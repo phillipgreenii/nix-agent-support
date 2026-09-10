@@ -28,29 +28,112 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // bdIssue is the subset of bd's `--json` issue shape this backend needs —
-// deliberately small: no metadata map, no comments (this backend has no
-// use for them, unlike packages/pg-pr/pkg/beads.bdIssue). Description,
+// deliberately small: no comments (this backend has no use for them,
+// unlike packages/pg-pr/pkg/beads.bdIssue). Description,
 // Assignee, Parent, and Dependencies were added by bead pg2-akfw5 (review finding A-33: Show previously
 // dropped all four), verified live against a real `bd show --json` on a
 // child issue with a parent and description/assignee set, not assumed from
-// memory.
+// memory. UpdatedAt, DueAt, ExternalRef, and Metadata were added by bead
+// pg2-2j5ac.28.3 — field names (`updated_at`, `due_at`, `external_ref`,
+// `metadata`) verified live against a real bd v1.2.2 `bd create --due ...
+// --external-ref ... --metadata ... --json` / `bd show --json` round trip
+// in a disposable embedded-dolt workspace, not assumed from `--help` text
+// alone (bd's own flags are named `--due`/`--external-ref` but the WIRE
+// field names differ: `due_at`/`external_ref`).
 type bdIssue struct {
-	ID           string         `json:"id"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description,omitempty"`
-	Status       string         `json:"status"`
-	Priority     int            `json:"priority"`
-	IssueType    string         `json:"issue_type"`
-	Labels       []string       `json:"labels,omitempty"`
-	Assignee     string         `json:"assignee,omitempty"`
-	Parent       string         `json:"parent,omitempty"`
-	Dependencies []bdDependency `json:"dependencies,omitempty"`
+	ID           string                     `json:"id"`
+	Title        string                     `json:"title"`
+	Description  string                     `json:"description,omitempty"`
+	Status       string                     `json:"status"`
+	Priority     int                        `json:"priority"`
+	IssueType    string                     `json:"issue_type"`
+	Labels       []string                   `json:"labels,omitempty"`
+	Assignee     string                     `json:"assignee,omitempty"`
+	Parent       string                     `json:"parent,omitempty"`
+	Dependencies []bdDependency             `json:"dependencies,omitempty"`
+	UpdatedAt    string                     `json:"updated_at,omitempty"`
+	DueAt        string                     `json:"due_at,omitempty"`
+	ExternalRef  string                     `json:"external_ref,omitempty"`
+	Metadata     map[string]json.RawMessage `json:"metadata,omitempty"`
+}
+
+// bdDepRecord is one record of `bd dep list <id> --direction=down --json`'s
+// flat per-id dependency listing (used only by Deps' recursive
+// blocked-by walk, bead pg2-2j5ac.28.3) — the same full-issue field shape
+// bdIssue already decodes, plus its own dependency_type (this listing's
+// edge label), verified live against a real bd v1.2.2 invocation.
+type bdDepRecord struct {
+	bdIssue
+	DependencyType string `json:"dependency_type"`
+}
+
+// bdMetadataToStrings coerces bd's own metadata map onto
+// schema.Issue.Metadata's map[string]string wire shape (binding decision:
+// "metadata is string-to-string on the wire; a backend whose native field
+// is typed ... coerces to its decimal string on the way out"). bd's own
+// JSON values are NOT always strings: `bd update --set-metadata num=42`
+// round-trips as a JSON number, `--set-metadata flag=true` as a JSON
+// boolean, and `--set-metadata foo=bar` as a JSON string — verified live
+// against a real bd v1.2.2 in a disposable embedded-dolt workspace. A
+// nested object/array value (bd's own `--metadata` flag accepts an
+// arbitrary JSON blob, not just flat scalars) is coerced to its compact
+// JSON text rather than dropped, so no value is ever silently lost.
+func bdMetadataToStrings(raw map[string]json.RawMessage) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			out[k] = s
+			continue
+		}
+		var f float64
+		if err := json.Unmarshal(v, &f); err == nil {
+			out[k] = strconv.FormatFloat(f, 'f', -1, 64)
+			continue
+		}
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			out[k] = strconv.FormatBool(b)
+			continue
+		}
+		// object/array/null: fall back to the raw compact JSON text.
+		out[k] = strings.TrimSpace(string(v))
+	}
+	return out
+}
+
+// joinBDSetMetadataArgs renders md as repeated `--set-metadata key=value`
+// flag values — bd's own merge-into-existing-metadata flag (Update's own
+// binding decision: "Metadata here is a MERGE ... mirroring bd's own
+// --set-metadata semantics"), distinct from Create's own `--metadata`
+// flag below (a single JSON-blob REPLACE, bd's only metadata-setting flag
+// on `bd create`). Keys are sorted for deterministic argv ordering (tests,
+// and reproducible audit logs), never because bd itself requires it.
+func joinBDSetMetadataArgs(md map[string]string) []string {
+	if len(md) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(md))
+	for k := range md {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := make([]string, 0, len(keys)*2)
+	for _, k := range keys {
+		args = append(args, "--set-metadata", k+"="+md[k])
+	}
+	return args
 }
 
 // bdDependency is one entry of bd's `dependencies` array on a `show`
@@ -155,6 +238,19 @@ func bdIssuesFromArray(data json.RawMessage) ([]bdIssue, error) {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "bd: decode issue list: "+err.Error())
 	}
 	return issues, nil
+}
+
+// bdDepRecordsFromArray decodes an array `data` payload from
+// `bd dep list <id> --direction=down --json` (used only by Deps' recursive
+// blocked-by walk, bead pg2-2j5ac.28.3). An empty array is a well-formed
+// "no dependencies," never an error, mirroring bdIssuesFromArray's
+// identical reasoning.
+func bdDepRecordsFromArray(data json.RawMessage) ([]bdDepRecord, error) {
+	var recs []bdDepRecord
+	if err := json.Unmarshal(data, &recs); err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "bd: decode dependency list: "+err.Error())
+	}
+	return recs, nil
 }
 
 // bdListFirstTokens is the closed set of bd subcommands a "list"

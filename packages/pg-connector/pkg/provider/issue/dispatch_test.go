@@ -20,6 +20,9 @@ type fakeProvider struct {
 	commentFn    func(ctx context.Context, id, body string) error
 	transitionFn func(ctx context.Context, id, targetState string) error
 	listFn       func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error)
+	updateFn     func(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error)
+	closeFn      func(ctx context.Context, id, reason string) error
+	depsFn       func(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error)
 }
 
 var _ Provider = (*fakeProvider)(nil)
@@ -42,6 +45,18 @@ func (f *fakeProvider) Transition(ctx context.Context, id, targetState string) e
 
 func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
 	return f.listFn(ctx, query, idsOnly)
+}
+
+func (f *fakeProvider) Update(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error) {
+	return f.updateFn(ctx, id, fields)
+}
+
+func (f *fakeProvider) Close(ctx context.Context, id, reason string) error {
+	return f.closeFn(ctx, id, reason)
+}
+
+func (f *fakeProvider) Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
+	return f.depsFn(ctx, id, full)
 }
 
 // fakeProviderWithAuth additionally implements pkg/provider.AuthChecker, to
@@ -273,6 +288,156 @@ func TestNewDispatchTable_List_DecodeFailureIsInvalidArgument(t *testing.T) {
 	}
 	table := NewDispatchTable(p)
 	_, err := table["list"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Update / Close / Deps (bead pg2-2j5ac.28.3)
+// ----------------------------------------------------------------------
+
+func TestNewDispatchTable_Update(t *testing.T) {
+	var gotID string
+	var gotFields IssueUpdateFields
+	p := &fakeProvider{
+		updateFn: func(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error) {
+			gotID, gotFields = id, fields
+			return &schema.Issue{ID: id, Metadata: fields.Metadata}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	entry, ok := table["update"]
+	if !ok {
+		t.Fatal(`table["update"] missing`)
+	}
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","fields":{"metadata":{"foo":"bar"},"priority":"P1"}}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if gotID != "issue-1" {
+		t.Fatalf("id = %q, want issue-1", gotID)
+	}
+	if gotFields.Priority != "P1" || gotFields.Metadata["foo"] != "bar" {
+		t.Fatalf("fields = %#v", gotFields)
+	}
+	got, ok := result.(*schema.Issue)
+	if !ok || got.ID != "issue-1" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNewDispatchTable_Update_NotFoundPassesThroughUnwrapped(t *testing.T) {
+	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "issue issue-404 not found")
+	p := &fakeProvider{
+		updateFn: func(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error) {
+			return nil, sentinelErr
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["update"].Handle(context.Background(), json.RawMessage(`{"id":"issue-404","fields":{}}`))
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestNewDispatchTable_Update_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		updateFn: func(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error) {
+			t.Fatal("Update must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["update"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestNewDispatchTable_Close(t *testing.T) {
+	var gotID, gotReason string
+	p := &fakeProvider{
+		closeFn: func(ctx context.Context, id, reason string) error {
+			gotID, gotReason = id, reason
+			return nil
+		},
+	}
+	table := NewDispatchTable(p)
+	entry := table["close"]
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","reason":"done"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil (Close reports no value of its own)", result)
+	}
+	if gotID != "issue-1" || gotReason != "done" {
+		t.Fatalf("id=%q reason=%q", gotID, gotReason)
+	}
+}
+
+func TestNewDispatchTable_Close_NotFoundPassesThroughUnwrapped(t *testing.T) {
+	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "issue issue-404 not found")
+	p := &fakeProvider{
+		closeFn: func(ctx context.Context, id, reason string) error {
+			return sentinelErr
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["close"].Handle(context.Background(), json.RawMessage(`{"id":"issue-404","reason":"x"}`))
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestNewDispatchTable_Close_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		closeFn: func(ctx context.Context, id, reason string) error {
+			t.Fatal("Close must not be invoked when args fail to decode")
+			return nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["close"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestNewDispatchTable_Deps(t *testing.T) {
+	var gotID string
+	var gotFull bool
+	p := &fakeProvider{
+		depsFn: func(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
+			gotID, gotFull = id, full
+			return &schema.IssueDepsResult{IDs: []string{"issue-2"}, Entities: []schema.Issue{{ID: "issue-2"}}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	entry := table["deps"]
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","full":true}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if gotID != "issue-1" || !gotFull {
+		t.Fatalf("id=%q full=%v", gotID, gotFull)
+	}
+	got, ok := result.(*schema.IssueDepsResult)
+	if !ok || len(got.IDs) != 1 || got.IDs[0] != "issue-2" || len(got.Entities) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNewDispatchTable_Deps_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		depsFn: func(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
+			t.Fatal("Deps must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["deps"].Handle(context.Background(), json.RawMessage(`{not valid json`))
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}

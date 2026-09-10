@@ -39,7 +39,24 @@ package schema
 // gaining a whole new op's wire shape bumps its one schemaVersion integer"
 // precedent pkg/schema/pr.go's own 2 -> 3 bump records for the sibling pr
 // capability.
-const IssueSchemaVersion = 4
+//
+// Bumped 4 -> 5 by bead pg2-2j5ac.28.3, which added the AsOf/Stale pair
+// (mirroring schema.PR's own pg2-681xo precedent exactly) plus
+// UpdatedAt/DueDate/Metadata/ExternalRefs below, and widened
+// pkg/provider/issue.Provider with the update/close/deps ops — same
+// "any field-shape change, or a capability gaining a whole new op's wire
+// shape, bumps its one schemaVersion integer" precedent as every earlier
+// bump on this constant.
+//
+// NOTE on the numeral itself: this bead's own drafting text anticipated a
+// "v3 -> v4" bump, written before bead pg2-2j5ac.28.1's List addition
+// landed and consumed v4 first — the two beads' schema work was drafted
+// against the same starting v3 but landed in the opposite order from what
+// the drafting text assumed. This is v4 -> v5, the correct next integer
+// given actual landing order; the invariant itself ("this bead bumps the
+// version by exactly one, to cover its own new field shape") holds
+// regardless of which specific numeral that lands on.
+const IssueSchemaVersion = 5
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -106,7 +123,70 @@ type Issue struct {
 	// "discovered-from") — in whatever the tracker itself calls the
 	// relationship. Empty when the backend does not supply this or the
 	// issue has none — added by bead pg2-akfw5 (review finding A-33).
+	//
+	// This is a ONE-LEVEL, ALL-edge-type field (bd's own `dependencies`
+	// array on a single `show` response) — distinct from
+	// issue.Provider's own Deps method/IssueDepsResult below, which walks
+	// the RECURSIVE, blocks-only chain. Do not conflate the two.
 	Deps []IssueDependency `json:"deps,omitempty"`
+
+	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
+	// pg2-2j5ac.28.3, mirroring the pr capability's own AsOf/Stale pair and
+	// semantics exactly (bead pg2-681xo's INV-ASOF-1 contract: "every
+	// acted-on read seam MUST carry its own as-of time ... an item or
+	// payload with no usable as-of time MUST be reported stale"). Empty
+	// only when a backend has no usable as-of time for this read, which
+	// MUST pair with Stale true rather than a plausible-looking but
+	// meaningless timestamp.
+	//
+	// This is a fact about a successful read's own payload, deliberately
+	// kept separate from pg-connector's outcome/error taxonomy (the CLI
+	// exit-code scheme and the wire Error.Code enum both classify whether
+	// a CALL succeeded; AsOf/Stale classify whether a successful call's
+	// DATA is current) — a targeted `show` that returns stale data is
+	// still exit 0, never folded into a sixth error/exit code.
+	AsOf string `json:"as_of"`
+	// Stale is this backend's own as-of/stale determination for this read
+	// (INV-ASOF-2: the backend that answers a read is the sole computer of
+	// its own staleness; a consumer MUST NOT re-derive one from AsOf
+	// itself). Always populated (not omitempty), matching Issue's other
+	// plain boolean facts — false is itself informative.
+	//
+	// Both of this capability's current backends (issue-beads,
+	// issue-jira) perform a live read on every call with no local cache of
+	// tracker facts, so both always report Stale false with AsOf set to
+	// that live call's own completion time — mirroring
+	// schema.PR.Stale's own doc comment, which noted this was true of
+	// every ci/issue/scm backend as of bead pg2-681xo.
+	Stale bool `json:"stale"`
+
+	// UpdatedAt is the issue's own last-modified time, in whatever
+	// timestamp form its tracker returns (bd's own `updated_at` is
+	// RFC3339). Empty when the backend does not supply one.
+	UpdatedAt string `json:"updated_at,omitempty"`
+
+	// DueDate is the issue's due date/time, in whatever form its tracker
+	// returns (bd's own `--due`/`due_at`; the daily-focus v2 design depends
+	// on Jira's native duedate field too, per this bead's own Contract).
+	// Empty when unset or the backend does not supply one.
+	DueDate string `json:"due_date,omitempty"`
+
+	// Metadata is a string-to-string map of backend-specific custom fields
+	// — deliberately typed map[string]string on the wire (binding
+	// decision: metadata is string-to-string on the wire), never a
+	// typed/nested value: a backend whose own native field is typed (e.g.
+	// bd's own metadata values, which may decode as a JSON number or
+	// boolean rather than a string) coerces it to its decimal/canonical
+	// string form on the way out. Empty/nil when the backend has no
+	// metadata to report.
+	Metadata map[string]string `json:"metadata,omitempty"`
+
+	// ExternalRefs lists ids the tracker exposes pointing at other systems
+	// (e.g. bd's own single `external_ref` field, a GitHub/Jira
+	// cross-link). Empty when the backend has none to report — a plural
+	// wire shape even though today's beads backend only ever supplies zero
+	// or one (bd's own external_ref field is singular).
+	ExternalRefs []string `json:"external_refs,omitempty"`
 }
 
 // IssueDependency is one edge in Issue.Deps: another issue's id, plus this
@@ -127,4 +207,20 @@ type IssueListResult struct {
 	PresentIDs []string `json:"present_ids"`
 	Cursor     *string  `json:"cursor"`
 	Truncated  bool     `json:"truncated"`
+}
+
+// IssueDepsResult is the "deps" op's wire result payload for the issue
+// capability (bead pg2-2j5ac.28.3): the recursive UPWARD (transitively
+// blocked-by) dependency set — what "waiting-on-me" tooling needs, and
+// distinct from Issue.Deps' own one-level, all-edge-type field above (see
+// its doc comment).
+//
+// IDs is always populated with the full recursive id set (never omitted,
+// even when full is false). Entities is populated only when the caller
+// passed full=true, each entry the same Issue shape "show" returns
+// (INV-VER-1 — no separate schema for this). A backend with no dependency
+// concept of its own answers an empty IDs/Entities, never an error.
+type IssueDepsResult struct {
+	IDs      []string `json:"ids"`
+	Entities []Issue  `json:"entities,omitempty"`
 }

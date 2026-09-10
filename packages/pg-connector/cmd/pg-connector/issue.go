@@ -58,6 +58,9 @@ func newIssueCmd() *cobra.Command {
 	issueCmd.AddCommand(newIssueCommentCmd())
 	issueCmd.AddCommand(newIssueTransitionCmd())
 	issueCmd.AddCommand(newIssueListCmd())
+	issueCmd.AddCommand(newIssueUpdateCmd())
+	issueCmd.AddCommand(newIssueCloseCmd())
+	issueCmd.AddCommand(newIssueDepsCmd())
 	return issueCmd
 }
 
@@ -80,8 +83,9 @@ func newIssueShowCmd() *cobra.Command {
 }
 
 func newIssueCreateCmd() *cobra.Command {
-	var title, priority, issueType, description string
+	var title, priority, issueType, description, parent string
 	var labels []string
+	var metadata map[string]string
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new issue",
@@ -104,6 +108,8 @@ func newIssueCreateCmd() *cobra.Command {
 			"labels":      labels,
 			"issue_type":  issueType,
 			"description": description,
+			"metadata":    metadata,
+			"parent":      parent,
 		}, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueCreate)
 	}
@@ -114,6 +120,10 @@ func newIssueCreateCmd() *cobra.Command {
 	// --description was added by bead pg2-akfw5 (review finding A-33: Create
 	// previously had no way to set one at all).
 	cmd.Flags().StringVar(&description, "description", "", "issue description")
+	// --metadata/--parent were added by bead pg2-2j5ac.28.3 (this bead's
+	// own Contract widening IssueInput).
+	cmd.Flags().StringToStringVar(&metadata, "metadata", nil, "custom metadata key=value (repeatable, or comma-separated within one flag)")
+	cmd.Flags().StringVar(&parent, "parent", "", "parent issue id")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
@@ -169,6 +179,106 @@ func newIssueTransitionCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&state, "state", "", "target state (required); a backend's own capabilities response declares its accepted vocabulary")
 	_ = cmd.MarkFlagRequired("state")
+	return cmd
+}
+
+// newIssueUpdateCmd is bead pg2-2j5ac.28.3's own capability widening:
+// every flag is optional and applied together in ONE call (the wire
+// "update" op's own fields.* shape, pkg/provider/issue.IssueUpdateFields).
+// args is built as a plain map (matching IssueUpdateFields' json tags)
+// rather than importing pkg/provider/issue, the same "no cross-package
+// struct dependency needed at this thin CLI layer" precedent
+// newIssueCreateCmd's own args map already sets for IssueInput.
+func newIssueUpdateCmd() *cobra.Command {
+	var priority, title, description string
+	var addLabels, removeLabels []string
+	var metadata map[string]string
+	cmd := &cobra.Command{
+		Use:   "update <id>",
+		Short: "Update an issue's fields in one call",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueUpdate)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "update", map[string]any{
+			"id": args[0],
+			"fields": map[string]any{
+				"metadata":      metadata,
+				"add_labels":    addLabels,
+				"remove_labels": removeLabels,
+				"priority":      priority,
+				"title":         title,
+				"description":   description,
+			},
+		}, *backendFlag)
+		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueUpdate)
+	}
+	cmd.Flags().StringToStringVar(&metadata, "metadata", nil, "custom metadata key=value to merge/set (repeatable, or comma-separated within one flag)")
+	cmd.Flags().StringSliceVar(&addLabels, "add-label", nil, "label to add (repeatable)")
+	cmd.Flags().StringSliceVar(&removeLabels, "remove-label", nil, "label to remove (repeatable)")
+	cmd.Flags().StringVar(&priority, "priority", "", "new priority")
+	cmd.Flags().StringVar(&title, "title", "", "new title")
+	cmd.Flags().StringVar(&description, "description", "", "new description")
+	return cmd
+}
+
+// newIssueCloseCmd is bead pg2-2j5ac.28.3's own capability widening:
+// Jira maps this to a resolving transition; beads maps it to `bd close
+// --reason`.
+func newIssueCloseCmd() *cobra.Command {
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "close <id>",
+		Short: "Close an issue",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		humanize := func(json.RawMessage) (string, error) {
+			return fmt.Sprintf("Issue %s closed", args[0]), nil
+		}
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, humanize)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "close", map[string]string{
+			"id":     args[0],
+			"reason": reason,
+		}, *backendFlag)
+		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanize)
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "reason for closing (required)")
+	_ = cmd.MarkFlagRequired("reason")
+	return cmd
+}
+
+// newIssueDepsCmd is bead pg2-2j5ac.28.3's own capability widening: the
+// recursive UPWARD (transitively blocked-by) dependency set — distinct
+// from `issue show`'s own one-level Deps field.
+func newIssueDepsCmd() *cobra.Command {
+	var full bool
+	cmd := &cobra.Command{
+		Use:   "deps <id>",
+		Short: "Show an issue's recursive blocked-by dependency set",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueDeps)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "deps", map[string]any{
+			"id":   args[0],
+			"full": full,
+		}, *backendFlag)
+		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueDeps)
+	}
+	cmd.Flags().BoolVar(&full, "full", false, "return full issue entities for each dependency, not just ids")
 	return cmd
 }
 
@@ -336,4 +446,35 @@ func humanizeIssueCreate(raw json.RawMessage) (string, error) {
 		return "", err
 	}
 	return formatIssue("created issue", issue), nil
+}
+
+// humanizeIssueUpdate formats an `issue update` result (schema.Issue, the
+// resulting state after applying fields) for human display (bead
+// pg2-2j5ac.28.3).
+func humanizeIssueUpdate(raw json.RawMessage) (string, error) {
+	var issue schema.Issue
+	if err := scriptout.Decode(raw, &issue); err != nil {
+		return "", err
+	}
+	return formatIssue("updated issue", issue), nil
+}
+
+// humanizeIssueDeps formats an `issue deps` result (schema.IssueDepsResult)
+// for human display (bead pg2-2j5ac.28.3): the recursive blocked-by id
+// set, plus each entity's own summary line when --full populated them.
+func humanizeIssueDeps(raw json.RawMessage) (string, error) {
+	var result schema.IssueDepsResult
+	if err := scriptout.Decode(raw, &result); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if len(result.IDs) == 0 {
+		b.WriteString("deps: (none)\n")
+	} else {
+		fmt.Fprintf(&b, "deps (%d): %s\n", len(result.IDs), strings.Join(result.IDs, ", "))
+	}
+	for _, issue := range result.Entities {
+		fmt.Fprintf(&b, "  [%s] %q [%s]\n", issue.ID, issue.Title, issue.State)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }

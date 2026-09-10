@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
@@ -226,6 +227,50 @@ func TestBackend_Show_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
 	}
 }
 
+// TestBackend_Show_IncludesFreshnessAndMetadataFields locks in bead
+// pg2-2j5ac.28.3's own additions: AsOf/Stale always populated (a live
+// read, so Stale is always false), UpdatedAt/DueDate carried straight
+// through from bd's own updated_at/due_at fields, ExternalRefs wrapping
+// bd's singular external_ref into a one-element slice, and Metadata
+// coerced to string-to-string even though bd's own JSON values may be a
+// number or boolean (verified live against a real bd v1.2.2: `--set-metadata
+// num=42`/`flag=true` round-trip as JSON number/boolean, not strings).
+func TestBackend_Show_IncludesFreshnessAndMetadataFields(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":1,` +
+			`"updated_at":"2026-09-10T00:00:00Z","due_at":"2027-01-15T00:00:00Z",` +
+			`"external_ref":"gh-9","metadata":{"foo":"bar","num":42,"flag":true}}],` +
+			`"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Show(context.Background(), "tp-1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.Stale {
+		t.Fatal("Stale = true, want false (a live bd read)")
+	}
+	asOf, parseErr := time.Parse(time.RFC3339, got.AsOf)
+	// RFC3339 (no sub-second precision) truncates below the second, so
+	// compare against "now" with slack rather than a strict Before check
+	// against a sub-second-precision "before" snapshot.
+	if parseErr != nil || time.Since(asOf) > 10*time.Second || time.Since(asOf) < -10*time.Second {
+		t.Fatalf("AsOf = %q, want a valid RFC3339 timestamp close to now", got.AsOf)
+	}
+	if got.UpdatedAt != "2026-09-10T00:00:00Z" {
+		t.Fatalf("UpdatedAt = %q", got.UpdatedAt)
+	}
+	if got.DueDate != "2027-01-15T00:00:00Z" {
+		t.Fatalf("DueDate = %q", got.DueDate)
+	}
+	if len(got.ExternalRefs) != 1 || got.ExternalRefs[0] != "gh-9" {
+		t.Fatalf("ExternalRefs = %+v, want [gh-9]", got.ExternalRefs)
+	}
+	if got.Metadata["foo"] != "bar" || got.Metadata["num"] != "42" || got.Metadata["flag"] != "true" {
+		t.Fatalf("Metadata = %+v, want string-coerced values", got.Metadata)
+	}
+}
+
 func TestBackend_Show_EmptyID(t *testing.T) {
 	fr := &fakeRunner{}
 	b := New(fr)
@@ -376,6 +421,46 @@ func TestBackend_Create_SetsDescription(t *testing.T) {
 	}
 	if got.Description != "a desc" {
 		t.Fatalf("Description = %q, want %q", got.Description, "a desc")
+	}
+}
+
+// TestBackend_Create_SetsMetadataAndParent locks in bead pg2-2j5ac.28.3's
+// own IssueInput widening: --metadata is a single JSON-blob value (bd
+// create's own only metadata flag), --parent passes straight through.
+func TestBackend_Create_SetsMetadataAndParent(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if !containsArg(args, "--parent") || !containsArg(args, "tp-0") {
+			t.Fatalf("expected --parent tp-0 in args, got %v", args)
+		}
+		idx := -1
+		for i, a := range args {
+			if a == "--metadata" {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 || idx+1 >= len(args) {
+			t.Fatalf("expected --metadata <json> in args, got %v", args)
+		}
+		if args[idx+1] != `{"foo":"bar"}` {
+			t.Fatalf("--metadata value = %q, want %q", args[idx+1], `{"foo":"bar"}`)
+		}
+		return `{"data":{"id":"tp-9","title":"t","status":"open","priority":2,"issue_type":"task","parent":"tp-0","metadata":{"foo":"bar"}}}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Create(context.Background(), issue.IssueInput{
+		Title:    "t",
+		Parent:   "tp-0",
+		Metadata: map[string]string{"foo": "bar"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.Parent != "tp-0" {
+		t.Fatalf("Parent = %q, want tp-0", got.Parent)
+	}
+	if got.Metadata["foo"] != "bar" {
+		t.Fatalf("Metadata = %+v, want foo=bar", got.Metadata)
 	}
 }
 
@@ -801,6 +886,255 @@ func TestParseBDListExpr_AllowsReadyAndList(t *testing.T) {
 	}
 	if _, err := parseBDListExpr("list --status open"); err != nil {
 		t.Fatalf("list --status open: %v", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Update / Close / Deps (bead pg2-2j5ac.28.3)
+// ----------------------------------------------------------------------
+
+func TestBackend_Update_AppliesAllFieldsInOneCall(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "update" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		for _, want := range []string{"--set-metadata", "flag=true", "--add-label", "urgent", "--remove-label", "stale", "--priority", "P1", "--title", "new title", "--description", "new desc"} {
+			if !containsArg(args, want) {
+				t.Fatalf("args = %v, missing %q", args, want)
+			}
+		}
+		if !argsEndWith(args, "--json", "--", "tp-1") {
+			t.Fatalf("expected --json then a literal id positional after \"--\", got %v", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"new title","description":"new desc","status":"open","priority":1,"labels":["urgent"]}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{
+		Metadata:     map[string]string{"flag": "true"},
+		AddLabels:    []string{"urgent"},
+		RemoveLabels: []string{"stale"},
+		Priority:     "P1",
+		Title:        "new title",
+		Description:  "new desc",
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got.Title != "new title" || got.Description != "new desc" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestBackend_Update_OmitsUnsetFields(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description"} {
+			if containsArg(args, flag) {
+				t.Fatalf("did not expect %s in args when unset, got %v", flag, args)
+			}
+		}
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":2}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if _, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+}
+
+func TestBackend_Update_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	_, err := b.Update(context.Background(), "  ", issue.IssueUpdateFields{Title: "x"})
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Update_NotFound_ViaStderrOnlyFailure(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New(`bd update --title x --json -- tp-zzz: exit status 1: Error resolving tp-zzz: no issue found matching "tp-zzz"`)
+	}}
+	b := New(fr)
+	_, err := b.Update(context.Background(), "tp-zzz", issue.IssueUpdateFields{Title: "x"})
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestBackend_Close_Success(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "close" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !containsArg(args, "--reason") || !containsArg(args, "done here") {
+			t.Fatalf("expected --reason \"done here\" in args, got %v", args)
+		}
+		if !argsEndWith(args, "--json", "--", "tp-1") {
+			t.Fatalf("expected --json then a literal id positional after \"--\", got %v", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"t","status":"closed","close_reason":"done here"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if err := b.Close(context.Background(), "tp-1", "done here"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestBackend_Close_OmitsReasonWhenEmpty(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if containsArg(args, "--reason") {
+			t.Fatalf("did not expect --reason in args when empty, got %v", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"t","status":"closed"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if err := b.Close(context.Background(), "tp-1", ""); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestBackend_Close_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	err := b.Close(context.Background(), "  ", "reason")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Close_NotFound_ViaStderrOnlyFailure(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New(`bd close --reason x --json -- tp-zzz: exit status 1: Error resolving tp-zzz: no issue found matching "tp-zzz"`)
+	}}
+	b := New(fr)
+	err := b.Close(context.Background(), "tp-zzz", "x")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestBackend_Deps_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	_, err := b.Deps(context.Background(), "  ", false)
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no bd invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestBackend_Deps_RecursiveBlocksOnly_IDsOnly proves Deps walks the
+// blocks-only chain recursively (tp-1 blocked-by tp-2 blocked-by tp-3) and
+// filters to dependency_type "blocks" via `--type blocks`, matching
+// bd's own vocabulary rather than pulling in unrelated edge types.
+func TestBackend_Deps_RecursiveBlocksOnly_IDsOnly(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "dep" || args[1] != "list" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !containsArg(args, "--type") || !containsArg(args, "blocks") {
+			t.Fatalf("expected --type blocks in args, got %v", args)
+		}
+		id := args[len(args)-1]
+		if !argsEndWith(args, "--json", "--", id) {
+			t.Fatalf("expected --json then a literal id positional after \"--\", got %v", args)
+		}
+		switch id {
+		case "tp-1":
+			return `{"data":[{"id":"tp-2","title":"b","status":"open","dependency_type":"blocks"}],"schema_version":1}`, nil
+		case "tp-2":
+			return `{"data":[{"id":"tp-3","title":"c","status":"open","dependency_type":"blocks"}],"schema_version":1}`, nil
+		case "tp-3":
+			return `{"data":[],"schema_version":1}`, nil
+		}
+		t.Fatalf("unexpected id: %q", id)
+		return "", nil
+	}}
+	b := New(fr)
+	got, err := b.Deps(context.Background(), "tp-1", false)
+	if err != nil {
+		t.Fatalf("Deps: %v", err)
+	}
+	if len(got.IDs) != 2 {
+		t.Fatalf("IDs = %+v, want exactly [tp-2 tp-3]", got.IDs)
+	}
+	want := map[string]bool{"tp-2": true, "tp-3": true}
+	for _, id := range got.IDs {
+		if !want[id] {
+			t.Fatalf("unexpected id %q in IDs = %+v", id, got.IDs)
+		}
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want empty when full=false", got.Entities)
+	}
+}
+
+// TestBackend_Deps_Full_PopulatesEntities proves full=true additionally
+// populates Entities with the full schema.Issue shape for each id.
+func TestBackend_Deps_Full_PopulatesEntities(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		id := args[len(args)-1]
+		if id == "tp-1" {
+			return `{"data":[{"id":"tp-2","title":"blocker","status":"open","priority":1,"dependency_type":"blocks"}],"schema_version":1}`, nil
+		}
+		return `{"data":[],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Deps(context.Background(), "tp-1", true)
+	if err != nil {
+		t.Fatalf("Deps: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].ID != "tp-2" || got.Entities[0].Title != "blocker" {
+		t.Fatalf("Entities = %+v", got.Entities)
+	}
+}
+
+// TestBackend_Deps_NoDependencies_EmptyResult proves a leaf issue with no
+// blockers answers an empty (never error) result.
+func TestBackend_Deps_NoDependencies_EmptyResult(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Deps(context.Background(), "tp-1", false)
+	if err != nil {
+		t.Fatalf("Deps: %v", err)
+	}
+	if len(got.IDs) != 0 {
+		t.Fatalf("IDs = %+v, want empty", got.IDs)
+	}
+}
+
+// TestBackend_Deps_CycleProtection proves a cyclic dependency graph (tp-1
+// blocked-by tp-2 blocked-by tp-1) terminates rather than looping forever,
+// and never re-includes the root id itself in the result.
+func TestBackend_Deps_CycleProtection(t *testing.T) {
+	calls := 0
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
+		if calls > 10 {
+			t.Fatal("Deps did not terminate on a cyclic dependency graph")
+		}
+		id := args[len(args)-1]
+		if id == "tp-1" {
+			return `{"data":[{"id":"tp-2","title":"b","status":"open","dependency_type":"blocks"}],"schema_version":1}`, nil
+		}
+		return `{"data":[{"id":"tp-1","title":"a","status":"open","dependency_type":"blocks"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Deps(context.Background(), "tp-1", false)
+	if err != nil {
+		t.Fatalf("Deps: %v", err)
+	}
+	if len(got.IDs) != 1 || got.IDs[0] != "tp-2" {
+		t.Fatalf("IDs = %+v, want exactly [tp-2] (tp-1 itself must never appear)", got.IDs)
 	}
 }
 

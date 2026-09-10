@@ -32,6 +32,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
@@ -91,6 +92,14 @@ var _ provider.AuthChecker = (*Backend)(nil)
 // rather than a shared cross-backend enum — see
 // pkg/provider/issue/iface.go's Transition doc comment).
 var Vocabulary = []string{"To Do", "In Progress", "Done"}
+
+// resolvingState is the Jira workflow state Close transitions to (bead
+// pg2-2j5ac.28.3's own Contract: "Jira maps [close] to a resolving
+// transition") — Vocabulary's own "Done" above, the same classic-default
+// state this backend already declares. A project on a customized workflow
+// with a differently-named terminal state hits the same limitation
+// Vocabulary's own doc comment already names for Transition generally.
+const resolvingState = "Done"
 
 // PriorityVocabulary is this backend's declared, non-empty priority
 // vocabulary — Jira's own classic default priority scheme (Highest/High/
@@ -180,7 +189,16 @@ func decodePJIRAIssue(raw string) (*pjiraIssue, error) {
 // own config), so the per-issue project key is the concrete, real value
 // available here. Assignee prefers DisplayName, falling back to Email when
 // a Jira instance's API returns one but not the other.
-func toSchemaIssue(iss *pjiraIssue) *schema.Issue {
+//
+// asOf is this call's own completion time (bead pg2-2j5ac.28.3, mirroring
+// cmd/pg-connector-issue-beads/internal/backend.go's identical toSchemaIssue
+// pattern): every call site below execs pjira fresh with no local cache
+// of Jira's own facts, so Stale is always false. UpdatedAt/DueDate/
+// Metadata/ExternalRefs stay empty: pjiraIssue carries none of those
+// today (verified against pjira's own `issue`/`search` JSON shapes) — a
+// future pjira addition of any of them is this backend's own follow-up,
+// not fabricated here.
+func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 	var assignee string
 	if iss.Assignee != nil {
 		assignee = iss.Assignee.DisplayName
@@ -198,6 +216,8 @@ func toSchemaIssue(iss *pjiraIssue) *schema.Issue {
 		IssueType: iss.IssueType,
 		Tracker:   iss.Project,
 		Assignee:  assignee,
+		AsOf:      asOf.Format(time.RFC3339),
+		Stale:     false,
 	}
 }
 
@@ -266,7 +286,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if decodeErr != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode issue: "+decodeErr.Error())
 	}
-	return toSchemaIssue(iss), nil
+	return toSchemaIssue(iss, time.Now().UTC()), nil
 }
 
 // pjiraCreateResult is `pjira create`'s own stdout shape (verified against
@@ -455,13 +475,14 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		if result.Truncated {
 			truncated = true
 		}
+		asOf := time.Now().UTC()
 		for i := range result.Items {
 			item := result.Items[i]
 			if item.Key == "" || seen[item.Key] {
 				continue
 			}
 			seen[item.Key] = true
-			entities = append(entities, *toSchemaIssue(&item))
+			entities = append(entities, *toSchemaIssue(&item, asOf))
 		}
 	}
 	ids := make([]string, 0, len(entities))
@@ -473,4 +494,57 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		res.Entities = nil
 	}
 	return res, nil
+}
+
+// Update implements issue.Provider.Update. pjira exposes NO op to change
+// an existing issue's fields at all (verified live: `pjira --help` lists
+// only issue/search/create/comment/transition/auth-status) — this is the
+// SAME kind of gap Create/Comment/Transition were once stubbed against
+// before pg2-7p4mr's children landed pjira create/transition/comment
+// (see this file's header comment); no equivalent pjira op has landed for
+// a field-level update yet, so this method returns the same documented
+// ErrUnavailable stub that earlier gap left in place for those three,
+// rather than silently no-opping or fabricating a partial write. Adding
+// an update op to pjira itself (phillipg-nix-repo-base) is out of this
+// bead's own scope [freedom boundary].
+func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdateFields) (*schema.Issue, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: no update op available (issue field updates are not yet supported against Jira)")
+}
+
+// Close implements issue.Provider.Close by mapping to a resolving
+// transition (bead pg2-2j5ac.28.3's own Contract), reusing Transition's
+// own `pjira transition` plumbing. When reason is non-empty, it is
+// recorded as a comment BEFORE the transition — pjira's transition op
+// itself takes no comment/resolution-note parameter of its own [freedom
+// boundary: the implementer's own choice for how to carry reason through
+// to Jira, within this backend's existing comment/transition
+// conventions], so a comment is the closest available carrier. A comment
+// failure short-circuits before ever attempting the transition, so a
+// caller never sees a "closed" result while its own reason silently
+// failed to record.
+func (b *Backend) Close(ctx context.Context, id, reason string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		if err := b.Comment(ctx, id, reason); err != nil {
+			return err
+		}
+	}
+	return b.Transition(ctx, id, resolvingState)
+}
+
+// Deps implements issue.Provider.Deps. pjira exposes no dependency/
+// issue-link query op at all, so this backend has no dependency concept
+// of its own — issue.Provider.Deps' own doc comment: "a backend with no
+// dependency concept ... answers an empty result, never an error."
+func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	return &schema.IssueDepsResult{IDs: []string{}}, nil
 }

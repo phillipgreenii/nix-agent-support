@@ -120,6 +120,140 @@ func TestRun_IssueCreate_WithDescription_Success(t *testing.T) {
 	}
 }
 
+// TestRun_IssueCreate_WithMetadataAndParent_Success locks in bead
+// pg2-2j5ac.28.3's own IssueInput widening at the CLI layer.
+func TestRun_IssueCreate_WithMetadataAndParent_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-create-meta", map[string]string{
+		"create": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-2","title":"new issue","state":"open","parent":"issue-0","metadata":{"foo":"bar"}}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-create-meta")
+
+	stdout, _, code := executePr(t, []string{"issue", "create", "--title", "new issue", "--metadata", "foo=bar", "--parent", "issue-0"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var issue schema.Issue
+	if err := scriptout.Decode(resp.Result, &issue); err != nil {
+		t.Fatalf("decode Issue: %v", err)
+	}
+	if issue.Parent != "issue-0" || issue.Metadata["foo"] != "bar" {
+		t.Fatalf("issue = %+v", issue)
+	}
+}
+
+func TestRun_IssueUpdate_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-update", map[string]string{
+		"update": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","title":"new title","state":"open","priority":"P1"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-update")
+
+	stdout, _, code := executePr(t, []string{"issue", "update", "issue-1", "--title", "new title", "--priority", "P1", "--metadata", "foo=bar", "--add-label", "urgent", "--remove-label", "stale"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var issue schema.Issue
+	if err := scriptout.Decode(resp.Result, &issue); err != nil {
+		t.Fatalf("decode Issue: %v", err)
+	}
+	if issue.Title != "new title" || issue.Priority != "P1" {
+		t.Fatalf("issue = %+v", issue)
+	}
+}
+
+func TestRun_IssueUpdate_NotFound_Exit4(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-update-notfound", map[string]string{
+		"update": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"issue issue-404 not found"}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-update-notfound")
+
+	stdout, _, code := executePr(t, []string{"issue", "update", "issue-404", "--title", "x"})
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
+	}
+}
+
+func TestRun_IssueClose_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-close", map[string]string{
+		"close": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-close")
+
+	stdout, _, code := executePr(t, []string{"issue", "close", "issue-1", "--reason", "done"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	if resp.Error != nil {
+		t.Fatalf("resp.Error = %+v, want nil", resp.Error)
+	}
+}
+
+func TestRun_IssueClose_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-close-human", map[string]string{
+		"close": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-close-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "close", "issue-1", "--reason", "done"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Issue issue-1 closed") {
+		t.Fatalf("human output = %q", stdout)
+	}
+}
+
+func TestRun_IssueDeps_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-deps", map[string]string{
+		"deps": `{"protocolVersion":1,"schemaVersion":1,"result":{"ids":["issue-2","issue-3"]}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-deps")
+
+	stdout, _, code := executePr(t, []string{"issue", "deps", "issue-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var result schema.IssueDepsResult
+	if err := scriptout.Decode(resp.Result, &result); err != nil {
+		t.Fatalf("decode IssueDepsResult: %v", err)
+	}
+	if len(result.IDs) != 2 || result.IDs[0] != "issue-2" || result.IDs[1] != "issue-3" {
+		t.Fatalf("IDs = %+v", result.IDs)
+	}
+}
+
+func TestRun_IssueDeps_Full_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-deps-full", map[string]string{
+		"deps": `{"protocolVersion":1,"schemaVersion":1,"result":{"ids":["issue-2"],"entities":[{"id":"issue-2","title":"blocker","state":"open"}]}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-deps-full")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "deps", "issue-1", "--full"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	for _, want := range []string{"deps (1): issue-2", `[issue-2] "blocker" [open]`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
 func TestRun_IssueComment_Success(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-comment", map[string]string{
 		"comment": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,

@@ -20,8 +20,10 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -152,23 +154,41 @@ func formatPriority(p int) string {
 // straight through from bdIssue's own fields, added by bead pg2-akfw5
 // (review finding A-33: this
 // mapping previously dropped all four).
-func toSchemaIssue(iss *bdIssue, tracker string) *schema.Issue {
+//
+// asOf is this call's own completion time (bead pg2-2j5ac.28.3, mirroring
+// pkg/schema/pr.go's toSchemaPR/asOf precedent exactly): every call site
+// below execs `bd` fresh with no local cache of bd's own facts, so Stale
+// is always false. UpdatedAt/DueDate/ExternalRefs/Metadata are carried
+// straight through from bdIssue's own updated_at/due_at/external_ref/
+// metadata fields (the last coerced to string-to-string via
+// bdMetadataToStrings — see its own doc comment).
+func toSchemaIssue(iss *bdIssue, tracker string, asOf time.Time) *schema.Issue {
 	var deps []schema.IssueDependency
 	for _, d := range iss.Dependencies {
 		deps = append(deps, schema.IssueDependency{ID: d.ID, Type: d.DependencyType})
 	}
+	var externalRefs []string
+	if iss.ExternalRef != "" {
+		externalRefs = []string{iss.ExternalRef}
+	}
 	return &schema.Issue{
-		ID:          iss.ID,
-		Title:       iss.Title,
-		State:       iss.Status,
-		Priority:    formatPriority(iss.Priority),
-		Labels:      iss.Labels,
-		IssueType:   iss.IssueType,
-		Tracker:     tracker,
-		Description: iss.Description,
-		Assignee:    iss.Assignee,
-		Parent:      iss.Parent,
-		Deps:        deps,
+		ID:           iss.ID,
+		Title:        iss.Title,
+		State:        iss.Status,
+		Priority:     formatPriority(iss.Priority),
+		Labels:       iss.Labels,
+		IssueType:    iss.IssueType,
+		Tracker:      tracker,
+		Description:  iss.Description,
+		Assignee:     iss.Assignee,
+		Parent:       iss.Parent,
+		Deps:         deps,
+		AsOf:         asOf.Format(time.RFC3339),
+		Stale:        false,
+		UpdatedAt:    iss.UpdatedAt,
+		DueDate:      iss.DueAt,
+		Metadata:     bdMetadataToStrings(iss.Metadata),
+		ExternalRefs: externalRefs,
 	}
 }
 
@@ -218,7 +238,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toSchemaIssue(iss, b.tracker()), nil
+	return toSchemaIssue(iss, b.tracker(), time.Now().UTC()), nil
 }
 
 // Create implements issue.Provider.Create via `bd create ... --json`. It
@@ -227,7 +247,13 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 // issue with none of CreateAction's parent-child/discovered-from wiring —
 // that wiring is specific to pg-pr's review workflow and does not carry
 // over. --description was added by bead pg2-akfw5 (review finding A-33: Create previously
-// had no way to set one at all).
+// had no way to set one at all). --metadata/--parent were added by bead
+// pg2-2j5ac.28.3 (this bead's own Contract widening IssueInput). Metadata
+// uses bd create's own `--metadata` flag — a single JSON-blob value, the
+// ONLY metadata-setting flag `bd create` has (unlike `bd update`, which
+// additionally offers the per-key-merge `--set-metadata` Update uses
+// below) — so a fresh create's metadata is always a full, first-write
+// REPLACE, never a merge concern.
 func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.Issue, error) {
 	if strings.TrimSpace(input.Title) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: title required")
@@ -242,6 +268,9 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 	if input.Description != "" {
 		args = append(args, "--description", input.Description)
 	}
+	if input.Parent != "" {
+		args = append(args, "--parent", input.Parent)
+	}
 	if len(input.Labels) > 0 {
 		// CSV-quoted, not a bare "," join: bd's own `--labels` flag is a
 		// pflag StringSlice, which decodes its value via encoding/csv —
@@ -252,6 +281,13 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 		}
 		args = append(args, "--labels", joined)
 	}
+	if len(input.Metadata) > 0 {
+		encoded, encodeErr := json.Marshal(input.Metadata)
+		if encodeErr != nil {
+			return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: encode metadata: "+encodeErr.Error())
+		}
+		args = append(args, "--metadata", string(encoded))
+	}
 	data, err := b.run(ctx, args...)
 	if err != nil {
 		return nil, err
@@ -260,7 +296,7 @@ func (b *Backend) Create(ctx context.Context, input issue.IssueInput) (*schema.I
 	if err != nil {
 		return nil, err
 	}
-	return toSchemaIssue(iss, b.tracker()), nil
+	return toSchemaIssue(iss, b.tracker(), time.Now().UTC()), nil
 }
 
 // Comment implements issue.Provider.Comment via `bd comment <id> <body>
@@ -355,12 +391,13 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		if err != nil {
 			return nil, err
 		}
+		asOf := time.Now().UTC()
 		for _, iss := range issues {
 			if seen[iss.ID] {
 				continue
 			}
 			seen[iss.ID] = true
-			entities = append(entities, *toSchemaIssue(&iss, tracker))
+			entities = append(entities, *toSchemaIssue(&iss, tracker, asOf))
 		}
 	}
 	ids := make([]string, 0, len(entities))
@@ -372,4 +409,121 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		result.Entities = nil
 	}
 	return result, nil
+}
+
+// Update implements issue.Provider.Update via `bd update <id> ... --json`
+// (bead pg2-2j5ac.28.3): every populated field of fields is applied in ONE
+// bd invocation, per the Contract's own "applied in ONE call" requirement.
+// Metadata uses bd's own `--set-metadata` (repeatable key=value, a per-key
+// MERGE into existing metadata) rather than Create's `--metadata` (a
+// full-blob REPLACE) — IssueUpdateFields' own doc comment names this
+// choice explicitly. id is placed after a literal "--" terminator, ahead
+// of every flag [bead: pg2-usu5b; review finding A-8], mirroring
+// Show/Comment/Transition's identical defense-in-depth.
+func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdateFields) (*schema.Issue, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	args := []string{"update"}
+	args = append(args, joinBDSetMetadataArgs(fields.Metadata)...)
+	for _, l := range fields.AddLabels {
+		args = append(args, "--add-label", l)
+	}
+	for _, l := range fields.RemoveLabels {
+		args = append(args, "--remove-label", l)
+	}
+	if fields.Priority != "" {
+		args = append(args, "--priority", fields.Priority)
+	}
+	if fields.Title != "" {
+		args = append(args, "--title", fields.Title)
+	}
+	if fields.Description != "" {
+		args = append(args, "--description", fields.Description)
+	}
+	args = append(args, "--json", "--", id)
+	data, err := b.run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	iss, err := bdIssueFromArray(data)
+	if err != nil {
+		return nil, err
+	}
+	return toSchemaIssue(iss, b.tracker(), time.Now().UTC()), nil
+}
+
+// Close implements issue.Provider.Close via `bd close <id> --reason
+// <reason> --json` (bead pg2-2j5ac.28.3). New code, using bd's own
+// documented `--reason` flag; an empty reason simply omits the flag
+// rather than passing an empty string bd would otherwise have to reject
+// or accept as a no-op value. id is placed after a literal "--"
+// terminator [bead: pg2-usu5b; review finding A-8], mirroring
+// Comment/Transition's identical defense-in-depth. This method reports
+// only error, mirroring Comment/Transition's own thin return — a caller
+// wanting the resulting state re-fetches via Show, exactly as this
+// bead's own manual validation test does.
+func (b *Backend) Close(ctx context.Context, id, reason string) error {
+	if strings.TrimSpace(id) == "" {
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	args := []string{"close"}
+	if reason != "" {
+		args = append(args, "--reason", reason)
+	}
+	args = append(args, "--json", "--", id)
+	_, err := b.run(ctx, args...)
+	return err
+}
+
+// Deps implements issue.Provider.Deps (bead pg2-2j5ac.28.3) via recursive
+// `bd dep list <id> --direction down --type blocks --json` calls: "down"
+// is bd's own "what THIS issue depends on" direction — the blocked-by set
+// the Contract names — filtered to the "blocks" dependency type only,
+// deliberately narrower than Show's own one-level Deps field (which
+// surfaces EVERY edge type: bd's own dependency vocabulary also includes
+// parent-child/related/discovered-from/supersedes/tracks/until/caused-by/
+// validates, none of which mean "blocks completion" the way a "blocks"
+// edge does — verified live: an unfiltered `bd dep tree` pulls in
+// unrelated parent/related/discovered-from edges reaching well beyond
+// this issue's own blocking chain, which "waiting-on-me" tooling does not
+// want). Traversal is breadth-first with cycle protection (a bead
+// dependency graph is not guaranteed acyclic in every workspace); each id
+// is visited at most once, and the root id itself is never included in
+// the result.
+func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	tracker := b.tracker()
+	visited := map[string]bool{id: true}
+	queue := []string{id}
+	ids := make([]string, 0)
+	var entities []schema.Issue
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		data, err := b.run(ctx, "dep", "list", "--direction", "down", "--type", "blocks", "--json", "--", cur)
+		if err != nil {
+			return nil, err
+		}
+		recs, recErr := bdDepRecordsFromArray(data)
+		if recErr != nil {
+			return nil, recErr
+		}
+		asOf := time.Now().UTC()
+		for i := range recs {
+			rec := recs[i]
+			if visited[rec.ID] {
+				continue
+			}
+			visited[rec.ID] = true
+			ids = append(ids, rec.ID)
+			if full {
+				entities = append(entities, *toSchemaIssue(&rec.bdIssue, tracker, asOf))
+			}
+			queue = append(queue, rec.ID)
+		}
+	}
+	return &schema.IssueDepsResult{IDs: ids, Entities: entities}, nil
 }

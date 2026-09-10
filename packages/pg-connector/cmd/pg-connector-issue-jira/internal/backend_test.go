@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
@@ -109,6 +110,27 @@ func TestBackend_Show_AssigneeFallsBackToEmail(t *testing.T) {
 	}
 	if got.Assignee != "someone@example.com" {
 		t.Fatalf("Assignee = %q, want someone@example.com", got.Assignee)
+	}
+}
+
+// TestBackend_Show_AsOfAndStale locks in bead pg2-2j5ac.28.3's own
+// additions: Stale is always false (a live pjira read, no local cache),
+// and AsOf is populated with a valid, current RFC3339 timestamp.
+func TestBackend_Show_AsOfAndStale(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"key":"PROJ-1","summary":"probe","status":"To Do"}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Show(context.Background(), "PROJ-1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.Stale {
+		t.Fatal("Stale = true, want false (a live pjira read)")
+	}
+	asOf, parseErr := time.Parse(time.RFC3339, got.AsOf)
+	if parseErr != nil || time.Since(asOf) > 10*time.Second || time.Since(asOf) < -10*time.Second {
+		t.Fatalf("AsOf = %q, want a valid RFC3339 timestamp close to now", got.AsOf)
 	}
 }
 
@@ -472,6 +494,144 @@ func TestBackend_Transition_NotFound_IsClassified(t *testing.T) {
 	err := b.Transition(context.Background(), "PROJ-999", "Done")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want wrapping ErrNotFound", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Update / Close / Deps (bead pg2-2j5ac.28.3)
+// ----------------------------------------------------------------------
+
+// TestBackend_Update_NoOpAvailable_IsUnavailable locks in Update's own
+// documented binding decision: pjira has no field-level update op at all
+// today, so this method returns a well-formed ErrUnavailable stub rather
+// than silently no-opping.
+func TestBackend_Update_NoOpAvailable_IsUnavailable(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		t.Fatal("pjira must not be invoked; no update op exists")
+		return "", nil
+	}}
+	b := New(fr)
+	_, err := b.Update(context.Background(), "PROJ-1", issue.IssueUpdateFields{Title: "new title"})
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+}
+
+func TestBackend_Update_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	_, err := b.Update(context.Background(), "  ", issue.IssueUpdateFields{})
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestBackend_Close_Success proves Close records reason as a comment
+// BEFORE transitioning to resolvingState ("Done").
+func TestBackend_Close_Success(t *testing.T) {
+	var calls [][]string
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls = append(calls, args)
+		if args[0] == "comment" {
+			return `{"key":"PROJ-1","id":"1"}`, nil
+		}
+		if args[0] == "transition" {
+			return `{"key":"PROJ-1","to":"Done"}`, nil
+		}
+		t.Fatalf("unexpected op: %v", args)
+		return "", nil
+	}}
+	b := New(fr)
+	if err := b.Close(context.Background(), "PROJ-1", "fixed in prod"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(calls) != 2 || calls[0][0] != "comment" || calls[1][0] != "transition" {
+		t.Fatalf("expected a comment call followed by a transition call, got %v", calls)
+	}
+	if !argsEndWith(calls[0], "--", "PROJ-1", "fixed in prod") {
+		t.Fatalf("comment args = %v", calls[0])
+	}
+	if !argsEndWith(calls[1], "--", "PROJ-1", "Done") {
+		t.Fatalf("transition args = %v", calls[1])
+	}
+}
+
+// TestBackend_Close_NoReason_SkipsComment proves Close does not call
+// pjira comment at all when reason is empty.
+func TestBackend_Close_NoReason_SkipsComment(t *testing.T) {
+	var calls [][]string
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls = append(calls, args)
+		return `{"key":"PROJ-1","to":"Done"}`, nil
+	}}
+	b := New(fr)
+	if err := b.Close(context.Background(), "PROJ-1", ""); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(calls) != 1 || calls[0][0] != "transition" {
+		t.Fatalf("expected only a transition call, got %v", calls)
+	}
+}
+
+// TestBackend_Close_CommentFailure_NeverTransitions proves a comment
+// failure short-circuits before ever attempting the transition.
+func TestBackend_Close_CommentFailure_NeverTransitions(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] == "comment" {
+			return "", errors.New("pjira comment -- PROJ-999 x: exit status 1: pjira: issue PROJ-999 not found")
+		}
+		t.Fatal("transition must not be attempted after a comment failure")
+		return "", nil
+	}}
+	b := New(fr)
+	err := b.Close(context.Background(), "PROJ-999", "x")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestBackend_Close_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	err := b.Close(context.Background(), "  ", "reason")
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestBackend_Deps_NoDependencyConcept_EmptyResult locks in Deps' own
+// binding decision: pjira has no dependency/link query op at all, so this
+// backend answers an empty result, never an error.
+func TestBackend_Deps_NoDependencyConcept_EmptyResult(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		t.Fatal("pjira must not be invoked; no dependency op exists")
+		return "", nil
+	}}
+	b := New(fr)
+	got, err := b.Deps(context.Background(), "PROJ-1", true)
+	if err != nil {
+		t.Fatalf("Deps: %v, want nil (empty result, never an error)", err)
+	}
+	if len(got.IDs) != 0 || len(got.Entities) != 0 {
+		t.Fatalf("got = %+v, want an empty result", got)
+	}
+}
+
+func TestBackend_Deps_EmptyID(t *testing.T) {
+	fr := &fakeRunner{}
+	b := New(fr)
+	_, err := b.Deps(context.Background(), "  ", false)
+	if len(fr.calls) != 0 {
+		t.Fatalf("expected no pjira invocation for an invalid call, got %v", fr.calls)
+	}
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 

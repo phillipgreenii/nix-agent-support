@@ -17,7 +17,8 @@ import (
 )
 
 // NewDispatchTable builds the issue capability's op-dispatch table for p:
-// show, create, comment, and transition always; auth_status only when p
+// show, create, comment, transition, list, update, close, and deps
+// always; auth_status only when p
 // also implements pkg/provider.AuthChecker, asserted via a type-check
 // rather than folded into the Provider interface. Every handler passes p's
 // returned error straight through unwrapped — a well-behaved Provider
@@ -107,6 +108,50 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
 				}
 				return p.List(ctx, expr, a.IDsOnly)
+			},
+		},
+		// update/close/deps were added by bead pg2-2j5ac.28.3 (this
+		// docket's own "issue schema v4 + capability widening" packet).
+		"update": {
+			SchemaVersion: schema.IssueSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID     string            `json:"id"`
+					Fields IssueUpdateFields `json:"fields"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode update args: "+err.Error())
+				}
+				return p.Update(ctx, a.ID, a.Fields)
+			},
+		},
+		"close": {
+			SchemaVersion: schema.IssueSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID     string `json:"id"`
+					Reason string `json:"reason"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode close args: "+err.Error())
+				}
+				if err := p.Close(ctx, a.ID, a.Reason); err != nil {
+					return nil, err
+				}
+				return nil, nil
+			},
+		},
+		"deps": {
+			SchemaVersion: schema.IssueSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID   string `json:"id"`
+					Full bool   `json:"full"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode deps args: "+err.Error())
+				}
+				return p.Deps(ctx, a.ID, a.Full)
 			},
 		},
 	}
