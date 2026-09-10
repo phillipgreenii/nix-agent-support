@@ -88,7 +88,16 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 // returned error wraps the matching Err* sentinel via errors.Is so callers
 // don't need to substring-match. Opaque to which capability is being
 // called — matches the shape of pg-pr's existing invoke() helper.
-func Invoke(ctx context.Context, binary, op string, args any) (*Response, error) {
+//
+// config is copied verbatim onto the outgoing Request's own Config member
+// (bead pg2-2j5ac.28.1, design: "the umbrella copies a registered
+// backend's backends.<binary> config block VERBATIM into every request to
+// that backend") — nil for a backend with no registered config block,
+// which every existing caller built before this parameter existed passes
+// unchanged, so this widening is source-compatible in spirit (every call
+// site was updated to pass its own resolved config; none silently changed
+// meaning by omission).
+func Invoke(ctx context.Context, binary, op string, args any, config json.RawMessage) (*Response, error) {
 	var rawArgs json.RawMessage
 	if args != nil {
 		b, err := json.Marshal(args)
@@ -98,7 +107,7 @@ func Invoke(ctx context.Context, binary, op string, args any) (*Response, error)
 		rawArgs = b
 	}
 
-	out, err := runInvoke(ctx, binary, Request{Op: op, Args: rawArgs})
+	out, err := runInvoke(ctx, binary, Request{Op: op, Args: rawArgs, Config: config})
 	if err != nil {
 		return nil, err
 	}

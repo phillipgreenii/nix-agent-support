@@ -52,57 +52,63 @@ func newScmWorktreeCmd() *cobra.Command {
 }
 
 func newScmWorktreeAddCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "add <branch-or-ref>",
 		Short: "Add a local git worktree for a branch or ref (never a PR number)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeInfo)
-			}
-			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_add", map[string]string{"branch_or_ref": args[0]})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeInfo)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend (connector.scm is single-valued today, so this only guards against a stale/mistyped name)")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeInfo)
+		}
+		resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_add", map[string]string{"branch_or_ref": args[0]}, *backendFlag)
+		return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeInfo)
+	}
+	return cmd
 }
 
 func newScmWorktreeRemoveCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "remove <path>",
 		Short: "Remove a local git worktree by path",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			humanize := func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("Worktree removed: %s", args[0]), nil
-			}
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportScmTargetedOutcome(cmd, nil, err, humanize)
-			}
-			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_remove", map[string]string{"path": args[0]})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanize)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend (connector.scm is single-valued today, so this only guards against a stale/mistyped name)")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		humanize := func(json.RawMessage) (string, error) {
+			return fmt.Sprintf("Worktree removed: %s", args[0]), nil
+		}
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportScmTargetedOutcome(cmd, nil, err, humanize)
+		}
+		resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_remove", map[string]string{"path": args[0]}, *backendFlag)
+		return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanize)
+	}
+	return cmd
 }
 
 func newScmWorktreeListCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List local git worktrees",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeList)
-			}
-			// worktree_list is a TARGETED op, not a fan-out: connector.scm
-			// is single-valued (unlike issue/ci/pr's list-type ops), so it
-			// always resolves to exactly one backend (INV-REG-1; INV-EXIT-1).
-			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_list", nil)
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeList)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend (connector.scm is single-valued today, so this only guards against a stale/mistyped name)")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportScmTargetedOutcome(cmd, nil, err, humanizeWorktreeList)
+		}
+		// worktree_list is a TARGETED op, not a fan-out: connector.scm
+		// is single-valued (unlike issue/ci/pr's list-type ops), so it
+		// always resolves to exactly one backend (INV-REG-1; INV-EXIT-1).
+		resp, dispatchErr := dispatchScm(cmd.Context(), reg, "worktree_list", nil, *backendFlag)
+		return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeWorktreeList)
+	}
+	return cmd
 }
 
 func newScmBranchCmd() *cobra.Command {
@@ -115,40 +121,53 @@ func newScmBranchCmd() *cobra.Command {
 }
 
 func newScmBranchDetectCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "detect [cwd]",
 		Short: "Resolve a working directory to its repo and current branch (defaults to the process's own working directory)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd := ""
-			if len(args) == 1 {
-				cwd = args[0]
-			} else {
-				wd, err := os.Getwd()
-				if err != nil {
-					return fmt.Errorf("pg-connector: resolve cwd: %w", err)
-				}
-				cwd = wd
-			}
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportScmTargetedOutcome(cmd, nil, err, humanizeBranchInfo)
-			}
-			resp, dispatchErr := dispatchScm(cmd.Context(), reg, "branch_detect", map[string]string{"cwd": cwd})
-			return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeBranchInfo)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend (connector.scm is single-valued today, so this only guards against a stale/mistyped name)")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		cwd := ""
+		if len(args) == 1 {
+			cwd = args[0]
+		} else {
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("pg-connector: resolve cwd: %w", err)
+			}
+			cwd = wd
+		}
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportScmTargetedOutcome(cmd, nil, err, humanizeBranchInfo)
+		}
+		resp, dispatchErr := dispatchScm(cmd.Context(), reg, "branch_detect", map[string]string{"cwd": cwd}, *backendFlag)
+		return reportScmTargetedOutcome(cmd, resp, dispatchErr, humanizeBranchInfo)
+	}
+	return cmd
 }
 
 // dispatchScm calls op on the one backend registered under connector.scm,
 // resolved via registry.go's Single accessor (connector.scm is
 // single-valued — see this file's own doc comment) — then invokes
-// pkg/scriptout's caller-side Invoke against it directly. Mirrors
-// dispatch.go's Dispatch helper's shape (resolve backend, then Invoke) but
-// intentionally does not extend or call into Dispatch itself: Dispatch's
-// job is disambiguating among 0..N backends registered under a list-valued
-// connector.<type> entry, which a single-valued entry never needs.
-func dispatchScm(ctx context.Context, reg *Registry, op string, args any) (*scriptout.Response, error) {
+// pkg/scriptout's caller-side Invoke against it directly, attaching that
+// backend's own registered config block (registry.go's BackendConfig) the
+// same way dispatch.go's invokeOne does for the list-valued capabilities.
+// Mirrors dispatch.go's Dispatch helper's shape (resolve backend, then
+// Invoke) but intentionally does not extend or call into Dispatch itself:
+// Dispatch's job is disambiguating among 0..N backends registered under a
+// list-valued connector.<type> entry, which a single-valued entry never
+// needs.
+//
+// pinned ("" for no pin) is threaded onto every scm verb for CLI-surface
+// consistency with pr/issue/ci (design's "id-less op rule" bullet:
+// "ci.go/scm.go need the flag even though neither gets list") — since
+// connector.scm can register at most one backend today, a non-empty
+// pinned only ever VALIDATES that name against the single registered
+// backend (or the absence of one); it never changes which backend is
+// actually dispatched to.
+func dispatchScm(ctx context.Context, reg *Registry, op string, args any, pinned string) (*scriptout.Response, error) {
 	backend, err := reg.Single("scm")
 	if err != nil {
 		return nil, err
@@ -156,7 +175,10 @@ func dispatchScm(ctx context.Context, reg *Registry, op string, args any) (*scri
 	if backend == "" {
 		return nil, fmt.Errorf("dispatch: no backend registered for connector.scm")
 	}
-	return scriptout.Invoke(ctx, backend, op, args)
+	if pinned != "" && pinned != backend {
+		return nil, fmt.Errorf("dispatch: --backend %q is not registered for connector.scm (registered: %s)", pinned, backend)
+	}
+	return invokeOne(ctx, reg, backend, op, args)
 }
 
 // reportScmTargetedOutcome writes resp's outcome to stdout — in the

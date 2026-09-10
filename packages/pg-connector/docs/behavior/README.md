@@ -59,13 +59,16 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
 
 ## Scope (extent + floor)
 
-- **Extent (in)** — the registry (`connector.<type>`, list- or single-valued per type); the wire
-  protocol (envelope, `protocolVersion`/`schemaVersion` negotiation, the closed six-value error
-  taxonomy, the `capabilities`/`auth_status` meta-ops, the optional `AuthChecker` sub-interface);
-  the operator CLI surface for the four landed capabilities (`pr`, `issue`, `ci`, `scm`) plus
-  `auth status` and `config validate`; pg-connector's own CLI outcome reporting (`sources[]`, the
-  fan-out and targeted exit-code schemes); the `--output json|human` presentation mode; and the
-  composition boundary between the umbrella and its backends.
+- **Extent (in)** — the registry (`connector.<type>`, list- or single-valued per type, plus the
+  per-backend `backends.<binary>` config block); the wire protocol (envelope, `protocolVersion`/
+  `schemaVersion` negotiation, the closed seven-value error taxonomy, the `capabilities`/
+  `auth_status` meta-ops, the optional `config` member and its statelessness rule, the optional
+  `AuthChecker` sub-interface); the operator CLI surface for the four landed capabilities (`pr`,
+  `issue`, `ci`, `scm`) plus `auth status`, `config validate`, and `config show`; the `pr`/`issue`
+  `list` op and its named-query resolution; the `--backend` targeted/fan-out pinning flag;
+  pg-connector's own CLI outcome reporting (`sources[]`, the fan-out and targeted exit-code
+  schemes); the `--output json|human` presentation mode; and the composition boundary between the
+  umbrella and its backends.
 - **Extent (out)** — everything the design document
   (`docs/superpowers/specs/2026-09-03-unified-connector-architecture-design.md`, recorded
   durably by `ADR 0062`) describes but that has not yet landed in code as of this writing:

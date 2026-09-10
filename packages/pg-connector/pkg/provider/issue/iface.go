@@ -62,4 +62,17 @@ type Provider interface {
 	// rejection of an unrecognized targetState is this method's own error
 	// to report — it is not validated here.
 	Transition(ctx context.Context, id, targetState string) error
+
+	// List runs query (already resolved from the request's own
+	// config.queries block — dispatch.go's "list" handler does that
+	// resolution centrally, reporting query_not_recognized itself before
+	// ever calling List) and returns the matching issues. query MAY carry
+	// more than one expression (design: "run each, union results
+	// deduplicated by id, report truncated if any member truncated") —
+	// List, not the dispatch table, does that fan-in. idsOnly, when true,
+	// means the caller only wants IssueListResult.PresentIDs populated; a
+	// Provider MAY still choose to populate Entities anyway (harmless,
+	// just wasted work) but need not. Mirrors pkg/provider/pr.Provider's
+	// identical List addition (bead pg2-2j5ac.28.1).
+	List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error)
 }

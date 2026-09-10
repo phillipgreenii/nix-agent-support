@@ -31,6 +31,14 @@ func (fakeGH) ListReviews(ctx context.Context, repo string, number int) ([]api.R
 
 func (fakeGH) CheckAuth(ctx context.Context) error { return nil }
 
+func (fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
+	return nil, nil
+}
+
+func (fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
+	return 5000, nil
+}
+
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
 	return internal.New(fakeGH{}, internal.NewStore(t.TempDir()+"/store.json"))

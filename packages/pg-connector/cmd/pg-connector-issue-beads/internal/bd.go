@@ -141,6 +141,49 @@ func bdIssueFromArray(data json.RawMessage) (*bdIssue, error) {
 	return &issues[0], nil
 }
 
+// bdIssuesFromArray decodes an array `data` payload (bd ready, bd list)
+// and returns EVERY element — unlike bdIssueFromArray, List's own
+// multi-match use for the "list" op (bead pg2-2j5ac.28.1). An empty
+// array is a well-formed "no matches," not an error — bd ready/list
+// return a genuinely empty match set for a query with no hits, which is
+// not the same failure bdIssueFromArray's own not_found handles (that
+// path answers a single-id lookup where "nothing returned" specifically
+// means "this id doesn't exist").
+func bdIssuesFromArray(data json.RawMessage) ([]bdIssue, error) {
+	var issues []bdIssue
+	if err := json.Unmarshal(data, &issues); err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "bd: decode issue list: "+err.Error())
+	}
+	return issues, nil
+}
+
+// bdListFirstTokens is the closed set of bd subcommands a "list"
+// query-expression MAY start with (design's own binding decision:
+// "a query expression here is the full bd argument vector after the
+// binary ... permits only ready/list as the first token"). Any other
+// first token — including a destructive verb like "close" or "update" —
+// is rejected before ever exec'ing bd.
+var bdListFirstTokens = map[string]bool{"ready": true, "list": true}
+
+// parseBDListExpr splits expr (one QueryExpr element — a full bd argument
+// vector, bead pg2-2j5ac.28.1's own binding decision) into argv tokens and validates its first token
+// against bdListFirstTokens. Splitting is a plain strings.Fields
+// whitespace split [freedom boundary: a query expression needing a
+// literal space inside one quoted flag value — e.g. --label-any with a
+// multi-word value — is not representable this simply; a config author
+// needing that is a future extension, not something this packet's own
+// config.queries convention supports today].
+func parseBDListExpr(expr string) ([]string, error) {
+	argv := strings.Fields(expr)
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("bd: empty query expression")
+	}
+	if !bdListFirstTokens[argv[0]] {
+		return nil, fmt.Errorf("bd: query expression %q must start with \"ready\" or \"list\", got %q", expr, argv[0])
+	}
+	return argv, nil
+}
+
 // classifyBDErrorMessage maps bd's own free-text error message onto
 // scriptout's closed error taxonomy. bd's not_found phrasing is
 // consistently "no issue(s) found ..." (verified above) — deliberately

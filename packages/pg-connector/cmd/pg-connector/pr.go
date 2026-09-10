@@ -4,17 +4,24 @@
 // CLI surface — pr is one of its verb groups, never a separate binary
 // (interfaces.md's INTF-CLI).
 //
-// Each of these three verbs is a targeted, id-keyed op dispatched via
+// show/categorize/feedback-set are targeted, id-keyed ops dispatched via
 // dispatch.go's DispatchTargeted, which implements this docket's
 // multi-instance resolution policy across every backend registered under
 // connector.pr (try each in registration order, stopping at the first
 // non-not_found answer), and uses the Tier-1 targeted-op exit-code scheme
 // (0/4/1) via outcome.go's TargetedExitCode — this file calls the
 // dispatcher and hands TargetedExitCode the raw per-call result/error it
-// got back; it never decides the exit code itself (INV-EXIT-1).
+// got back; it never decides the exit code itself (INV-EXIT-1). Every one
+// of these three, PLUS the new "list" verb below, carries its own
+// --backend flag (bead pg2-2j5ac.28.1, design's "id-less op rule"):
+// on show/categorize/feedback-set it PINS DispatchTargeted straight to
+// that one backend, skipping the try-each policy; on list it either pins
+// the fan-out to that one backend or is left empty to fan out across
+// every registered pr backend (see newPrListCmd).
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -32,23 +39,26 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(newPrShowCmd())
 	prCmd.AddCommand(newPrCategorizeCmd())
 	prCmd.AddCommand(newPrFeedbackSetCmd())
+	prCmd.AddCommand(newPrListCmd())
 	return prCmd
 }
 
 func newPrShowCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show a PR's current full state, including comments/review-thread entries",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportPrTargetedOutcome(cmd, nil, err, humanizePRShow)
-			}
-			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizePRShow)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
+	}
+	return cmd
 }
 
 func newPrCategorizeCmd() *cobra.Command {
@@ -57,17 +67,18 @@ func newPrCategorizeCmd() *cobra.Command {
 		Use:   "categorize <id>",
 		Short: "Set a PR's category (a plain set/overwrite; never written as a GitHub label)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportPrTargetedOutcome(cmd, nil, err, humanizePRCategorize)
-			}
-			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "categorize", map[string]string{
-				"id":       args[0],
-				"category": category,
-			})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCategorize)
-		},
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizePRCategorize)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "categorize", map[string]string{
+			"id":       args[0],
+			"category": category,
+		}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCategorize)
 	}
 	cmd.Flags().StringVar(&category, "category", "", "category to set (required); a backend's own capabilities response declares its accepted vocabulary")
 	_ = cmd.MarkFlagRequired("category")
@@ -80,26 +91,134 @@ func newPrFeedbackSetCmd() *cobra.Command {
 		Use:   "feedback-set <pr-id> <comment-id>",
 		Short: "Set a PR comment/review-thread entry's disposition",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			d := schema.Disposition(disposition)
-			if !d.IsValid() {
-				return fmt.Errorf("pg-connector: --disposition %q must be one of %v", disposition, schema.ValidDispositions)
-			}
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportPrTargetedOutcome(cmd, nil, err, humanizePRFeedbackSet)
-			}
-			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "feedback_set", map[string]string{
-				"id":          args[0],
-				"comment_id":  args[1],
-				"disposition": string(d),
-			})
-			return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFeedbackSet)
-		},
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		d := schema.Disposition(disposition)
+		if !d.IsValid() {
+			return fmt.Errorf("pg-connector: --disposition %q must be one of %v", disposition, schema.ValidDispositions)
+		}
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizePRFeedbackSet)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "feedback_set", map[string]string{
+			"id":          args[0],
+			"comment_id":  args[1],
+			"disposition": string(d),
+		}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFeedbackSet)
 	}
 	cmd.Flags().StringVar(&disposition, "disposition", "", "one of open|will-fix|wont-fix|no-action (required)")
 	_ = cmd.MarkFlagRequired("disposition")
 	return cmd
+}
+
+// prListOutcome is "pr list"'s wire response: every queried backend's
+// matched PRs concatenated into Entities (backend registration order,
+// bead pg2-2j5ac.28.1 design's closing paragraph — "entities
+// concatenated in backend registration order"), with each backend's own
+// health as one sources[] row (INV-OUT-1), mirroring ciListOutcome's
+// identical shape for the sibling PR-keyed "ci list" fan-out.
+type prListOutcome struct {
+	Entities []schema.PR    `json:"entities"`
+	Sources  []SourceResult `json:"sources"`
+}
+
+// fanOutPRList queries "list" against every backend in backends (design
+// 's request shape: {"query": query, "cursor": null, "ids_only":
+// idsOnly}), concatenating their matched entities and building one
+// sources[] row per backend queried. A backend answering
+// query_not_recognized is reported disabled with a reason distinct from
+// the generic "not applicable" (list.go's classifyListSource) so the
+// caller can tell "every registered backend answered
+// query_not_recognized" apart from "some backends don't implement list at
+// all."
+func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) prListOutcome {
+	// Entities and Sources both start as non-nil empty slices so a
+	// zero-backend (misconfigured host) result, or a backend that
+	// answers with zero matches, still marshals entities[]/sources[] as
+	// [] rather than null [bug A15's convention, applied here].
+	out := prListOutcome{
+		Entities: make([]schema.PR, 0),
+		Sources:  make([]SourceResult, 0, len(backends)),
+	}
+	for _, b := range backends {
+		config, err := reg.BackendConfig(b)
+		if err != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+			continue
+		}
+		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
+		if err != nil {
+			out.Sources = append(out.Sources, classifyListSource(b, err))
+			continue
+		}
+		var result schema.PRListResult
+		if err := scriptout.Decode(resp.Result, &result); err != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+			continue
+		}
+		out.Entities = append(out.Entities, result.Entities...)
+		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
+	}
+	return out
+}
+
+func newPrListCmd() *cobra.Command {
+	var query string
+	var idsOnly bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List PRs matching a named query, fanned out across every registered pr backend unless --backend pins one",
+		Args:  cobra.NoArgs,
+	}
+	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered pr backend")
+	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
+	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched PR's id, omitting full entity detail")
+	_ = cmd.MarkFlagRequired("query")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return err
+		}
+		backends, err := resolveListBackends(reg, "pr", *backendFlag)
+		if err != nil {
+			return err
+		}
+		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly)
+		if allQueryNotRecognized(outcome.Sources) {
+			// design: every registered backend answered
+			// query_not_recognized -> the umbrella fails the whole call
+			// as invalid_argument, reported through the same synthetic
+			// wire envelope every other CLI-level pre-dispatch failure
+			// uses. The humanize function is never invoked on this
+			// error branch (writeTargetedResult only calls it on
+			// success) so a trivial no-op stub is sufficient.
+			return reportPrTargetedOutcome(cmd, nil, listQueryNotRecognizedErr("pr", query), func(json.RawMessage) (string, error) { return "", nil })
+		}
+		return writeFanOutResult(cmd, outcome, listExitCode(outcome.Sources), func() string {
+			return humanizePRListOutcome(outcome)
+		})
+	}
+	return cmd
+}
+
+// humanizePRListOutcome formats "pr list"'s fan-out outcome for human
+// display, mirroring humanizeCiList's own shape for the analogous fan-out.
+func humanizePRListOutcome(o prListOutcome) string {
+	var b strings.Builder
+	if len(o.Entities) == 0 {
+		b.WriteString("prs: (none)\n")
+	} else {
+		fmt.Fprintf(&b, "prs (%d):\n", len(o.Entities))
+		for _, pr := range o.Entities {
+			fmt.Fprintf(&b, "  [%s] %s#%d %q [%s]\n", pr.ID, pr.Repo, pr.Number, pr.Title, pr.State)
+		}
+	}
+	b.WriteString("sources:\n")
+	b.WriteString(formatSourcesTable(o.Sources))
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // reportPrTargetedOutcome writes resp's outcome to stdout — in the

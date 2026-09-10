@@ -10,6 +10,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -26,11 +27,19 @@ import (
 
 // ghProvider is the subset of internal/github.Provider's method set Backend
 // needs — a small seam so tests can inject a fake without spawning `gh`.
+// SearchPRs/RateLimitRemaining were added by bead pg2-2j5ac.28.1 (design
+// ) for List's own use.
 type ghProvider interface {
 	GetPR(ctx context.Context, repo string, number int) (*api.PR, error)
 	ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error)
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 	CheckAuth(ctx context.Context) error
+	// SearchPRs runs one GitHub search-syntax query (design's
+	// "implement List" note) and returns every matched PR.
+	SearchPRs(ctx context.Context, query string) ([]api.PR, error)
+	// RateLimitRemaining reads the GraphQL API's current rate-limit
+	// remainder (design's "Rate protection" bullet).
+	RateLimitRemaining(ctx context.Context) (int, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
@@ -194,6 +203,97 @@ func (b *Backend) FeedbackSet(ctx context.Context, id, commentID string, disposi
 // (INV-AUTH-1).
 func (b *Backend) CheckAuth(ctx context.Context) error {
 	return b.gh.CheckAuth(ctx)
+}
+
+// defaultRateReservePoints is design's own stated default (1000)
+// when config.rate_reserve_points is absent.
+const defaultRateReservePoints = 1000
+
+// rateReservePoints resolves the configured rate-limit reserve from
+// config's own "rate_reserve_points" key (design's own key name;
+// absent — no config block registered, no key, or a malformed one —
+// means the default). config is the request's own opaque per-backend
+// config block (scriptout.ConfigFromContext), the SAME source List's own
+// query-name resolution reads its "queries" key from (bead
+// pg2-2j5ac.28.1, design's "Rate protection" bullet).
+func rateReservePoints(config json.RawMessage) int {
+	if len(config) == 0 {
+		return defaultRateReservePoints
+	}
+	var cfg struct {
+		RateReservePoints *int `json:"rate_reserve_points"`
+	}
+	if err := scriptout.Decode(config, &cfg); err != nil || cfg.RateReservePoints == nil {
+		return defaultRateReservePoints
+	}
+	return *cfg.RateReservePoints
+}
+
+// List implements pr.Provider.List against GitHub search (bead
+// pg2-2j5ac.28.1). query has ALREADY been resolved
+// from the request's own config.queries block by
+// pkg/provider/pr/dispatch.go's "list" handler — query_not_recognized is
+// never this method's concern. Each element of query is a bare GitHub
+// search-syntax string (ghProvider.SearchPRs' own doc comment); every
+// expression's matches are unioned, deduplicated by this backend's own
+// "<owner>/<repo>#<number>" id convention (formatPRID) — design's
+// "run each, union results deduplicated by id" rule.
+//
+// Before searching, this checks the GraphQL rate-limit remainder
+// (design's "Rate protection" bullet) against
+// config.rate_reserve_points (rateReservePoints, reading the SAME
+// per-backend config member every op receives via
+// scriptout.ConfigFromContext) — falling below it answers unavailable
+// rather than a partial/misleading result set, since a caller cannot
+// otherwise tell "genuinely zero matches" apart from "GitHub throttled
+// this call partway through." Truncated is always false: SearchPRs
+// itself does not report a partial/truncated flag of its own (gh search
+// prs' own --limit is fixed at 100 per call by SearchPRs, not exposed
+// as a per-query knob here) [freedom boundary].
+//
+// Matched entities carry no Category/dispositions (PRState{}'s zero
+// value) — this backend's own local Store is not consulted per matched
+// PR: "list" is an enumeration/matching op, not a full-detail read (see
+// schema.PRListResult's own doc comment), so a caller wanting a matched
+// PR's category/dispositions calls "show" on its id [freedom boundary].
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+	remaining, err := b.gh.RateLimitRemaining(ctx)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
+		))
+	}
+
+	seen := make(map[string]bool)
+	entities := make([]schema.PR, 0)
+	asOf := time.Now().UTC()
+	for _, q := range query {
+		prs, err := b.gh.SearchPRs(ctx, q)
+		if err != nil {
+			return nil, classifyGHError(err)
+		}
+		for i := range prs {
+			ghPR := prs[i]
+			id := formatPRID(ghPR.Repo, ghPR.Number)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, PRState{}, asOf))
+		}
+	}
+	ids := make([]string, 0, len(entities))
+	for _, e := range entities {
+		ids = append(ids, e.ID)
+	}
+	result := &schema.PRListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}
+	if idsOnly {
+		result.Entities = nil
+	}
+	return result, nil
 }
 
 // classifyGHError maps a ported GitHub-provider error onto scriptout's

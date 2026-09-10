@@ -11,6 +11,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -44,12 +45,21 @@ type Registry struct {
 	raw              map[string]yaml.Node
 	attentionSources []string
 	searchSources    []string
+	backends         map[string]yaml.Node
 }
 
 type registryDoc struct {
 	Connector map[string]yaml.Node `yaml:"connector"`
 	Attention *sourcesDoc          `yaml:"attention"`
 	Search    *sourcesDoc          `yaml:"search"`
+	// Backends is the top-level backends.<binary> map (bead pg2-2j5ac.28.1,
+	// bead pg2-2j5ac.28.1) — each entry's own opaque config block, copied VERBATIM
+	// by Invoke into every wire request sent to that binary. It is a
+	// SIBLING of connector: (not nested under it): a backend name may be
+	// registered under more than one connector.<type> entry (a
+	// multi-capability backend, INV-REG-1), and this config is per-BINARY,
+	// not per-(type, binary) pair.
+	Backends map[string]yaml.Node `yaml:"backends"`
 }
 
 // sourcesDoc is the shape of the top-level attention:/search: mappings: a
@@ -163,7 +173,7 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	if err := validateConnectorKeys(doc.Connector); err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
-	reg := &Registry{raw: doc.Connector}
+	reg := &Registry{raw: doc.Connector, backends: doc.Backends}
 	if doc.Attention != nil {
 		reg.attentionSources = doc.Attention.Sources
 	}
@@ -298,6 +308,65 @@ func (r *Registry) Single(entityType string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+// BackendConfig returns the opaque config block registered under the
+// top-level backends.<name> key (bead pg2-2j5ac.28.1), as raw
+// JSON — nil (not an error) when no such block exists, matching every
+// other Registry accessor's "absent key -> zero value, not an error"
+// convention (List/Single's own doc comments). The umbrella (Invoke)
+// never parses this block's own contents — the returned bytes are copied
+// VERBATIM into every wire request sent to name.
+func (r *Registry) BackendConfig(name string) (json.RawMessage, error) {
+	if r == nil {
+		return nil, nil
+	}
+	node, ok := r.backends[name]
+	if !ok {
+		return nil, nil
+	}
+	var v any
+	if err := node.Decode(&v); err != nil {
+		return nil, fmt.Errorf("registry: backends.%s: %w", name, err)
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("registry: backends.%s: encode as JSON: %w", name, err)
+	}
+	return raw, nil
+}
+
+// BackendQueryNames returns the sorted list of query names name's own
+// backends.<name>.queries block defines, without resolving any of them —
+// used by "config validate"/"config show --queries" (config_validate.go,
+// config_show.go) to report what a backend declares, never invoked
+// against the backend itself. A backend with no registered config block,
+// or a config block with no queries key at all, returns (nil, nil) — the
+// ordinary case for a backend that doesn't implement "list" at all (ci,
+// scm) or one that simply defines no named queries yet.
+func (r *Registry) BackendQueryNames(name string) ([]string, error) {
+	config, err := r.BackendConfig(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(config) == 0 {
+		return nil, nil
+	}
+	var parsed struct {
+		Queries map[string]json.RawMessage `json:"queries"`
+	}
+	if err := json.Unmarshal(config, &parsed); err != nil {
+		return nil, fmt.Errorf("registry: backends.%s: %w", name, err)
+	}
+	if len(parsed.Queries) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(parsed.Queries))
+	for n := range parsed.Queries {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // AttentionSources returns the bare binary names registered under the

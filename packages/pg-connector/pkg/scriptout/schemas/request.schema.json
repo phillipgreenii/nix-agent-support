@@ -6,6 +6,7 @@
   "required": ["op"],
   "properties": {
     "op": { "type": "string" },
-    "args": {}
+    "args": {},
+    "config": {}
   }
 }

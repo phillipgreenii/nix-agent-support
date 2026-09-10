@@ -36,7 +36,13 @@ package schema
 // Tier-3 tools) lands against the pre-freshness shape — precisely to avoid
 // an even more expensive schema bump a later addition would otherwise
 // force.
-const PRSchemaVersion = 2
+//
+// Bumped 2 -> 3 by bead pg2-2j5ac.28.1, which added the
+// "list" op and its PRListResult wire shape below — schemaVersion is one
+// integer per schema-bearing CAPABILITY (INV-VER-1), not one per Go
+// struct, so a capability gaining a whole new op's wire shape is exactly
+// the same kind of change the 1 -> 2 bump's precedent already covers.
+const PRSchemaVersion = 3
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -177,4 +183,35 @@ type FeedbackSetResult struct {
 	ID          string      `json:"id"`
 	CommentID   string      `json:"comment_id"`
 	Disposition Disposition `json:"disposition"`
+}
+
+// PRListResult is the "list" op's wire result payload (bead pg2-2j5ac.28.1,
+// design's exact response shape: `{"entities": [], "present_ids":
+// [], "cursor": null, "truncated": false}`).
+//
+// Cursor is *string (not a bare string) so the wire encoding always
+// explicitly emits "cursor": null rather than omitting the field —
+// design's own binding decision states cursor "MUST always be null in
+// this packet" (incremental fetching is changes, phase 8), so this type
+// never actually sets it to a non-nil value today, but the pointer form
+// keeps the wire shape self-documenting either way.
+//
+// Entities carries the FULL matched PR set (each entry the same PR shape
+// "show" returns) unless a caller passed ids_only, in which case a
+// backend leaves Entities empty and populates only PresentIDs — a
+// freedom-boundary choice: the design pins the response SHAPE, not
+// whether every backend eagerly fetches full detail (Comments/Reviews) for
+// every matched entity. This backend's own List MAY leave
+// Comments/Reviews unpopulated even when Entities is populated: "list" is
+// an enumeration/matching op, not a per-entity full-detail read — a caller
+// wanting full detail for one matched PR calls "show" on its id.
+//
+// PresentIDs MUST always be the complete id set the query matches right
+// now — populated regardless of ids_only, since ids_only
+// only controls whether Entities is ALSO populated.
+type PRListResult struct {
+	Entities   []PR     `json:"entities"`
+	PresentIDs []string `json:"present_ids"`
+	Cursor     *string  `json:"cursor"`
+	Truncated  bool     `json:"truncated"`
 }

@@ -9,6 +9,7 @@ package pr
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -63,6 +64,36 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode feedback_set args: "+err.Error())
 				}
 				return p.FeedbackSet(ctx, a.ID, a.CommentID, a.Disposition)
+			},
+		},
+		// list resolves args.query against the request's own config.queries
+		// block (via scriptout.ConfigFromContext) CENTRALLY, here, rather
+		// than inside every backend's own p.List — so query_not_recognized
+		// is reported identically by every pr backend, with
+		// no duplicated resolution logic across them [freedom boundary].
+		// cursor is decoded but deliberately unused/unvalidated: design's
+		// own binding decision is that cursor "MUST always be null in this
+		// packet" — a caller sending a non-null cursor is simply ignored
+		// rather than rejected, since rejecting it would require this
+		// packet to invent its own validation error for a field phase 8
+		// (changes) actually owns.
+		"list": {
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					Query   string  `json:"query"`
+					Cursor  *string `json:"cursor"`
+					IDsOnly bool    `json:"ids_only"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list args: "+err.Error())
+				}
+				expr, ok := schema.ResolveQuery(scriptout.ConfigFromContext(ctx), a.Query)
+				if !ok {
+					return nil, scriptout.WrapError(scriptout.ErrQueryNotRecognized,
+						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
+				}
+				return p.List(ctx, expr, a.IDsOnly)
 			},
 		},
 	}

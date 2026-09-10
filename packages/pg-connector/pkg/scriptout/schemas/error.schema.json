@@ -12,7 +12,8 @@
         "unavailable",
         "unknown_op",
         "version_mismatch",
-        "invalid_argument"
+        "invalid_argument",
+        "query_not_recognized"
       ]
     },
     "message": { "type": "string" }

@@ -685,3 +685,129 @@ func TestPriorityVocabulary_NonEmptyAndMatchesRealBDPriorities(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------
+// List (bead pg2-2j5ac.28.1)
+// ----------------------------------------------------------------------
+
+func TestBackend_List_ReadyExpr_AppendsJSONAndUnlimitedLimit(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "ready" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !argsEndWith(args, "--json", "--limit", "0") {
+			t.Fatalf("args = %v, want --json --limit 0 appended by the backend itself", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"a","status":"open","priority":1}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"ready"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].ID != "tp-1" {
+		t.Fatalf("Entities = %+v", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "tp-1" {
+		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
+	}
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %v, want nil (always null)", got.Cursor)
+	}
+	if got.Truncated {
+		t.Fatal("Truncated = true, want false")
+	}
+}
+
+func TestBackend_List_ListExprWithFlags(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "list" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !containsArg(args, "--status") || !containsArg(args, "open") {
+			t.Fatalf("args = %v, want the full argv from the query expression preserved", args)
+		}
+		return `{"data":[],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"list --status open"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want none", got.Entities)
+	}
+}
+
+func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
+	calls := 0
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
+		if args[0] == "ready" {
+			return `{"data":[{"id":"tp-1","title":"a","status":"open"},{"id":"tp-2","title":"b","status":"open"}],"schema_version":1}`, nil
+		}
+		return `{"data":[{"id":"tp-2","title":"b","status":"open"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"ready", "list --label focus"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one per expression)", calls)
+	}
+	if len(got.Entities) != 2 {
+		t.Fatalf("Entities = %+v, want exactly 2 after dedup by id (tp-2 appeared in both expressions)", got.Entities)
+	}
+}
+
+func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[{"id":"tp-1","title":"a","status":"open"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"ready"}, true)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want empty when ids_only is true", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "tp-1" {
+		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
+	}
+}
+
+func TestBackend_List_DisallowedFirstToken_IsUnavailable(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		t.Fatal("bd must not be invoked for a disallowed query expression")
+		return "", nil
+	}}
+	b := New(fr)
+
+	_, err := b.List(context.Background(), []string{"close tp-1"}, false)
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable) — a disallowed first token is a config-authoring problem", err)
+	}
+}
+
+func TestParseBDListExpr_AllowsReadyAndList(t *testing.T) {
+	if _, err := parseBDListExpr("ready"); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if _, err := parseBDListExpr("list --status open"); err != nil {
+		t.Fatalf("list --status open: %v", err)
+	}
+}
+
+func TestParseBDListExpr_RejectsOtherFirstTokens(t *testing.T) {
+	for _, expr := range []string{"close tp-1", "update tp-1 --status closed", "", "  "} {
+		if _, err := parseBDListExpr(expr); err == nil {
+			t.Errorf("parseBDListExpr(%q) = nil error, want a rejection", expr)
+		}
+	}
+}

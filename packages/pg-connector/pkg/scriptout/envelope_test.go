@@ -31,6 +31,47 @@ func TestRequestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRequestRoundTrip_Config proves the config member (bead
+// pg2-2j5ac.28.1) round-trips and stays absent from the wire encoding
+// entirely when unset (omitempty) — the "no structural change for a
+// backend with no registered config block" guarantee envelope.go's
+// Request doc comment states.
+func TestRequestRoundTrip_Config(t *testing.T) {
+	req := Request{Op: "list", Args: json.RawMessage(`{"query":"team"}`), Config: json.RawMessage(`{"queries":{"team":"is:open"}}`)}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got Request
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var cfg struct {
+		Queries map[string]string `json:"queries"`
+	}
+	if err := json.Unmarshal(got.Config, &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.Queries["team"] != "is:open" {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestRequestRoundTrip_NoConfig_OmittedFromWire(t *testing.T) {
+	req := Request{Op: "show", Args: json.RawMessage(`{"id":"1"}`)}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(b, &generic); err != nil {
+		t.Fatalf("unmarshal generic: %v", err)
+	}
+	if _, ok := generic["config"]; ok {
+		t.Fatalf("request with no Config must not carry a config key: %s", b)
+	}
+}
+
 func TestResponseRoundTrip_Success(t *testing.T) {
 	resp := Response{
 		ProtocolVersion: ProtocolVersion,

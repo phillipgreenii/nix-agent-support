@@ -17,23 +17,110 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// FanOutConfigValidate fans both auth_status and capabilities out across
-// every backend in backends, building the sources[] envelope. Each backend
-// gets exactly one row combining both checks' verdict — never collapsed
-// across backends, but the two checks ARE combined per-backend since both
-// exist to answer the single question "is this backend usable."
-func FanOutConfigValidate(ctx context.Context, backends []string) FanOutOutcome {
+// entityTypesWithList is the subset of entityTypes (registry.go) this
+// packet's own "list" op spans — pr/issue only, per this packet's own
+// Contract's two exemptions ("scm has no remote entity, and ci ... keeps
+// its existing PR-keyed ci list <pr-id> verb unchanged"). Used by
+// queryCoverageGaps below to scope which connector.<type> registrations
+// query-name coverage is even meaningful for.
+var entityTypesWithList = []string{"pr", "issue"}
+
+// queryCoverageCheck computes whether query-name coverage is even a
+// MEANINGFUL check for backend (applicable — true only when backend is
+// registered under at least one entityTypesWithList type), and if so,
+// the query names OTHER backends of that SAME type declare in their own
+// backends.<name>.queries block that backend's own block does NOT define
+// (gaps, bead pg2-2j5ac.28.1) — a config-authoring signal: a caller
+// naming that query via --backend (or hitting a fan-out where every
+// backend but this one happens to be down) would get
+// query_not_recognized specifically from this backend.
+//
+// applicable is deliberately distinguished from "gaps == nil": a ci-only
+// or scm-only backend (or ANY backend when nothing is registered under
+// pr/issue at all — the common case in this file's own pre-existing unit
+// tests, which pass a nil *Registry) is NOT applicable at all, and MUST
+// NOT be folded into configValidateOne's count/degradation logic the same
+// way a genuine zero-gap PASS would be — doing so would silently change
+// what Count means for every backend this check has nothing to say about
+// [bug discovered against this packet's own pre-existing
+// TestFanOutConfigValidate_CountReflectsChecksPassed: an always-counted
+// third check inflated Count from 2 to 3 even for backends with no
+// pr/issue registration at all]. gaps is sorted and de-duplicated across
+// every entityTypesWithList type backend is registered under (a
+// multi-capability backend registered under both pr and issue would
+// otherwise report the same gap twice).
+func queryCoverageCheck(reg *Registry, backend string) (applicable bool, gaps []string, err error) {
+	seen := map[string]bool{}
+	for _, t := range entityTypesWithList {
+		backends, listErr := reg.List(t)
+		if listErr != nil {
+			return false, nil, listErr
+		}
+		registered := false
+		for _, b := range backends {
+			if b == backend {
+				registered = true
+				break
+			}
+		}
+		if !registered {
+			continue
+		}
+		applicable = true
+		union := map[string]bool{}
+		var ownNames map[string]bool
+		for _, b := range backends {
+			names, namesErr := reg.BackendQueryNames(b)
+			if namesErr != nil {
+				return false, nil, namesErr
+			}
+			set := make(map[string]bool, len(names))
+			for _, n := range names {
+				union[n] = true
+				set[n] = true
+			}
+			if b == backend {
+				ownNames = set
+			}
+		}
+		for n := range union {
+			if !ownNames[n] {
+				seen[n] = true
+			}
+		}
+	}
+	if !applicable {
+		return false, nil, nil
+	}
+	if len(seen) == 0 {
+		return true, nil, nil
+	}
+	gaps = make([]string, 0, len(seen))
+	for n := range seen {
+		gaps = append(gaps, n)
+	}
+	sort.Strings(gaps)
+	return true, gaps, nil
+}
+
+// FanOutConfigValidate fans auth_status, capabilities, and (bead
+// pg2-2j5ac.28.1) query-name coverage out across every backend in
+// backends, building the sources[] envelope. Each backend gets exactly
+// one row combining all three checks' verdict — never collapsed across
+// backends, but the checks ARE combined per-backend since all exist to
+// answer the single question "is this backend usable."
+func FanOutConfigValidate(ctx context.Context, reg *Registry, backends []string) FanOutOutcome {
 	// Sources starts as a non-nil empty slice so a zero-backend
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
-		out.Sources = append(out.Sources, configValidateOne(ctx, b))
+		out.Sources = append(out.Sources, configValidateOne(ctx, reg, b))
 	}
 	return out
 }
 
-func configValidateOne(ctx context.Context, backend string) SourceResult {
+func configValidateOne(ctx context.Context, reg *Registry, backend string) SourceResult {
 	var reasons []string
 
 	authResult := authStatusOne(ctx, backend)
@@ -60,11 +147,32 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 		}
 	}
 
-	// Count is the number of this source's two checks (auth_status,
-	// capabilities) that actually came back healthy — its own raw
-	// pre-merge count (outcome.go's SourceResult doc comment), rather than
-	// the hardcoded 0 that made a fully-degraded backend indistinguishable
-	// from one that failed only one of the two checks [bug A16].
+	// queryCoverage is applicable only when backend is registered under a
+	// list-capable type (pr/issue) — see queryCoverageCheck's own doc
+	// comment for why an inapplicable check must NOT be folded into
+	// count/degradation the same way a genuine pass would be.
+	applicable, gaps, gapErr := queryCoverageCheck(reg, backend)
+	queriesOK := true
+	if applicable {
+		if gapErr != nil {
+			queriesOK = false
+			reasons = append(reasons, "query coverage: "+gapErr.Error())
+		} else if len(gaps) > 0 {
+			queriesOK = false
+			reasons = append(reasons, fmt.Sprintf(
+				"query coverage: missing %s (declared by another registered backend of the same type)",
+				strings.Join(gaps, ", "),
+			))
+		}
+	}
+
+	// Count is the number of this source's checks that actually came back
+	// healthy — its own raw pre-merge count (outcome.go's SourceResult doc
+	// comment), rather than the hardcoded 0 that made a fully-degraded
+	// backend indistinguishable from one that failed only one of the
+	// checks [bug A16]. Query coverage only contributes to Count/the
+	// overall verdict when applicable is true — see queryCoverageCheck's
+	// own doc comment.
 	count := 0
 	if authOK {
 		count++
@@ -72,8 +180,11 @@ func configValidateOne(ctx context.Context, backend string) SourceResult {
 	if capsOK {
 		count++
 	}
+	if applicable && queriesOK {
+		count++
+	}
 
-	if authOK && capsOK {
+	if authOK && capsOK && (!applicable || queriesOK) {
 		return SourceResult{Source: backend, Status: SourceSucceeded, Count: count}
 	}
 	return SourceResult{Source: backend, Status: SourceDegraded, Count: count, Reason: strings.Join(reasons, "; ")}
@@ -140,7 +251,7 @@ func newConfigValidateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			outcome := FanOutConfigValidate(cmd.Context(), backends)
+			outcome := FanOutConfigValidate(cmd.Context(), reg, backends)
 			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
 				return "config validate:\n" + formatSourcesTable(outcome.Sources)
 			})

@@ -81,6 +81,13 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// waiting on it) forever [bead #13].
 	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
 	defer cancel()
+	// Every op handler transitively receives the request's own opaque
+	// config block via ConfigFromContext, without widening OpHandler's own
+	// signature (see config_context.go's doc comment) — set unconditionally
+	// (even when req.Config is empty) so ConfigFromContext's nil-safe
+	// zero-value behavior is exercised the same way regardless of whether
+	// this particular request carried one.
+	ctx = WithConfig(ctx, req.Config)
 
 	result, err := entry.Handle(ctx, req.Args)
 	if err != nil {

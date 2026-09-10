@@ -318,3 +318,58 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 	_, err := b.run(ctx, "update", "--status", targetState, "--json", "--", id)
 	return err
 }
+
+// List implements issue.Provider.List against bd (bead pg2-2j5ac.28.1,
+// design's own binding decision): query has ALREADY been resolved
+// from the request's own config.queries block by
+// pkg/provider/issue/dispatch.go's "list" handler — query_not_recognized
+// is never this method's concern. Each element of query is a FULL bd
+// argument vector (parseBDListExpr splits + validates it, permitting only
+// "ready"/"list" as the first token); this method appends --json --limit
+// 0 itself, NEVER trusted from the config value, so a config author
+// cannot smuggle in a different --limit/--json flag. Every expression's
+// matches are unioned, deduplicated by id (design's "run each, union
+// results deduplicated by id" rule) — Truncated always false: bd's own
+// --limit 0 means unlimited, so this backend never truncates its own
+// result set.
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+	tracker := b.tracker()
+	seen := make(map[string]bool)
+	entities := make([]schema.Issue, 0)
+	for _, expr := range query {
+		argv, parseErr := parseBDListExpr(expr)
+		if parseErr != nil {
+			// A malformed/disallowed query expression is a config-
+			// authoring problem, not the caller's fault (the caller only
+			// ever supplies a query NAME, already resolved by the
+			// dispatch table before this method is ever reached) —
+			// ErrUnavailable is this taxonomy's closest fit for "this
+			// backend's own configuration is broken" (INV-ERR-2).
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, parseErr.Error())
+		}
+		data, err := b.run(ctx, append(argv, "--json", "--limit", "0")...)
+		if err != nil {
+			return nil, err
+		}
+		issues, err := bdIssuesFromArray(data)
+		if err != nil {
+			return nil, err
+		}
+		for _, iss := range issues {
+			if seen[iss.ID] {
+				continue
+			}
+			seen[iss.ID] = true
+			entities = append(entities, *toSchemaIssue(&iss, tracker))
+		}
+	}
+	ids := make([]string, 0, len(entities))
+	for _, e := range entities {
+		ids = append(ids, e.ID)
+	}
+	result := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}
+	if idsOnly {
+		result.Entities = nil
+	}
+	return result, nil
+}

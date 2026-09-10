@@ -64,13 +64,25 @@ const (
 )
 
 // Request is the wire shape read from stdin.
+//
+// Config is the registered backend's own opaque backends.<binary> config
+// block (bead pg2-2j5ac.28.1), copied VERBATIM by the umbrella
+// into every request it sends to that backend. It is deliberately untyped
+// on this wire-envelope side: pkg/scriptout is capability-agnostic (see this
+// file's package doc comment) and MUST NOT validate Config's contents —
+// only a capability's own dispatch table (or, for a value common to every
+// capability like "queries", pkg/schema's own ResolveQuery) ever interprets
+// it. Omitted (omitempty) for a backend with no registered config block, so
+// an older backend or a call built before this field existed sees no
+// structural change to the request it already knows how to decode.
 type Request struct {
-	Op   string          `json:"op"`
-	Args json.RawMessage `json:"args,omitempty"`
+	Op     string          `json:"op"`
+	Args   json.RawMessage `json:"args,omitempty"`
+	Config json.RawMessage `json:"config,omitempty"`
 }
 
 // Error is the wire shape of a failure response. Code MUST be one of the
-// closed six-value taxonomy named by the Err* sentinels in errors.go.
+// closed seven-value taxonomy named by the Err* sentinels in errors.go.
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

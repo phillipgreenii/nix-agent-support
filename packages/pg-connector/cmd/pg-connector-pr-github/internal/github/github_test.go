@@ -345,6 +345,132 @@ func TestListMyPRs_BodyAndLabels(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
+// SearchPRs / RateLimitRemaining tests (bead pg2-2j5ac.28.1)
+// ----------------------------------------------------------------------
+
+const sampleSearchPRs = `[
+  {
+    "number": 7,
+    "title": "fix: bug",
+    "url": "https://github.com/owner/repo/pull/7",
+    "state": "OPEN",
+    "body": "fixes a thing",
+    "isDraft": false,
+    "author": {"login": "octocat"},
+    "labels": [{"name": "bug"}, {"name": "p1"}],
+    "repository": {"nameWithOwner": "owner/repo"}
+  }
+]`
+
+func TestSearchPRs_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRs(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	pr := prs[0]
+	if pr.Repo != "owner/repo" || pr.Number != 7 || pr.Title != "fix: bug" || pr.Author != "octocat" {
+		t.Fatalf("unexpected PR: %+v", pr)
+	}
+	if pr.State != "open" {
+		t.Fatalf("State = %q, want lowercased %q", pr.State, "open")
+	}
+	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
+		t.Fatalf("Labels = %v", pr.Labels)
+	}
+}
+
+// TestSearchPRs_FlagsPrecedeDoubleDash proves --json/--limit are placed
+// BEFORE the "--" positional terminator (query.go — everything after
+// "--" is a literal positional, never re-parsed as a flag).
+func TestSearchPRs_FlagsPrecedeDoubleDash(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if _, err := p.SearchPRs(context.Background(), "-label:bug"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "search" || last[1] != "prs" {
+		t.Fatalf("expected search prs: %v", last)
+	}
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	if dashIdx == -1 {
+		t.Fatalf("expected a \"--\" terminator: %v", last)
+	}
+	if last[len(last)-1] != "-label:bug" {
+		t.Fatalf("expected the query as the final positional after \"--\": %v", last)
+	}
+	if !containsArg(last[:dashIdx], "--json") || !containsArg(last[:dashIdx], "--limit") {
+		t.Fatalf("expected --json/--limit BEFORE the \"--\" terminator: %v", last)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSearchPRs_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["search prs"] = errors.New("boom")
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestRateLimitRemaining_ParsesRemainder(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":1234}}}`)
+	p := NewWithRunner(gh)
+
+	remaining, err := p.RateLimitRemaining(context.Background())
+	if err != nil {
+		t.Fatalf("RateLimitRemaining: %v", err)
+	}
+	if remaining != 1234 {
+		t.Fatalf("remaining = %d, want 1234", remaining)
+	}
+}
+
+func TestRateLimitRemaining_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["api graphql"] = errors.New("boom")
+	p := NewWithRunner(gh)
+
+	if _, err := p.RateLimitRemaining(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestRateLimitRemaining_MalformedJSON(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`not json`)
+	p := NewWithRunner(gh)
+
+	if _, err := p.RateLimitRemaining(context.Background()); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+// ----------------------------------------------------------------------
 // ListComments tests
 // ----------------------------------------------------------------------
 

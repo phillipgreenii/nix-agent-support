@@ -36,6 +36,32 @@ distinction come from the behavior-docs method
   caller decoding a `capabilities` response MUST check for the ordinary error envelope's `error`
   field **before** attempting to decode the bespoke success shape; skipping that check risks
   silently decoding a failure as a zero-value success.
+- **`INV-WIRE-3`** <!-- uuid: 9c1e5f47-2b8a-4d6e-b3f9-7a4c1d8e6f52 --> — Every request MAY carry a
+  `config` member alongside `op`/`args`: the umbrella copies a registered backend's own registered
+  config block VERBATIM into every request it sends that backend (bead pg2-2j5ac.28.1). The
+  umbrella MUST NOT validate `config`'s contents — it is opaque at the wire-envelope layer, since
+  `INTF-WIRE` is capability-agnostic by design; only a capability's own dispatch table (or a value
+  common to more than one capability, like the `list` op's own `queries` key) ever interprets it.
+  `config` MUST NOT be logged with a secret exposed — see `INV-STATE-1`.
+
+## Statelessness
+
+- **`INV-STATE-1`** <!-- uuid: 4d8b2e91-7a3c-4f6d-9e1b-8c5a2d7f3b64 --> — A Tier-2 backend MUST
+  resolve any per-call, per-backend policy it needs (e.g. the `list` op's own named-query
+  definitions, or `pg-connector-pr-github`'s own GraphQL rate-limit reserve) from the REQUEST's own
+  opaque `config` member (`INV-WIRE-3`) alone — NEVER from a file, environment variable, or other
+  local state it reads or resolves itself for that purpose. The umbrella is the sole place a
+  backend's own config is authored and read from disk; a backend that instead resolved its own
+  config file would make the SAME backend binary behave differently depending on which host/process
+  invoked it, defeating the umbrella's own single point of configuration. This does not forbid a
+  backend from resolving its OWN credentials or connection details independently (e.g.
+  `pg-connector-pr-github`'s `gh`-mediated token, `pg-connector-issue-jira`'s `pjira` config file) —
+  `INV-STATE-1` is scoped to PER-CALL POLICY the umbrella itself can vary per backend via `config`,
+  not to a backend's own ambient identity/connection resolution.
+- A backend's own `config.queries` block (the `list` op's own named-query convention) MUST NOT
+  define any built-in query name of its own; every name a caller can legitimately supply comes
+  from that backend's own registered config, resolved centrally by that capability's dispatch
+  table before ever reaching the backend's own `List` implementation (`INV-ERR-3`).
 
 ## Versioning
 
@@ -70,12 +96,13 @@ distinction come from the behavior-docs method
 ## Error taxonomy
 
 - **`INV-ERR-1`** <!-- uuid: 18167463-248b-4264-b08e-2dce05a601b9 --> — A wire-level failure's
-  `error.code` MUST be one of exactly six values: `not_found`, `unauthenticated`, `unavailable`,
-  `unknown_op`, `version_mismatch`, `invalid_argument`. Each MUST map 1:1 to a Go sentinel error a
-  caller can match with `errors.Is` rather than substring-matching `message`. A handler error that
-  is not wrapped in one of these six sentinels MUST be reported as `unavailable` — the taxonomy's
-  closest fit for "something went wrong and this backend cannot currently be used" — rather than
-  invent a seventh code or leave `error.code` unset.
+  `error.code` MUST be one of exactly seven values: `not_found`, `unauthenticated`, `unavailable`,
+  `unknown_op`, `version_mismatch`, `invalid_argument`, `query_not_recognized` (the seventh member,
+  added for the `list` op's own named-query resolution — see `INV-ERR-3`). Each MUST map 1:1 to a
+  Go sentinel error a caller can match with `errors.Is` rather than substring-matching `message`. A
+  handler error that is not wrapped in one of these seven sentinels MUST be reported as
+  `unavailable` — the taxonomy's closest fit for "something went wrong and this backend cannot
+  currently be used" — rather than invent an eighth code or leave `error.code` unset.
 - **`INV-ERR-2`** <!-- uuid: b2e4a6ea-a6e7-4de5-b317-1e2c29bbd83d --> — `not_found`,
   `invalid_argument`, and `unavailable` MUST NOT be conflated, because each answers a different
   question about who or what is at fault:
@@ -100,6 +127,26 @@ distinction come from the behavior-docs method
       exists -->|"backend itself cannot answer right now"| un["unavailable - backend's own health problem"]
   ```
 
+- **`INV-ERR-3`** <!-- uuid: 7b4f2a91-6c3d-4e8a-9f10-2d5e8a3c6b17 --> — `query_not_recognized`
+  answers a question `INV-ERR-2`'s three-way split does not: the `list` op's own caller-facing
+  query NAME (resolved against the backend's own `config.queries` block — see the `INTF-WIRE` op
+  catalog's `list` row and `INV-STATE-1`) is not one this backend's own config defines. The request
+  is well-formed and the backend is healthy — distinct from `not_found` (which answers "does a
+  specific ENTITY exist," never "is this NAME even defined") and from `invalid_argument` (a
+  malformed request SHAPE, not an unrecognized caller-facing name). A backend MUST NOT treat an
+  unrecognized query name as a usage error, a crash, or a silently empty result — it MUST answer
+  `query_not_recognized` — and MUST NOT ship any built-in query name of its own (`INV-STATE-1`), so
+  every name a caller can legitimately supply comes from that backend's own registered config.
+
+  The umbrella's own `list` fan-out (`INTF-CLI`) treats one backend answering
+  `query_not_recognized` as "not applicable to this backend": skip it, report it in `sources[]` as
+  `disabled`, and exclude it from degraded-outcome accounting (`INV-EXIT-2`'s same rule, applied
+  here) — a fan-out where at least one OTHER backend recognizes the name is still exit-0 success.
+  Only when EVERY registered backend of the type answers `query_not_recognized` does the umbrella
+  fail the whole call, as its own CLI-level `invalid_argument` failure (never one of the fan-out
+  scheme's `0`/`2`/`3` values) — a query name nothing recognizes is a config-authoring/caller
+  mistake, not a partial-outage classification.
+
 ## Registry
 
 - **`INV-REG-1`** <!-- uuid: 0b8b254c-3fcf-46ce-bbe7-1c9b1c03be0d --> — The `connector.<type>`
@@ -110,11 +157,28 @@ distinction come from the behavior-docs method
   umbrella itself (`GOAL-MIN-1`).
 - **`INV-REG-2`** <!-- uuid: 6ea815c2-293c-40ca-93d7-2d8cc1b73b93 --> — A **targeted** op MUST
   resolve to exactly one registered backend for its capability. When a capability's registry
-  entry names zero backends, or (for a list-valued entry) more than one, a targeted op against
-  that capability MUST fail as a CLI-level error before any wire call is attempted — it MUST NOT
-  silently pick one of several registered backends. Selecting among multiple simultaneously-
-  registered same-capability backends for a targeted op is a future concern this set does not yet
-  resolve.
+  entry names zero backends, a targeted op against that capability MUST fail as a CLI-level error
+  before any wire call is attempted.
+
+  A capability's registry entry naming more than one backend has two resolutions, amended by bead
+  pg2-2j5ac.28.1 for multi-backend targeted ops:
+  - **No `--backend` given** — the umbrella tries each registered backend in registration order,
+    stopping at the first answer that is not `not_found` (a targeted op's own multi-instance
+    resolution policy); it MUST NOT otherwise silently pick one of several registered backends
+    without exhausting this policy.
+  - **`--backend <binary>` given** — every Tier-1 verb (targeted, id-less, or `list`) accepts this
+    flag; when present, the umbrella resolves DIRECTLY to that one named backend — validated
+    against the capability's own registration, a CLI-level error if it names a backend not
+    registered for that capability — skipping the multi-instance resolution policy above entirely.
+    On an id-less write with no meaningful fan-out (e.g. `issue create`), `--backend` is how an
+    operator resolves an otherwise-ambiguous N > 1 registration explicitly, rather than the
+    umbrella guessing. On `list`, `--backend` pins the fan-out to exactly that one backend instead
+    of querying every registered backend of the type.
+
+  Selecting among multiple simultaneously-registered same-capability backends for a targeted op
+  with NO `--backend` given and a first-tried non-`not_found` answer that is itself unhealthy
+  (i.e., ranking/failover beyond "first non-`not_found` wins") is a future concern this set does
+  not yet resolve.
 
 ## CLI outcome reporting and exit codes
 

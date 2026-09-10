@@ -46,8 +46,14 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 - **Single-valued entry** — a capability whose registry entry names exactly one backend (`scm`
   today, by design — it has no analogous multi-backend future).
 - **Targeted-op resolution** — resolving a targeted op to exactly one registered backend for its
-  capability; today this requires the capability's registry entry to name exactly one backend
-  (`INV-REG-2`).
+  capability: the capability's registry entry names exactly one backend, or (with more than one)
+  the umbrella either tries each in registration order (stopping at the first non-`not_found`
+  answer) or resolves directly to the one the operator names via `--backend` (`INV-REG-2`).
+- **`--backend <binary>`** — the flag every `pr`/`issue`/`ci`/`scm` Tier-1 verb accepts to resolve
+  directly to one named, already-registered backend: on a targeted op it skips the try-each
+  policy above, on `list` it pins the fan-out to that one backend, and on an id-less write with no
+  meaningful fan-out (`issue create`) it resolves an otherwise-ambiguous multi-backend
+  registration explicitly (`INV-REG-2`).
 
 ## The wire protocol
 
@@ -75,9 +81,9 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 
 ## Error taxonomy
 
-- **Error taxonomy** — the closed six-value set a wire-level failure's `error.code` MUST be drawn
-  from: `not_found`, `unauthenticated`, `unavailable`, `unknown_op`, `version_mismatch`,
-  `invalid_argument` (`INV-ERR-1`).
+- **Error taxonomy** — the closed seven-value set a wire-level failure's `error.code` MUST be
+  drawn from: `not_found`, `unauthenticated`, `unavailable`, `unknown_op`, `version_mismatch`,
+  `invalid_argument`, `query_not_recognized` (`INV-ERR-1`).
 - **Sentinel error** — the Go-side counterpart of each taxonomy code (`ErrNotFound`, …), so a
   caller uses `errors.Is` rather than substring-matching a message.
 - **`not_found`** — a well-formed request named a specific entity that genuinely doesn't exist; a
@@ -86,7 +92,25 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   that doesn't even parse into this backend's own id shape); the backend itself is healthy
   (`INV-ERR-2`).
 - **`unavailable`** — this backend cannot currently be used; also the default fallback code for an
-  error a handler returned without wrapping any of the six sentinels (`INV-ERR-1`).
+  error a handler returned without wrapping any of the seven sentinels (`INV-ERR-1`).
+- **`query_not_recognized`** — the `list` op's caller-facing query NAME is not one the backend's
+  own `config.queries` block defines; the request is well-formed and the backend is healthy
+  (`INV-ERR-3`).
+
+## The `list` op and named queries
+
+- **`list`** — the `pr`/`issue`-only op resolving a caller-facing query NAME against the backend's
+  own `config` block, returning every matching entity (`entities`), the complete current id set
+  (`present_ids`), an always-`null` `cursor`, and a `truncated` flag.
+- **Named query** — a `config.queries.<name>` entry: a caller-facing name mapped to one or more
+  backend-native query expressions (GitHub search syntax, JQL, a bd argument vector, …), resolved
+  centrally by the capability's own dispatch table before the backend's `List` is ever called.
+- **`config` block** — the opaque `backends.<binary>` registry entry (`INV-WIRE-3`) the umbrella
+  copies verbatim into every wire request sent to that binary; never validated by the umbrella,
+  interpreted only by the backend (or a value shared across capabilities, like `queries`).
+- **Statelessness** — a backend MUST resolve per-call policy (named queries, a rate-limit reserve,
+  …) from the request's own `config` member alone, never from a local file/env it reads itself
+  for that purpose (`INV-STATE-1`).
 
 ## Outcome reporting and CLI exit codes
 

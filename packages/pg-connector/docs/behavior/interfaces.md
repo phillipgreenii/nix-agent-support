@@ -54,7 +54,7 @@ Every op, on every capability, shares this shape (`INV-WIRE-1`):
   send `"result": null` explicitly rather than omitting `result` (`INV-WIRE-1`).
 - **The `capabilities` op is the one exception to this envelope**, both in what it returns on
   success and in what MUST be checked before decoding it (`INV-WIRE-2`).
-- **A wire-level failure's `error.code` MUST be drawn from a closed six-value taxonomy** —
+- **A wire-level failure's `error.code` MUST be drawn from a closed seven-value taxonomy** —
   `INV-ERR-1` below.
 - **Exit codes at this wire layer stay a plain `0`/`1`** (`0` the op ran and produced a
   well-formed envelope with `result` set; `1` anything else, including a malformed request, a
@@ -84,29 +84,51 @@ every backend regardless of capability. This catalog is what `INV-CAP-1` (capabi
 obliges to exist and to name no backend/system; `INTF-WIRE` is the interface that carries it
 (method `INV-8`: an enumerated catalog belongs to the interface that carries it).
 
-| Capability | Op                | Shape                                                             | Kind                                                                                                              |
-| ---------- | ----------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `pr`       | `show`            | `{id}` → the PR's full state incl. comments/reviews               | targeted                                                                                                          |
-| `pr`       | `categorize`      | `{id, category}` → `{id, category}`                               | targeted                                                                                                          |
-| `pr`       | `feedback_set`    | `{id, comment_id, disposition}` → `{id, comment_id, disposition}` | targeted                                                                                                          |
-| `issue`    | `show`            | `{id}` → the issue's current state                                | targeted                                                                                                          |
-| `issue`    | `create`          | `{title, priority?, labels?, issue_type?}` → the created issue    | targeted                                                                                                          |
-| `issue`    | `comment`         | `{id, body}` → no result payload (`result: null`)                 | targeted                                                                                                          |
-| `issue`    | `transition`      | `{id, target_state}` → no result payload (`result: null`)         | targeted                                                                                                          |
-| `ci`       | `list_runs`       | `{pr_id}` → every run this backend knows for that PR              | fanned out by the umbrella across every registered `ci` backend                                                   |
-| `ci`       | `get_logs`        | `{run_id}` → raw log bytes                                        | targeted                                                                                                          |
-| `ci`       | `rerun_failed`    | `{pr_id}` → no result payload (`result: null`)                    | targeted                                                                                                          |
-| `scm`      | `worktree_add`    | `{branch_or_ref}` → the added worktree's path/branch/ref          | targeted                                                                                                          |
-| `scm`      | `worktree_remove` | `{path}` → no result payload (`result: null`)                     | targeted                                                                                                          |
-| `scm`      | `worktree_list`   | (no args) → every local worktree this backend manages             | targeted (a single-backend list, not a fan-out — `scm`'s registry entry is single-valued)                         |
-| `scm`      | `branch_detect`   | `{cwd}` → `{repo, branch}`                                        | targeted                                                                                                          |
-| _(any)_    | `capabilities`    | (no args) → the bespoke discovery shape                           | common; every backend MUST answer it                                                                              |
-| _(any)_    | `auth_status`     | (no args) → `{state, detail?}`                                    | common but **optional** — present only if the backend's concrete provider implements `AuthChecker` (`INV-AUTH-1`) |
+| Capability | Op                | Shape                                                                                  | Kind                                                                                                              |
+| ---------- | ----------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `pr`       | `show`            | `{id}` → the PR's full state incl. comments/reviews                                    | targeted                                                                                                          |
+| `pr`       | `categorize`      | `{id, category}` → `{id, category}`                                                    | targeted                                                                                                          |
+| `pr`       | `feedback_set`    | `{id, comment_id, disposition}` → `{id, comment_id, disposition}`                      | targeted                                                                                                          |
+| `pr`       | `list`            | `{query, cursor: null, ids_only}` → `{entities, present_ids, cursor: null, truncated}` | fanned out by the umbrella across every registered `pr` backend unless `--backend` pins one                       |
+| `issue`    | `show`            | `{id}` → the issue's current state                                                     | targeted                                                                                                          |
+| `issue`    | `create`          | `{title, priority?, labels?, issue_type?}` → the created issue                         | targeted                                                                                                          |
+| `issue`    | `comment`         | `{id, body}` → no result payload (`result: null`)                                      | targeted                                                                                                          |
+| `issue`    | `transition`      | `{id, target_state}` → no result payload (`result: null`)                              | targeted                                                                                                          |
+| `issue`    | `list`            | `{query, cursor: null, ids_only}` → `{entities, present_ids, cursor: null, truncated}` | fanned out by the umbrella across every registered `issue` backend unless `--backend` pins one                    |
+| `ci`       | `list_runs`       | `{pr_id}` → every run this backend knows for that PR                                   | fanned out by the umbrella across every registered `ci` backend                                                   |
+| `ci`       | `get_logs`        | `{run_id}` → raw log bytes                                                             | targeted                                                                                                          |
+| `ci`       | `rerun_failed`    | `{pr_id}` → no result payload (`result: null`)                                         | targeted                                                                                                          |
+| `scm`      | `worktree_add`    | `{branch_or_ref}` → the added worktree's path/branch/ref                               | targeted                                                                                                          |
+| `scm`      | `worktree_remove` | `{path}` → no result payload (`result: null`)                                          | targeted                                                                                                          |
+| `scm`      | `worktree_list`   | (no args) → every local worktree this backend manages                                  | targeted (a single-backend list, not a fan-out — `scm`'s registry entry is single-valued)                         |
+| `scm`      | `branch_detect`   | `{cwd}` → `{repo, branch}`                                                             | targeted                                                                                                          |
+| _(any)_    | `capabilities`    | (no args) → the bespoke discovery shape                                                | common; every backend MUST answer it                                                                              |
+| _(any)_    | `auth_status`     | (no args) → `{state, detail?}`                                                         | common but **optional** — present only if the backend's concrete provider implements `AuthChecker` (`INV-AUTH-1`) |
 
 `issue`'s `transition` target state, and a `capabilities` response's `vocabulary`, are
 per-backend-declared rather than one fixed cross-backend enum, because the issue trackers this
 capability spans (Jira/beads/GitHub Issues, …) do not share one state vocabulary — unlike `pr`'s
 `disposition`, drawn from a genuinely closed, shared four-value enum.
+
+### `list` — named-query resolution and `query_not_recognized`
+
+`list` (`pr` and `issue` only — `scm` has no remote entity to enumerate, and `ci` keeps its
+existing PR-keyed `list_runs` fan-out unchanged) resolves `args.query` (a caller-facing NAME, e.g.
+`"team"`) against the backend's own `config.queries` block (`INV-WIRE-3`, `INV-STATE-1`) —
+resolved centrally by that capability's dispatch table, never by the backend's own `List`
+implementation, so every `pr`/`issue` backend answers an unrecognized name identically. `cursor`
+in `args` MUST always be `null` in this op's current scope (incremental fetching is a later
+concern); `ids_only` toggles whether the reply's `entities` array is populated, but
+`present_ids` — the COMPLETE id set the query currently matches — is always populated regardless.
+A `config.queries` value MAY be one string or a list of strings; a backend runs each, unions the
+results deduplicated by id, and reports `truncated` if any one member's own search reported
+truncated.
+
+A name the backend's own config does not define answers `query_not_recognized` (`INV-ERR-3`) —
+never a usage error, a crash, or a silently empty result. The umbrella's own fan-out treats that
+answer as "not applicable to this backend" (`disabled` in `sources[]`, excluded from
+degraded-outcome accounting) unless EVERY registered backend of the type answers it, in which case
+the umbrella fails the whole call as its own `invalid_argument` CLI-level failure (`INV-ERR-3`).
 
 ### `AuthChecker` — the optional auth-preflight facet
 
@@ -138,14 +160,24 @@ not authorize (`INV-COMP-1`).
 - **What the operator can do.** Invoke a **targeted** op against the one backend registered for a
   capability (`pr show`, `pr categorize`, `pr feedback-set`, `issue show/create/comment/
 transition`, `ci logs`, `ci rerun-failed`, `scm worktree add/remove/list`, `scm branch
-detect`); invoke a **fan-out** op across every backend registered for a capability (`ci list`,
-  `auth status`) or across every backend registered for **any** capability (`config validate`);
-  and choose the CLI's own presentation mode (`--output json|human`, a persistent flag inherited
-  by every verb group).
+detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
+  `issue list`, `ci list`, `auth status`) or across every backend registered for **any** capability
+  (`config validate`); and choose the CLI's own presentation mode (`--output json|human`, a
+  persistent flag inherited by every verb group).
 - **Registry resolution.** Every verb resolves its target backend(s) from the
   `connector.<type>` registry (`INV-REG-1`) before dispatching; a targeted op against a
-  capability with zero or more than one registered backend is a CLI-level failure before any
-  wire call is made (`INV-REG-2`), never a silent pick-one.
+  capability with zero registered backends is a CLI-level failure before any wire call is made.
+  With more than one registered backend, resolution follows `INV-REG-2`'s amended rule: the
+  umbrella tries each in registration order (stopping at the first non-`not_found` answer) unless
+  the operator supplies `--backend`.
+- **`--backend <binary>`.** Every `pr`/`issue`/`ci`/`scm` Tier-1 verb accepts this flag — a
+  leaf flag (unlike `--output`, it is registered per-verb, not inherited from root, since its
+  exact effect differs by verb shape). It resolves directly to the named backend, validated
+  against that capability's own registration (a CLI-level error if the name isn't registered
+  there); on a targeted op this skips the multi-instance try-each policy, on `list` it pins the
+  fan-out to that one backend instead of querying every registered backend of the type, and on an
+  id-less write with no meaningful fan-out (`issue create`) it is how an operator resolves an
+  otherwise-ambiguous multi-backend registration explicitly (`INV-REG-2`).
 - **Outcome reporting.** A targeted call's outcome is the umbrella's own **targeted** exit-code
   scheme (`0`/`4`/`1`); a fan-out call's outcome is the **fan-out** scheme (`0`/`2`/`3`) plus a
   `sources[]` row per backend queried — `INV-EXIT-1` and `INV-OUT-1` state both in full. These are
@@ -163,16 +195,16 @@ sequenceDiagram
     participant Umb as umbrella (INTF-CLI)
     participant Reg as registry
     participant BE as backend(s)
-    Op->>Umb: pg-connector <capability> <verb> [--output json|human]
+    Op->>Umb: pg-connector <capability> <verb> [--output json|human] [--backend <binary>]
     Umb->>Umb: validate --output (pre-dispatch, INV-OUT-2)
     Umb->>Reg: resolve connector.<type>
     alt targeted op
-        Reg-->>Umb: exactly one backend, or a CLI-level error (INV-REG-2)
+        Reg-->>Umb: zero backends is a CLI-level error; >1 resolves via --backend or try-each (INV-REG-2)
         Umb->>BE: INTF-WIRE: one op request
         BE-->>Umb: one result or error
         Umb-->>Op: rendered result; exit 0 / 4 / 1 (INV-EXIT-1)
     else fan-out op
-        Reg-->>Umb: every registered backend of the type
+        Reg-->>Umb: every registered backend of the type, or exactly one if --backend pins it
         loop each backend
             Umb->>BE: INTF-WIRE: one op request
             BE-->>Umb: one result or error

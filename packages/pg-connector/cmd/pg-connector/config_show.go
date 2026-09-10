@@ -11,6 +11,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -20,19 +22,30 @@ import (
 // registry.go's own list-valued (pr/issue/ci) vs single-valued (scm) shape
 // (INV-REG-1) — rather than force-fitting scm's single backend into a
 // one-element list just to give every entity type the same Go type.
+//
+// Queries is populated only when --queries is passed (bead
+// pg2-2j5ac.28.1) — backend binary name -> its own sorted registered
+// query names (backends.<name>.queries), covering every backend
+// registered under a list-capable type (pr/issue) — printed "on demand"
+// (this packet's own Files-section note) rather than unconditionally, so
+// an operator not using named queries at all sees no new noise in the
+// default "config show" output. Never invokes a backend, matching this
+// command's own existing "never invokes a backend" convention.
 type ConfigShowResult struct {
-	ConfigPath string   `json:"config_path"`
-	PR         []string `json:"pr,omitempty"`
-	Issue      []string `json:"issue,omitempty"`
-	CI         []string `json:"ci,omitempty"`
-	Scm        string   `json:"scm,omitempty"`
+	ConfigPath string              `json:"config_path"`
+	PR         []string            `json:"pr,omitempty"`
+	Issue      []string            `json:"issue,omitempty"`
+	CI         []string            `json:"ci,omitempty"`
+	Scm        string              `json:"scm,omitempty"`
+	Queries    map[string][]string `json:"queries,omitempty"`
 }
 
 // buildConfigShowResult resolves and parses the registry exactly as
 // LoadRegistry does (registry.go), then reads every entityTypes entry via
 // Registry's own List/Single — reusing that existing per-type
 // list-vs-scalar validation rather than a second, parallel decode.
-func buildConfigShowResult() (*ConfigShowResult, error) {
+// withQueries populates ConfigShowResult.Queries when true.
+func buildConfigShowResult(withQueries bool) (*ConfigShowResult, error) {
 	path, err := ResolveConfigPath()
 	if err != nil {
 		return nil, err
@@ -57,24 +70,65 @@ func buildConfigShowResult() (*ConfigShowResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ConfigShowResult{ConfigPath: path, PR: pr, Issue: issue, CI: ci, Scm: scm}, nil
+	result := &ConfigShowResult{ConfigPath: path, PR: pr, Issue: issue, CI: ci, Scm: scm}
+	if withQueries {
+		result.Queries = map[string][]string{}
+		for _, entityType := range entityTypesWithList {
+			for _, b := range result.backendsForType(entityType) {
+				if _, ok := result.Queries[b]; ok {
+					continue
+				}
+				names, namesErr := reg.BackendQueryNames(b)
+				if namesErr != nil {
+					return nil, namesErr
+				}
+				result.Queries[b] = names
+			}
+		}
+	}
+	return result, nil
 }
 
+// backendsForType returns r's own already-loaded backend list for
+// entityType ("pr" or "issue" — the two entityTypesWithList members) —
+// a plain field lookup, since buildConfigShowResult has already resolved
+// both into r.PR/r.Issue.
+func (r *ConfigShowResult) backendsForType(entityType string) []string {
+	switch entityType {
+	case "pr":
+		return r.PR
+	case "issue":
+		return r.Issue
+	default:
+		return nil
+	}
+}
+
+const configShowQueriesFlagName = "queries"
+
 func newConfigShowCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Print the resolved config file path and its registered connector.<type> backends",
 		Long: "Print the resolved config file path (registry.go's $PG_PR_CONFIG -> $XDG_CONFIG_HOME -> ~/.config\n" +
 			"resolution order) and, for each connector.<type> entity type, the backend(s) it registers there —\n" +
-			"without invoking any backend. Use \"config validate\" to check whether what's registered is healthy.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := buildConfigShowResult()
-			if err != nil {
-				return err
-			}
-			return writeConfigShowResult(cmd, result)
-		},
+			"without invoking any backend. Use \"config validate\" to check whether what's registered is healthy.\n" +
+			"--queries additionally prints, per pr/issue backend, the query names its own backends.<name>.queries\n" +
+			"config block defines, without resolving or invoking any of them.",
 	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		withQueries, err := cmd.Flags().GetBool(configShowQueriesFlagName)
+		if err != nil {
+			return err
+		}
+		result, err := buildConfigShowResult(withQueries)
+		if err != nil {
+			return err
+		}
+		return writeConfigShowResult(cmd, result)
+	}
+	cmd.Flags().Bool(configShowQueriesFlagName, false, "additionally print each pr/issue backend's own registered query names, without invoking any backend")
+	return cmd
 }
 
 // writeConfigShowResult renders result per the persistent --output flag
@@ -117,6 +171,26 @@ func formatConfigShow(r *ConfigShowResult) string {
 	if r.Scm != "" {
 		scmLine = "  scm: " + r.Scm
 	}
-	return fmt.Sprintf("config show:\n  config_path: %s\n%s\n%s\n%s\n%s",
+	out := fmt.Sprintf("config show:\n  config_path: %s\n%s\n%s\n%s\n%s",
 		r.ConfigPath, line("pr", r.PR), line("issue", r.Issue), line("ci", r.CI), scmLine)
+	if r.Queries != nil {
+		out += "\n  queries:"
+		if len(r.Queries) == 0 {
+			out += " (none registered)"
+		} else {
+			names := make([]string, 0, len(r.Queries))
+			for b := range r.Queries {
+				names = append(names, b)
+			}
+			sort.Strings(names)
+			for _, b := range names {
+				if len(r.Queries[b]) == 0 {
+					out += fmt.Sprintf("\n    %s: (none defined)", b)
+				} else {
+					out += fmt.Sprintf("\n    %s: %s", b, strings.Join(r.Queries[b], ", "))
+				}
+			}
+		}
+	}
+	return out
 }

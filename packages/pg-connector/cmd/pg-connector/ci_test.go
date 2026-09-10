@@ -141,7 +141,7 @@ func TestRun_CiList_FanOut_NoBackendsRegistered_Exit3(t *testing.T) {
 }
 
 func TestFanOutCIList_NoBackends_RunsAndSourcesAreEmptyArraysNotNull(t *testing.T) {
-	outcome := fanOutCIList(context.Background(), nil, "pr-1")
+	outcome := fanOutCIList(context.Background(), nil, nil, "pr-1")
 	raw, err := json.Marshal(outcome)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

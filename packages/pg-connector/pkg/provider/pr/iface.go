@@ -46,4 +46,17 @@ type Provider interface {
 	// response (e.g. commentID no longer exists) is a valid negative
 	// answer, not a broken call (INV-ERR-2).
 	FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error)
+
+	// List runs query (already resolved from the request's own
+	// config.queries block — dispatch.go's "list" handler does that
+	// resolution centrally, reporting query_not_recognized itself before
+	// ever calling List, so a concrete Provider need not repeat that check)
+	// and returns the matching PRs. query MAY carry more than one
+	// expression (design: "run each, union results deduplicated by
+	// id, report truncated if any member truncated") — List, not the
+	// dispatch table, does that fan-in. idsOnly, when true, means the
+	// caller only wants PRListResult.PresentIDs populated; a Provider MAY
+	// still choose to populate Entities anyway (harmless, just wasted
+	// work) but need not. bead pg2-2j5ac.28.1.
+	List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
 }

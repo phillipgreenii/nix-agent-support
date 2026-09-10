@@ -53,6 +53,58 @@ func TestServeLoop_Success(t *testing.T) {
 	}
 }
 
+// TestServeLoop_ThreadsConfigOntoContext proves the request's own Config
+// member (bead pg2-2j5ac.28.1) reaches the op handler via
+// ConfigFromContext (config_context.go), without widening OpHandler's own
+// Handle signature.
+func TestServeLoop_ThreadsConfigOntoContext(t *testing.T) {
+	table := DispatchTable{
+		"echo_config": {
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				return map[string]json.RawMessage{"config": ConfigFromContext(ctx)}, nil
+			},
+		},
+	}
+	code, resp := runServeLoop(t, table, `{"op":"echo_config","args":{},"config":{"queries":{"team":"is:open"}}}`)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got %v", resp)
+	}
+	cfg, ok := result["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected config object echoed back, got %v", result)
+	}
+	if _, ok := cfg["queries"]; !ok {
+		t.Fatalf("config = %v, want queries key preserved", cfg)
+	}
+}
+
+// TestServeLoop_NoConfig_HandlerSeesNil proves a request with no config
+// member leaves ConfigFromContext returning nil inside the handler — the
+// ordinary case for every pre-existing op this packet does not touch.
+func TestServeLoop_NoConfig_HandlerSeesNil(t *testing.T) {
+	var gotConfig json.RawMessage
+	sawCall := false
+	table := DispatchTable{
+		"op": {
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				sawCall = true
+				gotConfig = ConfigFromContext(ctx)
+				return map[string]string{"ok": "true"}, nil
+			},
+		},
+	}
+	if _, _ = runServeLoop(t, table, `{"op":"op","args":{}}`); !sawCall {
+		t.Fatal("handler was never called")
+	}
+	if gotConfig != nil {
+		t.Fatalf("ConfigFromContext = %q, want nil for a request with no config member", gotConfig)
+	}
+}
+
 func TestServeLoop_HandlerError(t *testing.T) {
 	table := DispatchTable{
 		"get_pr": {
@@ -99,7 +151,7 @@ func TestServeLoop_UnknownOp(t *testing.T) {
 // disagree, for every one of the six wire-taxonomy sentinels a handler can
 // wrap (bead pg2-7vgn5's core invariant) — not just the two spot-checked
 // above.
-func TestServeLoop_ExitCodeMatchesErrorCode_AllSixSentinels(t *testing.T) {
+func TestServeLoop_ExitCodeMatchesErrorCode_AllSevenSentinels(t *testing.T) {
 	cases := []struct {
 		sentinel error
 		code     string
@@ -110,6 +162,7 @@ func TestServeLoop_ExitCodeMatchesErrorCode_AllSixSentinels(t *testing.T) {
 		{ErrUnknownOp, "unknown_op"},
 		{ErrVersionMismatch, "version_mismatch"},
 		{ErrInvalidArgument, "invalid_argument"},
+		{ErrQueryNotRecognized, "query_not_recognized"},
 	}
 	seen := map[int]string{}
 	for _, c := range cases {

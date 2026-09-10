@@ -24,6 +24,14 @@ type fakeGH struct {
 	commentsErr  error
 	reviewsErr   error
 	checkAuthErr error
+
+	// searchFn/rateLimit/rateLimitErr back the List (bead pg2-2j5ac.28.1)
+	// seam. rateLimit defaults to a comfortably-above-reserve value (via
+	// rateLimitOrDefault below) so existing tests that never set it don't
+	// need to know about rate-limit protection at all.
+	searchFn     func(ctx context.Context, query string) ([]api.PR, error)
+	rateLimit    int
+	rateLimitErr error
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
@@ -49,6 +57,29 @@ func (f *fakeGH) ListReviews(ctx context.Context, repo string, number int) ([]ap
 
 func (f *fakeGH) CheckAuth(ctx context.Context) error {
 	return f.checkAuthErr
+}
+
+func (f *fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
+	if f.searchFn != nil {
+		return f.searchFn(ctx, query)
+	}
+	return nil, nil
+}
+
+// rateLimitOrDefaultReserve is fakeGH's own zero-value convenience: a
+// fakeGH that never sets rateLimit answers comfortably above
+// defaultRateReservePoints, so every EXISTING test in this file (written
+// before List/rate-limit protection existed) keeps working unchanged.
+const rateLimitOrDefaultReserve = defaultRateReservePoints + 1000
+
+func (f *fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
+	if f.rateLimitErr != nil {
+		return 0, f.rateLimitErr
+	}
+	if f.rateLimit == 0 {
+		return rateLimitOrDefaultReserve, nil
+	}
+	return f.rateLimit, nil
 }
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {
@@ -384,5 +415,148 @@ func TestBackend_Categorize_AcceptsEveryVocabularyValue(t *testing.T) {
 func TestVocabulary_NonEmpty(t *testing.T) {
 	if len(Vocabulary) == 0 {
 		t.Fatal("Vocabulary must be non-empty — it backs the capabilities op's declared category vocabulary (interfaces.md's vocabulary note)")
+	}
+}
+
+// ----------------------------------------------------------------------
+// List (bead pg2-2j5ac.28.1)
+// ----------------------------------------------------------------------
+
+func TestBackend_List_SingleExpr(t *testing.T) {
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		if query != "is:open author:@me" {
+			t.Fatalf("query = %q", query)
+		}
+		return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
+	}}
+	b := newTestBackend(t, gh)
+
+	got, err := b.List(context.Background(), []string{"is:open author:@me"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].ID != "owner/repo#1" {
+		t.Fatalf("Entities = %+v", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "owner/repo#1" {
+		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
+	}
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %v, want nil (always null)", got.Cursor)
+	}
+}
+
+func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
+	calls := 0
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		calls++
+		if query == "is:open author:@me" {
+			return []api.PR{{Repo: "owner/repo", Number: 1}, {Repo: "owner/repo", Number: 2}}, nil
+		}
+		return []api.PR{{Repo: "owner/repo", Number: 2}}, nil
+	}}
+	b := newTestBackend(t, gh)
+
+	got, err := b.List(context.Background(), []string{"is:open author:@me", "is:open review-requested:@me"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one per expression)", calls)
+	}
+	if len(got.Entities) != 2 {
+		t.Fatalf("Entities = %+v, want exactly 2 after dedup by id (owner/repo#2 appeared in both)", got.Entities)
+	}
+}
+
+func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+	}}
+	b := newTestBackend(t, gh)
+
+	got, err := b.List(context.Background(), []string{"is:open"}, true)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want empty when ids_only is true", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 {
+		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
+	}
+}
+
+func TestBackend_List_SearchError_Classified(t *testing.T) {
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		return nil, github.ErrGHAuthInvalid
+	}}
+	b := newTestBackend(t, gh)
+
+	_, err := b.List(context.Background(), []string{"is:open"}, false)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+// TestBackend_List_RateLimitBelowReserve_IsUnavailable is the design
+// "Rate protection" bullet's own regression proof: a rate-limit
+// remainder below the reserve answers unavailable BEFORE any search is
+// even attempted.
+func TestBackend_List_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
+	searchCalled := false
+	gh := &fakeGH{
+		rateLimit: 500,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			searchCalled = true
+			return nil, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+	_, err := b.List(ctx, []string{"is:open"}, false)
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+	if searchCalled {
+		t.Fatal("SearchPRs must not be called once the rate-limit check fails")
+	}
+}
+
+func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
+	gh := &fakeGH{
+		rateLimit: 2000,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+	got, err := b.List(ctx, []string{"is:open"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 {
+		t.Fatalf("Entities = %+v", got.Entities)
+	}
+}
+
+// TestRateReservePoints_DefaultsWhenAbsent proves rateReservePoints
+// falls back to defaultRateReservePoints (1000) when no
+// config, or a config with no rate_reserve_points key, is given.
+func TestRateReservePoints_DefaultsWhenAbsent(t *testing.T) {
+	if got := rateReservePoints(nil); got != defaultRateReservePoints {
+		t.Fatalf("rateReservePoints(nil) = %d, want %d", got, defaultRateReservePoints)
+	}
+	if got := rateReservePoints([]byte(`{}`)); got != defaultRateReservePoints {
+		t.Fatalf("rateReservePoints({}) = %d, want %d", got, defaultRateReservePoints)
+	}
+}
+
+func TestRateReservePoints_ReadsConfiguredValue(t *testing.T) {
+	if got := rateReservePoints([]byte(`{"rate_reserve_points":250}`)); got != 250 {
+		t.Fatalf("rateReservePoints = %d, want 250", got)
 	}
 }

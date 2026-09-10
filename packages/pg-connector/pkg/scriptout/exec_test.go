@@ -92,6 +92,24 @@ func helperMain() {
 			Result:          json.RawMessage(`"` + req.Op + `"`),
 		})
 		os.Exit(0)
+	case "echo_config":
+		// Echoes back the request's own Config member (bead pg2-2j5ac.28.1)
+		// as the result — used to prove Invoke's config parameter actually
+		// reaches the wire request, distinct from echo_op's op-only echo.
+		var req Request
+		if err := json.Unmarshal(stdin, &req); err != nil {
+			_ = json.NewEncoder(os.Stdout).Encode(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})
+			os.Exit(1)
+		}
+		result := req.Config
+		if len(result) == 0 {
+			result = json.RawMessage("null")
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(Response{
+			ProtocolVersion: ProtocolVersion,
+			Result:          result,
+		})
+		os.Exit(0)
 	case "stderr_only":
 		fmt.Fprintln(os.Stderr, "boom")
 		os.Exit(2)
@@ -168,7 +186,7 @@ func withFactory(t *testing.T, behavior string) {
 
 func TestInvoke_Success(t *testing.T) {
 	withFactory(t, "ok_auth")
-	resp, err := Invoke(context.Background(), "fake-binary", OpAuthStatus, nil)
+	resp, err := Invoke(context.Background(), "fake-binary", OpAuthStatus, nil, nil)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -183,7 +201,7 @@ func TestInvoke_Success(t *testing.T) {
 
 func TestInvoke_ErrorWrapsSentinel(t *testing.T) {
 	withFactory(t, "not_found")
-	_, err := Invoke(context.Background(), "fake-binary", "get_pr", map[string]any{"number": 1})
+	_, err := Invoke(context.Background(), "fake-binary", "get_pr", map[string]any{"number": 1}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -194,7 +212,7 @@ func TestInvoke_ErrorWrapsSentinel(t *testing.T) {
 
 func TestInvoke_UnknownOpWrapsSentinel(t *testing.T) {
 	withFactory(t, "unknown_op")
-	_, err := Invoke(context.Background(), "fake-binary", OpAuthStatus, nil)
+	_, err := Invoke(context.Background(), "fake-binary", OpAuthStatus, nil, nil)
 	if err == nil || !errors.Is(err, ErrUnknownOp) {
 		t.Fatalf("expected errors.Is(err, ErrUnknownOp), got %v", err)
 	}
@@ -202,14 +220,14 @@ func TestInvoke_UnknownOpWrapsSentinel(t *testing.T) {
 
 func TestInvoke_NonJSONOutput(t *testing.T) {
 	withFactory(t, "non_json")
-	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid JSON") {
 		t.Fatalf("expected invalid-JSON error, got %v", err)
 	}
 }
 
 func TestInvoke_EmptyBinary(t *testing.T) {
-	_, err := Invoke(context.Background(), "", "x", nil)
+	_, err := Invoke(context.Background(), "", "x", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "empty backend binary") {
 		t.Fatalf("expected empty-binary error, got %v", err)
 	}
@@ -220,7 +238,7 @@ func TestInvoke_BinaryNotFound(t *testing.T) {
 	execCmdFactory = exec.CommandContext
 	t.Cleanup(func() { execCmdFactory = orig })
 
-	_, err := Invoke(context.Background(), "definitely-does-not-exist-xyz-987", "x", nil)
+	_, err := Invoke(context.Background(), "definitely-does-not-exist-xyz-987", "x", nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing binary")
 	}
@@ -231,7 +249,7 @@ func TestInvoke_BinaryNotFound(t *testing.T) {
 
 func TestInvoke_ArgsRoundTrip(t *testing.T) {
 	withFactory(t, "echo_op")
-	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", map[string]any{"number": 7})
+	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", map[string]any{"number": 7}, nil)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -244,6 +262,41 @@ func TestInvoke_ArgsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestInvoke_ConfigRoundTrip proves the config parameter (bead
+// pg2-2j5ac.28.1) actually reaches the wire request's own Config member,
+// verbatim.
+func TestInvoke_ConfigRoundTrip(t *testing.T) {
+	withFactory(t, "echo_config")
+	config := json.RawMessage(`{"queries":{"team":"is:open"}}`)
+	resp, err := Invoke(context.Background(), "fake-binary", "list", nil, config)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	var got struct {
+		Queries map[string]string `json:"queries"`
+	}
+	if err := Decode(resp.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Queries["team"] != "is:open" {
+		t.Fatalf("echoed config = %+v, want the config passed to Invoke", got)
+	}
+}
+
+// TestInvoke_NilConfig_OmittedFromWire proves a nil config produces no
+// config member on the wire at all (envelope.go's own omitempty
+// guarantee), rather than a present-but-null one.
+func TestInvoke_NilConfig_OmittedFromWire(t *testing.T) {
+	withFactory(t, "echo_config")
+	resp, err := Invoke(context.Background(), "fake-binary", "show", nil, nil)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if string(resp.Result) != "null" {
+		t.Fatalf("resp.Result = %s, want the echo_config helper's own null fallback (no config member on the wire)", resp.Result)
+	}
+}
+
 func TestInvoke_ProtocolVersionMismatch_IsVersionMismatchNotSilentSuccess(t *testing.T) {
 	// Before this fix, Invoke decoded a well-formed, otherwise-successful
 	// response whose protocolVersion disagreed with this process's own
@@ -253,7 +306,7 @@ func TestInvoke_ProtocolVersionMismatch_IsVersionMismatchNotSilentSuccess(t *tes
 	// derivations (INV-VER-1)) passed silently instead of surfacing
 	// version_mismatch.
 	withFactory(t, "protocol_mismatch")
-	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil)
+	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil, nil)
 	if err == nil {
 		t.Fatalf("expected version_mismatch error, got success resp=%+v", resp)
 	}
@@ -269,7 +322,7 @@ func TestInvoke_EmptyEnvelope_IsProtocolViolationNotSuccess(t *testing.T) {
 	// A response with neither result nor error currently returned success
 	// — this must be a protocol-violation error instead [bug A7].
 	withFactory(t, "empty_envelope")
-	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil)
+	resp, err := Invoke(context.Background(), "fake-binary", "get_pr", nil, nil)
 	if err == nil {
 		t.Fatalf("expected error, got resp=%+v", resp)
 	}
@@ -286,7 +339,7 @@ func TestInvoke_ExplicitNullResult_IsSuccessNotViolation(t *testing.T) {
 	// MUST remain success, distinct from the omitted-field violation above
 	// [bug A7].
 	withFactory(t, "explicit_null_result")
-	resp, err := Invoke(context.Background(), "fake-binary", "rerun_failed", nil)
+	resp, err := Invoke(context.Background(), "fake-binary", "rerun_failed", nil, nil)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -394,7 +447,7 @@ func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
 	t.Cleanup(func() { execTimeout = origTimeout })
 
 	start := time.Now()
-	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil, nil)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -415,7 +468,7 @@ func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
 // the ENTIRE captured stderr into the returned error with no bound.
 func TestInvoke_StderrFoldIsCapped(t *testing.T) {
 	withFactory(t, "big_stderr")
-	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil, nil)
 	if err == nil {
 		t.Fatal("expected error from the big_stderr helper")
 	}
@@ -434,7 +487,7 @@ func TestInvoke_StderrFoldIsCapped(t *testing.T) {
 // "stdout=%q" with no bound.
 func TestInvoke_NonJSONStdoutFoldIsCapped(t *testing.T) {
 	withFactory(t, "big_nonjson_stdout")
-	_, err := Invoke(context.Background(), "fake-binary", "x", nil)
+	_, err := Invoke(context.Background(), "fake-binary", "x", nil, nil)
 	if err == nil {
 		t.Fatal("expected invalid-JSON error from the big_nonjson_stdout helper")
 	}

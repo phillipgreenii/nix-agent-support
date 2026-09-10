@@ -140,3 +140,86 @@ func TestResolveConfigPath_ExplicitOverrideMissingFile(t *testing.T) {
 		t.Fatalf("expected does-not-exist error, got %v", err)
 	}
 }
+
+// --- --queries (bead pg2-2j5ac.28.1) ---------------------------------------
+
+func writeConfigWithQueries(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	body := "connector:\n" +
+		"  pr:\n" +
+		"    - pg-connector-pr-github\n" +
+		"  issue:\n" +
+		"    - pg-connector-issue-beads\n" +
+		"backends:\n" +
+		"  pg-connector-pr-github:\n" +
+		"    queries:\n" +
+		"      team: \"is:open author:@me\"\n" +
+		"  pg-connector-issue-beads:\n" +
+		"    queries:\n" +
+		"      ready: \"ready\"\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+}
+
+func TestConfigShow_Queries_OmittedByDefault(t *testing.T) {
+	writeConfigWithQueries(t)
+
+	stdout, _, code := executePr(t, []string{"config", "show"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal([]byte(stdout), &generic); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := generic["queries"]; ok {
+		t.Fatalf("stdout = %s, must not carry a queries key without --queries", stdout)
+	}
+}
+
+func TestConfigShow_Queries_PrintsPerBackendNames(t *testing.T) {
+	writeConfigWithQueries(t)
+
+	stdout, _, code := executePr(t, []string{"config", "show", "--queries"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var result ConfigShowResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode: %v (stdout=%s)", err, stdout)
+	}
+	if len(result.Queries["pg-connector-pr-github"]) != 1 || result.Queries["pg-connector-pr-github"][0] != "team" {
+		t.Fatalf("queries[pg-connector-pr-github] = %v, want [\"team\"]", result.Queries["pg-connector-pr-github"])
+	}
+	if len(result.Queries["pg-connector-issue-beads"]) != 1 || result.Queries["pg-connector-issue-beads"][0] != "ready" {
+		t.Fatalf("queries[pg-connector-issue-beads] = %v, want [\"ready\"]", result.Queries["pg-connector-issue-beads"])
+	}
+}
+
+func TestConfigShow_Queries_NeverInvokesABackend(t *testing.T) {
+	// No fake backend binary is written at all — if "config show --queries"
+	// ever tried to exec one, this test would fail with a PATH lookup
+	// error instead of a clean exit 0.
+	writeConfigWithQueries(t)
+
+	_, _, code := executePr(t, []string{"config", "show", "--queries"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (config show must never invoke a backend)", code)
+	}
+}
+
+func TestConfigShow_Queries_HumanMode(t *testing.T) {
+	writeConfigWithQueries(t)
+
+	stdout, _, code := executePr(t, []string{"config", "show", "--queries", "--output", "human"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "team") || !strings.Contains(stdout, "ready") {
+		t.Fatalf("stdout = %q, want it to mention both registered query names", stdout)
+	}
+}

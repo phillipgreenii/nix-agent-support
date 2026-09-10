@@ -17,6 +17,7 @@ type fakeProvider struct {
 	showFn        func(ctx context.Context, id string) (*schema.PR, error)
 	categorizeFn  func(ctx context.Context, id, category string) (*schema.CategorizeResult, error)
 	feedbackSetFn func(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error)
+	listFn        func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
 }
 
 var _ Provider = (*fakeProvider)(nil)
@@ -31,6 +32,10 @@ func (f *fakeProvider) Categorize(ctx context.Context, id, category string) (*sc
 
 func (f *fakeProvider) FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
 	return f.feedbackSetFn(ctx, id, commentID, disposition)
+}
+
+func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+	return f.listFn(ctx, query, idsOnly)
 }
 
 // fakeProviderWithAuth additionally implements pkg/provider.AuthChecker, to
@@ -146,6 +151,91 @@ func TestNewDispatchTable_Show_DecodeFailureIsInvalidArgument(t *testing.T) {
 	}
 	if errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatal("a decode failure must not be reported as unavailable")
+	}
+}
+
+// TestNewDispatchTable_List_ResolvesQueryFromConfig proves the "list" entry
+// resolves args.query against the request's own config.queries block
+// (threaded via scriptout.ConfigFromContext, not the args payload itself)
+// before ever calling p.List, and passes the resolved schema.QueryExpr
+// through unchanged.
+func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
+	var gotQuery schema.QueryExpr
+	var gotIDsOnly bool
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+			gotQuery = query
+			gotIDsOnly = idsOnly
+			return &schema.PRListResult{Entities: []schema.PR{{ID: "pr-1"}}, PresentIDs: []string{"pr-1"}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"team":"is:open author:@me"}}`))
+	result, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"team","cursor":null,"ids_only":true}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(gotQuery) != 1 || gotQuery[0] != "is:open author:@me" {
+		t.Fatalf("query = %#v", gotQuery)
+	}
+	if !gotIDsOnly {
+		t.Fatal("ids_only was not passed through")
+	}
+	got, ok := result.(*schema.PRListResult)
+	if !ok || len(got.PresentIDs) != 1 || got.PresentIDs[0] != "pr-1" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+// TestNewDispatchTable_List_QueryNotRecognized proves an unresolvable
+// query name is rejected with ErrQueryNotRecognized BEFORE p.List is ever
+// called — design's "MUST NOT treat an unrecognized name as a usage
+// error, crash, or empty result" is the Provider's obligation not to
+// worry about, since the dispatch table itself never reaches it.
+func TestNewDispatchTable_List_QueryNotRecognized(t *testing.T) {
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+			t.Fatal("List must not be invoked for an unrecognized query name")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"team":"is:open"}}`))
+	_, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"nonexistent-name"}`))
+	if !errors.Is(err, scriptout.ErrQueryNotRecognized) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrQueryNotRecognized)", err)
+	}
+}
+
+// TestNewDispatchTable_List_NoConfig_QueryNotRecognized proves a request
+// with no config member at all (ConfigFromContext returns nil) is treated
+// the same as "no queries block" — every name is unrecognized, never a
+// nil-pointer panic.
+func TestNewDispatchTable_List_NoConfig_QueryNotRecognized(t *testing.T) {
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+			t.Fatal("List must not be invoked when no config was ever registered")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["list"].Handle(context.Background(), json.RawMessage(`{"query":"team"}`))
+	if !errors.Is(err, scriptout.ErrQueryNotRecognized) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrQueryNotRecognized)", err)
+	}
+}
+
+func TestNewDispatchTable_List_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+			t.Fatal("List must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["list"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 

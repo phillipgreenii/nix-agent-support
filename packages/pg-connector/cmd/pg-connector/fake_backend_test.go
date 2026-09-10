@@ -25,6 +25,24 @@ func writeFakeBackend(t *testing.T, name, stdout string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// writeEchoFakeBackend creates an executable shell script that replies
+// with a success envelope whose result is the ENTIRE received request
+// object verbatim — used to prove Dispatch/DispatchTargeted/dispatchScm
+// actually attach a backend's own registered config block to the
+// outgoing wire request (bead pg2-2j5ac.28.1), since
+// writeFakeBackend's own fixed canned response discards stdin entirely
+// and so cannot observe it.
+func writeEchoFakeBackend(t *testing.T, name string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, name)
+	content := "#!/bin/sh\nreq=$(cat)\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":%s}\\n' \"$req\"\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write echo fake backend: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // writeOpAwareFakeBackend is like writeFakeBackend, but replies with a
 // different canned response depending on which op the incoming request
 // names — needed to fake a backend that answers auth_status and

@@ -35,6 +35,12 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   rendered either as the stable JSON envelope my scripts already parse, or as readable text for
   my own terminal, chosen explicitly rather than guessed from my environment. _(→
   `USECASE-CHOOSE-OUTPUT`; `INV-OUT-2`.)_
+- **`STORY-OP-7`** <!-- uuid: 1a6e9d34-8c52-4f71-b3a9-6d8e2c5f9a17 --> — enumerate every `pr`/
+  `issue` entity matching a named query I define once in config, fanned out across every backend
+  that recognizes it, without the umbrella ever needing to know what that query means to each
+  backend's own system — and get a clear, distinct signal (never a crash or an empty result) when
+  I name a query no backend recognizes. _(→ `USECASE-NAMED-QUERY-CALL`; `INV-WIRE-3`,
+  `INV-STATE-1`, `INV-ERR-3`.)_
 
 ## Journey
 
@@ -230,6 +236,50 @@ Extensions:
   `schemaVersions` comparison from its `capabilities` response into one verdict — a `disabled`
   `auth_status` (no `AuthChecker`) does not by itself degrade the row (`INV-AUTH-1`,
   `INV-EXIT-2`), but a recognized-capability `schemaVersion` mismatch does (`INV-VER-1`).
+
+### `USECASE-NAMED-QUERY-CALL` — invoke `list` by name and read a distinct unrecognized-query signal <!-- uuid: 2e7c9a41-5b83-4f96-a1d2-8e3c6b9f4d70 -->
+
+**Actor:** `ACTOR-OP`.
+**Level:** user-goal.
+**Preconditions:** the operator has authored a `backends.<binary>.queries.<name>` block for at
+least one registered `pr`/`issue` backend.
+**Intent:** enumerate every entity a named query matches, fanned out across every backend that
+recognizes the name (or pinned to one via `--backend`), with a query name no backend recognizes
+reported distinctly rather than as a crash, a usage error, or a silently empty result.
+_Requires:_ `INV-WIRE-3`, `INV-STATE-1`, `INV-ERR-3`, `INV-REG-2`, `INV-EXIT-1`, `INV-OUT-1`.
+_Includes:_ `USECASE-CHOOSE-OUTPUT`.
+
+**Flow.** The umbrella resolves the backend set exactly as `USECASE-FANOUT-CALL` does — every
+backend registered for the type, or exactly one if `--backend` pins it — and, for each, attaches
+that backend's own registered `config` block VERBATIM onto the `list` request (`INV-WIRE-3`).
+Each backend resolves the caller's query name against its own `config.queries` (never a name it
+ships built in — `INV-STATE-1`) and returns matching entities, or `query_not_recognized` if its
+own config doesn't define that name. The umbrella reports a `query_not_recognized` backend as
+`disabled` in `sources[]` (excluded from degraded accounting, same as any other `disabled` row) —
+unless EVERY queried backend answers it, in which case the whole call fails as the umbrella's own
+`invalid_argument` CLI-level error instead of the ordinary fan-out exit-code scheme (`INV-ERR-3`).
+The merged result is rendered per the operator's chosen output mode (`USECASE-CHOOSE-OUTPUT`).
+
+```mermaid
+flowchart TD
+    call["operator invokes pr/issue list --query NAME"] --> resolve["resolve backend set (every registered, or --backend pins one)"]
+    resolve --> loop["per backend: attach its own config block, dispatch list (INV-WIRE-3)"]
+    loop --> reply{"reply?"}
+    reply -->|"entities matched"| ok["sources[] row: succeeded"]
+    reply -->|"query_not_recognized"| disabled["sources[] row: disabled (INV-ERR-3)"]
+    reply -->|"any other error"| degraded["sources[] row: degraded"]
+    ok --> tally{"every queried backend answered query_not_recognized?"}
+    degraded --> tally
+    disabled --> tally
+    tally -->|yes| einval["exit 1 - umbrella-level invalid_argument (INV-ERR-3)"]
+    tally -->|no| fanexit["ordinary fan-out exit code 0/2/3 (INV-EXIT-1)"]
+```
+
+Extensions:
+
+- A `config.queries` value is a list of expressions: the backend runs each, unions the results
+  deduplicated by id, and reports `truncated` if any one member's own search reported truncated
+  (`INV-STATE-1`).
 
 ### `USECASE-CHOOSE-OUTPUT` — choose the CLI's presentation mode <!-- uuid: 632b7e23-25c8-43e2-9572-65f3547023bd -->
 

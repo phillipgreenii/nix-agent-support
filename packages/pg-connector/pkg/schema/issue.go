@@ -33,7 +33,13 @@ package schema
 // Description/Assignee/Parent/Deps
 // below — same "any field-shape change bumps the version" precedent as the
 // 1 -> 2 bump.
-const IssueSchemaVersion = 3
+//
+// Bumped 3 -> 4 by bead pg2-2j5ac.28.1, which added the
+// "list" op and its IssueListResult wire shape below — same "a capability
+// gaining a whole new op's wire shape bumps its one schemaVersion integer"
+// precedent pkg/schema/pr.go's own 2 -> 3 bump records for the sibling pr
+// capability.
+const IssueSchemaVersion = 4
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -109,4 +115,16 @@ type Issue struct {
 type IssueDependency struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
+}
+
+// IssueListResult is the "list" op's wire result payload for the issue
+// capability — the same generic shape PRListResult (pr.go) documents in
+// full; see its doc comment for Cursor/Entities/PresentIDs/ids_only
+// semantics, which apply identically here with Issue in place of PR
+// (bead pg2-2j5ac.28.1).
+type IssueListResult struct {
+	Entities   []Issue  `json:"entities"`
+	PresentIDs []string `json:"present_ids"`
+	Cursor     *string  `json:"cursor"`
+	Truncated  bool     `json:"truncated"`
 }

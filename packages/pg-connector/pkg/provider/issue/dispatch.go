@@ -9,6 +9,7 @@ package issue
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -83,6 +84,29 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, err
 				}
 				return nil, nil
+			},
+		},
+		// list mirrors pkg/provider/pr/dispatch.go's identical "list"
+		// entry — see its own comment for why query-name resolution
+		// (query_not_recognized) lives centrally here rather
+		// than inside every backend's own p.List.
+		"list": {
+			SchemaVersion: schema.IssueSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					Query   string  `json:"query"`
+					Cursor  *string `json:"cursor"`
+					IDsOnly bool    `json:"ids_only"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list args: "+err.Error())
+				}
+				expr, ok := schema.ResolveQuery(scriptout.ConfigFromContext(ctx), a.Query)
+				if !ok {
+					return nil, scriptout.WrapError(scriptout.ErrQueryNotRecognized,
+						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
+				}
+				return p.List(ctx, expr, a.IDsOnly)
 			},
 		},
 	}

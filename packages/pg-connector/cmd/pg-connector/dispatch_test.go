@@ -15,7 +15,7 @@ func TestDispatch_ResolvesSingleRegisteredBackend(t *testing.T) {
 		t.Fatalf("parseRegistry: %v", err)
 	}
 
-	resp, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil)
+	resp, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil, "")
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestDispatch_NoBackendRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	if _, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil); err == nil {
+	if _, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil, ""); err == nil {
 		t.Fatal("expected error for no registered backend")
 	}
 }
@@ -43,7 +43,7 @@ func TestDispatch_AmbiguousMultipleBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	if _, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil); err == nil {
+	if _, err := Dispatch(context.Background(), reg, "pr", scriptout.OpAuthStatus, nil, ""); err == nil {
 		t.Fatal("expected error for ambiguous multi-backend targeted op")
 	}
 }
@@ -65,7 +65,7 @@ func TestDispatchTargeted_NoBackendRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	if _, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil); err == nil {
+	if _, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil, ""); err == nil {
 		t.Fatal("expected error for no registered backend")
 	}
 }
@@ -80,7 +80,7 @@ func TestDispatchTargeted_SingleBackend_ResolvesLikeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil)
+	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchTargeted: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestDispatchTargeted_Issue_MultipleBackends_FirstTriedSucceeds(t *testing.T
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil)
+	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchTargeted: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestDispatchTargeted_Issue_MultipleBackends_FirstNotFound_SecondSucceeds(t 
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil)
+	resp, err := DispatchTargeted(context.Background(), reg, "issue", "show", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchTargeted: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestDispatchTargeted_Issue_MultipleBackends_AllNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	_, err = DispatchTargeted(context.Background(), reg, "issue", "show", nil)
+	_, err = DispatchTargeted(context.Background(), reg, "issue", "show", nil, "")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, scriptout.ErrNotFound) — the all-not_found aggregate", err)
 	}
@@ -164,7 +164,7 @@ func TestDispatchTargeted_Pr_MultipleBackends_FirstTriedSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	resp, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil)
+	resp, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchTargeted: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDispatchTargeted_Pr_MultipleBackends_FirstNotFound_SecondSucceeds(t *te
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	resp, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil)
+	resp, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchTargeted: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestDispatchTargeted_Pr_MultipleBackends_AllNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	_, err = DispatchTargeted(context.Background(), reg, "pr", "show", nil)
+	_, err = DispatchTargeted(context.Background(), reg, "pr", "show", nil, "")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, scriptout.ErrNotFound) — the all-not_found aggregate", err)
 	}
@@ -216,6 +216,128 @@ func TestDispatchTargeted_Pr_MultipleBackends_AllNotFound(t *testing.T) {
 // ShortCircuits covers it at the CLI level): a non-not_found error from
 // the first-tried backend is returned immediately, never swallowed to
 // fall through to the second.
+// --- --backend pinning (bead pg2-2j5ac.28.1, design's "id-less op
+// rule") ---------------------------------------------------------------
+
+func TestDispatch_Pinned_SkipsAmbiguityHardFail(t *testing.T) {
+	writeFakeBackend(t, "pinned-a", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"from-a"}}`)
+	writeFakeBackend(t, "pinned-b", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"from-b"}}`)
+	reg, err := parseRegistry([]byte("connector:\n  issue:\n    - pinned-a\n    - pinned-b\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	resp, err := Dispatch(context.Background(), reg, "issue", "create", nil, "pinned-b")
+	if err != nil {
+		t.Fatalf("Dispatch with --backend pin: %v", err)
+	}
+	var got dispatchTargetedTestResult
+	if err := scriptout.Decode(resp.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != "from-b" {
+		t.Fatalf("id = %q, want the PINNED backend's answer %q", got.ID, "from-b")
+	}
+}
+
+func TestDispatch_Pinned_UnregisteredNameIsError(t *testing.T) {
+	writeFakeBackend(t, "pinned-only", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"x"}}`)
+	reg, err := parseRegistry([]byte("connector:\n  issue:\n    - pinned-only\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := Dispatch(context.Background(), reg, "issue", "create", nil, "not-registered"); err == nil {
+		t.Fatal("expected an error pinning to an unregistered backend")
+	}
+}
+
+func TestDispatchTargeted_Pinned_SkipsTryEachPolicy(t *testing.T) {
+	// Both backends would answer differently; pinning to the SECOND one
+	// must go straight there rather than trying the first (registration
+	// order) first — the try-each policy is specifically bypassed by a
+	// pin.
+	writeFakeBackend(t, "targeted-pin-a", `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"not found in a"}}`)
+	writeFakeBackend(t, "targeted-pin-b", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"from-b"}}`)
+	reg, err := parseRegistry([]byte("connector:\n  pr:\n    - targeted-pin-a\n    - targeted-pin-b\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	resp, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil, "targeted-pin-b")
+	if err != nil {
+		t.Fatalf("DispatchTargeted with --backend pin: %v", err)
+	}
+	var got dispatchTargetedTestResult
+	if err := scriptout.Decode(resp.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != "from-b" {
+		t.Fatalf("id = %q, want the PINNED backend's answer %q", got.ID, "from-b")
+	}
+}
+
+func TestDispatchTargeted_Pinned_UnregisteredNameIsError(t *testing.T) {
+	writeFakeBackend(t, "targeted-pin-only", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"x"}}`)
+	reg, err := parseRegistry([]byte("connector:\n  pr:\n    - targeted-pin-only\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	if _, err := DispatchTargeted(context.Background(), reg, "pr", "show", nil, "not-registered"); err == nil {
+		t.Fatal("expected an error pinning to an unregistered backend")
+	}
+}
+
+// --- per-backend config attachment (bead pg2-2j5ac.28.1)
+// ---------------------------------------------------------------------
+
+func TestDispatch_AttachesBackendOwnConfigVerbatim(t *testing.T) {
+	writeEchoFakeBackend(t, "echo-config-a")
+	reg, err := parseRegistry([]byte(`
+connector:
+  issue:
+    - echo-config-a
+backends:
+  echo-config-a:
+    queries:
+      ready: "ready"
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	resp, err := Dispatch(context.Background(), reg, "issue", "list", map[string]string{"query": "ready"}, "")
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	var echoed struct {
+		Config struct {
+			Queries map[string]string `json:"queries"`
+		} `json:"config"`
+	}
+	if err := scriptout.Decode(resp.Result, &echoed); err != nil {
+		t.Fatalf("decode echoed request: %v", err)
+	}
+	if echoed.Config.Queries["ready"] != "ready" {
+		t.Fatalf("echoed config = %+v, want the registered backends.echo-config-a block", echoed.Config)
+	}
+}
+
+func TestDispatch_NoRegisteredConfig_OmitsConfigMember(t *testing.T) {
+	writeEchoFakeBackend(t, "echo-config-b")
+	reg, err := parseRegistry([]byte("connector:\n  issue:\n    - echo-config-b\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	resp, err := Dispatch(context.Background(), reg, "issue", "show", map[string]string{"id": "1"}, "")
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	var echoed map[string]any
+	if err := scriptout.Decode(resp.Result, &echoed); err != nil {
+		t.Fatalf("decode echoed request: %v", err)
+	}
+	if _, ok := echoed["config"]; ok {
+		t.Fatalf("echoed request = %v, must not carry a config member when no backends.<name> block is registered", echoed)
+	}
+}
+
 func TestDispatchTargeted_Pr_MultipleBackends_FirstError_ShortCircuits(t *testing.T) {
 	writeFakeBackend(t, "pr-multi-err-a", `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`)
 	writeFakeBackend(t, "pr-multi-err-b", `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"should-never-be-returned"}}`)
@@ -223,7 +345,7 @@ func TestDispatchTargeted_Pr_MultipleBackends_FirstError_ShortCircuits(t *testin
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)
 	}
-	_, err = DispatchTargeted(context.Background(), reg, "pr", "show", nil)
+	_, err = DispatchTargeted(context.Background(), reg, "pr", "show", nil, "")
 	if !errors.Is(err, scriptout.ErrUnauthenticated) {
 		t.Fatalf("err = %v, want errors.Is(err, scriptout.ErrUnauthenticated), short-circuited on the first backend's error", err)
 	}

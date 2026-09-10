@@ -129,6 +129,32 @@ type pjiraUser struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+// pjiraSearchResult is `pjira search --jql <JQL>`'s own stdout shape
+// (verified live, 2026-09-10: `pjira search --help` — "JQL search; writes
+// {items,truncated,next_page_token?} JSON"). Items is assumed to share
+// pjiraIssue's own field shape (key/summary/status/issuetype/labels/url/
+// priority/project/assignee): both come from the same underlying pjira
+// tool's own Jira-issue representation, and pjira exposes no separate,
+// narrower "search result item" shape of its own [freedom boundary — not
+// independently verified against a live search response, since doing so
+// would require live Jira credentials/network this packet's own
+// implementer does not have; a future discrepancy here is a decode
+// failure (ErrUnavailable), not a silent wrong-field read].
+type pjiraSearchResult struct {
+	Items         []pjiraIssue `json:"items"`
+	Truncated     bool         `json:"truncated"`
+	NextPageToken string       `json:"next_page_token,omitempty"`
+}
+
+// decodePJIRASearchResult decodes `pjira search`'s stdout.
+func decodePJIRASearchResult(raw string) (*pjiraSearchResult, error) {
+	var res pjiraSearchResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 // decodePJIRAIssue decodes `pjira issue <KEY>`'s stdout into a pjiraIssue.
 // A response with an empty key is treated as a decode failure (never a
 // silently-successful zero-value issue) — mirroring
@@ -391,4 +417,60 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 		return errors.New("pjira auth-status: " + state)
 	}
 	return nil
+}
+
+// List implements issue.Provider.List via `pjira search --jql <JQL>
+// --all` (bead pg2-2j5ac.28.1, design's own "implement List against
+// Jira JQL" Files-section note). Each element of query is ALREADY the
+// full JQL text a caller's config.queries value carries — unlike the
+// sibling beads backend's own bd-argv-vector grammar, JQL is Jira's own
+// query language, so there is nothing further for this backend to parse
+// or restrict (no equivalent "only ready/list as the first token" rule
+// applies here). --all fetches every page up front rather than one page
+// at a time, so PresentIDs reflects "the complete id set the query
+// matches right now" even though this packet's own list op
+// never itself paginates (cursor is always null). Every expression's
+// matches are unioned, deduplicated by issue key (design's "run
+// each, union results deduplicated by id" rule); Truncated is true if ANY
+// expression's own search reported truncated (pjira's own --limit
+// default, or a config-set limit lower than the match count, per its
+// --help: "max results per page").
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+	seen := make(map[string]bool)
+	entities := make([]schema.Issue, 0)
+	truncated := false
+	for _, jql := range query {
+		jql = strings.TrimSpace(jql)
+		if jql == "" {
+			continue
+		}
+		out, runErr := b.runner.Run(ctx, "search", "--jql", jql, "--all")
+		if runErr != nil {
+			return nil, classifyPJIRAErrorMessage(runErr.Error())
+		}
+		result, decodeErr := decodePJIRASearchResult(out)
+		if decodeErr != nil {
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode search result: "+decodeErr.Error())
+		}
+		if result.Truncated {
+			truncated = true
+		}
+		for i := range result.Items {
+			item := result.Items[i]
+			if item.Key == "" || seen[item.Key] {
+				continue
+			}
+			seen[item.Key] = true
+			entities = append(entities, *toSchemaIssue(&item))
+		}
+	}
+	ids := make([]string, 0, len(entities))
+	for _, e := range entities {
+		ids = append(ids, e.ID)
+	}
+	res := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: truncated}
+	if idsOnly {
+		res.Entities = nil
+	}
+	return res, nil
 }

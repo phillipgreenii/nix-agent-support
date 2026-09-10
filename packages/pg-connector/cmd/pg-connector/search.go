@@ -74,7 +74,10 @@ func fanOutSearch(ctx context.Context, backends []string, query string, fields [
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
-		resp, err := scriptout.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields})
+		// nil config: search is outside this packet's own Files scope
+		// (bead pg2-2j5ac.28.1 wires backends.<binary> config attachment
+		// into pr/issue/ci/scm's own Tier-1 verbs only).
+		resp, err := scriptout.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, nil)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

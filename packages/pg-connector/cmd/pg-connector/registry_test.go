@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -628,6 +629,107 @@ attention:
 	sources, err := reg.AttentionSources()
 	if err != nil || len(sources) != 0 {
 		t.Fatalf("AttentionSources() = %v, %v", sources, err)
+	}
+}
+
+func TestRegistry_BackendConfig_ReturnsVerbatimBlock(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+backends:
+  pg-connector-pr-github:
+    rate_reserve_points: 500
+    queries:
+      team: "is:open author:@me"
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	config, err := reg.BackendConfig("pg-connector-pr-github")
+	if err != nil {
+		t.Fatalf("BackendConfig: %v", err)
+	}
+	var decoded struct {
+		RateReservePoints int               `json:"rate_reserve_points"`
+		Queries           map[string]string `json:"queries"`
+	}
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if decoded.RateReservePoints != 500 {
+		t.Fatalf("rate_reserve_points = %d", decoded.RateReservePoints)
+	}
+	if decoded.Queries["team"] != "is:open author:@me" {
+		t.Fatalf("queries = %+v", decoded.Queries)
+	}
+}
+
+func TestRegistry_BackendConfig_AbsentReturnsNilNotError(t *testing.T) {
+	reg, err := parseRegistry([]byte(`connector: {}`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	config, err := reg.BackendConfig("no-such-backend")
+	if err != nil {
+		t.Fatalf("BackendConfig: %v", err)
+	}
+	if config != nil {
+		t.Fatalf("config = %q, want nil", config)
+	}
+}
+
+func TestRegistry_BackendConfig_NilRegistry(t *testing.T) {
+	var reg *Registry
+	config, err := reg.BackendConfig("anything")
+	if err != nil || config != nil {
+		t.Fatalf("BackendConfig on nil registry = %q, %v", config, err)
+	}
+}
+
+func TestRegistry_BackendQueryNames_SortedList(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+backends:
+  pg-connector-issue-beads:
+    queries:
+      ready: "ready"
+      all-open: "list --status open"
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	names, err := reg.BackendQueryNames("pg-connector-issue-beads")
+	if err != nil {
+		t.Fatalf("BackendQueryNames: %v", err)
+	}
+	if len(names) != 2 || names[0] != "all-open" || names[1] != "ready" {
+		t.Fatalf("names = %v", names)
+	}
+}
+
+func TestRegistry_BackendQueryNames_NoConfigBlock(t *testing.T) {
+	reg, err := parseRegistry([]byte(`connector: {}`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	names, err := reg.BackendQueryNames("no-such-backend")
+	if err != nil || names != nil {
+		t.Fatalf("BackendQueryNames = %v, %v", names, err)
+	}
+}
+
+func TestRegistry_BackendQueryNames_ConfigWithNoQueriesKey(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+backends:
+  pg-connector-pr-github:
+    rate_reserve_points: 500
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	names, err := reg.BackendQueryNames("pg-connector-pr-github")
+	if err != nil || names != nil {
+		t.Fatalf("BackendQueryNames = %v, %v", names, err)
 	}
 }
 

@@ -538,3 +538,99 @@ func TestPriorityVocabulary_NonEmpty(t *testing.T) {
 		t.Fatal("PriorityVocabulary must be non-empty")
 	}
 }
+
+// ----------------------------------------------------------------------
+// List (bead pg2-2j5ac.28.1)
+// ----------------------------------------------------------------------
+
+func TestBackend_List_SingleExpr_JQLPassedThrough(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "search" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !argsEndWith(args, "--jql", "assignee = currentUser()", "--all") {
+			t.Fatalf("args = %v, want --jql <expr> --all", args)
+		}
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].ID != "PROJ-1" {
+		t.Fatalf("Entities = %+v", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "PROJ-1" {
+		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
+	}
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %v, want nil (always null)", got.Cursor)
+	}
+}
+
+func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
+	calls := 0
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
+		if containsArg(args, "assignee = currentUser()") {
+			return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"},{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":false}`, nil
+		}
+		return `{"items":[{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":true}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()", "labels = focus"}, false)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one per expression)", calls)
+	}
+	if len(got.Entities) != 2 {
+		t.Fatalf("Entities = %+v, want exactly 2 after dedup by key (PROJ-2 appeared in both)", got.Entities)
+	}
+	if !got.Truncated {
+		t.Fatal("Truncated = false, want true (the second expression's search reported truncated)")
+	}
+}
+
+func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, true)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want empty when ids_only is true", got.Entities)
+	}
+	if len(got.PresentIDs) != 1 {
+		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
+	}
+}
+
+func TestBackend_List_RunFailure_ClassifiedError(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira: 401 unauthorized")
+	}}
+	b := New(fr)
+
+	_, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}

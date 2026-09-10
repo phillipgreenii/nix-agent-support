@@ -32,8 +32,14 @@ func FanOutAuthStatus(ctx context.Context, backends []string) FanOutOutcome {
 	return out
 }
 
+// authStatusOne invokes auth_status against backend with no per-backend
+// config attached (nil) — auth_status is outside this packet's own Files
+// scope (bead pg2-2j5ac.28.1 wires backends.<binary> config attachment
+// into pr/issue/ci/scm's own Tier-1 verbs only; see dispatch.go's
+// invokeOne/ci.go's fanOutCIList), and no backend's auth_status handler
+// has any use for it today.
 func authStatusOne(ctx context.Context, backend string) SourceResult {
-	resp, err := scriptout.Invoke(ctx, backend, scriptout.OpAuthStatus, nil)
+	resp, err := scriptout.Invoke(ctx, backend, scriptout.OpAuthStatus, nil, nil)
 	if err != nil {
 		if errors.Is(err, scriptout.ErrUnknownOp) {
 			return SourceResult{Source: backend, Status: SourceDisabled, Count: 0, Reason: "not applicable"}

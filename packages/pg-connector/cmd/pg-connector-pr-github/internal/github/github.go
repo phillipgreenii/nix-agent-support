@@ -302,6 +302,120 @@ func (p *Provider) listForAuthor(ctx context.Context, repo, author string) ([]ap
 	return out, nil
 }
 
+// searchPRFields is the JSON field set requested from `gh search prs
+// --json` (bead pg2-2j5ac.28.1, design's "implement List" Files-
+// section note) — verified live against the real gh binary's own field
+// list (`gh search prs --json x` names it, 2026-09-10; no query was
+// actually issued, so no network round trip was needed to confirm the
+// field NAMES themselves). Deliberately narrower than ghPR/prListFields
+// (gh pr view/list's own JSON shape): gh search prs carries no
+// branch/head-sha/merged-at information at all, so a List-matched PR's
+// Branch/Base/HeadSHA/Merged fields are always their zero value
+// [freedom boundary: "list" is an enumeration op, not a full-detail
+// read — a caller wanting that detail calls "show" on the matched id].
+var searchPRFields = "number,title,url,state,body,isDraft,author,labels,repository"
+
+// ghSearchPR is `gh search prs --json <searchPRFields>`'s own decoded
+// shape.
+type ghSearchPR struct {
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	State   string `json:"state"`
+	Body    string `json:"body"`
+	IsDraft bool   `json:"isDraft"`
+	Author  struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+}
+
+func (p ghSearchPR) toAPI() api.PR {
+	out := api.PR{
+		Repo:   p.Repository.NameWithOwner,
+		Number: p.Number,
+		Title:  p.Title,
+		State:  strings.ToLower(p.State),
+		Author: p.Author.Login,
+		URL:    p.URL,
+		Draft:  p.IsDraft,
+		Body:   p.Body,
+	}
+	for _, l := range p.Labels {
+		out.Labels = append(out.Labels, l.Name)
+	}
+	return out
+}
+
+// SearchPRs runs one `gh search prs -- <query>` call (query is a bare
+// GitHub search-syntax string, e.g. "repo:owner/name is:open
+// author:@me" — GitHub's OWN qualifier syntax, never a compiled
+// cross-backend query language of pg-connector's own; see
+// pkg/provider/pr.Provider.List's own doc comment and this backend's
+// internal/provider.go List for the caller side) and returns every
+// matched PR. The "--" separator lets query itself start with a
+// "-"-prefixed exclusion qualifier (gh's own documented convention,
+// "gh search prs -- -label:bug") without gh's flag parser misreading it
+// as an unrecognized flag.
+func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
+	// Flags MUST precede "--": everything after "--" is a positional
+	// argument (the query itself), never re-parsed as a flag — putting
+	// --json/--limit after "--" would make gh treat them as extra query
+	// text instead of flags.
+	args := []string{
+		"search", "prs",
+		"--json", searchPRFields,
+		"--limit", "100",
+		"--",
+		query,
+	}
+	raw, err := p.gh.Run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var results []ghSearchPR
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return nil, fmt.Errorf("github: parse gh search prs JSON: %w", err)
+	}
+	out := make([]api.PR, 0, len(results))
+	for _, r := range results {
+		out = append(out, r.toAPI())
+	}
+	return out, nil
+}
+
+// rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {
+// remaining } }'`'s own stdout — the standard GitHub GraphQL response
+// envelope, {"data": {"rateLimit": {"remaining": N}}}.
+type rateLimitWire struct {
+	Data struct {
+		RateLimit struct {
+			Remaining int `json:"remaining"`
+		} `json:"rateLimit"`
+	} `json:"data"`
+}
+
+// RateLimitRemaining reads the GraphQL API's current rate-limit
+// remainder (bead pg2-2j5ac.28.1, design's "Rate protection"
+// bullet) via a dedicated, minimal GraphQL query — mirroring CheckAuth's
+// own `gh api graphql -f query=...` call shape exactly.
+func (p *Provider) RateLimitRemaining(ctx context.Context) (int, error) {
+	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining } }")
+	if err != nil {
+		return 0, err
+	}
+	var wire rateLimitWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return 0, fmt.Errorf("github: parse rate limit JSON: %w", err)
+	}
+	return wire.Data.RateLimit.Remaining, nil
+}
+
 func validateRepo(repo string) error {
 	if repo == "" {
 		return errors.New("github: repo is required")

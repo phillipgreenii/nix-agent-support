@@ -19,6 +19,18 @@
 // TargetedExitCode (INV-EXIT-1). This file calls the dispatcher/fan-out
 // helpers and hands their raw per-call result/error to outcome.go; it
 // never decides the exit code itself.
+//
+// Every one of these three verbs carries its own --backend flag (bead
+// pg2-2j5ac.28.1, design's "id-less op rule": "ci.go/scm.go need the
+// flag even though neither gets [the new named-query list] op"). "ci
+// list" itself is NOT that new op — it stays the pre-existing, PR-keyed
+// list_runs fan-out (this packet's own Contract explicitly keeps it
+// unchanged) — --backend on it simply narrows the fan-out to one backend,
+// reusing list.go's resolveListBackends (its query_not_recognized-specific
+// helpers do not apply here, since list_runs carries no query name at
+// all). On "ci logs"/"ci rerun-failed" --backend pins DispatchTargeted
+// straight to that one backend, skipping the try-each policy, exactly
+// like pr.go's/issue.go's own targeted verbs.
 package main
 
 import (
@@ -54,8 +66,11 @@ func (o ciListOutcome) exitCode() int {
 // A backend not implementing list_runs (recognized generically via the
 // wire-level unknown_op sentinel, matching auth.go's own convention) is
 // reported as disabled with reason "not applicable" rather than a
-// forced/meaningless answer.
-func fanOutCIList(ctx context.Context, backends []string, prID string) ciListOutcome {
+// forced/meaningless answer. reg is threaded through (bead pg2-2j5ac.28.1)
+// so each backend's own registered config block (registry.go's
+// BackendConfig) travels on the outgoing request the same way every other
+// Tier-1 verb's dispatch path already attaches it.
+func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID string) ciListOutcome {
 	// Runs and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
 	// answers with zero runs, still marshals runs[]/sources[] as []
@@ -65,7 +80,12 @@ func fanOutCIList(ctx context.Context, backends []string, prID string) ciListOut
 		Sources: make([]SourceResult, 0, len(backends)),
 	}
 	for _, b := range backends {
-		resp, err := scriptout.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID})
+		config, err := reg.BackendConfig(b)
+		if err != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+			continue
+		}
+		resp, err := scriptout.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID}, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
@@ -97,60 +117,66 @@ func newCiCmd() *cobra.Command {
 }
 
 func newCiListCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "list <pr-id>",
 		Short: "List CI runs for a PR, fanned out across every registered ci backend",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return err
-			}
-			backends, err := reg.List("ci")
-			if err != nil {
-				return err
-			}
-			outcome := fanOutCIList(cmd.Context(), backends, args[0])
-			return writeFanOutResult(cmd, outcome, outcome.exitCode(), func() string {
-				return humanizeCiList(outcome)
-			})
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered ci backend")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return err
+		}
+		backends, err := resolveListBackends(reg, "ci", *backendFlag)
+		if err != nil {
+			return err
+		}
+		outcome := fanOutCIList(cmd.Context(), reg, backends, args[0])
+		return writeFanOutResult(cmd, outcome, outcome.exitCode(), func() string {
+			return humanizeCiList(outcome)
+		})
+	}
+	return cmd
 }
 
 func newCiLogsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "logs <run-id>",
 		Short: "Get the raw logs for a CI run (targeted, id-keyed; multi-instance resolution across every registered ci backend)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
-			}
-			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]})
-			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]}, *backendFlag)
+		return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
+	}
+	return cmd
 }
 
 func newCiRerunFailedCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "rerun-failed <pr-id>",
 		Short: "Rerun a PR's failed CI runs (targeted, id-keyed; multi-instance resolution across every registered ci backend)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			humanize := func(json.RawMessage) (string, error) {
-				return fmt.Sprintf("CI rerun triggered for PR %s", args[0]), nil
-			}
-			reg, err := LoadRegistry()
-			if err != nil {
-				return reportCiTargetedOutcome(cmd, nil, err, humanize)
-			}
-			resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]})
-			return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanize)
-		},
 	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		humanize := func(json.RawMessage) (string, error) {
+			return fmt.Sprintf("CI rerun triggered for PR %s", args[0]), nil
+		}
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportCiTargetedOutcome(cmd, nil, err, humanize)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]}, *backendFlag)
+		return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanize)
+	}
+	return cmd
 }
 
 // reportCiTargetedOutcome writes resp's outcome to stdout — in the

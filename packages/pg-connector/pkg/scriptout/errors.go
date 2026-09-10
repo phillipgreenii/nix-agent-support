@@ -5,12 +5,12 @@ import (
 	"fmt"
 )
 
-// The six Err* sentinels are the Go-side mapping of the wire protocol's
-// closed error-code taxonomy (not_found, unauthenticated, unavailable,
-// unknown_op, version_mismatch, invalid_argument). A handler wraps one of
-// these via WrapError so callers use errors.Is rather than
-// substring-matching, the same pattern vcs.ErrAuthInvalid already
-// establishes in packages/pg-pr.
+// The Err* sentinels are the Go-side mapping of the wire protocol's closed
+// error-code taxonomy — originally six (not_found, unauthenticated,
+// unavailable, unknown_op, version_mismatch, invalid_argument), now seven
+// with ErrQueryNotRecognized (below). A handler wraps one of these via
+// WrapError so callers use errors.Is rather than substring-matching, the
+// same pattern vcs.ErrAuthInvalid already establishes in packages/pg-pr.
 //
 // ErrInvalidArgument was added (bead pg2-r9iok) to close a real gap: without
 // it, a caller-input-validation failure (an empty required field, a
@@ -31,45 +31,63 @@ import (
 // rather than a plain 1 for every failure. See ExitCodeForError's own doc
 // comment for why this is layered on top of — not a replacement for — the
 // wire body's error.code.
+//
+// ErrQueryNotRecognized was added by bead pg2-2j5ac.28.1,
+// extending the taxonomy to a seventh member: a backend's own
+// config.queries block does not define the query name a caller's "list"
+// (or any future named-query op) named. It answers a question INV-ERR-2's
+// three-way split does not: the caller's request is well-formed and the
+// backend is healthy, but the NAME itself is not one this backend's own
+// config recognizes — distinct from not_found (which answers "does a
+// specific ENTITY exist," never "is this NAME even defined") and from
+// invalid_argument (a malformed request shape, not an unrecognized
+// caller-facing name). The umbrella's own "list" fan-out treats a backend
+// answering it as "not applicable to this backend" (skip, report
+// disabled, exclude from degraded accounting) unless EVERY registered
+// backend of the type answers it, in which case the umbrella itself fails
+// the call with invalid_argument (cmd/pg-connector's own fan-out, not this
+// package).
 var (
-	ErrNotFound        = errors.New("scriptout: not found")
-	ErrUnauthenticated = errors.New("scriptout: unauthenticated")
-	ErrUnavailable     = errors.New("scriptout: unavailable")
-	ErrUnknownOp       = errors.New("scriptout: unknown op")
-	ErrVersionMismatch = errors.New("scriptout: version mismatch")
-	ErrInvalidArgument = errors.New("scriptout: invalid argument")
+	ErrNotFound           = errors.New("scriptout: not found")
+	ErrUnauthenticated    = errors.New("scriptout: unauthenticated")
+	ErrUnavailable        = errors.New("scriptout: unavailable")
+	ErrUnknownOp          = errors.New("scriptout: unknown op")
+	ErrVersionMismatch    = errors.New("scriptout: version mismatch")
+	ErrInvalidArgument    = errors.New("scriptout: invalid argument")
+	ErrQueryNotRecognized = errors.New("scriptout: query not recognized")
 )
 
 // codeToSentinel maps every wire code in the closed taxonomy to its Go
 // sentinel. Both codeForError and sentinelForCode derive from this single
 // table so the two directions of the mapping can never drift apart.
 var codeToSentinel = map[string]error{
-	"not_found":        ErrNotFound,
-	"unauthenticated":  ErrUnauthenticated,
-	"unavailable":      ErrUnavailable,
-	"unknown_op":       ErrUnknownOp,
-	"version_mismatch": ErrVersionMismatch,
-	"invalid_argument": ErrInvalidArgument,
+	"not_found":            ErrNotFound,
+	"unauthenticated":      ErrUnauthenticated,
+	"unavailable":          ErrUnavailable,
+	"unknown_op":           ErrUnknownOp,
+	"version_mismatch":     ErrVersionMismatch,
+	"invalid_argument":     ErrInvalidArgument,
+	"query_not_recognized": ErrQueryNotRecognized,
 }
 
 // WrapError wraps message with sentinel (via fmt.Errorf("%w: %s", ...)) so
-// errors.Is(err, sentinel) holds. sentinel should be one of the six Err*
+// errors.Is(err, sentinel) holds. sentinel should be one of the seven Err*
 // values above.
 func WrapError(sentinel error, message string) error {
 	return fmt.Errorf("%w: %s", sentinel, message)
 }
 
-// codeForError maps a Go error to its wire code by walking the six known
+// codeForError maps a Go error to its wire code by walking the seven known
 // sentinels with errors.Is. An error matching none of them (a handler
 // returned a plain, unwrapped error) falls back to "unavailable" — a
 // freedom-boundary choice: it is the taxonomy's closest fit for "something
 // went wrong and this backend cannot currently be used," which keeps every
-// wire response's error.code within the closed six-value set even when a
+// wire response's error.code within the closed seven-value set even when a
 // handler forgot to wrap its error. A handler that means "the caller's
 // input was bad" MUST wrap ErrInvalidArgument explicitly — that meaning is
 // never inferred from an unwrapped error.
 func codeForError(err error) string {
-	for _, code := range []string{"not_found", "unauthenticated", "unavailable", "unknown_op", "version_mismatch", "invalid_argument"} {
+	for _, code := range []string{"not_found", "unauthenticated", "unavailable", "unknown_op", "version_mismatch", "invalid_argument", "query_not_recognized"} {
 		if errors.Is(err, codeToSentinel[code]) {
 			return code
 		}
@@ -115,17 +133,21 @@ func ErrorResponse(err error) *Response {
 // generic/catch-all failure and MUST NOT be given a specific branchable
 // meaning, so every code that DOES carry one here is >=2. The specific
 // assignment (not_found=2 .. invalid_argument=7) follows codeToSentinel's
-// own declared order — there is no severity ranking among the six wire
-// codes to assign by, so the order is simply "the one place the taxonomy
-// is already enumerated," keeping this table and codeToSentinel trivially
-// comparable.
+// own declared order — there is no severity ranking among the six original
+// wire codes to assign by, so the order is simply "the one place the
+// taxonomy is already enumerated," keeping this table and codeToSentinel
+// trivially comparable. query_not_recognized=8 was appended by bead
+// pg2-2j5ac.28.1 as the taxonomy's seventh member, extending
+// the table in declaration order rather than renumbering or reordering the
+// original six.
 var exitCodeForCode = map[string]int{
-	"not_found":        2,
-	"unauthenticated":  3,
-	"unavailable":      4,
-	"unknown_op":       5,
-	"version_mismatch": 6,
-	"invalid_argument": 7,
+	"not_found":            2,
+	"unauthenticated":      3,
+	"unavailable":          4,
+	"unknown_op":           5,
+	"version_mismatch":     6,
+	"invalid_argument":     7,
+	"query_not_recognized": 8,
 }
 
 // ExitCodeForError returns the backend-process-level exit code
@@ -134,7 +156,7 @@ var exitCodeForCode = map[string]int{
 // same codeForError walk the JSON error body's Code field uses — so a
 // response's process exit code and its wire error.code can never disagree.
 // codeForError is total (every error, wrapped or not, resolves to one of
-// the six known codes via its own "unavailable" fallback), so this lookup
+// the seven known codes via its own "unavailable" fallback), so this lookup
 // always succeeds.
 //
 // This is what widens scriptout's backend-process exit code past the
@@ -154,7 +176,7 @@ func ExitCodeForError(err error) int {
 }
 
 // ExitCodeForCode returns the backend-process exit code for a bare wire
-// taxonomy code string (one of codeToSentinel's six keys) — the same
+// taxonomy code string (one of codeToSentinel's seven keys) — the same
 // mapping ExitCodeForError uses, exported so a caller holding only the
 // JSON error body's Code field (e.g. pkg/scriptout/conformance, checking a
 // live backend's reply with no Go error value to classify) can compute the
