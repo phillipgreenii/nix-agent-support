@@ -1,6 +1,6 @@
 # pg-desk and connector discovery: the scheduler pattern, the freshness contract, and the retirement of pg-pr's sync, dashboard, and open
 
-**Status**: Draft, revision 5 after the build-ordering discussion, pending operator review
+**Status**: Draft, revision 6 after the open-items rulings, pending operator approval
 **Date**: 2026-09-09
 **Deciders**: Phillip Green II (operator), in a brainstorm session with Claude
 **Bead**: `pg2-od9se`
@@ -44,7 +44,8 @@ verification each phase ends with, listed in section 9.5.
 Every row below is an operator ruling from the 2026-09-09 session, recorded so a later reader can
 tell an executed decision from an open question. D13 through D15 were ruled after the subagent
 reviews of revision 1. D16 through D20 were ruled in the build-ordering discussion that produced
-revision 5, in the session that continued this one (`pg2-rfvgl`).
+revision 5, in the session that continued this one (`pg2-rfvgl`). D21 through D27 closed section
+11's open items in that same session and produced revision 6.
 
 | #   | Decision                                                                                                                                                                                                                                                                                                                              |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -66,8 +67,15 @@ revision 5, in the session that continued this one (`pg2-rfvgl`).
 | D16 | Build order is vertical slices, not component layers: every phase ends at a checkpoint the operator runs by hand against the live system while `pg-pr` keeps running, and the checkpoint is a docket boundary. Soak durations are written as one working day and are placeholders the operator tunes during testing, not fixed gates. |
 | D17 | `pg-desk` sync has three modes, `off`, `plan`, and `apply`. `plan` runs the full adoption and rule logic and records every intended bead write in the store without calling `pg-connector issue`; it is the parity check for sync. `apply` is switched on only at the cutover flip.                                                   |
 | D18 | `pg-desk serve` soaks on an alternate port behind one ZR option that also renders a temporary Grafana board; turning that option off is the port move-back, so the flip cannot forget it. The cutover is split into a reversible flip (phase 11) and a later deletion phase (12), with a second soak between.                         |
-| D19 | daily-focus follows the same pattern and stops treating beads as its primary store: everything surveyed is stored uncapped, and a capped reconcile step mints focus beads; pulling more work is reconciling more from the store. Whose store is section 11's open item; this document recommends `pg-desk`'s. Refines D11.            |
+| D19 | daily-focus follows the same pattern and stops treating beads as its primary store: everything surveyed is stored uncapped, and a capped reconcile step mints focus beads; pulling more work is reconciling more from the store. The store is `pg-desk`'s (D26). Refines D11.                                                         |
 | D20 | `pg-pr pr view` call sites are replaced by need: sites reading PR facts only use `pg-connector pr show`; sites reading `wip`, approvals, or the consolidated picture use `pg-desk show`. Each group is rewritten in the phase whose destination ships, per the design of record's sequencing rule, not batched at cutover.            |
+| D21 | The proposed periods stand as configuration defaults, 60s for the PR feeds and heartbeat, 5m for the issue feeds, 30m for the sweep, 30m for the thread feed under D23, rendered as nix options; the operator verifies at these timings and tunes them during testing.                                                                |
+| D22 | The names stand for now. `pg-desk` is expected to stay. `pr-pool` no longer describes what the scheduler is, and its rename is a later decision (`pg2-myc6y`); the adapter's name follows the scheduler's when that happens.                                                                                                          |
+| D23 | Slack goes through Claude Code for now: `pg-connector-thread-slack` execs `claude -p` with the Slack MCP the machine already has, as transport only, and validates the reply against the `Thread` schema. The HTTP backend and its token are deferred; no Slack token is provisioned for this design.                                 |
+| D24 | Every component this design introduces or rewires MUST declare what it emits over OpenTelemetry or Prometheus and what it logs; an observability review (`pg2-7kizi`) consolidates those declarations and decides what the dashboard can show, before phase 12 deletes the Ops board.                                                 |
+| D25 | `pg-connector pr ready` and `pr draft` are not a priority and wait for the write-verb phase; the D15 losses stand for the whole window, with `open --promotable` as the manual path.                                                                                                                                                  |
+| D26 | daily-focus reconciles from `pg-desk`'s store, closing D19's open half: focus ranking is an interpret step, the cap a `focus` sync step, and `df-survey`, `df-wire`, and `df-pull` retire into `pg-desk` in phase 15.                                                                                                                 |
+| D27 | The soak option lives on the generic `services.pg-desk-serve` module with defaults, `soak.port` 9819 among them; `phillipg-nix-ziprecruiter` overrides a default only with a comment saying why.                                                                                                                                      |
 
 ## 3. Architecture overview
 
@@ -619,7 +627,7 @@ command.argv = ["pg-desk", "heartbeat"]
 ```
 
 The full query set: `pr-mine` and `pr-team` (60s), `issue-jira-mine` and `issue-beads-work` (5m),
-`thread-me` (5m) as change feeds; `pr-sweep` over both PR queries (30m); `desk-heartbeat` (60s);
+`thread-me` (30m while it runs through `claude -p`, D23) as change feeds; `pr-sweep` over both PR queries (30m); `desk-heartbeat` (60s);
 and the three existing bead sources rewritten to the adapter's `list`: `feedback-source` as above,
 `worker-source` with `worker-ready` and no post-filter, `review-source` with `review-ready` and
 `--title-prefix "review-pr: " --issue-type task`. They emit the same event types they emit today,
@@ -924,8 +932,9 @@ Human and agent annotations survive every pipeline run by construction: no stage
 
 - `pg-desk serve [--addr 127.0.0.1:9818]`: a long-lived HTTP server run as a launchd user agent by a
   generic `services.pg-desk-serve` darwin module in this repo (package, port, log path options).
-  ZR enables it in phase 9 behind one soak option (D18): while `soak.enable` is true the server
-  listens on the soak port, default 9819, and a temporary "My Work (pg-desk soak)" Grafana board
+  The module carries the soak option (D18, D27), `soak.enable` and `soak.port` with default 9819,
+  which ZR MAY override with a comment saying why. ZR enables it in phase 9 with the soak on: while
+  `soak.enable` is true the server listens on the soak port and a temporary "My Work (pg-desk soak)" Grafana board
   points at it, because `pg-pr sync` holds 9818 for both the dashboard and `/metrics` until the
   flip; when `soak.enable` is false the server listens on `dashboards.pgPr.port` and no temporary
   board is rendered. A ZR evaluation-time assertion requires the two ports to be equal whenever
@@ -1012,6 +1021,11 @@ config.
   three-stage timeline. OpenTelemetry export is a later observability item, with pr-pool's own
   metrics sink.
 - The server never blocks on the pipeline; it reads committed rows only.
+- Telemetry declaration (D24): every component this design introduces or rewires, the ledger and
+  `changes` in pg-connector, the adapter, `pg-desk`, and pr-pool's new stanzas, MUST state in its
+  behavior docs or first packet what it emits over OpenTelemetry or Prometheus and what it logs, so
+  the observability review (`pg2-7kizi`) can decide what the dashboard can show before phase 12
+  deletes the Ops board.
 
 ### 7.10 Testing
 
@@ -1059,19 +1073,24 @@ config.
   (default six in-plan items), and mints focus beads, plus metadata-less merge-request beads for
   PR items, through `df-wire`, with beads as its only store. Under D19 the survey lands uncapped
   in a store and a capped reconcile step mints the beads; `df-pull`'s "more work" becomes
-  reconciling more from the store. This document recommends that store be `pg-desk`'s: focus
+  reconciling more from the store. The store is `pg-desk`'s (D26): focus
   ranking becomes an interpret step over `entity` rows, the cap a `focus` sync step, and
   `df-survey` and `df-wire` retire into `pg-desk` as D10 retired `df-categorize` and
   `df-feedback`. The alternative, a daily-focus store of its own, means two interpreters and two
   reconcilers, and its PR items would still have to find `pg-desk`'s anchor. That design is phase
-  15 and its own document; whose store is section 11's open item.
-- **Slack**: the `Thread` type is re-added (section 4.5) because it now has a consumer.
-  `pg-connector-thread-slack` implements `show` and `list` over Slack search with the operator's own
-  modifiers in config, cursor an `oldest` timestamp. Slack search truncates readily, so `truncated`
-  will usually suppress removal detection for threads; consumers must expect that. External
-  dependencies: a token and a test-double convention for an HTTP-only backend, which no existing
-  pattern covers (the design of record's section 10.2 note). `pg-desk run thread` cross-references
-  threads to PRs and issues by permalinks and ticket keys.
+  15 and its own document.
+- **Slack**: the `Thread` type is re-added (section 4.5) because it now has a consumer. For now
+  (D23) `pg-connector-thread-slack` implements `show` and `list` by exec'ing `claude -p` with the
+  Slack MCP already configured on the machine, the same way other backends exec `gh`, `bd`, or
+  `pjira`: the prompt carries the operator's configured search modifiers and the `oldest` cursor,
+  requests JSON, and the backend validates the reply against the `Thread` schema, answering
+  `unavailable` on any mismatch. The model is transport to the MCP, not an interpreter; no derived
+  field comes from it, so the compute-only rule is untouched. Because a model-mediated search
+  cannot prove completeness, every `list` reply MUST carry `truncated: true`, so the umbrella never
+  derives removals for threads, and the feed SHOULD run on a long period (30m, section 6.1) because
+  each tick is a model call. The HTTP backend, its token, and a recorded-HTTP double are deferred;
+  when they land the wire shape does not change. `pg-desk run thread` cross-references threads to
+  PRs and issues by permalinks and ticket keys.
 - **Attention**: `pg-desk` MAY later expose an attention source over its store as a standalone
   `pg-connector-attention-desk` plugin; not designed here.
 - **git activity**: excluded. `work-report` owns ingestion (`pg2-lelc0`); a future source over its
@@ -1085,8 +1104,9 @@ config.
 
 - `pg-connector-issue-jira` answers `list` for a fixture JQL with a cursor round trip and a
   `truncated` page, using a recorded `pjira` double.
-- `pg-connector-thread-slack` passes the conformance suite with an HTTP double whose convention is
-  documented in its README before any other Slack code lands.
+- `pg-connector-thread-slack` passes the conformance suite against a `claude` double on PATH, the
+  exec'd-CLI convention the other backends already use; a malformed or schema-invalid reply from the
+  double yields `unavailable`, never a partial result; every `list` reply carries `truncated: true`.
 - `pg-desk run issue` and `run thread` write `xref` rows with evidence and re-interpret linked PRs
   without writing beads.
 
@@ -1258,8 +1278,8 @@ are their own packet inside phase 7, so the additive contract packets land and a
 | 9     | `pg-desk` (behavior docs first): store, gather, `show`, `status`, `heartbeat` and `heartbeat-item`; interpret, `serve` behind the ZR soak option on the soak port, `open`, `hide`, `unhide`, `wip`, `feedback list` and `feedback set`, `doctor`, `import-pg-pr-annotations`; nix module and ZR config; the temporary soak board, the My Work JSON additions, and the `pg-pr-dashboard-json-shape` check repointed at `pg-desk`'s golden; the `pg-desk show` and `sync --pr` call-site groups (D20)                                                                                                                                                                                                                                                                                                                                                                             | After `pg-connector pr list --query team --ids-only` piped to `pg-desk run pr` per id and one `pg-desk heartbeat`, the five panels diffed between the soak port and 9818 differ only by hidden rows, new fields, and the freshness root fields; `pg-desk open --print` matches `pg-pr open --print`; `rc-publish.sh` passes against a `pg-pr` stub rejecting `pr view` and `pr wip`; the repointed flake check passes                                                                                                                                                                                               | 8          |
 | 10    | `sync.mode` with `plan`; the `pr-mine`, `pr-team`, and `issue-beads-work` change feeds, `pr-sweep`, `desk-heartbeat`, and the `desk-pr`, `desk-issue`, and `desk-heartbeat` roles in ZR config, run by hand with `pr-pool drain`; `pg-desk run issue` for the beads backend, re-interpreting the PRs a bead links to by metadata or title key; `[pool].self_login`; `daemon.enable` (`pg2-ynhr.9` re-scoped) as the last packet, carrying a dependency edge on the phase 7 removals-packet bead; first soak                                                                                                                                                                                                                                                                                                                                                                     | `plan` against the live tracker adopts every bead `pg-pr sync` minted and creates nothing; a manual `pr-pool drain` fires `pg-desk run` per change and `status` shows the last run advancing; a bead closing re-runs interpretation for its PR; stopping the daemon flips `stale` within two heartbeat periods; the soak board and My Work agree for one working day, operator-tuned                                                                                                                                                                                                                                | 9          |
 | 11    | The cutover flip, reversible step by step and in this order: `import-pg-pr-annotations`, `sync.mode: apply`, `pg-pr-sync` disabled, the soak option off (serve on 9818, temporary board gone), `pr-pool reconcile` no longer run by hand; precondition: a grep across both repositories' skills, commands, agents, scripts, and memory files finds no instruction to run `pg-pr sync`; second soak                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Beads minted over the soak match plan mode's predictions; the Grafana JSON's seven URLs are byte-identical; activity-collector's daily summary still lists PR beads; `check-my-pr` and `pg-pr-work-bead` work against a pg-desk-minted anchor; one working day, operator-tuned                                                                                                                                                                                                                                                                                                                                      | 10         |
-| 12    | Deletions: `pg-pr` `sync`, `changes`, `open`, dashboard, `migrate`, `pr hide`, `unhide`, `wip`, `list`, `view`, `ready`, and `create --wip`; the ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback; `darwin/services/pg-pr-sync` and its alert rule; the Ops board and Prometheus baseline; every remaining retiring-verb call site in section 9.4; the process-feedback skill rewritten; pr-pool behavior-doc gap rows closed                                                                                                                                                                                                                                                                                                                                                                                                                         | The retiring-verb grep returns zero hits in both repositories; `store.db` still exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 11         |
-| 13    | Jira and Slack sources: the `issue-jira` cursor round trip, the `issue-jira-mine` and `thread-me` feeds and the `desk-thread` role, `Thread` v1 and `pg-connector-thread-slack`, `pg-desk run issue` for Jira and `run thread`, ticket-key and permalink cross-references, layered urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `pg-desk run issue` and `run thread` write `xref` rows and re-interpret linked PRs without writing beads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 10         |
+| 12    | Deletions: `pg-pr` `sync`, `changes`, `open`, dashboard, `migrate`, `pr hide`, `unhide`, `wip`, `list`, `view`, `ready`, and `create --wip`; the ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback; `darwin/services/pg-pr-sync` and its alert rule; the Ops board and Prometheus baseline, once the observability review (`pg2-7kizi`, D24) has decided their successor; every remaining retiring-verb call site in section 9.4; the process-feedback skill rewritten; pr-pool behavior-doc gap rows closed                                                                                                                                                                                                                                                                                                                                           | The retiring-verb grep returns zero hits in both repositories; `store.db` still exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 11         |
+| 13    | Jira and Slack sources: the `issue-jira` cursor round trip, the `issue-jira-mine` and `thread-me` feeds and the `desk-thread` role, `Thread` v1 and `pg-connector-thread-slack` over `claude -p` and the Slack MCP (D23), `pg-desk run issue` for Jira and `run thread`, ticket-key and permalink cross-references, layered urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `pg-desk run issue` and `run thread` write `xref` rows and re-interpret linked PRs without writing beads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 10         |
 | 14    | Umbrella entity cache: stale fallback for every type, `list` and `show` from cache, tombstones, opt-outs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | A backend answering `unavailable` is served from cache with `Stale: true` and the cached `AsOf`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 8          |
 | 15    | Focus: daily-focus store-first per D19, designed in its own document; `df-survey` and `df-wire` retire into the interpreter; `df-pull` becomes reconcile-more                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Defined by that document                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 13         |
 
@@ -1323,15 +1343,10 @@ is deleted only with the module (section 9.3).
 
 ## 11. Open items for operator review
 
-1. Periods: 60s for PR feeds and heartbeat, 5m for issue and thread feeds, 30m sweep, are proposals.
-2. The adapter's name, `pr-pool-source-pg-connector`, and pg-desk's binary name are provisional.
-3. Slack token provisioning and the HTTP test-double convention are prerequisites for phase 13.
-4. The Ops board has no successor here; pr-pool's metrics sink and `pg-desk` metrics are a
-   separate observability design.
-5. Which phase ships `pg-connector pr ready` and `pr draft`, which ends the D15 loss.
-6. Whose store daily-focus reconciles from under D19: `pg-desk`'s, as section 8 recommends, or one
-   of its own. This revision is written on the recommendation; the operator confirms at its read.
-7. The soak port, default 9819, and the soak option's name.
+Revision 6 closed every item revision 5 carried here; the rulings are D21 through D27 in section 2.
+Two forward items live in beads rather than in this document: the pr-pool rename (`pg2-myc6y`, D22)
+and the observability review that decides the Ops board's successor (`pg2-7kizi`, D24). Nothing in
+this document waits on an operator decision.
 
 ## Appendix A: premise corrections to `pg2-od9se`
 
@@ -1365,3 +1380,7 @@ with `plan`, the soak option, and the split cutover, recorded the consumer inven
 discussion surfaced (the Captain's Log backend, daily-focus's clients and its second minter of
 merge-request beads, the `pr view` groups, activity-collector's daily summary), and moved the
 `pr view`, `pr files`, and `pr commits` rewrites to the phases whose destinations ship them.
+Revision 6 recorded the operator's rulings on revision 5's seven open items as D21 through D27,
+rewrote the Slack source to run through `claude -p` and the Slack MCP, added the
+telemetry-declaration rule, moved the soak option's defaults to the generic module, and filed
+`pg2-7kizi` and `pg2-myc6y`.
