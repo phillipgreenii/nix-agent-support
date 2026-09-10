@@ -6,8 +6,10 @@ capability-scoped wire contract. This set follows the behavior-docs method
 (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).
 
 Start here, then the [glossary](glossary.md); the rules are in [invariants](invariants.md), the
-boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), and the stories,
-use cases, journey, and open questions in [journeys](journeys.md).
+boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), the stories,
+use cases, journey, and open questions in [journeys](journeys.md), and the `pg-pr`
+verb→destination map plus its per-table SQLite dispositions in
+[pg-pr retirement](pg-pr-retirement.md).
 
 ## The model
 
@@ -72,7 +74,11 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   `df-categorize`/`df-feedback` pr-pool roles. A packet that builds any of these MUST extend this
   set in the same change (`ADR 0062`'s own "Negative" consequence) rather than leaving intended
   behavior undocumented a second time. Concrete backend implementations (which system a backend
-  talks to, and how) are also out — that is each backend's own concern, opaque to this set.
+  talks to, and how) are also out — that is each backend's own concern, opaque to this set. The
+  `pg-pr` verb→destination MAP and its per-table SQLite dispositions are now documented in
+  [pg-pr retirement](pg-pr-retirement.md) (Phase 5, `pg2-2j5ac.23`) — but `pg-pr`'s actual
+  retirement code (any command-group cutover, SQLite disposition execution, or migration tooling)
+  remains out of scope here until each destination ships.
 - **Floor** — this set speaks in capabilities, backends, the registry, the wire envelope, ops,
   and outcomes. It names a concrete backend (`pg-connector-pr-github`, …) only as an
   illustrative example, never as part of a rule, and it names no external system's own API shape.
