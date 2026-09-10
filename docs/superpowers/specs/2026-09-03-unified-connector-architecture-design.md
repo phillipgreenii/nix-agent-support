@@ -1,5 +1,14 @@
 # Unified pluggable connector architecture: pg-connector + ZR df-\* layer
 
+> **Amended 2026-09-09** by the approved pg-desk and connector discovery design
+> (`docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md`, bead `pg2-od9se`,
+> revision 6, decisions D1 through D27). That document's section 9.1 lists fifteen amendments to
+> this one, and its section 4.3, its section 9.6, and D18 imply three more (the
+> `query_not_recognized` error code, the removal-criterion additions, and the reversible cutover
+> flip). Each is applied inline below: a block marked **Amended 2026-09-09** supersedes the text it
+> follows, and a handful of example lists and table cells were rewritten in place. Where the two
+> documents still disagree, the pg-desk design wins.
+
 ## 1. Purpose and scope
 
 `pg-pr`, `pr-pool`, and `work-activity-tracker` each independently reimplement overlapping
@@ -29,6 +38,16 @@ types" rather than types earning their place. They are tracked as candidate futu
 in §10, to be reconsidered only once a real consumer needs one; re-adding a type later costs
 nothing to the four shipped here.
 
+> **Amended 2026-09-09 (pg-desk design, D23, its sections 4.5 and 8).** `Thread` is re-added as a
+> shipped type, `Thread` v1 (`id`, `channel`, `permalink`, `started_by`, `participants`,
+> `last_reply_at`, `reply_count`, `text`, `mentions_me`, plus `AsOf`/`Stale`), because it now has
+> a consumer: `pg-desk` cross-references Slack threads to PRs and issues, driven by pr-pool's
+> `thread-me` feed. Its first backend, `pg-connector-thread-slack`, runs for now through `claude -p`
+> and the Slack MCP the machine already has, as transport only, validating every reply against the
+> `Thread` schema. Both ship in that design's phase 13, not before, because a type with no backend
+> has no checkpoint. `Note` stays dropped. The Next phase section's Thread and Note subsection is
+> amended to match.
+
 No connector mirrors entity state into a shared store (§8 explains why) and no connector widens
 its own scope to survey more than what's asked for.
 
@@ -40,11 +59,23 @@ so its `GetLogs` can resolve the `--repo` gh's `run view --log` needs without wi
 GitHub backend's own categorize/feedback-disposition store already is (§8). Neither is an
 exception to this line.
 
+> **Amended 2026-09-09 (pg-desk design, D3, its sections 4.1 and 4.5).** The ruling above is
+> REVERSED. Backends are stateless: a backend MAY be handed state in a request (an opaque cursor,
+> the per-backend `config` block) and MUST NOT persist any. All three backend-local stores it
+> allowed are removed in that design's phase 7: the PR GitHub backend's category and disposition
+> store (with its `migrate-disposition` one-shot tool), the CI GitHub Actions backend's run-to-repo
+> correlation file, and that backend's last-known-good run-list cache. The `GetLogs` half of the
+> ruling is reversed with it: `CIRun` v3 adds `repo`, and `get_logs` gains a `repo` argument the
+> caller supplies from the run it already holds, so no correlation file is needed. Derived data
+> (category, dispositions) moves to `pg-desk`'s interpreter store (D7).
+
 **Acceptance criteria**
 
 - The shared schema package defines exactly four connector types (pr, issue, ci, scm); Person and
   Repository appear only as attribute fields, never as top-level schemas. Thread and Note are not
-  implemented in this build (tracked in §10).
+  implemented in this build (tracked in §10). **Amended 2026-09-09:** five types once the pg-desk
+  design's phase 13 lands (`thread` added; `note` still dropped); a schema test asserts the
+  `AsOf`/`Stale` pair on every entity type in `pkg/schema`.
 - Feedback item is implemented as a categorization-style component off PR + comments, carrying an
   open/will-fix/wont-fix/no-action field — not a separate connector type.
 
@@ -60,7 +91,8 @@ exactly what this avoids. The Issue capability widens from read-only (`GetIssue`
 
 - The issue capability interface exposes create/comment/transition write verbs, not just a read.
 - A naming/convention check over `pkg/provider` (§5.2) confirms every exported interface's name
-  and method set corresponds to exactly one capability (pr/issue/ci/scm/attention/search) and
+  and method set corresponds to exactly one capability (pr/issue/ci/scm/attention/search, plus
+  thread from the pg-desk design's phase 13, amended 2026-09-09) and
   names no backend/system (github/jira/slack/…) — the mechanical form of "scoped by capability,
   not by system." **Implemented, not just claimed:** `naming_convention_test.go` (`pg2-nvm80`).
 
@@ -84,6 +116,7 @@ connector.pr      = [pg-connector-pr-github]
 connector.issue   = [pg-connector-issue-jira, pg-connector-issue-beads]
 connector.ci      = [pg-connector-ci-github-actions]   # pg-connector-ci-zr-captains-log deferred, §10
 connector.scm     = pg-connector-scm-git
+connector.thread  = [pg-connector-thread-slack]    # pg-desk design phase 13 (amended 2026-09-09)
 ```
 
 `issue`, `ci`, and `pr` are list-valued (multi-instance); `scm` takes exactly one value — it has
@@ -100,6 +133,20 @@ over unchanged from pg-pr's existing config machinery.
 
 Each backend's own settings (e.g. Captain's Log's `CAPTAINS_LOG_URL` + cloudflared login) live in
 that backend's own environment/config, not in this registry — the registry only names the binary.
+
+> **Amended 2026-09-09 (pg-desk design, its sections 4.7 and 4.8).** Superseded, credentials
+> excepted. A backend's settings live in a `backends:` mapping in this same shared config file,
+> keyed by binary name; the umbrella treats each value as opaque, copies it verbatim into every
+> request to that backend as the top-level `config` member, and never validates its contents.
+> Backends therefore read no files and have no configuration path of their own: a backend's
+> behavior is a pure function of one request. The `queries` key inside a block is the only key
+> that design gives meaning to (named queries in the backend's native syntax, resolved by name and
+> never shipped built in); a backend MAY define others and documents them in its `capabilities`
+> response. Credentials stay in each backend's own environment chain per the Credentials section,
+> and a backend block MUST NOT carry a secret. The pg-connector home-manager module owns the whole
+> file through options (`connector`, `backends`, `state`, `configSchemaVersion`, plus `extraConfig`
+> for pg-pr's remaining keys during the overlap); `configSchemaVersion` becomes 2, and the ZR repo
+> stops writing the file directly.
 
 **Config schema versioning, migration, and validation (resolved here, not left as "carries over
 unchanged" implies).** "Carries over unchanged" above is true of the _format_, but the `connector:`
@@ -177,6 +224,15 @@ This changes nothing about §4.5's CLI exit-code scheme: a targeted op still exi
 `invalid_argument`, identically to every other non-`not_found` code — §4.5 already named "bad
 arguments" explicitly as one of the CLI-level failures folded into that `1`. Only the wire body's
 `error.code` (and the Go sentinel a caller can `errors.Is` against) gains the extra precision.
+
+> **Amended 2026-09-09 (pg-desk design, its section 4.3).** A seventh code joins the closed set:
+> `query_not_recognized`, answered by a backend handed a named query absent from its
+> `config.queries`, with backend exit code 8, extending the existing exit-code table in
+> declaration order. It is a soft outcome, not an error: the umbrella skips that backend, reports
+> it in `sources[]` as `not_applicable`, logs at debug level only, and excludes it from
+> degraded-outcome accounting; only when every registered backend answers it does the call fail,
+> as `invalid_argument`. A backend MUST NOT treat an unrecognized name as a usage error, a crash,
+> or an empty result.
 
 ### 4.3 Versioning and capability discovery
 
@@ -273,6 +329,12 @@ because the condition wasn't actually resolved is correct behavior.
 design is the **client/dashboard layer**: whatever Tier-3 tool renders PR/attention data tracks
 that suppression locally. It is not a pg-connector wire concept and does not touch the PR entity's
 own state.)
+
+> **Amended 2026-09-09 (pg-desk design, its sections 7.6 and 8).** Unchanged in substance:
+> attention stays stateless. The client/dashboard layer the paragraph above points at is now
+> named: `hide`/`unhide` and WIP live in `pg-desk`'s `annotation` table, written only by its CLI
+> and never by its pipeline. A standalone `pg-connector-attention-desk` plugin MAY later derive
+> attention items by reading `pg-desk`'s store; it is not designed there.
 
 An attention item is exactly `{type, id, summary}` plus optional `severity` (closed enum `low |
 medium | high | critical`, canonical rank `low < medium < high < critical`, defined once in the
@@ -453,9 +515,9 @@ response to whoever invoked it.
 
 Exit codes distinguish outcomes, not just pass/fail, and split into two schemes depending on
 whether the invoked op is a FAN-OUT (queries every registered source of a type/capability:
-`attention list`, `search`, or a list-type op against a list-valued connector type) or a TARGETED
-op by a specific id, resolving to exactly one backend (e.g. `show`, `categorize`,
-`feedback_set`, `transition`):
+`attention list`, `search`, `<type> list --query <name>`, or a list-type op against a list-valued
+connector type) or a TARGETED op by a specific id, resolving to exactly one backend (e.g. `show`,
+`transition`, `update`):
 
 - **Fan-out ops** — this both fixes the earlier "exit 0 on partial failure" scripting trap
   (automation gating on exit status alone could not previously tell that some backends were down)
@@ -654,6 +716,16 @@ whoever actually owns the state:
 No cross-backend locking or coordination is needed anywhere in this design, because backends never
 share mutable state in the first place (§8's rejected-shared-store decision).
 
+> **Amended 2026-09-09 (pg-desk design, D3 and its section 5.2).** Two corrections. The first
+> bullet above is moot: backends hold no local store at all (D3), so there is no backend-store
+> concurrency to inherit. And the umbrella now owns one piece of persistent state, the delta
+> ledger under `$XDG_STATE_HOME/pg-connector/ledger/`, one file per (type, backend, query) holding
+> the fetch cursor, an id-to-content-hash index, and per-consumer cursors. Each file is guarded by a
+> flock on a sibling lock file and written by temp-file-and-rename, because two pr-pool queries and
+> any operator invocation share one backend and may run concurrently. That is the one
+> pg-connector-level lock. It guards derived state, never entity data: losing or clearing the
+> ledger costs one re-emission of every entity as `added`.
+
 ### 4.11 Timeouts and retries
 
 pg-connector's own dispatch path (`Dispatch`/`scriptout.Invoke`) enforces no timeout of its own
@@ -686,7 +758,7 @@ that need materializes.
 
 §2 describes Issue as symmetric with "multiple simultaneously-active instances," and §4.1
 registers `connector.issue`/`connector.ci`/`connector.pr` as list-valued specifically so a second
-backend can be added later — but a _targeted_ op (`show <id>`, `categorize`, `feedback_set`, …)
+backend can be added later — but a _targeted_ op (`show <id>`, `transition`, `update`, …)
 resolves to exactly one backend, and nothing before this section says how that resolution works
 once more than one is actually registered. Today's code (`cmd/pg-connector/dispatch.go`'s
 `Dispatch`) simply refuses: it errors out if more than one backend is registered for the type a
@@ -706,6 +778,12 @@ keeps id-shape disambiguation entirely out of pg-connector's own logic (a Jira k
 never collide in practice, so trying both cheaply is safe) rather than requiring a caller to
 pre-select a source — consistent with §2's "symmetric, same interface" framing: a caller of
 `pg-connector issue show <id>` shouldn't need to know which backend actually holds that id.
+
+> **Amended 2026-09-09 (pg-desk design, its section 4.7).** Every Tier-1 verb accepts
+> `--backend <binary>` to pin one registered backend, which is the explicit alternative to the
+> try-each policy above. An id-less op on a type with more than one registered backend MUST
+> require it when the op cannot fan out meaningfully (`create`) and MUST fan out when it can
+> (`list`). pg-connector's behavior set amends `INV-REG-2` accordingly.
 
 **Acceptance criteria**
 
@@ -748,8 +826,9 @@ independent CLI identity a human types directly.
 
 Every Tier-2/plugin binary matches `pg-connector-<type>-<backend>`, where `<type>` is always
 exactly the singular capability verb — `pr`, `issue`, `ci`, `scm`, `attention`, or `search` —
-drawn directly from the verb, not chosen per binary. (`thread`/`note` would follow the identical
-rule if and when they're built — see §10.) This also fixes a plural/singular mismatch that existed
+drawn directly from the verb, not chosen per binary. (`thread` does, as
+`pg-connector-thread-slack` in the pg-desk design's phase 13, amended 2026-09-09; `note` would
+follow the identical rule if ever built — see §10.) This also fixes a plural/singular mismatch that existed
 in earlier naming sketches, since the type token is now mechanically derived rather than picked
 freely.
 
@@ -784,6 +863,7 @@ packages/pg-connector/
     pg-connector-issue-beads/internal/
     pg-connector-ci-github-actions/internal/
     pg-connector-scm-git/internal/
+    pg-connector-thread-slack/internal/ <- pg-desk design phase 13 (amended 2026-09-09)
 ```
 
 `pkg/schema` and `pkg/provider` are separate packages rather than one combined package, restoring
@@ -804,15 +884,14 @@ lives in `main` or under its own `internal/`), a backstop, not the main enforcem
 Nix: N `mkGoApp`/`mkGoBinary` calls sharing `src` + `gomod2nixToml`, differing only in
 `subPackages`/`pname` — this repo's existing gomod2nix convention, with real precedent for the
 multi-binary-per-module shape one hop away (this workspace's `pn`/`pn-workspace-toml-enforce`,
-built from identical shared `src`). **Five nix outputs exist today** (verified against
-`flake.nix`'s `perSystem.packages`/its `inherit (pkgs) ...` re-export block): the umbrella
-`pg-connector` plus four backend binaries — `pg-connector-pr-github`,
-`pg-connector-ci-github-actions`, `pg-connector-issue-beads`, `pg-connector-scm-git`. The layout
-diagram above's sixth `cmd/` entry, `pg-connector-issue-jira/internal/`, is aspirational: no such
-directory exists under `packages/pg-connector/cmd/` and no corresponding nix output exists either,
-and no phase or bead in this design's tracked scope currently adds it — it stays a gap until one
-does. (Thread/Note stay dropped per §2/§10 regardless, so they were never part of either count.)
-Each existing/planned nix output needs a single-entry `subPackages` list. Known, already-accepted
+built from identical shared `src`). **Six nix outputs exist today** (verified 2026-09-09 against
+`packages/pg-connector/cmd/` and `flake.nix`): the umbrella `pg-connector` plus five backend
+binaries — `pg-connector-pr-github`, `pg-connector-ci-github-actions`, `pg-connector-issue-beads`,
+`pg-connector-issue-jira`, `pg-connector-scm-git`. (An earlier revision of this paragraph called
+`pg-connector-issue-jira` aspirational; it shipped in phase 2 of `pg2-2j5ac`, and the 2026-09-09
+amendment removed that note.) A seventh, `pg-connector-thread-slack`, is added by the pg-desk
+design's phase 13 (see the Entity model section's amendment); `Note` stays dropped. Each
+existing/planned nix output needs a single-entry `subPackages` list. Known, already-accepted
 cost: shared `src` means editing any one backend's `internal/` code bumps the
 content-digest-versioned nix rebuild of every one of these binaries — acceptable given there's no
 independent release-cadence requirement.
@@ -878,6 +957,20 @@ kind (its two current executor kinds are selected by a `role.Type` field) — wh
 new deterministic handlers below.
 
 ### 6.1 df-categorize and df-feedback — new pr-pool roles
+
+> **Superseded in full, 2026-09-09 (pg-desk design, D10, its section 7).** `df-categorize` and
+> `df-feedback` do not ship as pr-pool roles. Both retire into `pg-desk`'s interpret steps
+> (category ranking with the vocabulary in config, and the feedback-disposition rule set evaluated
+> over every comment each run), which execute inside `pg-desk run`, a `command` role pr-pool
+> dispatches on `pr.changed` and `pr.reconcile` events. The `pr` capability's `categorize` and
+> `feedback_set` ops and the backend-local store behind them are removed (D3), together with the
+> four Phase 3 pr-pool stanzas in ZR's config, in that design's phase 7 removals packet, in one
+> change so no tick fails with `unknown_op` in between. What survives of this section is its
+> analysis of pr-pool's real command-role contract (argv-only templating, the four-signal exit
+> contract, the `2`/`3` collision with `DEC-WIRE-1`), which `pg-desk run` inherits: it exits `0`
+> on success and on a degraded run, `1` on failure to fetch the triggering entity or on a store
+> error, never `9`, and never a raw pg-connector exit code. The text below is retained as history
+> and MUST NOT be implemented.
 
 > Rewritten end-to-end (bead `pg2-2j5ac.12`, 2026-09-06) against pr-pool's REAL command-role
 > contract. The prior draft of this section claimed pr-pool's command-role exit contract was
@@ -1078,6 +1171,11 @@ Explicitly not generic, and not bundled into one binary.
 df-categorize and df-feedback (§6.1) live here conceptually, though their registration lives in
 pr-pool's own config, not in this module.
 
+> **Amended 2026-09-09 (pg-desk design, D10).** Superseded. The event-reactive tool is `pg-desk`
+> itself, generic and in this repo at `packages/pg-desk`, dispatched by pr-pool's `desk-pr`,
+> `desk-issue`, `desk-thread`, and `desk-heartbeat` command roles (its section 6.1); the ZR repo
+> supplies configuration only.
+
 ### 7.3 Relationship to daily-focus's morning ritual
 
 Attention (§4.4) is a continuous "does this need my eyes" signal. Daily-focus's own morning
@@ -1089,6 +1187,14 @@ dashboard or TUI wants to correlate "what's attention-worthy right now" against 
 already covered," that correlation is a client-layer concern built on top of both — never logic
 inside either mechanism itself.
 
+> **Amended 2026-09-09 (pg-desk design, D19 and D26, its section 8).** daily-focus stops treating
+> beads as its primary store. Everything its survey gathers lands uncapped in `pg-desk`'s store;
+> focus ranking becomes an interpret step there; a capped `focus` sync step mints the focus beads;
+> and pulling more work is reconciling more from the store. `df-survey`, `df-wire`, and `df-pull`
+> retire into `pg-desk` in that design's phase 15, which is designed in its own document. The
+> disjointness this section states still holds: attention remains a live, memoryless signal, and
+> the ritual's memory is now the store rather than beads.
+
 ### 7.4 Where this lives
 
 df-categorize, df-feedback, df-attention, and df-search ship as new siblings in the existing
@@ -1096,6 +1202,13 @@ df-categorize, df-feedback, df-attention, and df-search ship as new siblings in 
 and bats-testing pattern. Standalone `pg-connector-attention-<backend>`/`pg-connector-search-
 <backend>` plugins do **not** live there — despite being ZR-specific, they have no connector
 duties of their own and belong alongside the other ZR-specific Tier-2 backends instead.
+
+> **Amended 2026-09-09 (pg-desk design, D10, D19, D26).** `df-categorize` and `df-feedback` are
+> removed from `modules/daily-focus/` in that design's phase 7; their logic ports into `pg-desk`'s
+> interpret steps. `df-attention` and `df-search` stay as described. The daily-focus v2
+> cross-reference below is amended too: `df-survey`, `df-wire`, and `df-pull` are that design's
+> phase 15 retirement targets, folding into `pg-desk`, so the coordination point it names shrinks
+> to `df-deferred` and whatever v2 pieces remain after phase 15.
 
 > **Cross-reference (bead `pg2-2j5ac.11`, 2026-09-06): relationship to `phillipg-nix-ziprecruiter`'s
 > daily-focus v2 design.** `phillipg-nix-ziprecruiter`'s
@@ -1123,8 +1236,9 @@ duties of their own and belong alongside the other ZR-specific Tier-2 backends i
   any source.
 - df-attention passes its own default `--cap 50` unless the user overrides it; the wire default
   itself stays uncapped.
-- The four Tier-3 tools ship in `modules/daily-focus/` using its existing packaging/test pattern;
-  standalone attention/search-only plugins do not.
+- `df-attention` and `df-search` ship in `modules/daily-focus/` using its existing packaging/test
+  pattern; standalone attention/search-only plugins do not. (`df-categorize` and `df-feedback` were
+  removed by the 2026-09-09 amendment above.)
 
 ## 8. Rejected alternative: canonical/shared store
 
@@ -1144,6 +1258,18 @@ into the owning system's own migrated store, categorization into a dedicated loc
 of building a separate cross-connector index; reading either back later is just a filtered live
 query through that backend. Search, attention, and daily-focus all do live fan-out plus in-memory
 correlation on demand, on the same principle.
+
+> **Amended 2026-09-09 (pg-desk design, D3, D6, D7, its section 5).** The paragraph above is
+> superseded with the backend-local stores (D3): categorization and feedback dispositions are
+> derived data and live in `pg-desk`'s own interpreter store, outside pg-connector, alongside human
+> annotations (D7). Two pieces of Tier-1 state are added and are NOT the cross-connector store this
+> section rejects: the delta ledger (content hashes, fetch cursors, and per-consumer cursors, keyed
+> per type, backend, and query) and, in that design's phase 14, an entity cache keyed the same way.
+> Neither correlates across types: every file is scoped to one (type, backend, query), and the
+> ledger holds no entity content at all. The mechanical check below is extended, not relaxed:
+> `entity_store_test.go`'s scan is widened to `cmd/pg-connector/internal/**` and to a `thread`
+> kind token before the ledger lands (its section 4.8), so a Tier-1 store keyed by more than one
+> type's ids would still fail it.
 
 **Acceptance criteria**
 
@@ -1184,6 +1310,15 @@ connector like every other source — this is a small, pre-existing pr-pool core
 compiled-in default query set is constructed directly in Go, not through config), not something
 this design's own new pieces introduce.
 
+> **Amended 2026-09-09 (pg-desk design, D8, D14, its sections 6 and 7.5).** The two retirements
+> above now have named destinations. pg-pr's bespoke beads-upsert code retires into `pg-desk`
+> sync, which writes agent signals only, only through `pg-connector issue`, deduplicated by keys
+> carried in the bead itself (`metadata.repo` plus `metadata.pr_number`, or the exact
+> `process-feedback:` title). pr-pool's beads-specific sources retire into
+> `pr-pool-source-pg-connector list` stanzas over the beads backend's named queries, a config-only
+> change with zero pr-pool core changes; `packages/pr-pool`'s only Go deletions attributable to
+> that design are the ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback.
+
 pg-pr's worktree/branch-detect commands resolve cleanly into the new `scm` connector type (§4.7) —
 they were never genuinely homeless, they just needed their own type. Wherever the existing review-
 orchestrator ecosystem (draft-review orchestrator → worktree add → parallel review subagents →
@@ -1197,25 +1332,24 @@ composed with a `pg-connector pr show` call for any PR→branch resolution.
 registration in `packages/pg-connector/cmd/pg-connector/*.go` for what already ships. `pr`, `issue`,
 and `ci` already had stated destinations before this table; the rest did not.
 
-| pg-pr command group                                                                       | Subcommands                                                                                                                                        | Destination                                                                                                                                                                                                                                                                                                                                | Status today                                                                                                                                                     |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pr`                                                                                      | `list`, `view`, `files`, `commits`, `create`, `update`, `close`, `ready`, `draft`, `wip on`/`off`, `hide`, `unhide`, `automerge on`/`off`, `merge` | `pg-connector pr <verb>` (same names, PR GitHub backend, **except `view` → `show`** — pg-connector's shipped verb for "fetch one PR's current state" is `show`, not `view`; every other mention of this op in this design uses `pg-connector pr show`, and this table adopts that same convention rather than pg-pr's own `view` spelling) | `show`, `categorize`, `feedback-set` ship; the rest of this list does not yet                                                                                    |
-| `worktree`                                                                                | `add`, `remove`, `list`                                                                                                                            | `pg-connector scm worktree <verb>`                                                                                                                                                                                                                                                                                                         | Ships today                                                                                                                                                      |
-| `branch`                                                                                  | `detect`                                                                                                                                           | `pg-connector scm branch detect`                                                                                                                                                                                                                                                                                                           | Ships today                                                                                                                                                      |
-| `issue`                                                                                   | `show`                                                                                                                                             | `pg-connector issue show`                                                                                                                                                                                                                                                                                                                  | Ships today (pg-connector's `issue` also has `create`/`comment`/`transition`, unused by pg-pr's read-only `issue show`)                                          |
-| `ci`                                                                                      | `runs`, `logs`, `rerun-failed`                                                                                                                     | `pg-connector ci list` (renamed from `runs`), `ci logs`, `ci rerun-failed`                                                                                                                                                                                                                                                                 | Ships today, modulo the `runs`→`list` rename                                                                                                                     |
-| `auth`                                                                                    | `status`                                                                                                                                           | `pg-connector auth status`                                                                                                                                                                                                                                                                                                                 | Ships today                                                                                                                                                      |
-| `config`                                                                                  | `show`, `validate`                                                                                                                                 | `pg-connector config validate` (ships); `config show` (does not yet)                                                                                                                                                                                                                                                                       | Partially ships                                                                                                                                                  |
-| `feedback`                                                                                | `list <repo> <pr>`, `show <id>`, `disposition <id>`                                                                                                | `list`/`show` fold into `pg-connector pr show <id>`'s response, which already returns every comment/thread with its own disposition (§6.1); `disposition` maps to the shipped `pg-connector pr feedback-set <pr-id> <comment-id> --disposition <status>`                                                                                   | No new verb needed — only the call sites need rewriting                                                                                                          |
-| `review`                                                                                  | `draft`, `post`, `submit`                                                                                                                          | `pg-connector pr review draft`/`post`/`submit` — new write verbs on the `pr` capability, mirroring the shape `categorize`/`feedback-set` already establish                                                                                                                                                                                 | Does not exist yet                                                                                                                                               |
-| `comment`                                                                                 | `add`, `resolve`                                                                                                                                   | `pg-connector pr comment add`/`resolve` — same new-verb pattern as `review`                                                                                                                                                                                                                                                                | Does not exist yet                                                                                                                                               |
-| `sync` (+ `sync duplicates`)                                                              | —                                                                                                                                                  | No destination verb. `sync`'s beads-upsert projection and its `duplicates` bd-audit subcommand are exactly the "bespoke beads-upsert code" and "pre-existing violation" this section already retires in favor of pr-pool polling the beads connector directly — there is nothing to rewrite one-for-one                                    | Retires without a rewrite target; also runs as the `pg-pr-sync` launchd daemon that serves the local dashboard below, so its shutdown is gated on that open item |
-| local dashboard (`internal/dashboard`, served by the `sync` daemon's `/api/v1/dashboard`) | —                                                                                                                                                  | Unresolved — Appendix B: `pg-pr open`'s disposition (its only confirmed consumer) is still unanswered                                                                                                                                                                                                                                      | Blocked on Appendix B                                                                                                                                            |
-| `open`                                                                                    | —                                                                                                                                                  | Unresolved — same Appendix B question: continues as a manually-run pg-connector-equivalent with no stated replacement, or drops entirely                                                                                                                                                                                                   | Blocked on Appendix B                                                                                                                                            |
-| `changes`                                                                                 | —                                                                                                                                                  | No destination verb. Superseded by pr-pool polling the beads connector directly instead of pg-pr's own bespoke bd-workspace diff/poll logic                                                                                                                                                                                                | Retires without a rewrite target                                                                                                                                 |
-| `migrate`                                                                                 | —                                                                                                                                                  | No destination verb. One-shot/idempotent maintenance on pg-pr's own SQLite store; its disposition is entirely the store's own per-table migration disposition (this section's second acceptance criterion), not a connector call                                                                                                           | Retires with the store                                                                                                                                           |
-| `migrate-feedback`                                                                        | —                                                                                                                                                  | No destination verb. One-shot cleanup of legacy pre-store feedback beads, already obsolete before this design started                                                                                                                                                                                                                      | Retires without a rewrite target                                                                                                                                 |
-| `version`                                                                                 | —                                                                                                                                                  | No destination verb needed — `pg-connector` has its own `version`/`--version`; moot once the binary retires                                                                                                                                                                                                                                | Trivial                                                                                                                                                          |
+| pg-pr command group                                                                       | Subcommands                                                                                                                                        | Destination                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Status today                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr`                                                                                      | `list`, `view`, `files`, `commits`, `create`, `update`, `close`, `ready`, `draft`, `wip on`/`off`, `hide`, `unhide`, `automerge on`/`off`, `merge` | `pg-connector pr <verb>` (same names, PR GitHub backend, **except `view` → `show`** — pg-connector's shipped verb for "fetch one PR's current state" is `show`, not `view`; every other mention of this op in this design uses `pg-connector pr show`, and this table adopts that same convention rather than pg-pr's own `view` spelling). **Amended 2026-09-09 (pg-desk design, D1, D20, D25):** `list` becomes `pg-connector pr list --query <name>` over named queries (its section 4.2); `hide`, `unhide`, and `wip on`/`off` become `pg-desk hide`/`unhide`/`wip on`/`off`; `view`'s PR-facts portion is `pg-connector pr show` and its enrichment portion is `pg-desk show`; `ready` and `draft` wait for the write-verb phase, with `pg-desk open --promotable` as the manual path meanwhile | `show` ships; `categorize` and `feedback-set` are removed (D3, 2026-09-09); `list --query`, `files`, and `commits` ship in the pg-desk design's phase 7 and `pg-desk`'s verbs in its phase 9; the rest of this list does not yet                                                                  |
+| `worktree`                                                                                | `add`, `remove`, `list`                                                                                                                            | `pg-connector scm worktree <verb>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Ships today                                                                                                                                                                                                                                                                                       |
+| `branch`                                                                                  | `detect`                                                                                                                                           | `pg-connector scm branch detect`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Ships today                                                                                                                                                                                                                                                                                       |
+| `issue`                                                                                   | `show`                                                                                                                                             | `pg-connector issue show`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Ships today (pg-connector's `issue` also has `create`/`comment`/`transition`, unused by pg-pr's read-only `issue show`; **amended 2026-09-09:** it gains `list --query`, `update`, `close`, `deps [--full]`, and `create --metadata`/`--parent` in the pg-desk design's phase 7, its section 4.6) |
+| `ci`                                                                                      | `runs`, `logs`, `rerun-failed`                                                                                                                     | `pg-connector ci list` (renamed from `runs`), `ci logs`, `ci rerun-failed`; unchanged by the 2026-09-09 amendment, since `ci` has no free-text search: `ci list <pr-id>` keeps its PR-keyed form and gains no `--query`, and `ci logs` gains a caller-supplied `repo` argument (`CIRun` v3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Ships today, modulo the `runs`→`list` rename                                                                                                                                                                                                                                                      |
+| `auth`                                                                                    | `status`                                                                                                                                           | `pg-connector auth status`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Ships today                                                                                                                                                                                                                                                                                       |
+| `config`                                                                                  | `show`, `validate`                                                                                                                                 | `pg-connector config validate` (ships); `config show` (does not yet; **amended 2026-09-09:** the pg-desk design's phase 7 adds `config show --queries` and per-backend query-name reporting in `validate`, its section 4.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Partially ships                                                                                                                                                                                                                                                                                   |
+| `review`                                                                                  | `draft`, `post`, `submit`                                                                                                                          | `pg-connector pr review draft`/`post`/`submit` — new write verbs on the `pr` capability, mirroring the shape `categorize`/`feedback-set` already establish                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Does not exist yet                                                                                                                                                                                                                                                                                |
+| `comment`                                                                                 | `add`, `resolve`                                                                                                                                   | `pg-connector pr comment add`/`resolve` — same new-verb pattern as `review`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Does not exist yet                                                                                                                                                                                                                                                                                |
+| `sync` (+ `sync duplicates`)                                                              | —                                                                                                                                                  | **Amended 2026-09-09 (pg-desk design, its sections 6, 7, and 9.2):** pr-pool change feeds (`pr-mine`, `pr-team`, `pr-sweep`, `desk-heartbeat`) plus `pg-desk` sync, which mints agent-signal beads through `pg-connector issue`; `sync --pr N` becomes `pg-desk show --refresh`; `sync duplicates` retires with it. An earlier revision of this row said `sync` retired without a rewrite target; its section 9.2 there shows `sync` was at least ten jobs, each now with a destination                                                                                                                                                                                                                                                                                                              | The `pg-pr-sync` daemon is disabled at the pg-desk design's phase 11 flip after a soak in `sync.mode: plan` (D17, D18) and deleted in its phase 12                                                                                                                                                |
+| local dashboard (`internal/dashboard`, served by the `sync` daemon's `/api/v1/dashboard`) | —                                                                                                                                                  | **Resolved 2026-09-09 (pg-desk design, D1, its section 7.7):** `pg-desk serve` on port 9818, serving today's `/api/v1/dashboard` payload contract (the five selectors and root fields) plus a `hidden` array, freshness fields, and per-row `degraded`/`sync_error`/`ready_to_promote`, and a minimal `/metrics`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Ships in the pg-desk design's phase 9 behind the soak option; takes over at its phase 11 flip                                                                                                                                                                                                     |
+| `open`                                                                                    | —                                                                                                                                                  | **Resolved 2026-09-09 (pg-desk design, D1, its section 7.7):** `pg-desk open`, a port of `pg-pr open` reading `pg-desk`'s store directly (no daemon, so `--addr` is dropped), every other flag and default pinned by the ported goldens, plus `--promotable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Ships in the pg-desk design's phase 9 behind the soak option; takes over at its phase 11 flip                                                                                                                                                                                                     |
+| `changes`                                                                                 | —                                                                                                                                                  | **Amended 2026-09-09 (pg-desk design, its section 6.1):** the `issue-beads-work` pr-pool change feed, `pr-pool-source-pg-connector changes issue work-beads` over `pg-connector issue changes`; a bead closing re-runs `pg-desk` interpretation for its PR                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Retires in the pg-desk design's phase 12, once the feed runs in its phase 10                                                                                                                                                                                                                      |
+| `migrate`                                                                                 | —                                                                                                                                                  | No destination verb. One-shot/idempotent maintenance on pg-pr's own SQLite store; its disposition is entirely the store's own per-table migration disposition (this section's second acceptance criterion), not a connector call                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Retires with the store                                                                                                                                                                                                                                                                            |
+| `migrate-feedback`                                                                        | —                                                                                                                                                  | No destination verb. One-shot cleanup of legacy pre-store feedback beads, already obsolete before this design started                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Retires without a rewrite target                                                                                                                                                                                                                                                                  |
+| `version`                                                                                 | —                                                                                                                                                  | No destination verb needed — `pg-connector` has its own `version`/`--version`; moot once the binary retires                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Trivial                                                                                                                                                                                                                                                                                           |
 
 Real downstream call sites confirming this table's shape were found across
 `claude-marketplace/pg-pr/{agents,commands,skills,hooks}`, `flake.nix`'s pinned checks
@@ -1273,6 +1407,19 @@ decision, which that bead executes against, not a restatement of it.
   window's end condition — it ends exactly when all six are independently true, not on a
   schedule.
 
+> **Amended 2026-09-09 (pg-desk design, its section 9.3).** The per-table dispositions are now
+> complete, and the feedback exception above is moot. `feedback` and `code_comment_message` DROP:
+> dispositions are re-derived by `pg-desk`'s interpreter each run (Phase 3 migrated zero real
+> rows), so no disposition store migrates under any backend and the same-cutover-step obligation
+> has nothing left to bind. `pull_request`, `pr_revision`, and `pr_approval` DROP, re-derived into
+> `pg-desk`'s `entity` and `interpretation` tables on the first sweep, with revision history an
+> accepted loss; only `pull_request`'s `user_hidden`, `user_hidden_reason`, and `wip` columns
+> migrate, through `pg-desk import-pg-pr-annotations`, into `pg-desk`'s `annotation` table, which
+> is the client/dashboard layer the `user_state` bullet above left unnamed. `outbox`,
+> `repo_sync_state`, and `data_migration` drop as decided. `store.db` itself is deleted only with
+> the `packages/pg-pr` module: the phase 11 flip disables the daemon and leaves the file and the
+> command groups, and phase 12 deletes the retiring command groups and still leaves the file.
+
 **Removal criterion — pg-pr is removed when:** `pg-pr` as a standalone binary MUST NOT be deleted
 until every one of the following holds, with no coexistence period required in between (per this
 section's own no-shim/no-dual-write decision):
@@ -1302,6 +1449,16 @@ condition-based criterion rather than a calendar date: the six conditions are in
 checkable at any time, so the dual-maintenance window ends exactly when the work is actually done,
 not on a schedule that can slip unnoticed.
 
+> **Amended 2026-09-09 (pg-desk design, its section 9.6).** Item 4 is satisfied by D1 and
+> `pg-desk serve`/`pg-desk open`. Item 2's literal-invocation grep explicitly includes
+> `pg-pr pr hide`, `wip`, `view`, `list`, and `ready`, and covers both repositories'
+> `claude-marketplace/**`, `modules/**`, `home/**`, and `packages/**`. Four items are added: (7)
+> pr-pool runs as a daemon at ZR and `pg-desk serve` has served the dashboard in `sync.mode: plan`
+> for at least one working day, operator-tuned, before the phase 11 flip; (8) the flip has run in
+> `sync.mode: apply` with `pg-pr-sync` disabled for at least one working day, operator-tuned,
+> before any phase 12 deletion; (9) the `annotation` import has run; (10) `store.db` is deleted
+> only with the module. Ten conditions, not six, now end the migration window.
+
 ### 9.2 What's explicitly out of scope here
 
 The review-orchestrator ecosystem's _trigger_ mechanism is intentionally not redesigned here. The
@@ -1326,6 +1483,15 @@ yet" to "ships," the call sites for that verb group become rewritable, and get r
 same packet or a closely-following one — not deferred to a single terminal "rewrite everything"
 phase.
 
+> **Amended 2026-09-09 (pg-desk design, D20, its section 9.4).** Applied to the `pr view`,
+> `pr files`, and `pr commits` call sites by need: sites reading PR facts only move to
+> `pg-connector pr show|files|commits` in that design's phase 7, once `PR` v3 ships; sites reading
+> `wip`, approvals, or the consolidated picture move to `pg-desk show` in phase 9; the bead-writing
+> `sync` sites move to `pg-desk show --refresh` in phase 9, so no skill instructs a second bead
+> writer when phase 11 sets `sync.mode: apply`; retiring verbs (`pr wip`, `pr ready`, `pr hide`,
+> `pr unhide`, `pr list`) are rewritten in phase 12. Each group is rewritten in the phase whose
+> destination ships, never batched at cutover.
+
 **Verification:** removal criterion item 2, above, already states the mechanical completeness
 proof (a repo-wide grep for a literal `pg-pr` invocation, excluding this design doc/ADRs/other
 historical prose, returns zero hits). This subsection adds the ordering discipline that gets there
@@ -1335,6 +1501,14 @@ incrementally, not a second completeness check.
 rewritten call site that breaks is fixed forward (revert or patch the one packet that rewrote it),
 never rolled back to calling the old `pg-pr` binary — pg-pr's own command group for that verb is
 deleted in the same cutover step, not kept alive as a fallback.
+
+> **Amended 2026-09-09 (pg-desk design, D18, its sections 9.3 and 9.5).** Narrowed for the
+> `sync`, dashboard, and `open` groups. Their cutover is a reversible flip (phase 11: run
+> `import-pg-pr-annotations`, set `sync.mode: apply`, disable `pg-pr-sync`, turn the soak option
+> off, in that order) followed by a soak and a separate deletion phase (12). During the second
+> soak `pg-pr-sync` is disabled, not deleted, and `store.db` is kept, so re-enabling the daemon is
+> a one-line rollback. The no-rollback rule above still holds for every call-site rewrite and for
+> phase 12's deletions.
 
 ### 9.4 Deprecation timeline
 
@@ -1351,6 +1525,19 @@ itself a cutover step — cutover (the §9.3 rewrite plus deleting `packages/pg-
 every one of the six removal-criterion conditions above is independently true. This is a
 dependency ORDER, not a schedule, for the same reason the removal criterion itself is
 condition-based rather than dated.
+
+> **Amended 2026-09-09 (pg-desk design, D16, its section 9.5).** The order gains nine phases after
+> the retirement preconditions (phase 5 of `pg2-2j5ac`), each ending at a checkpoint the operator
+> runs by hand against the live system while `pg-pr` keeps running: 7 the connector contract
+> additions (`backends:`, `list`, `--backend`, `query_not_recognized`, the schema bumps, the issue
+> widening) with the removals packet; 8 the delta ledger, `changes`, and the pr-pool adapter; 9
+> `pg-desk` behind the soak option; 10 `sync.mode: plan`, the change feeds, and `daemon.enable`;
+> 11 the reversible cutover flip; 12 the deletions; 13 the Jira and Slack sources; 14 the umbrella
+> entity cache; 15 daily-focus store-first. Phases 13 and 14 depend on 10 and 8 respectively, not
+> on 12. The statement above that cutover "starts only once every one of the six removal-criterion
+> conditions" is true is narrowed: the flip (11) and the retiring-verb deletions (12) proceed under
+> the pg-desk design's own gates (its section 9.6, applied to the removal criterion above), while
+> deleting `packages/pg-pr` itself still waits on every condition.
 
 **Acceptance criteria**
 
@@ -1415,14 +1602,24 @@ that will need fresh work whenever this happens: Slack and Notion are HTTP-only 
 local CLI to stub, so their tests will need a double convention (RoundTripper injection or
 record/replay) that no existing pattern in either repo currently covers.
 
+> **Amended 2026-09-09 (pg-desk design, D23, its sections 4.5 and 8).** `Thread` is re-added: it
+> now has the consumer this paragraph asked for (`pg-desk` cross-referencing, driven by pr-pool's
+> `thread-me` feed) and ships as `Thread` v1 with `pg-connector-thread-slack` in that design's
+> phase 13, following every convention listed here unchanged (`connector.thread`,
+> `pg-connector-thread-<backend>`, its own `schemaVersion`). The HTTP-only test-double concern is
+> deferred with the HTTP backend itself: for now the backend execs `claude -p` with the Slack MCP
+> as transport, so it is tested against a `claude` double on PATH, the exec'd-CLI convention the
+> other backends already use. Every `list` reply from it carries `truncated: true`, because a
+> model-mediated search cannot prove completeness. `Note` stays dropped.
+
 **Acceptance criteria**
 
 - `pg-pr-cicd-captains-log` keeps working, PATH-wired and unchanged, under its current name, until
   this phase actually starts; the §5.1 rename to `pg-connector-ci-zr-captains-log` and the
   `connector.ci` registration land together, in that phase, not before.
 - `connector.ci` does not list it until this phase is explicitly started.
-- Thread and Note are not implemented, registered, or referenced as live types anywhere in the
-  initial build; this section is their only mention.
+- Note is not implemented, registered, or referenced as a live type anywhere. Thread is
+  implemented only in the pg-desk design's phase 13 and not before (amended 2026-09-09).
 
 ## 11. Testing strategy
 
@@ -1496,6 +1693,15 @@ add`/`resolve`) is its own top-level command, not nested under `review`, so the 
   §4.8's dashboard convention into one unrelated slice) are recorded as a follow-up comment on
   that same bead, not duplicated into this design doc.
 
+> **Amended 2026-09-09 (pg-desk design, D1, its sections 7.7 and 9.3).** `open` and the local
+> dashboard now have destinations, `pg-desk open` and `pg-desk serve` (the What moves where
+> table). PR rows and approver data are resolved: `pull_request`, `pr_revision`, and `pr_approval`
+> drop and are re-derived into `pg-desk`'s store, with only the hide/WIP annotation columns
+> migrating (the Migration-window policy amendment). Feedback dispositions no longer migrate under
+> the PR GitHub backend; they are re-derived. The epic-decompose round named in the last bullet has
+> since produced phases 1 through 6 of `pg2-2j5ac`; phases 7 through 15 are the pg-desk design's
+> section 9.5, decomposed from that document.
+
 **Data freshness and existing guarantees**
 
 - **Resolved, not left open (bead `pg2-681xo`, 2026-09-06):** `schema.PR` now carries `AsOf`/
@@ -1511,6 +1717,17 @@ add`/`resolve`) is its own top-level command, not nested under `review`, so the 
   network call or a backend-local store persists, and, if a store, whether/when it would ever
   report `Stale: true`. The schema mechanism to represent that answer already exists either way —
   this is a live-vs-cache design question for whenever `list` is built, not a schema gap.
+
+> **Amended 2026-09-09 (pg-desk design, D3, D6, its sections 4.4 and 5.6).** Resolved: `pr list`
+> is a live network call through the pg-desk design's phases 7 through 12 and is served from the
+> umbrella's entity cache, with `Stale: true` and the cached `AsOf`, only once its phase 14 lands.
+> Every entity schema now carries the `AsOf`/`Stale` pair (`Issue` v4, `CIRun` v3, `Thread` v1),
+> with the same semantics: the backend that answers a read is the sole computer of its own
+> staleness, and a stateless backend performing a live read always reports `Stale: false`. The CI
+> GitHub Actions backend's last-known-good run-list cache, until then the one place a backend served
+> `Stale: true`, is removed in phase 7 under statelessness (D3); `schema.CIRun.Stale`'s comment is
+> updated to say so, and no backend serves stale data until the cache phase restores that fallback
+> for every type.
 
 **Wire protocol and testing**
 
@@ -1547,8 +1764,10 @@ add`/`resolve`) is its own top-level command, not nested under `review`, so the 
 
 ## Appendix B: loose threads carried from prior design sessions
 
-- `pg-pr open`'s disposition is still unanswered — whether the operator uses it manually with no
-  stated replacement, or it drops entirely.
+- `pg-pr open`'s disposition: **closed 2026-09-09 (pg-desk design, D1).** The opener survives with
+  full parity as `pg-desk open`, reading `pg-desk`'s store directly, and the dashboard survives as
+  `pg-desk serve` with all five triage panels, hide, WIP, and the batch-open flow. The operator
+  keeps the Grafana panel open to see when PRs need review and uses `open` to batch-open them.
 - Two pre-existing bugs, found but deliberately not fixed during this design's research, with no
   bead filed for either: a review-team skill double-adds/removes a worktree around the
   orchestrator's own add/remove; a work-bead skill uses a second, untracked worktree convention
