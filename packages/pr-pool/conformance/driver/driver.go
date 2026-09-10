@@ -32,6 +32,12 @@ type Result struct {
 	Skipped bool
 	// SkipReason explains a Skipped case; empty when Skipped is false.
 	SkipReason string
+	// Busy reports that a command-role case (Target.Command) exited 9 — a
+	// graceful pre-accept decline (INV-CONC-1), not a failure. Err stays nil
+	// and Skipped stays false: the check WAS invoked, it just came back busy.
+	// Busy is always false on every other case (Task pg2-2j5ac.23.3 Binding
+	// decisions #1).
+	Busy bool
 }
 
 // Target is the set of live participants Run may invoke checks against,
@@ -48,6 +54,26 @@ type Target struct {
 	// Query, when set, is invoked over the "query" subcommand (INTF-SOURCE
 	// pull direction) the same way.
 	Query conformance.Participant
+	// Command, when set, is invoked via argv (a real subprocess, os/exec or
+	// an equivalent test double) to prove a command-role participant's wire
+	// contract — the shape df-categorize/df-feedback use in
+	// phillipg-nix-ziprecruiter — against invokeCommand's four-signal
+	// classification, never through Participant's stdin/stdout JSON protocol
+	// (Task pg2-2j5ac.23.3 Binding decisions #2).
+	Command CommandParticipant
+}
+
+// CommandParticipant is the argv-invoked contract a command-role role speaks:
+// a real subprocess invocation with no stdin/stdout JSON request/reply body,
+// structurally different from Participant above (Task pg2-2j5ac.23.3 Binding
+// decisions #2). Run reports only the process's exit code — a command role
+// owes no reply body on the wire (DEC-WIRE-1).
+type CommandParticipant interface {
+	// Run invokes the participant once, returning its exit code. err is
+	// non-nil only when the command itself could not be started or awaited
+	// (e.g. the binary is missing) — a nonzero exit code from a command that
+	// DID run is reported through exitCode, never through err.
+	Run(ctx context.Context) (exitCode int, err error)
 }
 
 // Run executes every conformance case against target, returning one Result
@@ -72,7 +98,7 @@ func Run(ctx context.Context, target Target) []Result {
 		results = append(results, goldenCase(mt), negativeGenericCase(mt))
 	}
 	results = append(results, negativeMatrixCases()...)
-	results = append(results, invokeMonRead(target.MonRead), invokeQuery(target.Query), storeCase())
+	results = append(results, invokeMonRead(target.MonRead), invokeQuery(target.Query), invokeCommand(ctx, target.Command), storeCase())
 	return results
 }
 
@@ -314,6 +340,61 @@ func invokeCheck(name, subcommand, replyType string, participant conformance.Par
 		return Result{Name: name, Err: fmt.Errorf("%s reply failed %s schema: %w", subcommand, replyType, err)}
 	}
 	return Result{Name: name}
+}
+
+// exitCoreReserved is exit 3, DEC-WIRE-1's core-reserved pre-flight signal
+// (cmd/pr-pool/drain.go's own exitPrecheck — unexported from package main, so
+// it cannot be imported here and is instead restated by value with this
+// citation). No participant may legitimately emit it; only pr-pool's own
+// core does, so invokeCommand always flags it as a violation rather than
+// treating it like an ordinary nonzero exit.
+const exitCoreReserved = 3
+
+// invokeCommand proves a command-role participant's argv wire contract
+// (Task pg2-2j5ac.23.3 Contract/Binding decisions): it runs participant via
+// argv — never transport.Participant's stdin/stdout JSON protocol, which a
+// command role does not speak — and classifies the resulting exit code
+// against pr-pool's real four-signal command-role contract:
+//
+//   - 0 (conformance.ExitOK) passes.
+//   - 9 (conformance.ExitBusy) is a graceful pre-accept decline (INV-CONC-1),
+//     reported as Busy, not a failure — Err stays nil.
+//   - 3 (exitCoreReserved, DEC-WIRE-1) is flagged as a violation: it is
+//     core-reserved pre-flight, and no participant may legitimately emit it.
+//   - 2 (conformance.ExitUsage) is ALSO flagged as a violation here, but for
+//     a project-specific reason DEC-WIRE-1 itself does not state:
+//     df-categorize/df-feedback's real command-role handlers shell out to
+//     pg-connector, whose own exit codes 2/3 carry an unrelated fan-out
+//     meaning, so passing either through unchanged from a command role would
+//     collide with that meaning. DEC-WIRE-1 itself would allow any app to
+//     legitimately emit exit 2 for its own bad invocation — that blanket
+//     allowance is what this project-specific rule narrows, and this is not
+//     mis-cited as a blanket DEC-WIRE-1 prohibition.
+//   - Any other nonzero exit is a genuine conformance failure (Err set).
+//
+// A nil participant reports Skipped, matching every other optional Target
+// field's convention (Target's own doc comment).
+func invokeCommand(ctx context.Context, participant CommandParticipant) Result {
+	const name = "invoking/command"
+	if participant == nil {
+		return Result{Name: name, Skipped: true, SkipReason: "target carries no command-role participant"}
+	}
+	code, err := participant.Run(ctx)
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("command role: %w", err)}
+	}
+	switch code {
+	case conformance.ExitOK:
+		return Result{Name: name}
+	case conformance.ExitBusy:
+		return Result{Name: name, Busy: true}
+	case exitCoreReserved:
+		return Result{Name: name, Err: fmt.Errorf("command role exited %d: core-reserved pre-flight (DEC-WIRE-1); no participant may legitimately emit it", code)}
+	case conformance.ExitUsage:
+		return Result{Name: name, Err: fmt.Errorf("command role exited %d: usage error; df-categorize/df-feedback shell out to pg-connector, whose own exit codes 2/3 carry an unrelated meaning, so a command role must not pass this code through unchanged", code)}
+	default:
+		return Result{Name: name, Err: fmt.Errorf("command role exited %d", code)}
+	}
 }
 
 // storeCase always reports the store check Skipped: INTF-STORE is not

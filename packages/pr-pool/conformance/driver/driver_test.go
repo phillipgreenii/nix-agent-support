@@ -15,10 +15,11 @@ import (
 // assert directly before Task 3.13 moved that case-running logic here
 // (TestGoldenFixturesValidate, TestNegative_Generic, TestNegative_Matrix): every
 // golden/negative-generic/negative-matrix Result passes with a nil Target,
-// since none of those cases ever needed a live participant. The three
+// since none of those cases ever needed a live participant. The four
 // invoking/store-shaped results are Skipped instead — Target{} carries no
-// mon.read or query participant, and the store check is unconditionally
-// pre-skipped (Task 3.13 Binding decisions).
+// mon.read, query, or command-role participant, and the store check is
+// unconditionally pre-skipped (Task 3.13 Binding decisions; invoking/command
+// added by Task pg2-2j5ac.23.3).
 func TestRun_ReproducesConformanceCases(t *testing.T) {
 	results := Run(context.Background(), Target{})
 	if len(results) == 0 {
@@ -27,7 +28,7 @@ func TestRun_ReproducesConformanceCases(t *testing.T) {
 	for _, r := range results {
 		t.Run(r.Name, func(t *testing.T) {
 			switch r.Name {
-			case "invoking/mon.read", "invoking/query", "invoking/store":
+			case "invoking/mon.read", "invoking/query", "invoking/command", "invoking/store":
 				if !r.Skipped {
 					t.Fatalf("expected %s to be skipped against an empty Target, got err=%v", r.Name, r.Err)
 				}
@@ -177,6 +178,71 @@ func TestRun_InvokingQuery_SchemaViolation(t *testing.T) {
 	r := findResult(t, Run(context.Background(), target), "invoking/query")
 	if r.Err == nil {
 		t.Fatal("expected invoking/query to fail a reply naming neither branch")
+	}
+}
+
+// fakeCommandParticipant is a minimal CommandParticipant double used to prove
+// invokeCommand's exit-code classification without a real subprocess — this
+// task's Freedom boundary explicitly leaves open whether the test double is a
+// real compiled fixture binary or an in-process fake; this is the latter.
+type fakeCommandParticipant struct {
+	code int
+	err  error
+}
+
+func (f fakeCommandParticipant) Run(ctx context.Context) (int, error) { return f.code, f.err }
+
+func TestRun_InvokingCommand_Pass(t *testing.T) {
+	target := Target{Command: fakeCommandParticipant{code: conformance.ExitOK}}
+	r := findResult(t, Run(context.Background(), target), "invoking/command")
+	if r.Skipped || r.Err != nil || r.Busy {
+		t.Fatalf("invoking/command = %+v, want a clean pass", r)
+	}
+}
+
+func TestRun_InvokingCommand_Busy(t *testing.T) {
+	target := Target{Command: fakeCommandParticipant{code: conformance.ExitBusy}}
+	r := findResult(t, Run(context.Background(), target), "invoking/command")
+	if r.Err != nil || r.Skipped || !r.Busy {
+		t.Fatalf("invoking/command = %+v, want Busy=true, no error, not skipped", r)
+	}
+}
+
+func TestRun_InvokingCommand_PlainFailure(t *testing.T) {
+	// A plain non-zero exit outside the reserved/collision set (0, 2, 3, 9) —
+	// e.g. exit 1, ExitError — is a genuine conformance failure.
+	target := Target{Command: fakeCommandParticipant{code: conformance.ExitError}}
+	r := findResult(t, Run(context.Background(), target), "invoking/command")
+	if r.Err == nil || r.Busy {
+		t.Fatalf("invoking/command = %+v, want a plain Err, Busy=false", r)
+	}
+}
+
+func TestRun_InvokingCommand_CoreReservedViolation(t *testing.T) {
+	// Exit 3 (exitCoreReserved, DEC-WIRE-1) is core-reserved pre-flight — no
+	// participant may legitimately emit it.
+	target := Target{Command: fakeCommandParticipant{code: exitCoreReserved}}
+	r := findResult(t, Run(context.Background(), target), "invoking/command")
+	if r.Err == nil {
+		t.Fatal("expected invoking/command to flag exit 3 (core-reserved) as a violation")
+	}
+}
+
+func TestRun_InvokingCommand_UsageViolation(t *testing.T) {
+	// Exit 2 (conformance.ExitUsage) is flagged here too, but for the
+	// project-specific pg-connector-collision reason (Task pg2-2j5ac.23.3
+	// Binding decisions #1) — not a blanket DEC-WIRE-1 prohibition.
+	target := Target{Command: fakeCommandParticipant{code: conformance.ExitUsage}}
+	r := findResult(t, Run(context.Background(), target), "invoking/command")
+	if r.Err == nil {
+		t.Fatal("expected invoking/command to flag exit 2 (usage) as a violation")
+	}
+}
+
+func TestRun_InvokingCommand_SkippedWhenNil(t *testing.T) {
+	r := findResult(t, Run(context.Background(), Target{}), "invoking/command")
+	if !r.Skipped || r.Err != nil {
+		t.Fatalf("invoking/command = %+v, want Skipped=true, no error, against a Target with no Command", r)
 	}
 }
 
