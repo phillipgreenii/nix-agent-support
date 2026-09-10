@@ -43,11 +43,12 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
 					RunID string `json:"run_id"`
+					Repo  string `json:"repo"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode get_logs args: "+err.Error())
 				}
-				return p.GetLogs(ctx, a.RunID)
+				return p.GetLogs(ctx, a.RunID, a.Repo)
 			},
 		},
 		"rerun_failed": {

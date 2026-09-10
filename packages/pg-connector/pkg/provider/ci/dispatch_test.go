@@ -15,7 +15,7 @@ import (
 // op to the right method and passes args/results/errors straight through.
 type fakeProvider struct {
 	listRunsFn    func(ctx context.Context, prID string) ([]schema.CIRun, error)
-	getLogsFn     func(ctx context.Context, runID string) ([]byte, error)
+	getLogsFn     func(ctx context.Context, runID, repo string) ([]byte, error)
 	rerunFailedFn func(ctx context.Context, prID string) error
 }
 
@@ -25,8 +25,8 @@ func (f *fakeProvider) ListRuns(ctx context.Context, prID string) ([]schema.CIRu
 	return f.listRunsFn(ctx, prID)
 }
 
-func (f *fakeProvider) GetLogs(ctx context.Context, runID string) ([]byte, error) {
-	return f.getLogsFn(ctx, runID)
+func (f *fakeProvider) GetLogs(ctx context.Context, runID, repo string) ([]byte, error) {
+	return f.getLogsFn(ctx, runID, repo)
 }
 
 func (f *fakeProvider) RerunFailed(ctx context.Context, prID string) error {
@@ -71,16 +71,19 @@ func TestNewDispatchTable_ListRuns(t *testing.T) {
 
 func TestNewDispatchTable_GetLogs(t *testing.T) {
 	p := &fakeProvider{
-		getLogsFn: func(ctx context.Context, runID string) ([]byte, error) {
+		getLogsFn: func(ctx context.Context, runID, repo string) ([]byte, error) {
 			if runID != "run-1" {
 				t.Fatalf("runID = %q, want run-1", runID)
+			}
+			if repo != "foo/bar" {
+				t.Fatalf("repo = %q, want foo/bar", repo)
 			}
 			return []byte("log output"), nil
 		},
 	}
 	table := NewDispatchTable(p)
 	entry := table["get_logs"]
-	result, err := entry.Handle(context.Background(), json.RawMessage(`{"run_id":"run-1"}`))
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"run_id":"run-1","repo":"foo/bar"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -97,12 +100,12 @@ func TestNewDispatchTable_GetLogs_NotFoundPassesThroughUnwrapped(t *testing.T) {
 	// ErrNotFound-wrapped error through unchanged, not translate it.
 	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "run run-1 not found")
 	p := &fakeProvider{
-		getLogsFn: func(ctx context.Context, runID string) ([]byte, error) {
+		getLogsFn: func(ctx context.Context, runID, repo string) ([]byte, error) {
 			return nil, sentinelErr
 		},
 	}
 	table := NewDispatchTable(p)
-	_, err := table["get_logs"].Handle(context.Background(), json.RawMessage(`{"run_id":"run-1"}`))
+	_, err := table["get_logs"].Handle(context.Background(), json.RawMessage(`{"run_id":"run-1","repo":"foo/bar"}`))
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
@@ -204,7 +207,7 @@ func TestNewDispatchTable_SchemaVersionIsCISchemaVersion(t *testing.T) {
 	// capability's own schema version, never pr's (INV-VER-1).
 	p := &fakeProvider{
 		listRunsFn:    func(ctx context.Context, prID string) ([]schema.CIRun, error) { return nil, nil },
-		getLogsFn:     func(ctx context.Context, runID string) ([]byte, error) { return nil, nil },
+		getLogsFn:     func(ctx context.Context, runID, repo string) ([]byte, error) { return nil, nil },
 		rerunFailedFn: func(ctx context.Context, prID string) error { return nil },
 	}
 	table := NewDispatchTable(p)

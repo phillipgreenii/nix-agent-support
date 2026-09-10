@@ -1,14 +1,16 @@
 // run_store.go: this backend's own fresh, backend-local persistent store,
-// keyed by CI run ID, recording which repo owns that run. GetLogs needs the
-// repo to pass gh's own `run view <id> --log --repo <repo>` (`gh` has no
-// repo-agnostic "look up a run by id" call — every run endpoint GitHub's
-// REST API exposes is scoped under /repos/{owner}/{repo}/…), but
-// ci.Provider.GetLogs is deliberately kept id-only (no repo/prID parameter)
-// [operator ruling, Phillip, 2026-09-06, on pg2-f327j: GetLogs must resolve
-// repo internally rather than widen its signature]. ListRuns/
-// listRunsByBranch (provider.go) already know the repo for every run they
-// return — via PRResolver — so they populate this store as a side effect;
-// GetLogs then looks the run up here before calling gh.
+// keyed by CI run ID, recording which repo owns that run. It was created so
+// GetLogs could resolve the repo gh's own `run view <id> --log --repo
+// <repo>` needs internally [operator ruling, Phillip, 2026-09-06, on
+// pg2-f327j: GetLogs must resolve repo internally rather than widen its
+// signature] — that ruling was reversed by CISchemaVersion's 2 -> 3 bump
+// (bead pg2-2j5ac.28.4): GetLogs now takes repo as a caller-supplied
+// argument (provider.go), so it no longer reads this store. ListRuns/
+// listRunsByBranch (provider.go) still populate it as a side effect (they
+// already know the repo for every run they return, via PRResolver), but
+// nothing reads it any more — it is inert, kept in place only for the
+// removals packet (blocked-by the packet that reversed this ruling) to
+// delete along with its writer.
 //
 // The scriptout wire protocol execs a NEW PROCESS per call ("one request,
 // one response, one process per call" — pkg/scriptout's own doc comment), so
@@ -139,10 +141,10 @@ func (s *RunStore) SetRepo(runID, repo string) error {
 }
 
 // GetRepo returns runID's owning repo. ok is false when this backend has
-// never recorded runID before — e.g. GetLogs called for a run whose PR was
-// never listed via ListRuns/"ci list" in this environment — which the
-// caller (GetLogs, provider.go) turns into its own clear, actionable
-// not_found-shaped error rather than a silent or confusing failure.
+// never recorded runID before. Nothing in this backend calls GetRepo any
+// more — GetLogs (provider.go) takes repo as a caller-supplied argument
+// since CISchemaVersion's 2 -> 3 bump — so this method is currently unused,
+// kept only until the removals packet deletes this store outright.
 func (s *RunStore) GetRepo(runID string) (repo string, ok bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

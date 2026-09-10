@@ -147,12 +147,23 @@ func newCiLogsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	// --repo: since CISchemaVersion's 2 -> 3 bump (bead pg2-2j5ac.28.4,
+	// reversing the 2026-09-06 operator ruling on pg2-f327j),
+	// ci.Provider.GetLogs takes repo as a caller-supplied argument rather
+	// than resolving it internally — the caller here is this CLI verb, so
+	// it must supply repo itself. This freedom-boundary choice (a flag,
+	// rather than requiring a prior "ci list" call to learn a run's
+	// CIRun.Repo) keeps "ci logs" a single, self-contained call; a caller
+	// that already has a CIRun from "ci list" passes its own Repo value
+	// through this flag.
+	var repo string
+	cmd.Flags().StringVar(&repo, "repo", "", "the run's owning repo (owner/name), supplied by the caller — e.g. from a prior \"ci list\" result's CIRun.Repo")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0]}, *backendFlag)
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0], "repo": repo}, *backendFlag)
 		return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
 	}
 	return cmd

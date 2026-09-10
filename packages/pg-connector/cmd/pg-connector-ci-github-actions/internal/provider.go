@@ -1,14 +1,18 @@
 // provider.go: Backend implements pkg/provider/ci.Provider against GitHub
 // Actions by carrying over
 // packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
-// RerunFailed GitHub calls, adapted to ci.Provider's id-only signatures and
-// schema.CIRun result type [contract: carry-over basis]. GetLogs' own gh
-// call is the one exception to "unchanged": it now passes `--repo`,
-// resolved via this backend's own run_id->repo store (run_store.go,
-// GetLogs' doc comment below) [operator ruling, Phillip, 2026-09-06, on
-// pg2-f327j]. Backend also implements pkg/provider.AuthChecker via the same
-// env-then-gh-auth-token chain the pg-connector-pr-github backend already
-// uses, since both are GitHub-backed (INV-AUTH-1).
+// RerunFailed GitHub calls, adapted to ci.Provider's schema.CIRun result
+// type [contract: carry-over basis]. GetLogs' own gh call is the one
+// exception to "unchanged": it now passes `--repo`, supplied directly by
+// the caller as GetLogs' own repo argument (CISchemaVersion 2 -> 3, bead
+// pg2-2j5ac.28.4) rather than resolved via this backend's own
+// run_id->repo store (run_store.go) — this reverses the 2026-09-06 operator
+// ruling on pg2-f327j that had kept GetLogs id-only. run_store.go itself is
+// left in place (still written by listRunsByBranch below) for the removals
+// packet blocked-by this one to delete; GetLogs no longer reads it. Backend
+// also implements pkg/provider.AuthChecker via the same env-then-gh-auth-
+// token chain the pg-connector-pr-github backend already uses, since both
+// are GitHub-backed (INV-AUTH-1).
 package internal
 
 import (
@@ -44,16 +48,17 @@ type ghRunner interface {
 // Backend is pg-connector-ci-github-actions's concrete ci.Provider
 // implementation. Every field on schema.CIRun is read straight from
 // GitHub, with no categorize/feedback_set-style write-back this capability
-// needs to persist (interfaces.md's op catalog) — but Backend is NOT
-// store-free: it keeps its own small backend-local store (run_store.go),
-// recording which repo owns each CI run ID, purely so GetLogs can resolve
-// the `--repo` gh's `run view --log` call needs without widening
-// ci.Provider's id-only signature [operator ruling, Phillip, 2026-09-06, on
-// pg2-f327j; supersedes this comment's and GetLogs' own prior "no local
-// store"/"no repo/PR context is needed" claims]. This is a backend-private
-// correlation cache, not an entity mirror or a cross-connector store —
-// same category as the sibling pg-connector-pr-github backend's own
-// store.go.
+// needs to persist (interfaces.md's op catalog). Backend still carries its
+// own small backend-local store (run_store.go), recording which repo owns
+// each CI run ID — listRunsByBranch below still populates it — but GetLogs
+// no longer reads it: since CISchemaVersion's 2 -> 3 bump (bead
+// pg2-2j5ac.28.4, reversing the 2026-09-06 operator ruling on pg2-f327j),
+// GetLogs takes repo as a caller-supplied argument instead. The store is
+// left in place, now write-only, for the removals packet (blocked-by this
+// one) to delete along with its writer. Prior to that removal this is a
+// backend-private correlation cache, not an entity mirror or a
+// cross-connector store — same category as the sibling
+// pg-connector-pr-github backend's own store.go.
 type Backend struct {
 	gh    ghRunner
 	pr    PRResolver
@@ -202,6 +207,7 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 	out := make([]schema.CIRun, 0, len(runs))
 	for _, r := range runs {
 		cr := r.toSchema(prID)
+		cr.Repo = repo
 		cr.AsOf = asOf.Format(time.RFC3339)
 		cr.Stale = false
 		if err := b.runs.SetRepo(cr.ID, repo); err != nil {
@@ -260,19 +266,17 @@ func (b *Backend) staleFallback(prID string, ghErr error) ([]schema.CIRun, bool)
 
 // GetLogs implements ci.Provider.GetLogs. Unlike ghactions.go's own
 // GetLogs (this packet's original carry-over basis), this now passes
-// `--repo` to gh — matching ListRuns/listRunsByBranch above — resolved via
-// this backend's own run_id->repo store (run_store.go) rather than by
-// widening GetLogs' id-only signature: gh/GitHub's REST API has no
-// repo-agnostic "look up a run by id" call (every run endpoint is scoped
-// under /repos/{owner}/{repo}/…), and ci.Provider.GetLogs stays id-only per
-// operator ruling [Phillip, 2026-09-06, on pg2-f327j; supersedes this
-// doc comment's prior "carried over unchanged... no repo/PR context is
-// needed or added" claim — the process-boundary change the port itself
-// introduced, cwd no longer guaranteed to be the target repo, is exactly
-// what made that claim stop holding]. A run ID this store has never seen —
-// e.g. GetLogs called for a run whose PR was never listed via ListRuns/
-// "ci list" in this environment — is a well-formed not_found, not a
-// silent or confusing failure.
+// `--repo` to gh — matching ListRuns/listRunsByBranch above — using the
+// repo argument the caller supplies directly, rather than resolving it via
+// this backend's own run_id->repo store (run_store.go): gh/GitHub's REST
+// API has no repo-agnostic "look up a run by id" call (every run endpoint
+// is scoped under /repos/{owner}/{repo}/…), so *some* repo source is still
+// required, but CISchemaVersion's 2 -> 3 bump (bead pg2-2j5ac.28.4)
+// reverses the 2026-09-06 operator ruling on pg2-f327j and moves that
+// source to the caller instead of a backend-local correlation store — the
+// caller already holds it (e.g. from a prior list_runs/ListRuns response's
+// own schema.CIRun.Repo). run_store.go is left in place, now unread by
+// GetLogs, for the removals packet (blocked-by this one) to delete.
 //
 // The final gh call also carries the "--" terminator fix [bead: pg2-uziwu],
 // mirroring the pg-connector-scm-git worktree add/remove fix [bead:
@@ -286,19 +290,12 @@ func (b *Backend) staleFallback(prID string, ghErr error) ([]schema.CIRun, bool)
 // positional), with runID as the sole caller-controlled positional after
 // it: "run", "view", "--log", "--repo", repo, "--", runID — flags first,
 // then the terminator, then the caller-controlled positional.
-func (b *Backend) GetLogs(ctx context.Context, runID string) ([]byte, error) {
+func (b *Backend) GetLogs(ctx context.Context, runID, repo string) ([]byte, error) {
 	if strings.TrimSpace(runID) == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-connector-ci-github-actions: run ID is required")
 	}
-	repo, ok, err := b.runs.GetRepo(runID)
-	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
-	}
-	if !ok {
-		return nil, scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf(
-			"pg-connector-ci-github-actions: run %s has no known repo in this environment — run \"ci list\" for its PR first",
-			runID,
-		))
+	if err := validateRepo(repo); err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
 	raw, err := b.gh.Run(ctx, "run", "view", "--log", "--repo", repo, "--", runID)
 	if err != nil {

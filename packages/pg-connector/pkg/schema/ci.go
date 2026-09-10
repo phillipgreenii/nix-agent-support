@@ -31,7 +31,15 @@ package schema
 // pg2-1q9c0, for adding the Tracker field) already established this
 // repo's precedent that ANY field-shape change bumps the version,
 // additive or not.
-const CISchemaVersion = 2
+//
+// Bumped 2 -> 3 by bead pg2-2j5ac.28.4, which added the Repo field below
+// and, in lockstep, widened ci.Provider.GetLogs to take repo as a
+// caller-supplied argument — reversing the 2026-09-06 operator ruling on
+// pg2-f327j that had kept GetLogs id-only and resolved repo internally via
+// a backend-local correlation store
+// (pg-connector-ci-github-actions/internal/run_store.go, left in place for
+// the removals packet blocked-by this one).
+const CISchemaVersion = 3
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by
@@ -47,6 +55,15 @@ type CIRun struct {
 	// HeadSHA is the commit SHA the run was triggered against, carried over
 	// as-is from packages/pg-pr/pkg/api.CIRun.HeadSHA.
 	HeadSHA string `json:"head_sha,omitempty"`
+
+	// Repo is this run's owning repo (owner/name form), added by
+	// CISchemaVersion's 2 -> 3 bump so a caller already holding a CIRun (e.g.
+	// from a prior list_runs/ListRuns response) can supply it straight to
+	// ci.Provider.GetLogs — the caller-supplied-repo replacement for the
+	// backend-local correlation store GetLogs used to consult. Not
+	// omitempty: like PRID below, a well-behaved provider always populates
+	// it for a run it returns.
+	Repo string `json:"repo"`
 
 	// PRID links this run to the PR it belongs to (interfaces.md's op catalog) — see this
 	// file's header comment for why it was added on top of api.CIRun's

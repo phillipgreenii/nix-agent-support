@@ -48,8 +48,18 @@ type Provider interface {
 	// returns Stale false with AsOf set to the read's own call time.
 	ListRuns(ctx context.Context, prID string) ([]schema.CIRun, error)
 
-	// GetLogs returns the raw log bytes for the CI run identified by runID.
-	GetLogs(ctx context.Context, runID string) ([]byte, error)
+	// GetLogs returns the raw log bytes for the CI run identified by runID,
+	// scoped to repo (owner/name form) — a caller-supplied argument since
+	// CISchemaVersion's 2 -> 3 bump (bead pg2-2j5ac.28.4), reversing
+	// the 2026-09-06 operator ruling on pg2-f327j that had kept GetLogs
+	// id-only and left every implementation to resolve repo internally (a
+	// backend-local correlation store, e.g. pg-connector-ci-github-actions's
+	// run_store.go). This is not an additive overload: a backend MUST NOT
+	// resolve repo internally any more. The caller (the umbrella's targeted-
+	// op dispatch, cmd/pg-connector/ci.go) supplies repo from a run it
+	// already holds, e.g. a prior list_runs/ListRuns response's own
+	// schema.CIRun.Repo.
+	GetLogs(ctx context.Context, runID, repo string) ([]byte, error)
 
 	// RerunFailed re-runs the failed portion of the CI run(s) for the PR
 	// identified by prID. Whether repeat calls are idempotent-safe on the

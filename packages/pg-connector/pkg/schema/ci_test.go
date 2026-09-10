@@ -14,6 +14,7 @@ func TestCIRun_JSONRoundTrip(t *testing.T) {
 		URL:        "https://example.invalid/owner/repo/actions/runs/1",
 		Provider:   "github-actions",
 		HeadSHA:    "deadbeef",
+		Repo:       "owner/repo",
 		PRID:       "pr-1",
 		AsOf:       "2026-09-09T00:00:00Z",
 		Stale:      false,
@@ -43,7 +44,7 @@ func TestCIRun_PRIDIsAlwaysPresentOnTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	want := `{"id":"run-1","name":"","status":"","conclusion":"","url":"","provider":"","pr_id":"pr-1","as_of":"","stale":false}`
+	want := `{"id":"run-1","name":"","status":"","conclusion":"","url":"","provider":"","repo":"","pr_id":"pr-1","as_of":"","stale":false}`
 	if string(raw) != want {
 		t.Fatalf("got %s, want %s", raw, want)
 	}

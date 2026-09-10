@@ -818,13 +818,18 @@ func TestContract_CIGithubActions_RealGH_ListLogsRerunFailed(t *testing.T) {
 	if len(outcome.Runs) == 0 {
 		// A genuinely nonexistent run id rounds-trips as not_found (exit 4)
 		// against real gh — exercising get_logs' real wiring without a real
-		// run to read logs from.
-		logs := runPGConnector(t, "", env, "ci", "logs", "999999999999")
+		// run to read logs from. --repo is still required (caller-supplied
+		// since CISchemaVersion 2 -> 3, bead pg2-2j5ac.28.4); this suite
+		// already knows repo from the caller-chosen id above.
+		logs := runPGConnector(t, "", env, "ci", "logs", "999999999999", "--repo", repo)
 		if logs.exitCode != 4 {
 			t.Fatalf("ci logs 999999999999: exit=%d, want 4 (not_found); stdout=%s", logs.exitCode, logs.stdout)
 		}
 	} else {
-		logs := runPGConnector(t, "", env, "ci", "logs", outcome.Runs[0].ID)
+		// Exercises the designed usage pattern end-to-end: the caller's
+		// --repo value comes from the CIRun.Repo a prior "ci list" already
+		// returned, not from this test's own `repo` variable.
+		logs := runPGConnector(t, "", env, "ci", "logs", outcome.Runs[0].ID, "--repo", outcome.Runs[0].Repo)
 		if logs.exitCode != 0 {
 			t.Fatalf("ci logs %s: exit=%d stderr=%s", outcome.Runs[0].ID, logs.exitCode, logs.stderr)
 		}

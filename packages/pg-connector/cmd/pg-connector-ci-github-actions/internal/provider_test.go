@@ -243,18 +243,15 @@ func TestListRuns_EmptyArray(t *testing.T) {
 }
 
 // TestGetLogs_ReturnsRawBytes is this packet's required test proving
-// GetLogs passes `--repo`, resolved via the run store, to gh's `run view
-// --log` [operator ruling, Phillip, 2026-09-06, on pg2-f327j] — the store
-// is pre-populated the way ListRuns itself would populate it.
+// GetLogs passes `--repo`, supplied directly by the caller (bead
+// pg2-2j5ac.28.4, CISchemaVersion 2 -> 3, reversing the 2026-09-06 operator
+// ruling on pg2-f327j that had resolved it via the run store instead), to
+// gh's `run view --log`.
 func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run view"] = []byte("log output here")
-	runs := newTestRunStore(t)
-	if err := runs.SetRepo("1001", "foo/bar"); err != nil {
-		t.Fatalf("SetRepo: %v", err)
-	}
-	p := NewWithDeps(gh, nil, runs)
-	raw, err := p.GetLogs(context.Background(), "1001")
+	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	raw, err := p.GetLogs(context.Background(), "1001", "foo/bar")
 	if err != nil {
 		t.Fatalf("GetLogs: %v", err)
 	}
@@ -279,13 +276,9 @@ func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 // ".../actions/runs/--repo" as the literal (nonexistent) run id.
 func TestGetLogs_RunIDLooksLikeGHFlag(t *testing.T) {
 	gh := newFakeGH()
-	runs := newTestRunStore(t)
-	if err := runs.SetRepo("--repo", "foo/bar"); err != nil {
-		t.Fatalf("SetRepo: %v", err)
-	}
-	p := NewWithDeps(gh, nil, runs)
+	p := NewWithDeps(gh, nil, newTestRunStore(t))
 
-	if _, err := p.GetLogs(context.Background(), "--repo"); err != nil {
+	if _, err := p.GetLogs(context.Background(), "--repo", "foo/bar"); err != nil {
 		t.Fatalf("GetLogs: %v", err)
 	}
 	last := gh.calls[len(gh.calls)-1]
@@ -296,12 +289,30 @@ func TestGetLogs_RunIDLooksLikeGHFlag(t *testing.T) {
 
 func TestGetLogs_ValidatesEmpty(t *testing.T) {
 	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
-	_, err := p.GetLogs(context.Background(), "")
+	_, err := p.GetLogs(context.Background(), "", "foo/bar")
 	if err == nil {
 		t.Fatalf("expected error for empty run id")
 	}
 	// An empty required field is the CALLER's mistake, not this backend
 	// being unhealthy (INV-ERR-2; bug pg2-r9iok).
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+// TestGetLogs_ValidatesEmptyRepo is this packet's required test for the
+// reversed contract: since repo is now a caller-supplied argument rather
+// than resolved internally, an empty or malformed repo is the caller's
+// mistake (ErrInvalidArgument), exactly like an empty run id above — never
+// a not_found (that taxonomy belonged to the old "unknown run in the
+// store" case, which no longer exists now that GetLogs never consults
+// run_store.go).
+func TestGetLogs_ValidatesEmptyRepo(t *testing.T) {
+	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
+	_, err := p.GetLogs(context.Background(), "1001", "")
+	if err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
@@ -316,13 +327,9 @@ func TestGetLogs_ValidatesEmpty(t *testing.T) {
 func TestGetLogs_NonexistentRun_NotFound(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["run view"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs/999999999999?exclude_pull_requests=true)")
-	runs := newTestRunStore(t)
-	if err := runs.SetRepo("999999999999", "foo/bar"); err != nil {
-		t.Fatalf("SetRepo: %v", err)
-	}
-	p := NewWithDeps(gh, nil, runs)
+	p := NewWithDeps(gh, nil, newTestRunStore(t))
 
-	_, err := p.GetLogs(context.Background(), "999999999999")
+	_, err := p.GetLogs(context.Background(), "999999999999", "foo/bar")
 	if !errors.Is(err, scriptout.ErrNotFound) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
@@ -339,13 +346,9 @@ func TestGetLogs_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 	gh := newFakeGH()
 	wantErr := errors.New(`run view: exec: "gh": executable file not found in $PATH`)
 	gh.errs["run view"] = wantErr
-	runs := newTestRunStore(t)
-	if err := runs.SetRepo("1001", "foo/bar"); err != nil {
-		t.Fatalf("SetRepo: %v", err)
-	}
-	p := NewWithDeps(gh, nil, runs)
+	p := NewWithDeps(gh, nil, newTestRunStore(t))
 
-	_, err := p.GetLogs(context.Background(), "1001")
+	_, err := p.GetLogs(context.Background(), "1001", "foo/bar")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want errors.Is(err, wantErr)", err)
 	}
@@ -354,27 +357,11 @@ func TestGetLogs_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 	}
 }
 
-// TestGetLogs_UnknownRunReturnsNotFound is this packet's required test for
-// the missing-mapping case the operator ruling calls out explicitly: a run
-// ID this backend's store has never seen (e.g. GetLogs called without ever
-// running ListRuns/"ci list" against its PR in this environment) MUST be a
-// clear, actionable not_found — never a silent or confusing failure.
-func TestGetLogs_UnknownRunReturnsNotFound(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
-	_, err := p.GetLogs(context.Background(), "9999")
-	if err == nil {
-		t.Fatal("expected error for a run ID with no known repo")
-	}
-	if !errors.Is(err, scriptout.ErrNotFound) {
-		t.Errorf("expected scriptout.ErrNotFound, got %v", err)
-	}
-}
-
-// TestListRuns_PersistsRunRepoMapping is this packet's required test
-// proving ListRuns' repo resolution (via PRResolver) is recorded into the
-// run store for every run it returns, so a later GetLogs call for one of
-// those run IDs can resolve `--repo` [operator ruling, Phillip, 2026-09-06,
-// on pg2-f327j].
+// TestListRuns_PersistsRunRepoMapping proves ListRuns' repo resolution (via
+// PRResolver) is still recorded into the run store for every run it
+// returns, even though GetLogs (provider.go) no longer reads it — the
+// store's writer stays live until the removals packet (blocked-by this
+// one) deletes it along with the store itself.
 func TestListRuns_PersistsRunRepoMapping(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
@@ -395,26 +382,26 @@ func TestListRuns_PersistsRunRepoMapping(t *testing.T) {
 	}
 }
 
-// TestGetLogs_UsesRepoRecordedByListRuns is this packet's required
-// end-to-end test: ListRuns' own repo resolution is what makes a
-// subsequent GetLogs call for one of its run IDs succeed, with no separate
-// repo input to GetLogs itself.
-func TestGetLogs_UsesRepoRecordedByListRuns(t *testing.T) {
+// TestListRuns_PopulatesCIRunRepo is this packet's required test proving
+// every schema.CIRun ListRuns returns also carries its own Repo field
+// (CISchemaVersion 2 -> 3, bead pg2-2j5ac.28.4) — the value a caller is
+// expected to pass straight through to a later GetLogs call.
+func TestListRuns_PopulatesCIRunRepo(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	gh.responses["run view"] = []byte("log bytes")
-	runs := newTestRunStore(t)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, runs)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
 
-	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
+	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
-	if _, err := p.GetLogs(context.Background(), "1001"); err != nil {
-		t.Fatalf("GetLogs: %v", err)
+	if len(runs) == 0 {
+		t.Fatal("expected at least one run")
 	}
-	last := gh.calls[len(gh.calls)-1]
-	if !strings.Contains(strings.Join(last, " "), "--repo foo/bar") {
-		t.Fatalf("expected --repo foo/bar in run view call: %v", last)
+	for _, r := range runs {
+		if r.Repo != "foo/bar" {
+			t.Errorf("run %s Repo = %q, want %q", r.ID, r.Repo, "foo/bar")
+		}
 	}
 }
 

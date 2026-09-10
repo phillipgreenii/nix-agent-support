@@ -176,6 +176,36 @@ func TestRun_CiLogs_Success(t *testing.T) {
 	}
 }
 
+// TestRun_CiLogs_RepoFlag_ThreadsToBackendArgs is this packet's required
+// test proving "ci logs"'s new --repo flag (CISchemaVersion 2 -> 3, bead
+// pg2-2j5ac.28.4) actually reaches the backend's get_logs args, rather
+// than being accepted and silently dropped.
+func TestRun_CiLogs_RepoFlag_ThreadsToBackendArgs(t *testing.T) {
+	writeEchoFakeBackend(t, "backend-ci-logs-repo-echo")
+	writeCiConfigFor(t, "backend-ci-logs-repo-echo")
+
+	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1", "--repo", "foo/bar"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var echoed struct {
+		Args struct {
+			RunID string `json:"run_id"`
+			Repo  string `json:"repo"`
+		} `json:"args"`
+	}
+	if err := scriptout.Decode(resp.Result, &echoed); err != nil {
+		t.Fatalf("decode echoed request: %v", err)
+	}
+	if echoed.Args.RunID != "run-1" || echoed.Args.Repo != "foo/bar" {
+		t.Fatalf("echoed args = %+v, want run_id=run-1 repo=foo/bar", echoed.Args)
+	}
+}
+
 func TestRun_CiLogs_NotFound_Exit4(t *testing.T) {
 	// A not_found response (e.g. the run id no longer exists) is a
 	// well-formed negative answer under the targeted-op scheme (CLI exit
