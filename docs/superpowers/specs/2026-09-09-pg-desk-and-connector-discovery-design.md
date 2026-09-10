@@ -371,6 +371,8 @@ module also installs `pg-connector-issue-jira`, which it and the ZR package list
 
 **Acceptance criteria**
 
+All items are phase 7 except the `thread` items, which land in phase 13 with the Slack backend.
+
 - Every `pr`, `issue`, and `thread` backend's `capabilities` lists `list`; a conformance golden
   exercises `list` with `cursor: null`, `list` with an unrecognized name, `list` with a list-valued
   query, and, for a backend declaring incremental support, `list` with a cursor it previously
@@ -391,7 +393,8 @@ module also installs `pg-connector-issue-jira`, which it and the ZR package list
 - `pr files` and `pr commits` ship; `commits` carries author logins.
 - The `pg-connector` home-manager module renders the complete shared config from options; the ZR
   machine config no longer writes the file directly; pr-pool's rendered query names are asserted
-  against the rendered backend blocks at evaluation time.
+  against the rendered backend blocks at evaluation time, an assertion that ships in phase 8 with
+  the first named-query stanzas, because in phase 7 no stanza references one.
 - pg-connector's behavior set amends `INV-REG-2` (multi-backend targeted ops), which `--backend`
   and the design of record's section 4.13 supersede.
 
@@ -549,16 +552,16 @@ binary in this repo at `packages/pr-pool-source-pg-connector`. It knows exactly 
 pg-connector's `changes`/`list` envelopes and pr-pool's command-query item array, and holds no
 state. Three subcommands, each printing one JSON array in pr-pool's `rawItem` shape:
 
-- `pr-pool-source-pg-connector changes <type> <query> --consumer <id>` runs `pg-connector <type>
+- `pr-pool-source-pg-connector changes <type> <query> --consumer <id> [--beads-dir <path>]` runs `pg-connector <type>
 changes --query <query> --consumer <id> --output json` and prints one item per change:
   `{"id": <entity id>, "type": <type>, "title": <entity title or id>, "metadata": {"change":
 "added|changed|removed", "source": <backend>, "degraded_sources": [...]}}`. It exits 0 on a complete
   or degraded pg-connector outcome (degraded backends are named in every item's metadata) and
   non-zero only on total failure or `invalid_argument`, so pr-pool records a source error rather
   than an empty result.
-- `pr-pool-source-pg-connector sweep <type> <query>...` runs `list --ids-only` for each named query,
+- `pr-pool-source-pg-connector sweep <type> <query>... [--beads-dir <path>]` runs `list --ids-only` for each named query,
   unions the ids, and prints items with `metadata.change = "sweep"`.
-- `pr-pool-source-pg-connector list <type> <query> --backend <binary> [--title-prefix <p>] [--issue-type <t>]`
+- `pr-pool-source-pg-connector list <type> <query> --backend <binary> [--beads-dir <path>] [--title-prefix <p>] [--issue-type <t>]`
   runs a full `list` and prints one item per entity with `type` set to the entity's own issue type
   and `metadata` set to the entity's `metadata` map, after applying the two post-filters today's
   `jq` pipelines apply (title prefix and issue type), because `bd ready` cannot filter on title.
@@ -567,8 +570,8 @@ changes --query <query> --consumer <id> --output json` and prints one item per c
 
 Every adapter invocation that reaches the beads backend MUST carry that backend's workspace
 variable (`PG_CONNECTOR_ISSUE_BEADS_DIR`, fallback `BEADS_DIR`), the same rule section 7.3 gives
-`pg-desk`: pr-pool pins the variable only for ccpool roles, and a command query inherits pr-pool's
-own environment. The adapter takes `--beads-dir <path>` and exports the variable for its
+`pg-desk`: pr-pool pins only `BEADS_DIR`, and only for ccpool roles, and a command query inherits
+pr-pool's own environment. The adapter takes `--beads-dir <path>` and exports the variable for its
 `pg-connector` child; the ZR stanzas pass the workspace pr-pool itself runs against, rendered by
 nix (`BEADS-DIR` below).
 
@@ -622,7 +625,7 @@ and the three existing bead sources rewritten to the adapter's `list`: `feedback
 `--title-prefix "review-pr: " --issue-type task`. They emit the same event types they emit today,
 so no ccpool role changes. Roles: `desk-pr`, `desk-issue`, `desk-thread`, `desk-heartbeat`. The
 `issue-beads-work` feed is what replaces `pg-pr changes`: a bead closing re-runs interpretation for
-its PR. The heartbeat exists because a change feed emits nothing when nothing changes, and the
+its PR; its stanza carries `--beads-dir` like the three bead sources. The heartbeat exists because a change feed emits nothing when nothing changes, and the
 dashboard's freshness bound (section 7.7) needs proof that the scheduler is alive; `heartbeat-item`
 prints an item whose id is the current RFC3339 timestamp, because the queue de-duplicates a
 repeated id while it is retained. Periods are the operator's to tune.
@@ -701,6 +704,8 @@ daemonized pr-pool would otherwise run these live reads every ten seconds.
   and issue-type filters, and a test that its item output decodes through pr-pool's own `rawItem`
   type and selects exactly the beads today's three `jq` pipelines select for a fixture `bd ready`
   result.
+- The adapter exports `PG_CONNECTOR_ISSUE_BEADS_DIR` to its `pg-connector` child when `--beads-dir`
+  is given, proven by the wire double recording the child's environment.
 
 ## 7. pg-desk
 
@@ -953,11 +958,13 @@ Human and agent annotations survive every pipeline run by construction: no stage
   the latter records an override in `annotation`, attributed to the caller (`--actor`, default the
   configured actor). This is the write path the rewritten process-feedback skill uses, replacing
   `pg-pr feedback disposition`.
-- `pg-desk show <pr> [--refresh]`: prints the store's interpretation for one PR with its `as_of`;
+- `pg-desk show <pr> [--refresh]`: prints the store's interpretation for one PR with its `as_of`
+  and, in `plan` mode, the planned sync writes for that PR;
   `--refresh` runs the pipeline for that id first. Replaces `pg-pr pr view`'s enrichment display
   and `pg-pr sync --pr N` as the manual re-check.
 - `pg-desk status`: store path and schema version, entity and interpretation counts, last
-  heartbeat, run, and sweep, degraded rows, sync errors, and `pg-connector ledger show` for the
+  heartbeat, run, and sweep, degraded rows, sync errors, planned sync rows by kind when
+  `sync.mode` is `plan`, and `pg-connector ledger show` for the
   configured consumer.
 - `pg-desk doctor`: config resolves; `pg-connector` on PATH and `config validate` passes; every
   configured query name recognized by some backend; `serve` reachable; the stranded-cycle report
@@ -967,8 +974,8 @@ Human and agent annotations survive every pipeline run by construction: no stage
 - `pg-desk import-pg-pr-annotations --store <pg-pr store.db>`: one-shot cutover tool copying the
   `pull_request` columns `user_hidden`, `user_hidden_reason`, and `wip` into `annotation`. It MUST
   run before the first sweep so hidden PRs do not flash onto the board. It is the first step of the
-  phase 11 flip, and because it is idempotent it MAY also run during the phase 9 soak so the soak
-  board hides what pg-pr hides.
+  phase 11 flip, and because it is idempotent it MAY also run at the phase 9 checkpoint or during
+  the phase 10 soak so the soak board hides what pg-pr hides.
 
 ### 7.8 Configuration
 
@@ -1168,12 +1175,14 @@ retiring command groups and still leaves the file.
   and the new `degraded`/`sync_error`/`ready_to_promote` columns; its URLs are unchanged because
   port 9818 is kept. The `pg-pr-dashboard-json-shape` flake check is repointed at `pg-desk`'s
   payload golden. The Ops board `pg-pr-ops.json` and the Prometheus service's
-  `testdata/pgpr-baseline.yml` are removed. The `dashboards.pgPr` option is renamed or documented as
-  pg-desk's.
+  `testdata/pgpr-baseline.yml` are removed. The `dashboards.pgPr` option is documented as pg-desk's,
+  not renamed, because the soak-off assertion references it by name.
 - ZR repo, by phase. Phase 7 moves the pg-pr config block into the pg-connector module's
   `extraConfig`, removes the four Phase 3 stanzas and `df-categorize`/`df-feedback` from
-  `modules/daily-focus`, adds `pg-connector-issue-jira` to the package list, and lands the Captain's
-  Log fix paired with the `CIRun` bump (section 4.5). Phase 8 rewrites the three bead-source
+  `modules/daily-focus`, adds `pg-connector-issue-jira` to the package list, lands the Captain's
+  Log fix paired with the `CIRun` bump (section 4.5), and rewrites
+  `claude-marketplace/daily-focus/commands/close.md`'s `pr view` to `pg-connector pr show` (PR
+  facts, D20). Phase 8 rewrites the three bead-source
   stanzas to the adapter and adds it to the package list (section 6.1). Phase 9 enables
   `services.pg-desk-serve` behind the soak option, renders pg-desk config, adds `pg-desk` to the
   package list, and rewrites the `pg-desk show` group of `pr view` sites (D20), the ones that read
@@ -1181,24 +1190,30 @@ retiring command groups and still leaves the file.
   call survives) and its bats test, `claude-marketplace/zr-refactor/commands/status.md`, and
   `claude-marketplace/zr-refactor/skills/zr-refactor/SKILL.md`. Phase 10 rewrites
   `modules/zm/default.nix`'s remaining queries and roles, sets `[pool].self_login`, and enables
-  `programs.pr-pool.daemon`. Phase 11 is the flip: turn the soak option off, run
-  `import-pg-pr-annotations`, set `sync.mode: apply`, and disable `darwin/services/pg-pr-sync`.
+  `programs.pr-pool.daemon`. Phase 11 is the flip, in this order: run
+  `import-pg-pr-annotations`, set `sync.mode: apply`, disable `darwin/services/pg-pr-sync`, then
+  turn the soak option off, because turning it off first would collide with pg-pr on 9818.
   Phase 12 deletes `darwin/services/pg-pr-sync` including its fingerprint-poll alert rule and
   rewrites every remaining ZR call site of a RETIRING verb: `rc-publish.sh`'s `pr list`,
   `claude-marketplace/zr-refactor/commands/{work,retire}.md`,
-  `claude-marketplace/daily-focus/commands/close.md` (`pr view` for PR facts, D20), the `pg-pr`
-  permission entries in `modules/claude-code/settings.local.json`, and the agent memory files that
-  teach draft promotion, `pg-pr pr wip`, and the pg-pr daemon feedback workflow (four files).
+  the `pg-pr` permission entries in `modules/claude-code/settings.local.json`, and the agent memory
+  files that teach draft promotion and `pg-pr pr wip`; a memory file that teaches `pg-pr sync` or
+  the daemon feedback workflow is rewritten in phase 9 with the agent-support `sync` sites (four
+  memory files in all).
   `pg-pr` STAYS in the ZR package list through phase 12, because its surviving verbs have no other
   implementation yet; it leaves with the module under the removal criterion.
 - agent-support call sites, by phase (D20 and the design of record's section 9.3 sequencing rule).
   Phase 7, once `PR` v3 and `pr files`/`pr commits` ship: the PR-facts group moves to
   `pg-connector pr show|files|commits`: `pg-pr-workflow`'s discover line, `checkout-pr`,
-  `lib/pr-generation-shared.md`, and the review agents `pg-pr-review-jira-alignment` and
-  `pg-pr-review-pr-structure`; the checkpoint is a review orchestrator run on the rewritten agents.
-  Phase 9: `check-my-pr`'s `pr view` moves to `pg-desk show`, since it reads approvals and state.
-  Phase 12, retiring verbs only: `check-my-pr`'s `sync`, `pg-pr-workflow`'s `sync` and `pr wip`,
-  `pg-pr-write-pr-description`'s `pr wip`, `pg-pr-watch-my-prs`'s `sync`, all of
+  `lib/pr-generation-shared.md`, `check-my-pr`'s `pr view` (it reads number, state, and author), and
+  the review agents `pg-pr-review-jira-alignment`, `pg-pr-review-pr-structure`, and
+  `pg-pr-review-code-changes` (`pr files`); the checkpoint is a review orchestrator run on the
+  rewritten agents. Phase 9, once `pg-desk show --refresh` ships: the bead-writing `sync` sites,
+  `check-my-pr`'s `sync --pr`, `pg-pr-workflow`'s `sync` line, and `pg-pr-watch-my-prs`'s `sync`,
+  move to `pg-desk show --refresh` (the design of record's section 9.1 mapping), so that no skill
+  instructs a second bead writer when phase 11 sets `sync.mode: apply`. Phase 12, retiring verbs
+  only: `pg-pr-workflow`'s `pr wip`, `pr ready`, `pr hide`, and `pr unhide`,
+  `pg-pr-write-pr-description`'s `pr wip`, all of
   `pg-pr-process-feedback`, and the `pr list` call in
   `claude-marketplace/integrate-branch/skills/pull-request/SKILL.md`. Sites that use only surviving
   verbs (`pg-pr-review-team-pr`, the `pr create`/`update`/`merge`/`automerge` calls) wait for the
@@ -1220,8 +1235,9 @@ retiring command groups and still leaves the file.
 - ZR evaluation fails when `soak.enable` is false and `services.pg-desk-serve`'s port differs from
   `dashboards.pgPr.port`; with `soak.enable` true the temporary board is rendered and points at the
   soak port.
-- At the end of phase 9, a grep for `pg-pr pr view`, `pr files`, and `pr commits` across both
-  repositories finds only the phase 12 sites named above.
+- At the end of phase 9, a grep for `pg-pr pr view`, `pr files`, `pr commits`, and `pg-pr sync`
+  across both repositories' skills, commands, agents, scripts, and memory files finds only
+  `pg-pr-process-feedback` and the `settings.local.json` permission entries, both phase 12.
 
 ### 9.5 Phases
 
@@ -1235,24 +1251,25 @@ pause. Two properties make the slicing cheap: gather degrades by design when an 
 a cursorless backend (section 5.2), so the GitHub fingerprint cursor trails the ledger. Removals
 are their own packet inside phase 7, so the additive contract packets land and are checked first.
 
-| Phase | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Checkpoint                                                                                                                                                                                                                                                                                                                                                                 | Depends on |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 7     | Design-of-record amendments (first packet); `backends:` block and wire `config`, `--backend`, `query_not_recognized`, `config validate` and `config show --queries`, the pg-connector nix module owning the shared config; `list` with `cursor: null` in the pr-github, issue-beads, and issue-jira backends; the umbrella `list` verb; `PR` v3 and `Issue` v4; `CIRun` v3 paired with the Captain's Log fix; `pr files` and `pr commits`; issue capability widening (`update`, `close`, `deps`, `create --metadata` and `--parent`); the removals packet (two `pr` ops, three backend-local stores, four Phase 3 stanzas, `df-categorize` and `df-feedback`); the PR-facts call-site group (D20) | `pg-connector pr list --query team` returns the same PR id set as `pg-pr pr list`; `issue list --query feedback-ready` matches today's `bd ready` plus `jq` pipeline; `issue deps --full` on a known bead chain; `pg-pr config show`, `df-attention`, and `df-search` still work after the module renders the config; the review orchestrator runs on the rewritten agents | 5          |
-| 8     | Delta ledger, `changes`, consumer cursors, `--reset`, `ledger show` and `ledger clear`, eviction; then the pr-github fingerprint cursor as a follow-on packet; `pr-pool-source-pg-connector` with `--beads-dir`; the three ZR bead-source stanzas rewritten to the adapter; pg-connector behavior docs updated                                                                                                                                                                                                                                                                                                                                                                                    | Two `changes` calls show every PR as `added` then nothing; push to a PR; the third call shows exactly that PR as `changed`; `ledger show` prints the stored cursor after the follow-on; the adapter's items diff empty against the `jq` pipelines after scalar-type normalization; a manual `pr-pool drain` dispatches the same beads to the same roles                    | 7          |
-| 9     | `pg-desk` (behavior docs first): store, gather, `show`, `status`; interpret, `serve` behind the ZR soak option on the soak port, `open`, `hide`, `unhide`, `wip`, `feedback list` and `feedback set`, `doctor`, `import-pg-pr-annotations`; nix module and ZR config; the temporary soak board and the My Work JSON additions; the `pg-desk show` call-site group (D20)                                                                                                                                                                                                                                                                                                                           | `pg-desk run pr X` then `pg-desk show X` matches `gh pr view`; the five panels diffed between the soak port and 9818 differ only by hidden rows and new fields; `pg-desk open --print` matches `pg-pr open --print`; `rc-publish.sh` passes against a `pg-pr` stub rejecting `pr view` and `pr wip`                                                                        | 8          |
-| 10    | `sync.mode` with `plan`; pr-pool change-feed queries, sweep, heartbeat, and desk roles in ZR config, run by hand with `pr-pool drain`; `[pool].self_login`; `daemon.enable` (`pg2-ynhr.9` re-scoped) as the last packet; first soak                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `plan` against the live tracker adopts every bead `pg-pr sync` minted and creates nothing; a manual `pr-pool drain` fires `pg-desk run` per change and `status` shows the last run advancing; stopping the daemon flips `stale` within two heartbeat periods; the soak board and My Work agree for one working day, operator-tuned                                         | 9          |
-| 11    | The cutover flip, reversible step by step: `import-pg-pr-annotations`, `sync.mode: apply`, `pg-pr-sync` disabled, the soak option off (serve on 9818, temporary board gone), `pr-pool reconcile` no longer run by hand; second soak                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Beads minted over the soak match plan mode's predictions; the Grafana JSON's seven URLs are byte-identical and the repointed flake check passes; activity-collector's daily summary still lists PR beads; `check-my-pr` and `pg-pr-work-bead` work against a pg-desk-minted anchor; one working day, operator-tuned                                                        | 10         |
-| 12    | Deletions: `pg-pr` `sync`, `changes`, `open`, dashboard, `migrate`, `pr hide`, `unhide`, `wip`, `list`, `view`, `ready`, and `create --wip`; the ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback; `darwin/services/pg-pr-sync` and its alert rule; the Ops board and Prometheus baseline; every remaining retiring-verb call site in section 9.4; the process-feedback skill rewritten; pr-pool behavior-doc gap rows closed                                                                                                                                                                                                                                           | The retiring-verb grep returns zero hits in both repositories; `store.db` still exists                                                                                                                                                                                                                                                                                     | 11         |
-| 13    | Jira and Slack sources: the `issue-jira` cursor round trip, `Thread` v1 and `pg-connector-thread-slack`, `pg-desk` issue and thread pipelines, cross-references, layered urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | `pg-desk run issue` and `run thread` write `xref` rows and re-interpret linked PRs without writing beads                                                                                                                                                                                                                                                                   | 9          |
-| 14    | Umbrella entity cache: stale fallback for every type, `list` and `show` from cache, tombstones, opt-outs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | A backend answering `unavailable` is served from cache with `Stale: true` and the cached `AsOf`                                                                                                                                                                                                                                                                            | 8          |
-| 15    | Focus: daily-focus store-first per D19, designed in its own document; `df-survey` and `df-wire` retire into the interpreter; `df-pull` becomes reconcile-more                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Defined by that document                                                                                                                                                                                                                                                                                                                                                   | 13         |
+| Phase | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Checkpoint                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Depends on |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 7     | Design-of-record amendments (first packet); `backends:` block and wire `config`, `--backend`, `query_not_recognized`, `config validate` and `config show --queries`, the pg-connector nix module owning the shared config; `list` with `cursor: null` in the pr-github, issue-beads, and issue-jira backends; the umbrella `list` verb; `rate_reserve_points` and the `unavailable` answer in pr-github; `PR` v3 and `Issue` v4; `CIRun` v3 paired with the Captain's Log fix; `pr files` and `pr commits`; issue capability widening (`update`, `close`, `deps`, `create --metadata` and `--parent`); the removals packet (two `pr` ops, three backend-local stores, four Phase 3 stanzas, `df-categorize` and `df-feedback`); the PR-facts call-site group (D20); pg-connector behavior docs for `list`, `query_not_recognized`, `--backend`, and statelessness (`INV-REG-2`) | `pg-connector pr list --query team` returns the same PR id set as `pg-pr pr list`; `issue list --query feedback-ready`, narrowed by hand to the `process-feedback:` title prefix, matches today's `bd ready` plus `jq` pipeline; `issue deps --full` on a known bead chain; `pg-pr config show`, `df-attention`, and `df-search` still work after the module renders the config; the review orchestrator runs on the rewritten agents; `pg-connector pr categorize` answers `unknown_op`, ZR's `pr-pool config --show` lists no `categorize-*` or `feedback-pr` query, and no backend writes under `XDG_STATE_HOME` | 5          |
+| 8     | Delta ledger, `changes`, consumer cursors, `--reset`, `ledger show` and `ledger clear`, eviction; then the pr-github fingerprint cursor as a follow-on packet; `pr-pool-source-pg-connector` with `--beads-dir`; the three ZR bead-source stanzas rewritten to the adapter, with the evaluation-time query-name assertion (section 4.8); behavior docs for `changes` and the ledger                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Two `changes` calls show every PR as `added` then nothing; push to a PR; the third call shows exactly that PR as `changed`; `ledger show` prints the stored cursor after the follow-on; the adapter's items diff empty against the `jq` pipelines after scalar-type normalization; a manual `pr-pool drain` dispatches the same beads to the same roles                                                                                                                                                                                                                                                             | 7          |
+| 9     | `pg-desk` (behavior docs first): store, gather, `show`, `status`, `heartbeat` and `heartbeat-item`; interpret, `serve` behind the ZR soak option on the soak port, `open`, `hide`, `unhide`, `wip`, `feedback list` and `feedback set`, `doctor`, `import-pg-pr-annotations`; nix module and ZR config; the temporary soak board, the My Work JSON additions, and the `pg-pr-dashboard-json-shape` check repointed at `pg-desk`'s golden; the `pg-desk show` and `sync --pr` call-site groups (D20)                                                                                                                                                                                                                                                                                                                                                                             | After `pg-connector pr list --query team --ids-only` piped to `pg-desk run pr` per id and one `pg-desk heartbeat`, the five panels diffed between the soak port and 9818 differ only by hidden rows, new fields, and the freshness root fields; `pg-desk open --print` matches `pg-pr open --print`; `rc-publish.sh` passes against a `pg-pr` stub rejecting `pr view` and `pr wip`; the repointed flake check passes                                                                                                                                                                                               | 8          |
+| 10    | `sync.mode` with `plan`; the `pr-mine`, `pr-team`, and `issue-beads-work` change feeds, `pr-sweep`, `desk-heartbeat`, and the `desk-pr`, `desk-issue`, and `desk-heartbeat` roles in ZR config, run by hand with `pr-pool drain`; `pg-desk run issue` for the beads backend, re-interpreting the PRs a bead links to by metadata or title key; `[pool].self_login`; `daemon.enable` (`pg2-ynhr.9` re-scoped) as the last packet, carrying a dependency edge on the phase 7 removals-packet bead; first soak                                                                                                                                                                                                                                                                                                                                                                     | `plan` against the live tracker adopts every bead `pg-pr sync` minted and creates nothing; a manual `pr-pool drain` fires `pg-desk run` per change and `status` shows the last run advancing; a bead closing re-runs interpretation for its PR; stopping the daemon flips `stale` within two heartbeat periods; the soak board and My Work agree for one working day, operator-tuned                                                                                                                                                                                                                                | 9          |
+| 11    | The cutover flip, reversible step by step and in this order: `import-pg-pr-annotations`, `sync.mode: apply`, `pg-pr-sync` disabled, the soak option off (serve on 9818, temporary board gone), `pr-pool reconcile` no longer run by hand; precondition: a grep across both repositories' skills, commands, agents, scripts, and memory files finds no instruction to run `pg-pr sync`; second soak                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Beads minted over the soak match plan mode's predictions; the Grafana JSON's seven URLs are byte-identical; activity-collector's daily summary still lists PR beads; `check-my-pr` and `pg-pr-work-bead` work against a pg-desk-minted anchor; one working day, operator-tuned                                                                                                                                                                                                                                                                                                                                      | 10         |
+| 12    | Deletions: `pg-pr` `sync`, `changes`, `open`, dashboard, `migrate`, `pr hide`, `unhide`, `wip`, `list`, `view`, `ready`, and `create --wip`; the ACL half of `reconcile`, `prpoolacl`, and the `pg-pr config show` fallback; `darwin/services/pg-pr-sync` and its alert rule; the Ops board and Prometheus baseline; every remaining retiring-verb call site in section 9.4; the process-feedback skill rewritten; pr-pool behavior-doc gap rows closed                                                                                                                                                                                                                                                                                                                                                                                                                         | The retiring-verb grep returns zero hits in both repositories; `store.db` still exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 11         |
+| 13    | Jira and Slack sources: the `issue-jira` cursor round trip, the `issue-jira-mine` and `thread-me` feeds and the `desk-thread` role, `Thread` v1 and `pg-connector-thread-slack`, `pg-desk run issue` for Jira and `run thread`, ticket-key and permalink cross-references, layered urgency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `pg-desk run issue` and `run thread` write `xref` rows and re-interpret linked PRs without writing beads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 10         |
+| 14    | Umbrella entity cache: stale fallback for every type, `list` and `show` from cache, tombstones, opt-outs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | A backend answering `unavailable` is served from cache with `Stale: true` and the cached `AsOf`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 8          |
+| 15    | Focus: daily-focus store-first per D19, designed in its own document; `df-survey` and `df-wire` retire into the interpreter; `df-pull` becomes reconcile-more                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Defined by that document                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 13         |
 
 Behavior-docs updates land in the phase that changes the behavior, per this repo's rule; the
 `pg-desk` set is its own first packet in phase 9. Draft promotion returns as a sync step in
 whichever future phase ships `pg-connector pr ready` and `pr draft`. Each soak is written as one
 working day and is a placeholder the operator tunes during testing (D16). The phase 11 flip and
-the phase 7 removals packet are each filed as their own bead when their phase is decomposed, so
-neither depends on a person remembering it.
+the phase 7 removals packet are each filed as their own bead when their phase is decomposed, and
+the phase 8 root bead and the phase 10 `daemon.enable` bead MUST each carry a dependency edge on
+the removals-packet bead, so removals-before-daemon is graph state rather than prose.
 
 ### 9.6 Removal criterion changes
 
@@ -1336,11 +1353,12 @@ Revision 2 incorporated them, with operator rulings D13 through D15 deciding thr
 subagent then verified revision 2 against the finding list and the code and reported 22 residual
 defects, four of them major: the adapter could not reproduce the title-prefix filters, the
 feedback-child row described beads pg-pr never mints, the review-request rule had been narrowed
-away from the ACL it claimed to port, and the phase 10 call-site list was incomplete. Revision 3
+away from the ACL it claimed to port, and the cutover phase's call-site list (revision 3's phase
+10, now phases 11 and 12) was incomplete. Revision 3
 incorporates all 22. The reviews' own texts are in the session transcript, not in this repository.
 
-Revision 3 was re-verified: 21 of 22 fixed, one partial, and one new major (phase 10 over-scoped
-past pg-pr's surviving verbs), fixed in revision 4. Revision 5 followed the build-ordering
+Revision 3 was re-verified: 21 of 22 fixed, one partial, and one new major (revision 3's phase 10,
+the cutover, over-scoped past pg-pr's surviving verbs), fixed in revision 4. Revision 5 followed the build-ordering
 discussion with the operator in the continuation session (`pg2-rfvgl`, 2026-09-09), rulings D16
 through D20: it cut the phases into vertical slices with a checkpoint each, added `sync.mode`
 with `plan`, the soak option, and the split cutover, recorded the consumer inventory that the
