@@ -56,14 +56,33 @@ type PR struct {
 	// Review" match reason (pg2-4dz88.11.4).
 	AssignedToMe bool `json:"assigned_to_me,omitempty"`
 	// Mergeable is GitHub's merge-conflict signal: MERGEABLE | CONFLICTING |
-	// UNKNOWN. Populated by the GraphQL enrich path; empty on REST fallback.
+	// UNKNOWN. Populated directly from `gh pr view --json mergeable`
+	// (bead pg2-2j5ac.28.2 — this backend has no separate GraphQL enrich
+	// path today; see internal/github/github.go's prListFields).
 	Mergeable string `json:"mergeable,omitempty"`
 	// MergeStateStatus is GitHub's authoritative merge-readiness: CLEAN |
 	// BLOCKED | BEHIND | DIRTY | UNSTABLE | DRAFT | HAS_HOOKS | UNKNOWN. It
 	// reflects branch protection (approvals, required checks, policy-bot) and is
 	// the source of truth for "can I merge now" — distinct from the CI-health
-	// rollup. Empty on REST fallback.
+	// rollup. Populated directly from `gh pr view --json mergeStateStatus`
+	// (bead pg2-2j5ac.28.2, same as Mergeable above).
 	MergeStateStatus string `json:"merge_state_status,omitempty"`
+	// ChecksRollup folds the PR's head-commit check-run/status-context data
+	// (`gh pr view --json statusCheckRollup`) into one of "success",
+	// "failure", "pending", "none" — see internal/github/github.go's
+	// checksRollupFromContexts for the fold rule. Added by bead
+	// pg2-2j5ac.28.2 for schema.PR.ChecksRollup — distinct from
+	// MergeStateStatus, which is GitHub's own branch-protection/merge-
+	// readiness signal, not a CI-health rollup.
+	ChecksRollup string `json:"checks_rollup,omitempty"`
+	// ReviewRequests are the PR's currently-requested reviewers, both
+	// individual account logins AND team slugs — unlike RequestedReviewers
+	// above (which deliberately drops teams for the "requested of me"
+	// self-match use). Populated from the same `gh pr view --json
+	// reviewRequests` response RequestedReviewers reads, just without the
+	// team-dropping filter. Added by bead pg2-2j5ac.28.2 for
+	// schema.PR.ReviewRequests ("logins and team slugs").
+	ReviewRequests []string `json:"review_requests,omitempty"`
 	// AutoMergeEnabled is true when GitHub auto-merge is armed on the PR.
 	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
 	// StackID identifies the native GitHub stack this PR belongs to
@@ -95,4 +114,27 @@ type PR struct {
 // UNKNOWN (GitHub still computing) is deliberately NOT a conflict.
 func (pr PR) HasConflict() bool {
 	return pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY"
+}
+
+// File is one changed-file entry in a PR's diff, used only by the "files"
+// targeted op (pkg/provider/pr.Provider.Files, bead pg2-2j5ac.28.2).
+// internal/provider.go's toSchemaFiles maps it onto pkg/schema.PRFile at
+// the Files boundary.
+type File struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+}
+
+// Commit is one commit on a PR's branch, used only by the "commits"
+// targeted op (pkg/provider/pr.Provider.Commits, bead pg2-2j5ac.28.2).
+// Author MUST be the commit's own GitHub author login — the co-owned-
+// ownership classification's consumer — empty when GitHub has no linked
+// user account for the commit's author identity. internal/provider.go's
+// toSchemaCommits maps it onto pkg/schema.PRCommit at the Commits
+// boundary.
+type Commit struct {
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Message string `json:"message,omitempty"`
 }

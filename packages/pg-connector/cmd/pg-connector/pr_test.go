@@ -185,6 +185,94 @@ func TestRun_PrFeedbackSet_InvalidDisposition_IsGenericFailure(t *testing.T) {
 	}
 }
 
+func TestRun_PrFiles_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-files", map[string]string{
+		"files": `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"pr-1","files":[{"path":"a.go","additions":5,"deletions":1}]}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-files")
+
+	stdout, _, code := executePr(t, []string{"pr", "files", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var result schema.PRFilesResult
+	if err := scriptout.Decode(resp.Result, &result); err != nil {
+		t.Fatalf("decode PRFilesResult: %v", err)
+	}
+	if result.ID != "pr-1" || len(result.Files) != 1 || result.Files[0].Path != "a.go" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestRun_PrFiles_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-files-human", map[string]string{
+		"files": `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"pr-1","files":[{"path":"a.go","additions":5,"deletions":1}]}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-files-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "files", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"PR pr-1", "a.go", "+5/-1"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_PrCommits_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-commits", map[string]string{
+		"commits": `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"pr-1","commits":[{"sha":"abc123","author":"alice","message":"fix bug"}]}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-commits")
+
+	stdout, _, code := executePr(t, []string{"pr", "commits", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var result schema.PRCommitsResult
+	if err := scriptout.Decode(resp.Result, &result); err != nil {
+		t.Fatalf("decode PRCommitsResult: %v", err)
+	}
+	if result.ID != "pr-1" || len(result.Commits) != 1 || result.Commits[0].Author != "alice" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestRun_PrCommits_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-commits-human", map[string]string{
+		"commits": `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"pr-1","commits":[{"sha":"abc123","author":"alice","message":"fix bug"}]}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-commits-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "commits", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "{") {
+		t.Fatalf("human output must not contain raw JSON; stdout=%s", stdout)
+	}
+	for _, want := range []string{"PR pr-1", "abc123", "alice", "fix bug"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
 func TestRun_PrShow_HumanOutput(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-show-human", map[string]string{
 		"show": `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"category":"focus","labels":["x","y"],"comments":[{"id":"c1","author":"a","body":"body","resolved":false,"disposition":"open"}],"reviews":[{"id":"r1","author":"rev","state":"CHANGES_REQUESTED","comments":[{"id":"c2","author":"rev","body":"fix","thread_id":"th1","disposition":"will-fix"}]}]}}`,

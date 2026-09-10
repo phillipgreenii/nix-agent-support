@@ -96,6 +96,34 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 				return p.List(ctx, expr, a.IDsOnly)
 			},
 		},
+		// files/commits are targeted ops (bead pg2-2j5ac.28.2), matching
+		// show/categorize/feedback_set's existing convention (id-keyed,
+		// resolved to the one owning backend) rather than list's fan-out
+		// scheme.
+		"files": {
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID string `json:"id"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode files args: "+err.Error())
+				}
+				return p.Files(ctx, a.ID)
+			},
+		},
+		"commits": {
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID string `json:"id"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode commits args: "+err.Error())
+				}
+				return p.Commits(ctx, a.ID)
+			},
+		},
 	}
 
 	// A provider not implementing AuthChecker is not treated as a

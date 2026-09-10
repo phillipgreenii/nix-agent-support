@@ -140,7 +140,12 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 }
 
 // Common JSON field set requested from gh for PR-list endpoints.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees"
+//
+// mergeable/mergeStateStatus/statusCheckRollup were added by bead
+// pg2-2j5ac.28.2's PR-facts design bullet — all three are documented
+// `gh pr view --json` fields (gh's own PullRequest export shape), so no
+// separate GraphQL enrich call is needed to populate them.
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,statusCheckRollup"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -167,9 +172,14 @@ type ghPR struct {
 	} `json:"labels"`
 	// ReviewRequests is gh's reviewRequests array. Requested accounts (users, bots,
 	// mannequins) carry a login; TEAMS carry name/slug (no login) and are ignored
-	// for "requested of me".
+	// for "requested of me". Slug (bead pg2-2j5ac.28.2) is populated only for a
+	// team entry — gh's own `{"__typename": "Team", "name": ..., "slug": ...}`
+	// shape (verified against this repo's existing github_test.go fixture) — and
+	// is what toAPI's new ReviewRequests ("logins and team slugs") field falls
+	// back to when Login is empty.
 	ReviewRequests []struct {
 		Login string `json:"login"`
+		Slug  string `json:"slug"`
 	} `json:"reviewRequests"`
 	// Assignees is gh's assignees array. Every entry gh returns for this field
 	// carries a login (only teams — which cannot be assigned to a PR — would
@@ -178,26 +188,103 @@ type ghPR struct {
 	Assignees []struct {
 		Login string `json:"login"`
 	} `json:"assignees"`
+	// Mergeable/MergeStateStatus/StatusCheckRollup were added by bead
+	// pg2-2j5ac.28.2 — see prListFields' own doc comment.
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	// StatusCheckRollup is gh's flattened array of the head commit's check
+	// runs (CheckRun) and/or legacy commit statuses (StatusContext) — see
+	// checksRollupFromContexts below for how this folds into one summary
+	// value.
+	StatusCheckRollup []struct {
+		// Status/Conclusion are CheckRun's own fields (status: QUEUED |
+		// IN_PROGRESS | COMPLETED; conclusion: SUCCESS | FAILURE |
+		// NEUTRAL | CANCELLED | TIMED_OUT | ACTION_REQUIRED | STALE |
+		// SKIPPED, populated only once Status is COMPLETED).
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		// State is StatusContext's own field (the classic commit-status
+		// API: SUCCESS | FAILURE | PENDING | ERROR) — absent/empty on a
+		// CheckRun entry.
+		State string `json:"state"`
+	} `json:"statusCheckRollup"`
+}
+
+// checksRollupFromContexts folds gh's flattened statusCheckRollup array
+// into one of "none" | "pending" | "failure" | "success" (schema.PR.
+// ChecksRollup's closed value set) — bead pg2-2j5ac.28.2. How this fold is
+// computed is a freedom-boundary choice (design pins only the field's
+// existence and closed value set, not the algorithm): failure wins over
+// pending, which wins over success, so a run still in flight alongside an
+// already-failed run reports "failure" rather than masking it as
+// "pending".
+func checksRollupFromContexts(contexts []struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	State      string `json:"state"`
+},
+) string {
+	if len(contexts) == 0 {
+		return "none"
+	}
+	sawFailure := false
+	sawPending := false
+	for _, c := range contexts {
+		switch {
+		case c.State != "": // StatusContext (legacy commit-status API)
+			switch c.State {
+			case "FAILURE", "ERROR":
+				sawFailure = true
+			case "PENDING":
+				sawPending = true
+			}
+		case c.Status != "" && c.Status != "COMPLETED": // CheckRun still running
+			sawPending = true
+		default: // CheckRun completed — classify by conclusion
+			switch c.Conclusion {
+			case "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE":
+				sawFailure = true
+			case "SUCCESS", "NEUTRAL", "SKIPPED":
+				// Passing/non-blocking conclusions — no-op.
+			default:
+				// "" (no conclusion reported yet) or an unrecognized
+				// value — treat as still pending rather than silently
+				// counting toward success.
+				sawPending = true
+			}
+		}
+	}
+	switch {
+	case sawFailure:
+		return "failure"
+	case sawPending:
+		return "pending"
+	default:
+		return "success"
+	}
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
 	out := api.PR{
-		Repo:         repo,
-		Number:       p.Number,
-		Title:        p.Title,
-		State:        strings.ToLower(p.State),
-		Branch:       p.HeadRefName,
-		Base:         p.BaseRefName,
-		Author:       p.Author.Login,
-		URL:          p.URL,
-		Draft:        p.IsDraft,
-		Merged:       p.MergedAt != "",
-		MergedAt:     p.MergedAt,
-		Additions:    p.Additions,
-		Deletions:    p.Deletions,
-		ChangedFiles: p.ChangedFiles,
-		HeadSHA:      p.HeadRefOid,
-		Body:         p.Body,
+		Repo:             repo,
+		Number:           p.Number,
+		Title:            p.Title,
+		State:            strings.ToLower(p.State),
+		Branch:           p.HeadRefName,
+		Base:             p.BaseRefName,
+		Author:           p.Author.Login,
+		URL:              p.URL,
+		Draft:            p.IsDraft,
+		Merged:           p.MergedAt != "",
+		MergedAt:         p.MergedAt,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
+		HeadSHA:          p.HeadRefOid,
+		Body:             p.Body,
+		Mergeable:        p.Mergeable,
+		MergeStateStatus: p.MergeStateStatus,
+		ChecksRollup:     checksRollupFromContexts(p.StatusCheckRollup),
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
@@ -205,6 +292,11 @@ func (p ghPR) toAPI(repo string) api.PR {
 	for _, rr := range p.ReviewRequests {
 		if rr.Login != "" { // accounts (users/bots/mannequins) have a login; teams do not
 			out.RequestedReviewers = append(out.RequestedReviewers, rr.Login)
+			out.ReviewRequests = append(out.ReviewRequests, rr.Login)
+			continue
+		}
+		if rr.Slug != "" { // a team entry: no login, but ReviewRequests wants its slug too
+			out.ReviewRequests = append(out.ReviewRequests, rr.Slug)
 		}
 	}
 	for _, a := range p.Assignees {
@@ -238,6 +330,92 @@ func (p *Provider) GetPR(ctx context.Context, repo string, number int) (*api.PR,
 	}
 	out := pr.toAPI(repo)
 	return &out, nil
+}
+
+// ghPRFile is the JSON shape of one entry in `gh pr view --json files`'
+// flattened array.
+type ghPRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// GetFiles fetches a single PR's changed-file list (bead pg2-2j5ac.28.2,
+// the "files" targeted op's backing read). A dedicated `gh pr view --json
+// files` call, kept separate from GetPR's own prListFields call: folding
+// files into every GetPR call would fetch this potentially-large
+// connection on every Show, where today only "files" itself needs it.
+func (p *Provider) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	raw, err := p.gh.Run(ctx, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "files")
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Files []ghPRFile `json:"files"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("github: parse gh pr view --json files: %w", err)
+	}
+	out := make([]api.File, 0, len(resp.Files))
+	for _, f := range resp.Files {
+		out = append(out, api.File{Path: f.Path, Additions: f.Additions, Deletions: f.Deletions})
+	}
+	return out, nil
+}
+
+// ghPRCommit is the JSON shape of one entry in `gh pr view --json commits`'
+// flattened array. Authors carries every git-identity author on the
+// commit (co-authors included); GetCommits uses only the first entry's
+// login, matching pg-pr's own existing convention for a commit's "the"
+// author (packages/pg-pr/pkg/provider/vcs.EnrichedPR.CommitAuthors' doc
+// comment: "author.user.login").
+type ghPRCommit struct {
+	OID             string `json:"oid"`
+	MessageHeadline string `json:"messageHeadline"`
+	Authors         []struct {
+		Login string `json:"login"`
+	} `json:"authors"`
+}
+
+// GetCommits fetches a single PR's commit list (bead pg2-2j5ac.28.2, the
+// "commits" targeted op's backing read). Design's own binding decision:
+// "commits MUST carry each commit's own author login" — Author is left
+// empty (rather than erroring) when GitHub has no linked account for a
+// commit's author identity (e.g. an email with no matching GitHub user),
+// matching RequestedReviewers' own "no login means excluded/empty"
+// convention elsewhere in this file.
+func (p *Provider) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	raw, err := p.gh.Run(ctx, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "commits")
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Commits []ghPRCommit `json:"commits"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("github: parse gh pr view --json commits: %w", err)
+	}
+	out := make([]api.Commit, 0, len(resp.Commits))
+	for _, c := range resp.Commits {
+		var author string
+		if len(c.Authors) > 0 {
+			author = c.Authors[0].Login
+		}
+		out = append(out, api.Commit{SHA: c.OID, Author: author, Message: c.MessageHeadline})
+	}
+	return out, nil
 }
 
 // ListMyPRs returns open PRs authored by the configured self_login.

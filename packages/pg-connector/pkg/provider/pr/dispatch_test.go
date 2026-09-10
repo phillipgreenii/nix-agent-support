@@ -18,6 +18,8 @@ type fakeProvider struct {
 	categorizeFn  func(ctx context.Context, id, category string) (*schema.CategorizeResult, error)
 	feedbackSetFn func(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error)
 	listFn        func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
+	filesFn       func(ctx context.Context, id string) (*schema.PRFilesResult, error)
+	commitsFn     func(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }
 
 var _ Provider = (*fakeProvider)(nil)
@@ -36,6 +38,14 @@ func (f *fakeProvider) FeedbackSet(ctx context.Context, id, commentID string, di
 
 func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
 	return f.listFn(ctx, query, idsOnly)
+}
+
+func (f *fakeProvider) Files(ctx context.Context, id string) (*schema.PRFilesResult, error) {
+	return f.filesFn(ctx, id)
+}
+
+func (f *fakeProvider) Commits(ctx context.Context, id string) (*schema.PRCommitsResult, error) {
+	return f.commitsFn(ctx, id)
 }
 
 // fakeProviderWithAuth additionally implements pkg/provider.AuthChecker, to
@@ -234,6 +244,84 @@ func TestNewDispatchTable_List_DecodeFailureIsInvalidArgument(t *testing.T) {
 	}
 	table := NewDispatchTable(p)
 	_, err := table["list"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestNewDispatchTable_Files(t *testing.T) {
+	want := &schema.PRFilesResult{ID: "pr-1", Files: []schema.PRFile{{Path: "a.go", Additions: 3, Deletions: 1}}}
+	p := &fakeProvider{
+		filesFn: func(ctx context.Context, id string) (*schema.PRFilesResult, error) {
+			if id != "pr-1" {
+				t.Fatalf("id = %q, want pr-1", id)
+			}
+			return want, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	entry, ok := table["files"]
+	if !ok {
+		t.Fatal(`table["files"] missing`)
+	}
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"pr-1"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	got, ok := result.(*schema.PRFilesResult)
+	if !ok || got.ID != "pr-1" || len(got.Files) != 1 || got.Files[0].Path != "a.go" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNewDispatchTable_Files_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		filesFn: func(ctx context.Context, id string) (*schema.PRFilesResult, error) {
+			t.Fatal("Files must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["files"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestNewDispatchTable_Commits(t *testing.T) {
+	want := &schema.PRCommitsResult{ID: "pr-1", Commits: []schema.PRCommit{{SHA: "abc123", Author: "alice", Message: "fix"}}}
+	p := &fakeProvider{
+		commitsFn: func(ctx context.Context, id string) (*schema.PRCommitsResult, error) {
+			if id != "pr-1" {
+				t.Fatalf("id = %q, want pr-1", id)
+			}
+			return want, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	entry, ok := table["commits"]
+	if !ok {
+		t.Fatal(`table["commits"] missing`)
+	}
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"pr-1"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	got, ok := result.(*schema.PRCommitsResult)
+	if !ok || got.ID != "pr-1" || len(got.Commits) != 1 || got.Commits[0].Author != "alice" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNewDispatchTable_Commits_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProvider{
+		commitsFn: func(ctx context.Context, id string) (*schema.PRCommitsResult, error) {
+			t.Fatal("Commits must not be invoked when args fail to decode")
+			return nil, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	_, err := table["commits"].Handle(context.Background(), json.RawMessage(`{not valid json`))
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}

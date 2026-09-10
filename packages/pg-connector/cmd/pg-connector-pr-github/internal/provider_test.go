@@ -32,6 +32,13 @@ type fakeGH struct {
 	searchFn     func(ctx context.Context, query string) ([]api.PR, error)
 	rateLimit    int
 	rateLimitErr error
+
+	// files/commits/filesErr/commitsErr back the Files/Commits (bead
+	// pg2-2j5ac.28.2) seam.
+	files      []api.File
+	commits    []api.Commit
+	filesErr   error
+	commitsErr error
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
@@ -80,6 +87,20 @@ func (f *fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
 		return rateLimitOrDefaultReserve, nil
 	}
 	return f.rateLimit, nil
+}
+
+func (f *fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+	if f.filesErr != nil {
+		return nil, f.filesErr
+	}
+	return f.files, nil
+}
+
+func (f *fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+	if f.commitsErr != nil {
+		return nil, f.commitsErr
+	}
+	return f.commits, nil
 }
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {
@@ -558,5 +579,96 @@ func TestRateReservePoints_DefaultsWhenAbsent(t *testing.T) {
 func TestRateReservePoints_ReadsConfiguredValue(t *testing.T) {
 	if got := rateReservePoints([]byte(`{"rate_reserve_points":250}`)); got != 250 {
 		t.Fatalf("rateReservePoints = %d, want 250", got)
+	}
+}
+
+// TestBackend_Show_MapsNewPRFactFields_v4 proves the bead pg2-2j5ac.28.2
+// PR-facts fields (HeadSHA, Additions, Deletions, ChangedFiles, Mergeable,
+// MergeStateStatus, ReviewRequests, ChecksRollup) flow through toSchemaPR
+// from api.PR to schema.PR unchanged.
+func TestBackend_Show_MapsNewPRFactFields_v4(t *testing.T) {
+	gh := &fakeGH{
+		pr: &api.PR{
+			Repo: "owner/repo", Number: 1, Title: "T", State: "open",
+			HeadSHA: "abc123", Additions: 10, Deletions: 2, ChangedFiles: 3,
+			Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN",
+			ReviewRequests: []string{"alice", "core-team"},
+			ChecksRollup:   "success",
+		},
+	}
+	b := newTestBackend(t, gh)
+	got, err := b.Show(context.Background(), "owner/repo#1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.HeadSHA != "abc123" || got.Additions != 10 || got.Deletions != 2 || got.ChangedFiles != 3 {
+		t.Fatalf("diff-size fields = %+v", got)
+	}
+	if got.Mergeable != "MERGEABLE" || got.MergeStateStatus != "CLEAN" {
+		t.Fatalf("mergeability fields = %+v", got)
+	}
+	if len(got.ReviewRequests) != 2 || got.ReviewRequests[0] != "alice" || got.ReviewRequests[1] != "core-team" {
+		t.Fatalf("ReviewRequests = %+v", got.ReviewRequests)
+	}
+	if got.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want success", got.ChecksRollup)
+	}
+}
+
+func TestBackend_Files_MapsGHDataToSchemaPRFilesResult(t *testing.T) {
+	gh := &fakeGH{files: []api.File{{Path: "a.go", Additions: 5, Deletions: 1}}}
+	b := newTestBackend(t, gh)
+	got, err := b.Files(context.Background(), "owner/repo#1")
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	if got.ID != "owner/repo#1" || len(got.Files) != 1 || got.Files[0].Path != "a.go" {
+		t.Fatalf("Files result = %+v", got)
+	}
+}
+
+func TestBackend_Files_InvalidID(t *testing.T) {
+	b := newTestBackend(t, &fakeGH{})
+	_, err := b.Files(context.Background(), "not-a-valid-id")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Files_GHError_Classified(t *testing.T) {
+	gh := &fakeGH{filesErr: github.ErrGHAuthInvalid}
+	b := newTestBackend(t, gh)
+	_, err := b.Files(context.Background(), "owner/repo#1")
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+func TestBackend_Commits_MapsGHDataToSchemaPRCommitsResult(t *testing.T) {
+	gh := &fakeGH{commits: []api.Commit{{SHA: "abc123", Author: "alice", Message: "fix bug"}}}
+	b := newTestBackend(t, gh)
+	got, err := b.Commits(context.Background(), "owner/repo#1")
+	if err != nil {
+		t.Fatalf("Commits: %v", err)
+	}
+	if got.ID != "owner/repo#1" || len(got.Commits) != 1 || got.Commits[0].Author != "alice" {
+		t.Fatalf("Commits result = %+v", got)
+	}
+}
+
+func TestBackend_Commits_InvalidID(t *testing.T) {
+	b := newTestBackend(t, &fakeGH{})
+	_, err := b.Commits(context.Background(), "not-a-valid-id")
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Commits_GHError_Classified(t *testing.T) {
+	gh := &fakeGH{commitsErr: github.ErrGHAuthInvalid}
+	b := newTestBackend(t, gh)
+	_, err := b.Commits(context.Background(), "owner/repo#1")
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
 	}
 }

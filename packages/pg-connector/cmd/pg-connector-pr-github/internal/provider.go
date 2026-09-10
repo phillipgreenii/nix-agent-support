@@ -40,6 +40,10 @@ type ghProvider interface {
 	// RateLimitRemaining reads the GraphQL API's current rate-limit
 	// remainder (design's "Rate protection" bullet).
 	RateLimitRemaining(ctx context.Context) (int, error)
+	// GetFiles/GetCommits back the "files"/"commits" targeted ops (bead
+	// pg2-2j5ac.28.2's PR-facts design bullet).
+	GetFiles(ctx context.Context, repo string, number int) ([]api.File, error)
+	GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
@@ -296,6 +300,45 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	return result, nil
 }
 
+// Files implements pr.Provider.Files: fetches id's changed-file list from
+// GitHub (bead pg2-2j5ac.28.2). A targeted op, unlike List — no local
+// Store consultation, since files carry no category/disposition state of
+// their own.
+func (b *Backend) Files(ctx context.Context, id string) (*schema.PRFilesResult, error) {
+	repo, number, err := parsePRID(id)
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	files, err := b.gh.GetFiles(ctx, repo, number)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	out := make([]schema.PRFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, schema.PRFile{Path: f.Path, Additions: f.Additions, Deletions: f.Deletions})
+	}
+	return &schema.PRFilesResult{ID: id, Files: out}, nil
+}
+
+// Commits implements pr.Provider.Commits: fetches id's commit list from
+// GitHub (bead pg2-2j5ac.28.2), each carrying its own author login
+// (design's binding decision — see api.Commit's doc comment).
+func (b *Backend) Commits(ctx context.Context, id string) (*schema.PRCommitsResult, error) {
+	repo, number, err := parsePRID(id)
+	if err != nil {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	commits, err := b.gh.GetCommits(ctx, repo, number)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	out := make([]schema.PRCommit, 0, len(commits))
+	for _, c := range commits {
+		out = append(out, schema.PRCommit{SHA: c.SHA, Author: c.Author, Message: c.Message})
+	}
+	return &schema.PRCommitsResult{ID: id, Commits: out}, nil
+}
+
 // classifyGHError maps a ported GitHub-provider error onto scriptout's
 // closed error taxonomy: an auth failure becomes unauthenticated; a
 // genuine "the PR/comment/review genuinely doesn't exist" response from
@@ -364,6 +407,19 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 		Category: state.Category,
 		AsOf:     asOf.Format(time.RFC3339),
 		Stale:    false,
+
+		// bead pg2-2j5ac.28.2's additive PR-facts fields, carried straight
+		// through from the ported GitHub read (api.PR already carries
+		// these — see internal/api/pr.go and internal/github/github.go's
+		// prListFields).
+		HeadSHA:          in.HeadSHA,
+		Additions:        in.Additions,
+		Deletions:        in.Deletions,
+		ChangedFiles:     in.ChangedFiles,
+		Mergeable:        in.Mergeable,
+		MergeStateStatus: in.MergeStateStatus,
+		ReviewRequests:   in.ReviewRequests,
+		ChecksRollup:     in.ChecksRollup,
 	}
 
 	byReview := make(map[string][]schema.PRComment, len(reviews))

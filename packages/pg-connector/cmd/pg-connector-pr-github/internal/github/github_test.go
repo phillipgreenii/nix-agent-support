@@ -265,6 +265,237 @@ func TestGetPR_ValidatesInput(t *testing.T) {
 	}
 }
 
+// TestGetPR_ReviewRequests_IncludesLoginsAndTeamSlugs proves the bead
+// pg2-2j5ac.28.2 ReviewRequests field carries BOTH individual logins and
+// team slugs — unlike RequestedReviewers (above), which deliberately
+// excludes teams for the "requested of me" self-match use.
+func TestGetPR_ReviewRequests_IncludesLoginsAndTeamSlugs(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviewRequests": [
+			{"__typename": "User", "login": "phillipg"},
+			{"__typename": "Team", "name": "core-team", "slug": "core-team"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []string{"phillipg", "core-team"}
+	if len(pr.ReviewRequests) != len(want) {
+		t.Fatalf("ReviewRequests = %v, want %v", pr.ReviewRequests, want)
+	}
+	for i, w := range want {
+		if pr.ReviewRequests[i] != w {
+			t.Fatalf("ReviewRequests[%d] = %q, want %q (full: %v)", i, pr.ReviewRequests[i], w, pr.ReviewRequests)
+		}
+	}
+}
+
+func TestGetPR_ParsesMergeableAndMergeStateStatus(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.Mergeable != "CONFLICTING" || pr.MergeStateStatus != "DIRTY" {
+		t.Fatalf("Mergeable/MergeStateStatus = %q/%q, want CONFLICTING/DIRTY", pr.Mergeable, pr.MergeStateStatus)
+	}
+	if !pr.HasConflict() {
+		t.Fatal("HasConflict() = false, want true for CONFLICTING/DIRTY")
+	}
+	// The --json field set must request mergeable/mergeStateStatus, or gh
+	// returns nothing (bead pg2-2j5ac.28.2).
+	joined := strings.Join(gh.calls[0], " ")
+	if !strings.Contains(joined, "mergeable") || !strings.Contains(joined, "mergeStateStatus") {
+		t.Errorf("gh pr view must request mergeable/mergeStateStatus; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_ParsesChecksRollup(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"statusCheckRollup": [
+			{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want success", pr.ChecksRollup)
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "statusCheckRollup") {
+		t.Errorf("gh pr view must request statusCheckRollup; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_ChecksRollup_NoChecksIsNone(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ChecksRollup != "none" {
+		t.Fatalf("ChecksRollup = %q, want none", pr.ChecksRollup)
+	}
+}
+
+// TestChecksRollupFromContexts_FoldRules is a table-driven test of the
+// fold rule checksRollupFromContexts implements (bead pg2-2j5ac.28.2): a
+// mix of outcomes across both CheckRun and StatusContext shapes, proving
+// failure wins over pending, which wins over success.
+func TestChecksRollupFromContexts_FoldRules(t *testing.T) {
+	type ctx = struct {
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		State      string `json:"state"`
+	}
+	cases := []struct {
+		name string
+		in   []ctx
+		want string
+	}{
+		{"empty", nil, "none"},
+		{"single success CheckRun", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}}, "success"},
+		{"single running CheckRun", []ctx{{Status: "IN_PROGRESS"}}, "pending"},
+		{"single failed CheckRun", []ctx{{Status: "COMPLETED", Conclusion: "FAILURE"}}, "failure"},
+		{"legacy StatusContext success", []ctx{{State: "SUCCESS"}}, "success"},
+		{"legacy StatusContext pending", []ctx{{State: "PENDING"}}, "pending"},
+		{"legacy StatusContext failure", []ctx{{State: "FAILURE"}}, "failure"},
+		{"failure wins over pending", []ctx{{Status: "IN_PROGRESS"}, {Status: "COMPLETED", Conclusion: "FAILURE"}}, "failure"},
+		{"pending wins over success", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}, {Status: "IN_PROGRESS"}}, "pending"},
+		{"success plus neutral is success", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}, {Status: "COMPLETED", Conclusion: "NEUTRAL"}}, "success"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := checksRollupFromContexts(c.in); got != c.want {
+				t.Fatalf("checksRollupFromContexts(%+v) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestGetFiles_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"files": [
+		{"path": "a.go", "additions": 5, "deletions": 1},
+		{"path": "b.go", "additions": 0, "deletions": 3}
+	]}`)
+	p := NewWithRunner(gh)
+
+	files, err := p.GetFiles(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetFiles: %v", err)
+	}
+	if len(files) != 2 || files[0].Path != "a.go" || files[0].Additions != 5 || files[0].Deletions != 1 {
+		t.Fatalf("files = %+v", files)
+	}
+	if files[1].Path != "b.go" || files[1].Deletions != 3 {
+		t.Fatalf("files[1] = %+v", files[1])
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "files") {
+		t.Errorf("gh pr view must request the files field; args=%v", gh.calls)
+	}
+}
+
+func TestGetFiles_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.GetFiles(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.GetFiles(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestGetFiles_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr view"] = errors.New("boom: auth required")
+	p := NewWithRunner(gh)
+
+	if _, err := p.GetFiles(context.Background(), "foo/bar", 7); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
+func TestGetCommits_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"commits": [
+		{"oid": "abc123", "messageHeadline": "fix bug", "authors": [{"login": "alice"}]},
+		{"oid": "def456", "messageHeadline": "no linked account", "authors": [{"login": ""}]}
+	]}`)
+	p := NewWithRunner(gh)
+
+	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetCommits: %v", err)
+	}
+	if len(commits) != 2 || commits[0].SHA != "abc123" || commits[0].Author != "alice" || commits[0].Message != "fix bug" {
+		t.Fatalf("commits[0] = %+v", commits[0])
+	}
+	// A commit whose author has no linked GitHub account carries an empty
+	// Author rather than erroring (design's own binding decision).
+	if commits[1].SHA != "def456" || commits[1].Author != "" {
+		t.Fatalf("commits[1] = %+v", commits[1])
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "commits") {
+		t.Errorf("gh pr view must request the commits field; args=%v", gh.calls)
+	}
+}
+
+func TestGetCommits_NoAuthorsIsEmptyAuthor(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"commits": [
+		{"oid": "abc123", "messageHeadline": "fix bug", "authors": []}
+	]}`)
+	p := NewWithRunner(gh)
+
+	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetCommits: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Author != "" {
+		t.Fatalf("commits = %+v, want one entry with empty Author", commits)
+	}
+}
+
+func TestGetCommits_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.GetCommits(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.GetCommits(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestGetCommits_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr view"] = errors.New("boom: auth required")
+	p := NewWithRunner(gh)
+
+	if _, err := p.GetCommits(context.Background(), "foo/bar", 7); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
 func TestListMyPRs_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["pr list"] = errors.New("boom: auth required")

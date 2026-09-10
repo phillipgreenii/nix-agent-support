@@ -39,6 +39,14 @@ func (fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
 	return 5000, nil
 }
 
+func (fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+	return nil, nil
+}
+
+func (fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+	return nil, nil
+}
+
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
 	return internal.New(fakeGH{}, internal.NewStore(t.TempDir()+"/store.json"))

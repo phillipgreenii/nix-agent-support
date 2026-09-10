@@ -59,4 +59,16 @@ type Provider interface {
 	// still choose to populate Entities anyway (harmless, just wasted
 	// work) but need not. bead pg2-2j5ac.28.1.
 	List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
+
+	// Files returns id's changed-file list. A targeted op (resolves to the
+	// one backend that owns id), matching Show/Categorize/FeedbackSet's
+	// existing convention — NOT the fan-out scheme List uses. bead
+	// pg2-2j5ac.28.2.
+	Files(ctx context.Context, id string) (*schema.PRFilesResult, error)
+
+	// Commits returns id's commit list. Each entry MUST carry the
+	// commit's own GitHub author login (schema.PRCommit.Author's doc
+	// comment) — the co-owned-ownership classification's consumer. A
+	// targeted op, same convention as Files above. bead pg2-2j5ac.28.2.
+	Commits(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }

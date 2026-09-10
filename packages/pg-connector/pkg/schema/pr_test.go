@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -121,6 +122,115 @@ func TestFeedbackSetResult_JSONShape(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	want := `{"id":"pr-1","comment_id":"c1","disposition":"wont-fix"}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
+// TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
+// (bead pg2-2j5ac.28.2 bumped 3 -> 4) so an accidental future edit that
+// forgets to bump it alongside a new field-shape change is caught here
+// first.
+func TestPRSchemaVersion_IsCurrent(t *testing.T) {
+	if PRSchemaVersion != 4 {
+		t.Fatalf("PRSchemaVersion = %d, want 4", PRSchemaVersion)
+	}
+}
+
+// TestPR_V4FieldSet_JSONRoundTrip asserts the full v4 field set (bead
+// pg2-2j5ac.28.2's additive fields: HeadSHA, Additions, Deletions,
+// ChangedFiles, Mergeable, MergeStateStatus, ReviewRequests, ChecksRollup)
+// round-trips through JSON — the acceptance criterion's "a schema test
+// asserts the full v3 [now v4] field set."
+func TestPR_V4FieldSet_JSONRoundTrip(t *testing.T) {
+	in := PR{
+		ID:               "pr-1",
+		HeadSHA:          "abc123",
+		Additions:        10,
+		Deletions:        2,
+		ChangedFiles:     3,
+		Mergeable:        "MERGEABLE",
+		MergeStateStatus: "CLEAN",
+		ReviewRequests:   []string{"alice", "core-team"},
+		ChecksRollup:     "success",
+	}
+
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var out PR
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", out, in)
+	}
+
+	var asMap map[string]any
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	for _, key := range []string{
+		"head_sha", "additions", "deletions", "changed_files",
+		"mergeable", "merge_state_status", "review_requests", "checks_rollup",
+	} {
+		if _, ok := asMap[key]; !ok {
+			t.Errorf("wire JSON missing %q key: %s", key, raw)
+		}
+	}
+}
+
+func TestPRFilesResult_JSONShape(t *testing.T) {
+	raw, err := json.Marshal(PRFilesResult{
+		ID: "pr-1",
+		Files: []PRFile{
+			{Path: "a.go", Additions: 5, Deletions: 1},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"id":"pr-1","files":[{"path":"a.go","additions":5,"deletions":1}]}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
+func TestPRFilesResult_JSONShape_EmptyFilesIsEmptyArrayNotNull(t *testing.T) {
+	raw, err := json.Marshal(PRFilesResult{ID: "pr-1", Files: []PRFile{}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"id":"pr-1","files":[]}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
+func TestPRCommitsResult_JSONShape(t *testing.T) {
+	raw, err := json.Marshal(PRCommitsResult{
+		ID: "pr-1",
+		Commits: []PRCommit{
+			{SHA: "abc123", Author: "alice", Message: "fix bug"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"id":"pr-1","commits":[{"sha":"abc123","author":"alice","message":"fix bug"}]}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
+func TestPRCommitsResult_JSONShape_EmptyCommitsIsEmptyArrayNotNull(t *testing.T) {
+	raw, err := json.Marshal(PRCommitsResult{ID: "pr-1", Commits: []PRCommit{}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"id":"pr-1","commits":[]}`
 	if string(raw) != want {
 		t.Fatalf("got %s, want %s", raw, want)
 	}

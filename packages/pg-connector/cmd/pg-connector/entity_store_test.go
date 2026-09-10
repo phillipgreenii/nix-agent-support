@@ -18,6 +18,11 @@ import (
 // "cirun"/"ci" both mean the ci capability's run
 // entity — either spelling is accepted so a field/type named either
 // "CIRuns" or "Runs" (of a "ciRun"-ish value type) is recognized.
+//
+// "thread" was added by bead pg2-2j5ac.28.2, prep for phase 8's ledger
+// code — a future Thread-kind field/store (phase 13) is recognized by
+// this same heuristic even though no Thread type exists anywhere in
+// pkg/schema yet.
 var entityKindTokens = map[string]string{
 	"pr":       "pr",
 	"issue":    "issue",
@@ -26,6 +31,7 @@ var entityKindTokens = map[string]string{
 	"scm":      "scm",
 	"worktree": "scm",
 	"branch":   "scm",
+	"thread":   "thread",
 }
 
 // entityKindOf heuristically maps a Go identifier (a struct field name, or
@@ -162,12 +168,22 @@ func evaluateEntityStoreIsolation(dir string) ([]string, error) {
 	return violations, nil
 }
 
+// umbrellaBinaryDir is cmd/pg-connector's own directory name — the
+// literal directory this very test file lives in. Bead pg2-2j5ac.28.2
+// narrowed entityStoreScanDirs' blanket internal/-exemption so that
+// SPECIFICALLY cmd/pg-connector/internal/** (the umbrella's own internal
+// tree, prep for phase 8's ledger code) is included in the scan going
+// forward — every OTHER backend's own cmd/pg-connector-*/internal/ (e.g.
+// pg-connector-pr-github/internal/) stays exempted exactly as before.
+const umbrellaBinaryDir = "pg-connector"
+
 // entityStoreScanDirs returns every directory this module's shared surface
-// (outside any single backend's own internal/) — pkg/schema, pkg/provider
-// and its subpackages, pkg/scriptout and its subpackages, plus every
-// cmd/<binary>/ TOP-LEVEL directory itself (not recursed into internal/,
-// which this file's own acceptance criterion explicitly exempts: "outside
-// a single backend's own internal/").
+// (outside a single BACKEND's own internal/) — pkg/schema, pkg/provider
+// and its subpackages, pkg/scriptout and its subpackages, every
+// cmd/<binary>/ TOP-LEVEL directory itself, and (bead pg2-2j5ac.28.2)
+// cmd/pg-connector/internal/** specifically — not recursed into any OTHER
+// backend's own internal/, which this file's own acceptance criterion
+// exempts ("outside a single backend's own internal/").
 func entityStoreScanDirs(moduleRoot string) ([]string, error) {
 	var dirs []string
 	seen := map[string]bool{}
@@ -213,13 +229,36 @@ func entityStoreScanDirs(moduleRoot string) ([]string, error) {
 				// "a single backend's own internal/", not its top-level
 				// package).
 				add(rel)
+				if segments[1] == umbrellaBinaryDir {
+					// cmd/pg-connector's own internal/ tree is IN scope
+					// (bead pg2-2j5ac.28.2) — continue walking into it
+					// rather than skipping, so a future
+					// cmd/pg-connector/internal/<dir> is reached below.
+					return nil
+				}
+				// Every OTHER backend's own subdirectories stay exempted:
+				// internal/ is exempted by design there, and check 1
+				// (evaluateLayoutConvention) already forbids any
+				// non-internal subdirectory from existing in the first
+				// place, so there is nothing else under cmd/<binary>/ for
+				// this check to reach.
+				return fs.SkipDir
 			}
-			// Do not descend into a backend's own subdirectories at
-			// all: internal/ is exempted by design, and check 1
-			// (evaluateLayoutConvention) already forbids any
-			// non-internal subdirectory from existing in the first
-			// place, so there is nothing else under cmd/<binary>/ for
-			// this check to reach.
+			if segments[1] == umbrellaBinaryDir {
+				// Inside cmd/pg-connector/** (e.g. a future
+				// cmd/pg-connector/internal/ledger) — same rule as pkg/'s
+				// own directories above: add every directory that
+				// actually holds .go files, and keep descending.
+				if hasGoFiles(path) {
+					add(rel)
+				}
+				return nil
+			}
+			// Any other cmd/<binary>/** (e.g.
+			// cmd/pg-connector-pr-github/internal/) is unreachable here
+			// today (its parent already returned fs.SkipDir above) —
+			// kept only as a defensive fallback matching that exemption,
+			// same as before this bead's change.
 			return fs.SkipDir
 		default:
 			return nil
@@ -234,6 +273,44 @@ func entityStoreScanDirs(moduleRoot string) ([]string, error) {
 func hasGoFiles(dir string) bool {
 	matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	return err == nil && len(matches) > 0
+}
+
+// TestEntityStoreScanDirs_IncludesUmbrellaInternalButNotBackendInternal is
+// the widening's own regression test (bead pg2-2j5ac.28.2): on a synthetic
+// module tree, cmd/pg-connector/internal/** (the umbrella's own internal
+// tree, prep for phase 8's ledger code) MUST be scanned, while every OTHER
+// backend's own cmd/<binary>-*/internal/ (e.g. cmd/pg-connector-pr-github/
+// internal/) MUST stay exempted exactly as before this bead. Written to a
+// temp directory — never the real tree.
+func TestEntityStoreScanDirs_IncludesUmbrellaInternalButNotBackendInternal(t *testing.T) {
+	root := t.TempDir()
+	writeCompositionFixture(t, root, "cmd/pg-connector/main.go", "package main\n")
+	writeCompositionFixture(t, root, "cmd/pg-connector/internal/ledger/ledger.go", "package ledger\n")
+	writeCompositionFixture(t, root, "cmd/pg-connector-pr-github/main.go", "package main\n")
+	writeCompositionFixture(t, root, "cmd/pg-connector-pr-github/internal/store.go", "package internal\n")
+
+	dirs, err := entityStoreScanDirs(root)
+	if err != nil {
+		t.Fatalf("entityStoreScanDirs: %v", err)
+	}
+
+	has := func(want string) bool {
+		for _, d := range dirs {
+			if d == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, want := range []string{"cmd/pg-connector", "cmd/pg-connector-pr-github", "cmd/pg-connector/internal/ledger"} {
+		if !has(want) {
+			t.Errorf("entityStoreScanDirs(%v) missing %q", dirs, want)
+		}
+	}
+	if has("cmd/pg-connector-pr-github/internal") {
+		t.Errorf("entityStoreScanDirs(%v) must NOT include a backend's own internal/ tree", dirs)
+	}
 }
 
 // TestNoCrossConnectorEntityStore is the cross-entity-store check: no

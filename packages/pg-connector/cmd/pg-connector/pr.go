@@ -40,6 +40,8 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(newPrCategorizeCmd())
 	prCmd.AddCommand(newPrFeedbackSetCmd())
 	prCmd.AddCommand(newPrListCmd())
+	prCmd.AddCommand(newPrFilesCmd())
+	prCmd.AddCommand(newPrCommitsCmd())
 	return prCmd
 }
 
@@ -112,6 +114,86 @@ func newPrFeedbackSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&disposition, "disposition", "", "one of open|will-fix|wont-fix|no-action (required)")
 	_ = cmd.MarkFlagRequired("disposition")
 	return cmd
+}
+
+// newPrFilesCmd is "pr files" (bead pg2-2j5ac.28.2): a targeted op, like
+// show/categorize/feedback-set above — resolves to the one backend that
+// owns the given PR id, not a fan-out (bead pg2-2j5ac.28.2's PR-facts
+// design bullet).
+func newPrFilesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "files <id>",
+		Short: "List a PR's changed files",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizePRFiles)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "files", map[string]string{"id": args[0]}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFiles)
+	}
+	return cmd
+}
+
+// newPrCommitsCmd is "pr commits" (bead pg2-2j5ac.28.2): a targeted op,
+// same convention as newPrFilesCmd above.
+func newPrCommitsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "commits <id>",
+		Short: "List a PR's commits, each carrying its own author login",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, humanizePRCommits)
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "commits", map[string]string{"id": args[0]}, *backendFlag)
+		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCommits)
+	}
+	return cmd
+}
+
+// humanizePRFiles formats a `pr files` result (schema.PRFilesResult) for
+// human display.
+func humanizePRFiles(raw json.RawMessage) (string, error) {
+	var r schema.PRFilesResult
+	if err := scriptout.Decode(raw, &r); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if len(r.Files) == 0 {
+		fmt.Fprintf(&b, "PR %s: (no changed files)", r.ID)
+		return b.String(), nil
+	}
+	fmt.Fprintf(&b, "PR %s: files (%d):\n", r.ID, len(r.Files))
+	for _, f := range r.Files {
+		fmt.Fprintf(&b, "  %s (+%d/-%d)\n", f.Path, f.Additions, f.Deletions)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// humanizePRCommits formats a `pr commits` result (schema.PRCommitsResult)
+// for human display.
+func humanizePRCommits(raw json.RawMessage) (string, error) {
+	var r schema.PRCommitsResult
+	if err := scriptout.Decode(raw, &r); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if len(r.Commits) == 0 {
+		fmt.Fprintf(&b, "PR %s: (no commits)", r.ID)
+		return b.String(), nil
+	}
+	fmt.Fprintf(&b, "PR %s: commits (%d):\n", r.ID, len(r.Commits))
+	for _, c := range r.Commits {
+		fmt.Fprintf(&b, "  [%s] %s: %s\n", c.SHA, c.Author, c.Message)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 // prListOutcome is "pr list"'s wire response: every queried backend's

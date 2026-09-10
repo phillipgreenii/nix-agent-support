@@ -42,7 +42,18 @@ package schema
 // integer per schema-bearing CAPABILITY (INV-VER-1), not one per Go
 // struct, so a capability gaining a whole new op's wire shape is exactly
 // the same kind of change the 1 -> 2 bump's precedent already covers.
-const PRSchemaVersion = 3
+//
+// Bumped 3 -> 4 by bead pg2-2j5ac.28.2, which added PR's dashboard-facing
+// fact fields (HeadSHA, Additions, Deletions, ChangedFiles, Mergeable,
+// MergeStateStatus, ReviewRequests, ChecksRollup) plus the "files"/
+// "commits" ops and their PRFilesResult/PRCommitsResult wire shapes below.
+// The design source this packet curated from still describes this as a
+// "2 -> 3" bump (it was written before pg2-2j5ac.28.1's own 2 -> 3 bump for
+// "list" landed) — 3 was already spent by that earlier packet, so this is
+// the next integer per this const's own one-bump-per-field-shape-change
+// precedent (see the 1 -> 2 / 2 -> 3 comments above), not a deviation from
+// it.
+const PRSchemaVersion = 4
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -111,6 +122,44 @@ type PR struct {
 	// Reviews are the PR's review summaries, each carrying its own
 	// review-thread comments (see PRReview.Comments).
 	Reviews []PRReview `json:"reviews,omitempty"`
+
+	// The fields below (bead pg2-2j5ac.28.2) carry facts pg-desk/the
+	// dashboard needs on every "show" so it never has to fan out to a
+	// second `ci` call per PR per tick — bead pg2-2j5ac.28.2's own PR-facts
+	// design bullet. All are additive; every existing PRSchemaVersion-3
+	// consumer keeps decoding unchanged.
+
+	// HeadSHA is the OID of the PR's current head commit.
+	HeadSHA string `json:"head_sha,omitempty"`
+	// Additions/Deletions/ChangedFiles are the PR's diff-size facts, as
+	// GitHub reports them on the PR itself (not summed here from Files,
+	// which a caller fetches separately via the "files" op).
+	Additions    int `json:"additions,omitempty"`
+	Deletions    int `json:"deletions,omitempty"`
+	ChangedFiles int `json:"changed_files,omitempty"`
+	// Mergeable is GitHub's merge-conflict signal: one of "MERGEABLE",
+	// "CONFLICTING", "UNKNOWN" (GitHub's own enum, carried through
+	// verbatim — a freedom-boundary choice: the design pins the field's
+	// existence and semantics, not a Go representation narrower than
+	// GitHub's own tri-state).
+	Mergeable string `json:"mergeable,omitempty"`
+	// MergeStateStatus is GitHub's authoritative merge-readiness signal
+	// (branch protection, required checks, review policy folded together):
+	// one of "CLEAN", "BLOCKED", "BEHIND", "DIRTY", "UNSTABLE", "DRAFT",
+	// "HAS_HOOKS", "UNKNOWN" — GitHub's own enum, carried through verbatim.
+	MergeStateStatus string `json:"merge_state_status,omitempty"`
+	// ReviewRequests are the PR's currently-requested reviewers — both
+	// individual account logins and team slugs (design: "logins and team
+	// slugs"), unlike PRComment/PRReview's Author, which is always an
+	// individual account.
+	ReviewRequests []string `json:"review_requests,omitempty"`
+	// ChecksRollup folds the PR's head-commit check-run/status data into
+	// one of "success", "failure", "pending", "none" — carried here so the
+	// dashboard does not fan out to the `ci` capability per PR per tick.
+	// How a backend computes this from GitHub's underlying check-run data
+	// is a freedom-boundary choice; the design pins only this closed value
+	// set.
+	ChecksRollup string `json:"checks_rollup,omitempty"`
 }
 
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on
@@ -214,4 +263,41 @@ type PRListResult struct {
 	PresentIDs []string `json:"present_ids"`
 	Cursor     *string  `json:"cursor"`
 	Truncated  bool     `json:"truncated"`
+}
+
+// PRFile is one changed file entry in a PR's diff, an element of the
+// "files" op's wire result (bead pg2-2j5ac.28.2's PR-facts design bullet).
+// A targeted op (resolves to the one backend that owns the given PR id),
+// matching show/categorize/feedback_set's existing convention — NOT the
+// fan-out scheme list/ci list use.
+type PRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+}
+
+// PRFilesResult is the "files" op's wire result payload.
+type PRFilesResult struct {
+	ID    string   `json:"id"`
+	Files []PRFile `json:"files"`
+}
+
+// PRCommit is one commit on a PR's branch, an element of the "commits" op's
+// wire result. Author MUST carry the commit's own GitHub author login
+// (bead pg2-2j5ac.28.2's PR-facts design bullet, closing sentence —
+// "commits MUST carry each commit's own author login"), the co-owned-
+// ownership classification's
+// consumer; empty only when GitHub has no linked user account for the
+// commit's author identity (e.g. an email with no matching GitHub account).
+type PRCommit struct {
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Message string `json:"message,omitempty"`
+}
+
+// PRCommitsResult is the "commits" op's wire result payload. Like "files",
+// a targeted op (see PRFile's doc comment).
+type PRCommitsResult struct {
+	ID      string     `json:"id"`
+	Commits []PRCommit `json:"commits"`
 }
