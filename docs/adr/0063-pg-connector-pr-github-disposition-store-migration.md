@@ -1,8 +1,16 @@
 # pg-connector-pr-github: the pg-pr disposition-store migration path
 
-**Status**: Accepted
+**Status**: Superseded (2026-09-10)
 **Date**: 2026-09-06
 **Deciders**: Phillip Green II
+
+**Superseded 2026-09-10** (operator ruling, via `pg2-usjba`): the 2026-09-09 design amendment
+(commit `e0186710`) replaced the disposition-store migration mechanism this ADR describes.
+Dispositions are no longer migrated under any backend — `pg-desk`'s interpreter re-derives them
+from gathered facts on every run (Phase 3 migrated zero real rows in practice), so the `feedback`
+and `code_comment_message` tables DROP outright rather than moving. The rest of this ADR's
+Context/Decision below is retained as a historical record of the migration path that was
+considered and initially accepted, not as the current design.
 
 ## Context
 
