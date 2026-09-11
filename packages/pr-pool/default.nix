@@ -1,4 +1,5 @@
 {
+  pkgs,
   lib,
   mkGoApp,
   makeWrapper,
@@ -46,6 +47,13 @@ mkGoApp {
   versionPath = "main.version";
 
   nativeBuildInputs = [ makeWrapper ];
+
+  # No subPackages is set above, so this derivation's gomod2nix checkPhase runs the full
+  # `go test ./...`, including internal/config's git-common-dir tests (pg2-xl659), which build
+  # a real throwaway repo + linked worktree via the `git` binary rather than skipping when it
+  # is absent. Matches ccpool's own nativeCheckInputs = [ pkgs.git ] (packages/ccpool/default.nix),
+  # which mirrors pg-pr's (packages/pg-pr/default.nix).
+  nativeCheckInputs = [ pkgs.git ];
 
   # This list MUST carry the backing command of EVERY source and handler kind
   # pr-pool can validate, because `Config.Load()`'s pre-runtime check 5
