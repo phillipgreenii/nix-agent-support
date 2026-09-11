@@ -53,8 +53,8 @@ func (f fakeExister) Exists(string) bool { return f.ok }
 // has-session. A sub-bead external_id like "...zr-fy5j5.1..." must therefore be
 // mapped to the '_' form so create/has-session/kill all address one stored name.
 func TestTmuxName_sanitizesTargetSeparators(t *testing.T) {
-	if got := TmuxName("cc-", "pr-pool-worker-zr-fy5j5.1-stamp"); got != "cc-pr-pool-worker-zr-fy5j5_1-stamp" {
-		t.Errorf("TmuxName dotted = %q, want cc-pr-pool-worker-zr-fy5j5_1-stamp", got)
+	if got := TmuxName("cc-", "pg-router-worker-zr-fy5j5.1-stamp"); got != "cc-pg-router-worker-zr-fy5j5_1-stamp" {
+		t.Errorf("TmuxName dotted = %q, want cc-pg-router-worker-zr-fy5j5_1-stamp", got)
 	}
 	if got := TmuxName("cc-", "a:b.c"); got != "cc-a_b_c" {
 		t.Errorf("TmuxName colon+dot = %q, want cc-a_b_c", got)
@@ -85,14 +85,14 @@ func TestEnsure_sanitizesDottedExternalIDInTmuxName(t *testing.T) {
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
 
-	if _, err := s.Ensure(ctx, "pr-pool-worker-zr-fy5j5.1-stamp", "/tmp/proj", "", EnsureOpts{}); err != nil {
+	if _, err := s.Ensure(ctx, "pg-router-worker-zr-fy5j5.1-stamp", "/tmp/proj", "", EnsureOpts{}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	if len(ft.newCalls) != 1 {
 		t.Fatalf("NewSession calls = %d, want 1", len(ft.newCalls))
 	}
-	if got := ft.newCalls[0].name; got != "cc-pr-pool-worker-zr-fy5j5_1-stamp" {
-		t.Errorf("tmux session name = %q, want sanitized cc-pr-pool-worker-zr-fy5j5_1-stamp", got)
+	if got := ft.newCalls[0].name; got != "cc-pg-router-worker-zr-fy5j5_1-stamp" {
+		t.Errorf("tmux session name = %q, want sanitized cc-pg-router-worker-zr-fy5j5_1-stamp", got)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestEnsure_setsDispatchMetadataOnBrandNew(t *testing.T) {
 		NewUUID: func() string { return "csid-1" },
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
-	meta := map[string]string{"prpool.bead": "zr-1", "prpool.role": "worker"}
+	meta := map[string]string{"pgrouter.bead": "zr-1", "pgrouter.role": "worker"}
 	if _, err := s.Ensure(ctx, "ext-meta", "/tmp/proj", "", EnsureOpts{Meta: meta}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -626,7 +626,7 @@ func TestEnsure_reuseLivePreservesAndUpsertsMetadata(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if err := st.SetMeta(ctx, "ext-live", "prpool.role", "old"); err != nil {
+	if err := st.SetMeta(ctx, "ext-live", "pgrouter.role", "old"); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
 	ft := &fakeTmux{live: map[string]bool{"cc-ext-live": true}} // tmux already alive
@@ -635,7 +635,7 @@ func TestEnsure_reuseLivePreservesAndUpsertsMetadata(t *testing.T) {
 		Now: func() time.Time { return time.Unix(100, 0) },
 	})
 	if _, err := s.Ensure(ctx, "ext-live", "/tmp/proj", "", EnsureOpts{
-		Meta: map[string]string{"prpool.bead": "zr-2"},
+		Meta: map[string]string{"pgrouter.bead": "zr-2"},
 	}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestEnsure_reuseLivePreservesAndUpsertsMetadata(t *testing.T) {
 		t.Fatalf("reuse-live must not relaunch; got %d NewSession calls", len(ft.newCalls))
 	}
 	got, _ := st.Meta(ctx, "ext-live")
-	want := map[string]string{"prpool.role": "old", "prpool.bead": "zr-2"}
+	want := map[string]string{"pgrouter.role": "old", "pgrouter.bead": "zr-2"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Meta = %v, want %v (preserve old + upsert new)", got, want)
 	}
@@ -664,7 +664,7 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 	}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if err := st.SetMeta(ctx, "ext-reuse", "prpool.bead", "zr-OLD"); err != nil {
+	if err := st.SetMeta(ctx, "ext-reuse", "pgrouter.bead", "zr-OLD"); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
 	ft := &fakeTmux{live: map[string]bool{}} // tmux NOT alive => not reuse-live
@@ -679,7 +679,7 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 		Now:     func() time.Time { return time.Unix(100, 0) },
 	})
 	if _, err := s.Ensure(ctx, "ext-reuse", "/tmp/proj", "", EnsureOpts{
-		Meta: map[string]string{"prpool.bead": "zr-NEW"},
+		Meta: map[string]string{"pgrouter.bead": "zr-NEW"},
 	}); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 		t.Fatalf("expected a brand-new launch after prune; got %d NewSession calls", len(ft.newCalls))
 	}
 	got, _ := st.Meta(ctx, "ext-reuse")
-	want := map[string]string{"prpool.bead": "zr-NEW"} // zr-OLD cleared by the prune cascade
+	want := map[string]string{"pgrouter.bead": "zr-NEW"} // zr-OLD cleared by the prune cascade
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Meta = %v, want %v (prior metadata cleared on fresh launch)", got, want)
 	}

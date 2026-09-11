@@ -24,7 +24,7 @@ func TestReplyExitCode(t *testing.T) {
 	if c := replyExitCode(wrapped); c != 6 {
 		t.Errorf("wrapped ErrCancelUnconfirmed -> %d, want 6", c)
 	}
-	// A confirmed dropped nudge gets its own distinct code 7 so pr-pool can
+	// A confirmed dropped nudge gets its own distinct code 7 so pg-router can
 	// fail-fast and hand the bead back.
 	if c := replyExitCode(session.ErrPromptNotIngested); c != 7 {
 		t.Errorf("ErrPromptNotIngested -> %d, want 7", c)

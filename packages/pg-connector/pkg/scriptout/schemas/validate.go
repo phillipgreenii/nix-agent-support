@@ -1,14 +1,14 @@
 // validate.go: the compact JSON Schema SUBSET interpreter this package's
-// own embedded schemas actually use. Modeled on pr-pool's own
-// schemas/validate.go (packages/pr-pool/schemas/validate.go) — same
+// own embedded schemas actually use. Modeled on pg-router's own
+// schemas/validate.go (packages/pg-router/schemas/validate.go) — same
 // approach (a small self-contained interpreter, no external dependency),
 // deliberately a SMALLER keyword set: type, required, properties,
 // additionalProperties(false), enum, items, and "$ref" resolved BY NAME
-// against the registry. pr-pool's own richer message set additionally
+// against the registry. pg-router's own richer message set additionally
 // needed const/oneOf/pattern/minItems/minimum/maximum; none of the five
 // scriptout wire-envelope shapes here (request, response-success,
 // response-error, error, capabilities-response) do, so those keywords are
-// simply not implemented — add them here, following pr-pool's own
+// simply not implemented — add them here, following pg-router's own
 // validate.go as the reference, if a future schema in this package needs
 // one.
 package schemas
@@ -82,7 +82,7 @@ func (s *schema) validate(value any, path string, resolve resolver) error {
 	}
 
 	// Object and array keywords bind by keyword PRESENCE, independent of
-	// the declared "type" (matching pr-pool's own validator convention) —
+	// the declared "type" (matching pg-router's own validator convention) —
 	// a typeless schema still enforces them.
 	if obj, ok := value.(map[string]any); ok {
 		if err := s.validateObjectConstraints(obj, path, resolve); err != nil {

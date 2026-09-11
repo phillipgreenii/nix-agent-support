@@ -9,9 +9,9 @@
 // real compiled Tier-2 backend binary, or an in-process DispatchTable
 // double, can be run against the whole suite the same way.
 //
-// Modeled on pr-pool's own conformance package
-// (packages/pr-pool/conformance) — same Golden-loader/Check/CheckBytes
-// shape — reimplemented rather than imported, since pr-pool is a separate
+// Modeled on pg-router's own conformance package
+// (packages/pg-router/conformance) — same Golden-loader/Check/CheckBytes
+// shape — reimplemented rather than imported, since pg-router is a separate
 // Go module.
 package conformance
 

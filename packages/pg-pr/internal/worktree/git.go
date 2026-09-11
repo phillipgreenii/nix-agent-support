@@ -85,7 +85,7 @@ type opener func(ctx context.Context, dir string) (gitRepo, error)
 // openGit is a package-level var, not a plain function, so tests can
 // substitute a fake opener (map-backed, or one that fails) without
 // threading a new testing seam through GitClient/CLIGitClient itself. This
-// mirrors pr-pool's internal/worktree.Opener and internal/watchdog's
+// mirrors pg-router's internal/worktree.Opener and internal/watchdog's
 // gitOpener.
 var openGit opener = func(ctx context.Context, dir string) (gitRepo, error) {
 	return gitclient.New(ctx, dir)

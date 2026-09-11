@@ -197,20 +197,20 @@
           pg-ccaudit = final.callPackage ./packages/pg-ccaudit {
             inherit (goBuilders) mkGoApp;
           };
-          pr-pool = final.callPackage ./packages/pr-pool {
+          pg-router = final.callPackage ./packages/pg-router {
             inherit (goBuilders) mkGoApp;
             # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
             bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
           };
           pb = final.callPackage ./packages/pb {
             inherit (goBuilders) mkGoApp;
-            # No top-level bd/beads overlay attr — source it like pr-pool above.
+            # No top-level bd/beads overlay attr — source it like pg-router above.
             bd = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
             # git is pkgs.git (auto via callPackage); `pn` is NOT passed — it is an
             # ambient runtime PATH dep (agent-support is standalone/no-external-flake-deps
             # so final.pn does not resolve). See packages/pb/default.nix + ADR 0018.
           };
-          # prpool-ccpool-handler: pr-pool's sibling module realizing
+          # prpool-ccpool-handler: pg-router's sibling module realizing
           # INTF-HANDLER/INTF-SOURCE for the ccpool-backed and command-backed
           # participant kinds (`phillipgreenii-nix-agent-support` ADR 0065's
           # "New module" decision, docket pg2-oju6w Task 5.1). Currently an
@@ -824,14 +824,14 @@
                   };
                 })
                 (goLint {
-                  module = "pr-pool";
-                  modRoot = "pr-pool";
+                  module = "pg-router";
+                  modRoot = "pg-router";
                   src = lib.fileset.toSource {
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       # ./docs holds behavior docs, not build inputs — mirror
-                      # pr-pool/default.nix and exclude it from the digest.
-                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      # pg-router/default.nix and exclude it from the digest.
+                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
                     ];
@@ -842,7 +842,7 @@
               # `-tagged` companions for all three Pattern-B modules — every
               # one of them carries build-tagged test files today (ccpool:
               # contract/integration; pa-monitor: hostile/integration;
-              # pr-pool: integration/smoke). Same src/modRoot as patternBGoLints
+              # pg-router: integration/smoke). Same src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
                 (goLintTagged {
@@ -868,12 +868,12 @@
                   };
                 })
                 (goLintTagged {
-                  module = "pr-pool";
-                  modRoot = "pr-pool";
+                  module = "pg-router";
+                  modRoot = "pg-router";
                   src = lib.fileset.toSource {
                     root = ./packages;
                     fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
                     ];
@@ -1352,12 +1352,12 @@
                 testDeps = [ pkgs.git ];
               };
 
-              # prpool-ccpool-handler — pr-pool's sibling module (docket
-              # pg2-oju6w Task 5.1). Pattern-B local `replace => ../pr-pool`,
+              # prpool-ccpool-handler — pg-router's sibling module (docket
+              # pg2-oju6w Task 5.1). Pattern-B local `replace => ../pg-router`,
               # same shape as ccpool-go-tests above, so root the fileset at
               # packages/ and pass modRoot. Currently an empty, buildable
               # shell — no participant code has moved in yet, so no testDeps
-              # are needed (its one blank import, packages/pr-pool/schemas,
+              # are needed (its one blank import, packages/pg-router/schemas,
               # shells out to nothing).
               prpool-ccpool-handler-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "prpool-ccpool-handler-go-tests";
@@ -1365,7 +1365,7 @@
                   root = ./packages;
                   fileset = lib.fileset.unions [
                     ./packages/prpool-ccpool-handler
-                    ./packages/pr-pool
+                    ./packages/pg-router
                   ];
                 };
                 modRoot = "prpool-ccpool-handler";
@@ -1389,7 +1389,7 @@
               # `-go-tests` check, so it was the one Go module in this flake where
               # a broken or no-op test could never fail `nix flake check`. It is a
               # pure library (no `default.nix`, no standalone binary; consumed via
-              # local `replace` by pa-monitor/pr-pool/ccpool), so `src` matches
+              # local `replace` by pa-monitor/pg-router/ccpool), so `src` matches
               # goLint's default for this same module's `-golangci` check above
               # (plain path, no `lib.cleanSource`) rather than a `default.nix` that
               # doesn't exist. No `testDeps`: none of its tests shell out.
@@ -1871,7 +1871,7 @@
                 testDeps = [ pkgs.git ];
               };
 
-              # pr-pool — full internal/* suite PLUS a per-package STATEMENT-
+              # pg-router — full internal/* suite PLUS a per-package STATEMENT-
               # coverage gate (bead pg2-hvlyj.19, plan item 5.7 / FIX 2). This is
               # the enforcer the Cluster-5 Go items (.13/.16/.17/.18) cite by
               # name. It EXTENDS the base `mkGoTest` builder (ADR 0021's preferred
@@ -1883,7 +1883,7 @@
               # FAILs the build if any gated package is below its pinned bar.
               # Pattern-B module (local replace ../ccpool, ../claude-transcript)
               # so root the fileset at packages/ and pass modRoot, mirroring the
-              # pr-pool goLint + default.nix (docs excluded — behavior docs, not
+              # pg-router goLint + default.nix (docs excluded — behavior docs, not
               # build inputs). The thresholds start empty and each Go bead
               # activates its line as its package lands (the gate is wired
               # first, extended after).
@@ -1898,19 +1898,19 @@
               # only tests `count > 0` per statement, which atomic's non-binary
               # counts still satisfy identically, so the gate's thresholds are
               # unaffected.
-              pr-pool-go-tests =
+              pg-router-go-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pr-pool-go-tests";
+                  pname = "pg-router-go-tests";
                   src = lib.fileset.toSource {
                     root = ./packages;
                     fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pr-pool ./packages/pr-pool/docs)
+                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
                     ];
                   };
-                  modRoot = "pr-pool";
-                  gomod2nixToml = ./packages/pr-pool/gomod2nix.toml;
+                  modRoot = "pg-router";
+                  gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
                   testFlags = [
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
@@ -1926,7 +1926,7 @@
                     # gate there, in the module cwd where `go test ./...` wrote
                     # cover.out and where tests/ (script + thresholds) lives.
                     postBuild = (old.postBuild or "") + ''
-                      echo "=== pr-pool per-package statement-coverage gate (bead pg2-hvlyj.19) ==="
+                      echo "=== pg-router per-package statement-coverage gate (bead pg2-hvlyj.19) ==="
                       bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
                     '';
                   });
@@ -1935,9 +1935,9 @@
               # acceptance): a synthetic profile deliberately BELOW its bar makes
               # the gate FAIL, at/above PASSES, and a gated-but-absent package
               # FAILS — proving the gate actually blocks, not merely measures.
-              test-pr-pool-coverage-gate =
+              test-pg-router-coverage-gate =
                 let
-                  gate = ./packages/pr-pool/tests/coverage-gate.sh;
+                  gate = ./packages/pg-router/tests/coverage-gate.sh;
                   # queue = 3/4 stmts = 75%; msgschema = 9/10 = 90%.
                   profile = pkgs.writeText "synthetic.cover" ''
                     mode: set
@@ -1955,7 +1955,7 @@
                   # it must NOT over-match `ex/internal/vaXb` (bead pg2-vybrv #9).
                   metachar = pkgs.writeText "metachar.txt" "internal/va.b 90\n";
                 in
-                pkgs.runCommand "test-pr-pool-coverage-gate" { nativeBuildInputs = [ pkgs.bash ]; } ''
+                pkgs.runCommand "test-pg-router-coverage-gate" { nativeBuildInputs = [ pkgs.bash ]; } ''
                   fail() { echo "META-TEST FAIL: $1" >&2; exit 1; }
 
                   # BELOW threshold must be rejected (non-zero).
@@ -1984,28 +1984,28 @@
                   touch $out
                 '';
 
-              # Regression guard that the pr-pool binary's version string is
+              # Regression guard that the pg-router binary's version string is
               # actually stamped by the build-time ldflag (versionPath =
-              # "main.version" in packages/pr-pool/default.nix) — the same
+              # "main.version" in packages/pg-router/default.nix) — the same
               # gap and fix as test-pa-monitor-version-stamped above. Unlike
-              # pa-monitor, pr-pool's cmd/pr-pool/main.go prints the bare
+              # pa-monitor, pg-router's cmd/pg-router/main.go prints the bare
               # version with no program-name prefix — the repo-wide
               # convention per phillipg-nix-repo-base's using-mkGoBuilders.md
               # "Version format" (ADR 0006): `0.0.0-<srcdigest8>`, no prefix.
               # pa-monitor's "pa-monitor "-prefixed output is that tool's own
               # one-off choice, not the convention this check should mirror.
-              test-pr-pool-version-stamped = pkgs.runCommand "pr-pool-version-stamped" { } ''
-                v=$(${pkgs.pr-pool}/bin/pr-pool --version)
+              test-pg-router-version-stamped = pkgs.runCommand "pg-router-version-stamped" { } ''
+                v=$(${pkgs.pg-router}/bin/pg-router --version)
                 case "$v" in
                   "0.0.0-"????????) touch "$out" ;;
                   *)
-                    echo "pr-pool version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
+                    echo "pg-router version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
                     exit 1
                     ;;
                 esac
               '';
 
-              test-pr-pool-module =
+              test-pg-router-module =
                 let
                   hmAssertionSubmodule = lib.types.submodule {
                     options = {
@@ -2015,17 +2015,17 @@
                   };
 
                   # HM-side eval: stub exactly the options
-                  # home/programs/pr-pool/default.nix reads/writes —
+                  # home/programs/pg-router/default.nix reads/writes —
                   # home.packages, systemd.user.{services,timers}, and the
                   # home-manager `assertions` list (this bare `lib.evalModules`
                   # call never imports home-manager's own base modules, which
                   # is where `assertions` normally comes from).
                   evalHM =
-                    prPool:
+                    pgRouter:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
-                        ./home/programs/pr-pool/default.nix
+                        ./home/programs/pg-router/default.nix
                         (
                           { lib, ... }:
                           {
@@ -2049,12 +2049,12 @@
                             };
                           }
                         )
-                        { phillipgreenii.programs.pr-pool = prPool; }
+                        { phillipgreenii.programs.pg-router = pgRouter; }
                       ];
                     }).config;
 
                   # darwin-side eval: stub the options
-                  # darwin/modules/pr-pool/default.nix reads/writes —
+                  # darwin/modules/pg-router/default.nix reads/writes —
                   # phillipgreenii.observability.enable, system.primaryUser,
                   # phillipgreenii.system.launchdServices.userAgents (the real
                   # option; see the header comment above), and a MINIMAL
@@ -2091,7 +2091,7 @@
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
-                        ./darwin/modules/pr-pool/default.nix
+                        ./darwin/modules/pg-router/default.nix
                         (
                           { lib, ... }:
                           {
@@ -2119,7 +2119,7 @@
                               home-manager.users = lib.mkOption {
                                 type = lib.types.attrsOf (
                                   lib.types.submodule {
-                                    options.phillipgreenii.programs.pr-pool.daemon = {
+                                    options.phillipgreenii.programs.pg-router.daemon = {
                                       enable = lib.mkOption {
                                         type = lib.types.bool;
                                         default = false;
@@ -2154,7 +2154,7 @@
                             };
                           }
                         )
-                        { home-manager.users.tester.phillipgreenii.programs.pr-pool.daemon.enable = daemonEnable; }
+                        { home-manager.users.tester.phillipgreenii.programs.pg-router.daemon.enable = daemonEnable; }
                       ];
                     }).config;
 
@@ -2173,7 +2173,7 @@
                       configText = baseConfigText;
                     };
                   };
-                  drainService = drainOnly.systemd.user.services.pr-pool-drain.Service;
+                  drainService = drainOnly.systemd.user.services.pg-router-drain.Service;
 
                   # daemon only, gate paths overridden — proves the daemon
                   # ExecStart, and that the gate env vars actually surface.
@@ -2193,7 +2193,7 @@
                       };
                     };
                   };
-                  daemonService = daemonOnly.systemd.user.services.pr-pool-daemon.Service;
+                  daemonService = daemonOnly.systemd.user.services.pg-router-daemon.Service;
 
                   # Both enabled at once — the mutual-exclusion assertion
                   # must fire (its `assertion` field is false).
@@ -2221,17 +2221,17 @@
                 # Daemon unit: the bare "run" subcommand.
                 assert lib.hasSuffix " run" daemonService.ExecStart;
                 # Gate env vars present on the daemon unit when configured.
-                assert lib.elem "PR_POOL_OPERATOR_PAUSED=/state/gates/operator-paused" daemonService.Environment;
-                assert lib.elem "PR_POOL_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
+                assert lib.elem "PG_ROUTER_OPERATOR_PAUSED=/state/gates/operator-paused" daemonService.Environment;
+                assert lib.elem "PG_ROUTER_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
                 # Mutual-exclusion assertion fires when both are enabled.
                 assert firedAssertion != null;
                 # darwin LaunchAgent mirrors the daemon (pa-monitor pattern),
                 # only when some HM user enabled it.
-                assert darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents ? pr-pool-daemon;
-                assert lib.hasInfix "pr-pool run"
-                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pr-pool-daemon.script;
+                assert darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents ? pg-router-daemon;
+                assert lib.hasInfix "pg-router run"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
-                pkgs.runCommand "test-pr-pool-module-ok" { } "touch $out";
+                pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
 
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's
@@ -2454,7 +2454,7 @@
               # evaluator CAN see a defect, and prove nothing about the docs that
               # actually ship. Two known defects reached main precisely because no
               # gate ever read a real set. This check runs all three evaluators
-              # over every in-repo behavior-docs set and the real method->pr-pool
+              # over every in-repo behavior-docs set and the real method->pg-router
               # seam, so a violation in shipped docs fails the build.
               #
               # `${./.}` is the flake source, already realised in the store — so
@@ -4373,7 +4373,7 @@
             # "expected a set but found null").
             inherit (pkgs)
               ccpool
-              pr-pool
+              pg-router
               prpool-ccpool-handler
               pb
               claude-extended-tool-approver

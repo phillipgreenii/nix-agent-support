@@ -3,11 +3,11 @@
 // pkg/scriptout/conformance's conformance suite for the generic,
 // capability-agnostic wire protocol pkg/scriptout/envelope.go defines
 // (Request, Response's success/error branches, Error, and the bespoke
-// CapabilitiesResponse shape). It is modeled on pr-pool's own schemas
-// package (packages/pr-pool/schemas): same embed-and-interpret approach,
+// CapabilitiesResponse shape). It is modeled on pg-router's own schemas
+// package (packages/pg-router/schemas): same embed-and-interpret approach,
 // deliberately reimplemented here (see validate.go) rather than imported —
-// pr-pool is a separate Go module (github.com/phillipgreenii/pr-pool) this
-// module has no dependency on, and pr-pool itself is left unmodified,
+// pg-router is a separate Go module (github.com/phillipgreenii/pg-router) this
+// module has no dependency on, and pg-router itself is left unmodified,
 // used only as the reference pattern.
 //
 // This package is deliberately scoped to the WIRE ENVELOPE only — the

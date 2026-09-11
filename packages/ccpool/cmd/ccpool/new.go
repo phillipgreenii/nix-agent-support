@@ -92,7 +92,7 @@ func runNew(args []string) int {
 }
 
 // envFlag collects repeated `--env KEY=VAL` into a map. Implements flag.Value so
-// `ccpool new` can take --env any number of times (pr-pool injects one per key).
+// `ccpool new` can take --env any number of times (pg-router injects one per key).
 type envFlag map[string]string
 
 func (e envFlag) String() string { return "" }

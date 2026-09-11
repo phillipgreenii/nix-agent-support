@@ -73,7 +73,7 @@ func TestValidator_ObjectConstraints(t *testing.T) {
 // TestValidator_TypelessObjectKeywords proves object keywords bind by
 // keyword PRESENCE, independent of a declared "type" — e.g. a $ref target
 // with no "type":"object" of its own still enforces required/
-// additionalProperties (mirrors pr-pool's own validator convention).
+// additionalProperties (mirrors pg-router's own validator convention).
 func TestValidator_TypelessObjectKeywords(t *testing.T) {
 	doc := `{"additionalProperties":false,"required":["a"],"properties":{"a":{"type":"string"}}}`
 	if err := val(t, doc, `{"a":"x"}`); err != nil {

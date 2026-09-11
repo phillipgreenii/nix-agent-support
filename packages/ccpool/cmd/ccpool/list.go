@@ -178,14 +178,14 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 	return b.String()
 }
 
-// listJSON is the --json shape consumed by pr-pool's Runner.List. `live` is
+// listJSON is the --json shape consumed by pg-router's Runner.List. `live` is
 // SEPARATE from `state` (tmux has-session liveness, not folded into state).
 // Location facets (pg2-gxxl):
 //   - launch_dir: directory ccpool launched the session in (store.Session.CWD).
 //     Always present.
 //   - cwd: the LIVE pane current working directory for a live session, falling
 //     back to launch_dir when the session is not live or the pane query fails.
-//     Always present; KEEPS its name for backward compat (pr-pool maps it).
+//     Always present; KEEPS its name for backward compat (pg-router maps it).
 //   - git_repo_root / worktree / branch: git-dependent facets resolved against
 //     cwd; pointers with omitempty, so they marshal to absent when cwd is not
 //     inside a git work tree (fail-soft, never error the whole list).
@@ -210,7 +210,7 @@ type listJSON struct {
 // renderListJSON marshals the visible rows as a JSON array (one object per
 // session), applying the same view hygiene as renderList; --all bypasses
 // retention identically. An empty result marshals as [] (never null), so
-// pr-pool always unmarshals a JSON array.
+// pg-router always unmarshals a JSON array.
 //
 // pathFn and gitFn are injected (mirroring liveFn) so the renderer stays PURE
 // and list_test.go stays hermetic. pathFn resolves a session's LIVE pane cwd;

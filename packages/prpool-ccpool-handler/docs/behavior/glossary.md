@@ -1,9 +1,9 @@
 # Glossary — prpool-ccpool-handler
 
 Vocabulary for this module's realization of `INTF-HANDLER`/`INTF-SOURCE`
-(`packages/pr-pool/docs/behavior/interfaces.md`). Terms the core itself defines — event, binding,
+(`packages/pg-router/docs/behavior/interfaces.md`). Terms the core itself defines — event, binding,
 handler session, role, wiring — are not restated here; see
-`packages/pr-pool/docs/behavior/glossary.md`. Nothing below exists in the module's code yet (see
+`packages/pg-router/docs/behavior/glossary.md`. Nothing below exists in the module's code yet (see
 [README](README.md)'s Realization gaps) — this vocabulary names what Task 5.2 onward moves in.
 
 ## Handler-side vocabulary
@@ -16,7 +16,7 @@ handler session, role, wiring — are not restated here; see
   from the core's delivery bookkeeping (`INTF-HANDLER`'s "a handler's run status is not part of
   this contract").
 - **Budget** — this module's own policy for a usage ceiling on a handler session (a `resource-limit`
-  post-accept outcome in `INTF-HANDLER`'s vocabulary); pr-pool's core never declares this ceiling.
+  post-accept outcome in `INTF-HANDLER`'s vocabulary); pg-router's core never declares this ceiling.
 - **Prompt template** — how this module renders the text a handler session is asked to act on, from
   the opaque event payload the core handed over.
 - **Completion policy** — how this module turns a finished handler session into the opaque outcome

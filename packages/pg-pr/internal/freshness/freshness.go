@@ -9,7 +9,7 @@
 // stale once it exceeds a bound) come from a single definition instead of being
 // re-derived per seam.
 //
-// Policy authority: the pr-pool deployment's INV-FRESH-1 ("don't act on stale
+// Policy authority: the pg-router deployment's INV-FRESH-1 ("don't act on stale
 // truth": any surface an operator or observer acts on MUST expose its own as-of
 // time and flag its data as stale once that data exceeds a bound; a readiness or
 // status signal derived from data past that bound MUST NOT be presented as

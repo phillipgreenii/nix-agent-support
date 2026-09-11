@@ -158,7 +158,7 @@ const titleScanLines = 200
 // titleScanInitialBufSize and titleScanMaxLineSize match the 1 MiB initial /
 // 16 MiB ceiling pattern used by every other transcript reader in this repo
 // (context.go, subagents.go, first_prompt.go, corpus/resolve.go,
-// pr-pool/internal/usage/transcript.go, claude-transcript/scanner.go). A
+// pg-router/internal/usage/transcript.go, claude-transcript/scanner.go). A
 // single JSONL line here routinely runs to megabytes (a large tool_result or
 // pasted file on one line), and bufio.Scanner.Buffer's effective ceiling is
 // the LARGER of its two arguments — the previous (1<<16, 1<<20) pair capped

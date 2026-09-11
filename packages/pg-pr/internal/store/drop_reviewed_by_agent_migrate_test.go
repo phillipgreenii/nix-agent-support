@@ -9,7 +9,7 @@ import (
 // Schema v16 drops pr_revision.reviewed_by_agent_at (pg2-ynhr.5). It was the
 // re-review-on-head-advance cursor for the legacy pg-pr draft-review consumer
 // (pg2-4c5i.36), removed wholesale by this bead's strip of pg-pr's review
-// workflow — that workflow shipped to pr-pool (ADR 0034), whose review-pr
+// workflow — that workflow shipped to pg-router (ADR 0034), whose review-pr
 // bead now carries its own head_sha cursor. Mirrors
 // TestMigrate_V12DropsRetiredApprovalColumns's shape (plain native DROP
 // COLUMN, not a 12-step rebuild): the column is not a PRIMARY KEY, UNIQUE,

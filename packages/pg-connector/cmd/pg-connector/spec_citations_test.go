@@ -30,7 +30,7 @@ const sectionSign = string(rune(0x00a7))
 // repo's git history) using the same forbidden section-sign shape. Both classes
 // were rewritten (bead pg2-hidkm) to cite durable, in-repo owners instead —
 // ADR 0062, the packages/pg-connector/docs/behavior/ invariant/interface IDs
-// (INV-*/INTF-* — the bare-ID citation convention pr-pool's own Go code already
+// (INV-*/INTF-* — the bare-ID citation convention pg-router's own Go code already
 // uses for its behavior docs), or the specific mechanical test that already
 // enforces a naming/layout/composition rule, whichever fits. This guard is
 // what keeps that rewrite from rotting back to dangling section-sign citations

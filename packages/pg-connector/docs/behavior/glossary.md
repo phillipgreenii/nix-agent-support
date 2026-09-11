@@ -12,7 +12,7 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   wire protocol, with no independent CLI identity a human types directly. An **Adapter**
   translating one external system into a capability's generic wire contract, realized as a
   **process-boundary adapter** (a separate OS process, not an in-language object).
-- **Tier 3 — consumer layer** — tooling built on top of pg-connector's own verbs (a TUI, a pr-pool
+- **Tier 3 — consumer layer** — tooling built on top of pg-connector's own verbs (a TUI, a pg-router
   role, …); out of this set's scope (`## Scope`).
 - **Backend implementer** — the role of building a Tier-2 backend against a capability's Provider
   interface and the wire protocol; realized by `ACTOR-OP` acting in that capacity, mirroring the

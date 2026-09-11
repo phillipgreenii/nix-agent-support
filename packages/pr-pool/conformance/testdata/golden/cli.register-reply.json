@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "1",
-  "accepted": true,
-  "callback": "",
-  "selfStatusCallback": "pr-pool self-status --socket '/tmp/prp/core.sock' --token 'xyz'"
-}

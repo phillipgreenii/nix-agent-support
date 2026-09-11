@@ -431,7 +431,7 @@ func TestContract_Meta_cliRoundTripAndListFilter(t *testing.T) {
 	if _, code := sb.ccp("meta", "set", "tagged", "role", "worker"); code != 0 {
 		t.Fatalf("meta set role rc=%d", code)
 	}
-	if _, code := sb.ccp("meta", "set", "tagged", "pool", "pr-pool"); code != 0 {
+	if _, code := sb.ccp("meta", "set", "tagged", "pool", "pg-router"); code != 0 {
 		t.Fatalf("meta set pool rc=%d", code)
 	}
 
@@ -443,8 +443,8 @@ func TestContract_Meta_cliRoundTripAndListFilter(t *testing.T) {
 	// list --json surfaces the meta object on the tagged row.
 	row, ok := sb.listRow("tagged")
 	liveAssert(t, "tagged row present in list", ok, true)
-	if row.Meta["role"] != "worker" || row.Meta["pool"] != "pr-pool" {
-		t.Errorf("meta object = %v, want role=worker pool=pr-pool", row.Meta)
+	if row.Meta["role"] != "worker" || row.Meta["pool"] != "pg-router" {
+		t.Errorf("meta object = %v, want role=worker pool=pg-router", row.Meta)
 	}
 
 	// list --filter role=worker includes the tagged row and EXCLUDES the untagged one.
@@ -462,7 +462,7 @@ func TestContract_Meta_cliRoundTripAndListFilter(t *testing.T) {
 	liveAssert(t, "filter role=worker excludes the untagged row", sawUntagged, false)
 
 	// AND-combined filter still matches; a mismatched value matches nothing.
-	if rows := sb.listRowsFiltered("role=worker", "pool=pr-pool"); len(rows) != 1 || rows[0].ExternalID != "tagged" {
+	if rows := sb.listRowsFiltered("role=worker", "pool=pg-router"); len(rows) != 1 || rows[0].ExternalID != "tagged" {
 		t.Errorf("AND filter rows = %v, want exactly [tagged]", externalIDsOf(rows))
 	}
 	if rows := sb.listRowsFiltered("role=ghost"); len(rows) != 0 {

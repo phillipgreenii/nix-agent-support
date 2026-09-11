@@ -20,8 +20,8 @@
 # Exit:  0 when the real corpus matches the recorded baseline exactly, 1 otherwise.
 #
 # THE BASELINE IS A RATCHET, NOT AN EXEMPTION LIST. Some findings below are open
-# work with a scheduled owner (pr-pool has not retrofitted INV-22 to its journeys;
-# five implementation citations name elements pr-pool does not declare). Loosening
+# work with a scheduled owner (pg-router has not retrofitted INV-22 to its journeys;
+# five implementation citations name elements pg-router does not declare). Loosening
 # a check until those pass would make it worthless — a gate that only ever agrees
 # with the current state. Instead every open finding is recorded VERBATIM in the
 # baseline, and this runner fails on ANY difference in EITHER direction:
@@ -67,8 +67,8 @@ NAME_COLLISIONS="$SKILLS/behavior-docs-inter-conformance/scripts/name-collisions
 IMPL_TRACES="$SKILLS/behavior-docs-impl-conformance/scripts/impl-traces.sh"
 
 METHOD_SET="behavior-docs/docs/behavior"
-PRPOOL_SET="packages/pr-pool/docs/behavior"
-PRPOOL_IMPL="packages/pr-pool"
+PGROUTER_SET="packages/pg-router/docs/behavior"
+PGROUTER_IMPL="packages/pg-router"
 PAMONITOR_SET="packages/pa-monitor/docs/behavior"
 CCPOOL_SET="packages/ccpool/docs/behavior"
 PGPR_SET="packages/pg-pr/docs/behavior"
@@ -80,7 +80,7 @@ for f in "$SELF_CHECKS" "$TRACE_EXTRACT" "$RELOCATION_CHECK" "$RESOLVE_IMPORTS" 
     exit 2
   }
 done
-for d in "$METHOD_SET" "$PRPOOL_SET" "$PRPOOL_IMPL" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
+for d in "$METHOD_SET" "$PGROUTER_SET" "$PGROUTER_IMPL" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
   [ -d "$d" ] || {
     echo "missing real corpus path: $ROOT/$d" >&2
     exit 2
@@ -133,7 +133,7 @@ require_clean() {
 
 echo "=== behavior-docs real corpus: $ROOT ==="
 
-for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
+for set in "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET"; do
   echo
   echo "--- intra: self-checks.sh $set ---"
   out="$tmp/self-checks.$(printf '%s' "$set" | tr / _)"
@@ -185,9 +185,9 @@ for set in "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET
 done
 
 echo
-echo "--- inter: resolve-imports.sh (method -> pr-pool) ---"
+echo "--- inter: resolve-imports.sh (method -> pg-router) ---"
 out="$tmp/resolve"
-bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PRPOOL_SET" >"$out" 2>&1 || {
+bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PGROUTER_SET" >"$out" 2>&1 || {
   echo "REAL-CORPUS FAIL resolve-imports.sh did not resolve the real seam:" >&2
   cat "$out" >&2
   hard_fail=1
@@ -195,9 +195,9 @@ bash "$RESOLVE_IMPORTS" "$METHOD_SET" "$PRPOOL_SET" >"$out" 2>&1 || {
 record "inter/resolve-imports" "$out"
 grep -E '^[[:space:]]*(ok|WARN|FAIL|external)' "$out" | sed 's/^/  /' || true
 
-echo "--- inter: reconcile-imports.sh (method <-> pr-pool) ---"
+echo "--- inter: reconcile-imports.sh (method <-> pg-router) ---"
 out="$tmp/reconcile"
-bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PRPOOL_SET" >"$out" 2>&1 || true
+bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PGROUTER_SET" >"$out" 2>&1 || true
 record "inter/reconcile-imports" "$out"
 grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
 
@@ -265,9 +265,9 @@ bash "$RECONCILE_IMPORTS" "$METHOD_SET" "$PGPR_SET" >"$out" 2>&1 || true
 record "inter/reconcile-imports" "$out"
 grep -E '^[[:space:]]*(FAIL|WARN|clean)' "$out" | sed 's/^/  /' || true
 
-echo "--- inter: name-collisions.sh (method, pr-pool, pa-monitor, ccpool, pg-pr) ---"
+echo "--- inter: name-collisions.sh (method, pg-router, pa-monitor, ccpool, pg-pr) ---"
 out="$tmp/collisions"
-bash "$NAME_COLLISIONS" "$METHOD_SET" "$PRPOOL_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET" >"$out" 2>&1 || true
+bash "$NAME_COLLISIONS" "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_SET" >"$out" 2>&1 || true
 record "inter/name-collisions" "$out"
 # `note` is echoed but deliberately NOT recorded (see `record`, which greps only
 # FAIL/WARN/CANDIDATE). Class 1 emits one per ID name reused across two sets with NO
@@ -276,9 +276,9 @@ record "inter/name-collisions" "$out"
 # VISIBLE in the gate log rather than silent (bead pg2-pffnw).
 grep -E '^[[:space:]]*(FAIL|CANDIDATE|note|clean|none)' "$out" | sed 's/^/  /' || true
 
-echo "--- impl: impl-traces.sh (pr-pool code <-> pr-pool set) ---"
+echo "--- impl: impl-traces.sh (pg-router code <-> pg-router set) ---"
 out="$tmp/impl"
-bash "$IMPL_TRACES" "$PRPOOL_SET" "$PRPOOL_IMPL" >"$out" 2>&1 || true
+bash "$IMPL_TRACES" "$PGROUTER_SET" "$PGROUTER_IMPL" >"$out" 2>&1 || true
 record "impl/impl-traces" "$out"
 grep -E '^[[:space:]]*(FAIL|NOTICE)' "$out" | sed 's/^/  /' || true
 

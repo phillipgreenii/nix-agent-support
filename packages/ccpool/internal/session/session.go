@@ -33,7 +33,7 @@ import (
 // never advance past `starting` — so every dispatch silently eats the full Wait
 // timeout (default 10m) before failing with the opaque "did not reach ready
 // before timeout" error (tc-24qs: this reproduced on every attempt because the
-// consuming deployment enabled `programs.pr-pool` without also enabling
+// consuming deployment enabled `programs.pg-router` without also enabling
 // `programs.ccpool`, so `claude.plugin_dir` was never rendered into
 // config.toml — a misconfiguration this check turns into an immediate,
 // diagnosable error instead of a 10-minute hang).
@@ -198,18 +198,18 @@ type EnsureOpts struct {
 	PermissionMode launch.PermissionMode
 	Effort         string
 	// AllowedTools is forwarded verbatim to launch.Spec.AllowedTools (claude
-	// --allowed-tools). Empty omits the flag. Set by pr-pool to constrain a
+	// --allowed-tools). Empty omits the flag. Set by pg-router to constrain a
 	// dontAsk worker to an allowlist.
 	AllowedTools string
 
 	// Autonomous, when true, injects CCPOOL_AUTONOMOUS=1 into the session env so
 	// the `ccpool hook ask` PreToolUse hook BLOCKS AskUserQuestion (emits a deny)
-	// instead of only recording the needs_input edge. Set by pr-pool for human-less
+	// instead of only recording the needs_input edge. Set by pg-router for human-less
 	// workers; unset for attended sessions (which keep pg2-7a5b detection).
 	Autonomous bool
 
 	// Meta is caller-supplied session metadata upserted atomically as part of this
-	// dispatch (e.g. pr-pool's prpool.bead/role/pool). Addressed by external_id and
+	// dispatch (e.g. pg-router's pgrouter.bead/role/pool). Addressed by external_id and
 	// tied to the Claude session lifecycle: preserved across reuse-live/resume,
 	// cleared when a phantom row is pruned (reuse => new). Empty/nil is a no-op.
 	Meta map[string]string

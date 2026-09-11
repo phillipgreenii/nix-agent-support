@@ -3,7 +3,7 @@
 `pg-connector` is the unified, pluggable connector umbrella for PR/issue/CI/SCM state: one
 user-facing CLI, backed by a config-driven registry of small backend binaries, so no other tool
 in this repo talks to GitHub/Jira/beads/git directly. It replaces the overlapping GitHub/Jira/beads
-sync and correlation logic that `pg-pr`, `pr-pool`, and `work-activity-tracker` each used to
+sync and correlation logic that `pg-pr`, `pg-router`, and `work-activity-tracker` each used to
 reimplement independently.
 
 > **Behavior:** what pg-connector guarantees about the wire protocol, the registry, the CLI's own

@@ -303,7 +303,7 @@ func getDashboard(t *testing.T, s *snapshot.Store) snapshot.Snapshot {
 // request — NOT at the moment the daemon built the snapshot. The same held
 // snapshot must read fresh early and stale once the bound has passed, which is
 // the whole point: a wedged sync tick leaves the snapshot in place and only the
-// serve-time verdict can catch it (pr-pool INV-FRESH-1).
+// serve-time verdict can catch it (pg-router INV-FRESH-1).
 func TestDashboardStampsFreshnessAtServeTime(t *testing.T) {
 	generated := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	s := snapshot.NewStore()

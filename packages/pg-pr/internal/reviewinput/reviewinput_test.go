@@ -412,7 +412,7 @@ func TestDecode_MalformedJSON(t *testing.T) {
 }
 
 // TestDecode_PassesThroughProvenance: the advisory provenance keys the daemon
-// and the pr-pool review role set must survive the adapter.
+// and the pg-router review role set must survive the adapter.
 func TestDecode_PassesThroughProvenance(t *testing.T) {
 	d, err := Decode([]byte(`{"head_sha":"abc123","ownership":"team","bead_id":"pg2-x","verdict":"comment"}`))
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 // This file pins the `--json` machine-readable contract for the consolidated
 // View (pg2-4dz88.5.5). --json is a COMMITTED contract, not an open question:
 // cmd/pg-pr/pr_list.go's own doc comment states `pr list --json` "is the read
-// seam the pr-pool ACL consumes," and two existing marketplace callers already
+// seam the pg-router ACL consumes," and two existing marketplace callers already
 // depend on field-level detail from this command family's --json output today
 // (claude-marketplace/pg-pr/skills/pg-pr-write-pr-description/SKILL.md reads
 // `body` from `pr show --json`; claude-marketplace/pg-pr/agents/

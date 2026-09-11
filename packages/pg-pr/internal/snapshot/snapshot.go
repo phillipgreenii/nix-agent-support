@@ -10,7 +10,7 @@ import (
 
 // Snapshot is the top-level dashboard payload.
 //
-// It carries BOTH halves of the freshness contract (pr-pool INV-FRESH-1): the
+// It carries BOTH halves of the freshness contract (pg-router INV-FRESH-1): the
 // as-of time (GeneratedAt) and the staleness verdict against a declared bound
 // (StaleAfterSeconds / AgeSeconds / Stale). The bound is fixed when the snapshot
 // is BUILT (it derives from the declared sync cadence); the verdict is stamped

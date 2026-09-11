@@ -124,10 +124,10 @@ func TestListExternalIDsByMeta_andCombinesFilters(t *testing.T) {
 	ctx := context.Background()
 	// ext-a matches BOTH; ext-b only role; ext-c only pool.
 	_ = st.SetMeta(ctx, "ext-a", "role", "worker")
-	_ = st.SetMeta(ctx, "ext-a", "pool", "pr-pool")
+	_ = st.SetMeta(ctx, "ext-a", "pool", "pg-router")
 	_ = st.SetMeta(ctx, "ext-b", "role", "worker")
-	_ = st.SetMeta(ctx, "ext-c", "pool", "pr-pool")
-	got, err := st.ListExternalIDsByMeta(ctx, map[string]string{"role": "worker", "pool": "pr-pool"})
+	_ = st.SetMeta(ctx, "ext-c", "pool", "pg-router")
+	got, err := st.ListExternalIDsByMeta(ctx, map[string]string{"role": "worker", "pool": "pg-router"})
 	if err != nil {
 		t.Fatalf("ListExternalIDsByMeta: %v", err)
 	}

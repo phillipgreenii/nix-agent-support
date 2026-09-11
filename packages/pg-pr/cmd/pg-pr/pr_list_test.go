@@ -178,7 +178,7 @@ func TestPRList_JSONBaseFields(t *testing.T) {
 
 // TestPRList_MergedPRExcluded_SeamProtection is the pg2-ew4kf seam-protection
 // regression guard: `pg-pr pr list` is the machine-readable read seam the
-// pr-pool ACL consumes, and it MUST stay open/draft-only regardless of the
+// pg-router ACL consumes, and it MUST stay open/draft-only regardless of the
 // dashboard/snapshot layer's separate 24h merged-PR retention (implemented in
 // internal/snapshot's Build, not here). A merged PR — including one authored
 // by ME, the exact case the dashboard now retains — must NEVER appear in this
@@ -207,7 +207,7 @@ func TestPRList_MergedPRExcluded_SeamProtection(t *testing.T) {
 	}
 	for _, it := range got {
 		if it.State == "merged" {
-			t.Fatalf("a merged PR must never appear in `pr list` output (pr-pool ACL seam): %+v", it)
+			t.Fatalf("a merged PR must never appear in `pr list` output (pg-router ACL seam): %+v", it)
 		}
 	}
 	if got[0].Number != 10 {
@@ -216,7 +216,7 @@ func TestPRList_MergedPRExcluded_SeamProtection(t *testing.T) {
 }
 
 // TestPRList_HiddenPRAlwaysIncludedWithFlagAndReason is the pg2-4dz88.4.3
-// machine-seam acceptance test: `pr list --json` (the read seam pr-pool's ACL
+// machine-seam acceptance test: `pr list --json` (the read seam pg-router's ACL
 // consumes, per ADR 0034 / the fork #1 operator ruling) NEVER filters on
 // USER_HIDDEN -- a hidden PR appears in the default output exactly like an
 // unhidden one, carrying "hidden": true and its "reason".
@@ -672,7 +672,7 @@ func TestPRList_JSONCarriesStoreLastSyncedAt(t *testing.T) {
 		t.Errorf("a row synced 30s ago must not be flagged stale: %+v", got[0])
 	}
 	// The fields must actually be on the wire (not merely on the decoded struct),
-	// under exactly these JSON keys — the pr-pool ACL binds to them by name.
+	// under exactly these JSON keys — the pg-router ACL binds to them by name.
 	raw := runPRListRaw(t, "--repo", "foo/bar", "--json")
 	if !strings.Contains(raw, `"last_synced_at": "`+synced+`"`) {
 		t.Errorf("last_synced_at missing from the emitted JSON:\n%s", raw)

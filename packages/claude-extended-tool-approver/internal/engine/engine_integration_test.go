@@ -2320,7 +2320,7 @@ func TestIntegration_GitDirCensusFalsePositives(t *testing.T) {
 		want    hookio.Decision
 	}{
 		// --- Rows 1-3: printed in full, and each really carries the exclusion ---
-		{"row 1: named-glob walk excluding .git", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'", hookio.NoOpinion},
+		{"row 1: named-glob walk excluding .git", "find /Users/phillipg/phillipg_mbp -name '*pg-router-event-model*' -not -path '*/.git/*'", hookio.NoOpinion},
 		// Row 2 is byte-identical to a case TestIntegration_GitDirDirectionAndRole
 		// already pins for pg2-3hk7t. It is restated here deliberately: this block is
 		// the acceptance evidence for pg2-24sc9's census, and a reader auditing "all

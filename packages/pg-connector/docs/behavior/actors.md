@@ -13,11 +13,11 @@ actors (method `INV-13`).
   call out across every registered source, checks auth/config health
   (`auth status`, `config validate`), and chooses the CLI's presentation mode
   (`--output json|human`). Works through `INTF-CLI`, which is drivable by either a human at a
-  terminal or a script/subprocess (a pr-pool role, a review-orchestrator tool, …) — pg-connector
+  terminal or a script/subprocess (a pg-router role, a review-orchestrator tool, …) — pg-connector
   draws no distinction between the two. This actor also covers the **backend-implementer** role:
   building a Tier-2 backend against a capability's Provider interface and the wire protocol is
   `ACTOR-OP` acting in that capacity, not a second actor — the same convention this set's sibling
-  `pr-pool` behavior-docs set applies to its own operator/implementer split.
+  `pg-router` behavior-docs set applies to its own operator/implementer split.
 
 ## System actors (participants behind interfaces)
 

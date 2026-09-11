@@ -32,7 +32,7 @@ type Commit struct {
 // opener seam). A package-level var, not a plain function, so tests can
 // substitute a fake HistoryReader without threading a new testing seam
 // through ChangedFiles/Commits themselves — mirrors pg-pr's
-// internal/worktree.opener and pr-pool's internal/watchdog.gitOpener.
+// internal/worktree.opener and pg-router's internal/watchdog.gitOpener.
 type opener func(ctx context.Context, dir string) (gitclient.HistoryReader, error)
 
 // openGit is the production opener. gitclient.Client builds its child

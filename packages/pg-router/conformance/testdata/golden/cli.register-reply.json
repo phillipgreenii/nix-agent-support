@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1",
+  "accepted": true,
+  "callback": "",
+  "selfStatusCallback": "pg-router self-status --socket '/tmp/prp/core.sock' --token 'xyz'"
+}

@@ -8,7 +8,7 @@
 // "id":12345). This file instead builds the REAL five binaries this module
 // produces (pg-connector plus its four Tier-2 backends) via `go build`,
 // execs the REAL pg-connector binary as a genuinely separate OS process
-// (mirroring packages/pr-pool/cmd/pr-pool/e2e_test.go's own
+// (mirroring packages/pg-router/cmd/pg-router/e2e_test.go's own
 // build-the-real-binary-and-exec-it convention), and lets IT exec the real
 // backend binaries in turn exactly as it does in production — never
 // calling any backend's internal.Backend/Provider Go type directly.
@@ -99,8 +99,8 @@ func TestMain(m *testing.M) {
 // via `go build -o <dir>/<name> ./cmd/<name>`, run with the MODULE ROOT
 // (two directories up from this file, packages/pg-connector) as the
 // build's working directory — the actual artifacts operators run, not a
-// package-level fake, mirroring packages/pr-pool/cmd/pr-pool/e2e_test.go's
-// own buildPrPoolBinary.
+// package-level fake, mirroring packages/pg-router/cmd/pg-router/e2e_test.go's
+// own buildPgRouterBinary.
 func buildContractBinaries() (string, error) {
 	moduleRoot, err := filepath.Abs("../..")
 	if err != nil {

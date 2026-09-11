@@ -249,7 +249,7 @@ func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n not
 // askDenyReason is the autonomous-mode denial fed back to the model. It MUST tell
 // the model the channel is intentionally closed (autonomous mode) and what to do
 // instead — a BARE denial can read as "user went away" and make the model give up
-// (D2 caveat). Pairs with pr-pool's prompt-forbid lever.
+// (D2 caveat). Pairs with pg-router's prompt-forbid lever.
 const askDenyReason = "Autonomous mode: AskUserQuestion is disabled — there is no human to answer. Do NOT ask; proceed with your best judgment. If a decision genuinely needs a human, record the question with `bd comment` on your bead and continue or hand the bead back."
 
 // writeAskDenyJSON emits the PreToolUse structured-deny payload (claude hooks

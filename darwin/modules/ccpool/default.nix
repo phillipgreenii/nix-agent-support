@@ -34,7 +34,7 @@ in
     # in phillipgreenii-nix-support-apps (darwin/modules/observability/
     # registration.nix), so this lives in darwin, not the home-manager module —
     # setting it from HM targets an undeclared option and fails eval (same
-    # reasoning as pr-pool's registration). A cross-flake stub in that flake's
+    # reasoning as pg-router's registration). A cross-flake stub in that flake's
     # flake.nix lets it type-check standalone in agent-support CI (pg2-45ab.3).
     #
     # ccpool writes its structured diagnostic log to

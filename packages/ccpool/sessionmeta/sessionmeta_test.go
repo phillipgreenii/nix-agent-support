@@ -33,9 +33,9 @@ func TestListByMeta_andFilter(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	ctx := context.Background()
 	_ = s.Set(ctx, "ext-a", "role", "worker")
-	_ = s.Set(ctx, "ext-a", "pool", "pr-pool")
+	_ = s.Set(ctx, "ext-a", "pool", "pg-router")
 	_ = s.Set(ctx, "ext-b", "role", "worker")
-	got, err := s.ListByMeta(ctx, map[string]string{"role": "worker", "pool": "pr-pool"})
+	got, err := s.ListByMeta(ctx, map[string]string{"role": "worker", "pool": "pg-router"})
 	if err != nil {
 		t.Fatalf("ListByMeta: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestDelete_removesKey(t *testing.T) {
 	}
 }
 
-// TestConcurrentWriters_twoHandlesSameDB simulates ccpool + pr-pool both holding
+// TestConcurrentWriters_twoHandlesSameDB simulates ccpool + pg-router both holding
 // a handle to the SAME on-disk pool DB and writing metadata concurrently. With
 // WAL + busy_timeout and single-statement autocommit writes, no write errors and
 // the final reads are consistent (last-writer-wins per key, no lost rows).
@@ -82,7 +82,7 @@ func TestConcurrentWriters_twoHandlesSameDB(t *testing.T) {
 		t.Fatalf("Open a: %v", err)
 	}
 	defer func() { _ = a.Close() }()
-	b, err := sessionmeta.Open(db) // "pr-pool" writer
+	b, err := sessionmeta.Open(db) // "pg-router" writer
 	if err != nil {
 		t.Fatalf("Open b: %v", err)
 	}

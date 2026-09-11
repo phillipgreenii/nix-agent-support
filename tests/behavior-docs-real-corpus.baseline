@@ -1,7 +1,7 @@
 # behavior-docs real-corpus recorded findings
 #
 # Every line below is a finding the three conformance evaluators CURRENTLY report
-# against the real in-repo behavior-docs sets and pr-pool's implementation. This
+# against the real in-repo behavior-docs sets and pg-router's implementation. This
 # file is a RATCHET, not an exemption list: `tests/behavior-docs-real-corpus.sh`
 # fails on any difference in EITHER direction, so a new finding fails the gate AND
 # a fixed finding fails it too until its line is deleted here. A baseline allowed

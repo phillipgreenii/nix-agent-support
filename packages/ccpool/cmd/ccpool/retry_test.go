@@ -231,7 +231,7 @@ func TestMaybeRetry_rateLimitedHandsBack(t *testing.T) {
 	sess, _, _ := st.GetByExternalID(ctx, "ext-a")
 	retried, _ := a.maybeRetry(ctx, sess, tp)
 	if retried {
-		t.Error("retried = true, want false (rate_limited hands back to pr-pool quota gate)")
+		t.Error("retried = true, want false (rate_limited hands back to pg-router quota gate)")
 	}
 }
 

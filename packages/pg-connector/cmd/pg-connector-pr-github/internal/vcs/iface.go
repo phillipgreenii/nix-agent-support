@@ -63,7 +63,7 @@ type AuthChecker interface {
 // never consumed by anything in pg-connector — this backend's Show always
 // performs a live, uncached, per-PR read (provider.go's own doc comment).
 // The design's verb->destination table retires pg-pr's `sync` command group
-// "without a rewrite target" (pr-pool polls the beads connector directly
+// "without a rewrite target" (pg-router polls the beads connector directly
 // instead), and no design section names either optional capability as a
 // future pg-connector need, so both were removed as dead surface rather
 // than carried forward speculatively [bead pg2-lh3c4]. If a future

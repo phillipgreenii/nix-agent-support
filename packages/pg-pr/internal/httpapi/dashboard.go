@@ -20,7 +20,7 @@ var nowUTC = func() time.Time { return time.Now().UTC() }
 // so the payload's freshness verdict is stamped HERE, per request, via
 // Snapshot.WithFreshness — the served document always carries an age and a stale
 // flag computed at the moment the consumer read it, never at the moment the
-// daemon built it (pr-pool INV-FRESH-1).
+// daemon built it (pg-router INV-FRESH-1).
 func DashboardHandler(store *snapshot.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		snap, ok := store.Get()

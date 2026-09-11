@@ -158,20 +158,20 @@ timeout = "10s"
 
 	// new WITH --meta, no separate `meta set`.
 	newCmd := exec.Command(ccpool, "new", "ext-meta", "--cwd", proj,
-		"--meta", "prpool.bead=zr-1", "--meta", "prpool.role=worker")
+		"--meta", "pgrouter.bead=zr-1", "--meta", "pgrouter.role=worker")
 	newCmd.Env = env
 	if out, err := newCmd.CombinedOutput(); err != nil {
 		t.Fatalf("new --meta: %v\n%s", err, out)
 	}
 
 	// meta get must return the value set by `new`.
-	getCmd := exec.Command(ccpool, "meta", "get", "ext-meta", "prpool.bead")
+	getCmd := exec.Command(ccpool, "meta", "get", "ext-meta", "pgrouter.bead")
 	getCmd.Env = env
 	out, err := getCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("meta get: %v\n%s", err, out)
 	}
 	if got := strings.TrimSpace(string(out)); got != "zr-1" {
-		t.Errorf("meta get prpool.bead = %q, want zr-1", got)
+		t.Errorf("meta get pgrouter.bead = %q, want zr-1", got)
 	}
 }

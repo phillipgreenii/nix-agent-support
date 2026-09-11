@@ -278,7 +278,7 @@ type FeedbackItem struct {
 // the store package reads them any more, replaced by the per-approver
 // store.Approval rows (which this view's Approvals axis deliberately defers;
 // see the package doc). ReviewedByAgentAt (the pg2-4c5i.36 agent-review
-// cursor) was dropped entirely by pg2-ynhr.5, superseded by pr-pool's bead
+// cursor) was dropped entirely by pg2-ynhr.5, superseded by pg-router's bead
 // head_sha cursor.
 type RevisionItem struct {
 	Seq        int    `json:"seq"`

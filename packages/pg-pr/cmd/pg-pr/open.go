@@ -176,7 +176,7 @@ type openJSONRow struct {
 
 	// GeneratedAt/AgeSeconds/Stale/StaleAfterSeconds mirror
 	// snapshot.Snapshot's identically-tagged fields verbatim — the same
-	// freshness contract (pr-pool INV-FRESH-1) the human renderer's
+	// freshness contract (pg-router INV-FRESH-1) the human renderer's
 	// stderr warning is derived from, but JSON-visible on every row so a
 	// stale snapshot yields stale:true in the payload itself.
 	GeneratedAt       time.Time `json:"generated_at"`

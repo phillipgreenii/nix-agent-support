@@ -307,7 +307,7 @@ func TestReviewSubmit_NoStaging(t *testing.T) {
 }
 
 // TestReviewSubmit_SkipsWhenPendingReviewExists: re-running the submit path (the
-// path the pr-pool review role drives) against a PR that already has this
+// path the pg-router review role drives) against a PR that already has this
 // reviewer's PENDING review must NOT stack a second PENDING review (pg2-3fo3c).
 func TestReviewSubmit_SkipsWhenPendingReviewExists(t *testing.T) {
 	resetReviewFlags()
@@ -337,7 +337,7 @@ func TestReviewSubmit_SkipsWhenPendingReviewExists(t *testing.T) {
 
 // TestReviewSubmit_SkipsWhenPendingReviewExists_JSON: the --json skip emits the
 // documented machine shape (status=skipped, reason=pending_review_exists) so a
-// programmatic caller (the pr-pool review role) can distinguish skip from post.
+// programmatic caller (the pg-router review role) can distinguish skip from post.
 func TestReviewSubmit_SkipsWhenPendingReviewExists_JSON(t *testing.T) {
 	resetReviewFlags()
 	t.Setenv("PG_PR_STATE_HOME", t.TempDir())
@@ -393,7 +393,7 @@ func TestReviewSubmit_PendingCheckError_Propagates(t *testing.T) {
 
 // TestReviewSubmit_ForwardsHeadSHAAsCommitID: a submit JSON carrying head_sha
 // must anchor the review to that commit (commit_id), so a PR head that advanced
-// between review and post does not 422 (pg2-pipw). This is the path the pr-pool
+// between review and post does not 422 (pg2-pipw). This is the path the pg-router
 // review role uses.
 func TestReviewSubmit_ForwardsHeadSHAAsCommitID(t *testing.T) {
 	resetReviewFlags()

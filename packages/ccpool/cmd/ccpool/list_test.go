@@ -87,7 +87,7 @@ func TestRenderList_stateFilter(t *testing.T) {
 	_ = context.Background()
 }
 
-// TestRenderListJSON_fieldsAndLiveness pins the --json shape pr-pool's Runner.List
+// TestRenderListJSON_fieldsAndLiveness pins the --json shape pg-router's Runner.List
 // unmarshals: a JSON array of objects with snake_case name/state/live/
 // transcript_path/uuid/launch_dir/cwd plus the git facets. live is SEPARATE
 // from state (tmux has-session liveness, derived from liveFn), not folded into
@@ -312,11 +312,11 @@ func TestFilterRowsByExternalIDSet(t *testing.T) {
 }
 
 func TestParseFilters_keyValuePairs(t *testing.T) {
-	got, err := parseFilters([]string{"role=worker", "pool=pr-pool"})
+	got, err := parseFilters([]string{"role=worker", "pool=pg-router"})
 	if err != nil {
 		t.Fatalf("parseFilters: %v", err)
 	}
-	want := map[string]string{"role": "worker", "pool": "pr-pool"}
+	want := map[string]string{"role": "worker", "pool": "pg-router"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

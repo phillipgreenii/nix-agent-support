@@ -518,9 +518,9 @@ ALTER TABLE pull_request ADD COLUMN body TEXT NOT NULL DEFAULT '';
 	// re-review-on-head-advance cursor for the legacy pg-pr draft-review
 	// consumer (pg2-4c5i.36: MarkRevisionAgentReviewed / reopenStaleReviews /
 	// stampAgentReviewed in internal/sync), all removed by this bead's strip of
-	// pg-pr's review workflow — that workflow shipped entirely to pr-pool
+	// pg-pr's review workflow — that workflow shipped entirely to pg-router
 	// (ADR 0034), whose review-pr bead now carries its OWN head_sha cursor
-	// (pr-pool's internal/beads.ReopenReview refreshes metadata.head_sha on
+	// (pg-router's internal/beads.ReopenReview refreshes metadata.head_sha on
 	// re-review). Nothing outside this file's now-deleted writer/reader ever
 	// consulted the column — prview.go explicitly excluded it (see
 	// RevisionItem's doc comment) — so no other read path is affected.

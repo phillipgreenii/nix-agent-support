@@ -592,7 +592,7 @@ func TestGitDir_CensusFalsePositiveSpellings(t *testing.T) {
 		command string
 	}{
 		// Census row 1, verbatim: an absolute-root walk that EXCLUDES git metadata.
-		{"census row 1: -not -path with an absolute root", "find /Users/phillipg/phillipg_mbp -name '*pr-pool-event-model*' -not -path '*/.git/*'"},
+		{"census row 1: -not -path with an absolute root", "find /Users/phillipg/phillipg_mbp -name '*pg-router-event-model*' -not -path '*/.git/*'"},
 		// Census row 3's spelling: `-name` glob plus a `-not -path` exclusion. The
 		// `-name` pattern is a walk pattern too, so neither operand is a path.
 		{"census row 3: -name glob with -not -path", "find . -name '*.go' -not -path './.git/*'"},

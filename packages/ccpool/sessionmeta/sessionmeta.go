@@ -5,7 +5,7 @@
 //
 // Concurrency: a Store wraps the same SQLite DB the ccpool binary uses, opened
 // WAL + busy_timeout (see internal/store.Open). Two processes (e.g. ccpool and
-// pr-pool) may hold Stores on the same DB; every write is a single autocommit
+// pg-router) may hold Stores on the same DB; every write is a single autocommit
 // statement, so cross-process contention is covered by busy_timeout. Concurrent
 // writes to the same (externalID,key) are last-writer-wins.
 package sessionmeta

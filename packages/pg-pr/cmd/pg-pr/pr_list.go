@@ -18,7 +18,7 @@ import (
 )
 
 // prListItem is the JSON shape emitted per open PR by `pg-pr pr list --json`.
-// It is the read seam the pr-pool ACL consumes: the base fields (repo, number,
+// It is the read seam the pg-router ACL consumes: the base fields (repo, number,
 // head_sha, ownership, draft, state, branch) come from the store; reviewer
 // roster + labels are added best-effort from a live provider round-trip.
 //
@@ -27,7 +27,7 @@ import (
 // whereas the store already records a PER-ROW as-of time (last_synced_at), which
 // is strictly more informative than one payload-wide stamp — a repo mid-refresh
 // can hold rows of different ages. Both halves of the freshness contract
-// (pr-pool INV-FRESH-1) therefore ride on each item: LastSyncedAt is the as-of
+// (pg-router INV-FRESH-1) therefore ride on each item: LastSyncedAt is the as-of
 // time, Stale is the verdict against pg-pr's own bound.
 type prListItem struct {
 	Repo      string `json:"repo"`
@@ -45,7 +45,7 @@ type prListItem struct {
 	LastSyncedAt string `json:"last_synced_at"`
 	// Stale is the freshness FLAG: LastSyncedAt has aged past
 	// freshness.BoundSeconds, so these facts MUST NOT be treated as current. A
-	// consumer that acts on the seam (the pr-pool ACL) reads THIS rather than
+	// consumer that acts on the seam (the pg-router ACL) reads THIS rather than
 	// re-deriving the bound, keeping the staleness POLICY owned by pg-pr, which
 	// owns the sync cadence it is measured against.
 	Stale     bool             `json:"stale"`
@@ -56,7 +56,7 @@ type prListItem struct {
 	// This machine seam NEVER filters on the flag -- unlike the human-facing
 	// surfaces (`pg-pr open`, the dashboard), which exclude a hidden PR by
 	// default -- per the fork #1 operator ruling (2026-08-24): `pr list
-	// --json` is the read seam pr-pool's ACL consumes (ADR 0034), so it
+	// --json` is the read seam pg-router's ACL consumes (ADR 0034), so it
 	// reports facts and leaves the judgement to that consumer.
 	Hidden bool   `json:"hidden"`
 	Reason string `json:"reason,omitempty"`
@@ -75,11 +75,11 @@ type prListReviewer struct {
 
 var prListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List open PRs as the data seam consumed by pr-pool",
+	Short: "List open PRs as the data seam consumed by pg-router",
 	Long: `List the open/draft pull requests for a repo.
 
 Base fields (repo, number, head_sha, ownership, draft, state, branch) are read
-from the local store — this is the cheap default the pr-pool ACL polls, and it
+from the local store — this is the cheap default the pg-router ACL polls, and it
 makes no network calls.
 
 Because those facts come from the store rather than the network, each PR also
@@ -173,7 +173,7 @@ func listOpenPRItems(ctx context.Context, repo string, augment bool) ([]prListIt
 // live provider round-trip. It is BEST-EFFORT: any provider error leaves that
 // PR's labels/roster empty rather than failing the listing (the base fields
 // from the store are authoritative). This keeps the read verb exit-0 on a
-// transient upstream failure, which the pr-pool ACL relies on.
+// transient upstream failure, which the pg-router ACL relies on.
 //
 // When the provider implements the vcs.EnrichedPRsProvider bulk capability, the
 // per-PR GetPR+ListReviews fan-out (2 gh subprocess spawns per PR, sequential)
@@ -308,7 +308,7 @@ func nonNilStrings(s []string) []string {
 // renderPRList writes the human-readable table. The SYNCED column carries the
 // same freshness the JSON seam does — the table is itself a surface an operator
 // acts on, so it must not present store-derived state without saying how old it
-// is (pr-pool INV-FRESH-1).
+// is (pg-router INV-FRESH-1).
 func renderPRList(w io.Writer, items []prListItem) error {
 	if len(items) == 0 {
 		_, err := io.WriteString(w, "(no open PRs)\n")

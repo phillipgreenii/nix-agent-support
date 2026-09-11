@@ -963,7 +963,7 @@ be synced exactly as before -- its revisions and feedback keep being
 recorded, and it is never mistaken for closed/merged because of the hide
 alone.
 
-'pg-pr pr list --json' (the machine seam pr-pool's ACL consumes) NEVER
+'pg-pr pr list --json' (the machine seam pg-router's ACL consumes) NEVER
 filters on this flag -- it always includes the PR, carrying "hidden" and
 "reason" fields so that consumer can make its own judgement.`,
 	Args: cobra.RangeArgs(1, 2),

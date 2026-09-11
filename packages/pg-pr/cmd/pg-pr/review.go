@@ -61,7 +61,7 @@ func readDraftInput(cmd *cobra.Command, fromFile string) (*reviewstage.Draft, er
 // ----------------------------------------------------------------------
 
 // reviewCmd's Long embeds reviewinput.SchemaDoc: the reviewer agent assets and
-// the pr-pool review-role prompt both instruct their agent to "see `pg-pr review
+// the pg-router review-role prompt both instruct their agent to "see `pg-pr review
 // --help`" for the payload schema, so this text is the schema's only
 // user-visible documentation (pg2-cns7a AC4).
 var reviewCmd = &cobra.Command{
@@ -219,7 +219,7 @@ func postStaged(ctx context.Context, draft *reviewstage.Draft, w io.Writer, emit
 	}
 
 	// Skip if this reviewer already has a PENDING review on the PR, so a re-run
-	// (the pr-pool review role may re-review on head advance) does not stack a
+	// (the pg-router review role may re-review on head advance) does not stack a
 	// second PENDING review (pg2-3fo3c). Fail-closed on detection error.
 	if skip, err := skipExistingPendingReview(ctx, provider, draft.Repo, draft.PR, w, emitJSON); err != nil || skip {
 		return skip, err

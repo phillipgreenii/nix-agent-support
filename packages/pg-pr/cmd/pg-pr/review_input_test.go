@@ -110,7 +110,7 @@ func TestReviewDraft_GoldenAgentPayloadRoundTrips(t *testing.T) {
 }
 
 // TestReviewSubmit_GoldenAgentPayloadPostsRealComments is the same golden
-// payload down the LIVE post path (the one the pr-pool review role drives):
+// payload down the LIVE post path (the one the pg-router review role drives):
 // the comments handed to the provider must carry real bodies and lines.
 func TestReviewSubmit_GoldenAgentPayloadPostsRealComments(t *testing.T) {
 	resetReviewFlags()
@@ -344,7 +344,7 @@ func TestReviewPost_RefusesLegacyBlankStagedDraft(t *testing.T) {
 }
 
 // TestReviewHelp_DocumentsThePayloadSchema is pg2-cns7a acceptance criterion 4:
-// the reviewer-agent assets and the pr-pool review-role prompt both tell their
+// the reviewer-agent assets and the pg-router review-role prompt both tell their
 // agent to "see `pg-pr review --help`", which before the fix resolved to no
 // schema at all. The help MUST carry the schema and one complete example.
 func TestReviewHelp_DocumentsThePayloadSchema(t *testing.T) {

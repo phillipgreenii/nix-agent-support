@@ -1,11 +1,11 @@
 // driver.go: the case-running logic conformance.Run executes against a
 // Backend (see backend.go) — golden/negative-matrix static schema checks
-// plus a handful of live wire round trips. Modeled on pr-pool's own
+// plus a handful of live wire round trips. Modeled on pg-router's own
 // conformance/driver package's Run/Result shape, folded directly into
 // this package rather than split into a separate driver subpackage: the
-// scriptout wire envelope's case set is much smaller than pr-pool's own
+// scriptout wire envelope's case set is much smaller than pg-router's own
 // message set (five schemas, not two dozen), so the extra package
-// boundary pr-pool introduced for a later extraction task does not earn
+// boundary pg-router introduced for a later extraction task does not earn
 // its keep here.
 package conformance
 
@@ -113,7 +113,7 @@ type negativeCase struct {
 }
 
 // negativeMatrix pins at least one independently-violable-constraint
-// negative case per schema (mirrors pr-pool's own negativeMatrix
+// negative case per schema (mirrors pg-router's own negativeMatrix
 // completeness rule — see TestNegativeMatrixCompleteness in
 // conformance_test.go).
 var negativeMatrix = map[string][]negativeCase{

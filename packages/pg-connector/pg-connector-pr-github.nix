@@ -29,7 +29,7 @@ mkGoApp {
   # pg-connector-scm-git/-issue-beads/-ci-github-actions' own files no longer
   # touches this derivation's content hash. Technique: `lib.fileset.toSource`/
   # `unions`/`difference`, the same fileset idiom `phillipg-nix-repo-base`'s
-  # `mkGoApp` Pattern B and this repo's own `packages/pr-pool/default.nix` already
+  # `mkGoApp` Pattern B and this repo's own `packages/pg-router/default.nix` already
   # use, adapted here for per-binary isolation within one shared go.mod rather
   # than a local module replace.
   src = lib.fileset.toSource {

@@ -12,7 +12,7 @@ mkGoApp {
   # no parent-rooted fileset are needed.
   #
   # claude-transcript was evaluated and NOT reused. Its Event/Block types carry
-  # only the fields ccpool/pa-monitor/pr-pool need, and omit every field this
+  # only the fields ccpool/pa-monitor/pg-router need, and omit every field this
   # index is about — the tool_use `input`, the tool_result `content` and
   # `is_error`, `parentUuid`, `isSidechain`, `cwd`, `gitBranch`, `durationMs`.
   # Adding them would change a type three other packages depend on, and its reader

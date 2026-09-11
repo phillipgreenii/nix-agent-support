@@ -9,7 +9,7 @@
 //   - the pg-pr reviewer agent assets
 //     (`claude-marketplace/pg-pr/agents/pg-pr-review-*.md`), which emit it;
 //   - `pg-pr review --help`, which renders [SchemaDoc] verbatim (the
-//     orchestrator asset and the pr-pool review role both tell their agent to
+//     orchestrator asset and the pg-router review role both tell their agent to
 //     "see pg-pr review --help", so that text is load-bearing, not decoration);
 //   - [reviewstage.Draft], the domain type Decode adapts the payload into.
 //
@@ -21,7 +21,7 @@
 // reason in — has no target field there. So a translation step must exist
 // regardless of what the assets emit; putting it here (rather than only fixing
 // the assets) also makes the verb loud for every OTHER caller that composes this
-// JSON by hand: the pr-pool review role, the daemon spawn path, and humans.
+// JSON by hand: the pg-router review role, the daemon spawn path, and humans.
 //
 // # Fail loud, never drop
 //

@@ -114,7 +114,7 @@ from `self-checks.sh` as a hard failure with **no baseline escape** — it never
 helper on that script's output, so the ratchet cannot absorb the finding the way it absorbs a
 `trace-extract.sh` one. A hard presence check would therefore red the whole build for every set that
 has not been retrofitted yet, and the retrofit of the sets shipped beside the tooling belongs to other
-work streams (pr-pool's register is authored by bead `pg2-wr6lm.5.4`, which adopts this shape rather
+work streams (pg-router's register is authored by bead `pg2-wr6lm.5.4`, which adopts this shape rather
 than inventing one). The advisory is not the resting state: **when `self-checks.sh` reports the register section
 present for every set the real-corpus runner reads, the advisory is promoted to `FAIL`.** That
 condition is observable by running the runner; until then the gap is a row in the method set's own

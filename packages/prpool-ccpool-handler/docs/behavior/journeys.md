@@ -8,12 +8,12 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 
 ## Stories
 
-- **`STORY-CCH-RUN`** <!-- uuid: dfd8305b-a52a-441c-a1d8-218337d7c81f --> — As pr-pool's core, I
+- **`STORY-CCH-RUN`** <!-- uuid: dfd8305b-a52a-441c-a1d8-218337d7c81f --> — As pg-router's core, I
   want a registered handler participant to run an agent session on my behalf through `ccpool` (or
-  a bare configured command), so pr-pool itself never needs to know how to drive an agent.
+  a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`.)_
-- **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pr-pool's core, I
-  want a registered source to query beads for events on my behalf, so pr-pool itself never needs
+- **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
+  want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`.)_
 
 ## Use cases
@@ -62,7 +62,7 @@ Extensions:
 
 - **`OQ-CCH-ROLEMODEL`** <!-- uuid: 0ec48c8a-1d82-45b9-b94b-589056323ada --> — whether this
   module's internal role model keeps a `kind` field distinguishing ccpool-backed from
-  command-backed roles (mirroring the enum pr-pool's core drops per
+  command-backed roles (mirroring the enum pg-router's core drops per
   `phillipgreenii-nix-agent-support` ADR 0065's "Open question resolved" section), or dispatches by
   some other mechanism (e.g. one registered executor per configured role name). _Gap_: ADR 0065
   explicitly leaves this module's own internal layout to the implementer — "that distinction is

@@ -257,7 +257,7 @@ func pgPrModuleRoot(t *testing.T) string {
 // This guard currently covers only packages/pg-pr's testdata/ fixtures. Other
 // directories (docs/superpowers/, packages/pa-monitor*,
 // packages/claude-extended-tool-approver, docs/adr/, home/programs/,
-// packages/pr-pool) are NOT yet scrubbed and are NOT guarded — adding them
+// packages/pg-router) are NOT yet scrubbed and are NOT guarded — adding them
 // here before they are scrubbed would just make this test permanently red.
 // Widen the scope by adding to this test's walk (or, if the widened directory
 // sits outside this Go module and is unreachable from a test that walks up to

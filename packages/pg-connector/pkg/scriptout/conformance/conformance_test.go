@@ -10,7 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// --- static schema/golden checks (mirrors pr-pool's own conformance
+// --- static schema/golden checks (mirrors pg-router's own conformance
 // package tests, before Run existed to reproduce them) ---------------------
 
 func loadGolden(t *testing.T, name string) map[string]any {
@@ -45,7 +45,7 @@ func TestNegative_Generic(t *testing.T) {
 }
 
 // TestNegativeMatrixCompleteness gates the schema-change mechanics rule
-// (mirrors pr-pool's own): adding a new schemas/*.schema.json name
+// (mirrors pg-router's own): adding a new schemas/*.schema.json name
 // requires >=1 negative-matrix row in the same commit, so a new schema
 // landing with no negative case at all is caught rather than silently
 // passing every other conformance case.

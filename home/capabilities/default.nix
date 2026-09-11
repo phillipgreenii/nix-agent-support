@@ -100,7 +100,7 @@
         name = "claude-fleet";
         features = [
           "ccpool"
-          "pr-pool"
+          "pg-router"
           "pa-monitor"
           "pw-agent-activity"
           "pw-reset-agents"

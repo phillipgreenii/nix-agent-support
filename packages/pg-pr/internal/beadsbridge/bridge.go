@@ -7,7 +7,7 @@
 // It also no longer produces draft-review or attention beads (pg2-ynhr.5):
 // that legacy review-workflow production (EnsureDraftReviewBead/
 // EnsureDraftReviewMineLabel and the attention-bead projection) shipped off to
-// pr-pool per ADR 0034 and epic pg2-ynhr. The pg-pr dashboard's OWN attention
+// pg-router per ADR 0034 and epic pg2-ynhr. The pg-pr dashboard's OWN attention
 // verdict (internal/snapshot.NeedsAttention, surfaced via internal/dashboard
 // and `pg-pr pr open`) is UNRELATED and unaffected — this package never
 // computed that verdict; it only ever projected a bead FROM it, and that
@@ -261,7 +261,7 @@ func (h *Handler) project(ctx context.Context, e store.Event) error {
 		// the closed 3-value set the two agree; they diverge on an out-of-band/
 		// empty value, where ActsAsMine degrades to team-style selection (a draft
 		// is skipped, not auto-reviewed, and the priority nudge lowers rather
-		// than raises) — the conservative direction, matching pr-pool's copy of
+		// than raises) — the conservative direction, matching pg-router's copy of
 		// the predicate. (pg2-q2drf)
 		mine := ownership.Ownership(p.Ownership).ActsAsMine()
 		_, _, err = h.client.ReconcileMergeRequest(ctx, existing, p.Title, beads.MergeRequestFields{

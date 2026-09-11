@@ -5,7 +5,7 @@ import (
 )
 
 // The error-classification primitives now live in the shared claude-transcript
-// module (the single source of truth across pa-monitor, ccpool, and pr-pool).
+// module (the single source of truth across pa-monitor, ccpool, and pg-router).
 // This file re-exports them under the local `transcript` package so the existing
 // pa-monitor call sites (transcript.ErrorRecord, transcript.ErrUnknown, …) keep
 // compiling unchanged, and adds pa-monitor's own retry POLICY on top of the

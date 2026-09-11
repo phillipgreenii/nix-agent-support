@@ -81,7 +81,7 @@ type FeedbackPayload struct {
 // pr.attention (formerly EventPRAttention) and its AttentionPayload were
 // removed by pg2-ynhr.5: they existed only to drive beadsbridge's
 // attention-BEAD projection (a teammate-PR "needs me" bead), which is the
-// legacy pg-pr review workflow shipping to pr-pool. The pg-pr DASHBOARD'S
+// legacy pg-pr review workflow shipping to pg-router. The pg-pr DASHBOARD'S
 // OWN attention verdict (internal/snapshot.NeedsAttention, surfaced via
 // internal/dashboard and `pg-pr pr open`) is computed independently, straight
 // from store facts, and is UNAFFECTED (FORK2a) — it never went through this

@@ -2,9 +2,9 @@
 
 Rules this set's implementation MUST hold, following the behavior-docs method
 (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`). Names are namespaced by topic
-(`INV-3`) since this set cites the method, and — because ccpool has no pr-pool edge by design
+(`INV-3`) since this set cites the method, and — because ccpool has no pg-router edge by design
 (D2) — every clause here is restated at ccpool's own floor: no `owner`/`role`/`item`/`claim`/
-`tracker`/`Callback` vocabulary, and no pr-pool citation.
+`tracker`/`Callback` vocabulary, and no pg-router citation.
 
 ## Pool (`INV-POOL-*`)
 

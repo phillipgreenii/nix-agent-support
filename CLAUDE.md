@@ -152,10 +152,10 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 ---
 
-## pg-pr / pr-pool Development Rules
+## pg-pr / pg-router Development Rules
 
 - **Behavior docs are the source of truth** (working principle, user 2026-07-09): changes to the
-  pg-pr ↔ pr-pool system MUST flow through the living docs at `docs/behavior/` first, then derive
+  pg-pr ↔ pg-router system MUST flow through the living docs at `docs/behavior/` first, then derive
   throwaway spec → design → plan → code. The docs are product-level and timeless (stories,
   journeys, invariants in RFC 2119 language); code paths and tool internals stay out of the
   narrative. When review/workflow behavior changes, the relevant `docs/behavior/` doc MUST be
@@ -166,16 +166,16 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   fine, perfection is not required. Any sub-signal genuinely requiring an LLM MUST be deferred to
   a separate LLM-gated bead, never implemented with an LLM. The same rule applies to diff-review's
   reviewer-picking inputs.
-- **pr-pool config testing trap**: a config.toml declaring `[[query]]` but NO `[[role]]` makes
-  pr-pool log "config present but defines no [[role]]; using built-in roles" and fall back to the
+- **pg-router config testing trap**: a config.toml declaring `[[query]]` but NO `[[role]]` makes
+  pg-router log "config present but defines no [[role]]; using built-in roles" and fall back to the
   BUILT-IN query set — your queries are silently discarded, so a smoke test can exit 0 having
   never evaluated the source type under test (hit 2026-08-13, `pg2-lmyts`). A test config MUST
-  declare at least one role. Reliable recipe: `pr-pool config --print-defaults > cfg.toml`, then
+  declare at least one role. Reliable recipe: `pg-router config --print-defaults > cfg.toml`, then
   retype ONE existing query to the type under test. A hand-rolled ccpool role needs `actor` AND
   (`prompt` XOR `prompt_file`) AND `completion` AND `on_failure` AND `on_dispatch_fail`
   (enums: `completion` = close-only|close-or-handback; the failure fields = unclaim|add-human).
   To prove the backing-command check actually RAN, run the same config against the unwrapped
-  binary `bin/.pr-pool-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
+  binary `bin/.pg-router-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
   `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through
   the nix wrapper is vacuous (the wrapper injects the tools onto PATH).
 

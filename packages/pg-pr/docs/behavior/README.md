@@ -4,7 +4,7 @@ pg-pr is the **PR-data interface**: it syncs PR facts from a code host into its 
 serves them out with freshness attached, and is the sole path through which reviews and comments
 are posted back — safely, attributed, and never auto-submitted. This set follows the
 behavior-docs method (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`) and ADR
-0034 (`pg-pr / pr-pool review-ownership split`).
+0034 (`pg-pr / pg-router review-ownership split`).
 
 Start here, then the [glossary](glossary.md); the rules are in [invariants](invariants.md), the
 boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), and the stories, use
@@ -56,7 +56,7 @@ restated here.
   re-review-on-head-advance and any reviewed-state cursor, retry/dead-letter policy, a credential
   pre-fetch gate, a result sidecar, the kill switch gating all of it, and every prompt asset
   defining what a good review is. Also out: which reviews are posted and when (deployment
-  policy), and the pr-pool seam (a peer seam owned elsewhere). The PR-data sync and the read/write
+  policy), and the pg-router seam (a peer seam owned elsewhere). The PR-data sync and the read/write
   surfaces themselves stay in extent regardless of any kill switch — the switch gates only the
   excluded workflow.
 - **Floor** — pg-pr speaks in PRs, facts, freshness, merge-request records, drafts, and

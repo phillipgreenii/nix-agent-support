@@ -15,8 +15,8 @@ import (
 // human's in-flight context would be gone before they could `ccpool attach`.
 //
 // Deliberately ONE predicate shared by Pass 1 (TTL) and Pass 2 (cap eviction) so
-// the two passes cannot drift, mirroring pr-pool's closeUnlessNeedsInput (shared by
-// teardownAll and run-role's single-session teardown). pr-pool's orchestrator is
+// the two passes cannot drift, mirroring pg-router's closeUnlessNeedsInput (shared by
+// teardownAll and run-role's single-session teardown). pg-router's orchestrator is
 // this predicate's peer across the seam; both realize the deployment set's
 // INV-CCPOOL-6 ("a session projected as paused for a human decision MUST be
 // preserved, not reaped").

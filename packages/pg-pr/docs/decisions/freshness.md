@@ -16,4 +16,4 @@ rather than a single process-wide constant, is the implementation's own to revis
 change the behavior-side obligation (`INV-ASOF-1`, `INV-ASOF-2`), only the number.
 
 See also `docs/pr-review-flow.md` (JR3) for how the current implementation wires this bound into
-`pr-pool`'s ACL.
+`pg-router`'s ACL.

@@ -203,7 +203,7 @@ func drainQueue(q *refreshQueue) map[prKey]bool {
 // detector must enqueue not only team-authored PRs but also PRs where I'm a
 // requested reviewer, PRs assigned to me, and PRs carrying a configured watch
 // label — the broadened review set. Without this, the daemon (which uses
-// detector.go, NOT enumerate) never sees them, so pr-pool never reviews them.
+// detector.go, NOT enumerate) never sees them, so pg-router never reviews them.
 // PR 13 (assignee-only case) proves the new assignee:<self> bucket alone is
 // enough to enqueue a PR (pg2-4dz88.11.4).
 func TestFingerprintTick_TeamLoopUnionsRequestedAndLabels(t *testing.T) {

@@ -47,7 +47,7 @@ const (
 // The first-review edge deliberately takes NO review-readiness input. It used to
 // require "the pg-pr draft-review bead for this PR is CLOSED", but that bead is
 // produced ONLY by the legacy in-daemon pg-pr review path, which ships OFF
-// (config.ReviewEnabled defaults to false; ADR 0034 — pr-pool owns reviews). At
+// (config.ReviewEnabled defaults to false; ADR 0034 — pg-router owns reviews). At
 // the shipped default no draft-review bead is ever created, so the readiness
 // input was permanently false and the whole first-review edge was dead code:
 // "a teammate PR I have never reviewed" could never fire (pg2-kh1ar). The signal

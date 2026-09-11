@@ -153,7 +153,7 @@ in
     # scope in phillipgreenii-nix-support-apps
     # (darwin/modules/observability/registration.nix), so this lives in
     # darwin, not the home-manager module — same reasoning as ccpool's/
-    # pr-pool's own logSources registration. Guarded on obs.enable so it is
+    # pg-router's own logSources registration. Guarded on obs.enable so it is
     # a no-op on machines without the stack.
     (lib.mkIf (ollamaEnabled && primaryUser != null && (obs.enable or false)) {
       phillipgreenii.observability.logSources.ollama-probe = {
