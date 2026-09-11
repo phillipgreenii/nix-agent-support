@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,9 @@ import (
 
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // prefixLocator is the package-wide test CommandLocator: every command resolves
@@ -1295,5 +1300,130 @@ argv = ["true"]
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("the documented recipe must also pass Validate(): %v", err)
+	}
+}
+
+// --- pg2-xl659: git-common-dir read-through config resolution + fallback WARN ---
+
+// minimalRoleCfg is the smallest TOML that decodes to one wired role+query
+// pair (registry_test.go's own minimal shape), so a Load() from it exercises
+// the full decode+Validate path rather than an empty/trivial config.
+func minimalRoleCfg(roleName string) string {
+	return "[[query]]\n" +
+		"name = \"q\"\n" +
+		"emits = [\"e\"]\n" +
+		"type = \"command\"\n" +
+		"[query.command]\n" +
+		"argv = [\"x\"]\n" +
+		"format = \"jsonl\"\n" +
+		"\n" +
+		"[[role]]\n" +
+		"name = \"" + roleName + "\"\n" +
+		"type = \"command\"\n" +
+		"binds = [\"e\"]\n" +
+		"[role.command]\n" +
+		"argv = [\"x\"]\n"
+}
+
+// TestLoad_worktreeReadsThroughToCanonicalConfigViaGitCommonDir is
+// acceptance criterion (a): a LINKED WORKTREE with no .pr-pool/ of its own
+// still resolves the CANONICAL clone's .pr-pool/config.toml, via `git
+// rev-parse --git-common-dir` from the worktree's RepoRoot -- the
+// read-through design decision (operator, 2026-09-10), not the
+// .pre-commit-config.yaml symlink-in precedent this repo's own CLAUDE.md
+// documents for a different problem. Mirrors x/gitclient's own
+// TestToplevelAndCommonDirDifferBetweenALinkedWorktreeAndItsCanonicalClone
+// anchoring setup.
+func TestLoad_worktreeReadsThroughToCanonicalConfigViaGitCommonDir(t *testing.T) {
+	absentGlobalConfig(t)
+	ctx := t.Context()
+	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pg2-xl659-readthrough"})
+	if _, err := repo.Commit(ctx, "seed", map[string]string{"a.txt": "hello\n"}); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := repo.WriteFile(".pr-pool/config.toml", minimalRoleCfg("canonical-role")); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	wtPath := filepath.Join(t.TempDir(), "linked-wt")
+	if err := repo.Client.CreateWorktree(ctx, wtPath, "feature", gitclient.CreateWorktreeOptions{}); err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	// The linked worktree has NO .pr-pool/ of its own -- proving a resolution
+	// that found the role below did not just read a naive
+	// RepoRoot-relative path, which would find nothing here.
+	if _, err := os.Stat(filepath.Join(wtPath, ".pr-pool")); !os.IsNotExist(err) {
+		t.Fatalf(".pr-pool must not exist in the linked worktree fixture, stat err=%v", err)
+	}
+
+	t.Setenv("PR_POOL_REPO_ROOT", wtPath)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() from linked worktree error = %v", err)
+	}
+
+	wantPath := filepath.Join(repo.Dir, ".pr-pool", "config.toml")
+	if c.ConfigPath != wantPath {
+		t.Errorf("ConfigPath = %q, want %q (the canonical clone's config, via git-common-dir)", c.ConfigPath, wantPath)
+	}
+	if len(c.Roles) != 1 || c.Roles[0].Name != "canonical-role" {
+		t.Fatalf("Roles = %+v, want the canonical clone's own [[role]] (\"canonical-role\"), not a built-in fallback", c.Roles)
+	}
+}
+
+// TestLoad_noFile_logsAtWarnByDefault is acceptance criterion (b): the
+// missing-config fallback (config.go's former slog.Info) now logs at WARN,
+// naming the resolved path it looked in (design decision's second clause).
+func TestLoad_noFile_logsAtWarnByDefault(t *testing.T) {
+	absentGlobalConfig(t)
+	missing := filepath.Join(t.TempDir(), "absent.toml")
+	t.Setenv("PR_POOL_CONFIG", missing)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "no pr-pool config found") {
+		t.Errorf("missing-config fallback did not log at WARN (or above):\n%s", got)
+	}
+	if !strings.Contains(got, missing) {
+		t.Errorf("WARN must name the resolved path it looked in (%s), got:\n%s", missing, got)
+	}
+}
+
+// TestLoad_noFile_optOutSuppressesWarn is acceptance criterion (c):
+// PR_POOL_NO_CONFIG_WARN is the explicit opt-out for intentional
+// built-in-role usage. It suppresses the WARN -- demoting back to this
+// package's pre-pg2-xl659 INFO, not going fully silent.
+func TestLoad_noFile_optOutSuppressesWarn(t *testing.T) {
+	absentGlobalConfig(t)
+	missing := filepath.Join(t.TempDir(), "absent.toml")
+	t.Setenv("PR_POOL_CONFIG", missing)
+	t.Setenv("PR_POOL_NO_CONFIG_WARN", "true")
+
+	var warnBuf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&warnBuf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(warnBuf.String(), "no pr-pool config found") {
+		t.Errorf("PR_POOL_NO_CONFIG_WARN=true must suppress the WARN, got:\n%s", warnBuf.String())
+	}
+
+	var infoBuf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&infoBuf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(infoBuf.String(), "no pr-pool config found") {
+		t.Errorf("PR_POOL_NO_CONFIG_WARN=true must still log at INFO (not go fully silent), got:\n%s", infoBuf.String())
 	}
 }

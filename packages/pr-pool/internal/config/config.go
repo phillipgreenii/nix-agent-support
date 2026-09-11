@@ -9,6 +9,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pr-pool/internal/query"
 	"github.com/phillipgreenii/pr-pool/internal/roles"
 	"github.com/phillipgreenii/pr-pool/internal/usage"
+	"github.com/phillipgreenii/x/gitclient"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 )
@@ -272,9 +274,12 @@ func Default() Config {
 
 // Load returns Default() overlaid with PR_POOL_* environment variables (pool scalars
 // only), then the resolved role set: the [[role]] array from the config file
-// (PR_POOL_CONFIG, else <RepoRoot>/.pr-pool/config.toml), or the built-in default
+// (PR_POOL_CONFIG, else <RepoRoot>/.pr-pool/config.toml resolved via
+// resolveConfigPath's git-common-dir read-through), or the built-in default
 // set when no file / no [[role]] is present. A present-but-malformed file, an
 // unknown type, or a failed validation is a hard error (never a silent fallback).
+// The no-file case itself is not an error: it logs at WARN (or INFO when
+// PR_POOL_NO_CONFIG_WARN opts out — pg2-xl659) and falls back to built-in roles.
 func Load() (Config, error) {
 	c := Default()
 	// Pool-scalar env overlay. The legacy role-specific env vars
@@ -314,7 +319,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("stat %s: %w", globalPath, statErr)
 	}
 
-	path := envStr("PR_POOL_CONFIG", filepath.Join(c.RepoRoot, ".pr-pool", "config.toml"))
+	path := envStr("PR_POOL_CONFIG", resolveConfigPath(c.RepoRoot))
 	c.ConfigPath = path
 	reg := NewRegistry()
 	if _, statErr := os.Stat(path); statErr == nil {
@@ -330,8 +335,10 @@ func Load() (Config, error) {
 		}
 	} else if !os.IsNotExist(statErr) {
 		return Config{}, fmt.Errorf("stat %s: %w", path, statErr)
-	} else {
+	} else if noConfigWarnSuppressed() {
 		slog.Info("no pr-pool config found; using built-in roles", "path", path)
+	} else {
+		slog.Warn("no pr-pool config found; using built-in roles (set PR_POOL_NO_CONFIG_WARN=true to silence this for intentional built-in-role usage)", "path", path)
 	}
 	// Gate file defaults (INV-LIFE-2), filled AFTER the repo-TOML layer above (so
 	// [pool].operator_paused_path / cicd_down_path, if present, already won) and
@@ -364,6 +371,50 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// resolveConfigPath resolves the DEFAULT .pr-pool/config.toml location for
+// repoRoot: <canonical-clone-root>/.pr-pool/config.toml, found by running
+// `git rev-parse --git-common-dir` FROM repoRoot (pg2-xl659 design decision,
+// operator 2026-09-10: read-through, not a per-worktree symlink-in bootstrap
+// — this deliberately does NOT follow the .pre-commit-config.yaml symlink
+// precedent this repo's own CLAUDE.md documents for a different problem).
+// A linked worktree's own .pr-pool/ is never consulted: --git-common-dir
+// always resolves to the ONE canonical clone regardless of which worktree
+// pr-pool is invoked from, so there is no multi-worktree ambiguity to design
+// around, and the resolution stays correct if the canonical config later
+// changes (no stale copy to go out of sync).
+//
+// This is a soft-fail probe, the same posture gitfacet.Resolve takes for the
+// identical git-common-dir query: repoRoot outside any git work tree (or a
+// machine with no git on PATH) is an ordinary case for this package's own
+// tests and for a bare-directory deployment, so a git error falls back to
+// the naive filepath.Join(repoRoot, ".pr-pool", "config.toml") rather than
+// failing Load() outright. GatePaths() below reuses this same helper so its
+// own documented "identical precedence" promise holds for a linked worktree
+// too.
+func resolveConfigPath(repoRoot string) string {
+	naive := filepath.Join(repoRoot, ".pr-pool", "config.toml")
+	ctx := context.Background()
+	client, err := gitclient.New(ctx, repoRoot)
+	if err != nil {
+		return naive
+	}
+	commonDir, err := client.CommonDir(ctx)
+	if err != nil {
+		return naive
+	}
+	return filepath.Join(filepath.Dir(commonDir), ".pr-pool", "config.toml")
+}
+
+// noConfigWarnSuppressed reports whether PR_POOL_NO_CONFIG_WARN opts out of
+// the missing-config WARN (pg2-xl659 acceptance criterion 3): the explicit
+// escape hatch for a deployment that intentionally runs on built-in roles
+// and does not want an ongoing operator-visible nag every Load(). Opting out
+// still leaves an INFO trace (this package's pre-pg2-xl659 behavior)
+// rather than going fully silent.
+func noConfigWarnSuppressed() bool {
+	return envBool("PR_POOL_NO_CONFIG_WARN", false)
 }
 
 // validPermissionModes is the set of claude --permission-mode values pr-pool may
@@ -708,7 +759,10 @@ func GatePaths() (operatorPaused, cicdDown string) {
 
 	cwd, _ := os.Getwd()
 	repoRoot := envStr("PR_POOL_REPO_ROOT", cwd)
-	path := envStr("PR_POOL_CONFIG", filepath.Join(repoRoot, ".pr-pool", "config.toml"))
+	// resolveConfigPath (not a naive filepath.Join) so this agrees with Load()'s
+	// own resolution for a linked worktree too — see this function's doc comment
+	// and resolveConfigPath's own doc comment (pg2-xl659).
+	path := envStr("PR_POOL_CONFIG", resolveConfigPath(repoRoot))
 	if body, err := os.ReadFile(path); err == nil {
 		var shape fileShape
 		if _, err := toml.Decode(string(body), &shape); err == nil {

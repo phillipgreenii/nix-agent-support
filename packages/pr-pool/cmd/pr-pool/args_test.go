@@ -327,3 +327,12 @@ func TestHelpText_MentionsActivityRingEnvVar(t *testing.T) {
 		t.Fatal("helpText does not mention PR_POOL_ACTIVITY_RING")
 	}
 }
+
+// Same operator-command-surface rule as above: PR_POOL_NO_CONFIG_WARN
+// (internal/config's missing-config WARN opt-out, pg2-xl659) is new
+// operator-facing surface — helpText MUST advertise it.
+func TestHelpText_MentionsNoConfigWarnEnvVar(t *testing.T) {
+	if !strings.Contains(helpText, "PR_POOL_NO_CONFIG_WARN") {
+		t.Fatal("helpText does not mention PR_POOL_NO_CONFIG_WARN")
+	}
+}

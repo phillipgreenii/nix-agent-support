@@ -110,9 +110,13 @@ participant runs them):
                           never starts one.
 
 Roles are configured in <RepoRoot>/.pr-pool/config.toml (override the path with
-PR_POOL_CONFIG). With no config file, pr-pool uses the built-in feedback + worker
-roles. <role> is the role's configured name. Run "pr-pool config --print-defaults"
-to see the schema and defaults.
+PR_POOL_CONFIG). Resolved via 'git rev-parse --git-common-dir' from RepoRoot, so a
+linked worktree reads through to the CANONICAL clone's config.toml rather than
+falling back to built-ins just because it has no .pr-pool/ of its own. With no
+config file at that resolved location, pr-pool logs a WARN (see
+PR_POOL_NO_CONFIG_WARN below) and uses the built-in feedback + worker roles.
+<role> is the role's configured name. Run "pr-pool config --print-defaults" to see
+the schema and defaults.
 
 Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_REPO_ROOT        monorepo root the drain operates in (default: cwd)
@@ -124,7 +128,11 @@ Pool-wide settings come from PR_POOL_* environment variables:
   PR_POOL_EFFORT           claude --effort value (default max)
   PR_POOL_PERMISSION_MODE  claude --permission-mode for workers (default dontAsk; bypassPermissions is the opt-in escape)
   PR_POOL_ALLOWED_TOOLS    claude --allowed-tools allowlist for workers (default: conservative deny-by-default set; empty clears the flag)
-  PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml)
+  PR_POOL_CONFIG           explicit config.toml path (default <RepoRoot>/.pr-pool/config.toml,
+                           resolved via --git-common-dir read-through — see above)
+  PR_POOL_NO_CONFIG_WARN   set to suppress the WARN Load() logs when no config.toml is found at
+                           the resolved location (falls back to INFO); the explicit opt-out for
+                           a deployment that intentionally runs on built-in roles (default false)
   PR_POOL_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
   PR_POOL_TUI_INTERVAL     tui's poll interval; floor-clamped to 250ms (default 1s). CLI flag >
                            PR_POOL_TUI_INTERVAL env > built-in default; a value that fails to
