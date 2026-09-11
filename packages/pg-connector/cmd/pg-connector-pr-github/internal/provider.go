@@ -22,6 +22,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -47,6 +48,10 @@ type ghProvider interface {
 	// pg2-2j5ac.28.2's PR-facts design bullet).
 	GetFiles(ctx context.Context, repo string, number int) ([]api.File, error)
 	GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error)
+	// ViewerLogin/ReviewsWithCommit back ListAttention's own ported
+	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
+	ViewerLogin(ctx context.Context) (string, error)
+	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
@@ -70,6 +75,7 @@ var (
 	_ pr.Provider          = (*Backend)(nil)
 	_ search.Provider      = (*Backend)(nil)
 	_ provider.AuthChecker = (*Backend)(nil)
+	_ attention.Provider   = (*Backend)(nil)
 )
 
 // formatPRID formats repo/number into this backend's id convention:
@@ -259,6 +265,185 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 		})
 	}
 	return out, nil
+}
+
+// Attention reason strings this backend's own list_attention response
+// carries in AttentionItem.Summary — port the CONCEPT of (not a
+// dependency on) packages/pg-pr/internal/snapshot/attention.go's own
+// AttentionReasonUnreviewed/AttentionReasonReReview constants (bead
+// pg2-7wqkr's design).
+const (
+	attentionReasonUnreviewed = "unreviewed-by-me"
+	attentionReasonReReview   = "re-review-after-my-approval"
+)
+
+// attentionQueryConfig is the {"attention_query": ...} shape this
+// backend's own list_attention op reads from its per-backend opaque
+// config block (bead pg2-7wqkr) — a GitHub search-syntax query, or list of
+// queries (reusing schema.QueryExpr's existing single-string-or-list-of-
+// strings normalization, the SAME shape List's own config.queries values
+// already carry), identifying the TEAM PRs needsAttentionForPR scans.
+// Unlike the beads/jira backends' attention_threshold/attention_exclude,
+// this backend's own attention config carries no threshold/exclude of its
+// own: PR attention is not deadline-based (design: "reuse the mine-vs-
+// team NeedsAttention criteria ... not deadline-based"), and the
+// mine-vs-team predicate itself already IS the filter.
+type attentionQueryConfig struct {
+	AttentionQuery schema.QueryExpr `json:"attention_query"`
+}
+
+// attentionQueryFrom resolves config's own attention_query key, nil when
+// config is empty, fails to decode, or the key is simply unset —
+// ListAttention treats nil as "nothing configured to scan," never an
+// error (this backend has no safe way to invent a default GitHub search
+// query, unlike config.queries' own caller-named resolution: list_attention
+// takes no wire args at all, so there is no caller-supplied name to
+// resolve here in the first place).
+func attentionQueryFrom(config json.RawMessage) schema.QueryExpr {
+	if len(config) == 0 {
+		return nil
+	}
+	var cfg attentionQueryConfig
+	if err := scriptout.Decode(config, &cfg); err != nil {
+		return nil
+	}
+	return cfg.AttentionQuery
+}
+
+// reviewIsStale reports whether review no longer stands for head — ports
+// packages/pg-pr/internal/snapshot/attention.go's store.Approval.IsStale
+// CONCEPT (dismissed, OR submitted against a commit other than the
+// current head) over this backend's own live-fetched fields
+// (ghProvider.ReviewsWithCommit's CommitOID) rather than pg-pr's persisted
+// per-approver store rows. An empty CommitOID (GitHub returns a null
+// commit when the reviewed commit was since force-pushed away) is
+// conservatively treated as stale — it can never match a real head SHA.
+func reviewIsStale(r api.Review, head string) bool {
+	if strings.EqualFold(r.State, "DISMISSED") {
+		return true
+	}
+	return r.CommitOID == "" || r.CommitOID != head
+}
+
+// needsAttentionForPR ports packages/pg-pr/internal/snapshot/attention.go's
+// NeedsAttention predicate CONCEPT as a fresh implementation over this
+// backend's own live-fetched inputs (bead pg2-7wqkr) — never a dependency
+// on the pg-pr package. reviews is collapsed to the LATEST review per
+// author first: gh's GraphQL reviews(first: N) query returns every review
+// EVENT in chronological order (oldest first), while pg-pr's own
+// store.Approval is UNIQUE per (pr, approver) — a single current-state
+// row, not full history — so keeping only the last-seen entry per author
+// reproduces that same "one current row per approver" shape. The state
+// machine itself is unchanged from attention.go's own doc comment:
+//   - a merge conflict dampens the whole PR off the hook.
+//   - a teammate approval that currently stands (not stale) takes it off
+//     my plate.
+//   - MY OWN review of the current head takes it off my plate REGARDLESS
+//     of its state — "having looked at this head at all" — unlike a
+//     teammate's non-approval state, which does NOT close the team edge.
+//   - otherwise: re-review (I have a review, but it's stale) or
+//     first-review (I have none at all).
+func needsAttentionForPR(reviews []api.Review, self, head string, hasConflict bool) (need bool, reason string) {
+	if hasConflict {
+		return false, ""
+	}
+	latest := make(map[string]api.Review, len(reviews))
+	for _, r := range reviews {
+		if r.Author == "" {
+			continue
+		}
+		latest[r.Author] = r
+	}
+	var mine *api.Review
+	for author, r := range latest {
+		if self != "" && author == self {
+			rr := r
+			mine = &rr
+			continue
+		}
+		if strings.EqualFold(r.State, "APPROVED") && !reviewIsStale(r, head) {
+			return false, ""
+		}
+	}
+	if mine != nil {
+		if !reviewIsStale(*mine, head) {
+			return false, ""
+		}
+		return true, attentionReasonReReview
+	}
+	return true, attentionReasonUnreviewed
+}
+
+// ListAttention implements the attention capability's attention.Provider
+// against GitHub (bead pg2-7wqkr): scans this backend's own configured
+// attention_query candidate PRs (attentionQueryFrom) via the same
+// ghProvider.SearchPRs List/Search already use, then applies
+// needsAttentionForPR's ported mine-vs-team predicate to each, resolving
+// "self" via a fresh ViewerLogin GraphQL call every time (statelessness,
+// D3 — this backend keeps no local self_login configuration of its own
+// the way pg-pr's sync layer does). The same rate-limit reserve check
+// List/Search already apply is applied once here, up front, since this op
+// issues 1 (viewer) + 1-per-query (search) + 2-per-candidate (GetPR,
+// ReviewsWithCommit) GraphQL/REST calls — considerably more than a single
+// List call.
+func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
+	query := attentionQueryFrom(scriptout.ConfigFromContext(ctx))
+	if len(query) == 0 {
+		return []schema.AttentionItem{}, nil
+	}
+	remaining, err := b.gh.RateLimitRemaining(ctx)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
+		))
+	}
+	self, err := b.gh.ViewerLogin(ctx)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+
+	seen := make(map[string]bool)
+	var candidates []api.PR
+	for _, q := range query {
+		prs, err := b.gh.SearchPRs(ctx, q)
+		if err != nil {
+			return nil, classifyGHError(err)
+		}
+		for i := range prs {
+			c := prs[i]
+			id := formatPRID(c.Repo, c.Number)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			candidates = append(candidates, c)
+		}
+	}
+
+	items := make([]schema.AttentionItem, 0, len(candidates))
+	for _, c := range candidates {
+		full, err := b.gh.GetPR(ctx, c.Repo, c.Number)
+		if err != nil {
+			return nil, classifyGHError(err)
+		}
+		reviews, err := b.gh.ReviewsWithCommit(ctx, c.Repo, c.Number)
+		if err != nil {
+			return nil, classifyGHError(err)
+		}
+		need, reason := needsAttentionForPR(reviews, self, full.HeadSHA, full.HasConflict())
+		if !need {
+			continue
+		}
+		items = append(items, schema.AttentionItem{
+			Type:    "pr",
+			ID:      formatPRID(full.Repo, full.Number),
+			Summary: fmt.Sprintf("%s: %s", reason, full.Title),
+		})
+	}
+	return items, nil
 }
 
 // Files implements pr.Provider.Files: fetches id's changed-file list from

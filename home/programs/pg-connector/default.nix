@@ -38,6 +38,42 @@ let
     inherit (cfg.search) sources;
   };
 
+  # attentionBackendExtra (bead pg2-7wqkr) renders one
+  # attention.perBackend.<name> entry onto the wire's own opaque
+  # per-backend config vocabulary (attention_threshold/attention_exclude
+  # -- each backend's own list_attention implementation documents these
+  # keys itself), omitting whichever of the two is unset (null) rather
+  # than rendering it as a literal `null` on the wire -- mirrors
+  # renderedAttention/renderedSearch's identical "omit rather than render
+  # null" convention above.
+  attentionBackendExtra =
+    entry:
+    lib.filterAttrs (_: v: v != null) {
+      attention_threshold = entry.threshold;
+      attention_exclude = entry.exclude;
+    };
+
+  # renderedBackends folds attention.perBackend's own per-backend entries
+  # into cfg.backends' existing opaque per-backend blocks (bead pg2-7wqkr):
+  # a backend named under EITHER map contributes an entry in the result: a
+  # name present only in attention.perBackend (not yet given any other
+  # backends.<name> config) still gets one, and a name present in both
+  # gets attention.perBackend's own keys merged alongside (never
+  # clobbering) whatever cfg.backends already set for it directly.
+  renderedBackends = lib.listToAttrs (
+    map (name: {
+      inherit name;
+      value =
+        (cfg.backends.${name} or { })
+        // attentionBackendExtra (
+          cfg.attention.perBackend.${name} or {
+            threshold = null;
+            exclude = null;
+          }
+        );
+    }) (lib.unique (lib.attrNames cfg.backends ++ lib.attrNames cfg.attention.perBackend))
+  );
+
   # The complete rendered document: extraConfig's keys (pg-pr's own,
   # during the overlap window) plus this module's own connector:/
   # attention:/search:/backends:/state:/configSchemaVersion: keys, each
@@ -52,7 +88,7 @@ let
     // lib.optionalAttrs (renderedConnector != { }) { connector = renderedConnector; }
     // lib.optionalAttrs (renderedAttention != { }) { attention = renderedAttention; }
     // lib.optionalAttrs (renderedSearch != { }) { search = renderedSearch; }
-    // lib.optionalAttrs (cfg.backends != { }) { inherit (cfg) backends; }
+    // lib.optionalAttrs (renderedBackends != { }) { backends = renderedBackends; }
     // lib.optionalAttrs (cfg.state != { }) { inherit (cfg) state; }
     // lib.optionalAttrs (cfg.configSchemaVersion != null) { inherit (cfg) configSchemaVersion; };
 in
@@ -117,12 +153,71 @@ in
             default = [ ];
             description = "Registered `attention.sources` backends (bare binary names, resolved on PATH), fanned out to by `pg-connector attention list`, in config order.";
           };
+
+          # perBackend (bead pg2-7wqkr): attention.sources (above) only
+          # says WHICH backends `pg-connector attention list` fans out to
+          # -- it carries no per-backend SEMANTICS. This is that new
+          # shape: a deadline threshold plus an optional exclude filter,
+          # per backend, rendered onto each named backend's own opaque
+          # backends.<name> config block (see attentionBackendExtra/
+          # renderedBackends above) rather than requiring a host to
+          # hand-write raw backends.<name>.attention_threshold/
+          # attention_exclude attrs itself.
+          perBackend = lib.mkOption {
+            type = lib.types.attrsOf (
+              lib.types.submodule {
+                options = {
+                  threshold = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = ''
+                      How close to (or how far past) its due date an item
+                      from this backend must be before `list_attention`
+                      raises it -- a Go `time.ParseDuration` string (e.g.
+                      `"72h"`; there is no `d`/`w` unit, only
+                      ns/us/ms/s/m/h). `null` (the default) means this
+                      backend's own `list_attention` implementation
+                      applies its own built-in default rather than a
+                      configured one. Only consulted by a deadline-based
+                      backend (`pg-connector-issue-beads`,
+                      `pg-connector-issue-jira`) -- `pg-connector-pr-github`'s
+                      own PR attention is not deadline-based and ignores
+                      this.
+                    '';
+                  };
+                  exclude = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = ''
+                      An additional, backend-native exclude filter applied
+                      on top of the threshold -- e.g. a `bd
+                      --exclude-label`-shaped value for
+                      `pg-connector-issue-beads`, or a JQL boolean fragment
+                      ANDed-out for `pg-connector-issue-jira` (e.g.
+                      `"labels = no-attention"`). `null` (the default)
+                      applies no additional exclusion. Backend-specific
+                      grammar; see that backend's own doc comments.
+                    '';
+                  };
+                };
+              }
+            );
+            default = { };
+            description = ''
+              Per-backend attention semantics (deadline threshold plus
+              optional exclude filter), keyed by backend binary name.
+              Independent of `attention.sources` -- a backend configured
+              here has no effect on `pg-connector attention list` unless
+              it is ALSO registered under `attention.sources`.
+            '';
+          };
         };
       };
       default = { };
       description = ''
         The `attention:` registry rendered into the shared config file:
-        which backend binaries `pg-connector attention list` fans out to.
+        which backend binaries `pg-connector attention list` fans out to,
+        plus each backend's own attention semantics (`perBackend`).
         Independent of `connector.<type>` -- a backend may be registered
         here as well as under `connector.<type>`.
       '';

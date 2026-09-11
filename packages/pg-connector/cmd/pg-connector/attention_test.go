@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -152,7 +153,7 @@ func TestMergeAttentionItems_PreservesEachSourcesOwnItemOrderOnFullTie(t *testin
 
 func TestFanOutAttentionList_Succeeded(t *testing.T) {
 	writeFakeBackend(t, "backend-ok", `{"protocolVersion":1,"schemaVersion":1,"result":[{"type":"pr","id":"1","summary":"s"}]}`)
-	perSource, out := fanOutAttentionList(context.Background(), []string{"backend-ok"})
+	perSource, out := fanOutAttentionList(context.Background(), nil, []string{"backend-ok"})
 	if len(out.Sources) != 1 || out.Sources[0].Status != SourceSucceeded || out.Sources[0].Count != 1 {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
@@ -163,7 +164,7 @@ func TestFanOutAttentionList_Succeeded(t *testing.T) {
 
 func TestFanOutAttentionList_Degraded(t *testing.T) {
 	writeFakeBackend(t, "backend-broken", `{"protocolVersion":1,"error":{"code":"unavailable","message":"boom"}}`)
-	_, out := fanOutAttentionList(context.Background(), []string{"backend-broken"})
+	_, out := fanOutAttentionList(context.Background(), nil, []string{"backend-broken"})
 	if len(out.Sources) != 1 || out.Sources[0].Status != SourceDegraded {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
@@ -171,13 +172,55 @@ func TestFanOutAttentionList_Degraded(t *testing.T) {
 
 func TestFanOutAttentionList_DisabledNotApplicable(t *testing.T) {
 	writeFakeBackend(t, "backend-noattention", `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op \"list_attention\""}}`)
-	_, out := fanOutAttentionList(context.Background(), []string{"backend-noattention"})
+	_, out := fanOutAttentionList(context.Background(), nil, []string{"backend-noattention"})
 	if len(out.Sources) != 1 {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
 	got := out.Sources[0]
 	if got.Status != SourceDisabled || got.Reason != "not applicable" {
 		t.Fatalf("source = %+v, want disabled/not applicable", got)
+	}
+}
+
+// TestFanOutAttentionList_AttachesBackendConfig proves fanOutAttentionList
+// (bead pg2-7wqkr) actually attaches a backend's own registered
+// backends.<name> config block to the outgoing list_attention request --
+// unlike fanOutSearch's own still-nil config, list_attention now needs
+// this so a deadline-based backend's configured attention_threshold/
+// attention_exclude (home/programs/pg-connector's attention.perBackend
+// option) actually reaches it. The fake backend below only answers
+// successfully when its own stdin request carries the expected
+// attention_threshold value, mirroring writeOpAwareFakeBackend's
+// grep-the-request style rather than writeEchoFakeBackend's verbatim
+// echo (whose reply shape — the whole request object — cannot itself
+// decode as []schema.AttentionItem).
+func TestFanOutAttentionList_AttachesBackendConfig(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "backend-config-aware")
+	content := "#!/bin/sh\n" +
+		"req=$(cat)\n" +
+		"case \"$req\" in\n" +
+		"  *attention_threshold*72h*) printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":[{\"type\":\"pr\",\"id\":\"1\",\"summary\":\"s\"}]}\\n' ;;\n" +
+		"  *) printf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"config missing\"}}\\n' ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write backend: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	reg, err := parseRegistry([]byte(
+		"attention:\n  sources:\n    - backend-config-aware\n"+
+			"backends:\n  backend-config-aware:\n    attention_threshold: \"72h\"\n",
+	), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	perSource, out := fanOutAttentionList(context.Background(), reg, []string{"backend-config-aware"})
+	if len(out.Sources) != 1 || out.Sources[0].Status != SourceSucceeded {
+		t.Fatalf("sources = %+v, want succeeded (backend must have received attention_threshold=72h in its config)", out.Sources)
+	}
+	if len(perSource["backend-config-aware"]) != 1 {
+		t.Fatalf("perSource = %+v, want 1 item", perSource["backend-config-aware"])
 	}
 }
 

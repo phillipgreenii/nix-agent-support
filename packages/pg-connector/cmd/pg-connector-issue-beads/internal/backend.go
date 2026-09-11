@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -43,8 +44,12 @@ func New(r Runner) *Backend {
 }
 
 // Compile-time check that Backend satisfies the issue capability's
-// Provider interface.
-var _ issue.Provider = (*Backend)(nil)
+// Provider interface, and (bead pg2-7wqkr) the attention capability's own
+// Provider interface — see attention.go's own ListAttention.
+var (
+	_ issue.Provider     = (*Backend)(nil)
+	_ attention.Provider = (*Backend)(nil)
+)
 
 // Workspace reports the bd workspace directory this Backend's Runner is
 // (or would be) pinned to, without invoking bd — main.go's capabilities

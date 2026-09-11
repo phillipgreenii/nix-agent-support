@@ -22,6 +22,7 @@ import (
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -46,15 +47,23 @@ func run() int {
 
 // newDispatchTable builds the issue capability's table (show/create/
 // comment/transition) via the sibling "generic issue entity/capability"
-// packet's NewDispatchTable, then adds this backend's own capabilities
-// entry via scriptout.AddCapabilities — the concrete backing for that
-// sibling packet's vocabulary.state check, which cites this backend's
-// capabilities response but does not itself populate it (interfaces.md's vocabulary note). AddCapabilities computes capabilities.ops straight from this
-// table's own registered op names, so this backend never hand-types a
-// second, separately maintained ops list that could drift from what the
-// table actually dispatches (bead pg2-fh2vh).
+// packet's NewDispatchTable, then merges in the attention capability's
+// table (list_attention, bead pg2-7wqkr: this backend's own ListAttention
+// against bd's --due/--overdue fields) built by
+// pkg/provider/attention.NewDispatchTable, then adds this backend's own
+// capabilities entry via scriptout.AddCapabilities — the concrete backing
+// for that sibling packet's vocabulary.state check, which cites this
+// backend's capabilities response but does not itself populate it
+// (interfaces.md's vocabulary note). AddCapabilities computes
+// capabilities.ops straight from this table's own registered op names, so
+// this backend never hand-types a second, separately maintained ops list
+// that could drift from what the table actually dispatches (bead
+// pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := issue.NewDispatchTable(backend)
+	for op, handler := range attention.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase(backend))
 }
 
@@ -85,7 +94,7 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 	}
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion},
+		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "attention": schema.AttentionSchemaVersion},
 		Vocabulary:      vocabulary,
 		Version:         Version,
 	}

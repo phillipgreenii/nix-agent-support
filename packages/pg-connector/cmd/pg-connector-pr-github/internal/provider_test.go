@@ -37,6 +37,12 @@ type fakeGH struct {
 	commits    []api.Commit
 	filesErr   error
 	commitsErr error
+
+	// viewerLogin/viewerLoginErr and reviewsWithCommitFn back
+	// ListAttention's own ported mine-vs-team predicate (bead pg2-7wqkr).
+	viewerLogin         string
+	viewerLoginErr      error
+	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
@@ -99,6 +105,23 @@ func (f *fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api
 		return nil, f.commitsErr
 	}
 	return f.commits, nil
+}
+
+func (f *fakeGH) ViewerLogin(ctx context.Context) (string, error) {
+	if f.viewerLoginErr != nil {
+		return "", f.viewerLoginErr
+	}
+	if f.viewerLogin != "" {
+		return f.viewerLogin, nil
+	}
+	return "me", nil
+}
+
+func (f *fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	if f.reviewsWithCommitFn != nil {
+		return f.reviewsWithCommitFn(ctx, repo, number)
+	}
+	return nil, nil
 }
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {

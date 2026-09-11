@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -80,6 +81,11 @@ var _ search.Provider = (*Backend)(nil)
 // capability (see CheckAuth's doc comment for why this backend, unlike
 // pg-connector-issue-beads, can implement it).
 var _ provider.AuthChecker = (*Backend)(nil)
+
+// Compile-time check that Backend also satisfies the attention
+// capability's own Provider interface (bead pg2-7wqkr — see attention.go's
+// own ListAttention).
+var _ attention.Provider = (*Backend)(nil)
 
 // Vocabulary is this backend's declared, non-empty state vocabulary —
 // Jira's own classic default workflow status names ("To Do"/"In
@@ -135,6 +141,18 @@ type pjiraIssue struct {
 	Priority  string     `json:"priority,omitempty"`
 	Project   string     `json:"project,omitempty"`
 	Assignee  *pjiraUser `json:"assignee,omitempty"`
+	// Duedate is Jira's own standard duedate field (bead pg2-7wqkr's
+	// design: "deadline source is Jira's standard duedate field"),
+	// verified against phillipg-nix-repo-base's
+	// modules/jira/pkg/pjira/model.go's own Issue.Duedate
+	// (`*string json:"duedate,omitempty"`) and client.go's field-request
+	// list (both GetIssue and Search explicitly request "duedate" from
+	// Jira's API) — pjira DOES carry this field; toSchemaIssue's own
+	// former doc comment claiming DueDate "stays empty ... pjiraIssue
+	// carries none of those today" predates pjira gaining it and is
+	// corrected below. A pointer (like pjiraUser's own fields) since an
+	// issue with no due date omits the key entirely.
+	Duedate *string `json:"duedate,omitempty"`
 }
 
 // pjiraUser is pjira's own nested user shape (model.go's User), used here
@@ -200,11 +218,14 @@ func decodePJIRAIssue(raw string) (*pjiraIssue, error) {
 // asOf is this call's own completion time (bead pg2-2j5ac.28.3, mirroring
 // cmd/pg-connector-issue-beads/internal/backend.go's identical toSchemaIssue
 // pattern): every call site below execs pjira fresh with no local cache
-// of Jira's own facts, so Stale is always false. UpdatedAt/DueDate/
-// Metadata/ExternalRefs stay empty: pjiraIssue carries none of those
-// today (verified against pjira's own `issue`/`search` JSON shapes) — a
-// future pjira addition of any of them is this backend's own follow-up,
-// not fabricated here.
+// of Jira's own facts, so Stale is always false. DueDate is now carried
+// straight through from pjiraIssue.Duedate (bead pg2-7wqkr added that
+// field — see its own doc comment for why this corrects an earlier,
+// now-stale claim that pjira carried no due date at all).
+// UpdatedAt/Metadata/ExternalRefs still stay empty: pjiraIssue carries
+// none of those today (verified against pjira's own `issue`/`search` JSON
+// shapes) — a future pjira addition of any of them is this backend's own
+// follow-up, not fabricated here.
 func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 	var assignee string
 	if iss.Assignee != nil {
@@ -212,6 +233,10 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 		if assignee == "" {
 			assignee = iss.Assignee.Email
 		}
+	}
+	var dueDate string
+	if iss.Duedate != nil {
+		dueDate = *iss.Duedate
 	}
 	return &schema.Issue{
 		ID:        iss.Key,
@@ -225,6 +250,7 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 		Assignee:  assignee,
 		AsOf:      asOf.Format(time.RFC3339),
 		Stale:     false,
+		DueDate:   dueDate,
 	}
 }
 

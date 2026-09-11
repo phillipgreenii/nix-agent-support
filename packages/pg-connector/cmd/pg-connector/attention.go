@@ -62,17 +62,31 @@ type MergedAttentionItem struct {
 // consume. A backend not implementing list_attention (the wire-level
 // unknown_op sentinel) is reported disabled/"not applicable" rather than a
 // failure, mirroring authStatusOne's/fanOutCIList's own handling exactly.
-func fanOutAttentionList(ctx context.Context, backends []string) (map[string][]schema.AttentionItem, FanOutOutcome) {
+//
+// reg is threaded through (bead pg2-7wqkr, mirroring fanOutCIList's own
+// identical "config travels the same way every other Tier-1 verb's
+// dispatch path already attaches it" reasoning): a deadline-based
+// backend's own list_attention needs its configured
+// attention_threshold/attention_exclude (home/programs/pg-connector's
+// attention.perBackend option, rendered onto backends.<name>), which can
+// only reach it via this call's own config argument -- unlike search's
+// sibling fanOutSearch, which deliberately still passes nil (no bead has
+// yet needed per-backend config for search). reg may be nil (every
+// existing test predating this bead exercises that path); Registry.
+// BackendConfig is nil-receiver-safe and simply answers (nil, nil).
+func fanOutAttentionList(ctx context.Context, reg *Registry, backends []string) (map[string][]schema.AttentionItem, FanOutOutcome) {
 	perSource := make(map[string][]schema.AttentionItem, len(backends))
 	// Sources starts as a non-nil empty slice so a zero-backend
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
-		// nil config: list_attention is outside this packet's own Files
-		// scope (bead pg2-2j5ac.28.1 wires backends.<binary> config
-		// attachment into pr/issue/ci/scm's own Tier-1 verbs only).
-		resp, err := scriptout.Invoke(ctx, b, "list_attention", nil, nil)
+		config, err := reg.BackendConfig(b)
+		if err != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+			continue
+		}
+		resp, err := scriptout.Invoke(ctx, b, "list_attention", nil, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
@@ -265,7 +279,7 @@ func newAttentionListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			perSource, fanOut := fanOutAttentionList(cmd.Context(), backends)
+			perSource, fanOut := fanOutAttentionList(cmd.Context(), reg, backends)
 			outcome := AttentionOutcome{
 				FanOutOutcome: fanOut,
 				Items:         mergeAttentionItems(perSource, backends),

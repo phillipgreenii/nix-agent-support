@@ -1376,6 +1376,124 @@ func (p *Provider) CheckAuth(ctx context.Context) error {
 	return err
 }
 
+// ViewerLogin resolves the authenticated GitHub account's own login via
+// the same "viewer { login }" GraphQL query CheckAuth already issues (bead
+// pg2-7wqkr), but actually decodes the response instead of discarding it —
+// ListAttention's own ported mine-vs-team NeedsAttention predicate
+// (provider.go's needsAttentionForPR) needs to know "self" to distinguish
+// the viewer's own review from a teammate's, and this backend is
+// stateless (D3, no local self_login configuration of its own the way
+// pg-pr's sync layer carries) so it resolves that fresh on every call.
+func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
+	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ viewer { login } }")
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Data struct {
+			Viewer struct {
+				Login string `json:"login"`
+			} `json:"viewer"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", fmt.Errorf("github: parse viewer login graphql response: %w", err)
+	}
+	if resp.Data.Viewer.Login == "" {
+		return "", errors.New("github: viewer login graphql response carried no login")
+	}
+	return resp.Data.Viewer.Login, nil
+}
+
+// reviewsWithCommitQuery fetches a PR's reviews together with the commit
+// SHA each was submitted against (GraphQL's own
+// PullRequestReview.commit.oid) — `gh pr view --json reviews`
+// (ListReviews's own call, ghReviewEntry above) exposes no such
+// sub-field, so ListAttention's own head-staleness check (bead pg2-7wqkr,
+// porting packages/pg-pr/internal/snapshot/attention.go's NeedsAttention
+// CONCEPT) needs this dedicated query instead, mirroring
+// ReplyToThread's/MinimizeComment's own existing ad-hoc "api graphql"
+// call style elsewhere in this file. A review whose commit was since
+// deleted (e.g. a force-pushed-away head) reports a null commit per
+// GitHub's own documented behavior, decoding here as an empty OID —
+// api.Review.CommitOID's own zero value, which ReviewsWithCommit's
+// caller (provider.go's reviewIsStale) already treats as "does not stand
+// for the current head" (conservatively correct, never a crash).
+const reviewsWithCommitQuery = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviews(first: 100) {
+        nodes {
+          state
+          commit { oid }
+          author { login }
+        }
+      }
+    }
+  }
+}
+`
+
+// ReviewsWithCommit runs reviewsWithCommitQuery for repo/number and
+// returns each review's author/state/commit-oid (Body/ID left unset —
+// ListAttention's own predicate never reads either).
+func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return nil, fmt.Errorf("github: repo %q is not in owner/name form", repo)
+	}
+	args := []string{
+		"api", "graphql",
+		"-F", "query=" + reviewsWithCommitQuery,
+		"-f", "owner=" + owner,
+		"-f", "name=" + name,
+		"-F", fmt.Sprintf("number=%d", number),
+	}
+	raw, err := p.gh.Run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					Reviews struct {
+						Nodes []struct {
+							State  string `json:"state"`
+							Commit struct {
+								OID string `json:"oid"`
+							} `json:"commit"`
+							Author struct {
+								Login string `json:"login"`
+							} `json:"author"`
+						} `json:"nodes"`
+					} `json:"reviews"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("github: parse reviews-with-commit graphql response: %w", err)
+	}
+	nodes := resp.Data.Repository.PullRequest.Reviews.Nodes
+	out := make([]api.Review, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, api.Review{
+			Author:    n.Author.Login,
+			State:     n.State,
+			CommitOID: n.Commit.OID,
+		})
+	}
+	return out, nil
+}
+
 // Compile-time check that Provider satisfies vcs.Provider.
 var _ vcs.Provider = (*Provider)(nil)
 

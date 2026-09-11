@@ -47,6 +47,14 @@ func (fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Co
 	return nil, nil
 }
 
+func (fakeGH) ViewerLogin(ctx context.Context) (string, error) {
+	return "me", nil
+}
+
+func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	return nil, nil
+}
+
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
 	return internal.New(fakeGH{})
