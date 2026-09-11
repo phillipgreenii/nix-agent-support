@@ -1,7 +1,6 @@
 # pr-pool: participant extraction into `packages/prpool-ccpool-handler` (Phase 5)
 
-**Status**: Proposed — pending operator review (docket `pg2-84o3m` Task 5.0 requires review of
-this ADR before Phase 5 execution begins; see "Operator review" below)
+**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`)
 **Date**: 2026-09-10
 **Deciders**: drafted by an implementer agent under Task 5.0's derive-plan mandate; the
 command-executor open question (the Decision's "Open question resolved" section) is this ADR's own to make per that mandate's
@@ -363,11 +362,12 @@ unwieldy; it is simply not this ADR's decision to make preemptively.
 
 ## Operator review
 
-This ADR's own acceptance criteria (docket `pg2-84o3m`, Task 5.0) name **operator review of this
-ADR, recorded before Phase 5 execution begins**, as a required step this ADR cannot itself
-satisfy — it is a human action, not a drafting one. This ADR is filed as **Proposed** for exactly
-that reason; the docket packet marks the derive-plan work `done` on the understanding that this
-review is the one remaining step before the derived plan below may be executed.
+This ADR's own acceptance criteria (docket `pg2-84o3m`, Task 5.0) named **operator review of this
+ADR, recorded before Phase 5 execution begins**, as a required step this ADR could not itself
+satisfy — it is a human action, not a drafting one. **Accepted** by the operator (Phillip Green
+II) on 2026-09-10, tracked as bead `pg2-mf0dx`: the "Open question resolved" decision (the
+`command` executor moves out too) and the disclosed zero-config-deployment breakage/perf-regression
+trade-off are both approved as written. The derived Phase 5 plan below may now be executed.
 
 ## Related Decisions
 
