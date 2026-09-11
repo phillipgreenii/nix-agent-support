@@ -44,6 +44,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/vcs"
@@ -530,28 +531,84 @@ func (p ghSearchPR) toAPI() api.PR {
 	return out
 }
 
-// SearchPRs runs one `gh search prs -- <query>` call (query is a bare
+// splitSearchQualifiers splits a bare GitHub search-syntax string into its
+// individual space-separated qualifier tokens, so each becomes its OWN gh
+// CLI positional argument rather than one argument containing embedded
+// spaces [bug pg2-76vsd].
+//
+// This split exists because `gh search prs` parses each POSITIONAL
+// ARGUMENT it receives as one keyword: a token containing a colon (e.g.
+// "is:open") is read as a qualifier, and everything AFTER that first colon
+// becomes the qualifier's value verbatim — including any further spaces
+// and colons still inside the SAME argument. Handing gh one argument that
+// already contains multiple space-separated qualifiers (e.g. exec'ing
+// `gh` with a single argv element "is:open repo:X" — no shell is
+// involved, so no shell re-splits it for us) makes gh treat "open
+// repo:X" as the (space-containing) VALUE of "is:", which it then quotes:
+// the request becomes `q=is:"open repo:X"`, a qualifier value nothing
+// matches — reproduced 2026-09-11 against the real `gh search prs`
+// binary and confirmed via GH_DEBUG=api request tracing. Splitting the
+// query into one gh argv element per qualifier here (mirroring what a
+// shell would already have done had the query arrived pre-tokenized)
+// makes gh parse each qualifier independently, matching GitHub's own
+// documented multi-qualifier search syntax. A single qualifier with no
+// embedded space was never affected — there was nothing for the bug to
+// bite on.
+//
+// A double-quoted substring (GitHub's own exact-phrase / quoted-value
+// syntax, e.g. `label:"needs review"`) is kept as ONE token — its
+// embedded space must survive, since that's the one case where the value
+// truly is meant to contain a space — by tracking quote state rather than
+// splitting on every space unconditionally.
+func splitSearchQualifiers(query string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inQuotes := false
+	for _, r := range query {
+		switch {
+		case r == '"':
+			inQuotes = !inQuotes
+			cur.WriteRune(r)
+		case unicode.IsSpace(r) && !inQuotes:
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
+// SearchPRs runs one `gh search prs -- <query...>` call (query is a bare
 // GitHub search-syntax string, e.g. "repo:owner/name is:open
 // author:@me" — GitHub's OWN qualifier syntax, never a compiled
 // cross-backend query language of pg-connector's own; see
 // pkg/provider/pr.Provider.List's own doc comment and this backend's
 // internal/provider.go List for the caller side) and returns every
-// matched PR. The "--" separator lets query itself start with a
-// "-"-prefixed exclusion qualifier (gh's own documented convention,
-// "gh search prs -- -label:bug") without gh's flag parser misreading it
-// as an unrecognized flag.
+// matched PR. query is split into one gh positional argument per
+// qualifier via splitSearchQualifiers (bug pg2-76vsd: gh reads a whole
+// unsplit multi-qualifier string as a single, mostly-quoted keyword and
+// matches nothing). The "--" separator lets the first qualifier be a
+// "-"-prefixed exclusion (gh's own documented convention, "gh search prs
+// -- -label:bug") without gh's flag parser misreading it as an
+// unrecognized flag.
 func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
-	// Flags MUST precede "--": everything after "--" is a positional
-	// argument (the query itself), never re-parsed as a flag — putting
-	// --json/--limit after "--" would make gh treat them as extra query
-	// text instead of flags.
+	// Flags MUST precede "--": everything after "--" is positional
+	// arguments (the query's own qualifiers), never re-parsed as a flag —
+	// putting --json/--limit after "--" would make gh treat them as extra
+	// query text instead of flags.
 	args := []string{
 		"search", "prs",
 		"--json", searchPRFields,
 		"--limit", "100",
 		"--",
-		query,
 	}
+	args = append(args, splitSearchQualifiers(query)...)
 	raw, err := p.gh.Run(ctx, args...)
 	if err != nil {
 		return nil, err

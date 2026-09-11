@@ -657,6 +657,126 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
+// TestSearchPRs_MultiQualifierQuery_SplitsIntoSeparateArgs is the pg2-76vsd
+// regression test: a 2+ qualifier query string (e.g. "is:pr is:open
+// repo:X") must reach `gh` as SEPARATE positional arguments after "--",
+// never as one argument containing embedded spaces — passing it as one
+// argument makes gh's own parser read everything past the first
+// qualifier's colon as that qualifier's (space-containing, then quoted)
+// value, matching nothing (reproduced live against the real `gh search
+// prs` binary: a single merged argv element returned q=is:"open
+// repo:X", 0 results, while separate elements returned q=is:open
+// repo:X, real results).
+func TestSearchPRs_MultiQualifierQuery_SplitsIntoSeparateArgs(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:pr is:open repo:ZR-Private/ziprecruiter"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+
+	last := gh.calls[len(gh.calls)-1]
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	if dashIdx == -1 {
+		t.Fatalf("expected a \"--\" terminator: %v", last)
+	}
+	positionals := last[dashIdx+1:]
+	want := []string{"is:pr", "is:open", "repo:ZR-Private/ziprecruiter"}
+	if len(positionals) != len(want) {
+		t.Fatalf("expected %d separate positional args (one per qualifier), got %d: %v",
+			len(want), len(positionals), positionals)
+	}
+	for i, w := range want {
+		if positionals[i] != w {
+			t.Fatalf("positional[%d] = %q, want %q (full: %v)", i, positionals[i], w, positionals)
+		}
+	}
+	// The bug's exact failure shape: the WHOLE query merged into one argv
+	// element must never appear.
+	for _, a := range positionals {
+		if strings.Contains(a, " ") {
+			t.Fatalf("no single positional arg must contain an embedded space (that's the bug): %v", positionals)
+		}
+	}
+}
+
+// TestSearchPRs_QuotedQualifierValueStaysOneToken proves a GitHub
+// exact-phrase qualifier value (e.g. label:"needs review") is NOT split on
+// its own internal space — only whitespace OUTSIDE a quoted span is a
+// token boundary.
+func TestSearchPRs_QuotedQualifierValueStaysOneToken(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), `is:open label:"needs review"`); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+
+	last := gh.calls[len(gh.calls)-1]
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	positionals := last[dashIdx+1:]
+	want := []string{"is:open", `label:"needs review"`}
+	if len(positionals) != len(want) {
+		t.Fatalf("expected %d positional args, got %d: %v", len(want), len(positionals), positionals)
+	}
+	for i, w := range want {
+		if positionals[i] != w {
+			t.Fatalf("positional[%d] = %q, want %q (full: %v)", i, positionals[i], w, positionals)
+		}
+	}
+}
+
+// TestSplitSearchQualifiers is a table-driven unit test of the tokenizer
+// SearchPRs relies on to avoid bug pg2-76vsd.
+func TestSplitSearchQualifiers(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single qualifier", "is:open", []string{"is:open"}},
+		{"two qualifiers", "is:pr is:open", []string{"is:pr", "is:open"}},
+		{
+			"three qualifiers", "is:pr is:open repo:ZR-Private/ziprecruiter",
+			[]string{"is:pr", "is:open", "repo:ZR-Private/ziprecruiter"},
+		},
+		{"leading exclusion qualifier", "-label:bug is:open", []string{"-label:bug", "is:open"}},
+		{"extra whitespace collapses", "  is:pr   is:open  ", []string{"is:pr", "is:open"}},
+		{
+			"quoted value keeps its internal space",
+			`is:open label:"needs review"`,
+			[]string{"is:open", `label:"needs review"`},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := splitSearchQualifiers(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("splitSearchQualifiers(%q) = %v, want %v", c.in, got, c.want)
+			}
+			for i, w := range c.want {
+				if got[i] != w {
+					t.Fatalf("splitSearchQualifiers(%q)[%d] = %q, want %q (full: %v)", c.in, i, got[i], w, got)
+				}
+			}
+		})
+	}
+}
+
 func TestSearchPRs_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["search prs"] = errors.New("boom")
