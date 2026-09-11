@@ -79,12 +79,18 @@ on every land. If you find a standing push bead, report it as this defect
 
 ## Startup / resume (survives compaction)
 
-1. Invoke the `beads-lifecycle` skill now, before any `bd` command runs this session. It
+1. Mark this session's mode (best-effort — `|| true`; a missing/broken `session-mode` tool
+   must never block the actual drain work): if `$ARGUMENTS` is 24 characters or fewer AND has
+   at most one `--flag`, run `session-mode start drain-beads --force --detail "$ARGUMENTS"`;
+   otherwise first write a brief few-word summary of what it restricts to (e.g. `P1, db label`
+   instead of the full `--label db --priority 1 --parent pg2-xyz` clause) and pass THAT as
+   `--detail` instead.
+2. Invoke the `beads-lifecycle` skill now, before any `bd` command runs this session. It
    carries claim/release hygiene, dependency-vs-human blocker modeling, handoff-precondition
    phrasing, premise freshness, and the worktree-review label lifecycle — all cited by rule ID
    throughout this command. Invoke it ONCE per session; you do not need to re-invoke it per bead.
-2. Run `bd prime` for workflow context.
-3. Recover any bead you already own but didn't finish:
+3. Run `bd prime` for workflow context.
+4. Recover any bead you already own but didn't finish:
 
    ```bash
    bd list --status in_progress --assignee "ID" --json
@@ -152,7 +158,9 @@ proceeding on currently loaded text (direct interactive invocation).`)
 
    Atomically claims the highest-priority ready bead (assignee=ID,
    status=in_progress) and returns it. No other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → STOP. A transient error → retry. If the
+   SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
+   best-effort — this is the loop's own natural, deterministic termination point; no hook
+   is used or needed for this). A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
    (see "Optional scope arguments"); they never remove `--exclude-label human` (nor
    its campaign counterpart in the CLAIM query above), the `--exclude-type epic`

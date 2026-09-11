@@ -1,0 +1,12 @@
+{
+  "description": "SessionEnd backstop for session-mode: a killed/crashed session leaves a stale running/stopping record; this flips it to finished exactly once, when the session actually terminates",
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "session-mode hook session-end" }
+        ]
+      }
+    ]
+  }
+}

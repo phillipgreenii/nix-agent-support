@@ -8,6 +8,9 @@ description: >-
 
 # /stop-draining-beads
 
+Run `session-mode set-status stopping` (best-effort — `|| true`; a missing/broken
+`session-mode` tool must never block the stop sequence below).
+
 Stop claiming new beads in this session. Finish the bead this session
 already has claimed, following `/drain-beads`' own steps through to a
 normal close (or a normal park, if it genuinely can't finish) — don't force

@@ -211,6 +211,40 @@ let
     printf "''${BOLD}@%s''${RESET}" "$CLAUDE_SL_AGENT"
   '';
 
+  # SESSION MODE: which named "mode" (drain-beads, unblock-human-beads,
+  # wrap-up-session, ...) is running in this session, per the session-mode CLI
+  # (bead pg2-gzrn2). Hidden entirely when kind/state are empty (no
+  # <session_id>.session-mode.json, or it is absent/malformed). wrap-up-session
+  # gets the literal user-requested strings; every other kind renders
+  # generically ("<kind>: RUNNING|STOPPING|DONE[ [<detail>]]") so a brand-new
+  # future kind needs zero part-script changes. Between agent and context.
+  sessionModePart = pkgs.writeShellScript "claude-sl-session-mode" ''
+    ${ansiColors}
+    [ -n "$CLAUDE_SL_SESSION_MODE_KIND" ] && [ -n "$CLAUDE_SL_SESSION_MODE_STATE" ] || exit 1
+
+    if [ "$CLAUDE_SL_SESSION_MODE_KIND" = "wrap-up-session" ]; then
+      case "$CLAUDE_SL_SESSION_MODE_STATE" in
+      running) printf "''${YELLOW}(WRAPPING UP)''${RESET}" ;;
+      finished) printf "''${GREEN}(WRAPPED UP)''${RESET}" ;;
+      *) exit 1 ;;
+      esac
+      exit 0
+    fi
+
+    case "$CLAUDE_SL_SESSION_MODE_STATE" in
+    running) state_label="RUNNING" ;;
+    stopping) state_label="STOPPING" ;;
+    finished) state_label="DONE" ;;
+    *) exit 1 ;;
+    esac
+
+    out=$(printf "''${MAGENTA}%s: %s''${RESET}" "$CLAUDE_SL_SESSION_MODE_KIND" "$state_label")
+    if [ -n "$CLAUDE_SL_SESSION_MODE_DETAIL" ]; then
+      out="$out $(printf "''${DIM}[%s]''${RESET}" "$CLAUDE_SL_SESSION_MODE_DETAIL")"
+    fi
+    printf '%s' "$out"
+  '';
+
   # LIMITS: 5h + 7d rate limits combined into ONE space-separated segment. Whole segment
   # hidden when rate_limits is absent; each sub-part hidden when its used_percentage is absent.
   #
@@ -349,6 +383,9 @@ let
       export CLAUDE_SL_5H_RESET
       export CLAUDE_SL_7D_PCT
       export CLAUDE_SL_7D_RESET
+      export CLAUDE_SL_SESSION_MODE_KIND
+      export CLAUDE_SL_SESSION_MODE_STATE
+      export CLAUDE_SL_SESSION_MODE_DETAIL
       # Single jq invocation extracts every field at once (one process per render, not one
       # per field). jq emits shell-quoted `VAR=value` assignments via @sh; eval applies them.
       # @sh guarantees each value is safely quoted, so spaces / quotes / $() / backticks in
@@ -379,6 +416,25 @@ let
         @sh "_sl_cwd=\(.workspace.current_dir // .cwd // "")",
         @sh "_sl_transcript=\(.transcript_path // "")"
       ')"
+
+      # Hoisted once (bead pg2-gzrn2): previously computed only inside the
+      # rate_limits capture block below; both that block and the session-mode
+      # read reuse this single computation now.
+      _sl_txdir=''${_sl_transcript%/*}
+
+      # session-mode read (bead pg2-gzrn2). Plucks kind/state/detail (if any)
+      # from the sibling <session_id>.session-mode.json file via a jq-free
+      # pattern match (json_string_field / read_session_mode), matching this
+      # wrapper's one-jq-call-per-render discipline. The functions are
+      # injected verbatim exactly like capture-status.bash / strip-ansi.bash;
+      # the CALL is guarded (best-effort: no transcript/session id means no
+      # sibling path to derive) and assigns
+      # CLAUDE_SL_SESSION_MODE_KIND/_STATE/_DETAIL directly — absent/unreadable/
+      # empty leaves them empty, so sessionModePart is simply skipped.
+      ${builtins.readFile ./session-mode-status.bash}
+      if [ -n "$_sl_txdir" ] && [ -n "$CLAUDE_SL_SESSION_ID" ]; then
+        read_session_mode "$_sl_txdir/$CLAUDE_SL_SESSION_ID.session-mode.json"
+      fi
 
       # Branch fallback: Claude only populates worktree.branch inside a worktree session,
       # so a normal checkout has no branch. Derive it from the repo's .git/HEAD by walking
@@ -418,7 +474,6 @@ let
       ${builtins.readFile ./capture-status.bash}
       {
         if [ -n "$_sl_transcript" ] && [ -n "$CLAUDE_SL_SESSION_ID" ]; then
-          _sl_txdir=''${_sl_transcript%/*}
           capture_status_line \
             "$_sl_txdir/$CLAUDE_SL_SESSION_ID.status.jsonl" \
             "$EPOCHSECONDS" \
@@ -498,8 +553,10 @@ let
       done
     '';
 
-  # Segment order (bead pg2-nhm2 FINAL DESIGN):
-  #   vim, session name?, session id, location, model, agent, context, limits, version.
+  # Segment order (bead pg2-nhm2 FINAL DESIGN; sessionModePart inserted
+  # between agent and context per bead pg2-gzrn2, same base-module band):
+  #   vim, session name?, session id, location, model, agent, session mode,
+  #   context, limits, version.
   defaultParts = [
     "${vimPart}"
     "${sessionNamePart}"
@@ -507,6 +564,7 @@ let
     "${locationPart}"
     "${modelPart}"
     "${agentPart}"
+    "${sessionModePart}"
     "${contextPart}"
     "${limitsPart}"
     "${versionPart}"
@@ -522,6 +580,7 @@ in
     versionPart
     vimPart
     agentPart
+    sessionModePart
     limitsPart
     mkWrapperScript
     defaultParts

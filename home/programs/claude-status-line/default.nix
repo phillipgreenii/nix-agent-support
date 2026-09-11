@@ -32,7 +32,8 @@ in
             CLAUDE_SL_EXCEEDS_200K, CLAUDE_SL_REPO_OWNER, CLAUDE_SL_REPO_NAME,
             CLAUDE_SL_PR_NUMBER, CLAUDE_SL_PR_URL, CLAUDE_SL_PR_REVIEW_STATE,
             CLAUDE_SL_EFFORT, CLAUDE_SL_THINKING, CLAUDE_SL_VIM_MODE, CLAUDE_SL_AGENT,
-            CLAUDE_SL_5H_PCT, CLAUDE_SL_5H_RESET, CLAUDE_SL_7D_PCT, CLAUDE_SL_7D_RESET)
+            CLAUDE_SL_5H_PCT, CLAUDE_SL_5H_RESET, CLAUDE_SL_7D_PCT, CLAUDE_SL_7D_RESET,
+            CLAUDE_SL_SESSION_MODE_KIND, CLAUDE_SL_SESSION_MODE_STATE, CLAUDE_SL_SESSION_MODE_DETAIL)
           - prints a single formatted segment to stdout (ANSI colors allowed)
           - exits 0 to include the segment, non-zero to skip it silently
         Segments are joined with " | ".

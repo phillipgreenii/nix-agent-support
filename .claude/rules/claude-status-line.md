@@ -29,15 +29,26 @@ env vars, runs each part, and width-wraps the non-empty outputs across rows (see
   (`CLAUDE_SL_SESSION_NAME`, `_SESSION_ID`, `_WORKTREE`, `_BRANCH`, `_VERSION`, `_MODEL`,
   `_CONTEXT_USED_PCT`, `_EXCEEDS_200K`, `_REPO_OWNER`, `_REPO_NAME`, `_PR_NUMBER`, `_PR_URL`,
   `_PR_REVIEW_STATE`, `_EFFORT`, `_THINKING`, `_VIM_MODE`, `_AGENT`, `_5H_PCT`, `_5H_RESET`,
-  `_7D_PCT`, `_7D_RESET`)
+  `_7D_PCT`, `_7D_RESET`, `_SESSION_MODE_KIND`, `_SESSION_MODE_STATE`, `_SESSION_MODE_DETAIL`)
   or its own environment; prints **one** formatted segment to stdout
   (ANSI colors allowed); and exits non-zero to be skipped silently. Keep segments compact —
   they share rows and the right edge is reserved for notifications.
 - **Default segment order** (base set, `home/programs/claude-status-line/scripts.nix`):
   vim, session name?, session id, location (repo + worktree + branch + `PR#<n>`), model
-  (+effort +thinking), agent, context (+200k alert), limits (5h + 7d), version. The PR sub-part
-  is appended after branch inside the single location segment (colored by `pr.review_state`,
-  no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
+  (+effort +thinking), agent, session mode, context (+200k alert), limits (5h + 7d), version.
+  The PR sub-part is appended after branch inside the single location segment (colored by
+  `pr.review_state`, no glyph prefix); the `CLAUDE_SL_PR_*` vars remain exported for custom parts.
+- **Session mode segment** (bead pg2-gzrn2): shows which named "mode" (drain-beads,
+  unblock-human-beads, wrap-up-session, ...) the `session-mode` CLI
+  (`packages/session-mode/`) has recorded as active for THIS session, read from the sibling
+  `<session_id>.session-mode.json` file next to the transcript. `kind == wrap-up-session`
+  renders the literal `(WRAPPING UP)` / `(WRAPPED UP)`; every other kind renders generically as
+  `<kind>: RUNNING|STOPPING|DONE`, with `[<detail>]` appended when present — a brand-new future
+  kind needs zero part-script changes. The read is jq-free
+  (`session-mode-status.bash`'s `json_string_field` / `read_session_mode`, injected verbatim
+  like `capture-status.bash`), reusing the wrapper's hoisted `_sl_txdir` — matching the
+  one-jq-call-per-render discipline below. Hidden entirely when no record exists, the file is
+  unreadable/empty, or it fails to parse.
 - **Nerd-font glyphs**: `phillipgreenii.programs.claude.status-line-nerd-font` (bool, default
   false) picks MDI glyphs vs text fallbacks. The choice is baked at Nix eval time (no runtime
   branch) via the `nerdFont` arg threaded into `scripts.nix`. In text (off) mode the location

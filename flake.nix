@@ -362,6 +362,19 @@
               pkgs = final;
               inherit bashBuilders;
             }).wtdone.script;
+          # session-mode (bead pg2-gzrn2): per-session "which loop is running"
+          # tracking (drain-beads / unblock-human-beads / wrap-up-session /
+          # ...), consumed by the pb marketplace's commands, its SessionEnd
+          # hook, and the claude-status-line segment. Single mkBashScript
+          # tool (backed by its own session-mode-lib), so -- same rationale
+          # as wtnew/wtdone/pg-disk-reclaimer/pw-reset-agents/
+          # pw-agent-activity above -- it takes `result.session-mode.script`
+          # directly rather than symlinkJoin-ing `result.packages`.
+          session-mode =
+            (import ./packages/session-mode {
+              pkgs = final;
+              inherit bashBuilders;
+            }).session-mode.script;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -4340,6 +4353,13 @@
             # Same one-line idiom as git-tools above: without this the suite
             # ran in no gate at all.
             // (import ./packages/bg-tools {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
+            # test-session-mode-lib / test-session-mode (bead pg2-gzrn2).
+            # Same one-line idiom as bg-tools above: without this the suite
+            # ran in no gate at all.
+            // (import ./packages/session-mode {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks

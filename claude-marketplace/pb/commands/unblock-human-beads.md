@@ -74,12 +74,17 @@ exit on an error.
 
 ## Startup / resume (survives compaction)
 
-1. Invoke the `beads-lifecycle` skill (claim/release hygiene, dependency-vs-human blocker
+1. Mark this session's mode (best-effort — `|| true`; a missing/broken `session-mode` tool
+   must never block the actual unblock work): if `$ARGUMENTS` is 24 characters or fewer AND
+   has at most one `--flag`, run
+   `session-mode start unblock-human-beads --force --detail "$ARGUMENTS"`; otherwise first
+   write a brief few-word summary of what it restricts to and pass THAT as `--detail` instead.
+2. Invoke the `beads-lifecycle` skill (claim/release hygiene, dependency-vs-human blocker
    modeling, handoff preconditions, premise freshness, worktree-review label lifecycle) —
    before running `bd prime` or any other `bd` command. This is a session-level prerequisite
    for the whole run below, not a per-bead step to redo.
-2. Run `bd prime` for workflow context.
-3. Recover any bead you already own but didn't finish:
+3. Run `bd prime` for workflow context.
+4. Recover any bead you already own but didn't finish:
 
    ```bash
    bd list --status in_progress --assignee "ID" --label human --json
@@ -88,7 +93,7 @@ exit on an error.
    If one exists, resume it (UNDERSTAND → FRESHNESS CHECK → TRIAGE → terminal action) before claiming new
    work.
 
-4. Start with an empty session skip-set.
+5. Start with an empty session skip-set.
 
 ## Main loop — repeat until the Goal is met
 
@@ -103,8 +108,11 @@ exit on an error.
 
    Atomically claims the highest-priority ready `human` bead (assignee=ID,
    status=`in_progress`) and returns it; no other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → STOP. A returned id already in your skip-set →
-   STOP. A transient error → retry. If the invocation supplied `$ARGUMENTS`, apply them as
+   SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
+   best-effort). A returned id already in your skip-set → STOP (also run
+   `session-mode set-status finished`, best-effort — missing this STOP would leave the
+   record `running` whenever the loop ends via this defensive guard instead of an empty
+   result). A transient error → retry. If the invocation supplied `$ARGUMENTS`, apply them as
    additional NARROWING filters here (see "Optional scope arguments").
 
 2. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn

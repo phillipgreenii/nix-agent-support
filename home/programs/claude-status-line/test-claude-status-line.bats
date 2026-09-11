@@ -1059,3 +1059,132 @@ _capture_json() {
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_DIR/nope/sess-1.status.jsonl" ]
 }
+
+# =====================================================================================
+# Session-mode segment (bead pg2-gzrn2): between agent and context. Reads the
+# sibling <session_id>.session-mode.json next to the transcript, jq-free.
+# =====================================================================================
+
+# Build a status-line JSON carrying a transcript_path in $TEST_DIR (no rate_limits).
+# Args: $1 session_id  $2 transcript_path
+_session_mode_json() {
+  printf '{"session_id":"%s","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"transcript_path":"%s","model":{"display_name":"Opus"}}' \
+    "$1" "$2"
+}
+
+@test "session-mode segment absent when no session-mode.json file exists" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"RUNNING"* ]]
+  [[ "$stripped" != *"WRAP"* ]]
+}
+
+@test "session-mode segment shows KIND: RUNNING with no detail bracket" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"drain-beads","state":"running","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"drain-beads: RUNNING"* ]]
+  [[ "$stripped" != *"["* ]]
+}
+
+@test "session-mode segment shows the detail bracket when present" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"drain-beads","detail":"P1 only","state":"running","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"drain-beads: RUNNING [P1 only]"* ]]
+}
+
+@test "session-mode segment shows STOPPING with no detail bracket when detail absent" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"drain-beads","state":"stopping","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"drain-beads: STOPPING"* ]]
+  [[ "$stripped" != *"["* ]]
+}
+
+@test "session-mode segment shows DONE for a finished record" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"unblock-human-beads","state":"finished","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"unblock-human-beads: DONE"* ]]
+}
+
+@test "session-mode segment renders the literal wrap-up-session strings" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"wrap-up-session","state":"running","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"(WRAPPING UP)"* ]]
+
+  printf '{"kind":"wrap-up-session","state":"finished","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"(WRAPPED UP)"* ]]
+}
+
+@test "session-mode segment sits between agent and context" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf '{"kind":"drain-beads","state":"running","started_at":"x","updated_at":"y"}' >"$TEST_DIR/sess-1.session-mode.json"
+  J='{"session_id":"sess-1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"transcript_path":"'"$tx"'","agent":{"name":"secrev"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25}}'
+  run env COLUMNS=400 bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"@secrev"*"drain-beads: RUNNING"*"25%"* ]]
+}
+
+@test "session-mode segment absent when the fixture file is malformed JSON (no crash)" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  printf 'not-json{{{' >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"RUNNING"* ]]
+  [[ "$stripped" != *"WRAP"* ]]
+}
+
+@test "session-mode segment absent when the fixture file is zero-byte (no crash)" {
+  local tx="$TEST_DIR/sess-1.jsonl"
+  : >"$tx"
+  : >"$TEST_DIR/sess-1.session-mode.json"
+  local J
+  J=$(_session_mode_json "sess-1" "$tx")
+  run bash -c "printf '%s' '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"RUNNING"* ]]
+  [[ "$stripped" != *"WRAP"* ]]
+}

@@ -13,9 +13,17 @@ import (
 // Status-line rate_limits sibling suffixes (ADR 0021 §1/§2). The wrapper writes a
 // <id>.status.jsonl record file (and MAY keep a <id>.status.last hash sidecar) next
 // to the transcript; neither is a transcript and neither is a session record.
+//
+// sessionModeSuffix (bead pg2-gzrn2) is a THIRD sibling: the session-mode CLI's
+// <id>.session-mode.json per-session mode record, written next to the same
+// transcript. Its extension is .json (not .jsonl), so without this exclusion
+// listSessionFiles would strip only the .json suffix and derive the phantom
+// session ID "<id>.session-mode" — the same bug class ADR 0021 §2 already fixed
+// for the two suffixes above.
 const (
 	statusRecordSuffix  = ".status.jsonl"
 	statusSidecarSuffix = ".status.last"
+	sessionModeSuffix   = ".session-mode.json"
 )
 
 // IsTranscriptFile reports whether name is a Claude Code transcript file, as
@@ -34,13 +42,16 @@ func IsTranscriptFile(name string) bool {
 	return !IsStatusSiblingFile(name)
 }
 
-// IsStatusSiblingFile reports whether name is a status-line rate_limits sibling
-// file (the <id>.status.jsonl record or the <id>.status.last hash sidecar). Used
-// by gc.listSessionFiles to skip these so they never derive a phantom session ID
+// IsStatusSiblingFile reports whether name is a session-adjacent sibling file
+// that is NOT itself a transcript or a session record: the <id>.status.jsonl
+// rate_limits record, the <id>.status.last hash sidecar, or the
+// <id>.session-mode.json mode record (bead pg2-gzrn2). Used by
+// gc.listSessionFiles to skip these so they never derive a phantom session ID
 // (ADR 0021 §2), while genuine <id>.json session records still pass.
 func IsStatusSiblingFile(name string) bool {
 	return strings.HasSuffix(name, statusRecordSuffix) ||
-		strings.HasSuffix(name, statusSidecarSuffix)
+		strings.HasSuffix(name, statusSidecarSuffix) ||
+		strings.HasSuffix(name, sessionModeSuffix)
 }
 
 // ResolveTranscript finds the most relevant transcript file for s under

@@ -158,16 +158,20 @@ func TestListSessionFiles(t *testing.T) {
 }
 
 // TestListSessionFiles_IgnoresStatusSiblings proves a status-line rate_limits
-// sibling never derives a phantom session id (ADR 0021 §2). A <id>.status.jsonl
-// (and the <id>.status.last hash sidecar) must be skipped; a genuine <id>.json
-// / <id>.jsonl still yields its id.
+// sibling never derives a phantom session id (ADR 0021 §2), extended by bead
+// pg2-gzrn2 to cover the session-mode CLI's sibling too. A <id>.status.jsonl
+// (the <id>.status.last hash sidecar, and now <id>.session-mode.json) must be
+// skipped; a genuine <id>.json / <id>.jsonl still yields its id. Without this
+// case, a future accidental revert of the session-mode exclusion in
+// IsStatusSiblingFile would go uncaught.
 func TestListSessionFiles_IgnoresStatusSiblings(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{
 		"real-1.json",
 		"real-2.jsonl",
-		"sess-1.status.jsonl", // rate_limits sibling — must NOT become "sess-1.status"
-		"sess-1.status.last",  // hash sidecar — must NOT become "sess-1.status"
+		"sess-1.status.jsonl",      // rate_limits sibling — must NOT become "sess-1.status"
+		"sess-1.status.last",       // hash sidecar — must NOT become "sess-1.status"
+		"sess-1.session-mode.json", // session-mode record — must NOT become "sess-1.session-mode"
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)

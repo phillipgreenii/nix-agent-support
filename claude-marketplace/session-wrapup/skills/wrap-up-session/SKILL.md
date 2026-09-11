@@ -109,6 +109,25 @@ described in **"Markdown handoff doc (no-beads repos)."**
 Run these in order. Earlier phases are read-only or reversible; the irreversible ones come
 last and only after the gates pass.
 
+### Preamble: mark this session's mode (bead pg2-gzrn2)
+
+Deliberately NOT inside phase 1 itself — that phase's own text says "Produce nothing
+destructive here," and a file create/overwrite would contradict that documented read-only
+contract even though it is harmless in practice.
+
+Attempt `session-mode start wrap-up-session` (no `--force`), best-effort end-to-end (its exit
+code is branched on when it succeeds, but a failure of ANY kind must never block or alter the
+actual wrapup), and branch on its exit code:
+
+- **0** → no other kind was active for this session; proceed normally.
+- **3 (conflict)** → a drain-beads/unblock-human-beads record is already active for this
+  session: do NOT create a separate record — instead run `session-mode set-status stopping`
+  on it. This is exactly how a session running `/pb:unblock-human-beads` (which has no stop
+  command of its own) gets a stop signal, via wrap-up-session.
+- **anything else** (missing tool, exit 127, a corrupted existing record, etc.) → treat
+  session-mode as unavailable for this run: proceed with wrap-up-session normally, and do not
+  attempt to create or touch any record for the rest of the run.
+
 ### 1. Take stock (read-only)
 
 Build the in-scope set per "Why scope is the whole game" above. For each in-scope repo,
@@ -290,6 +309,11 @@ STATE, and is NOT worth the operator's attention:
 
 (There's no separate beads "sync" step: in server mode `bd create`/`bd close` write straight
 to the shared remote, so the housekeeping in phase 2 is already persisted.)
+
+Run `session-mode set-status finished` unconditionally (best-effort): this finishes
+whichever kind ended up active for this session — wrap-up-session's own record, or one it
+took over in the Preamble above. A no-op (silently) when the Preamble never got a record
+started in the first place.
 
 ## Next-session handoff bead
 
@@ -500,3 +524,4 @@ If nothing was in scope, say so plainly rather than inventing work.
 | retire a spent P0 pointer       | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                      |
 | record work (no-beads repo)     | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                           |
 | next-session handoff (no-beads) | update the handoff doc's top "Resume here" section                                                       |
+| this session's mode record      | `session-mode show` (see "Preamble: mark this session's mode")                                           |

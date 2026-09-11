@@ -25,6 +25,7 @@
     ./programs/claude-extended-tool-approver
     ./programs/git-tools
     ./programs/bg-tools
+    ./programs/session-mode
     ./programs/pg-pr
     ./programs/pg-connector
     ./programs/pg-ccaudit
