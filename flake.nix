@@ -210,6 +210,16 @@
             # ambient runtime PATH dep (agent-support is standalone/no-external-flake-deps
             # so final.pn does not resolve). See packages/pb/default.nix + ADR 0018.
           };
+          # prpool-ccpool-handler: pr-pool's sibling module realizing
+          # INTF-HANDLER/INTF-SOURCE for the ccpool-backed and command-backed
+          # participant kinds (`phillipgreenii-nix-agent-support` ADR 0065's
+          # "New module" decision, docket pg2-oju6w Task 5.1). Currently an
+          # empty, buildable shell — no participant code has moved in yet
+          # (Task 5.2 onward); see packages/prpool-ccpool-handler/doc.go and
+          # its docs/behavior/README.md Realization gaps.
+          prpool-ccpool-handler = final.callPackage ./packages/prpool-ccpool-handler {
+            inherit (goBuilders) mkGoApp;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
@@ -1340,6 +1350,26 @@
                 modRoot = "ccpool";
                 gomod2nixToml = ./packages/ccpool/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
+              };
+
+              # prpool-ccpool-handler — pr-pool's sibling module (docket
+              # pg2-oju6w Task 5.1). Pattern-B local `replace => ../pr-pool`,
+              # same shape as ccpool-go-tests above, so root the fileset at
+              # packages/ and pass modRoot. Currently an empty, buildable
+              # shell — no participant code has moved in yet, so no testDeps
+              # are needed (its one blank import, packages/pr-pool/schemas,
+              # shells out to nothing).
+              prpool-ccpool-handler-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "prpool-ccpool-handler-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/prpool-ccpool-handler
+                    ./packages/pr-pool
+                  ];
+                };
+                modRoot = "prpool-ccpool-handler";
+                gomod2nixToml = ./packages/prpool-ccpool-handler/gomod2nix.toml;
               };
 
               # ceta — the finding's primary motivation: internal rule / engine /
@@ -4344,6 +4374,7 @@
             inherit (pkgs)
               ccpool
               pr-pool
+              prpool-ccpool-handler
               pb
               claude-extended-tool-approver
               pa-monitor
