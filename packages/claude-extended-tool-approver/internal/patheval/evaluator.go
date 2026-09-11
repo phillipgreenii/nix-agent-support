@@ -938,6 +938,26 @@ func InGitRepo(path string) bool {
 	return ok
 }
 
+// GitRoot exposes gitRoot: the nearest ancestor of dir (dir itself included)
+// holding a `.git` entry (file or directory — a linked worktree's `.git` is a
+// FILE holding a `gitdir:` pointer, and this counts, exactly as InGitRepo's
+// own doc explains). Returns ("", false) when the walk reaches the
+// filesystem root without finding one.
+//
+// Exported for internal/rules/gitdir's tc-uelj current-repo-root carve-out
+// (`git worktree add`), which needs the RAW walk result — never
+// DetectProjectRoot's MONOREPO_ROOT-overridden answer — to ask "is this path
+// under the SPECIFIC repository the invocation is already running against",
+// not "what project should this cwd be attributed to". DetectProjectRoot's
+// own doc names exactly this ambiguity (pg2-byh62) as the reason a caller
+// needing a yes/no repo-root answer must not read its fallback as a repo;
+// GitRoot's explicit `found` return is that answer, mirroring InGitRepo's own
+// predicate shape but handing back the root string a carve-out needs to
+// compare against, rather than only the boolean.
+func GitRoot(dir string) (string, bool) {
+	return gitRoot(filepath.Clean(dir))
+}
+
 // gitRoot walks up from dir — dir itself included — and returns the first
 // ancestor holding a `.git` entry. The second result is false when the walk
 // reaches the filesystem root without finding one; callers MUST branch on it

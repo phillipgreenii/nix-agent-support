@@ -211,6 +211,39 @@
 // GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY
 // refusal itself out of scope — that question is tracked separately (tc-j0aa).
 //
+// # CURRENT-REPO-ROOT CARVE-OUT FOR `git worktree add` (tc-uelj)
+//
+// tc-mzr5's Reject above is right for the actual hazard — a PERSISTENT
+// REDIRECT of an EXISTING checkout's git-dir/work-tree elsewhere — but it
+// also caught a normal, expected agent operation this repo's own R-4 rule
+// MANDATES by default: creating an ADDITIONAL linked worktree of the repo the
+// agent is already in (`git worktree add .worktrees/<id> -b <branch>`, this
+// repo's own documented convention; many such worktrees already exist under
+// `.worktrees/*` and `homelab-worktrees/*`). Operator position (tc-uelj,
+// 2026-09-10): "you should always be allowed to do that" — that is a
+// materially different act from redirecting an existing checkout, and
+// tc-mzr5's own scoping already excludes `remove`/`list`/`prune`/`repair`
+// from the hazard on the same reasoning (see gitWorktreeSubcommandTarget's
+// doc): only `add`/`move` create-or-relocate a worktree at a caller-chosen
+// path, and of those two only `add` creates a NEW, independent one rather
+// than relocating one that already exists.
+//
+// currentRepoWorktreeAddCarveOutApplies (see its own doc for the full
+// decision, including why it re-derives the raw `.git` walk rather than
+// reusing DetectProjectRoot, and why a compound command carrying any OTHER
+// `.git`-metadata hazard alongside an eligible `add` disqualifies the whole
+// command) relaxes the Reject a SECOND, independent way, alongside
+// tempFixtureCarveOutApplies: Evaluate's dirWrite branch falls through to
+// NotApplicable when EITHER carve-out applies. See
+// docs/adr/0066-ceta-worktree-add-current-repo-carve-out.md in
+// phillipgreenii-nix-agent-support for the full decision.
+//
+// `git worktree move`, `git config core.worktree`/`--file … core.worktree`,
+// and `git init --separate-git-dir` are DELIBERATELY NOT eligible for this
+// carve-out even when their target resolves under the current repo's own
+// root — every one of them redirects something that ALREADY EXISTS, which is
+// the hazard tc-mzr5/tc-7mqr are about; only `add` is exempted.
+//
 // SYNTACTIC ROLE, not bare text. A git-metadata path token is a violation only
 // when it is a path the command actually OPERATES ON. The rule therefore parses
 // the command and inspects operands by role, following
@@ -236,6 +269,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
@@ -323,6 +357,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// write it exists to refuse. Fall through exactly as a leaf this
 				// rule never matched at all — the generic approvers registered
 				// after it decide, unchanged from today's non-.git traffic.
+				return hookio.NotApplicable()
+			}
+			if dir == dirWrite && currentRepoWorktreeAddCarveOutApplies(leaves, input.CWD) {
+				// tc-uelj: a `git worktree add <path>` whose target resolves under
+				// the CURRENT repository's own root -- creating an ADDITIONAL
+				// worktree of the repo the agent is already in, this repo's own
+				// R-4-mandated everyday operation -- not the tc-mzr5/tc-7mqr
+				// persistent-redirect hazard. See
+				// currentRepoWorktreeAddCarveOutApplies' own doc and
+				// docs/adr/0066-ceta-worktree-add-current-repo-carve-out.md.
 				return hookio.NotApplicable()
 			}
 			return r.verdict(dir, credentialCopyOut, envVarRedirect, worktreeRedirect)
@@ -435,7 +479,10 @@ func (r *Rule) verdict(d direction, credentialCopyOut bool, envVarRedirect bool,
 				"invocation (tc-mzr5, same incident class as tc-7mqr) " +
 				"(permitted only when every repo-locating operand this command carries resolves under a " +
 				"temporary root — see docs/adr/0059-ceta-temp-repo-carve-out.md in " +
-				"phillipgreenii-nix-agent-support)"
+				"phillipgreenii-nix-agent-support; `git worktree add` specifically is ALSO permitted when " +
+				"its target resolves under the CURRENT repository's own root — creating an additional " +
+				"worktree of the repo you are already in, e.g. `.worktrees/<id>` — see " +
+				"docs/adr/0066-ceta-worktree-add-current-repo-carve-out.md in phillipgreenii-nix-agent-support)"
 		}
 		return hookio.RuleResult{
 			Decision: hookio.Reject,
@@ -702,6 +749,118 @@ func tempFixtureCarveOutApplies(leaves []cmdparse.ParsedCommand, cwd string) boo
 		}
 	}
 	return true
+}
+
+// currentRepoWorktreeAddCarveOutApplies implements tc-uelj's current-repo-root
+// carve-out: `git worktree add <path> -b <branch>` — creating an ADDITIONAL
+// worktree of the repo the invocation is ALREADY running against — is relaxed
+// a SECOND, independent way alongside tempFixtureCarveOutApplies, keyed on a
+// DIFFERENT root: the git repository enclosing the invocation's own effective
+// directory (patheval.GitRoot), rather than a machine-wide temporary-root
+// set. See the package doc's "CURRENT-REPO-ROOT CARVE-OUT" section and
+// docs/adr/0066-ceta-worktree-add-current-repo-carve-out.md in
+// phillipgreenii-nix-agent-support for the full decision.
+//
+// ONLY `add` IS ELIGIBLE. `git worktree move`, `git config core.worktree`/
+// `--file … core.worktree`, and `git init --separate-git-dir` all redirect
+// something that ALREADY EXISTS — the tc-mzr5/tc-7mqr hazard this carve-out
+// must not touch — so a leaf matching gitWorktreeRedirectTarget that is NOT
+// specifically `git worktree add` disqualifies the WHOLE command (returns
+// false immediately), exactly as a non-temp participant does in
+// tempFixtureCarveOutApplies.
+//
+// A COMPOUND CARRYING ANY OTHER `.git`-METADATA HAZARD ALSO DISQUALIFIES,
+// for the identical "one carve-out, one shape" reason: `git worktree add
+// .worktrees/x -b y && rm -rf .git` must not be relaxed merely because the
+// first half qualifies, and neither must `GIT_DIR=<real canonical>/.git git
+// status && git worktree add .worktrees/x -b y` — the env-var redirect on
+// the FIRST leaf must not be masked by the second leaf's eligible add. Every
+// leaf is therefore checked for the two hazards bashAccessLeaves itself
+// checks UNCONDITIONALLY, regardless of gitPorcelain (its own Redirections
+// and EnvVars loops), and any match fails the WHOLE carve-out immediately.
+// A non-`git` leaf's own OPERANDS are additionally checked via pathOperands
+// (mirroring bashAccessLeaves' `!gitPorcelain` branch); a `git` leaf's own
+// arguments are not — including one that does not match
+// gitWorktreeRedirectTarget at all (a plain `git status`, or a `.git`-path
+// OPERAND to `git config -f`) — because the "SYNTACTIC ROLE, not bare text"
+// policy leaves git's own arguments to the dedicated `git` rule to judge,
+// exactly as bashAccessLeaves' own gitPorcelain branch does.
+//
+// THE ROOT IS THE RAW `.git` WALK (patheval.GitRoot), never
+// DetectProjectRoot's MONOREPO_ROOT-aware answer: this carve-out approves
+// creating a worktree of the SPECIFIC repository the invocation is running
+// against, not anywhere under a configured monorepo umbrella — a broader
+// grant than the operator ruling asked for.
+//
+// FAIL-SAFE ON NO REPO FOUND: patheval.GitRoot's second return is false for
+// a fabricated, not-yet-existing, or not-a-repo cwd, and that never relaxes
+// anything here — matching this file's established default for an
+// unresolvable operand elsewhere (see tempFixtureCarveOutApplies' own doc).
+func currentRepoWorktreeAddCarveOutApplies(leaves []cmdparse.ParsedCommand, cwd string) bool {
+	sawEligibleAdd := false
+	for _, pc := range leaves {
+		base, _ := cmdparse.EffectiveExec(pc)
+		gitPorcelain := base == "git"
+
+		if gitPorcelain {
+			if target, matched := gitWorktreeRedirectTarget(pc.Args); matched {
+				chdirs, subcmd, rest := cmdparse.GitInvocation(pc.Args)
+				isAdd := subcmd == "worktree" && len(rest) > 0 && rest[0] == "add"
+				if !isAdd {
+					// `git worktree move`, `git config core.worktree`/`--file`, or
+					// `git init --separate-git-dir`: none of these creates an
+					// ADDITIONAL worktree of the current repo — they redirect an
+					// EXISTING one, the hazard this carve-out must not touch.
+					return false
+				}
+				leafCwd := temproot.EffectiveDir(cwd, chdirs)
+				root, found := patheval.GitRoot(leafCwd)
+				if !found {
+					return false
+				}
+				rootResolved := patheval.ResolveRealPath(root)
+				resolvedTarget := temproot.ResolveOperand(leafCwd, target)
+				if rootResolved == "" || resolvedTarget == "" || !patheval.PathContains(rootResolved, resolvedTarget) {
+					return false
+				}
+				sawEligibleAdd = true
+			}
+			// A `git` leaf that did NOT match gitWorktreeRedirectTarget carries no
+			// path-operand hazard of its OWN — the "SYNTACTIC ROLE, not bare text"
+			// policy leaves git's own arguments (a plain `git status`, a `.git`-path
+			// OPERAND to `git config -f`) to the dedicated `git` rule to judge, the
+			// same skip bashAccessLeaves' own gitPorcelain branch applies. Fall
+			// through to the UNCONDITIONAL redirection/env-var checks below —
+			// mirroring bashAccessLeaves exactly, this is what catches a
+			// `GIT_DIR=<real> git status` leaf riding alongside an eligible
+			// `worktree add` leaf in the SAME compound.
+		} else {
+			// A non-`git` leaf naming a `.git`-metadata path OPERAND is a hazard
+			// this carve-out does not cover at all — fail the whole compound
+			// rather than let an eligible `worktree add` leaf elsewhere mask it.
+			tokens, opMalformed := pathOperands(pc)
+			if opMalformed {
+				return false
+			}
+			for _, tok := range tokens {
+				if isGitMetadataPath(tok) {
+					return false
+				}
+			}
+		}
+
+		for _, rd := range pc.Redirections {
+			if isGitMetadataPath(rd.Path) {
+				return false
+			}
+		}
+		for _, ev := range pc.EnvVars {
+			if temproot.CanonicalRepoLocatingEnvVars[ev.Name] || isGitMetadataPath(ev.Value) {
+				return false
+			}
+		}
+	}
+	return sawEligibleAdd
 }
 
 // gitWorktreeRedirectTarget detects tc-mzr5's four PERSISTENT-SPELLING
