@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -411,6 +412,79 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 	}
 	if len(got.Entities) != 1 {
 		t.Fatalf("Entities = %+v", got.Entities)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Search (bead pg2-8hcnx: wire the search capability's Search op onto the
+// same ghProvider.SearchPRs List already uses)
+// ----------------------------------------------------------------------
+
+func TestBackend_Search_MapsGHDataToSearchResult(t *testing.T) {
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		if query != "repo:owner/repo is:pr is:open" {
+			t.Fatalf("query = %q", query)
+		}
+		return []api.PR{{Repo: "owner/repo", Number: 7, Title: "Add feature", URL: "https://example.invalid/owner/repo/pull/7"}}, nil
+	}}
+	b := newTestBackend(t, gh)
+
+	got, err := b.Search(context.Background(), "repo:owner/repo is:pr is:open", nil)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Search results = %+v, want exactly 1", got)
+	}
+	want := schema.SearchResult{Type: "pr", ID: "owner/repo#7", Title: "Add feature", URL: "https://example.invalid/owner/repo/pull/7", Source: "pg-connector-pr-github"}
+	if got[0].Type != want.Type || got[0].ID != want.ID || got[0].Title != want.Title || got[0].URL != want.URL || got[0].Source != want.Source || len(got[0].Attributes) != 0 {
+		t.Fatalf("Search()[0] = %+v, want %+v", got[0], want)
+	}
+}
+
+func TestBackend_Search_EmptyQuery_IsInvalidArgument(t *testing.T) {
+	b := newTestBackend(t, &fakeGH{})
+
+	_, err := b.Search(context.Background(), "   ", nil)
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Search_SearchError_Classified(t *testing.T) {
+	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		return nil, github.ErrGHAuthInvalid
+	}}
+	b := newTestBackend(t, gh)
+
+	_, err := b.Search(context.Background(), "is:open", nil)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+// TestBackend_Search_RateLimitBelowReserve_IsUnavailable mirrors
+// TestBackend_List_RateLimitBelowReserve_IsUnavailable: Search hits the
+// same GraphQL quota via the same ghProvider.SearchPRs call, so it applies
+// the identical rate-limit reserve check before ever calling SearchPRs.
+func TestBackend_Search_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
+	searchCalled := false
+	gh := &fakeGH{
+		rateLimit: 500,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			searchCalled = true
+			return nil, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+	_, err := b.Search(ctx, "is:open", nil)
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+	if searchCalled {
+		t.Fatal("SearchPRs must not be called once the rate-limit check fails")
 	}
 }
 

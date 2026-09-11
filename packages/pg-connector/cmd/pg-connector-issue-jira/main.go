@@ -18,6 +18,7 @@ import (
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -40,7 +41,13 @@ func run() int {
 
 // newDispatchTable builds the issue capability's table (show/create/
 // comment/transition, plus auth_status since internal.Backend implements
-// AuthChecker) via issue.NewDispatchTable, then adds this backend's own
+// AuthChecker) via issue.NewDispatchTable, then merges in the search
+// capability's table (search, plus its own auth_status entry —
+// functionally identical to issue's, since both type-assert the same
+// backend; harmless to overwrite) built by
+// pkg/provider/search.NewDispatchTable (bead pg2-8hcnx: this backend's
+// `pjira search --jql` call already existed for List but was never wired
+// to the cross-capability "search" op), then adds this backend's own
 // capabilities entry via scriptout.AddCapabilities — AddCapabilities
 // computes capabilities.ops straight from this table's own registered op
 // names, so this backend never hand-types a second, separately maintained
@@ -48,6 +55,9 @@ func run() int {
 // identical newDispatchTable, bead pg2-fh2vh].
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := issue.NewDispatchTable(backend)
+	for op, handler := range search.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase())
 }
 
@@ -59,7 +69,7 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 func capabilitiesBase() scriptout.CapabilitiesResponse {
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion},
+		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "search": schema.SearchSchemaVersion},
 		Vocabulary: map[string]any{
 			"state":    internal.Vocabulary,
 			"priority": internal.PriorityVocabulary,

@@ -36,6 +36,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -68,6 +69,12 @@ func (b *Backend) getenvFunc() func(string) string {
 // Compile-time check that Backend satisfies the issue capability's
 // Provider interface.
 var _ issue.Provider = (*Backend)(nil)
+
+// Compile-time check that Backend also satisfies the search capability's
+// Provider interface (bead pg2-8hcnx — this backend's own `pjira search
+// --jql` call already existed for List; it was simply never wired to the
+// cross-capability "search" op before this).
+var _ search.Provider = (*Backend)(nil)
 
 // Compile-time check that Backend also implements the optional AuthChecker
 // capability (see CheckAuth's doc comment for why this backend, unlike
@@ -494,6 +501,44 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		res.Entities = nil
 	}
 	return res, nil
+}
+
+// Search implements the search capability's search.Provider via `pjira
+// search --jql <QUERY> --all` (bead pg2-8hcnx) — query is passed straight
+// through as JQL text, exactly the same "config.queries entries are
+// already raw JQL, nothing further to parse" convention List's own doc
+// comment above already establishes: unlike List, the search wire op
+// receives its query argument directly from the caller with no
+// config.queries resolution (pkg/provider/search/dispatch.go's own
+// "search" handler), so there is only ever one JQL expression to run per
+// call. fields is unused: this backend populates no Attributes beyond
+// SearchResult's own core set [freedom boundary — pjira's own search
+// response carries nothing this backend maps to Attributes today].
+func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schema.SearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "search: query required")
+	}
+	out, runErr := b.runner.Run(ctx, "search", "--jql", query, "--all")
+	if runErr != nil {
+		return nil, classifyPJIRAErrorMessage(runErr.Error())
+	}
+	result, decodeErr := decodePJIRASearchResult(out)
+	if decodeErr != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode search result: "+decodeErr.Error())
+	}
+	results := make([]schema.SearchResult, 0, len(result.Items))
+	for i := range result.Items {
+		item := result.Items[i]
+		results = append(results, schema.SearchResult{
+			Type:   "issue",
+			ID:     item.Key,
+			Title:  item.Summary,
+			URL:    item.URL,
+			Source: "pg-connector-issue-jira",
+		})
+	}
+	return results, nil
 }
 
 // Update implements issue.Provider.Update. pjira exposes NO op to change

@@ -23,6 +23,7 @@ import (
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -45,21 +46,29 @@ func run() int {
 
 // newDispatchTable builds the pr capability's table (show/list/files/
 // commits, plus auth_status via backend's AuthChecker) via the sibling
-// "generic pr entity/capability" packet's NewDispatchTable, then adds this
-// backend's own capabilities entry via scriptout.AddCapabilities.
-// AddCapabilities computes capabilities.ops straight from this table's own
-// registered op names, so this backend never hand-types a second,
-// separately maintained ops list that could drift from what the table
-// actually dispatches (bead pg2-fh2vh). Version is set to this binary's
-// own ldflags-stamped build var, so capabilities is now the wire exposure
-// for the version this binary otherwise had no way to report (bead
-// pg2-a8uf2). This backend declares no vocabulary (its category vocabulary
-// was retired with categorize by bead pg2-2j5ac.28.7).
+// "generic pr entity/capability" packet's NewDispatchTable, then merges in
+// the search capability's table (search, plus its own auth_status entry —
+// functionally identical to pr's, since both type-assert the same backend;
+// harmless to overwrite) built by pkg/provider/search.NewDispatchTable
+// (bead pg2-8hcnx: this backend's SearchPRs already existed but was never
+// wired to the cross-capability "search" op), then adds this backend's own
+// capabilities entry via scriptout.AddCapabilities. AddCapabilities
+// computes capabilities.ops straight from this table's own registered op
+// names, so this backend never hand-types a second, separately maintained
+// ops list that could drift from what the table actually dispatches (bead
+// pg2-fh2vh). Version is set to this binary's own ldflags-stamped build
+// var, so capabilities is now the wire exposure for the version this
+// binary otherwise had no way to report (bead pg2-a8uf2). This backend
+// declares no vocabulary (its category vocabulary was retired with
+// categorize by bead pg2-2j5ac.28.7).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := pr.NewDispatchTable(backend)
+	for op, handler := range search.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.PRSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"pr": schema.PRSchemaVersion},
+		SchemaVersions:  map[string]int{"pr": schema.PRSchemaVersion, "search": schema.SearchSchemaVersion},
 		Version:         Version,
 	})
 }

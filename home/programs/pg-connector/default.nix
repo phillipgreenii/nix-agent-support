@@ -23,17 +23,35 @@ let
     scm = cfg.connector.scm;
   };
 
+  # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
+  # always-list-valued registrations, independent of connector.<type> --
+  # see registry.go's own AttentionSources/SearchSources doc comments.
+  # Like connector.<type>'s own list entries, pg-connector's registry.go
+  # rejects an explicit `sources: []` (validateBackendList's "omit the key
+  # entirely if no backend should be registered" error), so an empty list
+  # here means the whole attention:/search: mapping is omitted entirely
+  # rather than rendered with an empty sources: [].
+  renderedAttention = lib.optionalAttrs (cfg.attention.sources != [ ]) {
+    inherit (cfg.attention) sources;
+  };
+  renderedSearch = lib.optionalAttrs (cfg.search.sources != [ ]) {
+    inherit (cfg.search) sources;
+  };
+
   # The complete rendered document: extraConfig's keys (pg-pr's own,
-  # during the overlap window) plus this module's own connector:/backends:/
-  # state:/configSchemaVersion: keys, each included only when it has
-  # something to say -- an empty backends:/state: block is harmless to
-  # pg-connector's own unknown-fields-tolerant top-level decode, but there
-  # is no reason to render noise for a host that leaves them unset, and
-  # configSchemaVersion specifically MUST be omitted (not rendered as
-  # `null`) so its absence keeps meaning schema version 1.
+  # during the overlap window) plus this module's own connector:/
+  # attention:/search:/backends:/state:/configSchemaVersion: keys, each
+  # included only when it has something to say -- an empty backends:/
+  # state: block is harmless to pg-connector's own unknown-fields-tolerant
+  # top-level decode, but there is no reason to render noise for a host
+  # that leaves them unset, and configSchemaVersion specifically MUST be
+  # omitted (not rendered as `null`) so its absence keeps meaning schema
+  # version 1.
   renderedConfig =
     cfg.extraConfig
     // lib.optionalAttrs (renderedConnector != { }) { connector = renderedConnector; }
+    // lib.optionalAttrs (renderedAttention != { }) { attention = renderedAttention; }
+    // lib.optionalAttrs (renderedSearch != { }) { search = renderedSearch; }
     // lib.optionalAttrs (cfg.backends != { }) { inherit (cfg) backends; }
     // lib.optionalAttrs (cfg.state != { }) { inherit (cfg) state; }
     // lib.optionalAttrs (cfg.configSchemaVersion != null) { inherit (cfg) configSchemaVersion; };
@@ -81,6 +99,51 @@ in
         backend binary serves each capability. Mirrors the hand-written
         registry ZR's machine config previously wrote directly into its own
         `xdg.configFile` entry.
+      '';
+    };
+
+    # attention.sources/search.sources (bead pg2-8hcnx): the two
+    # always-list-valued, top-level registrations pg-connector's own
+    # registry.go reads INDEPENDENTLY of connector.<type>
+    # (Registry.AttentionSources/Registry.SearchSources) -- this module
+    # previously exposed no option for either key, so a host's
+    # `pg-connector attention list`/`pg-connector search <query>` always
+    # saw zero registered backends regardless of connector: contents.
+    attention = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          sources = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `attention.sources` backends (bare binary names, resolved on PATH), fanned out to by `pg-connector attention list`, in config order.";
+          };
+        };
+      };
+      default = { };
+      description = ''
+        The `attention:` registry rendered into the shared config file:
+        which backend binaries `pg-connector attention list` fans out to.
+        Independent of `connector.<type>` -- a backend may be registered
+        here as well as under `connector.<type>`.
+      '';
+    };
+
+    search = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          sources = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `search.sources` backends (bare binary names, resolved on PATH), fanned out to by `pg-connector search <query>`, in config order.";
+          };
+        };
+      };
+      default = { };
+      description = ''
+        The `search:` registry rendered into the shared config file: which
+        backend binaries `pg-connector search <query>` fans out to.
+        Independent of `connector.<type>` -- a backend may be registered
+        here as well as under `connector.<type>`.
       '';
     };
 

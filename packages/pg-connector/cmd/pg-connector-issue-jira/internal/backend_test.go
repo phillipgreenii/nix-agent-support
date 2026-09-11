@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -781,6 +782,57 @@ func TestBackend_List_RunFailure_ClassifiedError(t *testing.T) {
 	b := New(fr)
 
 	_, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Search (bead pg2-8hcnx: wire the search capability's Search op onto the
+// same `pjira search --jql` call List already uses)
+// ----------------------------------------------------------------------
+
+func TestBackend_Search_JQLPassedThrough(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "search" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !argsEndWith(args, "--jql", "assignee = currentUser()", "--all") {
+			t.Fatalf("args = %v, want --jql <expr> --all", args)
+		}
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do","url":"https://example.atlassian.net/browse/PROJ-1"}],"truncated":false}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.Search(context.Background(), "assignee = currentUser()", nil)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Search results = %+v, want exactly 1", got)
+	}
+	want := schema.SearchResult{Type: "issue", ID: "PROJ-1", Title: "a", URL: "https://example.atlassian.net/browse/PROJ-1", Source: "pg-connector-issue-jira"}
+	if got[0].Type != want.Type || got[0].ID != want.ID || got[0].Title != want.Title || got[0].URL != want.URL || got[0].Source != want.Source || len(got[0].Attributes) != 0 {
+		t.Fatalf("Search()[0] = %+v, want %+v", got[0], want)
+	}
+}
+
+func TestBackend_Search_EmptyQuery_IsInvalidArgument(t *testing.T) {
+	b := New(&fakeRunner{})
+
+	_, err := b.Search(context.Background(), "   ", nil)
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}
+
+func TestBackend_Search_RunFailure_ClassifiedError(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira: 401 unauthorized")
+	}}
+	b := New(fr)
+
+	_, err := b.Search(context.Background(), "assignee = currentUser()", nil)
 	if !errors.Is(err, scriptout.ErrUnauthenticated) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -60,10 +61,14 @@ func New(gh ghProvider) *Backend {
 	return &Backend{gh: gh}
 }
 
-// Compile-time checks that Backend satisfies both the pr capability's
-// Provider interface and pg-connector's optional AuthChecker capability.
+// Compile-time checks that Backend satisfies the pr capability's Provider
+// interface, the search capability's Provider interface (bead pg2-8hcnx —
+// this backend's own SearchPRs already exists; it was simply never wired to
+// the cross-capability "search" op before this), and pg-connector's optional
+// AuthChecker capability.
 var (
 	_ pr.Provider          = (*Backend)(nil)
+	_ search.Provider      = (*Backend)(nil)
 	_ provider.AuthChecker = (*Backend)(nil)
 )
 
@@ -211,6 +216,49 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		result.Entities = nil
 	}
 	return result, nil
+}
+
+// Search implements the search capability's search.Provider via the same
+// ghProvider.SearchPRs GitHub search-syntax call List already uses (bead
+// pg2-8hcnx) — query is a single bare GitHub search-syntax string, passed
+// straight through with no config.queries resolution (the search wire op,
+// unlike list, receives its query argument directly from the caller — see
+// pkg/provider/search/dispatch.go's own "search" handler). fields is
+// unused: this backend populates no Attributes beyond SearchResult's own
+// core set [freedom boundary — no additional search_attributes vocabulary
+// declared today]. The same rate-limit reserve check List applies before
+// every SearchPRs call applies here too, since both hit the same GraphQL
+// quota.
+func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schema.SearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "search: query required")
+	}
+	remaining, err := b.gh.RateLimitRemaining(ctx)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
+		))
+	}
+	prs, err := b.gh.SearchPRs(ctx, query)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	out := make([]schema.SearchResult, 0, len(prs))
+	for i := range prs {
+		p := prs[i]
+		out = append(out, schema.SearchResult{
+			Type:   "pr",
+			ID:     formatPRID(p.Repo, p.Number),
+			Title:  p.Title,
+			URL:    p.URL,
+			Source: "pg-connector-pr-github",
+		})
+	}
+	return out, nil
 }
 
 // Files implements pr.Provider.Files: fetches id's changed-file list from
