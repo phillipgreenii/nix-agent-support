@@ -29,9 +29,10 @@ Subcommands:
       state running or stopping, marks it finished. Always exits 0 — a hook
       must never disrupt session teardown.
 
-The session is identified by $CLAUDE_SESSION_ID (start/set-status/show); the
-record directory is derived from the transcript path (hook) or $PWD
-(everything else), overridable via $SESSION_MODE_STATE_DIR for testing.
+The session is identified by $CLAUDE_SESSION_ID, falling back to
+$CLAUDE_CODE_SESSION_ID (start/set-status/show); the record directory is
+derived from the transcript path (hook) or $PWD (everything else),
+overridable via $SESSION_MODE_STATE_DIR for testing.
 
 Options:
   -h, --help     Show this help message
@@ -59,16 +60,31 @@ die() {
 }
 
 resolve_session_id() {
-  [[ -n ${CLAUDE_SESSION_ID:-} ]] || die "CLAUDE_SESSION_ID is not set (run inside a Claude Code session)"
-  printf '%s' "$CLAUDE_SESSION_ID"
+  if [[ -n ${CLAUDE_SESSION_ID:-} ]]; then
+    printf '%s' "$CLAUDE_SESSION_ID"
+  elif [[ -n ${CLAUDE_CODE_SESSION_ID:-} ]]; then
+    printf '%s' "$CLAUDE_CODE_SESSION_ID"
+  else
+    die "CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set (run inside a Claude Code session)"
+  fi
 }
 
 # resolve_file — the record path for THIS session, derived from $PWD (no
 # transcript_path available outside the hook: see session_mode_state_dir).
+# sid is captured into a variable on its own assignment line (not passed as
+# a nested "$(resolve_session_id)" function ARGUMENT) — a failing command
+# substitution used as an argument never fails the caller. That alone is
+# still not enough: resolve_file() itself runs inside the subshell that
+# "$(resolve_file)" spawns for its caller, and bash disables `set -e`
+# inside a command-substitution subshell by default (no `inherit_errexit`
+# here), so a bare `sid="$(resolve_session_id)"` would silently continue
+# with sid empty rather than aborting. The explicit `|| return 1` makes the
+# failure check independent of that errexit nesting quirk.
 resolve_file() {
-  local dir
+  local dir sid
   dir="$(session_mode_state_dir)"
-  session_mode_file_path "$dir" "$(resolve_session_id)"
+  sid="$(resolve_session_id)" || return 1
+  session_mode_file_path "$dir" "$sid"
 }
 
 cmd_start() {

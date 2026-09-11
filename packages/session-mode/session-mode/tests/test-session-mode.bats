@@ -129,6 +129,29 @@ record_file() { echo "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.session-mode.js
 }
 
 # =====================================================================================
+# session id resolution (CLAUDE_SESSION_ID / CLAUDE_CODE_SESSION_ID fallback)
+# =====================================================================================
+
+@test "start: CLAUDE_SESSION_ID unset but CLAUDE_CODE_SESSION_ID set still resolves (fallback)" {
+  create_cmd_wrapper session-mode
+  run env -u CLAUDE_SESSION_ID CLAUDE_CODE_SESSION_ID="code-sess-1" "$TEST_DIR/run_session-mode" start drain-beads
+  [ "$status" -eq 0 ]
+  local f
+  f="$SESSION_MODE_STATE_DIR/code-sess-1.session-mode.json"
+  [ -f "$f" ]
+  [ "$(jq -r '.kind' "$f")" = "drain-beads" ]
+  [ "$(jq -r '.state' "$f")" = "running" ]
+}
+
+@test "start: neither CLAUDE_SESSION_ID nor CLAUDE_CODE_SESSION_ID set fails cleanly, no file written" {
+  create_cmd_wrapper session-mode
+  run env -u CLAUDE_SESSION_ID -u CLAUDE_CODE_SESSION_ID "$TEST_DIR/run_session-mode" start drain-beads
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set"* ]]
+  [ ! -d "$SESSION_MODE_STATE_DIR" ] || [ -z "$(ls -A "$SESSION_MODE_STATE_DIR")" ]
+}
+
+# =====================================================================================
 # set-status
 # =====================================================================================
 
