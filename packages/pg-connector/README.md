@@ -70,8 +70,6 @@ external distinction, since nothing is compiled into the umbrella itself.
 | Command                                                           | Description                                                                                                                    |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `pr show <id>`                                                    | show a PR's current full state, including comments/review-thread entries (targeted)                                            |
-| `pr categorize <id> --category <c>`                               | set a PR's category — a plain set/overwrite, never a GitHub label (targeted)                                                   |
-| `pr feedback-set <pr-id> <comment-id> --disposition <d>`          | set a PR comment/review-thread entry's disposition (`open`\|`will-fix`\|`wont-fix`\|`no-action`) (targeted)                    |
 | `issue show <id>`                                                 | show an issue's current state (targeted)                                                                                       |
 | `issue create --title <t> [--priority] [--labels] [--issue-type]` | create a new issue (targeted)                                                                                                  |
 | `issue comment <id> --body <b>`                                   | add a comment to an issue (targeted)                                                                                           |

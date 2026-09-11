@@ -153,7 +153,7 @@ _Requires:_ `INV-REG-1`, `INV-REG-2`.
 value for `scm`. No `exec:` prefix or other built-in/external marker is written, because nothing
 is compiled into the umbrella (`INV-REG-1`). Registering a second backend for a capability that
 already has one does not, by itself, break every targeted op against it (`INV-REG-2`): an
-**id-keyed** targeted op (`show`, `categorize`, …) resolves via the try-each policy
+**id-keyed** targeted op (`show`, `files`, …) resolves via the try-each policy
 `USECASE-TARGETED-CALL` describes regardless of how many backends end up registered. Only an
 **id-less write** (`issue create` today, the one member) still requires either exactly one
 registered backend or an explicit `--backend` pin once a second is added — that op alone
@@ -181,7 +181,7 @@ _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 **Flow.** The umbrella resolves the capability's registered backend(s). With exactly one
 registered, or an explicit `--backend` pin, it dispatches one `INTF-WIRE` request directly to
 that backend. With more than one registered and no pin: an **id-keyed** op (`show`,
-`categorize`, …) tries each in registration order, dispatching to the next only when the current
+`files`, …) tries each in registration order, dispatching to the next only when the current
 one answers `not_found`, and short-circuiting immediately on any other outcome (`INV-REG-2`); an
 **id-less write** (`issue create` today) instead fails as a CLI-level error before any wire call
 is made at all — the try-each policy does not extend to it. Whichever path produced a reply, the

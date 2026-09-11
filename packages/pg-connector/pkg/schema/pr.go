@@ -220,8 +220,8 @@ type PRListResult struct {
 // PRFile is one changed file entry in a PR's diff, an element of the
 // "files" op's wire result (bead pg2-2j5ac.28.2's PR-facts design bullet).
 // A targeted op (resolves to the one backend that owns the given PR id),
-// matching show/categorize/feedback_set's existing convention — NOT the
-// fan-out scheme list/ci list use.
+// matching show's existing convention — NOT the fan-out scheme list/ci
+// list use.
 type PRFile struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions,omitempty"`

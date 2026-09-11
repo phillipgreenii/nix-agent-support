@@ -25,8 +25,8 @@
 //     create`/`update`/`draft`/`automerge`/`merge`/`close` (the design's
 //     table: "the rest of this list does not yet [ship]").
 //   - AddComment/ReplyToThread/ResolveThread -> `pg-connector pr comment
-//     add`/`resolve` (the design's table: "new write verbs ... mirroring the
-//     shape categorize/feedback-set already establish").
+//     add`/`resolve` (the design's table: "new write verbs on the `pr`
+//     capability").
 //   - PostReview -> `pg-connector pr review draft`/`post`/`submit` (same
 //     table entry, same rationale).
 //
