@@ -1885,6 +1885,11 @@
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
                   ];
+                  # internal/config's git-common-dir tests (pg2-xl659) build a real throwaway
+                  # canonical repo + linked worktree via the `git` binary rather than skipping
+                  # when it is absent — matching pg-pr-go-tests' own testDeps = [ pkgs.git ]
+                  # pattern above.
+                  testDeps = [ pkgs.git ];
                 }).overrideAttrs
                   (old: {
                     # mkGoTest's buildPhase ends with `runHook postBuild`; run the
