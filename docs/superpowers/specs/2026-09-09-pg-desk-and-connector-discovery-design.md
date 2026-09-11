@@ -1258,9 +1258,10 @@ retiring command groups and still leaves the file.
 - ZR evaluation fails when `soak.enable` is false and `services.pg-desk-serve`'s port differs from
   `dashboards.pgPr.port`; with `soak.enable` true the temporary board is rendered and points at the
   soak port.
-- At the end of phase 9, a grep for `pg-pr pr view`, `pr files`, `pr commits`, and `pg-pr sync`
-  across both repositories' skills, commands, agents, scripts, and memory files finds only
-  `pg-pr-process-feedback` and the `settings.local.json` permission entries, both phase 12.
+- At the end of phase 9, a grep for `pg-pr pr view`, `pr files`, and `pr commits` across both
+  repositories' skills, commands, agents, scripts, and memory files finds only
+  `pg-pr-process-feedback` and the `settings.local.json` permission entries, both phase 12; a
+  separate grep for `pg-pr sync` finds zero hits, matching row 11's flip precondition.
 
 ### 9.5 Phases
 
