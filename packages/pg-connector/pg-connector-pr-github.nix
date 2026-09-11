@@ -17,9 +17,11 @@ mkGoApp {
   # is go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout's top-level package
   # (not its schemas/ or conformance/ subpackages — those are pulled in only by
   # pg-connector's own Tier-1 conformance suite and pkg/scriptout's own tests, not
-  # by this binary), pkg/provider's root iface.go plus its own pkg/provider/pr
-  # capability subpackage, and its own cmd/pg-connector-pr-github/ tree (main.go,
-  # internal/** — including internal/api, internal/gitenv, internal/vcs,
+  # by this binary), pkg/provider's root iface.go plus its own pkg/provider/pr AND
+  # pkg/provider/search capability subpackages (search added by bead pg2-8hcnx:
+  # this binary now also wires pkg/provider/search.NewDispatchTable to answer the
+  # cross-capability "search" op), and its own cmd/pg-connector-pr-github/ tree
+  # (main.go, internal/** — including internal/api, internal/gitenv, internal/vcs,
   # internal/github and their testdata). None of the other 3 backends'
   # cmd/pg-connector-*/ trees are reachable from here (verified: no cross-backend
   # import, no filesystem reference to a sibling backend's path — the sha256-pinned
@@ -47,6 +49,7 @@ mkGoApp {
       ))
       ./pkg/provider/iface.go
       ./pkg/provider/pr
+      ./pkg/provider/search
       ./cmd/pg-connector-pr-github
     ];
   };
