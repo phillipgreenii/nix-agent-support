@@ -6,8 +6,8 @@
 // multiple systems (INV-CAP-1).
 //
 // Unlike pr/issue/ci, scm manages LOCAL git state and has no remote-sync
-// concept (GOAL-MIN-1), so its Provider has no analogue of pr.Provider's
-// "categorize"/"feedback_set" remote-write ops.
+// concept (GOAL-MIN-1), so its Provider has no analogue of issue.Provider's
+// "comment"/"transition" remote-write ops.
 //
 // This package sits alongside pkg/schema and pkg/scriptout as part of the
 // module's shared surface importable across backend boundaries — see

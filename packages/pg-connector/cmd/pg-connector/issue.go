@@ -32,9 +32,7 @@
 // transition's --state value is a plain string, never validated here
 // against a fixed set: valid target-state values are declared per-backend
 // in that backend's own capabilities response (vocabulary.state), since
-// Jira/beads/GitHub Issues do not share one state vocabulary — unlike
-// pr's feedback-set, which validates --disposition client-side against a
-// genuinely closed cross-backend enum (schema.ValidDispositions).
+// Jira/beads/GitHub Issues do not share one state vocabulary.
 package main
 
 import (
