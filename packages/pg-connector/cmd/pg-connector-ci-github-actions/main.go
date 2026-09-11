@@ -32,15 +32,12 @@ func main() {
 	os.Exit(run())
 }
 
-// run builds this backend's Provider (ported GitHub Actions logic, plus
-// this backend's own small run_id->repo correlation store — internal/
-// run_store.go, still populated by ListRuns but no longer read by GetLogs,
-// which now takes repo as a caller-supplied argument since CISchemaVersion's
-// 2 -> 3 bump (bead pg2-2j5ac.28.4, reversing the 2026-09-06 operator
-// ruling on pg2-f327j) — and its own last-known-good ListRuns result cache —
-// internal/run_list_cache.go, bead pg2-4aoeg — that lets ListRuns keep
-// serving a PR's cached CI runs, flagged schema.CIRun.Stale=true, when
-// GitHub Actions itself is degraded or unreachable) and its op-dispatch
+// run builds this backend's Provider (ported GitHub Actions logic, with no
+// backend-local store at all — statelessness, D3; bead pg2-2j5ac.28.7
+// deleted this backend's former run_id->repo correlation store and its
+// last-known-good ListRuns result cache outright, so ListRuns now always
+// reports schema.CIRun.Stale=false, with real stale-fallback for every
+// capability deferred to phase 14's entity cache) and its op-dispatch
 // table, then hands the table to the Tier-1 core's generic serve loop.
 func run() int {
 	backend := internal.New()

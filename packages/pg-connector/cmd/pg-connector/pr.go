@@ -4,20 +4,22 @@
 // CLI surface — pr is one of its verb groups, never a separate binary
 // (interfaces.md's INTF-CLI).
 //
-// show/categorize/feedback-set are targeted, id-keyed ops dispatched via
-// dispatch.go's DispatchTargeted, which implements this docket's
-// multi-instance resolution policy across every backend registered under
-// connector.pr (try each in registration order, stopping at the first
-// non-not_found answer), and uses the Tier-1 targeted-op exit-code scheme
-// (0/4/1) via outcome.go's TargetedExitCode — this file calls the
-// dispatcher and hands TargetedExitCode the raw per-call result/error it
-// got back; it never decides the exit code itself (INV-EXIT-1). Every one
-// of these three, PLUS the new "list" verb below, carries its own
-// --backend flag (bead pg2-2j5ac.28.1, design's "id-less op rule"):
-// on show/categorize/feedback-set it PINS DispatchTargeted straight to
-// that one backend, skipping the try-each policy; on list it either pins
-// the fan-out to that one backend or is left empty to fan out across
-// every registered pr backend (see newPrListCmd).
+// show is a targeted, id-keyed op dispatched via dispatch.go's
+// DispatchTargeted, which implements this docket's multi-instance
+// resolution policy across every backend registered under connector.pr
+// (try each in registration order, stopping at the first non-not_found
+// answer), and uses the Tier-1 targeted-op exit-code scheme (0/4/1) via
+// outcome.go's TargetedExitCode — this file calls the dispatcher and
+// hands TargetedExitCode the raw per-call result/error it got back; it
+// never decides the exit code itself (INV-EXIT-1). show and files/commits
+// (below), PLUS the new "list" verb below, carry their own --backend flag
+// (bead pg2-2j5ac.28.1, design's "id-less op rule"): on the targeted ops
+// it PINS DispatchTargeted straight to that one backend, skipping the
+// try-each policy; on list it either pins the fan-out to that one backend
+// or is left empty to fan out across every registered pr backend (see
+// newPrListCmd). The categorize/feedback-set verbs this file used to also
+// carry were retired by bead pg2-2j5ac.28.7 (categorize/feedback_set
+// removed — statelessness, D3).
 package main
 
 import (
@@ -37,8 +39,6 @@ func newPrCmd() *cobra.Command {
 		Short: "PR capability commands",
 	}
 	prCmd.AddCommand(newPrShowCmd())
-	prCmd.AddCommand(newPrCategorizeCmd())
-	prCmd.AddCommand(newPrFeedbackSetCmd())
 	prCmd.AddCommand(newPrListCmd())
 	prCmd.AddCommand(newPrFilesCmd())
 	prCmd.AddCommand(newPrCommitsCmd())
@@ -63,63 +63,9 @@ func newPrShowCmd() *cobra.Command {
 	return cmd
 }
 
-func newPrCategorizeCmd() *cobra.Command {
-	var category string
-	cmd := &cobra.Command{
-		Use:   "categorize <id>",
-		Short: "Set a PR's category (a plain set/overwrite; never written as a GitHub label)",
-		Args:  cobra.ExactArgs(1),
-	}
-	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		reg, err := LoadRegistry()
-		if err != nil {
-			return reportPrTargetedOutcome(cmd, nil, err, humanizePRCategorize)
-		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "categorize", map[string]string{
-			"id":       args[0],
-			"category": category,
-		}, *backendFlag)
-		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRCategorize)
-	}
-	cmd.Flags().StringVar(&category, "category", "", "category to set (required); a backend's own capabilities response declares its accepted vocabulary")
-	_ = cmd.MarkFlagRequired("category")
-	return cmd
-}
-
-func newPrFeedbackSetCmd() *cobra.Command {
-	var disposition string
-	cmd := &cobra.Command{
-		Use:   "feedback-set <pr-id> <comment-id>",
-		Short: "Set a PR comment/review-thread entry's disposition",
-		Args:  cobra.ExactArgs(2),
-	}
-	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		d := schema.Disposition(disposition)
-		if !d.IsValid() {
-			return fmt.Errorf("pg-connector: --disposition %q must be one of %v", disposition, schema.ValidDispositions)
-		}
-		reg, err := LoadRegistry()
-		if err != nil {
-			return reportPrTargetedOutcome(cmd, nil, err, humanizePRFeedbackSet)
-		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "feedback_set", map[string]string{
-			"id":          args[0],
-			"comment_id":  args[1],
-			"disposition": string(d),
-		}, *backendFlag)
-		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRFeedbackSet)
-	}
-	cmd.Flags().StringVar(&disposition, "disposition", "", "one of open|will-fix|wont-fix|no-action (required)")
-	_ = cmd.MarkFlagRequired("disposition")
-	return cmd
-}
-
 // newPrFilesCmd is "pr files" (bead pg2-2j5ac.28.2): a targeted op, like
-// show/categorize/feedback-set above — resolves to the one backend that
-// owns the given PR id, not a fan-out (bead pg2-2j5ac.28.2's PR-facts
-// design bullet).
+// show above — resolves to the one backend that owns the given PR id, not
+// a fan-out (bead pg2-2j5ac.28.2's PR-facts design bullet).
 func newPrFilesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "files <id>",
@@ -331,8 +277,8 @@ func humanizePRShow(raw json.RawMessage) (string, error) {
 	return formatPR(pr), nil
 }
 
-// formatPR renders pr's identity, review/feedback state, and the two
-// dedicated write fields (category, disposition) as human-readable text.
+// formatPR renders pr's identity and review/feedback state as
+// human-readable text.
 func formatPR(pr schema.PR) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "PR %s: %s#%d %q [%s]\n", pr.ID, pr.Repo, pr.Number, pr.Title, pr.State)
@@ -340,9 +286,6 @@ func formatPR(pr schema.PR) string {
 	fmt.Fprintf(&b, "  author: %s\n", pr.Author)
 	fmt.Fprintf(&b, "  url: %s\n", pr.URL)
 	fmt.Fprintf(&b, "  draft: %t  merged: %t\n", pr.Draft, pr.Merged)
-	if pr.Category != "" {
-		fmt.Fprintf(&b, "  category: %s\n", pr.Category)
-	}
 	if len(pr.Labels) > 0 {
 		fmt.Fprintf(&b, "  labels: %s\n", strings.Join(pr.Labels, ", "))
 	}
@@ -364,36 +307,11 @@ func formatPR(pr schema.PR) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// prCommentStatus reports a PR comment/review-thread entry's current
-// disposition, or its plain resolved/open state when no disposition has
-// been set yet (Disposition is only ever populated once feedback_set has
-// been called on it — see schema.PRComment).
+// prCommentStatus reports a PR comment/review-thread entry's plain
+// resolved/open state.
 func prCommentStatus(c schema.PRComment) string {
-	if c.Disposition != "" {
-		return string(c.Disposition)
-	}
 	if c.Resolved {
 		return "resolved"
 	}
 	return "open"
-}
-
-// humanizePRCategorize formats a `pr categorize` result
-// (schema.CategorizeResult) for human display.
-func humanizePRCategorize(raw json.RawMessage) (string, error) {
-	var r schema.CategorizeResult
-	if err := scriptout.Decode(raw, &r); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("PR %s: category set to %q", r.ID, r.Category), nil
-}
-
-// humanizePRFeedbackSet formats a `pr feedback-set` result
-// (schema.FeedbackSetResult) for human display.
-func humanizePRFeedbackSet(raw json.RawMessage) (string, error) {
-	var r schema.FeedbackSetResult
-	if err := scriptout.Decode(raw, &r); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("PR %s: comment %s disposition set to %q", r.ID, r.CommentID, r.Disposition), nil
 }

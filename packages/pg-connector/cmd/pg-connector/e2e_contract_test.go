@@ -645,18 +645,20 @@ func assertGHBackendsHealthy(t *testing.T, sources []SourceResult) {
 }
 
 // ---------------------------------------------------------------------
-// pr (pg-connector-pr-github): show, categorize, feedback-set — every op
-// this backend's own capabilities response declares
+// pr (pg-connector-pr-github): show — every op this backend's own
+// capabilities response declares
 // (cmd/pg-connector-pr-github/main.go's newDispatchTable) — against a
-// real, caller-chosen PR/repo (requireGHRepoAndPR).
+// real, caller-chosen PR/repo (requireGHRepoAndPR). categorize/
+// feedback-set were retired by bead pg2-2j5ac.28.7 (statelessness, D3;
+// category/disposition are re-derived by pg-desk rather than persisted by
+// any backend), so this case no longer exercises them.
 // ---------------------------------------------------------------------
 
-func TestContract_PRGithub_RealGH_ShowCategorizeFeedbackSet(t *testing.T) {
+func TestContract_PRGithub_RealGH_Show(t *testing.T) {
 	repo, prNumber := requireGHRepoAndPR(t)
 	id := fmt.Sprintf("%s#%d", repo, prNumber)
 	env := contractEnv(map[string]string{
-		"PG_PR_CONFIG":   writeContractRegistry(t),
-		"XDG_STATE_HOME": t.TempDir(),
+		"PG_PR_CONFIG": writeContractRegistry(t),
 	})
 
 	shown := runPGConnector(t, "", env, "pr", "show", id)
@@ -682,62 +684,6 @@ func TestContract_PRGithub_RealGH_ShowCategorizeFeedbackSet(t *testing.T) {
 	}
 	t.Logf("real PR fetched: %s %q state=%s comments=%d reviews=%d", pr.ID, pr.Title, pr.State, len(pr.Comments), len(pr.Reviews))
 
-	categorized := runPGConnector(t, "", env, "pr", "categorize", id, "--category", "focus")
-	if categorized.exitCode != 0 {
-		t.Fatalf("pr categorize %s: exit=%d stderr=%s", id, categorized.exitCode, categorized.stderr)
-	}
-	catResp := decodeContractJSON[scriptout.Response](t, categorized.stdout)
-	var catResult schema.CategorizeResult
-	if err := scriptout.Decode(catResp.Result, &catResult); err != nil {
-		t.Fatalf("decode categorize result: %v", err)
-	}
-	if catResult.ID != id || catResult.Category != "focus" {
-		t.Fatalf("pr categorize %s: got %+v, want category=focus", id, catResult)
-	}
-
-	reshown := runPGConnector(t, "", env, "pr", "show", id)
-	reshownResp := decodeContractJSON[scriptout.Response](t, reshown.stdout)
-	var reshownPR schema.PR
-	if err := scriptout.Decode(reshownResp.Result, &reshownPR); err != nil {
-		t.Fatalf("decode reshown PR: %v", err)
-	}
-	if reshownPR.Category != "focus" {
-		t.Fatalf("pr show %s after categorize: category = %q, want focus (persisted write not reflected)", id, reshownPR.Category)
-	}
-
-	// feedback-set needs a real comment/review-thread entry id to set a
-	// disposition on; not every real PR has one. When the caller-chosen PR
-	// genuinely has none, this logs and moves on rather than failing —
-	// there is nothing to point feedback-set at, and that is a fact about
-	// the chosen PR, not a defect in this backend.
-	commentID := firstCommentID(pr)
-	if commentID == "" {
-		t.Logf("pr %s has no comments/review-thread entries; skipping feedback-set assertion", id)
-		return
-	}
-	fedback := runPGConnector(t, "", env, "pr", "feedback-set", id, commentID, "--disposition", "will-fix")
-	if fedback.exitCode != 0 {
-		t.Fatalf("pr feedback-set %s %s: exit=%d stderr=%s", id, commentID, fedback.exitCode, fedback.stderr)
-	}
-	fedbackResp := decodeContractJSON[scriptout.Response](t, fedback.stdout)
-	var fedbackResult schema.FeedbackSetResult
-	if err := scriptout.Decode(fedbackResp.Result, &fedbackResult); err != nil {
-		t.Fatalf("decode feedback-set result: %v", err)
-	}
-	if fedbackResult.ID != id || fedbackResult.CommentID != commentID || fedbackResult.Disposition != schema.DispositionWillFix {
-		t.Fatalf("pr feedback-set %s %s: got %+v, want disposition=will-fix", id, commentID, fedbackResult)
-	}
-
-	reshownAgain := runPGConnector(t, "", env, "pr", "show", id)
-	reshownAgainResp := decodeContractJSON[scriptout.Response](t, reshownAgain.stdout)
-	var reshownAgainPR schema.PR
-	if err := scriptout.Decode(reshownAgainResp.Result, &reshownAgainPR); err != nil {
-		t.Fatalf("decode reshown PR: %v", err)
-	}
-	if got := dispositionFor(reshownAgainPR, commentID); got != schema.DispositionWillFix {
-		t.Fatalf("pr show %s after feedback-set: comment %s disposition = %q, want will-fix (persisted write not reflected)", id, commentID, got)
-	}
-
 	// A nonexistent PR number on the same real repo rounds-trips as
 	// not_found (exit 4) against real gh, not a fake — the same
 	// "GraphQL: Could not resolve to a PullRequest" classification this
@@ -747,40 +693,6 @@ func TestContract_PRGithub_RealGH_ShowCategorizeFeedbackSet(t *testing.T) {
 	if bogus.exitCode != 4 {
 		t.Fatalf("pr show %s#999999999: exit=%d, want 4 (not_found); stdout=%s", repo, bogus.exitCode, bogus.stdout)
 	}
-}
-
-// firstCommentID returns the id of pr's first top-level comment, or (if
-// none) its first review's first comment, or "" if pr has no
-// comments/review-thread entries at all.
-func firstCommentID(pr schema.PR) string {
-	if len(pr.Comments) > 0 {
-		return pr.Comments[0].ID
-	}
-	for _, r := range pr.Reviews {
-		if len(r.Comments) > 0 {
-			return r.Comments[0].ID
-		}
-	}
-	return ""
-}
-
-// dispositionFor returns commentID's disposition on pr, checking both
-// top-level comments and every review's nested comments (mirroring
-// firstCommentID's own search order).
-func dispositionFor(pr schema.PR, commentID string) schema.Disposition {
-	for _, c := range pr.Comments {
-		if c.ID == commentID {
-			return c.Disposition
-		}
-	}
-	for _, r := range pr.Reviews {
-		for _, c := range r.Comments {
-			if c.ID == commentID {
-				return c.Disposition
-			}
-		}
-	}
-	return ""
 }
 
 // ---------------------------------------------------------------------

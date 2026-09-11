@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -31,8 +30,7 @@ func (fakePR) Resolve(_ context.Context, _ string) (string, string, error) {
 
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
-	runs := internal.NewRunStore(filepath.Join(t.TempDir(), "run-repo.json"))
-	return internal.NewWithDeps(fakeGH{}, fakePR{}, runs)
+	return internal.NewWithDeps(fakeGH{}, fakePR{})
 }
 
 // TestNewDispatchTable_CapabilitiesDeclaresCISchemaVersion is the packet's

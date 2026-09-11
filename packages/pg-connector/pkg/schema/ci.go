@@ -104,12 +104,10 @@ type CIRun struct {
 	// completion time — pg2-681xo's own doc comment on schema.PR.Stale
 	// noted this was true of every ci/issue/scm backend as of that bead.
 	// pg-connector-ci-github-actions (cmd/pg-connector-ci-github-actions)
-	// is the first ci backend to add a real cache for this purpose (its own
-	// RunListCache, run_list_cache.go): its ListRuns reports Stale true only
-	// when GitHub Actions itself was degraded/unreachable for a live call it
-	// would otherwise have made, and it served this PR's last-known-good
-	// cached run list instead of erroring outright — AsOf in that case is
-	// the CACHED read's own original as-of time, never the moment of the
-	// failed live attempt.
+	// briefly added a real cache for this purpose (bead pg2-4aoeg) but bead
+	// pg2-2j5ac.28.7 deleted it outright (statelessness, D3) — this
+	// backend's ListRuns now always reports Stale false again, with real
+	// stale-fallback for every ci-capable backend deferred to phase 14's
+	// entity cache.
 	Stale bool `json:"stale"`
 }

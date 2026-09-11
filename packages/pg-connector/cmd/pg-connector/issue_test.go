@@ -315,9 +315,8 @@ func TestRun_IssueTransition_NotFound_Exit4(t *testing.T) {
 
 func TestRun_IssueTransition_VocabularyMismatch_PassesToBackendAndIsGenericFailure(t *testing.T) {
 	// transition's target-state vocabulary is backend-declared, never a
-	// fixed Go enum, so there is no client-side --state validation the way
-	// pr's feedback-set validates --disposition against a closed enum.
-	// The request must actually reach the backend, and an unrecognized
+	// fixed Go enum, so there is no client-side --state validation. The
+	// request must actually reach the backend, and an unrecognized
 	// target state is reported by the backend as a well-formed (non
 	// not_found) error, which maps to the generic exit-1 failure code —
 	// never exit 4 (not_found is reserved for a genuinely missing entity,
@@ -462,8 +461,8 @@ func TestRun_IssueShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 // TestRun_IssueCreate_AmbiguousMultipleBackends_IsGenericFailure is the
 // regression this packet's own acceptance criteria requires: issue create
 // is the one id-less write routed through the same dispatch path as the
-// 8 id-keyed ops (show/comment/transition/get_logs/rerun_failed/show/
-// categorize/feedback_set) — the multi-instance try-each resolution
+// id-keyed ops (issue show/comment/transition, ci get_logs/rerun_failed,
+// pr show/files/commits) — the multi-instance try-each resolution
 // policy is scoped to id-keyed ops only, by this phase's own operator
 // ruling, so create must be BYTE-FOR-BYTE unchanged at N > 1: it stays
 // on Dispatch (never DispatchTargeted), keeps hard-failing with the

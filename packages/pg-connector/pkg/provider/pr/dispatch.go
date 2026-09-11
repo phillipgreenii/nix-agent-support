@@ -17,7 +17,7 @@ import (
 )
 
 // NewDispatchTable builds the pr capability's op-dispatch table for p:
-// show, categorize, and feedback_set always; auth_status only when p also
+// show, list, files, and commits always; auth_status only when p also
 // implements pkg/provider.AuthChecker, asserted via a type-check rather
 // than folded into the Provider interface (INV-AUTH-1). Every handler
 // passes p's returned error straight through unwrapped — a well-behaved
@@ -37,33 +37,6 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode show args: "+err.Error())
 				}
 				return p.Show(ctx, a.ID)
-			},
-		},
-		"categorize": {
-			SchemaVersion: schema.PRSchemaVersion,
-			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
-				var a struct {
-					ID       string `json:"id"`
-					Category string `json:"category"`
-				}
-				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode categorize args: "+err.Error())
-				}
-				return p.Categorize(ctx, a.ID, a.Category)
-			},
-		},
-		"feedback_set": {
-			SchemaVersion: schema.PRSchemaVersion,
-			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
-				var a struct {
-					ID          string             `json:"id"`
-					CommentID   string             `json:"comment_id"`
-					Disposition schema.Disposition `json:"disposition"`
-				}
-				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode feedback_set args: "+err.Error())
-				}
-				return p.FeedbackSet(ctx, a.ID, a.CommentID, a.Disposition)
 			},
 		},
 		// list resolves args.query against the request's own config.queries
@@ -97,9 +70,8 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 			},
 		},
 		// files/commits are targeted ops (bead pg2-2j5ac.28.2), matching
-		// show/categorize/feedback_set's existing convention (id-keyed,
-		// resolved to the one owning backend) rather than list's fan-out
-		// scheme.
+		// show's existing convention (id-keyed, resolved to the one owning
+		// backend) rather than list's fan-out scheme.
 		"files": {
 			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {

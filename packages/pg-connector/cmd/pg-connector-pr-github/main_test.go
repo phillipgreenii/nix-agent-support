@@ -49,31 +49,7 @@ func (fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Co
 
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
-	return internal.New(fakeGH{}, internal.NewStore(t.TempDir()+"/store.json"))
-}
-
-// TestNewDispatchTable_CapabilitiesVocabularyNonEmpty is the packet's
-// required test asserting the capabilities op's vocabulary.category list is
-// non-empty, proving the vocabulary is actually declared and not just
-// committed to in prose (interfaces.md's vocabulary note).
-func TestNewDispatchTable_CapabilitiesVocabularyNonEmpty(t *testing.T) {
-	table := newDispatchTable(newTestBackend(t))
-	entry, ok := table[scriptout.OpCapabilities]
-	if !ok {
-		t.Fatal("capabilities entry missing from this binary's own dispatch table")
-	}
-	result, err := entry.Handle(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	resp, ok := result.(scriptout.CapabilitiesResponse)
-	if !ok {
-		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
-	}
-	cats, ok := resp.Vocabulary["category"].([]string)
-	if !ok || len(cats) == 0 {
-		t.Fatalf("vocabulary.category = %#v, want a non-empty []string", resp.Vocabulary["category"])
-	}
+	return internal.New(fakeGH{})
 }
 
 // TestNewDispatchTable_CapabilitiesDeclaresVersion is bead pg2-a8uf2's

@@ -89,9 +89,12 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   top of these verbs — `pg-desk`, a TUI, a pr-pool role — is out categorically regardless of
   whether it has landed (see the [glossary](glossary.md)'s Tiers and roles):
   `phillipg-nix-ziprecruiter`'s `df-attention`/`df-search` (pure clients of `attention list`/
-  `search`) and its `df-categorize`/`df-feedback` pr-pool roles (consumers of the pre-existing `pr
-categorize`/`feedback_set` ops) have both landed there, but stay out of this set for that
-  structural reason, not because they were unbuilt. The `pg-pr` verb→destination MAP and its
+  `search`) landed there and stay out of this set for that structural reason, not because they
+  were unbuilt. Its `df-categorize`/`df-feedback` pr-pool roles (consumers of the `pr
+categorize`/`feedback_set` ops) landed there too but were retired, along with the ops
+  themselves, by bead `pg2-2j5ac.28.7` (statelessness, `D3`) — category/disposition are
+  re-derived by `pg-desk`'s interpreter rather than persisted by any backend. The `pg-pr`
+  verb→destination MAP and its
   per-table SQLite dispositions are now documented in
   [pg-pr retirement](pg-pr-retirement.md) (Phase 5, `pg2-2j5ac.23`) — but `pg-pr`'s actual
   retirement code (any command-group cutover, SQLite disposition execution, or migration tooling)

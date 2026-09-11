@@ -1,9 +1,11 @@
 // provider.go: Backend implements pkg/provider/pr.Provider against GitHub,
 // gluing together internal/github's ported GitHub logic ("carries over
 // pg-pr's existing GitHub logic unchanged" — bead pg2-2j5ac's carry-over
-// decision) with this backend's
-// own fresh local Store (store.go) for the categorize/feedback_set writes
-// GitHub itself never sees (interfaces.md's pr op catalog). Backend also implements
+// decision) with a live GitHub read on every call — this backend keeps no
+// local store (statelessness, D3; bead pg2-2j5ac.28.7 removed the
+// categorize/feedback_set writes and their backend-local JSON-file store,
+// since category/disposition are re-derived by pg-desk's interpreter
+// rather than persisted here). Backend also implements
 // pkg/provider.AuthChecker via internal/github.Provider.CheckAuth, carried
 // over from pg-pr's existing env-then-gh auth token chain (INV-AUTH-1).
 package internal
@@ -48,15 +50,14 @@ type ghProvider interface {
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
 type Backend struct {
-	gh    ghProvider
-	store *Store
+	gh ghProvider
 }
 
-// New returns a Backend wiring gh and store together. Production wiring
-// passes a *github.Provider (internal/github.New()); tests pass a fake
-// satisfying ghProvider.
-func New(gh ghProvider, store *Store) *Backend {
-	return &Backend{gh: gh, store: store}
+// New returns a Backend wrapping gh. Production wiring passes a
+// *github.Provider (internal/github.New()); tests pass a fake satisfying
+// ghProvider.
+func New(gh ghProvider) *Backend {
+	return &Backend{gh: gh}
 }
 
 // Compile-time checks that Backend satisfies both the pr capability's
@@ -65,13 +66,6 @@ var (
 	_ pr.Provider          = (*Backend)(nil)
 	_ provider.AuthChecker = (*Backend)(nil)
 )
-
-// Vocabulary is this backend's declared, non-empty category vocabulary —
-// the concrete backing for the sibling "generic pr entity/capability"
-// packet's vocabulary check (interfaces.md's vocabulary note). A plain, backend-declared
-// set (not GitHub labels): callers choose one of these values when calling
-// categorize.
-var Vocabulary = []string{"focus", "later", "blocked", "done"}
 
 // formatPRID formats repo/number into this backend's id convention:
 // "<owner>/<repo>#<number>" — a freedom-boundary choice (the design does not
@@ -98,10 +92,9 @@ func parsePRID(id string) (repo string, number int, err error) {
 }
 
 // Show implements pr.Provider.Show: fetches the PR's live GitHub state
-// (metadata, comments, reviews) via the ported GitHub logic, then merges in
-// this backend's own persisted category/dispositions so a caller sees the
-// current state of any prior categorize/feedback_set write (interfaces.md's pr op catalog). Every call is a fresh, uncached GitHub read, so the response's
-// schema.PR.AsOf is always this call's own completion time and
+// (metadata, comments, reviews) via the ported GitHub logic (interfaces.md's
+// pr op catalog). Every call is a fresh, uncached GitHub read, so the
+// response's schema.PR.AsOf is always this call's own completion time and
 // schema.PR.Stale is always false (bead pg2-681xo) — see toSchemaPR.
 func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	repo, number, err := parsePRID(id)
@@ -120,86 +113,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
-	state, err := b.store.Get(id)
-	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
-	}
-	return toSchemaPR(id, ghPR, comments, reviews, state, time.Now().UTC()), nil
-}
-
-// Categorize implements pr.Provider.Categorize: a plain set/overwrite into
-// this backend's own store, never a GitHub label (interfaces.md's pr op catalog). No GitHub
-// call is made — category has no GitHub-side representation.
-//
-// category MUST be one of Vocabulary (finding A20: the previous version
-// accepted any string, unvalidated, while the sibling FeedbackSet already
-// validates its own enum). An empty category is rejected with its own
-// distinct message rather than falling through to the vocabulary-membership
-// error: store.SetCategory's JSON field carries `omitempty`, so writing an
-// empty category is indistinguishable on disk from never having categorized
-// the PR at all — a silent delete, not a value the vocabulary check alone
-// would explain clearly to a caller that passed "" by mistake.
-func (b *Backend) Categorize(ctx context.Context, id, category string) (*schema.CategorizeResult, error) {
-	if _, _, err := parsePRID(id); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
-	}
-	if category == "" {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
-			"pg-connector-pr-github: category must not be empty — an empty category would silently clear any previously-set category rather than erroring")
-	}
-	if !isValidCategory(category) {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
-			fmt.Sprintf("pg-connector-pr-github: category %q is not one of %v", category, Vocabulary))
-	}
-	if err := b.store.SetCategory(id, category); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
-	}
-	return &schema.CategorizeResult{ID: id, Category: category}, nil
-}
-
-// isValidCategory reports whether category is a member of Vocabulary.
-func isValidCategory(category string) bool {
-	for _, v := range Vocabulary {
-		if category == v {
-			return true
-		}
-	}
-	return false
-}
-
-// FeedbackSet implements pr.Provider.FeedbackSet. A commentID that no
-// longer exists on the PR (e.g. deleted upstream) is a well-formed
-// not_found response, not a broken call (INV-ERR-2) — checked here
-// by re-fetching the PR's live comments (the same read Show uses) rather
-// than trusting the caller's commentID blindly.
-func (b *Backend) FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
-	if !disposition.IsValid() {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
-			fmt.Sprintf("pg-connector-pr-github: disposition %q is not one of %v", disposition, schema.ValidDispositions))
-	}
-	repo, number, err := parsePRID(id)
-	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
-	}
-	comments, err := b.gh.ListComments(ctx, repo, number)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	found := false
-	for _, c := range comments {
-		if c.ID == commentID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, scriptout.WrapError(scriptout.ErrNotFound,
-			fmt.Sprintf("comment %q not found on PR %s", commentID, formatPRID(repo, number)))
-	}
-	if err := b.store.SetDisposition(id, commentID, disposition); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
-	}
-	return &schema.FeedbackSetResult{ID: id, CommentID: commentID, Disposition: disposition}, nil
+	return toSchemaPR(id, ghPR, comments, reviews, time.Now().UTC()), nil
 }
 
 // CheckAuth implements pkg/provider.AuthChecker via internal/github's
@@ -255,11 +169,10 @@ func rateReservePoints(config json.RawMessage) int {
 // prs' own --limit is fixed at 100 per call by SearchPRs, not exposed
 // as a per-query knob here) [freedom boundary].
 //
-// Matched entities carry no Category/dispositions (PRState{}'s zero
-// value) — this backend's own local Store is not consulted per matched
-// PR: "list" is an enumeration/matching op, not a full-detail read (see
+// "list" is an enumeration/matching op, not a full-detail read (see
 // schema.PRListResult's own doc comment), so a caller wanting a matched
-// PR's category/dispositions calls "show" on its id [freedom boundary].
+// PR's full comment/review detail calls "show" on its id [freedom
+// boundary].
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
@@ -286,7 +199,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 				continue
 			}
 			seen[id] = true
-			entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, PRState{}, asOf))
+			entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
 		}
 	}
 	ids := make([]string, 0, len(entities))
@@ -301,9 +214,8 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 }
 
 // Files implements pr.Provider.Files: fetches id's changed-file list from
-// GitHub (bead pg2-2j5ac.28.2). A targeted op, unlike List — no local
-// Store consultation, since files carry no category/disposition state of
-// their own.
+// GitHub (bead pg2-2j5ac.28.2). A targeted op, resolved to the one backend
+// that owns id.
 func (b *Backend) Files(ctx context.Context, id string) (*schema.PRFilesResult, error) {
 	repo, number, err := parsePRID(id)
 	if err != nil {
@@ -377,36 +289,34 @@ func isGHNotFound(err error) bool {
 }
 
 // toSchemaPR assembles the pr capability's wire shape from the ported
-// GitHub provider's own read results plus this backend's persisted
-// category/dispositions. Top-level (issue) comments have no owning review
-// and land in PR.Comments; inline/review-thread comments nest under their
-// owning PRReview.Comments via api.Comment.ReviewID (falling back to
-// PR.Comments when GitHub's response left ReviewID unpopulated, so no
-// comment is ever silently dropped).
+// GitHub provider's own read results. Top-level (issue) comments have no
+// owning review and land in PR.Comments; inline/review-thread comments
+// nest under their owning PRReview.Comments via api.Comment.ReviewID
+// (falling back to PR.Comments when GitHub's response left ReviewID
+// unpopulated, so no comment is ever silently dropped).
 //
 // asOf is the freshness timestamp for this assembled read (bead pg2-681xo)
-// — the caller's own call-completion time, since every field above except
-// Category/dispositions came from a live GitHub read performed just before
-// this call. Stale is therefore always false: this backend has no local
-// cache of GitHub's PR facts to ever serve a stale copy of.
-func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Review, state PRState, asOf time.Time) *schema.PR {
+// — the caller's own call-completion time, since every field above came
+// from a live GitHub read performed just before this call. Stale is
+// therefore always false: this backend has no local cache of GitHub's PR
+// facts to ever serve a stale copy of.
+func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Review, asOf time.Time) *schema.PR {
 	out := &schema.PR{
-		ID:       id,
-		Repo:     in.Repo,
-		Number:   in.Number,
-		Title:    in.Title,
-		State:    in.State,
-		Branch:   in.Branch,
-		Base:     in.Base,
-		Author:   in.Author,
-		URL:      in.URL,
-		Draft:    in.Draft,
-		Merged:   in.Merged,
-		Body:     in.Body,
-		Labels:   in.Labels,
-		Category: state.Category,
-		AsOf:     asOf.Format(time.RFC3339),
-		Stale:    false,
+		ID:     id,
+		Repo:   in.Repo,
+		Number: in.Number,
+		Title:  in.Title,
+		State:  in.State,
+		Branch: in.Branch,
+		Base:   in.Base,
+		Author: in.Author,
+		URL:    in.URL,
+		Draft:  in.Draft,
+		Merged: in.Merged,
+		Body:   in.Body,
+		Labels: in.Labels,
+		AsOf:   asOf.Format(time.RFC3339),
+		Stale:  false,
 
 		// bead pg2-2j5ac.28.2's additive PR-facts fields, carried straight
 		// through from the ported GitHub read (api.PR already carries
@@ -424,7 +334,7 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 
 	byReview := make(map[string][]schema.PRComment, len(reviews))
 	for _, c := range comments {
-		pc := toSchemaComment(c, state.Dispositions)
+		pc := toSchemaComment(c)
 		if c.ReviewID != "" {
 			byReview[c.ReviewID] = append(byReview[c.ReviewID], pc)
 			continue
@@ -445,23 +355,15 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 	return out
 }
 
-// toSchemaComment maps one api.Comment onto its schema.PRComment shape,
-// merging in its persisted disposition (defaulting to DispositionOpen when
-// never written, matching schema.PR's own doc convention of an
-// unaddressed finding starting "open").
-func toSchemaComment(c api.Comment, dispositions map[string]schema.Disposition) schema.PRComment {
-	disposition := dispositions[c.ID]
-	if disposition == "" {
-		disposition = schema.DispositionOpen
-	}
+// toSchemaComment maps one api.Comment onto its schema.PRComment shape.
+func toSchemaComment(c api.Comment) schema.PRComment {
 	return schema.PRComment{
-		ID:          c.ID,
-		Author:      c.Author,
-		Body:        c.Body,
-		Path:        c.Path,
-		Line:        c.Line,
-		ThreadID:    c.ThreadID,
-		Resolved:    c.Resolved,
-		Disposition: disposition,
+		ID:       c.ID,
+		Author:   c.Author,
+		Body:     c.Body,
+		Path:     c.Path,
+		Line:     c.Line,
+		ThreadID: c.ThreadID,
+		Resolved: c.Resolved,
 	}
 }

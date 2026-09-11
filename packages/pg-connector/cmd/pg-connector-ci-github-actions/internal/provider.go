@@ -2,17 +2,18 @@
 // Actions by carrying over
 // packages/pg-pr/pkg/provider/cicd/ghactions's existing ListRuns/GetLogs/
 // RerunFailed GitHub calls, adapted to ci.Provider's schema.CIRun result
-// type [contract: carry-over basis]. GetLogs' own gh call is the one
-// exception to "unchanged": it now passes `--repo`, supplied directly by
-// the caller as GetLogs' own repo argument (CISchemaVersion 2 -> 3, bead
-// pg2-2j5ac.28.4) rather than resolved via this backend's own
-// run_id->repo store (run_store.go) — this reverses the 2026-09-06 operator
-// ruling on pg2-f327j that had kept GetLogs id-only. run_store.go itself is
-// left in place (still written by listRunsByBranch below) for the removals
-// packet blocked-by this one to delete; GetLogs no longer reads it. Backend
-// also implements pkg/provider.AuthChecker via the same env-then-gh-auth-
-// token chain the pg-connector-pr-github backend already uses, since both
-// are GitHub-backed (INV-AUTH-1).
+// type [contract: carry-over basis]. GetLogs' own gh call passes `--repo`,
+// supplied directly by the caller as GetLogs' own repo argument
+// (CISchemaVersion 2 -> 3, bead pg2-2j5ac.28.4) rather than resolved via a
+// backend-local run_id->repo store — that store (run_store.go) and this
+// backend's separate last-known-good ListRuns cache (run_list_cache.go)
+// were both deleted outright by bead pg2-2j5ac.28.7 (statelessness, D3):
+// this backend keeps no local store at all. ListRuns therefore always
+// reports Stale=false; real stale-fallback for every capability is
+// deferred to phase 14's entity cache. Backend also implements
+// pkg/provider.AuthChecker via the same env-then-gh-auth-token chain the
+// pg-connector-pr-github backend already uses, since both are
+// GitHub-backed (INV-AUTH-1).
 package internal
 
 import (
@@ -48,52 +49,28 @@ type ghRunner interface {
 // Backend is pg-connector-ci-github-actions's concrete ci.Provider
 // implementation. Every field on schema.CIRun is read straight from
 // GitHub, with no categorize/feedback_set-style write-back this capability
-// needs to persist (interfaces.md's op catalog). Backend still carries its
-// own small backend-local store (run_store.go), recording which repo owns
-// each CI run ID — listRunsByBranch below still populates it — but GetLogs
-// no longer reads it: since CISchemaVersion's 2 -> 3 bump (bead
-// pg2-2j5ac.28.4, reversing the 2026-09-06 operator ruling on pg2-f327j),
-// GetLogs takes repo as a caller-supplied argument instead. The store is
-// left in place, now write-only, for the removals packet (blocked-by this
-// one) to delete along with its writer. Prior to that removal this is a
-// backend-private correlation cache, not an entity mirror or a
-// cross-connector store — same category as the sibling
-// pg-connector-pr-github backend's own store.go.
+// needs to persist, and no backend-local store of any kind (statelessness,
+// D3; bead pg2-2j5ac.28.7 deleted this backend's former run_id->repo
+// correlation store and last-known-good ListRuns cache outright).
 type Backend struct {
-	gh    ghRunner
-	pr    PRResolver
-	runs  *RunStore
-	cache *RunListCache
+	gh ghRunner
+	pr PRResolver
 }
 
 // New returns a Backend wired for production: the token-protected gh CLI
 // gateway (internal/github.NewCLI), shared between run-list/logs/rerun and
 // the PRResolver (resolver.go), which resolves a PR id directly against
 // GitHub — never by shelling out to pg-connector or any other backend
-// binary (INV-REG-1) — plus this backend's own run_id->repo correlation
-// store (run_store.go) and its own last-known-good ListRuns result cache
-// (run_list_cache.go, bead pg2-4aoeg), each at its default,
-// XDG_STATE_HOME-honouring path.
+// binary (INV-REG-1).
 func New() *Backend {
 	gh := github.NewCLI()
-	return NewWithCache(gh, newGHPRResolver(gh), NewRunStore(DefaultRunStorePath()), NewRunListCache(DefaultRunListCachePath()))
+	return NewWithDeps(gh, newGHPRResolver(gh))
 }
 
-// NewWithDeps constructs a Backend with injected dependencies and no
-// run-list cache (cache is nil, so ListRuns behaves exactly as it did
-// before bead pg2-4aoeg: a live gh failure always propagates, never served
-// from a stale copy) — used by the many existing tests that predate the
-// cache and have no opinion on it. A test exercising the AsOf/Stale
-// contract itself uses NewWithCache below instead.
-func NewWithDeps(gh ghRunner, pr PRResolver, runs *RunStore) *Backend {
-	return NewWithCache(gh, pr, runs, nil)
-}
-
-// NewWithCache constructs a Backend with injected dependencies including a
-// run-list cache (nil is valid and means "no caching," matching
-// NewWithDeps' own contract above).
-func NewWithCache(gh ghRunner, pr PRResolver, runs *RunStore, cache *RunListCache) *Backend {
-	return &Backend{gh: gh, pr: pr, runs: runs, cache: cache}
+// NewWithDeps constructs a Backend with injected dependencies — used by
+// tests to supply a fake ghRunner/PRResolver.
+func NewWithDeps(gh ghRunner, pr PRResolver) *Backend {
+	return &Backend{gh: gh, pr: pr}
 }
 
 // Compile-time checks that Backend satisfies both the ci capability's
@@ -158,22 +135,13 @@ func (b *Backend) ListRuns(ctx context.Context, prID string) ([]schema.CIRun, er
 }
 
 // listRunsByBranch is ghactions.go's own ListRunsByBranch, carried over
-// unchanged in its gh call shape, adapted to this capability's schema, to
-// stamp prID onto every result, and to record each returned run's repo in
-// this backend's own run_id->repo store (run_store.go) so a later GetLogs
-// call for one of these run IDs can resolve the `--repo` gh's `run view
-// --log` needs [operator ruling, Phillip, 2026-09-06, on pg2-f327j].
-//
-// Bead pg2-4aoeg widened this method with the ci capability's AsOf/Stale
-// contract (pkg/provider/ci/iface.go's ListRuns doc comment): every live,
-// successfully-fetched run is stamped with this call's own as-of time and
-// Stale=false, then persisted into this backend's own RunListCache
-// (run_list_cache.go) as this PR's new last-known-good result. If the live
-// gh call itself fails instead, staleFallback below decides whether that
-// failure is a caching opportunity (GitHub Actions degraded/unreachable,
-// as opposed to a definitive not_found/unauthenticated answer) and, if so,
-// serves the cached result — flagged Stale=true — instead of propagating
-// the error.
+// unchanged in its gh call shape, adapted to this capability's schema and
+// to stamp prID onto every result. Every live, successfully-fetched run
+// is stamped with this call's own as-of time and Stale=false — bead
+// pg2-2j5ac.28.7 removed this backend's stale-fallback cache outright
+// (statelessness, D3), so a live gh failure now always propagates
+// unchanged; real stale-fallback for every capability is deferred to
+// phase 14's entity cache.
 func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch string) ([]schema.CIRun, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
@@ -190,11 +158,7 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 		"--limit", "100",
 	)
 	if err != nil {
-		ghErr := classifyGHError(err)
-		if stale, ok := b.staleFallback(prID, ghErr); ok {
-			return stale, nil
-		}
-		return nil, ghErr
+		return nil, classifyGHError(err)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
@@ -210,73 +174,22 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 		cr.Repo = repo
 		cr.AsOf = asOf.Format(time.RFC3339)
 		cr.Stale = false
-		if err := b.runs.SetRepo(cr.ID, repo); err != nil {
-			return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: persist run %s's repo: %v", cr.ID, err))
-		}
 		out = append(out, cr)
 	}
-	if b.cache != nil {
-		if err := b.cache.Set(prID, out, asOf); err != nil {
-			return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-connector-ci-github-actions: persist run-list cache for %s: %v", prID, err))
-		}
-	}
 	return out, nil
-}
-
-// staleFallback implements the ci capability's own half of the
-// as-of/staleness contract (pkg/provider/ci/iface.go's ListRuns doc
-// comment, bead pg2-4aoeg, mirroring pkg/provider/pr.Provider.Show's
-// established one from bead pg2-681xo): when listRunsByBranch's own live
-// `gh run list` call has just failed with ghErr, staleFallback decides
-// whether that failure is a caching opportunity and, if so, returns prID's
-// cached runs (ok true) instead of leaving the caller to propagate ghErr.
-//
-// A definitive not_found or unauthenticated answer means the PR/repo
-// itself is bad, or this backend's own credentials are the problem — never
-// "GitHub Actions is merely degraded/unreachable right now" — so neither is
-// a caching opportunity: ok is false and the caller must still propagate
-// ghErr unchanged. Every OTHER classifyGHError outcome (its own
-// "everything else" bucket, matching scriptout's codeForError fallback of
-// "unavailable" for a plain, unwrapped error) is exactly the
-// degraded/unreachable-upstream case this cache exists to answer.
-//
-// ok is also false whenever there is nothing cached to serve — a fresh
-// environment's first ListRuns call for prID that fails has no
-// last-known-good copy to fall back to, so the caller still propagates
-// ghErr rather than fabricating a stale answer with nothing behind it.
-func (b *Backend) staleFallback(prID string, ghErr error) ([]schema.CIRun, bool) {
-	if b.cache == nil {
-		return nil, false
-	}
-	if errors.Is(ghErr, scriptout.ErrNotFound) || errors.Is(ghErr, scriptout.ErrUnauthenticated) {
-		return nil, false
-	}
-	cached, asOf, ok, err := b.cache.Get(prID)
-	if err != nil || !ok {
-		return nil, false
-	}
-	out := make([]schema.CIRun, len(cached))
-	for i, r := range cached {
-		r.AsOf = asOf.Format(time.RFC3339)
-		r.Stale = true
-		out[i] = r
-	}
-	return out, true
 }
 
 // GetLogs implements ci.Provider.GetLogs. Unlike ghactions.go's own
 // GetLogs (this packet's original carry-over basis), this now passes
 // `--repo` to gh — matching ListRuns/listRunsByBranch above — using the
-// repo argument the caller supplies directly, rather than resolving it via
-// this backend's own run_id->repo store (run_store.go): gh/GitHub's REST
-// API has no repo-agnostic "look up a run by id" call (every run endpoint
-// is scoped under /repos/{owner}/{repo}/…), so *some* repo source is still
-// required, but CISchemaVersion's 2 -> 3 bump (bead pg2-2j5ac.28.4)
-// reverses the 2026-09-06 operator ruling on pg2-f327j and moves that
+// repo argument the caller supplies directly: gh/GitHub's REST API has no
+// repo-agnostic "look up a run by id" call (every run endpoint is scoped
+// under /repos/{owner}/{repo}/…), so *some* repo source is still required,
+// but CISchemaVersion's 2 -> 3 bump (bead pg2-2j5ac.28.4) moved that
 // source to the caller instead of a backend-local correlation store — the
 // caller already holds it (e.g. from a prior list_runs/ListRuns response's
-// own schema.CIRun.Repo). run_store.go is left in place, now unread by
-// GetLogs, for the removals packet (blocked-by this one) to delete.
+// own schema.CIRun.Repo). That correlation store (run_store.go) was
+// deleted outright by bead pg2-2j5ac.28.7 (statelessness, D3).
 //
 // The final gh call also carries the "--" terminator fix [bead: pg2-uziwu],
 // mirroring the pg-connector-scm-git worktree add/remove fix [bead:

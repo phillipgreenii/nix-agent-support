@@ -9,10 +9,13 @@
 // underlying GitHub state pg-pr always has". It is
 // deliberately a SMALLER field set than pg-pr's internal api.PR: this is the
 // pr capability's generic wire contract (what a `pr show` caller needs —
-// identity, review/feedback state, and the two dedicated write fields),
-// never pg-pr's own sync/dashboard-ingestion shape. Fields specific to that
-// internal use (StackID, MergedAt, enrichment/co-ownership bookkeeping, …)
-// are out of scope here [freedom boundary].
+// identity and review/feedback state), never pg-pr's own
+// sync/dashboard-ingestion shape. Fields specific to that internal use
+// (StackID, MergedAt, enrichment/co-ownership bookkeeping, …) are out of
+// scope here [freedom boundary]. The category/disposition write fields
+// this comment used to describe were removed by bead pg2-2j5ac.28.7
+// (categorize/feedback_set retired — re-derived by pg-desk instead of
+// migrated/persisted here).
 package schema
 
 // PRSchemaVersion is the pr capability's own schema version, populated into
@@ -74,11 +77,6 @@ type PR struct {
 	Merged bool     `json:"merged"`
 	Body   string   `json:"body,omitempty"`
 	Labels []string `json:"labels,omitempty"`
-
-	// Category is a single-valued, backend-declared-vocabulary string
-	// field, written only via the dedicated categorize op — never a GitHub
-	// label (interfaces.md's pr op catalog; INV-VER-1).
-	Category string `json:"category,omitempty"`
 
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
 	// pg2-681xo, mirroring the pair pg-pr's own read seams already publish
@@ -163,19 +161,16 @@ type PR struct {
 }
 
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on
-// PR itself, above) and CommentID (used by feedback_set) are strings,
-// carried over as-is from pg-pr's existing api.Comment.ID string field.
-// Disposition is the closed enum a caller re-evaluates
-// via `pr show` and writes back via feedback_set (interfaces.md's pr op catalog).
+// PR itself, above) and CommentID are strings, carried over as-is from
+// pg-pr's existing api.Comment.ID string field.
 type PRComment struct {
-	ID          string      `json:"id"`
-	Author      string      `json:"author"`
-	Body        string      `json:"body"`
-	Path        string      `json:"path,omitempty"`
-	Line        int         `json:"line,omitempty"`
-	ThreadID    string      `json:"thread_id,omitempty"`
-	Resolved    bool        `json:"resolved"`
-	Disposition Disposition `json:"disposition,omitempty"`
+	ID       string `json:"id"`
+	Author   string `json:"author"`
+	Body     string `json:"body"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Resolved bool   `json:"resolved"`
 }
 
 // PRReview is one PR review summary. Its own inline/review-thread comments
@@ -189,49 +184,6 @@ type PRReview struct {
 	State    string      `json:"state"`
 	Body     string      `json:"body,omitempty"`
 	Comments []PRComment `json:"comments,omitempty"`
-}
-
-// Disposition is the closed enum a PR comment/review-thread entry's current
-// disposition is drawn from, and the value feedback_set writes
-// (interfaces.md's pr op catalog).
-type Disposition string
-
-const (
-	DispositionOpen     Disposition = "open"
-	DispositionWillFix  Disposition = "will-fix"
-	DispositionWontFix  Disposition = "wont-fix"
-	DispositionNoAction Disposition = "no-action"
-)
-
-// ValidDispositions is the closed set above, in a stable order — used for
-// validation and CLI help/error text.
-var ValidDispositions = []Disposition{DispositionOpen, DispositionWillFix, DispositionWontFix, DispositionNoAction}
-
-// IsValid reports whether d is one of ValidDispositions.
-func (d Disposition) IsValid() bool {
-	for _, v := range ValidDispositions {
-		if d == v {
-			return true
-		}
-	}
-	return false
-}
-
-// CategorizeResult is the categorize op's wire result payload: a plain
-// set/overwrite acknowledgement, no add/remove/toggle ambiguity since
-// category is a dedicated field rather than a member of a shared label
-// namespace (interfaces.md's pr op catalog).
-type CategorizeResult struct {
-	ID       string `json:"id"`
-	Category string `json:"category"`
-}
-
-// FeedbackSetResult is the feedback_set op's wire result payload
-// (interfaces.md's pr op catalog).
-type FeedbackSetResult struct {
-	ID          string      `json:"id"`
-	CommentID   string      `json:"comment_id"`
-	Disposition Disposition `json:"disposition"`
 }
 
 // PRListResult is the "list" op's wire result payload (bead pg2-2j5ac.28.1,

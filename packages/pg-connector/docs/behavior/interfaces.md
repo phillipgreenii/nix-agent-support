@@ -87,8 +87,6 @@ obliges to exist and to name no backend/system; `INTF-WIRE` is the interface tha
 | Capability  | Op                | Shape                                                                                                                   | Kind                                                                                                              |
 | ----------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `pr`        | `show`            | `{id}` → the PR's full state incl. comments/reviews                                                                     | targeted                                                                                                          |
-| `pr`        | `categorize`      | `{id, category}` → `{id, category}`                                                                                     | targeted                                                                                                          |
-| `pr`        | `feedback_set`    | `{id, comment_id, disposition}` → `{id, comment_id, disposition}`                                                       | targeted                                                                                                          |
 | `pr`        | `list`            | `{query, cursor: null, ids_only}` → `{entities, present_ids, cursor: null, truncated}`                                  | fanned out by the umbrella across every registered `pr` backend unless `--backend` pins one                       |
 | `pr`        | `files`           | `{id}` → `{id, files}` (each file's path/additions/deletions)                                                           | targeted                                                                                                          |
 | `pr`        | `commits`         | `{id}` → `{id, commits}` (each commit's sha/author login/message)                                                       | targeted                                                                                                          |
@@ -114,8 +112,11 @@ obliges to exist and to name no backend/system; `INTF-WIRE` is the interface tha
 
 `issue`'s `transition` target state, and a `capabilities` response's `vocabulary`, are
 per-backend-declared rather than one fixed cross-backend enum, because the issue trackers this
-capability spans (Jira/beads/GitHub Issues, …) do not share one state vocabulary — unlike `pr`'s
-`disposition`, drawn from a genuinely closed, shared four-value enum.
+capability spans (Jira/beads/GitHub Issues, …) do not share one state vocabulary. `pr` declares no
+vocabulary of its own: its former `category`/`disposition` write fields and their dedicated
+`categorize`/`feedback_set` ops were retired by bead `pg2-2j5ac.28.7` (statelessness, `D3`) —
+category/disposition are re-derived by `pg-desk`'s interpreter rather than persisted by any
+backend.
 
 ### `list` — named-query resolution and `query_not_recognized`
 
@@ -198,7 +199,7 @@ not authorize (`INV-COMP-1`).
   verifies by conformance suite, and every obligation below is the umbrella's own.
   **Initiator:** operator.
 - **What the operator can do.** Invoke a **targeted** op against the one backend registered for a
-  capability (`pr show`, `pr categorize`, `pr feedback-set`, `issue show/create/comment/
+  capability (`pr show`, `pr files`, `pr commits`, `issue show/create/comment/
 transition/update/close/deps`, `ci logs`, `ci rerun-failed`, `scm worktree add/remove/list`, `scm branch
 detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
   `issue list`, `ci list`, `auth status`), across every backend registered under the top-level
@@ -211,7 +212,7 @@ detect`); invoke a **fan-out** op across every backend registered for a capabili
   always fan out, with no targeted form at all. A targeted op against a capability with zero
   registered backends is a CLI-level failure before any wire call is made. With more than one
   registered backend, resolution follows `INV-REG-2`'s split rule: an **id-keyed** targeted op
-  (`show`, `categorize`, …) tries each in registration order, stopping at the first
+  (`show`, `files`, …) tries each in registration order, stopping at the first
   non-`not_found` answer; an **id-less write** (`issue create` today) instead hard-fails at
   N > 1 — either way, unless the operator supplies `--backend`.
 - **`--backend <binary>`.** Every `pr`/`issue`/`ci`/`scm` Tier-1 verb accepts this flag — a

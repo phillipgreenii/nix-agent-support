@@ -14,20 +14,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
-
-// newTestRunStore returns a RunStore backed by a file in a fresh
-// t.TempDir() — isolated per this repo's Unit Tests convention (a test
-// that touches files must generate its scenario in a temp directory).
-func newTestRunStore(t *testing.T) *RunStore {
-	t.Helper()
-	return NewRunStore(filepath.Join(t.TempDir(), "run-repo.json"))
-}
 
 // fakeGH replays canned responses keyed by the first two arguments
 // ("run list", "run view", "run rerun"), carried over unchanged from
@@ -103,7 +94,7 @@ const sampleRunList = `[
 func TestListRuns_ResolvesRepoAndBranchAndFilters(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
@@ -135,7 +126,7 @@ func TestListRuns_ResolvesRepoAndBranchAndFilters(t *testing.T) {
 func TestListRuns_PRIDPopulated(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
@@ -152,7 +143,7 @@ func TestListRuns_PRIDPopulated(t *testing.T) {
 }
 
 func TestListRuns_ValidatesEmptyID(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), &fakePR{repo: "a/b", branch: "x"}, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), &fakePR{repo: "a/b", branch: "x"})
 	_, err := p.ListRuns(context.Background(), "")
 	if err == nil {
 		t.Fatalf("expected error for empty pr id")
@@ -188,7 +179,7 @@ func TestListRuns_ResolverInvalidID_IsInvalidArgument(t *testing.T) {
 func TestListRuns_NonexistentPR_NotFound(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["pr view"] = errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")
-	p := NewWithDeps(gh, newGHPRResolver(gh), newTestRunStore(t))
+	p := NewWithDeps(gh, newGHPRResolver(gh))
 
 	_, err := p.ListRuns(context.Background(), "foo/bar#999999999")
 	if !errors.Is(err, scriptout.ErrNotFound) {
@@ -200,14 +191,14 @@ func TestListRuns_NonexistentPR_NotFound(t *testing.T) {
 }
 
 func TestListRuns_ResolverInvalidRepo(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), &fakePR{repo: "", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), &fakePR{repo: "", branch: "feat/x"})
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
 		t.Fatalf("expected error for empty repo from resolver")
 	}
 }
 
 func TestListRuns_ResolverInvalidBranch(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), &fakePR{repo: "foo/bar", branch: ""}, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), &fakePR{repo: "foo/bar", branch: ""})
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
 		t.Fatalf("expected error for empty branch from resolver")
 	}
@@ -215,7 +206,7 @@ func TestListRuns_ResolverInvalidBranch(t *testing.T) {
 
 func TestListRuns_PropagatesResolverError(t *testing.T) {
 	resolverErr := errors.New("boom: resolver failed")
-	p := NewWithDeps(newFakeGH(), &fakePR{err: resolverErr}, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), &fakePR{err: resolverErr})
 	_, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if !errors.Is(err, resolverErr) {
 		t.Fatalf("expected propagated resolver error, got %v", err)
@@ -225,14 +216,14 @@ func TestListRuns_PropagatesResolverError(t *testing.T) {
 func TestListRuns_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["run list"] = errors.New("boom")
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
 		t.Fatalf("expected propagated error")
 	}
 }
 
 func TestListRuns_EmptyArray(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), &fakePR{repo: "foo/bar", branch: "feat/x"})
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
@@ -250,7 +241,7 @@ func TestListRuns_EmptyArray(t *testing.T) {
 func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run view"] = []byte("log output here")
-	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	p := NewWithDeps(gh, nil)
 	raw, err := p.GetLogs(context.Background(), "1001", "foo/bar")
 	if err != nil {
 		t.Fatalf("GetLogs: %v", err)
@@ -276,7 +267,7 @@ func TestGetLogs_ReturnsRawBytes(t *testing.T) {
 // ".../actions/runs/--repo" as the literal (nonexistent) run id.
 func TestGetLogs_RunIDLooksLikeGHFlag(t *testing.T) {
 	gh := newFakeGH()
-	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	p := NewWithDeps(gh, nil)
 
 	if _, err := p.GetLogs(context.Background(), "--repo", "foo/bar"); err != nil {
 		t.Fatalf("GetLogs: %v", err)
@@ -288,7 +279,7 @@ func TestGetLogs_RunIDLooksLikeGHFlag(t *testing.T) {
 }
 
 func TestGetLogs_ValidatesEmpty(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), nil)
 	_, err := p.GetLogs(context.Background(), "", "foo/bar")
 	if err == nil {
 		t.Fatalf("expected error for empty run id")
@@ -308,7 +299,7 @@ func TestGetLogs_ValidatesEmpty(t *testing.T) {
 // store" case, which no longer exists now that GetLogs never consults
 // run_store.go).
 func TestGetLogs_ValidatesEmptyRepo(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), nil)
 	_, err := p.GetLogs(context.Background(), "1001", "")
 	if err == nil {
 		t.Fatalf("expected error for empty repo")
@@ -327,7 +318,7 @@ func TestGetLogs_ValidatesEmptyRepo(t *testing.T) {
 func TestGetLogs_NonexistentRun_NotFound(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["run view"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs/999999999999?exclude_pull_requests=true)")
-	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	p := NewWithDeps(gh, nil)
 
 	_, err := p.GetLogs(context.Background(), "999999999999", "foo/bar")
 	if !errors.Is(err, scriptout.ErrNotFound) {
@@ -346,7 +337,7 @@ func TestGetLogs_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 	gh := newFakeGH()
 	wantErr := errors.New(`run view: exec: "gh": executable file not found in $PATH`)
 	gh.errs["run view"] = wantErr
-	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	p := NewWithDeps(gh, nil)
 
 	_, err := p.GetLogs(context.Background(), "1001", "foo/bar")
 	if !errors.Is(err, wantErr) {
@@ -357,31 +348,6 @@ func TestGetLogs_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 	}
 }
 
-// TestListRuns_PersistsRunRepoMapping proves ListRuns' repo resolution (via
-// PRResolver) is still recorded into the run store for every run it
-// returns, even though GetLogs (provider.go) no longer reads it — the
-// store's writer stays live until the removals packet (blocked-by this
-// one) deletes it along with the store itself.
-func TestListRuns_PersistsRunRepoMapping(t *testing.T) {
-	gh := newFakeGH()
-	gh.responses["run list"] = []byte(sampleRunList)
-	runs := newTestRunStore(t)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, runs)
-
-	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
-		t.Fatalf("ListRuns: %v", err)
-	}
-	for _, runID := range []string{"1001", "1002"} {
-		repo, ok, err := runs.GetRepo(runID)
-		if err != nil {
-			t.Fatalf("GetRepo(%s): %v", runID, err)
-		}
-		if !ok || repo != "foo/bar" {
-			t.Errorf("GetRepo(%s) = %q, %v, want %q, true", runID, repo, ok, "foo/bar")
-		}
-	}
-}
-
 // TestListRuns_PopulatesCIRunRepo is this packet's required test proving
 // every schema.CIRun ListRuns returns also carries its own Repo field
 // (CISchemaVersion 2 -> 3, bead pg2-2j5ac.28.4) — the value a caller is
@@ -389,7 +355,7 @@ func TestListRuns_PersistsRunRepoMapping(t *testing.T) {
 func TestListRuns_PopulatesCIRunRepo(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
@@ -408,7 +374,7 @@ func TestListRuns_PopulatesCIRunRepo(t *testing.T) {
 func TestRerunFailed_PicksLatestFailedRun(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("RerunFailed: %v", err)
 	}
@@ -424,7 +390,7 @@ func TestRerunFailed_NoFailedRuns(t *testing.T) {
 	gh.responses["run list"] = []byte(
 		`[{"databaseId":1,"status":"completed","conclusion":"success","headBranch":"f"}]`,
 	)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	err := p.RerunFailed(context.Background(), "foo/bar#42")
 	if err == nil {
 		t.Fatalf("expected error when no failed runs")
@@ -443,7 +409,7 @@ func TestRerunFailed_MatchesTimedOut(t *testing.T) {
 	gh.responses["run list"] = []byte(
 		`[{"databaseId":2001,"status":"completed","conclusion":"timed_out","headBranch":"feat/x"}]`,
 	)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("RerunFailed: %v", err)
 	}
@@ -459,7 +425,7 @@ func TestRerunFailed_MatchesStartupFailure(t *testing.T) {
 	gh.responses["run list"] = []byte(
 		`[{"databaseId":2002,"status":"completed","conclusion":"startup_failure","headBranch":"feat/x"}]`,
 	)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("RerunFailed: %v", err)
 	}
@@ -475,7 +441,7 @@ func TestRerunFailed_MatchesCancelled(t *testing.T) {
 	gh.responses["run list"] = []byte(
 		`[{"databaseId":2003,"status":"completed","conclusion":"cancelled","headBranch":"feat/x"}]`,
 	)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("RerunFailed: %v", err)
 	}
@@ -497,7 +463,7 @@ func TestRerunFailed_ExcludedConclusionsStayNotFound(t *testing.T) {
 		gh.responses["run list"] = []byte(
 			fmt.Sprintf(`[{"databaseId":3001,"status":"completed","conclusion":%q,"headBranch":"f"}]`, conclusion),
 		)
-		p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+		p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 		err := p.RerunFailed(context.Background(), "foo/bar#42")
 		if err == nil {
 			t.Fatalf("conclusion %q: expected error, got nil", conclusion)
@@ -521,7 +487,7 @@ func TestRerunFailed_OnlyRerunsNewestMatch(t *testing.T) {
 		{"databaseId":4002,"status":"completed","conclusion":"timed_out","headBranch":"feat/x"},
 		{"databaseId":4001,"status":"completed","conclusion":"failure","headBranch":"feat/x"}
 	]`)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 	if err := p.RerunFailed(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("RerunFailed: %v", err)
 	}
@@ -542,14 +508,15 @@ func TestRerunFailed_OnlyRerunsNewestMatch(t *testing.T) {
 }
 
 // TestListRuns_LiveReadIsNeverStale is this packet's baseline for the
-// AsOf/Stale contract (bead pg2-4aoeg, mirroring
-// pkg/provider/pr.Provider.Show's own bead pg2-681xo): a successful live
-// gh call must always report Stale=false with a non-empty AsOf, regardless
-// of whether a cache is wired in.
+// AsOf/Stale contract: a successful live gh call must always report
+// Stale=false with a non-empty AsOf. Bead pg2-2j5ac.28.7 removed the
+// stale-fallback cache entirely (statelessness, D3) — this backend's
+// ListRuns now always reports Stale=false, with real stale-fallback
+// restored for every capability by phase 14's entity cache.
 func TestListRuns_LiveReadIsNeverStale(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
@@ -568,95 +535,31 @@ func TestListRuns_LiveReadIsNeverStale(t *testing.T) {
 	}
 }
 
-// TestListRuns_ServesStaleCacheDuringSimulatedOutage is this bead's
-// (pg2-4aoeg) required acceptance-criteria proof: at least one ci
-// connector implementation must serve cached data with Stale=true during a
-// simulated upstream outage instead of erroring. It first performs a live
-// ListRuns call to populate the cache, then simulates GitHub Actions going
-// unreachable (the SAME "run list" call now failing) and asserts ListRuns
-// serves the previously-fetched runs back — unchanged except Stale forced
-// true and AsOf rewritten to the ORIGINAL live read's own as-of time, never
-// re-stamped to "now" (the moment of the failed attempt) — instead of
-// propagating the gh failure.
-func TestListRuns_ServesStaleCacheDuringSimulatedOutage(t *testing.T) {
+// TestListRuns_OutageStillErrors proves a live gh failure now always
+// propagates unchanged — bead pg2-2j5ac.28.7 removed the stale-fallback
+// cache (statelessness, D3), so there is no cached copy left to serve
+// during a simulated outage; that capability is deferred to phase 14's
+// entity cache.
+func TestListRuns_OutageStillErrors(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
-
-	fresh, err := p.ListRuns(context.Background(), "foo/bar#42")
-	if err != nil {
-		t.Fatalf("first (live) ListRuns: %v", err)
-	}
-	if len(fresh) == 0 {
-		t.Fatal("expected at least one run from the live read")
-	}
-
-	// Simulate a degraded/unreachable upstream: the SAME "run list" call
-	// that just succeeded now fails outright.
-	gh.errs["run list"] = errors.New("boom: network unreachable")
-
-	stale, err := p.ListRuns(context.Background(), "foo/bar#42")
-	if err != nil {
-		t.Fatalf("ListRuns during simulated outage: %v (want cached data, not an error)", err)
-	}
-	if len(stale) != len(fresh) {
-		t.Fatalf("stale runs = %d, want %d (the cached copy)", len(stale), len(fresh))
-	}
-	for i, r := range stale {
-		if !r.Stale {
-			t.Errorf("run %s: Stale = false, want true when served from cache during a simulated outage", r.ID)
-		}
-		if r.AsOf != fresh[i].AsOf {
-			t.Errorf("run %s: AsOf = %q, want the ORIGINAL live read's as-of time %q, not re-stamped to the failed attempt's own time", r.ID, r.AsOf, fresh[i].AsOf)
-		}
-		if r.ID != fresh[i].ID || r.Conclusion != fresh[i].Conclusion {
-			t.Errorf("run %d: cached data drifted from the original live read: got %+v, want %+v", i, r, fresh[i])
-		}
-	}
-}
-
-// TestListRuns_OutageWithNoCachedData_StillErrors proves staleFallback
-// never fabricates an answer: a PR that has never had a successful
-// ListRuns call in this environment has nothing cached to fall back to, so
-// an outage on the very first call still propagates the error, exactly as
-// it did before bead pg2-4aoeg.
-func TestListRuns_OutageWithNoCachedData_StillErrors(t *testing.T) {
-	gh := newFakeGH()
-	gh.errs["run list"] = errors.New("boom: network unreachable")
-	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
-
-	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
-		t.Fatal("expected an error: nothing was ever cached for this PR to fall back to")
-	}
-}
-
-// TestListRuns_NotFoundDuringOutage_DoesNotUseCache proves a definitive
-// not_found answer from the live gh call is never treated as a caching
-// opportunity, even when a cached copy exists: a not_found means the run
-// list itself is bad (e.g. the branch/PR genuinely has none), not that
-// GitHub Actions is merely unreachable, so it must still propagate as
-// not_found rather than being masked by a stale success.
-func TestListRuns_NotFoundDuringOutage_DoesNotUseCache(t *testing.T) {
-	gh := newFakeGH()
-	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithCache(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t), newTestRunListCache(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("first (live) ListRuns: %v", err)
 	}
 
-	gh.errs["run list"] = errors.New("failed to get run: HTTP 404: Not Found (https://api.github.com/repos/foo/bar/actions/runs)")
+	gh.errs["run list"] = errors.New("boom: network unreachable")
 
-	_, err := p.ListRuns(context.Background(), "foo/bar#42")
-	if !errors.Is(err, scriptout.ErrNotFound) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound) — a not_found answer must not be masked by a cached success", err)
+	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err == nil {
+		t.Fatal("expected the gh failure to propagate — no cache remains to fall back to")
 	}
 }
 
 func TestListRuns_HeadSHAPropagated(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["run list"] = []byte(sampleRunList)
-	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"}, newTestRunStore(t))
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
 
 	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
 	if err != nil {
@@ -676,14 +579,14 @@ func TestListRuns_HeadSHAPropagated(t *testing.T) {
 func TestCheckAuth_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["api graphql"] = errors.New("boom")
-	p := NewWithDeps(gh, nil, newTestRunStore(t))
+	p := NewWithDeps(gh, nil)
 	if err := p.CheckAuth(context.Background()); err == nil {
 		t.Fatalf("expected propagated error")
 	}
 }
 
 func TestCheckAuth_Success(t *testing.T) {
-	p := NewWithDeps(newFakeGH(), nil, newTestRunStore(t))
+	p := NewWithDeps(newFakeGH(), nil)
 	if err := p.CheckAuth(context.Background()); err != nil {
 		t.Fatalf("CheckAuth: %v", err)
 	}

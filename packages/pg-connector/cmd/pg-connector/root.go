@@ -51,7 +51,7 @@ own 0/1 wire-protocol exit code):
     2  degraded/partial — at least one backend succeeded, at least one did not
     3  total failure — no backend succeeded, including zero backends registered
   Targeted ops (resolve to exactly one backend — e.g. "pr show",
-  "pr categorize", "issue create", "scm worktree add"):
+  "issue transition", "issue create", "scm worktree add"):
     0  the operation completed and produced a well-formed response
     4  not_found — a well-formed negative answer, never shared with a real failure
     1  any other error, or a CLI-level failure before a response ever existed

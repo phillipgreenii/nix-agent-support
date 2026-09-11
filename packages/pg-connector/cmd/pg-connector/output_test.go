@@ -54,7 +54,7 @@ func TestOutputModeFor_InvalidValueIsError(t *testing.T) {
 func TestRun_InvalidOutputFlag_IsGenericFailure(t *testing.T) {
 	// An unrecognized --output value is caught before ever dispatching to
 	// a backend, so no config/backend is needed; it is the generic exit-1
-	// CLI failure path, matching pr.go's own --disposition validation
+	// CLI failure path, matching issue.go's own --state validation
 	// convention.
 	writeConfigFor(t, "backend-unused")
 
@@ -66,7 +66,7 @@ func TestRun_InvalidOutputFlag_IsGenericFailure(t *testing.T) {
 
 func TestRun_InvalidOutputFlag_WriteOp_NoSideEffect(t *testing.T) {
 	// The regression this bead fixes [bug A4]: a typo'd --output on a
-	// WRITE op (pr categorize mutates state) must be rejected with zero
+	// WRITE op (issue transition mutates state) must be rejected with zero
 	// side effects, not after the backend has already run. The fake
 	// backend touches sideEffect on every invocation regardless of op —
 	// if root's PersistentPreRunE did not catch the bad --output value
@@ -76,14 +76,14 @@ func TestRun_InvalidOutputFlag_WriteOp_NoSideEffect(t *testing.T) {
 	sideEffect := filepath.Join(dir, "backend-was-invoked")
 	backendDir := t.TempDir()
 	script := filepath.Join(backendDir, "backend-side-effecting")
-	content := "#!/bin/sh\ncat >/dev/null\ntouch " + sideEffect + "\ncat <<'FAKE_BACKEND_EOF'\n{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"id\":\"pr-1\",\"category\":\"focus\"}}\nFAKE_BACKEND_EOF\n"
+	content := "#!/bin/sh\ncat >/dev/null\ntouch " + sideEffect + "\ncat <<'FAKE_BACKEND_EOF'\n{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"id\":\"issue-1\",\"state\":\"done\"}}\nFAKE_BACKEND_EOF\n"
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatalf("write fake backend: %v", err)
 	}
 	t.Setenv("PATH", backendDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	writeConfigFor(t, "backend-side-effecting")
+	writeIssueConfigFor(t, "backend-side-effecting")
 
-	_, _, code := executePr(t, []string{"--output", "yaml", "pr", "categorize", "pr-1", "--category", "focus"})
+	_, _, code := executePr(t, []string{"--output", "yaml", "issue", "transition", "issue-1", "--state", "done"})
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}

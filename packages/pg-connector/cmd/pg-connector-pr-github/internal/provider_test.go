@@ -3,14 +3,11 @@ package internal
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -105,8 +102,7 @@ func (f *fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {
 	t.Helper()
-	store := NewStore(filepath.Join(t.TempDir(), "store.json"))
-	return New(gh, store)
+	return New(gh)
 }
 
 func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
@@ -142,10 +138,6 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 	}
 	if len(got.Reviews) != 1 || len(got.Reviews[0].Comments) != 1 || got.Reviews[0].Comments[0].ID != "c2" {
 		t.Fatalf("review-nested comments mismatch: %+v", got.Reviews)
-	}
-	// Never-written dispositions default to "open".
-	if got.Comments[0].Disposition != schema.DispositionOpen || got.Reviews[0].Comments[0].Disposition != schema.DispositionOpen {
-		t.Fatalf("default disposition should be open: %+v / %+v", got.Comments[0], got.Reviews[0].Comments[0])
 	}
 }
 
@@ -267,74 +259,6 @@ func TestBackend_Show_GenuineGHFailure_PassesThroughUnclassified(t *testing.T) {
 	}
 }
 
-func TestBackend_RoundTrip_CategorizeAndFeedbackSetThenShow(t *testing.T) {
-	// This is the packet's required round-trip test: write a category via
-	// categorize and a disposition via feedback_set, then call show, and
-	// assert both values round-trip into the response (interfaces.md's pr op catalog) —
-	// proving the store-and-merge behavior, not just that the store accepts
-	// writes.
-	gh := &fakeGH{
-		pr: &api.PR{Repo: "owner/repo", Number: 7, Title: "T", State: "open"},
-		comments: []api.Comment{
-			{ID: "c1", Author: "alice", Body: "please fix this"},
-		},
-	}
-	b := newTestBackend(t, gh)
-	id := "owner/repo#7"
-
-	catResult, err := b.Categorize(context.Background(), id, "focus")
-	if err != nil {
-		t.Fatalf("Categorize: %v", err)
-	}
-	if catResult.Category != "focus" {
-		t.Fatalf("CategorizeResult.Category = %q, want focus", catResult.Category)
-	}
-
-	fbResult, err := b.FeedbackSet(context.Background(), id, "c1", schema.DispositionWillFix)
-	if err != nil {
-		t.Fatalf("FeedbackSet: %v", err)
-	}
-	if fbResult.Disposition != schema.DispositionWillFix {
-		t.Fatalf("FeedbackSetResult.Disposition = %q, want will-fix", fbResult.Disposition)
-	}
-
-	pr, err := b.Show(context.Background(), id)
-	if err != nil {
-		t.Fatalf("Show: %v", err)
-	}
-	if pr.Category != "focus" {
-		t.Fatalf("Show did not reflect the categorize write: Category = %q", pr.Category)
-	}
-	if len(pr.Comments) != 1 || pr.Comments[0].Disposition != schema.DispositionWillFix {
-		t.Fatalf("Show did not reflect the feedback_set write: Comments = %+v", pr.Comments)
-	}
-}
-
-func TestBackend_FeedbackSet_UnknownDispositionRejected(t *testing.T) {
-	gh := &fakeGH{comments: []api.Comment{{ID: "c1"}}}
-	b := newTestBackend(t, gh)
-	_, err := b.FeedbackSet(context.Background(), "owner/repo#1", "c1", schema.Disposition("bogus"))
-	if err == nil {
-		t.Fatal("expected an error for an invalid disposition")
-	}
-	// An invalid disposition value is the CALLER's mistake, not this
-	// backend being unhealthy (INV-ERR-2; bug pg2-r9iok).
-	if !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
-	}
-}
-
-func TestBackend_FeedbackSet_UnknownCommentIsNotFound(t *testing.T) {
-	// A commentID that no longer exists on the PR is a well-formed
-	// not_found response, not a broken call (INV-ERR-2).
-	gh := &fakeGH{comments: []api.Comment{{ID: "c1"}}}
-	b := newTestBackend(t, gh)
-	_, err := b.FeedbackSet(context.Background(), "owner/repo#1", "does-not-exist", schema.DispositionOpen)
-	if !errors.Is(err, scriptout.ErrNotFound) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
-	}
-}
-
 func TestBackend_CheckAuth_DelegatesToGHProvider(t *testing.T) {
 	wantErr := errors.New("no token")
 	b := newTestBackend(t, &fakeGH{checkAuthErr: wantErr})
@@ -344,14 +268,6 @@ func TestBackend_CheckAuth_DelegatesToGHProvider(t *testing.T) {
 	b2 := newTestBackend(t, &fakeGH{})
 	if err := b2.CheckAuth(context.Background()); err != nil {
 		t.Fatalf("CheckAuth() = %v, want nil", err)
-	}
-}
-
-func TestBackend_Categorize_InvalidID_IsInvalidArgument(t *testing.T) {
-	b := newTestBackend(t, &fakeGH{})
-	_, err := b.Categorize(context.Background(), "not-a-valid-id", "focus")
-	if !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
 	}
 }
 
@@ -370,72 +286,6 @@ func TestParsePRID_RejectsMalformed(t *testing.T) {
 		if _, _, err := parsePRID(id); err == nil {
 			t.Errorf("parsePRID(%q) should have failed", id)
 		}
-	}
-}
-
-// TestBackend_Categorize_RejectsValueOutsideVocabulary is finding A20's
-// required proof: Categorize previously accepted any string unvalidated.
-func TestBackend_Categorize_RejectsValueOutsideVocabulary(t *testing.T) {
-	b := newTestBackend(t, &fakeGH{})
-	_, err := b.Categorize(context.Background(), "owner/repo#1", "not-a-real-category")
-	if !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
-	}
-	// And the rejected write must not have landed in the store.
-	st, getErr := b.store.Get("owner/repo#1")
-	if getErr != nil {
-		t.Fatalf("Get: %v", getErr)
-	}
-	if st.Category != "" {
-		t.Fatalf("Category = %q, want empty — a rejected categorize must not partially write", st.Category)
-	}
-}
-
-// TestBackend_Categorize_EmptyCategoryIsDistinctNonSilentError proves an
-// empty category is rejected with its own error rather than either (a)
-// silently succeeding as a store.SetCategory "delete" (the pre-fix
-// behavior — store.go's `omitempty` JSON tag makes an empty category
-// indistinguishable on disk from "never categorized") or (b) merely
-// reusing the generic vocabulary-membership error message.
-func TestBackend_Categorize_EmptyCategoryIsDistinctNonSilentError(t *testing.T) {
-	b := newTestBackend(t, &fakeGH{})
-	// First set a real category...
-	if _, err := b.Categorize(context.Background(), "owner/repo#1", "focus"); err != nil {
-		t.Fatalf("Categorize(focus): %v", err)
-	}
-	// ...then attempt to clear it via an empty string.
-	_, err := b.Categorize(context.Background(), "owner/repo#1", "")
-	if !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
-	}
-	if !strings.Contains(err.Error(), "empty") {
-		t.Fatalf("err = %v, want a message distinctly about the empty category, not just the generic vocabulary-membership message", err)
-	}
-	// The earlier valid write must survive the rejected empty-category call.
-	st, getErr := b.store.Get("owner/repo#1")
-	if getErr != nil {
-		t.Fatalf("Get: %v", getErr)
-	}
-	if st.Category != "focus" {
-		t.Fatalf("Category = %q, want focus — an empty-category call must not silently delete the existing category", st.Category)
-	}
-}
-
-// TestBackend_Categorize_AcceptsEveryVocabularyValue is the positive
-// counterpart: every declared Vocabulary value must be accepted (a
-// too-strict validator would be exactly as broken as no validator).
-func TestBackend_Categorize_AcceptsEveryVocabularyValue(t *testing.T) {
-	for _, cat := range Vocabulary {
-		b := newTestBackend(t, &fakeGH{})
-		if _, err := b.Categorize(context.Background(), "owner/repo#1", cat); err != nil {
-			t.Fatalf("Categorize(%q): %v", cat, err)
-		}
-	}
-}
-
-func TestVocabulary_NonEmpty(t *testing.T) {
-	if len(Vocabulary) == 0 {
-		t.Fatal("Vocabulary must be non-empty — it backs the capabilities op's declared category vocabulary (interfaces.md's vocabulary note)")
 	}
 }
 

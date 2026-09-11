@@ -65,8 +65,9 @@ func isPackageMain(path string) bool {
 // import-path text (layout_convention_test.go); or (c) any OTHER nesting
 // depth under cmd/<binary>/ whose .go file itself declares "package main" —
 // a standalone one-shot tool binary nested deeper than cmd/<binary>/ itself
-// (e.g. cmd/pg-connector-pr-github/migrate-disposition/main.go, ADR 0063's
-// cutover tool) is, by the same reasoning as (a), never importable by a
+// (e.g. the former cmd/pg-connector-pr-github/migrate-disposition/main.go,
+// ADR 0063's cutover tool, deleted by bead pg2-2j5ac.28.7 once its one-shot
+// migration had run) is, by the same reasoning as (a), never importable by a
 // sibling backend: Go's compiler refuses to import a package main from
 // anywhere, at any nesting depth, so the "importable by sibling backends"
 // risk this whole check exists to catch (see below) simply does not apply
@@ -131,7 +132,7 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			}
 			if isPackageMain(path) {
 				// A standalone one-shot tool's own package main, nested
-				// deeper than cmd/<binary>/ itself (e.g.
+				// deeper than cmd/<binary>/ itself (e.g. the former
 				// cmd/pg-connector-pr-github/migrate-disposition/main.go)
 				// — never importable by a sibling backend regardless of
 				// nesting depth, for the same reason depth-0
@@ -234,11 +235,12 @@ func TestBackendLayoutConvention_RejectsNonInternalCmdPackage(t *testing.T) {
 // TestBackendLayoutConvention_AllowsNestedPackageMainTool proves
 // evaluateLayoutConvention's case (c) (see its own doc comment): a
 // standalone one-shot tool nested deeper than cmd/<binary>/ itself — e.g.
-// this module's real cmd/pg-connector-pr-github/migrate-disposition/main.go
-// — is allowed when its .go file actually declares "package main" (never
-// importable by a sibling backend, exactly like depth-0 cmd/<binary>/
-// main.go), while a non-main package at that SAME nesting depth is still
-// rejected — proving this case does not loosen the check for the real gap
+// this module's former cmd/pg-connector-pr-github/migrate-disposition/
+// main.go (deleted by bead pg2-2j5ac.28.7) — is allowed when its .go file
+// actually declares "package main" (never importable by a sibling backend,
+// exactly like depth-0 cmd/<binary>/main.go), while a non-main package at
+// that SAME nesting depth is still rejected — proving this case does not
+// loosen the check for the real gap
 // TestBackendLayoutConvention_RejectsNonInternalCmdPackage guards.
 func TestBackendLayoutConvention_AllowsNestedPackageMainTool(t *testing.T) {
 	root := t.TempDir()

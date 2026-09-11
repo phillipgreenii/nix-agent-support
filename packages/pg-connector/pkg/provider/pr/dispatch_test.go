@@ -14,26 +14,16 @@ import (
 // Provider interface's method set, and (b) that NewDispatchTable wires each
 // op to the right method and passes args/results/errors straight through.
 type fakeProvider struct {
-	showFn        func(ctx context.Context, id string) (*schema.PR, error)
-	categorizeFn  func(ctx context.Context, id, category string) (*schema.CategorizeResult, error)
-	feedbackSetFn func(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error)
-	listFn        func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
-	filesFn       func(ctx context.Context, id string) (*schema.PRFilesResult, error)
-	commitsFn     func(ctx context.Context, id string) (*schema.PRCommitsResult, error)
+	showFn    func(ctx context.Context, id string) (*schema.PR, error)
+	listFn    func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
+	filesFn   func(ctx context.Context, id string) (*schema.PRFilesResult, error)
+	commitsFn func(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }
 
 var _ Provider = (*fakeProvider)(nil)
 
 func (f *fakeProvider) Show(ctx context.Context, id string) (*schema.PR, error) {
 	return f.showFn(ctx, id)
-}
-
-func (f *fakeProvider) Categorize(ctx context.Context, id, category string) (*schema.CategorizeResult, error) {
-	return f.categorizeFn(ctx, id, category)
-}
-
-func (f *fakeProvider) FeedbackSet(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
-	return f.feedbackSetFn(ctx, id, commentID, disposition)
 }
 
 func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
@@ -81,66 +71,6 @@ func TestNewDispatchTable_Show(t *testing.T) {
 	got, ok := result.(*schema.PR)
 	if !ok || got.ID != "pr-1" || got.Title != "hello" {
 		t.Fatalf("result = %#v", result)
-	}
-}
-
-func TestNewDispatchTable_Categorize(t *testing.T) {
-	p := &fakeProvider{
-		categorizeFn: func(ctx context.Context, id, category string) (*schema.CategorizeResult, error) {
-			if id != "pr-1" || category != "focus" {
-				t.Fatalf("id=%q category=%q", id, category)
-			}
-			return &schema.CategorizeResult{ID: id, Category: category}, nil
-		},
-	}
-	table := NewDispatchTable(p)
-	entry := table["categorize"]
-	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"pr-1","category":"focus"}`))
-	if err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	got, ok := result.(*schema.CategorizeResult)
-	if !ok || got.ID != "pr-1" || got.Category != "focus" {
-		t.Fatalf("result = %#v", result)
-	}
-}
-
-func TestNewDispatchTable_FeedbackSet(t *testing.T) {
-	p := &fakeProvider{
-		feedbackSetFn: func(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
-			if id != "pr-1" || commentID != "c1" || disposition != schema.DispositionWontFix {
-				t.Fatalf("id=%q commentID=%q disposition=%q", id, commentID, disposition)
-			}
-			return &schema.FeedbackSetResult{ID: id, CommentID: commentID, Disposition: disposition}, nil
-		},
-	}
-	table := NewDispatchTable(p)
-	entry := table["feedback_set"]
-	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"pr-1","comment_id":"c1","disposition":"wont-fix"}`))
-	if err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	got, ok := result.(*schema.FeedbackSetResult)
-	if !ok || got.CommentID != "c1" || got.Disposition != schema.DispositionWontFix {
-		t.Fatalf("result = %#v", result)
-	}
-}
-
-func TestNewDispatchTable_FeedbackSet_NotFoundPassesThroughUnwrapped(t *testing.T) {
-	// A not_found response from feedback_set (e.g. the comment id no longer
-	// exists) is a well-formed negative answer, not a broken call
-	// (INV-ERR-2) — NewDispatchTable must pass the provider's own
-	// ErrNotFound-wrapped error through unchanged, not translate it.
-	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "comment c1 not found")
-	p := &fakeProvider{
-		feedbackSetFn: func(ctx context.Context, id, commentID string, disposition schema.Disposition) (*schema.FeedbackSetResult, error) {
-			return nil, sentinelErr
-		},
-	}
-	table := NewDispatchTable(p)
-	_, err := table["feedback_set"].Handle(context.Background(), json.RawMessage(`{"id":"pr-1","comment_id":"c1","disposition":"open"}`))
-	if !errors.Is(err, scriptout.ErrNotFound) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
 }
 

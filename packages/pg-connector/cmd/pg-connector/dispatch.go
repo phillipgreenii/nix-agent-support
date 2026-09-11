@@ -99,7 +99,7 @@ func Dispatch(ctx context.Context, reg *Registry, entityType, op string, args an
 
 // DispatchTargeted implements this docket's multi-instance targeted-op
 // resolution policy for id-keyed ops only: issue show/comment/transition,
-// ci get_logs/rerun_failed, and pr show/categorize/feedback_set. For a
+// ci get_logs/rerun_failed, and pr show/files/commits. For a
 // targeted op against a list-valued connector.<type> with N > 1
 // registered backends and no --backend pin, it tries each registered
 // backend in registration order (resolveBackends' own returned order),

@@ -33,19 +33,16 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 - **Entity type** — a capability tied to one kind of external record: one of `pr`, `issue`, `ci`,
   `scm` in this set's extent. Every entity type is also a capability; `attention`/`search` are the
   two capabilities that are not entity types.
-- **`pr`** — a pull/merge request: identity, review/feedback state, and two dedicated write fields
-  (`category`, and each comment/review-thread entry's `disposition`).
+- **`pr`** — a pull/merge request: identity and review/feedback state. Carries no
+  category/disposition write fields of its own — bead pg2-2j5ac.28.7 retired the `categorize`/
+  `feedback_set` ops (statelessness, `D3`); category/disposition are re-derived by `pg-desk`'s
+  interpreter rather than persisted by any backend.
 - **`issue`** — a tracked issue (Jira/beads/GitHub Issues, …): identity, state, and read+write ops
   (show, create, comment, transition).
 - **`ci`** — a build/run linked to a PR: identity, status/conclusion, and read+write ops (list
   runs, get logs, rerun failed).
 - **`scm`** — local git state (worktrees, cwd→branch resolution); unlike the other three, it syncs
   no remote entity.
-- **Category** — a `pr`-only, single-valued, backend-declared-vocabulary field set via the
-  dedicated `categorize` op; never a GitHub label.
-- **Disposition** — the closed enum (`open` | `will-fix` | `wont-fix` | `no-action`) a `pr`
-  comment/review-thread entry's current review-feedback state is drawn from, and the value the
-  dedicated `feedback_set` op writes.
 
 ## Cross-cutting capabilities
 
@@ -88,7 +85,7 @@ source}` plus an optional `attributes` map carrying whatever type-declared or ba
 - **Targeted-op resolution** — resolving a targeted op to exactly one registered backend for its
   capability: the capability's registry entry names exactly one backend, or (with more than one)
   the umbrella resolves directly to the one the operator names via `--backend`, or — for an
-  **id-keyed** op only (`show`, `categorize`, …) — tries each registered backend in registration
+  **id-keyed** op only (`show`, `files`, …) — tries each registered backend in registration
   order, stopping at the first non-`not_found` answer. An **id-less write** (`issue create`
   today) has no try-each fallback: with more than one registered backend and no `--backend`, it
   hard-fails as a CLI-level error (`INV-REG-2`).
@@ -108,7 +105,7 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   `{protocolVersion, schemaVersion, error: {code, message}}` on failure. Exactly one of `result`
   or `error` is present; a response carrying neither is a protocol violation, not a success
   (`INV-WIRE-1`).
-- **Op** — one named operation a backend answers (e.g. `show`, `categorize`, `list_runs`,
+- **Op** — one named operation a backend answers (e.g. `show`, `files`, `list_runs`,
   `worktree_add`). A per-capability op catalog is enumerated in `interfaces.md`.
 - **`protocolVersion`** — one global integer versioning the envelope shape itself, independent of
   any capability's own schema (`INV-VER-1`).
@@ -162,7 +159,7 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   its own caller; a layer separate from, and never built from, the wire protocol's plain `0`/`1`
   (`INV-EXIT-1`).
 - **Targeted op** — an op that resolves to exactly one registered backend by id (e.g. `show`,
-  `categorize`, `get_logs`); uses the `0`/`4`/`1` exit-code scheme.
+  `files`, `get_logs`); uses the `0`/`4`/`1` exit-code scheme.
 - **Fan-out op** — an op that queries every backend registered for a type/capability at once (e.g.
   `ci list`, `auth status`, `config validate`); uses the `0`/`2`/`3` exit-code scheme, and its
   response carries a `sources[]` outcome row per backend queried (`INV-OUT-1`).

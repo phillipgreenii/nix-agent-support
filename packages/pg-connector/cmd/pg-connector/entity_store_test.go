@@ -341,15 +341,14 @@ func TestNoCrossConnectorEntityStore(t *testing.T) {
 
 // TestNoCrossConnectorEntityStore_DetectsCombinedStore is a test-of-a-test:
 // TestNoCrossConnectorEntityStore has nothing to reject in the current,
-// already-compliant tree
-// (its one real persistent store, cmd/pg-connector-pr-github/internal/
-// store.go's storeFile, is correctly scoped to PR ids only AND lives inside
-// a backend's own internal/, so it is out of this check's scope for two
-// independent reasons). This proves evaluateEntityStoreIsolation actually
+// already-compliant tree (bead pg2-2j5ac.28.7 removed this module's own
+// backend-local stores entirely — statelessness, D3 — so there is no real
+// persistent entity store left in scope for this check to ever find a
+// violation in today). This proves evaluateEntityStoreIsolation actually
 // rejects a struct combining two entity kinds' JSON-tagged map fields,
-// modeled directly on that real storeFile's own shape plus a second,
-// synthetic issue-keyed map field. Written to a temp directory — never the
-// real tree.
+// modeled on the shape the now-removed cmd/pg-connector-pr-github/internal/
+// store.go's storeFile used to have, plus a second, synthetic issue-keyed
+// map field. Written to a temp directory — never the real tree.
 func TestNoCrossConnectorEntityStore_DetectsCombinedStore(t *testing.T) {
 	dir := t.TempDir()
 	src := `package internal
