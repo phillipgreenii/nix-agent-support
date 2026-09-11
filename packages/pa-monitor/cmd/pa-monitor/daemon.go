@@ -222,6 +222,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		},
 		BridgeSnapshotInterval: timings.SnapshotInterval,
 		BridgeStaleAfter:       timings.StaleAfter,
+		// Beads-staleness watcher (pg2-zjopv): off unless the operator
+		// configures [beads_watch].roots.
+		BeadsWatchRoots:    cfg.BeadsWatch.Roots,
+		BeadsWatchInterval: cfg.BeadsWatch.Interval,
 	}
 
 	if !disablePoller {

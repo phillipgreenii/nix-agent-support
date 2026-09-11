@@ -23,3 +23,12 @@ func TestSeverityForEvent(t *testing.T) {
 		}
 	}
 }
+
+// TestSeverityForEvent_BeadsStaleExportIsError: pg2-zjopv's top-level alert
+// must be ERROR, one level above the WARN delivery-failure events — a stray
+// issues.jsonl is a data-corruption footgun, not merely a degraded delivery.
+func TestSeverityForEvent_BeadsStaleExportIsError(t *testing.T) {
+	if got := severityForEvent("beads.stale_export_found"); got != otellog.SeverityError {
+		t.Errorf("severityForEvent(%q) = %v, want Error", "beads.stale_export_found", got)
+	}
+}

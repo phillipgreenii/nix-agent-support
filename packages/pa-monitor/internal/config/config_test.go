@@ -427,3 +427,45 @@ command = "/nix/store/def-decorator/bin/decorator"
 		t.Errorf("Decorators[1].Env = %+v, want nil for a decorator with no [decorator.env]", cfg.Decorators[1].Env)
 	}
 }
+
+// TestBeadsWatchDefaultsWhenAbsent (pg2-zjopv): Roots MUST default to empty
+// (the watcher off) — this repo never hardcodes a personal workspace path —
+// while Interval still gets a usable built-in default.
+func TestBeadsWatchDefaultsWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nonexistent.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BeadsWatch.Roots) != 0 {
+		t.Errorf("BeadsWatch.Roots default = %v, want empty (watcher off with no config)", cfg.BeadsWatch.Roots)
+	}
+	if cfg.BeadsWatch.Interval != time.Hour {
+		t.Errorf("BeadsWatch.Interval default = %v, want 1h", cfg.BeadsWatch.Interval)
+	}
+}
+
+// TestBeadsWatchParse: [beads_watch] roots + interval_s parse onto Config.
+func TestBeadsWatchParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[beads_watch]
+roots = ["/workspace"]
+interval_s = 1800
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/workspace"}
+	if len(cfg.BeadsWatch.Roots) != 1 || cfg.BeadsWatch.Roots[0] != want[0] {
+		t.Errorf("BeadsWatch.Roots = %v, want %v", cfg.BeadsWatch.Roots, want)
+	}
+	if cfg.BeadsWatch.Interval != 30*time.Minute {
+		t.Errorf("BeadsWatch.Interval = %v, want 30m", cfg.BeadsWatch.Interval)
+	}
+}

@@ -58,6 +58,23 @@ type Config struct {
 	// §3). Sourced from [account.pricing]; built-in defaults populate it so
 	// native cost emits with no config (cost is notional on this plan).
 	Pricing PricingConfig
+	// BeadsWatch is the [beads_watch] block (pg2-zjopv): the root directories
+	// the daemon's BeadsWatcher periodically scans for a stray top-level
+	// `.beads/issues.jsonl`. Roots defaults to empty (watcher off) — this repo
+	// is standalone/config-driven and never hardcodes a personal workspace
+	// path; an operator opts in via `phillipgreenii.programs.pa-monitor.settings`.
+	BeadsWatch BeadsWatchConfig
+}
+
+// BeadsWatchConfig is the [beads_watch] block.
+type BeadsWatchConfig struct {
+	// Roots are the directories BeadsWatcher scans (root itself, plus each of
+	// its immediate non-dotfile subdirectories) for a `.beads/issues.jsonl`.
+	// Typically the pn-workspace root. Empty disables the watcher.
+	Roots []string
+	// Interval is the scan cadence. Defaults to 1h (see
+	// defaultBeadsWatchInterval in internal/daemon).
+	Interval time.Duration
 }
 
 // ModelPricing is one model's per-million-token USD prices.
@@ -125,6 +142,13 @@ type tomlConfig struct {
 	Decorators                   []tomlDecorator `toml:"decorator"`
 	OTel                         *tomlOTel       `toml:"otel"`
 	Account                      *tomlAccount    `toml:"account"`
+	BeadsWatch                   *tomlBeadsWatch `toml:"beads_watch"`
+}
+
+// tomlBeadsWatch is the [beads_watch] block (pg2-zjopv).
+type tomlBeadsWatch struct {
+	Roots     []string `toml:"roots"`
+	IntervalS *int     `toml:"interval_s"`
 }
 
 type tomlAccount struct {
@@ -181,6 +205,9 @@ func defaults() Config {
 		BridgeSnapshotInterval:   timing.DefaultSnapshotInterval,
 		BridgeHeartbeatInterval:  timing.DefaultHeartbeatInterval,
 		Pricing:                  defaultPricing(),
+		// Roots deliberately defaults to empty (watcher off) — see the
+		// BeadsWatch field doc.
+		BeadsWatch: BeadsWatchConfig{Interval: time.Hour},
 	}
 }
 
@@ -295,6 +322,14 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.Account != nil && raw.Account.Pricing != nil {
 		applyPricing(&cfg.Pricing, raw.Account.Pricing)
+	}
+	if raw.BeadsWatch != nil {
+		if raw.BeadsWatch.Roots != nil {
+			cfg.BeadsWatch.Roots = raw.BeadsWatch.Roots
+		}
+		if raw.BeadsWatch.IntervalS != nil {
+			cfg.BeadsWatch.Interval = time.Duration(*raw.BeadsWatch.IntervalS) * time.Second
+		}
 	}
 }
 

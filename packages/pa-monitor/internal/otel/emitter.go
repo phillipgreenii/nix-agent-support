@@ -93,6 +93,7 @@ type Emitter struct {
 	nudgeDroppedNoBridge metric.Int64Counter
 	apiErrorObserved     metric.Int64Counter
 	signalerBinMissing   metric.Int64Counter
+	staleBeadsExport     metric.Int64Counter
 
 	// Instrumentation histograms/counters (pg2-sewtz). Nil when SDK uninitialised.
 	pollTickDuration  metric.Float64Histogram
@@ -388,6 +389,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		return err
 	}
 	if e.signalerBinMissing, err = meter.Int64Counter("pa_monitor.signaler.binary_missing_total"); err != nil {
+		return err
+	}
+	if e.staleBeadsExport, err = meter.Int64Counter("pa_monitor.beads.stale_export_found_total"); err != nil {
 		return err
 	}
 
@@ -874,6 +878,30 @@ func (e *Emitter) RecordSignalerBinaryMissing(attrs map[string]string) {
 		e.signalerBinMissing.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent("signaler.binary_missing", attrs)
+}
+
+// RecordStaleBeadsExport fires the TOP-LEVEL alert (pg2-zjopv) for a stray
+// `issues.jsonl` found at the top level of a `.beads` directory. Every
+// workspace `.beads` dir has `export.auto: false`, so bd never refreshes this
+// file on its own — it is written only by an explicit `bd export` (without
+// -o) and then silently rots, and if anything ever reads it (a stray `bd
+// import`, a future auto-import path) it can restore whole prior rows over
+// current state with no warning. The intent is "a human sees this promptly":
+// this increments pa_monitor.beads.stale_export_found_total (so the count is
+// dashboardable) AND emits the beads.stale_export_found log event, which
+// severityForEvent maps to ERROR — a severity a Loki/Grafana alert rule
+// would actually surface, not just a metric point nobody dashboards. attrs
+// MUST include "path" (the exact file found); the caller (BeadsWatcher) is
+// responsible for its own repeat-alert throttling — every call here emits.
+// nil-safe.
+func (e *Emitter) RecordStaleBeadsExport(attrs map[string]string) {
+	if e == nil {
+		return
+	}
+	if e.staleBeadsExport != nil {
+		e.staleBeadsExport.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+	}
+	e.LogEvent("beads.stale_export_found", attrs)
 }
 
 // RecordSessionInfo replaces the buffered per-session rows. Callers MUST

@@ -247,6 +247,15 @@ type RunOptions struct {
 	// caller that does not set them still gets a consistent pair.
 	BridgeSnapshotInterval time.Duration
 	BridgeStaleAfter       time.Duration
+	// BeadsWatchRoots, when non-empty, starts a BeadsWatcher goroutine that
+	// periodically scans these directories for a stray top-level
+	// `.beads/issues.jsonl` and raises a top-level OTel alert (pg2-zjopv).
+	// Empty (the default) leaves the watcher off. See internal/config's
+	// [beads_watch].roots.
+	BeadsWatchRoots []string
+	// BeadsWatchInterval is the BeadsWatcher scan cadence. Zero selects
+	// defaultBeadsWatchInterval (1h).
+	BeadsWatchInterval time.Duration
 }
 
 // RunWith is the daemon's main loop. It acquires the pidfile, binds the
@@ -367,6 +376,19 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			HardDeleteAfter: 24 * time.Hour,
 		}
 		go sweeper.Run(ctx)
+	}
+
+	// Launch the beads-staleness watcher (pg2-zjopv) when roots are
+	// configured. BeadsWatcher.Run itself no-ops when Roots is empty, but
+	// gating the goroutine here too avoids spawning a permanently-idle
+	// goroutine on every daemon that hasn't opted in via [beads_watch].roots.
+	if len(opts.BeadsWatchRoots) > 0 {
+		watcher := &BeadsWatcher{
+			Roots:    opts.BeadsWatchRoots,
+			Interval: opts.BeadsWatchInterval,
+			Emitter:  opts.Emitter,
+		}
+		go watcher.Run(ctx)
 	}
 
 	// Construct Nudger + WatermarkStore when configured.
