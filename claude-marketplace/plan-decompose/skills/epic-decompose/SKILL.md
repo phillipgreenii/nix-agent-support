@@ -182,25 +182,45 @@ ambiguous "same source, different intended round" case.
      invalidate this phase's decomposition, and everything else in the upstream phase is
      irrelevant to whether this phase is safe to decompose.
 
-     If the upstream phase is already decomposed (query
-     `bd list --parent <that phase's phase-bead> --status all -n 0 --json`, excluding the
-     `phase-trigger`-labeled bead itself — any non-trigger children found are its work
-     packets), wire `bd dep add <this phase's trigger> --blocked-by <packet-id>` once per
-     packet this phase's design Consumes-section names (matched the same way intra-docket
-     packet ordering already resolves a named task reference to a real bead id, per
-     `plan-decompose-beads`'s `wire-ordering` mapping); if the design only states phase-level
-     scope with no packet-level Consumes detail, fall back to wiring against every packet
-     currently under that phase — over-blocking is safe, under-blocking is not.
+     For each such dependency, query the upstream phase's own work packets — never its
+     trigger, since a trigger is a SIBLING of its phase bead, both children of the program
+     epic per Concepts above, never a child of the phase bead, so no exclusion filter is
+     needed:
 
-     If the upstream phase is NOT yet decomposed (the query above returns no non-trigger
-     children — a sibling phase created in this same `epic-decompose` run, so no packets
-     exist yet to name), wire `bd dep add <this phase's trigger> --blocked-by <that phase's own trigger>`
-     instead (task-to-task, always legal) as an interim placeholder, and record on this
-     phase's trigger (`bd update <this phase's trigger> --append-notes`) that it is a
-     placeholder pending the upstream phase's own decomposition, and that
-     `phase-decompose`'s Closeout step (see that skill) promotes it to real packet-level
-     edges once that phase's packets exist — this step cannot do that promotion itself, since
-     the packets it would need to name don't exist yet.
+     `bd list --parent <that phase's phase-bead> --status all -n 0 --json`
+
+     If every packet this phase's design Consumes-section names for that dependency is
+     present in the result, wire the trigger to each named packet (matched the same way
+     intra-docket packet ordering already resolves a named task reference to a real bead id,
+     per `plan-decompose-beads`'s `wire-ordering` mapping), once per named packet:
+
+     `bd dep add <this phase's trigger> --blocked-by <packet-id>`
+
+     If the design only states phase-level scope with no packet-level Consumes detail, fall
+     back to wiring against every packet the query returned instead — over-blocking is safe,
+     under-blocking is not.
+
+     If the query returns no packets at all, OR returns some but not the specific one(s) the
+     design names, treat this dependency as NOT yet decomposed. This covers both a sibling
+     phase created in this same `epic-decompose` run (no packets exist yet) and a phase whose
+     decomposition is only partway through running concurrently — this step claims only the
+     program epic, never an upstream phase or trigger, so it cannot serialize against that
+     race, and the query may see a partial packet set. In either case, wire an interim
+     placeholder instead (task-to-task, always legal):
+
+     `bd dep add <this phase's trigger> --blocked-by <that phase's own trigger>`
+
+     and record on this phase's trigger that it is a placeholder pending the upstream phase's
+     own decomposition, and that `phase-decompose`'s Closeout step (see that skill) promotes
+     it to real packet-level edges once that phase's packets fully exist — this step cannot
+     do that promotion itself, since the packets it would need to name don't exist (or don't
+     fully exist) yet:
+
+     `bd update <this phase's trigger> --append-notes "<placeholder note>"`
+
+     Each dependency is resolved independently this way — a phase depending on several
+     upstream phases may end up with a mix of real packet edges and placeholder edges, one
+     per dependency, not an all-or-nothing choice for the new phase as a whole.
 
      Verify every edge by read-back (`bd dep list`); run `bd dep cycles` after the bulk
      wiring, filtered to this program epic's beads.

@@ -20,8 +20,9 @@ in your dispatcher, not something to guess around:
 3. The **phase bead's design text**.
 4. The **upstream-phase ids** — the phases the current phase depends on. These come from the
    **trigger bead's** `--blocked-by` list, resolved by your dispatcher before you were called.
-   NEVER re-derive them from the phase bead's own `--blocked-by` list — that list holds only a
-   single edge back to its own trigger bead and is not the upstream-phase set.
+   NEVER re-derive them from the phase bead's own `--blocked-by` list — the phase bead carries
+   no gating edge at all (`bd` rejects any epic/task-mixed edge), so that list is always empty
+   and is not the upstream-phase set.
 5. The **absolute repo root(s)** to inspect.
 
 ## Verification method

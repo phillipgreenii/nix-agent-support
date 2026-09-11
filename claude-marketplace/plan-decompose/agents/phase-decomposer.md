@@ -78,8 +78,8 @@ dispatch template):
 > All five required inputs, in this order: (1) the phase bead's own id; (2) the trigger bead's
 > own id; (3) the phase bead's current design text; (4) the ids of the upstream phases this
 > phase depends on, resolved by YOU (the dispatcher) from `bd dep list <trigger-bead-id>` —
-> NEVER from the phase bead's own `--blocked-by` list, which holds only a single edge back to
-> its own trigger; (5) the absolute repo root(s). Check the ACTUAL landed state of those
+> NEVER from the phase bead's own `--blocked-by` list, which carries no gating edge at all
+> (`bd` rejects any epic/task-mixed edge); (5) the absolute repo root(s). Check the ACTUAL landed state of those
 > upstream phases (their closed packets' `close_reason`s, and the real repo code/interfaces they
 > produced) against what this phase's design text ASSUMES those phases produced. On unambiguous
 > drift: direct-edit the phase bead's design field yourself with the correction (no `pd_rev`
