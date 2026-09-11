@@ -72,12 +72,17 @@ whatever invoked the outermost skill [design: §3 Decision 9, §5.3].
    the trigger bead's own id (both already resolved at step 1), the phase bead's design text,
    the ids of the UPSTREAM phases this phase depends on, and the absolute repo root(s).
    - **Resolving the upstream-phase ids**: query `bd dep list <trigger-bead-id>` — NEVER
-     `bd dep list <phase-bead-id>`. Per `epic-decompose`'s own wiring, the phase bead itself is
-     `--blocked-by` only its own trigger (a single, self-referential edge); the upstream phases
-     this phase actually depends on live on the TRIGGER bead's `--blocked-by` list instead.
-     Querying the phase bead's own list would return only that one self-referential edge, never
-     the upstream set [design: §7 step 8 "Wire" — this resolution path is derived directly from
-     that wiring, not itself stated verbatim by the design].
+     `bd dep list <phase-bead-id>` (the phase bead itself carries no gating edge at all; `bd`
+     rejects any epic/task-mixed edge, so nothing is ever wired to or from it for this
+     purpose — see `epic-decompose`'s Wire step). The trigger bead's `--blocked-by` list is
+     TASK-LEVEL, not phase-level: each entry is either an upstream work-packet bead (the
+     common case) or, transiently, another phase's trigger bead (the PLACEHOLDER case, before
+     that upstream phase has been decomposed — see `epic-decompose`'s Wire step). Resolve each
+     blocker's owning phase via its `.parent` (the program epic) plus which phase-bead's
+     children it belongs to (`bd list --parent <candidate phase-bead>` membership), or — for a
+     placeholder trigger blocker — its own phase-bead id directly. Deduplicate to the distinct
+     set of upstream PHASE ids this yields; that set is what gets forwarded to
+     `phase-plan-verifier`.
    - **Why both ids are forwarded**: `phase-plan-verifier` needs the phase-bead id to know which
      bead's design field it may direct-edit on unambiguous drift, and needs BOTH ids to fill in
      the escalation-bead template's `Phase: <phase-bead-id> / Trigger: <trigger-bead-id>` header
@@ -148,13 +153,35 @@ whatever invoked the outermost skill [design: §3 Decision 9, §5.3].
    `"decomposition did not converge"`, citing the inner run's own failure report. Do not leave
    the trigger silently open [design: §8 step 6].
 
-7. **Closeout** — only on a genuine `pd_phase=released` result from step 5: `bd close` the
-   trigger bead with a reason citing the release. Because `bd` dependency edges self-clear when
-   their blocker closes, this automatically un-blocks the phase bead — and any later phase's
-   trigger bead that was wired `--blocked-by` this one only unblocks once THIS phase bead
-   itself closes (which, being an epic, `bd` refuses until every packet under it is closed) —
-   so "the next phase isn't planned until this phase is actually done, not merely decomposed"
-   holds by construction [design: §8 step 7].
+7. **Closeout** — only on a genuine `pd_phase=released` result from step 5.
+   - **Promote any downstream placeholders FIRST**, before closing this trigger. Query for
+     every OTHER trigger bead in this program epic still wired `bd dep add <downstream
+trigger> --blocked-by <this phase's own trigger>` (`epic-decompose`'s Wire-step
+     placeholder, applied when this phase hadn't been decomposed yet). For each one found:
+     resolve which of THIS phase's just-created packets its design's Consumes-section names
+     (same resolution `epic-decompose`'s Wire step already applies to an already-decomposed
+     upstream phase), `bd dep add <downstream trigger> --blocked-by <packet-id>` once per
+     named packet (falling back to every packet of this phase if the design only states
+     phase-level scope), then `bd comment <downstream trigger>` recording the promotion. Do
+     NOT explicitly remove the placeholder edge to this phase's trigger — closing this
+     trigger below makes `bd` self-clear it automatically, same as any other blocker.
+     Verify the new edges by read-back (`bd dep list <downstream trigger>`) before
+     proceeding. If no downstream trigger references this one, there is nothing to promote —
+     proceed directly to closing.
+   - `bd close` the trigger bead with a reason citing the release. Because `bd` dependency
+     edges self-clear when their blocker closes, this automatically unblocks every downstream
+     trigger that was wired `--blocked-by` one of THIS phase's packets (real edges, from the
+     promotion step above or from `epic-decompose`'s Wire step when this phase was already
+     decomposed at sketch time) — each such trigger unblocks once the SPECIFIC packets it
+     actually depends on close, not merely once this phase is fully decomposed, and not only
+     once every packet in this phase closes. "The next phase isn't planned until the packets
+     it actually needs are done" holds by construction, at whatever granularity the design
+     names — this is a deliberate loosening of the earlier phase-level gate (operator
+     ruling, bead `pg2-8fjus`, 2026-09-11): the old phase-bead-level gate (which epics'
+     no-auto-close-until-every-child-closed behavior would have given, had the mixed-type
+     edge been wirable at all) required the WHOLE upstream phase done; this requires only the
+     specific packets named, which may leave the upstream phase's own unrelated packets still
+     open.
 
 ## Consumers
 

@@ -161,9 +161,49 @@ ambiguous "same source, different intended round" case.
      safety analogy to the phase bead's identical hazard: the trigger bead is also created
      with `--parent` in this same step, so without `--no-inherit-labels` it would inherit the
      same unwanted program-epic labels (e.g. `phased-epic`).
-   - **Wire**: `bd dep add <phase-bead> --blocked-by <its own trigger>`; for every phase this
-     new phase depends on (existing or new, from step 5), `bd dep add <this phase's trigger> --blocked-by <that phase's phase-bead>`. Verify every edge by read-back (`bd dep list`); run
-     `bd dep cycles` after the bulk wiring, filtered to this program epic's beads.
+   - **Wire — never a mixed epic/task edge.** `bd` 1.2.2 rejects `blocks` edges that mix an
+     epic and a task in either direction ("epics can only block other epics, not tasks" /
+     "tasks can only block other tasks, not epics" — verified 2026-09-10, memory
+     `bd-epic-task-blocks-edges-rejected`). The phase bead is `-t epic`; the trigger is
+     `-t task`; so neither `bd dep add <phase-bead> --blocked-by <its own trigger>` nor
+     `bd dep add <trigger> --blocked-by <phase-bead>` can ever be wired — do not attempt
+     either. This replaces both the phase-bead-to-trigger edge and the old
+     trigger-to-phase-bead cross-phase edge this step previously specified; neither was ever
+     actually wired in practice (the phase-bead-to-trigger edge was silently dropped, and the
+     cross-phase edge fell back ad hoc to an epic-to-epic edge on the phase beads themselves
+     plus a prose note on the trigger) — the exact shape that let concurrent drain sessions
+     reclaim the same "ready" trigger forever, since the trigger itself carried no real edge
+     (bead `pg2-8fjus`).
+
+     The trigger's real gate is task-level, not phase-level: for every phase this new phase
+     depends on (existing or new, from step 5), resolve that dependency down to the specific
+     upstream work-packet bead(s) this phase's design actually Consumes, not the whole
+     upstream phase — those specific packets are the only thing that could actually
+     invalidate this phase's decomposition, and everything else in the upstream phase is
+     irrelevant to whether this phase is safe to decompose.
+
+     If the upstream phase is already decomposed (query
+     `bd list --parent <that phase's phase-bead> --status all -n 0 --json`, excluding the
+     `phase-trigger`-labeled bead itself — any non-trigger children found are its work
+     packets), wire `bd dep add <this phase's trigger> --blocked-by <packet-id>` once per
+     packet this phase's design Consumes-section names (matched the same way intra-docket
+     packet ordering already resolves a named task reference to a real bead id, per
+     `plan-decompose-beads`'s `wire-ordering` mapping); if the design only states phase-level
+     scope with no packet-level Consumes detail, fall back to wiring against every packet
+     currently under that phase — over-blocking is safe, under-blocking is not.
+
+     If the upstream phase is NOT yet decomposed (the query above returns no non-trigger
+     children — a sibling phase created in this same `epic-decompose` run, so no packets
+     exist yet to name), wire `bd dep add <this phase's trigger> --blocked-by <that phase's own trigger>`
+     instead (task-to-task, always legal) as an interim placeholder, and record on this
+     phase's trigger (`bd update <this phase's trigger> --append-notes`) that it is a
+     placeholder pending the upstream phase's own decomposition, and that
+     `phase-decompose`'s Closeout step (see that skill) promotes it to real packet-level
+     edges once that phase's packets exist — this step cannot do that promotion itself, since
+     the packets it would need to name don't exist yet.
+
+     Verify every edge by read-back (`bd dep list`); run `bd dep cycles` after the bulk
+     wiring, filtered to this program epic's beads.
 
 9. **Label and report.** Label the program epic `phased-epic` (idempotent) and `write-report`
    the phase-split report (phase index, per-phase design-section coverage, review outcome,
