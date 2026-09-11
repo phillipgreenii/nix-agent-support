@@ -16,11 +16,12 @@ mkGoApp {
   # (bead pg2-p5at3): this binary's entire build+test dependency graph is
   # go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout's top-level package
   # (not its schemas/ or conformance/ subpackages), pkg/provider's root
-  # iface.go plus its own pkg/provider/issue AND pkg/provider/search capability
-  # subpackages (search added by bead pg2-8hcnx: this binary now also wires
-  # pkg/provider/search.NewDispatchTable to answer the cross-capability
-  # "search" op), and its own cmd/pg-connector-issue-jira/ tree (main.go,
-  # internal/**). No cross-backend import exists, so editing
+  # iface.go plus its own pkg/provider/issue, pkg/provider/search, AND
+  # pkg/provider/attention capability subpackages (search added by bead
+  # pg2-8hcnx; attention added by bead pg2-7wqkr: this binary now also wires
+  # pkg/provider/attention.NewDispatchTable to answer the "list_attention"
+  # op), and its own cmd/pg-connector-issue-jira/ tree (main.go, internal/**).
+  # No cross-backend import exists, so editing
   # pg-connector-scm-git/-pr-github/-ci-github-actions/-issue-beads' own files
   # does not touch this derivation's content hash.
   src = lib.fileset.toSource {
@@ -39,6 +40,7 @@ mkGoApp {
       ./pkg/provider/iface.go
       ./pkg/provider/issue
       ./pkg/provider/search
+      ./pkg/provider/attention
       ./cmd/pg-connector-issue-jira
     ];
   };

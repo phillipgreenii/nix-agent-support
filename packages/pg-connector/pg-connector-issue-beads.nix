@@ -18,9 +18,11 @@ mkGoApp {
   # (not its schemas/ or conformance/ subpackages — those are pulled in only by
   # pg-connector's own Tier-1 conformance suite and pkg/scriptout's own tests, not
   # by this binary), pkg/provider's root iface.go plus its own pkg/provider/issue
-  # capability subpackage, and its own cmd/pg-connector-issue-beads/ tree (main.go,
-  # internal/**). None of the other 3 backends' cmd/pg-connector-*/ trees are
-  # reachable from here (verified: no cross-backend import, no filesystem
+  # AND pkg/provider/attention capability subpackages (attention added by bead
+  # pg2-7wqkr: this binary now also wires pkg/provider/attention.NewDispatchTable
+  # to answer the "list_attention" op), and its own cmd/pg-connector-issue-beads/
+  # tree (main.go, internal/**). None of the other 3 backends' cmd/pg-connector-*/
+  # trees are reachable from here (verified: no cross-backend import, no filesystem
   # reference to a sibling backend's path) — scoping src to exactly this set means
   # editing pg-connector-scm-git/-pr-github/-ci-github-actions' own files no longer
   # touches this derivation's content hash. Technique: `lib.fileset.toSource`/
@@ -43,6 +45,7 @@ mkGoApp {
       ))
       ./pkg/provider/iface.go
       ./pkg/provider/issue
+      ./pkg/provider/attention
       ./cmd/pg-connector-issue-beads
     ];
   };
