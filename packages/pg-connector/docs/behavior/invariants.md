@@ -10,8 +10,9 @@ distinction come from the behavior-docs method
 ## Capability scoping
 
 - **`INV-CAP-1`** <!-- uuid: 40812675-88b2-40e8-9471-2381106587c3 --> — An interface's name and
-  method set MUST correspond to exactly one capability (`pr`, `issue`, `ci`, `scm`, or any future
-  entity type) and MUST name no backend/system (GitHub, Jira, beads, git, …). The umbrella itself
+  method set MUST correspond to exactly one capability (`pr`, `issue`, `ci`, `scm`, the
+  cross-cutting `attention`/`search`, or any future entity type or cross-cutting capability) and
+  MUST name no backend/system (GitHub, Jira, beads, git, …). The umbrella itself
   MUST know nothing about any backend's external system — that knowledge lives entirely behind
   `INTF-WIRE`, inside the backend. A single interface spanning more than one capability's own
   operations for one system (e.g. one interface mixing PR, CI, and Issue ops for "GitHub") is a
@@ -160,25 +161,48 @@ distinction come from the behavior-docs method
   entry names zero backends, a targeted op against that capability MUST fail as a CLI-level error
   before any wire call is attempted.
 
-  A capability's registry entry naming more than one backend has two resolutions, amended by bead
-  pg2-2j5ac.28.1 for multi-backend targeted ops:
-  - **No `--backend` given** — the umbrella tries each registered backend in registration order,
-    stopping at the first answer that is not `not_found` (a targeted op's own multi-instance
-    resolution policy); it MUST NOT otherwise silently pick one of several registered backends
-    without exhausting this policy.
-  - **`--backend <binary>` given** — every Tier-1 verb (targeted, id-less, or `list`) accepts this
-    flag; when present, the umbrella resolves DIRECTLY to that one named backend — validated
-    against the capability's own registration, a CLI-level error if it names a backend not
-    registered for that capability — skipping the multi-instance resolution policy above entirely.
-    On an id-less write with no meaningful fan-out (e.g. `issue create`), `--backend` is how an
-    operator resolves an otherwise-ambiguous N > 1 registration explicitly, rather than the
-    umbrella guessing. On `list`, `--backend` pins the fan-out to exactly that one backend instead
-    of querying every registered backend of the type.
+  A capability's registry entry naming more than one backend resolves differently depending on
+  whether the op is **id-keyed** (`show`, `categorize`, `feedback_set`, `files`, `commits`,
+  `comment`, `transition`, `update`, `close`, `deps`, `get_logs`, `rerun_failed`, every `scm`
+  targeted verb) or an **id-less write** (`issue create` today, the only member) — a split fixed
+  by bead pg2-2j5ac.17.2's own operator ruling, deliberately narrow (see this rule's final
+  paragraph):
+  - **An id-keyed op, no `--backend` given** — the umbrella tries each registered backend in
+    registration order, stopping at the first answer that is not `not_found` (the multi-instance
+    resolution policy bead pg2-2j5ac.17.2 implements); it MUST NOT otherwise silently pick one of
+    several registered backends without exhausting this policy. Any non-`not_found` error
+    short-circuits immediately without trying the remaining backends; if every registered backend
+    answers `not_found`, that is the aggregate result.
+  - **An id-less write, no `--backend` given** — MUST hard-fail as a CLI-level error at N > 1,
+    exactly as it did before the multi-instance policy existed; the try-each policy above does
+    NOT extend to this case (bead pg2-2j5ac.17.2's own scope ruling: "the narrower question of
+    what `create` SHOULD eventually do at N > 1 with no `--backend` given is explicitly out of
+    scope," left for a separate bead).
+  - **`--backend <binary>` given (either kind), amended by bead pg2-2j5ac.28.1** — every Tier-1
+    verb (targeted, id-less, or `list`) accepts this flag; when present, the umbrella resolves
+    DIRECTLY to that one named backend — validated against the capability's own registration, a
+    CLI-level error if it names a backend not registered for that capability — skipping either
+    resolution above entirely. On an id-less write with no meaningful fan-out (e.g. `issue
+create`), `--backend` is how an operator resolves an otherwise-ambiguous N > 1 registration
+    explicitly, rather than the umbrella guessing or hard-failing. On `list`, `--backend` pins the
+    fan-out to exactly that one backend instead of querying every registered backend of the type.
 
-  Selecting among multiple simultaneously-registered same-capability backends for a targeted op
+  Selecting among multiple simultaneously-registered same-capability backends for an id-keyed op
   with NO `--backend` given and a first-tried non-`not_found` answer that is itself unhealthy
   (i.e., ranking/failover beyond "first non-`not_found` wins") is a future concern this set does
   not yet resolve.
+
+- **`INV-REG-3`** <!-- uuid: 5adff190-3848-4fdb-b02b-16f4c8f55591 --> — `attention.sources` and
+  `search.sources` MUST be flat, top-level, always-list-valued registry keys, independent of
+  `connector.<type>` (never nested under it, never sharing its own zero/single/list-valued
+  distinction per type). A backend name MAY be registered under one of these AND under a
+  `connector.<type>` entry at once, with no cross-check between the two — the same binary
+  answering more than one capability, extending `INV-REG-1`'s multi-capability-backend allowance
+  to these two keys. Neither key participates in `auth status`'s or `config validate`'s own
+  fan-out — both resolve their backend set from `AllBackends` (`connector.<type>` only) — so a
+  backend registered ONLY under `attention.sources`/`search.sources` reports its own health
+  solely through `attention list`'s/`search`'s own `sources[]` rows, never through `auth
+status`/`config validate`.
 
 ## CLI outcome reporting and exit codes
 
@@ -187,10 +211,10 @@ distinction come from the behavior-docs method
   and this scheme MUST NOT be built from, or confused with, `INTF-WIRE`'s plain `0`/`1`
   (`INV-WIRE-1`):
   - **Fan-out** (queries every backend registered for a type/capability — `ci list`,
-    `auth status`, `config validate`): `0` every queried backend succeeded (no
-    degraded/failed row); `2` degraded/partial (at least one backend succeeded and at least one
-    did not); `3` total failure (every backend failed, including the case of zero backends
-    registered — a misconfigured host has nothing to report as success).
+    `auth status`, `config validate`, `attention list`, `search`): `0` every queried backend
+    succeeded (no degraded/failed row); `2` degraded/partial (at least one backend succeeded and
+    at least one did not); `3` total failure (every backend failed, including the case of zero
+    backends registered — a misconfigured host has nothing to report as success).
   - **Targeted** (resolves to exactly one backend — `show`, `categorize`, `feedback-set`,
     `create`, `comment`, `transition`, `get_logs`, `rerun-failed`, `worktree add`/`remove`/`list`,
     `branch detect`): `0` the operation completed and produced a well-formed response (including
@@ -229,6 +253,27 @@ distinction come from the behavior-docs method
   MUST live in this JSON body, never as a stderr `WARNING:` line. `count` MUST be that backend's
   own raw, pre-merge item count, unaffected by any later cross-backend deduplication a fan-out's
   own merge stage performs.
+
+## Cross-cutting capability aggregation
+
+- **`INV-ATTN-1`** <!-- uuid: 5e51d13b-8f9e-4a7e-a882-462fdb16af7a --> — `attention list`'s
+  aggregation MUST dedup every queried source's raw `list_attention` items by `{type, id}` into
+  one merged item carrying a `via` list of every source that reported it — it MUST NOT simply
+  concatenate them (unlike `ci list`'s own "runs concatenate" fan-out). A dedup group's own
+  `summary`/`severity` MUST come from its most-severe contributing source (an absent/invalid
+  severity ranks as `medium` for this comparison only — it MUST NOT be written back as `medium`
+  on the wire); a tie at the same rank MUST be broken by `attention.sources` config order (the
+  earliest-configured source wins). The merged list MUST then be sorted by severity rank
+  descending, tiebroken by `via` length descending, tiebroken by the winning contributor's own
+  config order ascending (and, within that, by its own original item order). No cap applies by
+  default; an explicit `--cap N` truncates the already-merged/sorted list and MUST set
+  `truncated`/`total_before_cap` only when the cap actually cuts items.
+- **`INV-SEARCH-1`** <!-- uuid: a9fdaa89-5b51-4d5f-8a2b-3d72a36a0326 --> — `search`'s aggregation
+  MUST NOT merge or dedup across sources at all — unlike `attention list`'s `INV-ATTN-1`, each
+  queried source's own results stay grouped under that source, in that source's own returned
+  order, and groups themselves MUST be ordered by `search.sources` registration order, never
+  interleaved. `search` takes no type-filter argument: "the queried type(s)" is simply the union
+  of every type any registered source can return.
 
 ## Auth
 

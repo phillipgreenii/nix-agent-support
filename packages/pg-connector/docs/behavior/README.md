@@ -60,25 +60,39 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
 ## Scope (extent + floor)
 
 - **Extent (in)** — the registry (`connector.<type>`, list- or single-valued per type, plus the
-  per-backend `backends.<binary>` config block); the wire protocol (envelope, `protocolVersion`/
-  `schemaVersion` negotiation, the closed seven-value error taxonomy, the `capabilities`/
-  `auth_status` meta-ops, the optional `config` member and its statelessness rule, the optional
-  `AuthChecker` sub-interface); the operator CLI surface for the four landed capabilities (`pr`,
-  `issue`, `ci`, `scm`) plus `auth status`, `config validate`, and `config show`; the `pr`/`issue`
-  `list` op and its named-query resolution; the `--backend` targeted/fan-out pinning flag;
-  pg-connector's own CLI outcome reporting (`sources[]`, the fan-out and targeted exit-code
-  schemes); the `--output json|human` presentation mode; and the composition boundary between the
-  umbrella and its backends.
+  per-backend `backends.<binary>` config block); the two top-level, always-list-valued
+  `attention.sources`/`search.sources` registry keys and the cross-cutting `attention`/`search`
+  capabilities they back (`list_attention`/`search`, each capability's own aggregation rule, and
+  the `pg-connector attention list`/`pg-connector search` CLI verbs); the wire protocol (envelope,
+  `protocolVersion`/`schemaVersion` negotiation, the closed seven-value error taxonomy, the
+  `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule,
+  the optional `AuthChecker` sub-interface); the operator CLI surface for the four landed
+  entity-type capabilities (`pr`, `issue`, `ci`, `scm`) plus `auth status`, `config validate`, and
+  `config show`; the `pr`/`issue` `list` op and its named-query resolution; the `--backend`
+  targeted/fan-out pinning flag; the id-keyed-vs-id-less split in multi-instance targeted-op
+  resolution (an id-keyed op tries each registered backend in order, an id-less write hard-fails
+  at N > 1 with no pin); pg-connector's own CLI outcome reporting (`sources[]`, the fan-out and
+  targeted exit-code schemes); the `--output json|human` presentation mode; and the composition
+  boundary between the umbrella and its backends.
 - **Extent (out)** — everything the design document
   (`docs/superpowers/specs/2026-09-03-unified-connector-architecture-design.md`, recorded
-  durably by `ADR 0062`) describes but that has not yet landed in code as of this writing:
-  the `attention`/`search` cross-cutting capabilities, the Tier-1/Tier-2 dashboard and alert
-  convention, the deferred `Thread`/`Note` entity types, `pg-pr`'s actual retirement, and the
-  `df-categorize`/`df-feedback` pr-pool roles. A packet that builds any of these MUST extend this
-  set in the same change (`ADR 0062`'s own "Negative" consequence) rather than leaving intended
-  behavior undocumented a second time. Concrete backend implementations (which system a backend
-  talks to, and how) are also out — that is each backend's own concern, opaque to this set. The
-  `pg-pr` verb→destination MAP and its per-table SQLite dispositions are now documented in
+  durably by `ADR 0062`) describes but that has not yet landed in code as of this writing: the
+  Tier-1/Tier-2 dashboard and alert convention, and the deferred `Thread`/`Note` entity types. A
+  packet that builds either of these MUST extend this set in the same change (`ADR 0062`'s own
+  "Negative" consequence) rather than leaving intended behavior undocumented a second time.
+  Concrete backend implementations (which system a backend talks to, and how) are also out — that
+  is each backend's own concern, opaque to this set; this now includes the second `issue` backend
+  (Jira) and whatever concrete backend or standalone plugin eventually implements `attention`/
+  `search` — only the multi-instance targeted-op resolution POLICY those registrations exercise is
+  in scope, documented in [invariants](invariants.md)'s `INV-REG-2`, never a named backend as
+  anything but an illustrative example (this set's own Floor). Tier-3 consumer tooling built on
+  top of these verbs — `pg-desk`, a TUI, a pr-pool role — is out categorically regardless of
+  whether it has landed (see the [glossary](glossary.md)'s Tiers and roles):
+  `phillipg-nix-ziprecruiter`'s `df-attention`/`df-search` (pure clients of `attention list`/
+  `search`) and its `df-categorize`/`df-feedback` pr-pool roles (consumers of the pre-existing `pr
+categorize`/`feedback_set` ops) have both landed there, but stay out of this set for that
+  structural reason, not because they were unbuilt. The `pg-pr` verb→destination MAP and its
+  per-table SQLite dispositions are now documented in
   [pg-pr retirement](pg-pr-retirement.md) (Phase 5, `pg2-2j5ac.23`) — but `pg-pr`'s actual
   retirement code (any command-group cutover, SQLite disposition execution, or migration tooling)
   remains out of scope here until each destination ships.
@@ -91,10 +105,11 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
 This set's **realization-gap register** (method `INV-23`): intended behavior this set's
 implementation has not yet built, one row per gap.
 
-| Element      | Intended                                                                                                                                                                          | Where the implementation stands                                                                                                                                                                                                                                         | Tracked by                |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `INV-WIRE-1` | every interface ships a **conformance suite** an implementer can run before being trusted to route through it — the same discipline `pr-pool`'s `INTF-INTF-2` already applies     | `pkg/scriptout` has no schemas/goldens/conformance suite of its own; nothing structurally prevents a backend's own unit tests from passing against a fake shape no real backend implements                                                                              | not yet tracked by a bead |
-| `INV-COMP-1` | the composition-boundary rule (a Tier-2 backend MUST NOT exec `pg-connector` or a sibling backend) is a mechanically-checked regression guard, not only a manually-fixed instance | one violation (the CI backend's PR→branch lookup) was found and fixed by hand (`pg2-0vwcc`); no automated check (e.g. a grep for `exec.Command`/`os/exec` naming `pg-connector` or a sibling backend binary outside a backend's own tests) exists to catch a recurrence | not yet tracked by a bead |
+| Element      | Intended                                                                                                                                                                                                                                            | Where the implementation stands                                                                                                                                                                                                                                                                                        | Tracked by                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `INV-WIRE-1` | every interface ships a **conformance suite** an implementer can run before being trusted to route through it — the same discipline `pr-pool`'s `INTF-INTF-2` already applies                                                                       | `pkg/scriptout` has no schemas/goldens/conformance suite of its own; nothing structurally prevents a backend's own unit tests from passing against a fake shape no real backend implements                                                                                                                             | not yet tracked by a bead |
+| `INV-COMP-1` | the composition-boundary rule (a Tier-2 backend MUST NOT exec `pg-connector` or a sibling backend) is a mechanically-checked regression guard, not only a manually-fixed instance                                                                   | one violation (the CI backend's PR→branch lookup) was found and fixed by hand (`pg2-0vwcc`); no automated check (e.g. a grep for `exec.Command`/`os/exec` naming `pg-connector` or a sibling backend binary outside a backend's own tests) exists to catch a recurrence                                                | not yet tracked by a bead |
+| `INV-COMP-1` | a standalone `attention`/`search` plugin (the implementer kind [interfaces](interfaces.md)'s `attention`/`search` subsection names, alongside a capability's own Tier-2 backend) can compose `pg-connector`'s own verbs the way its design requires | no such plugin has landed yet, and the composition-boundary's own mechanical guard (`evaluateCompositionBoundary`, `dependency_direction_test.go`) as written flags ANY `pg-connector`-named binary executing `pg-connector`, standalone plugin or not — the exemption this implementer kind would need does not exist | not yet tracked by a bead |
 
 ## External references
 

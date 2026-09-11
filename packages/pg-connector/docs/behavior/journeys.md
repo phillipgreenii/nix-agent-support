@@ -41,6 +41,12 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   backend's own system — and get a clear, distinct signal (never a crash or an empty result) when
   I name a query no backend recognizes. _(→ `USECASE-NAMED-QUERY-CALL`; `INV-WIRE-3`,
   `INV-STATE-1`, `INV-ERR-3`.)_
+- **`STORY-OP-8`** <!-- uuid: 4fe4ecd0-7cca-49a3-b15e-9b9b20d78d5f --> — get one deduped,
+  severity-ranked view of everything needing my attention across every registered source, and
+  one search query answered across every registered source grouped by where each result came
+  from — both aggregated the same way regardless of how many sources are registered or which
+  entity types they cover, without learning any source's own query language. _(→
+  `USECASE-CROSSCUT-FANOUT-CALL`; `INV-REG-3`, `INV-ATTN-1`, `INV-SEARCH-1`.)_
 
 ## Journey
 
@@ -145,12 +151,13 @@ _Requires:_ `INV-REG-1`, `INV-REG-2`.
 **Flow.** The operator adds the backend's bare binary name under its capability's
 `connector.<type>` entry — appending to the list for `pr`/`issue`/`ci`, or setting the single
 value for `scm`. No `exec:` prefix or other built-in/external marker is written, because nothing
-is compiled into the umbrella (`INV-REG-1`). If the operator intends the backend to answer a
-**targeted** op (as opposed to only participating in a fan-out), the capability's registry entry
-MUST resolve to exactly this one backend when that targeted op is invoked (`INV-REG-2`) — for a
-list-valued capability that already has another backend registered, registering a second one
-makes every targeted op against that capability a CLI-level error until the operator narrows it
-back to one.
+is compiled into the umbrella (`INV-REG-1`). Registering a second backend for a capability that
+already has one does not, by itself, break every targeted op against it (`INV-REG-2`): an
+**id-keyed** targeted op (`show`, `categorize`, …) resolves via the try-each policy
+`USECASE-TARGETED-CALL` describes regardless of how many backends end up registered. Only an
+**id-less write** (`issue create` today, the one member) still requires either exactly one
+registered backend or an explicit `--backend` pin once a second is added — that op alone
+hard-fails at N > 1 with no pin.
 
 Extensions:
 
@@ -162,27 +169,38 @@ Extensions:
 
 **Actor:** `ACTOR-OP`.
 **Level:** user-goal.
-**Preconditions:** the target capability's registry entry resolves to exactly one backend
-(`USECASE-REGISTER-BACKEND`).
-**Intent:** call an op that resolves to one specific backend and get back a result or a
-definitive, correctly-coded negative — never a health problem misreported as one, or the reverse.
+**Preconditions:** the target capability's registry entry resolves to exactly one backend, or —
+for an **id-keyed** op — to more than one, resolved via the try-each policy below
+(`USECASE-REGISTER-BACKEND`, `INV-REG-2`).
+**Intent:** call an op that resolves to exactly one backend's own answer and get back a result or
+a definitive, correctly-coded negative — never a health problem misreported as one, or the
+reverse.
 _Requires:_ `INV-REG-2`, `INV-WIRE-1`, `INV-ERR-1`, `INV-ERR-2`, `INV-EXIT-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
-**Flow.** The umbrella resolves the capability's registered backend, dispatches one `INTF-WIRE`
-request, and classifies the reply into its own targeted exit code: `0` on a well-formed
-`result` (including a successful write); `4` when the reply's `error.code` is `not_found` — a
-well-formed negative answer, not a failure; `1` for any other error, or for a CLI-level failure
-before any well-formed response existed at all (no backend registered, an ambiguous
-multi-backend registration, a bad flag). The result is then rendered per the operator's chosen
-output mode (`USECASE-CHOOSE-OUTPUT`).
+**Flow.** The umbrella resolves the capability's registered backend(s). With exactly one
+registered, or an explicit `--backend` pin, it dispatches one `INTF-WIRE` request directly to
+that backend. With more than one registered and no pin: an **id-keyed** op (`show`,
+`categorize`, …) tries each in registration order, dispatching to the next only when the current
+one answers `not_found`, and short-circuiting immediately on any other outcome (`INV-REG-2`); an
+**id-less write** (`issue create` today) instead fails as a CLI-level error before any wire call
+is made at all — the try-each policy does not extend to it. Whichever path produced a reply, the
+umbrella classifies it into its own targeted exit code: `0` on a well-formed `result` (including
+a successful write); `4` when the reply's (or, on the try-each path, the aggregate) `error.code`
+is `not_found` — a well-formed negative answer, not a failure; `1` for any other error, or for a
+CLI-level failure before any well-formed response existed at all (no backend registered, an
+id-less write ambiguous at N > 1 with no pin, a bad flag). The result is then rendered per the
+operator's chosen output mode (`USECASE-CHOOSE-OUTPUT`).
 
 ```mermaid
 flowchart TD
-    call["operator invokes a targeted verb"] --> resolve{"exactly one backend registered? (INV-REG-2)"}
-    resolve -->|no| e1a["exit 1 - CLI-level failure, no wire call made"]
-    resolve -->|yes| dispatch["INTF-WIRE request to that backend"]
+    call["operator invokes a targeted verb"] --> n{"how many backends registered, or --backend pinned?"}
+    n -->|"zero"| e1a["exit 1 - CLI-level failure, no wire call made"]
+    n -->|"one, or --backend pins one"| dispatch["INTF-WIRE request to that backend"]
+    n -->|"N greater than 1, no pin, id-keyed op"| tryeach["try each in registration order, stop at first non-not_found (INV-REG-2)"]
+    n -->|"N greater than 1, no pin, id-less write"| e1c["exit 1 - CLI-level failure, no wire call made"]
     dispatch --> outcome{"reply?"}
+    tryeach --> outcome
     outcome -->|"result set"| e0["exit 0"]
     outcome -->|"error.code == not_found"| e4["exit 4 - well-formed negative (INV-ERR-2)"]
     outcome -->|"any other error.code"| e1b["exit 1"]
@@ -194,6 +212,10 @@ Extensions:
   identical to every other non-`not_found` error, since sharpening `invalid_argument` from
   `unavailable` is a wire-body precision, not a new CLI exit-code bucket (`INV-ERR-2`,
   `INV-EXIT-1`).
+- The op is an id-less write (`issue create`) and more than one backend is registered with no
+  `--backend` pin: the umbrella fails before any wire call at all, rather than trying each as the
+  id-keyed path above does — the multi-instance try-each policy is scoped to id-keyed ops only
+  (`INV-REG-2`).
 
 ### `USECASE-FANOUT-CALL` — invoke a fan-out op across every registered backend and read its outcome <!-- uuid: f325a8b7-c43f-4b97-839f-2e32871a68d7 -->
 
@@ -280,6 +302,48 @@ Extensions:
 - A `config.queries` value is a list of expressions: the backend runs each, unions the results
   deduplicated by id, and reports `truncated` if any one member's own search reported truncated
   (`INV-STATE-1`).
+
+### `USECASE-CROSSCUT-FANOUT-CALL` — invoke the attention or search fan-out and read its aggregated outcome <!-- uuid: 8794553a-233c-44b4-9480-851511311eab -->
+
+**Actor:** `ACTOR-OP`.
+**Level:** user-goal.
+**Preconditions:** none — like `USECASE-FANOUT-CALL`, MAY run against zero registered sources
+(reported as total failure, `INV-EXIT-1`).
+**Intent:** call `attention list` or `search <query>` — the two capabilities with no targeted
+form at all — and get back every registered source's own contribution, aggregated per that
+capability's own rule, plus the ordinary fan-out exit code.
+_Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-SEARCH-1`.
+_Includes:_ `USECASE-CHOOSE-OUTPUT`.
+
+**Flow.** The umbrella resolves the backend set from the capability's own top-level key
+(`attention.sources` or `search.sources`, never `connector.<type>` — `INV-REG-3`) and dispatches
+one `INTF-WIRE` request per registered source, building one `sources[]` row each exactly as
+`USECASE-FANOUT-CALL` does. It then aggregates the per-source raw items by that capability's own
+rule — `attention list` dedups by `{type, id}` and ranks by severity (`INV-ATTN-1`); `search`
+keeps every source's results in its own group, ordered by registration order, with no
+cross-source merge at all (`INV-SEARCH-1`) — and computes the SAME fan-out exit code
+`USECASE-FANOUT-CALL` does from the `sources[]` rows. Neither verb accepts `--backend` or
+attaches a `backends.<binary>` config block (unlike every `pr`/`issue`/`ci`/`scm` verb), and
+neither participates in `auth status`'s or `config validate`'s own fan-out. The aggregated
+result is then rendered per the operator's chosen output mode (`USECASE-CHOOSE-OUTPUT`).
+
+```mermaid
+flowchart TD
+    call["operator invokes attention list or search QUERY"] --> resolve["resolve sources from attention.sources or search.sources (INV-REG-3)"]
+    resolve --> loop["dispatch INTF-WIRE to each; build one sources[] row per source"]
+    loop --> agg{"which capability?"}
+    agg -->|"attention"| dedup["dedup by type+id, rank by severity (INV-ATTN-1)"]
+    agg -->|"search"| group["group by source, registration order, no merge (INV-SEARCH-1)"]
+    dedup --> exit["fan-out exit code 0/2/3 (INV-EXIT-1)"]
+    group --> exit
+```
+
+Extensions:
+
+- `attention list --cap N` truncates the already-merged/ranked list, setting `truncated`/
+  `total_before_cap` only when the cap actually cuts items — the fan-out exit code is unaffected.
+- `search --fields ...` requests specific result attributes; an unrecognized one produces a
+  `warnings[]` entry, never an error and never a `sources[]`-level failure.
 
 ### `USECASE-CHOOSE-OUTPUT` — choose the CLI's presentation mode <!-- uuid: 632b7e23-25c8-43e2-9572-65f3547023bd -->
 

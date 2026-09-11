@@ -16,13 +16,23 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   role, …); out of this set's scope (`## Scope`).
 - **Backend implementer** — the role of building a Tier-2 backend against a capability's Provider
   interface and the wire protocol; realized by `ACTOR-OP` acting in that capacity, mirroring the
-  method's own convention of not minting a second actor purely for a build-time role.
+  method's own convention of not minting a second actor purely for a build-time role. For the two
+  cross-cutting capabilities (`attention`, `search`) this role has a second shape: a **standalone
+  plugin** — a binary implementing nothing but `attention.Provider`/`search.Provider`, composing
+  `pg-connector`'s own other verbs instead of talking to an external system directly (see
+  "Cross-cutting capabilities" below).
 
 ## Capabilities and entity types
 
-- **Capability** (also **entity type**) — one of `pr`, `issue`, `ci`, `scm` in this set's extent.
-  An interface's name and method set MUST correspond to exactly one capability and MUST name no
-  backend/system (`INV-CAP-1`).
+- **Capability** — the general term: a single-purpose Go `Provider` interface plus its own
+  wire-op catalog. An interface's name and method set MUST correspond to exactly one capability
+  and MUST name no backend/system (`INV-CAP-1`). Six exist in this set's extent: the four
+  **entity types** below, plus the two cross-cutting capabilities `attention`/`search` (see
+  "Cross-cutting capabilities"), which are capabilities but NOT entity types — neither is tied to
+  one kind of external record.
+- **Entity type** — a capability tied to one kind of external record: one of `pr`, `issue`, `ci`,
+  `scm` in this set's extent. Every entity type is also a capability; `attention`/`search` are the
+  two capabilities that are not entity types.
 - **`pr`** — a pull/merge request: identity, review/feedback state, and two dedicated write fields
   (`category`, and each comment/review-thread entry's `disposition`).
 - **`issue`** — a tracked issue (Jira/beads/GitHub Issues, …): identity, state, and read+write ops
@@ -37,6 +47,36 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   comment/review-thread entry's current review-feedback state is drawn from, and the value the
   dedicated `feedback_set` op writes.
 
+## Cross-cutting capabilities
+
+- **Attention** — a cross-cutting, fan-out-only capability (no targeted form at all): "everything
+  that currently qualifies for attention," aggregated across every backend registered under
+  `attention.sources`. Unlike `pr`/`issue`/`ci`/`scm` it is not tied to one entity type — an
+  attention item's own `type` field names whatever kind of thing a source reports (a PR, an
+  issue, a CI run, …) — and it MAY be implemented either by a capability's own Tier-2 backend
+  alongside its normal ops, or by a dedicated standalone plugin implementing nothing else.
+- **Attention item** — the attention capability's shared wire shape: `{type, id, summary}` plus
+  an optional `severity`. Deliberately stateless — it MUST NOT gain any acknowledge/hide/unhide
+  field or method; resolving the underlying condition is how an item stops appearing, entirely
+  out-of-band from this capability.
+- **Severity** — the attention capability's closed four-value enum (`low` | `medium` | `high` |
+  `critical`), each with a canonical rank used only by `attention list`'s own merge/sort
+  (`INV-ATTN-1`) — never to default a source's own unopinionated (omitted) severity.
+- **Search** — the second cross-cutting, fan-out-only capability: "every result a query matches,"
+  reported per-source and never merged across sources (unlike attention's own dedup). Same two
+  implementer shapes as attention — a capability's own Tier-2 backend, or a dedicated standalone
+  plugin (`INV-SEARCH-1`).
+- **Search result** — the search capability's shared wire shape: the core `{type, id, title, url,
+source}` plus an optional `attributes` map carrying whatever type-declared or backend-declared
+  extension attribute a query's `fields` list requested and the returning backend chose to
+  populate. Carries no score/rank/relevance field under any name.
+- **`attention.sources` / `search.sources`** — the two top-level, always-list-valued registry
+  keys backing these capabilities, siblings of — never nested under — `connector.<type>`
+  (`INV-REG-3`). A backend name MAY be registered under one of these AND under a
+  `connector.<type>` entry at once (the same binary answering more than one capability); its
+  health under one registration is reported independently of the other, and neither key
+  participates in `auth status`'s or `config validate`'s own fan-out (`INV-REG-3`).
+
 ## Registry
 
 - **Registry** — the `connector.<type>` configuration the operator authors, resolved by the
@@ -47,10 +87,14 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   today, by design — it has no analogous multi-backend future).
 - **Targeted-op resolution** — resolving a targeted op to exactly one registered backend for its
   capability: the capability's registry entry names exactly one backend, or (with more than one)
-  the umbrella either tries each in registration order (stopping at the first non-`not_found`
-  answer) or resolves directly to the one the operator names via `--backend` (`INV-REG-2`).
-- **`--backend <binary>`** — the flag every `pr`/`issue`/`ci`/`scm` Tier-1 verb accepts to resolve
-  directly to one named, already-registered backend: on a targeted op it skips the try-each
+  the umbrella resolves directly to the one the operator names via `--backend`, or — for an
+  **id-keyed** op only (`show`, `categorize`, …) — tries each registered backend in registration
+  order, stopping at the first non-`not_found` answer. An **id-less write** (`issue create`
+  today) has no try-each fallback: with more than one registered backend and no `--backend`, it
+  hard-fails as a CLI-level error (`INV-REG-2`).
+- **`--backend <binary>`** — the flag every `pr`/`issue`/`ci`/`scm` Tier-1 verb accepts (`attention
+list`/`search` accept no such flag — see "Cross-cutting capabilities" above) to resolve directly
+  to one named, already-registered backend: on an id-keyed targeted op it skips the try-each
   policy above, on `list` it pins the fan-out to that one backend, and on an id-less write with no
   meaningful fan-out (`issue create`) it resolves an otherwise-ambiguous multi-backend
   registration explicitly (`INV-REG-2`).
