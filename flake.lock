@@ -556,11 +556,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789188769,
-        "narHash": "sha256-Jw+9GVIEbEIQRkg9l+3/VzBaYCIhyfu8wwbEQTfBpUM=",
+        "lastModified": 1789223552,
+        "narHash": "sha256-tvK84cH/eUOr6tdouOjxC7laY1613hBRZMrE3Tnz5kQ=",
         "owner": "phillipgreenii",
         "repo": "nix-overlay",
-        "rev": "705f22367218fba4235d8977830b131748225f2c",
+        "rev": "3fe95a13576179c95fb056c6291caafff9f86f21",
         "type": "github"
       },
       "original": {
