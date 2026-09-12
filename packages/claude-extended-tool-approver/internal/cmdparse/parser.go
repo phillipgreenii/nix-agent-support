@@ -1484,7 +1484,7 @@ func redirectClearance(redirs []hooktypes.Redirection) SubstitutionClearance {
 // substitution floor exactly as before.
 //
 // The exception: a write-direction redirect to a device
-// hookio.IsSafeRedirectTarget already vouches for (`/dev/null`,
+// hooktypes.IsSafeRedirectTarget already vouches for (`/dev/null`,
 // `/dev/stdout`, `/dev/stderr`, `/dev/tty`, `/dev/fd/<n>`) does not
 // disqualify here. `2>/dev/null` is not a hypothetical — it is PART OF the
 // bounded shape this bead's own acceptance criteria name explicitly
@@ -1492,7 +1492,7 @@ func redirectClearance(redirs []hooktypes.Redirection) SubstitutionClearance {
 // (tc-o1g9's comment thread) carries it: `wc -l < $SP/bdprof.tsv
 // 2>/dev/null || echo 0`, `stat -c %Y $S/race.log 2>/dev/null || echo 0`.
 // Discarding stderr to `/dev/null` writes nothing anywhere observable — it
-// is the same "captures nothing" reasoning hookio.IsSafeRedirectTarget's own
+// is the same "captures nothing" reasoning hooktypes.IsSafeRedirectTarget's own
 // doc states for its other two callers (the engine's redirection evaluator
 // and the gitdir rule's copy-out detector) — so refusing it here would
 // refuse the bead's own named target shape outright and defeat the widen
@@ -1505,10 +1505,10 @@ func redirectClearance(redirs []hooktypes.Redirection) SubstitutionClearance {
 // ALSO relax the plain sole-leaf floor (`$(stat -c %Y f 2>/dev/null)` alone,
 // no `||`), which is a real, separate, unmeasured widening this bead's
 // operator sign-off was never asked about.
-func redirectClearanceForBoundedFallback(redirs []hookio.Redirection) SubstitutionClearance {
+func redirectClearanceForBoundedFallback(redirs []hooktypes.Redirection) SubstitutionClearance {
 	clearance := SubstitutionCleared
 	for _, rd := range redirs {
-		if rd.Kind.IsWrite() && hookio.IsSafeRedirectTarget(rd.Path) {
+		if rd.Kind.IsWrite() && hooktypes.IsSafeRedirectTarget(rd.Path) {
 			continue
 		}
 		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
