@@ -45,7 +45,7 @@ resume step then won't find an earlier-claimed bead.)
 You are DONE only when a SUCCESSFUL query returns no agent-workable beads:
 
 ```bash
-bd ready --exclude-label human,refactor-campaign --json -n 10
+bd ready --exclude-label human,human-focus-required,refactor-campaign --json -n 10
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -196,7 +196,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
        content is stale and the session should be restarted fresh.
 
    ```bash
-   bd ready --claim --exclude-label human,refactor-campaign --exclude-type epic --actor "ID" --json
+   bd ready --claim --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --actor "ID" --json
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -210,7 +210,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
    `--monitor-if-empty`, in which case take the ARM path in "--monitor-if-empty"
    above instead of stopping. A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
-   (see "Optional scope arguments"); they never remove `--exclude-label human` (nor
+   (see "Optional scope arguments"); they never remove `--exclude-label human,human-focus-required` (nor
    its campaign counterpart in the CLAIM query above), the `--exclude-type epic`
    exclusion, or the deferred exclusion.
 
@@ -316,11 +316,11 @@ proceeding on currently loaded text (direct interactive invocation).`)
       itself for direct claim (`--exclude-type epic` again):
 
       ```bash
-      bd ready --parent <id> --exclude-type epic --exclude-label human,refactor-campaign --claim --actor "ID" --json
+      bd ready --parent <id> --exclude-type epic --exclude-label human,human-focus-required,refactor-campaign --claim --actor "ID" --json
       ```
 
       Apply the SAME label filters this session's own atomic CLAIM query
-      above uses (drain's `--exclude-label human,refactor-campaign`; a sibling
+      above uses (drain's `--exclude-label human,human-focus-required,refactor-campaign`; a sibling
       command sourcing work the same way, e.g. `/unblock-human-beads`,
       substitutes its own mirrored filters here instead — see the bead's
       DESIRED BEHAVIOR for the mapping).
@@ -828,7 +828,7 @@ further **restricts** the work it claims — e.g. an extra label, a
 priority, a parent/epic, a type, a specific bead id, or a one-bead /
 N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
 CLAIM query. Honor a specific bead id via the safe path: confirm the id
-appears in `bd ready --exclude-label human,refactor-campaign [scope] --json`
+appears in `bd ready --exclude-label human,human-focus-required,refactor-campaign [scope] --json`
 (ready, in-scope, not deferred, not `human`), then claim it with
 `bd update <id> --claim --actor "ID"` (`bd ready --claim` cannot target a
 chosen id — it claims the first filter match).
@@ -837,7 +837,7 @@ zr-refactor campaign beads carry their own protocol; excluded here by design (zr
 refactor spec §3).
 
 Arguments may only NARROW the query. They MUST NOT broaden scope and MUST
-NOT remove the safety filters — `--exclude-label human` (nor its campaign
+NOT remove the safety filters — `--exclude-label human,human-focus-required` (nor its campaign
 counterpart above), `--exclude-type epic`, and the default deferred-exclusion
 always remain. A `--type epic`
 argument would contradict the standing `--exclude-type epic` exclusion and
@@ -973,7 +973,7 @@ Open N Claude Code sessions, each with its working directory inside this
 pn-workspace, and run `/drain-beads` in each. Every session self-assigns a
 distinct actor id; the atomic `bd ready --claim` guarantees no two sessions ever
 get the same bead. Each session stops on its own when a successful
-`bd ready --exclude-label human,refactor-campaign -n 10` is empty (zr-refactor
+`bd ready --exclude-label human,human-focus-required,refactor-campaign -n 10` is empty (zr-refactor
 campaign beads carry their own protocol; excluded here by design (zr-refactor spec
 §3)). A parked (`human`-labeled) bead,
 or a stale-converted gate, stays out of the queue until a human reviews it. A bead
