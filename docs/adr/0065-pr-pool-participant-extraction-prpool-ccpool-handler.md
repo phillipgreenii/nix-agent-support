@@ -1,4 +1,4 @@
-# pr-pool: participant extraction into `packages/prpool-ccpool-handler` (Phase 5)
+# pg-router: participant extraction into `packages/pg-router-ccpool-handler` (Phase 5)
 
 **Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`)
 **Date**: 2026-09-10
@@ -9,7 +9,7 @@ command-executor open question (the Decision's "Open question resolved" section)
 ## Context
 
 `ADR 0061`'s Decision, "Participant model: full message-passing is the target; the in-process
-shortcut is register-held intent," records the operator's already-settled direction: pr-pool's documented
+shortcut is register-held intent," records the operator's already-settled direction: pg-router's documented
 participant architecture — every core→participant interaction as a message carrying a per-call
 tracking id, an inline-or-deferred reply, and a callback for a deferred ack (`INV-INTF-1`,
 `INTF-HANDLER`, `INTF-SOURCE`) — **is the intended target, not a description to relax to match the
@@ -30,9 +30,9 @@ end-to-end for a `command` role (`executor.ErrBusy` → `eventqueue.DeclineBusy`
 (`internal/core/ingest.go`, `internal/emit/socket.go`); `INV-LIFE-2`'s gate mechanism and Phase 3's
 socket verbs are in; the `sessions`/`reconcile` subcommands' realization-gap rows are already
 annotated "register-held: deployment-coupled, moves out at extraction"
-(`packages/pr-pool/docs/decisions/cli.md`'s `DEC-CLI-2`). None of this crossed a wire — every call
+(`packages/pg-router/docs/decisions/cli.md`'s `DEC-CLI-2`). None of this crossed a wire — every call
 listed above is still a same-process Go call. The realization-gap register
-(`packages/pr-pool/docs/behavior/README.md`) currently holds eleven rows whose "Where the
+(`packages/pg-router/docs/behavior/README.md`) currently holds eleven rows whose "Where the
 implementation stands" column names exactly this gap from eleven different angles (see this ADR's
 "Register" section's table for the full list with bead ids).
 
@@ -44,8 +44,8 @@ in-core as a generic backing-command path, or does it move out with everything e
 Decision's "Open question resolved" section.)
 
 **The state to extract, concretely.** The move-list packages, read for this ADR
-(`packages/pr-pool/internal/{ccpool,watchdog,budget,prompt,complete,beads,prpoolacl}`,
-`internal/roles/builtin.go`, `internal/query/beads.go`, `cmd/pr-pool/{sessions_cmd,reconcile_cmd}.go`):
+(`packages/pg-router/internal/{ccpool,watchdog,budget,prompt,complete,beads,pgrouteracl}`,
+`internal/roles/builtin.go`, `internal/query/beads.go`, `cmd/pg-router/{sessions_cmd,reconcile_cmd}.go`):
 
 - `internal/roles.Role` carries `Type string // "ccpool" | "command"` and a matching config block
   (`CCPoolConfig` / `CommandConfig`); `internal/executor.For(roleType)` selects
@@ -58,7 +58,7 @@ Decision's "Open question resolved" section.)
   `Deps.commander()`, mapping exit `9` to `ErrBusy`. It has no `ccpool`/`beads`/`watchdog`
   coupling of its own — it is pass-through in exactly the sense this set's README's boundary
   principle already blesses ("a `command` handler's argv... looks like another application's
-  configuration living inside pr-pool's, but pr-pool invokes it and never reads it, so it is a
+  configuration living inside pg-router's, but pg-router invokes it and never reads it, so it is a
   pass-through and belongs"). Its only compiled-in coupling to a package this contract moves is
   `internal/prompt` (argv-template rendering).
 - `internal/config.Config.PermissionMode` is validated against `validPermissionModes`
@@ -70,11 +70,11 @@ Decision's "Open question resolved" section.)
   `item.Item` fields under `payload["item"]` and write `payload["source"]` — the core-side bridge
   reading and naming payload paths no binding declares (`GOAL-MIN-1`'s payload-opacity row, bead
   `pg2-4t5ey`).
-- `internal/complete` (`DoneSignal`/`OnFailure`) is pr-pool's own work-outcome policy —
+- `internal/complete` (`DoneSignal`/`OnFailure`) is pg-router's own work-outcome policy —
   `created`/`closed`/`handed-back` — consulted from `orchestrator.go`'s `buildResult`
   (`INV-WORKFLOW-1`'s row, bead `pg2-ctqo2`): the core computing **work** outcomes where the
   invariant scopes it to **delivery** outcomes.
-- `cmd/pr-pool/drain.go`'s `precheck`/`precheckPrefix`/`resolveSelf` run three tool-naming/
+- `cmd/pg-router/drain.go`'s `precheck`/`precheckPrefix`/`resolveSelf` run three tool-naming/
   connectivity checks (`bd` unreachable, beads-prefix mismatch, `pg-pr config show` self-login)
   ahead of `INV-WORKFLOW-1`'s closed six-check pre-flight set, outside it (register row R14, bead
   `pg2-d4gvb`).
@@ -82,16 +82,16 @@ Decision's "Open question resolved" section.)
   or callback, and `internal/roles/builtin.go` pairs a beads-backed built-in query set with the
   built-in role set so a config-less deployment still runs (register rows R2/`pg2-nr1xm` and
   `USECASE-CREATE-SOURCE`/`pg2-u7rzl`).
-- `cmd/pr-pool/sessions_cmd.go` opens ccpool's own on-disk session-metadata store directly;
-  `cmd/pr-pool/reconcile_cmd.go` reports stranded self-owned feedback cycles and runs the pg-pr
-  ACL (`internal/prpoolacl`) — both deployment-coupled subcommands the realization-gap register
+- `cmd/pg-router/sessions_cmd.go` opens ccpool's own on-disk session-metadata store directly;
+  `cmd/pg-router/reconcile_cmd.go` reports stranded self-owned feedback cycles and runs the pg-pr
+  ACL (`internal/pgrouteracl`) — both deployment-coupled subcommands the realization-gap register
   already flags as moving out (the pre-existing `GOAL-MIN-1` "Scope (extent out)" row, bead
   `pg2-ynhr.5` / `pg2-ynhr`, and `INTF-CLI`'s `--json`-coverage row R17, bead `pg2-t5j54`, whose
   residual is narrowed to exactly these two subcommands).
 
 Separately, an **operator ruling superseded** the docket's own originally-planned deprecation
 shim for these two subcommands (Phillip Green II, 2026-09-02, recorded in docket `pg2-84o3m`'s
-design, Addendum after "Phase gating"; docket now at `pd_rev=2`): pr-pool has no live consumers, so
+design, Addendum after "Phase gating"; docket now at `pd_rev=2`): pg-router has no live consumers, so
 `sessions`/`reconcile` are **deleted outright** in the same change that lands the extraction — no
 exit-2 diagnostic stub, no stderr discriminator line, no one-release grace period, no
 `MIGRATION.md` entry for this specific removal. A caller still invoking either name gets the
@@ -100,40 +100,40 @@ binary has never had.
 
 ## Decision
 
-### 1. New module: `packages/prpool-ccpool-handler`
+### 1. New module: `packages/pg-router-ccpool-handler`
 
-A new Go module, sibling to `packages/pr-pool`, owns every concrete participant implementation
+A new Go module, sibling to `packages/pg-router`, owns every concrete participant implementation
 this ADR moves. It:
 
-- imports `packages/pr-pool`'s interfaces (the wire schemas and `conformance` package) rather than
-  the reverse — pr-pool's own module MUST NOT import this module, which is what makes the core
+- imports `packages/pg-router`'s interfaces (the wire schemas and `conformance` package) rather than
+  the reverse — pg-router's own module MUST NOT import this module, which is what makes the core
   generic again;
-- carries its **own** behavior-docs set (`packages/prpool-ccpool-handler/docs/behavior/`),
+- carries its **own** behavior-docs set (`packages/pg-router-ccpool-handler/docs/behavior/`),
   because it is now itself an implementer of `INTF-HANDLER`/`INTF-SOURCE` and the concrete
   participant behavior it realizes (ccpool session lifecycle, watchdog/budget policy, beads
   read/write) is exactly the kind of "downstream deployment set" content this set's own
-  `## Scope`'s "Extent (out)" already excludes from `packages/pr-pool/docs/behavior/`;
+  `## Scope`'s "Extent (out)" already excludes from `packages/pg-router/docs/behavior/`;
 - carries its **own** `gomod2nix.toml`, `flake.nix` package + check attributes, and (per the
   repo's package-versioning convention) its own per-source-digest `--version`;
-- carries its **own** `prpool-ccpool-handler-go-tests` check with its **own** coverage-thresholds
+- carries its **own** `pg-router-ccpool-handler-go-tests` check with its **own** coverage-thresholds
   file and gate. This module's thresholds are **never** added to
-  `packages/pr-pool/tests/coverage-thresholds.txt` — the module boundary is also the coverage-gate
+  `packages/pg-router/tests/coverage-thresholds.txt` — the module boundary is also the coverage-gate
   boundary, so a change on one side never silently moves the other side's ratchet.
 
 ### 2. Move list
 
-The following packages and subcommands move from `packages/pr-pool` into
-`packages/prpool-ccpool-handler`, verbatim per the docket's fixed contract:
+The following packages and subcommands move from `packages/pg-router` into
+`packages/pg-router-ccpool-handler`, verbatim per the docket's fixed contract:
 
 `internal/ccpool` (the executor), `internal/watchdog`, `internal/budget`, `internal/prompt`,
-`internal/complete`, `internal/beads` (the beads client), `internal/prpoolacl`, the built-in
+`internal/complete`, `internal/beads` (the beads client), `internal/pgrouteracl`, the built-in
 beads-shaped roles and query set (`internal/roles/builtin.go`'s beads defaults and
 `internal/query/beads.go`), and the `sessions`/`reconcile` subcommands' **logic**
-(`cmd/pr-pool/sessions_cmd.go`, `cmd/pr-pool/reconcile_cmd.go`, `internal/reconcile`) — though per
+(`cmd/pg-router/sessions_cmd.go`, `cmd/pg-router/reconcile_cmd.go`, `internal/reconcile`) — though per
 the superseding operator ruling above, that logic moves as a **deleted** capability, not a ported
 one: nothing in the new module is obligated to reimplement `sessions`/`reconcile`'s behavior,
 because no live consumer needs it. What actually moves for this pair is the ccpool
-session-metadata read path (`sessionmeta`) and the pg-pr ACL (`internal/prpoolacl`) themselves,
+session-metadata read path (`sessionmeta`) and the pg-pr ACL (`internal/pgrouteracl`) themselves,
 insofar as anything downstream of the extraction still wants to build a replacement source/role on
 top of them (`push-inject`, not a subcommand) — the docket's design already named that shape and
 this ADR does not narrow it further.
@@ -166,12 +166,12 @@ it would mean Phase 5 completes the message-passing target for `ccpool` roles on
 
 **R15 / Floor consequences of each branch:**
 
-|                                                                     | Keep `command` in-core (rejected)                                                                                                                                                                                                                                                                                                                           | Move `command` out too (decided)                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **R15** (`GOAL-MIN-1` minimality, "core never distinguishes kinds") | **Not resolved.** The core retains exactly one hardcoded, zero-registration participant kind and one bit of kind-branching in `executor.For`; `roles.Role` cannot fully drop `Type`, and this ADR would have to narrow the fixed contract's own "loses the Type enum" bullet to "loses it except for `command`."                                            | **Fully resolved.** The core has exactly one handler-dispatch path (`handler.dispatch`) for every role regardless of kind; adding a third, fourth, ... handler kind is pure configuration plus a downstream handler-side capability, never a core change.                                                                                                                                                                                                   |
-| **R16** (Floor, "names no concrete tool")                           | Unaffected either way on this specific row: `commandExecutor` never names a concrete tool today (it execs whatever argv the operator configures) — its cost is on the minimality axis (R15), not the tool-naming axis.                                                                                                                                      | Same — moving it doesn't change what R16 already measured elsewhere (`bd`/`pg-pr`/`ccpool`/`claude` names in config/help text), which this ADR's other moves (beads client, `PermissionMode`, `AllowedTools` defaults) already close.                                                                                                                                                                                                                       |
-| **Coupling cost**                                                   | `commandExecutor` calls `internal/prompt` for argv templating; `prompt` is on the move list. Keeping `command` in-core while moving `prompt` forces either a forked/duplicated templating helper in-core, or `packages/pr-pool` importing `packages/prpool-ccpool-handler` back — inverting the one-way import direction the "New module" section requires. | No such inversion: `prompt` moves wholesale with the role kind that uses it; the core needs no template-rendering capability of its own at all.                                                                                                                                                                                                                                                                                                             |
-| **Operational cost**                                                | None beyond today: a trivial pass-through role (e.g. a health-probe `command` role) needs no separate handler process running.                                                                                                                                                                                                                              | A deployment's simplest role now needs the handler module registered and reachable, even for a one-line `argv` — new standing process surface where there was none. This is the real price of the decision, and it is exactly what the pinned acceptance test "perf baselines re-measured (no daemon regression)" and the `MIGRATION.md` "hard `INV-WORKFLOW-1` check-5 startup failure" note (the "Operator surface" section) exist to catch and disclose. |
+|                                                                     | Keep `command` in-core (rejected)                                                                                                                                                                                                                                                                                                                                | Move `command` out too (decided)                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R15** (`GOAL-MIN-1` minimality, "core never distinguishes kinds") | **Not resolved.** The core retains exactly one hardcoded, zero-registration participant kind and one bit of kind-branching in `executor.For`; `roles.Role` cannot fully drop `Type`, and this ADR would have to narrow the fixed contract's own "loses the Type enum" bullet to "loses it except for `command`."                                                 | **Fully resolved.** The core has exactly one handler-dispatch path (`handler.dispatch`) for every role regardless of kind; adding a third, fourth, ... handler kind is pure configuration plus a downstream handler-side capability, never a core change.                                                                                                                                                                                                   |
+| **R16** (Floor, "names no concrete tool")                           | Unaffected either way on this specific row: `commandExecutor` never names a concrete tool today (it execs whatever argv the operator configures) — its cost is on the minimality axis (R15), not the tool-naming axis.                                                                                                                                           | Same — moving it doesn't change what R16 already measured elsewhere (`bd`/`pg-pr`/`ccpool`/`claude` names in config/help text), which this ADR's other moves (beads client, `PermissionMode`, `AllowedTools` defaults) already close.                                                                                                                                                                                                                       |
+| **Coupling cost**                                                   | `commandExecutor` calls `internal/prompt` for argv templating; `prompt` is on the move list. Keeping `command` in-core while moving `prompt` forces either a forked/duplicated templating helper in-core, or `packages/pg-router` importing `packages/pg-router-ccpool-handler` back — inverting the one-way import direction the "New module" section requires. | No such inversion: `prompt` moves wholesale with the role kind that uses it; the core needs no template-rendering capability of its own at all.                                                                                                                                                                                                                                                                                                             |
+| **Operational cost**                                                | None beyond today: a trivial pass-through role (e.g. a health-probe `command` role) needs no separate handler process running.                                                                                                                                                                                                                                   | A deployment's simplest role now needs the handler module registered and reachable, even for a one-line `argv` — new standing process surface where there was none. This is the real price of the decision, and it is exactly what the pinned acceptance test "perf baselines re-measured (no daemon regression)" and the `MIGRATION.md` "hard `INV-WORKFLOW-1` check-5 startup failure" note (the "Operator surface" section) exist to catch and disclose. |
 
 The extracted module keeps supporting a `command`-shaped role internally (its own role model MAY
 still distinguish "run ccpool" from "run this argv" — that distinction is now the **handler's**
@@ -219,13 +219,13 @@ replaced by a query that crosses to a registered source participant exactly as `
 crosses to a handler. The built-in beads-backed query set (`internal/query/beads.go`,
 `internal/roles/builtin.go`'s built-in defaults) moves out with it: **the core ships with no
 built-in role or query set once this lands.** A deployment relying on zero-config defaults today
-(no `.pr-pool/config.toml`, "using built-in roles" in the log) MUST author real configuration and
+(no `.pg-router/config.toml`, "using built-in roles" in the log) MUST author real configuration and
 run the handler module after this change — recorded as a `MIGRATION.md` consequence in the
 "Operator surface" section, not softened here.
 
 The three R14 tool-naming/connectivity startup blockers (`bd` unreachable, beads-prefix mismatch,
 `pg-pr` self-login) move to the handler/deployment layer with the beads client that backs them —
-after the move, `cmd/pr-pool/drain.go`'s own pre-flight returns to exactly `INV-WORKFLOW-1`'s
+after the move, `cmd/pg-router/drain.go`'s own pre-flight returns to exactly `INV-WORKFLOW-1`'s
 closed six-check set, closing register row R14 (`pg2-d4gvb`) by removing the extra checks rather
 than documenting them.
 
@@ -242,13 +242,13 @@ into concrete test names and mechanisms:
 - Perf baselines are re-measured; the extraction introduces a real wire hop where there was an
   in-process call, and this obligation exists precisely to catch a daemon regression from that,
   not to rubber-stamp it.
-- An inter-conformance pass runs over the new module ↔ `pr-pool` seam (the
+- An inter-conformance pass runs over the new module ↔ `pg-router` seam (the
   `behavior-docs-inter-conformance` skill's mode, checking the two sets agree at the boundary each
   now separately documents).
 
 ### 8. Operator surface
 
-- `packages/pr-pool/MIGRATION.md` gains an entry for: the new package and the module split itself;
+- `packages/pg-router/MIGRATION.md` gains an entry for: the new package and the module split itself;
   that the handler binary must now be on `PATH` and running/registered — an unmigrated upgrade (old
   config, no handler module deployed) is a **hard `INV-WORKFLOW-1` check-5 startup failure**, not a
   degraded-but-working state, because the core now has no built-in role/query set to fall back to
@@ -256,12 +256,12 @@ into concrete test names and mechanisms:
   moved subcommands (`sessions`/`reconcile` are **removed**, not moved — no migration path is owed
   for them per the superseding ruling, the "No deprecation shim for `sessions`/`reconcile`"
   section).
-- `home/programs/pr-pool` and `darwin/modules/pr-pool` are updated for the split; the new module
-  gets its own home-manager capability (`home/programs/prpool-ccpool-handler/`) and a
-  systemd(user)/LaunchAgent unit that registers with a running `pr-pool` core, mirroring the
-  existing `periodicDrain`/`daemon` pattern in `home/programs/pr-pool/default.nix` and its
-  `darwin/modules/pr-pool` LaunchAgent mirror.
-- The downstream deployment set (`your-private-flake · modules/zm/pr-pool`) is **flagged**, not
+- `home/programs/pg-router` and `darwin/modules/pg-router` are updated for the split; the new module
+  gets its own home-manager capability (`home/programs/pg-router-ccpool-handler/`) and a
+  systemd(user)/LaunchAgent unit that registers with a running `pg-router` core, mirroring the
+  existing `periodicDrain`/`daemon` pattern in `home/programs/pg-router/default.nix` and its
+  `darwin/modules/pg-router` LaunchAgent mirror.
+- The downstream deployment set (`your-private-flake · modules/zm/pg-router`) is **flagged**, not
   migrated by this ADR or this docket — it is out of this repo and out of this ADR's authority; the
   derived plan's operator-surface task records the flag as a note to raise with that deployment,
   not a build item here.
@@ -284,7 +284,7 @@ Delete, in the same change that lands the extraction:
 | `INV-EVT-2` duplicate-absorption                          | `pg2-v0hhx`               | **Requires real build work, not relocation alone** — see note below.                                                                                                                                                                                                                                                                                                                                                                                   |
 | `GOAL-MIN-1` "Scope (extent out)" — `reconcile`           | `pg2-ynhr.5` / `pg2-ynhr` | The intended sync-as-a-source-or-role behind `push-inject` is **obsoleted**, not built: no live consumer needs it, so the row closes because the need it named no longer exists (the "No deprecation shim for `sessions`/`reconcile`" section), not because Phase 5 built the thing it described. This closure is recorded as obsoleted-not-realized in the plan's register-update task, so a later reader does not mistake it for delivered behavior. |
 
-Floor is re-checked as part of closing R16: after the "Move list" and "Wire contract" sections' moves, `packages/pr-pool`'s own contract
+Floor is re-checked as part of closing R16: after the "Move list" and "Wire contract" sections' moves, `packages/pg-router`'s own contract
 surface (`--help`, config validation, built-in defaults) MUST name no concrete tool at all before
 this row is deleted, not merely fewer tools than before.
 
@@ -303,7 +303,7 @@ without that logic would misrecord an unrealized gap as closed.
 
 ### Positive
 
-- The generic binary (`packages/pr-pool`) becomes what its own behavior docs already describe: a
+- The generic binary (`packages/pg-router`) becomes what its own behavior docs already describe: a
   dispatcher that knows events, bindings, participants, handler sessions, and wiring, and nothing
   about `bd`, `ccpool`, `claude`, or any other concrete tool. Ten of the eleven register rows this
   ADR-and-plan pair close were already-recorded, already-triaged intent; this is exactly what the
@@ -311,7 +311,7 @@ without that logic would misrecord an unrealized gap as closed.
 - `roles.Role` losing `Type` outright (not narrowed) removes the single biggest structural reason
   adding a new handler kind has ever required a core change.
 - The module boundary's own coverage gate (the "New module" section) means the new module's test debt can never silently
-  borrow against `pr-pool`'s own ratchet, and vice versa.
+  borrow against `pg-router`'s own ratchet, and vice versa.
 
 ### Negative
 
@@ -353,7 +353,7 @@ consumer appears later, the shape this ADR's Context describes (a source or role
 
 Considered, given the "Open question resolved" section's outcome makes the module host two
 genuinely different role kinds internally. Rejected for this pass: the docket's fixed contract pins
-the module's name and existence (`packages/prpool-ccpool-handler`) as the minimum this ADR must
+the module's name and existence (`packages/pg-router-ccpool-handler`) as the minimum this ADR must
 realize, and splitting it further is additional structure the fixed contract does not ask for and
 the OQ's resolution does not require — the module's own internal role model (the "Open question
 resolved" section's closing paragraph) can hold both
@@ -382,9 +382,53 @@ trade-off are both approved as written. The derived Phase 5 plan below may now b
 - The command-executor open question (the "Open question resolved" section) is filed and resolved
   as bead `pg2-mbm5i`.
 - Design spec:
-  `docs/superpowers/specs/2026-08-29-pr-pool-impl-conformance-delta.md` (Theme A/B for the
+  `docs/superpowers/specs/2026-08-29-pg-router-impl-conformance-delta.md` (Theme A/B for the
   participant-interface and minimality findings this ADR closes; that report's own "Register
   reconciliation and human decisions" section, "Decisions only a human can make" item 3, already
   answered by `ADR 0061`, which this ADR builds on).
-- Realization-gap register: `packages/pr-pool/docs/behavior/README.md`'s "Realization gaps"
+- Realization-gap register: `packages/pg-router/docs/behavior/README.md`'s "Realization gaps"
   section, this ADR's own "Register" section's table.
+
+## Addendum (2026-09-11): rename, and Task 5.2/5.3 fold
+
+Two clarifications recorded by the operator via `/unblock-human-beads`, on docket `pg2-oju6w`'s
+Task 5.2 packet (bead `pg2-oju6w.2`), after this ADR's original text (above, now updated in place
+for the general `pr-pool` -> `pg-router` rename, `pg2-myc6y`) was drafted:
+
+1. **The new module is named `packages/pg-router-ccpool-handler`, not
+   `packages/prpool-ccpool-handler`.** The module was scaffolded (Task 5.1, commit `216ba3f1`) just
+   before the `pr-pool` -> `pg-router` rename landed (`pg2-myc6y`, commit `2b055b4c`) and was never
+   caught by that sweep. Renaming it alone does not resolve clarification 2 below — it remains a
+   separate top-level Go module either way, so the two clarifications are independent, not
+   causally linked.
+2. **Task 5.3 folds into Task 5.2.** This ADR's own Decision, as originally drafted, implied Task
+   5.2 could land the move while **preserving** the old in-process
+   `Dispatch(ctx, discover.DispatchContext, Deps) (report.Result, error)` signature, with Task 5.3
+   replacing it with the wire-facing entrypoint afterward. That intermediate state is
+   **unbuildable**: Go's internal-package visibility rule is a pure import-path-prefix check, so
+   the new module — under either name — can never import `packages/pg-router/internal/*`
+   regardless of how it's spelled, and 8 of the moved packages need 10 of `packages/pg-router`'s
+   other `internal/*` packages (`config`, `discover`, `eventlog`, `gitenv`, `item`, `query`,
+   `report`, `roles`, `usage`, `worktree`) in production code if the old signature is kept.
+   Confirmed empirically (a minimal probe file, and the actual `git mv` + import-rewrite) by the
+   drain session that first hit it. Task 5.2 therefore now ALSO builds the real wire-facing
+   entrypoint that was Task 5.3's scope (register/self-status/dispatch/query per `DEC-WIRE-2`,
+   branching internally on the `ccpool`/`command` role kind, replying inline or deferred) — the
+   moved code becomes wire-driven directly, never an in-process caller of
+   `discover.DispatchContext`/`report.Result`, matching this ADR's own end-state (handlers as
+   separate wire-connected processes) rather than creating a throwaway intermediate one. The
+   rejected alternative — promoting the 10 shared packages out of `packages/pg-router`'s
+   `internal/` — would work but only to support a signature Task 5.3 was always going to replace,
+   and contradicts this ADR's own "New module" section (the new module imports `packages/pg-router`'s
+   interfaces, never the reverse, and never `packages/pg-router`'s `internal/*`).
+
+Consequently: `pg2-oju6w.3` closed as merged into `pg2-oju6w.2`; `pg2-oju6w.4` ("Core-side wire
+client; `roles.Role` loses `Type`") re-wired to depend on `pg2-oju6w.2` directly. The move-list
+packages that need one of the ten now-unreachable `internal/*` packages get a small,
+purpose-built local replacement inside `packages/pg-router-ccpool-handler` instead (e.g. a local
+`item.Item`/`ItemFromPayload`-equivalent decoded from the wire's opaque `event.payload`, per Task
+5.6's own "same field names, different side" framing) — this ADR's "Move list" and "Wire contract"
+sections describe the packages that move; they do not enumerate the narrow local seam types the
+wire-driven rewrite needs in their place, which is an implementation detail below this ADR's own
+level, same as the socket's concrete framing (this ADR's Context, `DEC-WIRE-2`'s "Not decided
+here").

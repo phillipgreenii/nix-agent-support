@@ -1,0 +1,30 @@
+# Per-package STATEMENT-coverage thresholds enforced by the
+# `pg-router-ccpool-handler-go-tests` flake check, mirroring
+# packages/pg-router/tests/coverage-gate.sh's own enforcer (same script,
+# copied verbatim — see this module's tests/coverage-gate.sh). Format:
+#
+#   <package-import-suffix> <min-statement-percent>
+#
+# A rule matches the package whose import path equals the suffix or ends with
+# "/<suffix>". A gated package ABSENT from the profile FAILS the gate (so a
+# renamed/removed package cannot silently pass its bar). `#` comments and blank
+# lines are ignored.
+#
+# Per the repo's module-boundary-is-also-the-coverage-gate-boundary rule
+# (docs/adr/0065's "New module" section; repo CLAUDE.md path-rule
+# package-versioning.md): these bars are activated FRESH here, since none of
+# the seven moved packages carried an existing packages/pg-router-side bar as
+# of this move (verified — packages/pg-router/tests/coverage-thresholds.txt
+# has no line for any of them) — there is nothing to carry forward or delete
+# on that side. Values are the measured statement coverage at move time
+# (docket pg2-oju6w Task 5.2/5.3, folded per the operator's 2026-09-11
+# decision), rounded down to the nearest 5 for a small ratchet margin.
+
+# --- active rules ---
+internal/ccpool 90
+internal/watchdog 80
+internal/budget 85
+internal/prompt 95
+internal/complete 95
+internal/beads 70
+internal/pgrouteracl 70

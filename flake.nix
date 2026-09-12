@@ -210,14 +210,17 @@
             # ambient runtime PATH dep (agent-support is standalone/no-external-flake-deps
             # so final.pn does not resolve). See packages/pb/default.nix + ADR 0018.
           };
-          # prpool-ccpool-handler: pg-router's sibling module realizing
+          # pg-router-ccpool-handler: pg-router's sibling module realizing
           # INTF-HANDLER/INTF-SOURCE for the ccpool-backed and command-backed
           # participant kinds (`phillipgreenii-nix-agent-support` ADR 0065's
-          # "New module" decision, docket pg2-oju6w Task 5.1). Currently an
-          # empty, buildable shell — no participant code has moved in yet
-          # (Task 5.2 onward); see packages/prpool-ccpool-handler/doc.go and
-          # its docs/behavior/README.md Realization gaps.
-          prpool-ccpool-handler = final.callPackage ./packages/prpool-ccpool-handler {
+          # "New module" decision, docket pg2-oju6w Task 5.1). Renamed from
+          # prpool-ccpool-handler (scaffolded just before the pr-pool ->
+          # pg-router rename landed, pg2-myc6y) by the operator's 2026-09-11
+          # decision recorded on the Task 5.2 packet; now carries every moved
+          # participant implementation plus its own wire-facing CLI entrypoint
+          # (Task 5.2/5.3, folded together — see packages/pg-router-ccpool-handler/doc.go
+          # and its docs/behavior/README.md Realization gaps).
+          pg-router-ccpool-handler = final.callPackage ./packages/pg-router-ccpool-handler {
             inherit (goBuilders) mkGoApp;
           };
           pa-monitor = final.callPackage ./packages/pa-monitor {
@@ -1365,25 +1368,49 @@
                 testDeps = [ pkgs.git ];
               };
 
-              # prpool-ccpool-handler — pg-router's sibling module (docket
-              # pg2-oju6w Task 5.1). Pattern-B local `replace => ../pg-router`,
-              # same shape as ccpool-go-tests above, so root the fileset at
-              # packages/ and pass modRoot. Currently an empty, buildable
-              # shell — no participant code has moved in yet, so no testDeps
-              # are needed (its one blank import, packages/pg-router/schemas,
-              # shells out to nothing).
-              prpool-ccpool-handler-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "prpool-ccpool-handler-go-tests";
-                src = lib.fileset.toSource {
-                  root = ./packages;
-                  fileset = lib.fileset.unions [
-                    ./packages/prpool-ccpool-handler
-                    ./packages/pg-router
+              # pg-router-ccpool-handler — pg-router's sibling module (docket
+              # pg2-oju6w Task 5.1, renamed from prpool-ccpool-handler by the
+              # operator's 2026-09-11 decision on the Task 5.2 packet).
+              # Pattern-B local `replace => ../pg-router`/`../ccpool`/
+              # `../claude-transcript`, same shape as ccpool-go-tests above
+              # (docs excluded, same rationale as pg-router-go-tests below),
+              # so root the fileset at packages/ and pass modRoot. Now
+              # carries the moved participant packages plus the wire-facing
+              # CLI entrypoint (Task 5.2/5.3 folded); git on PATH for the
+              # moved ccpool/watchdog packages' real-git fixture tests
+              # (mirrors ccpool-go-tests' own testDeps above). Runs the SAME
+              # per-package statement-coverage gate as pg-router-go-tests
+              # (tests/coverage-gate.sh, copied verbatim — the module
+              # boundary is also the coverage-gate boundary, docs/adr/0065's
+              # "New module" section): the seven moved packages' bars are
+              # activated FRESH here since none carried an existing
+              # pg-router-side bar as of this move.
+              pg-router-ccpool-handler-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-ccpool-handler-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router-ccpool-handler ./packages/pg-router-ccpool-handler/docs)
+                      ./packages/pg-router
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                  modRoot = "pg-router-ccpool-handler";
+                  gomod2nixToml = ./packages/pg-router-ccpool-handler/gomod2nix.toml;
+                  testFlags = [
+                    "-coverprofile=cover.out"
+                    "-covermode=atomic"
                   ];
-                };
-                modRoot = "prpool-ccpool-handler";
-                gomod2nixToml = ./packages/prpool-ccpool-handler/gomod2nix.toml;
-              };
+                  testDeps = [ pkgs.git ];
+                }).overrideAttrs
+                  (old: {
+                    postBuild = (old.postBuild or "") + ''
+                      echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
+                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    '';
+                  });
 
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
@@ -4394,7 +4421,7 @@
             inherit (pkgs)
               ccpool
               pg-router
-              prpool-ccpool-handler
+              pg-router-ccpool-handler
               pb
               claude-extended-tool-approver
               pa-monitor
