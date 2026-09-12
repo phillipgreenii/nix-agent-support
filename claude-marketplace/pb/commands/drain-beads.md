@@ -11,7 +11,7 @@ description: >-
   bead `human`, which is reserved as a last resort for a blocker only a PERSON can
   clear (a blocker that is another bead is modeled with `bd dep`, never with the
   label).
-argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
+argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one'; optionally --monitor-if-empty]"
 ---
 
 # /drain-beads
@@ -52,8 +52,10 @@ zr-refactor campaign beads carry their own protocol; excluded here by design (zr
 refactor spec §3).
 
 If that command SUCCEEDS (exit 0) and is empty, STOP (see "Unpushed commits when
-you STOP"). If it ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly
-and retry; never exit on an error. `bd ready` already excludes
+you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
+"--monitor-if-empty" below), in which case an empty result ARMS a recurring
+check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
+back off briefly and retry; never exit on an error. `bd ready` already excludes
 `in_progress`/`blocked`/`deferred`, so in-flight work is excluded automatically;
 `human`-labeled parked beads are excluded here too. Beads awaiting post-deploy
 verification are GATED (blocked), so they are absent from `bd ready` as well —
@@ -76,6 +78,50 @@ Do NOT `bd create` anything for this either way — there is deliberately NO
 standing push bead (provenance: `pg2-5subz`, `pg2-dawg2`); the debt regenerates
 on every land. If you find a standing push bead, report it as this defect
 (U-2) rather than updating it.
+
+### --monitor-if-empty
+
+Accepted as one of this command's `$ARGUMENTS` (composes normally with the
+narrowing arguments in "Optional scope arguments" below). It changes ONLY what
+happens when the Main loop's atomic CLAIM query (step 1) comes back a
+SUCCESSFUL empty result — no agent-workable bead was claimed, the exact
+condition that otherwise means Goal met and STOP.
+
+- **Flag ABSENT (default):** unchanged, byte-for-byte — an empty CLAIM result
+  still means STOP, exactly as documented above.
+- **Flag PRESENT:** instead of stopping, ARM a recurring self-paced check and
+  end the turn:
+
+  ```
+  Skill({ skill: "loop", args: "/pb:drain-beads --monitor-if-empty <carry
+    forward any other $ARGUMENTS this session was invoked with>" })
+  ```
+
+  This is a deliberate DELEGATION, never a direct `ScheduleWakeup` call.
+  `ScheduleWakeup`'s own tool description scopes it to `/loop` dynamic mode and
+  explicitly says not to call it from a drain-beads/orchestrator session — this
+  command MUST NOT call `ScheduleWakeup` directly, with or without this flag.
+  Only the `loop` skill's own dynamic (self-paced) mode owns that mechanism: it
+  arms the recurring `ScheduleWakeup` (a fallback-heartbeat-style delay) and
+  re-invokes the SAME command text (`/pb:drain-beads --monitor-if-empty …`) on
+  each wake, exactly as any other `/loop` dynamic-mode target.
+
+  **On each wake** (this command running again, invoked by `loop`, from
+  "Startup / resume" below): the CLAIM query in Main loop step 1 runs exactly
+  as always.
+  - Bead found → resume the normal Main loop on it. The flag has no further
+    effect once work exists — it only changes what happens at an EMPTY
+    result, and this wake's CLAIM already wasn't empty.
+  - Still empty → take this SAME arm step again (re-invoke the identical
+    `Skill({ skill: "loop", ... })` call) and end the turn. From `loop`'s own
+    perspective this is just its next self-paced re-invocation finding
+    nothing new; there is no bead work and nothing else to report this turn
+    (a quiet re-arm — noop: true).
+
+  A monitor armed this way MUST NOT survive past this session:
+  `/pb:stop-draining-beads` and the `session-wrapup:wrap-up-session` skill each
+  cancel it (`ScheduleWakeup({stop: true})`) as part of their own stop/close-out
+  sequences, independently of each other — see those documents.
 
 ## Startup / resume (survives compaction)
 
@@ -160,7 +206,9 @@ proceeding on currently loaded text (direct interactive invocation).`)
    status=in_progress) and returns it. No other session can get the same bead. A
    SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
    best-effort — this is the loop's own natural, deterministic termination point; no hook
-   is used or needed for this). A transient error → retry. If the
+   is used or needed for this) — UNLESS this session was invoked with
+   `--monitor-if-empty`, in which case take the ARM path in "--monitor-if-empty"
+   above instead of stopping. A transient error → retry. If the
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
    (see "Optional scope arguments"); they never remove `--exclude-label human` (nor
    its campaign counterpart in the CLAIM query above), the `--exclude-type epic`
@@ -813,7 +861,11 @@ arguments, behavior is otherwise unchanged.
   `nix flake check`) — the notification-resumes-you mechanism applies only to
   YOU, the top-level orchestrator, waiting on your own Agent-tool dispatch;
   a subagent gets no such notification for its own child and MUST block on it
-  itself via `Monitor` in the same turn (see step 4's worked example).
+  itself via `Monitor` in the same turn (see step 4's worked example). It is
+  also orthogonal to `--monitor-if-empty` (see that section above): arming
+  that flag's recurring check hands the `loop` skill a prompt to re-run and
+  lets `loop` own the `ScheduleWakeup` call, so THIS command still never calls
+  `ScheduleWakeup` directly, even then.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
 - A claimed bead that genuinely IS type `epic` with decomposed children — reachable

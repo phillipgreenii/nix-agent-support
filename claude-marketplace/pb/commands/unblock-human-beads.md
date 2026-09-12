@@ -9,7 +9,7 @@ description: >-
   carve-outs below for close/substrate). Assumes `pn workspace apply` ran before
   invocation. Parallel-safe via atomic claims; accepts optional narrowing
   $ARGUMENTS.
-argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one']"
+argument-hint: "[optional narrowing scope: a bead id, --label X, --priority N, --parent ID, or 'one'; optionally --monitor-if-empty]"
 ---
 
 # /unblock-human-beads
@@ -66,11 +66,59 @@ bd ready --claim --label human --exclude-label refactor-campaign --actor "ID" --
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
 refactor spec §3).
 
-If that SUCCEEDS (exit 0) and is empty, STOP. If a claim ever returns a bead whose id is
-already in your session **skip-set**, also STOP: a correctly DEFERred bead cannot reappear
-this run, so a reappearance means the loop is stuck — this is a defensive guard. If the
+If that SUCCEEDS (exit 0) and is empty, STOP — UNLESS this session was invoked with
+`--monitor-if-empty` (see "--monitor-if-empty" below), in which case an empty result ARMS
+a recurring check instead of stopping. If a claim ever returns a bead whose id is
+already in your session **skip-set**, also STOP, UNCONDITIONALLY — `--monitor-if-empty`
+does NOT apply to this branch: a correctly DEFERred bead cannot reappear
+this run, so a reappearance means the loop is stuck — this is a defensive guard, not the
+"queue is empty" condition the flag changes. If the
 command ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly and retry; never
 exit on an error.
+
+### --monitor-if-empty
+
+Accepted as one of this command's `$ARGUMENTS` (composes normally with the narrowing
+arguments in "Optional scope arguments" below). It changes ONLY what happens when the
+Main loop's atomic CLAIM query (step 1) comes back a SUCCESSFUL empty result — no ready
+`human` bead left in scope, the exact condition that otherwise means Goal met and STOP. It
+does **NOT** change the OTHER termination condition above (a returned id already in the
+session skip-set) — that is a defensive anomaly guard, unrelated to the queue being empty,
+and it STOPs unconditionally regardless of this flag.
+
+- **Flag ABSENT (default):** unchanged, byte-for-byte — an empty CLAIM result still means
+  STOP, exactly as documented above.
+- **Flag PRESENT:** instead of stopping, ARM a recurring self-paced check and end the turn:
+
+  ```
+  Skill({ skill: "loop", args: "/pb:unblock-human-beads --monitor-if-empty <carry
+    forward any other $ARGUMENTS this session was invoked with>" })
+  ```
+
+  This is a deliberate DELEGATION, never a direct `ScheduleWakeup` call — for the same
+  reason `/pb:drain-beads` documents under its own "--monitor-if-empty": `ScheduleWakeup`'s
+  tool description scopes it to `/loop` dynamic mode and explicitly says not to call it
+  from an orchestrator session directly. Only the `loop` skill's own dynamic (self-paced)
+  mode arms the recurring `ScheduleWakeup` (a fallback-heartbeat-style delay) and
+  re-invokes the SAME command text (`/pb:unblock-human-beads --monitor-if-empty …`) on
+  each wake.
+
+  **On each wake** (this command running again, invoked by `loop`, from "Startup / resume"
+  below): the CLAIM query in Main loop step 1 runs exactly as always.
+  - Bead found → resume the normal Main loop (UNDERSTAND → FRESHNESS CHECK → TRIAGE →
+    terminal action) on it. The flag has no further effect once a bead is claimed.
+  - Still empty → take this SAME arm step again (re-invoke the identical
+    `Skill({ skill: "loop", ... })` call) and end the turn — no bead work, nothing else to
+    report this turn (a quiet re-arm — noop: true).
+
+  **Cancellation — no dedicated stop command exists for this one.** Unlike
+  `/pb:drain-beads` (which has `/pb:stop-draining-beads`), this command has NO
+  `stop-unblocking-human-beads` counterpart, and this flag deliberately does not add one —
+  see this bead's (`pg2-dfdlt`) own notes on why inventing one wasn't warranted. The SOLE
+  cancellation path for a monitor armed here is `session-wrapup:wrap-up-session`'s
+  close-out: its Preamble cancels `ScheduleWakeup({stop: true})` unconditionally,
+  regardless of which command armed it. To stop a monitoring
+  `/pb:unblock-human-beads --monitor-if-empty` session, invoke that skill directly.
 
 ## Startup / resume (survives compaction)
 
@@ -109,8 +157,10 @@ exit on an error.
    Atomically claims the highest-priority ready `human` bead (assignee=ID,
    status=`in_progress`) and returns it; no other session can get the same bead. A
    SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
-   best-effort). A returned id already in your skip-set → STOP (also run
-   `session-mode set-status finished`, best-effort — missing this STOP would leave the
+   best-effort) — UNLESS this session was invoked with `--monitor-if-empty`, in which case
+   take the ARM path in "--monitor-if-empty" above instead of stopping. A returned id
+   already in your skip-set → STOP UNCONDITIONALLY, regardless of `--monitor-if-empty` (also
+   run `session-mode set-status finished`, best-effort — missing this STOP would leave the
    record `running` whenever the loop ends via this defensive guard instead of an empty
    result). A transient error → retry. If the invocation supplied `$ARGUMENTS`, apply them as
    additional NARROWING filters here (see "Optional scope arguments").
