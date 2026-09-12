@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -53,8 +54,8 @@ func TestBackend_ListAttention_DueSoonAndOverdueSplit(t *testing.T) {
 		if !strings.Contains(jql, "AND NOT (labels = no-attention)") {
 			t.Fatalf("expected exclude fragment ANDed out, got jql=%q", jql)
 		}
-		if !strings.Contains(jql, `duedate is not EMPTY`) || !strings.Contains(jql, `resolution = Unresolved`) {
-			t.Fatalf("expected standard due/resolution clauses, got jql=%q", jql)
+		if !strings.Contains(jql, `duedate is not EMPTY`) || !strings.Contains(jql, `statusCategory != Done`) {
+			t.Fatalf("expected standard due/statusCategory clauses, got jql=%q", jql)
 		}
 		if strings.Contains(jql, "duedate <=") {
 			return `{"items":[
@@ -107,6 +108,63 @@ func TestBackend_ListAttention_NoExcludeConfigured(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("len(got) = %d, want 0", len(got))
+	}
+}
+
+// TestBackend_ListAttention_ExcludesDoneCategoryWithNullResolution proves
+// the pg2-uf2pq fix: a fixture issue moved to a Done-category status
+// (e.g. "Closed") without ever having its resolution field set — this
+// org's real Jira data does exactly this (pg2-uf2pq, live-verified
+// against FSTS-2296: status=Closed, resolution=null) — is excluded by
+// attentionSearch's own "AND statusCategory != Done" clause even though
+// the old "resolution = Unresolved" clause alone would have let it leak
+// through forever (a null resolution reads as Unresolved in JQL). The
+// fake stands in for pjira's own server-side JQL evaluation (mirroring
+// this file's other tests, which already key a fake's canned response
+// off substrings of the generated JQL rather than modeling real JQL
+// parsing): it omits the Done-category fixture from its response only
+// when the JQL it was actually given carries the statusCategory clause,
+// so this test fails if that clause is ever dropped from the generated
+// JQL.
+func TestBackend_ListAttention_ExcludesDoneCategoryWithNullResolution(t *testing.T) {
+	// doneCategoryClosedFixture mirrors FSTS-2296's real shape from the
+	// bug report: transitioned to a Done-category status with resolution
+	// never set. pjiraIssue decodes no resolution/statusCategory field of
+	// its own (this backend never inspects either client-side — filtering
+	// is entirely server-side JQL, per this file's own doc comments), so
+	// both are named here only to document the fixture's real-world
+	// shape; the fake below decides inclusion from the JQL string, not
+	// these JSON fields.
+	const doneCategoryClosedFixture = `{"key":"TP-CLOSED","summary":"stale, already closed","status":"Closed","issuetype":"Task","url":"https://example.invalid/TP-CLOSED","duedate":"2020-01-01"}`
+	const stillOpenFixture = `{"key":"TP-OPEN","summary":"genuinely still open","status":"To Do","issuetype":"Task","url":"https://example.invalid/TP-OPEN","duedate":"2020-01-01"}`
+
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		jql := args[2] // "search", "--jql", "<jql>", "--all"
+		items := stillOpenFixture
+		if !strings.Contains(jql, "statusCategory != Done") {
+			items += "," + doneCategoryClosedFixture
+		}
+		return fmt.Sprintf(`{"items":[%s],"truncated":false}`, items), nil
+	}}
+	b := New(fr)
+
+	got, err := b.ListAttention(context.Background())
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	for _, it := range got {
+		if it.ID == "TP-CLOSED" {
+			t.Fatalf("Done-category issue with null resolution leaked through: %+v", got)
+		}
+	}
+	found := false
+	for _, it := range got {
+		if it.ID == "TP-OPEN" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the still-open fixture to be present: %+v", got)
 	}
 }
 

@@ -82,10 +82,23 @@ func attentionExcludeFrom(config json.RawMessage) string {
 // cmd/pg-connector-issue-beads/internal/attention.go's identical
 // --due-before/--overdue split, so this backend never has to parse Jira's
 // own duedate string itself either. Both queries AND in "duedate is not
-// EMPTY AND resolution = Unresolved" (never surface a closed/resolved
-// issue — matching the beads backend's identical "bd list already
-// excludes closed by default" semantics) plus attention_exclude, if
-// configured, ANDed-out via "AND NOT (...)".
+// EMPTY AND statusCategory != Done" (never surface a closed issue —
+// matching the beads backend's identical "bd list already excludes
+// closed by default" semantics) plus attention_exclude, if configured,
+// ANDed-out via "AND NOT (...)". statusCategory, not resolution: bead
+// pg2-uf2pq found that on this org's real Jira data many issues are
+// transitioned to a Done-category status (e.g. "Closed") without their
+// resolution field ever being set, so they read resolution=null
+// ("Unresolved" in JQL) forever and an ANDed "resolution = Unresolved"
+// clause never excludes them (verified live 2026-09-12: 1815/2651
+// "attention" items were already Done-category). statusCategory is
+// workflow-status-name-independent (Jira's fixed To Do/In Progress/Done
+// taxonomy, unlike "status not in (Closed, ...)" which breaks if a
+// project renames or adds a status) and also sidesteps resolution's own
+// opposite failure mode — an issue whose resolution gets set before its
+// status leaves a non-Done category would be wrongly excluded by
+// "resolution = Unresolved" alone — so resolution is dropped here rather
+// than kept alongside statusCategory.
 func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
 	config := scriptout.ConfigFromContext(ctx)
 	threshold := attentionThresholdFrom(config)
@@ -131,10 +144,10 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 
 // attentionSearch runs one `pjira search --jql <JQL> --all` call for
 // ListAttention, ANDing dueClause together with "duedate is not EMPTY AND
-// resolution = Unresolved" and, when exclude is non-empty, "AND NOT
+// statusCategory != Done" and, when exclude is non-empty, "AND NOT
 // (exclude)".
 func (b *Backend) attentionSearch(ctx context.Context, dueClause, exclude string) (*pjiraSearchResult, error) {
-	jql := dueClause + ` AND duedate is not EMPTY AND resolution = Unresolved`
+	jql := dueClause + ` AND duedate is not EMPTY AND statusCategory != Done`
 	if exclude != "" {
 		jql += fmt.Sprintf(` AND NOT (%s)`, exclude)
 	}
