@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -193,5 +196,151 @@ func TestBackend_ListAttention_RateLimitBelowReserve(t *testing.T) {
 	}
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+// inFlightTracker counts concurrently-in-flight simulated `gh` calls, so a
+// test can assert BOTH that calls actually overlapped (proving real
+// parallelism, not just an accidentally-fast serial run) and that the
+// overlap never exceeded the bounded worker pool's own size (proving the
+// pool is actually bounded, not an unbounded fan-out).
+type inFlightTracker struct {
+	current atomic.Int32
+	max     atomic.Int32
+}
+
+// begin records one more call starting; the returned func records it
+// ending. Use as `defer tracker.begin()()`.
+func (tr *inFlightTracker) begin() func() {
+	n := tr.current.Add(1)
+	for {
+		m := tr.max.Load()
+		if n <= m || tr.max.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	return func() { tr.current.Add(-1) }
+}
+
+// TestBackend_ListAttention_RealisticScale_CompletesWellUnderExecTimeout is
+// the realistic-scale regression test bead pg2-zutee asks for: multiple
+// queries (6, matching the real attention_query's queries.team list that
+// triggered the regression), dozens of candidate PRs, and simulated
+// per-call latency on every fakeGH hook standing in for a real `gh`
+// subprocess spawn (the bead's own root-cause estimate: "a few hundred ms
+// to ~1s" each). Before this bead's fix (fully sequential SearchPRs/
+// GetPR/ReviewsWithCommit), the sequential sum of that many calls at that
+// latency would land well past scriptout's own 30s DefaultExecTimeout
+// (packages/pg-connector/pkg/scriptout/limits.go) — this test asserts the
+// real wall-clock elapsed time of the NEW, parallelized implementation
+// instead, so a future regression back to sequential execution fails this
+// test on timing, not just on inspection.
+func TestBackend_ListAttention_RealisticScale_CompletesWellUnderExecTimeout(t *testing.T) {
+	const (
+		numQueries = 6 // bead's own trigger: attention_query's queries.team list has 6 entries.
+		numPerQ    = 7 // 6*7 = 42 unique candidates -- "considerably more" than the bead's observed 15-20.
+		latency    = 400 * time.Millisecond
+		execBudget = 10 * time.Second // generous, but well under scriptout's 30s DefaultExecTimeout.
+	)
+	numCandidates := numQueries * numPerQ
+
+	// sequentialEstimate is what the OLD, fully-sequential implementation
+	// would have taken: 1 SearchPRs per query, plus 1 GetPR + 1
+	// ReviewsWithCommit per unique candidate, every one of them serial.
+	// This is the number that must exceed scriptout's 30s timeout for
+	// this fixture to actually exercise the regression this bead fixes.
+	sequentialEstimate := time.Duration(numQueries+2*numCandidates) * latency
+	if sequentialEstimate <= scriptout.DefaultExecTimeout {
+		t.Fatalf("fixture too small to demonstrate the regression: sequential estimate %v is not > scriptout.DefaultExecTimeout (%v)", sequentialEstimate, scriptout.DefaultExecTimeout)
+	}
+
+	queries := make([]string, numQueries)
+	for i := range queries {
+		queries[i] = fmt.Sprintf("is:open is:pr team-query-%d", i)
+	}
+	queryJSON, err := json.Marshal(queries)
+	if err != nil {
+		t.Fatalf("json.Marshal(queries): %v", err)
+	}
+
+	var (
+		tracker                           inFlightTracker
+		searchCalls, getPRCalls, revCalls atomic.Int32
+	)
+	gh := &fakeGH{
+		viewerLogin: attnSelf,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			defer tracker.begin()()
+			time.Sleep(latency)
+			idx := -1
+			for i, q := range queries {
+				if q == query {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				return nil, fmt.Errorf("unexpected query %q", query)
+			}
+			searchCalls.Add(1)
+			prs := make([]api.PR, numPerQ)
+			for j := 0; j < numPerQ; j++ {
+				n := idx*numPerQ + j + 1
+				prs[j] = api.PR{Repo: "owner/repo", Number: n, Title: fmt.Sprintf("pr %d", n), Author: attnTeammate}
+			}
+			return prs, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			defer tracker.begin()()
+			time.Sleep(latency)
+			getPRCalls.Add(1)
+			return &api.PR{Repo: repo, Number: number, Title: fmt.Sprintf("pr %d", number), HeadSHA: "h1"}, nil
+		},
+		reviewsWithCommitFn: func(ctx context.Context, repo string, number int) ([]api.Review, error) {
+			defer tracker.begin()()
+			time.Sleep(latency)
+			revCalls.Add(1)
+			// Every other candidate already has a standing teammate
+			// approval at head (off the hook); the rest need a first
+			// review -- a realistic mixed backlog, not all-or-nothing.
+			if number%2 == 0 {
+				return []api.Review{{Author: attnTeammate, State: "APPROVED", CommitOID: "h1"}}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	b := New(gh)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(fmt.Sprintf(`{"attention_query":%s}`, queryJSON)))
+
+	start := time.Now()
+	got, err := b.ListAttention(ctx)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if elapsed > execBudget {
+		t.Fatalf("ListAttention took %v, want <= %v (scriptout's own exec timeout is %v)", elapsed, execBudget, scriptout.DefaultExecTimeout)
+	}
+
+	if max := tracker.max.Load(); max <= 1 {
+		t.Fatalf("max concurrent in-flight calls = %d, want > 1 -- calls ran sequentially, not in parallel", max)
+	} else if int(max) > listAttentionMaxWorkers {
+		t.Fatalf("max concurrent in-flight calls = %d, exceeded the bounded worker pool size %d", max, listAttentionMaxWorkers)
+	}
+
+	if gotSearch, want := int(searchCalls.Load()), numQueries; gotSearch != want {
+		t.Fatalf("searchCalls = %d, want %d", gotSearch, want)
+	}
+	if gotGetPR, want := int(getPRCalls.Load()), numCandidates; gotGetPR != want {
+		t.Fatalf("getPRCalls = %d, want %d", gotGetPR, want)
+	}
+	if gotRev, want := int(revCalls.Load()), numCandidates; gotRev != want {
+		t.Fatalf("reviewsWithCommit calls = %d, want %d", gotRev, want)
+	}
+
+	wantNeed := numCandidates / 2 // every odd-numbered PR (per reviewsWithCommitFn above) needs a first review.
+	if len(got) != wantNeed {
+		t.Fatalf("len(got) = %d, want %d: %+v", len(got), wantNeed, got)
 	}
 }

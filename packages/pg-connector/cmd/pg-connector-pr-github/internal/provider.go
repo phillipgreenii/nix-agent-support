@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
@@ -374,6 +375,67 @@ func needsAttentionForPR(reviews []api.Review, self, head string, hasConflict bo
 	return true, attentionReasonUnreviewed
 }
 
+// listAttentionMaxWorkers bounds how many concurrent `gh` subprocesses
+// ListAttention spawns for its per-query SearchPRs fan-out and its
+// per-candidate GetPR/ReviewsWithCommit fan-out (bead pg2-zutee: the prior
+// fully-sequential implementation summed 30-40+ `gh` exec round trips past
+// scriptout's own 30s DefaultExecTimeout — packages/pg-connector/pkg/
+// scriptout/limits.go — for a realistic 6-query attention_query surfacing
+// dozens of candidates). 8 is a modest bound: enough concurrency to bring
+// a few dozen candidate-pair calls comfortably under the 30s budget,
+// without spawning so many `gh` processes/TLS handshakes at once that it
+// looks like a burst against a single GitHub token (this is a fan-out
+// WITHIN one backend's own external-service calls, not the umbrella's
+// own deliberately-serial cross-BACKEND fan-out — cmd/pg-connector/ci.go's
+// fanOutCIList doc comment, cited by limits.go, is about that other,
+// unrelated layer).
+const listAttentionMaxWorkers = 8
+
+// parallelMap runs fn(items[i]) for every i using a bounded pool of at
+// most listAttentionMaxWorkers goroutines (or len(items), if smaller),
+// preserving items' order in the returned slice — so a caller that
+// dedupes/aggregates over the results in order sees the exact same
+// sequence a purely-sequential loop would have produced. Every fn call
+// still runs to completion (unlike an errgroup-style fail-fast group):
+// with no test or caller here relying on early-abort-on-first-error, this
+// keeps the pool trivially free of "which in-flight goroutines are safe
+// to abandon" concerns. The first non-nil error (by items' own index
+// order) is returned; ctx is passed through unmodified so every
+// underlying `gh` call (internal/github's exec.CommandContext-based
+// wrappers) still observes the caller's own cancellation/deadline.
+func parallelMap[T, R any](ctx context.Context, items []T, fn func(ctx context.Context, item T) (R, error)) ([]R, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	workers := listAttentionMaxWorkers
+	if workers > len(items) {
+		workers = len(items)
+	}
+
+	results := make([]R, len(items))
+	errs := make([]error, len(items))
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+
+	for i, item := range items {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(i int, item T) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i], errs[i] = fn(ctx, item)
+		}(i, item)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
+}
+
 // ListAttention implements the attention capability's attention.Provider
 // against GitHub (bead pg2-7wqkr): scans this backend's own configured
 // attention_query candidate PRs (attentionQueryFrom) via the same
@@ -385,7 +447,12 @@ func needsAttentionForPR(reviews []api.Review, self, head string, hasConflict bo
 // List/Search already apply is applied once here, up front, since this op
 // issues 1 (viewer) + 1-per-query (search) + 2-per-candidate (GetPR,
 // ReviewsWithCommit) GraphQL/REST calls — considerably more than a single
-// List call.
+// List call. RateLimitRemaining/ViewerLogin are each already called
+// exactly once (not once per query), so bead pg2-zutee's own "cache
+// once instead of once per query" suggestion for those two calls is
+// already satisfied here; the per-query SearchPRs and per-candidate
+// GetPR/ReviewsWithCommit fan-outs below (parallelMap) are what that bead
+// actually found running sequentially.
 func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
 	query := attentionQueryFrom(scriptout.ConfigFromContext(ctx))
 	if len(query) == 0 {
@@ -405,13 +472,16 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 		return nil, classifyGHError(err)
 	}
 
+	searchResults, err := parallelMap(ctx, query, func(ctx context.Context, q string) ([]api.PR, error) {
+		return b.gh.SearchPRs(ctx, q)
+	})
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+
 	seen := make(map[string]bool)
 	var candidates []api.PR
-	for _, q := range query {
-		prs, err := b.gh.SearchPRs(ctx, q)
-		if err != nil {
-			return nil, classifyGHError(err)
-		}
+	for _, prs := range searchResults {
 		for i := range prs {
 			c := prs[i]
 			id := formatPRID(c.Repo, c.Number)
@@ -423,25 +493,34 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 		}
 	}
 
-	items := make([]schema.AttentionItem, 0, len(candidates))
-	for _, c := range candidates {
+	perCandidate, err := parallelMap(ctx, candidates, func(ctx context.Context, c api.PR) (*schema.AttentionItem, error) {
 		full, err := b.gh.GetPR(ctx, c.Repo, c.Number)
 		if err != nil {
-			return nil, classifyGHError(err)
+			return nil, err
 		}
 		reviews, err := b.gh.ReviewsWithCommit(ctx, c.Repo, c.Number)
 		if err != nil {
-			return nil, classifyGHError(err)
+			return nil, err
 		}
 		need, reason := needsAttentionForPR(reviews, self, full.HeadSHA, full.HasConflict())
 		if !need {
-			continue
+			return nil, nil
 		}
-		items = append(items, schema.AttentionItem{
+		return &schema.AttentionItem{
 			Type:    "pr",
 			ID:      formatPRID(full.Repo, full.Number),
 			Summary: fmt.Sprintf("%s: %s", reason, full.Title),
-		})
+		}, nil
+	})
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+
+	items := make([]schema.AttentionItem, 0, len(perCandidate))
+	for _, item := range perCandidate {
+		if item != nil {
+			items = append(items, *item)
+		}
 	}
 	return items, nil
 }

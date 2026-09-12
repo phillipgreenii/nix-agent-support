@@ -23,6 +23,12 @@ type fakeGH struct {
 	reviewsErr   error
 	checkAuthErr error
 
+	// getPRFn lets a test answer GetPR per repo/number instead of the
+	// single fixed pr/getPRErr above — needed once a test has more than
+	// one distinct candidate PR in flight at a time (bead pg2-zutee's
+	// realistic-scale ListAttention test).
+	getPRFn func(ctx context.Context, repo string, number int) (*api.PR, error)
+
 	// searchFn/rateLimit/rateLimitErr back the List (bead pg2-2j5ac.28.1)
 	// seam. rateLimit defaults to a comfortably-above-reserve value (via
 	// rateLimitOrDefault below) so existing tests that never set it don't
@@ -46,6 +52,9 @@ type fakeGH struct {
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
+	if f.getPRFn != nil {
+		return f.getPRFn(ctx, repo, number)
+	}
 	if f.getPRErr != nil {
 		return nil, f.getPRErr
 	}
