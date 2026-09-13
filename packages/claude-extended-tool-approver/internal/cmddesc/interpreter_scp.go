@@ -168,7 +168,7 @@ func scpOperandIsRemote(tok string) bool {
 		return false
 	}
 	slash := strings.IndexByte(tok, '/')
-	return !(slash >= 0 && slash < colon)
+	return slash < 0 || slash >= colon
 }
 
 // scpRemoteHostPath extracts (host, path) from a token already known remote

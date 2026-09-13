@@ -76,7 +76,7 @@ func parseIgnoreFile(path, base string) []ignoreRule {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var rules []ignoreRule
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

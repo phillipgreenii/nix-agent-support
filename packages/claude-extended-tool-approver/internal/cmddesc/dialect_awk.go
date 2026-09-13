@@ -189,14 +189,14 @@ func (p *awkParser) string() (string, bool) {
 	p.i++ // opening quote
 	start := p.i
 	for !p.eof() {
-		switch c := p.peek(); {
-		case c == '\\':
+		switch c := p.peek(); c {
+		case '\\':
 			p.i += 2
-		case c == '"':
+		case '"':
 			val := p.src[start:p.i]
 			p.i++
 			return val, true
-		case c == '\n':
+		case '\n':
 			return "", p.fail("newline inside string")
 		default:
 			p.i++
@@ -212,17 +212,17 @@ func (p *awkParser) string() (string, bool) {
 func (p *awkParser) regex() bool {
 	p.i++ // opening /
 	for !p.eof() {
-		switch c := p.peek(); {
-		case c == '\\':
+		switch c := p.peek(); c {
+		case '\\':
 			p.i += 2
-		case c == '[':
+		case '[':
 			if !p.regexBracket() {
 				return false
 			}
-		case c == '/':
+		case '/':
 			p.i++
 			return true
-		case c == '\n':
+		case '\n':
 			return p.fail("newline inside regex")
 		default:
 			p.i++
@@ -271,19 +271,19 @@ func (p *awkParser) consumeToCloseParen() bool {
 		if p.eof() {
 			return p.fail("unterminated (")
 		}
-		switch c := p.peek(); {
-		case c == '"':
+		switch c := p.peek(); c {
+		case '"':
 			if _, ok := p.string(); !ok {
 				return false
 			}
-		case c == '#':
+		case '#':
 			for !p.eof() && p.peek() != '\n' {
 				p.i++
 			}
-		case c == '(':
+		case '(':
 			depth++
 			p.i++
-		case c == ')':
+		case ')':
 			depth--
 			p.i++
 		default:
@@ -310,19 +310,19 @@ func (p *awkParser) balanced() bool {
 		if p.eof() {
 			return p.fail("unterminated %q", string(open))
 		}
-		switch c := p.peek(); {
-		case c == '"':
+		switch c := p.peek(); c {
+		case '"':
 			if _, ok := p.string(); !ok {
 				return false
 			}
-		case c == '#':
+		case '#':
 			for !p.eof() && p.peek() != '\n' {
 				p.i++
 			}
-		case c == open:
+		case open:
 			depth++
 			p.i++
-		case c == closeCh:
+		case closeCh:
 			depth--
 			p.i++
 		default:

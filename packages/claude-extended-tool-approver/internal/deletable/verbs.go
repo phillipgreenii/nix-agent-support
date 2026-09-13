@@ -161,11 +161,17 @@ func isJustRecipeName(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+		if !isJustRecipeRune(r) {
 			return false
 		}
 	}
 	return true
+}
+
+// isJustRecipeRune reports whether r is a letter, digit, `_`, or `-` — the
+// allowed character set for a just recipe name.
+func isJustRecipeRune(r rune) bool {
+	return r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 // firstToken returns s's first whitespace-separated field, or "" if s has

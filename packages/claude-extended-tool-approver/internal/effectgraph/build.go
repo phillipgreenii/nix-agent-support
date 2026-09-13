@@ -337,8 +337,8 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		})
 	}
 
-	switch {
-	case leaf.Executable == "":
+	switch leaf.Executable {
+	case "":
 		// A bare assignment or an empty leaf: nothing to look up, and the
 		// assignment's value may hide an expansion the parse does not lower here.
 		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: "no executable"})

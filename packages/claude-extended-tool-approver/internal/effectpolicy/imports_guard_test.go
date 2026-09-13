@@ -1,14 +1,45 @@
 package effectpolicy
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// parseDirImportsOnly parses the import-only AST of every top-level ".go"
+// file in dir for which keep (given the bare filename) reports true. It is a
+// narrow, build-tag-oblivious replacement for the deprecated
+// go/parser.ParseDir (SA1019, deprecated since Go 1.25): unlike ParseDir it
+// does not group files by package, but neither guard below relies on package
+// grouping — both just want the union of imports across the matched files —
+// so this preserves that behavior exactly, including ParseDir's original
+// build-tag obliviousness that TestNoDirectHookioImport's doc comment
+// explicitly depends on (see its EXCLUSION note).
+func parseDirImportsOnly(t *testing.T, fset *token.FileSet, dir string, keep func(name string) bool) []*ast.File {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	var files []*ast.File
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || !keep(name) {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", filepath.Join(dir, name), err)
+		}
+		files = append(files, f)
+	}
+	return files
+}
 
 // TestNoDirectHookioImport: none of the four spike packages imports
 // internal/hookio directly (the port must stay hook-independent). This guard
@@ -45,25 +76,20 @@ func TestNoDirectHookioImport(t *testing.T) {
 		filepath.Join("..", "evalcontract"),
 		".",
 	}
-	notIntegrationTest := func(f fs.FileInfo) bool {
-		return !strings.HasSuffix(f.Name(), "_integration_test.go")
+	notIntegrationTest := func(name string) bool {
+		return !strings.HasSuffix(name, "_integration_test.go")
 	}
 	fset := token.NewFileSet()
 	for _, dir := range dirs {
-		pkgs, err := parser.ParseDir(fset, dir, notIntegrationTest, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", dir, err)
-		}
-		for _, pkg := range pkgs {
-			for name, f := range pkg.Files {
-				for _, imp := range f.Imports {
-					p, err := strconv.Unquote(imp.Path.Value)
-					if err != nil {
-						t.Fatalf("%s: bad import %s", name, imp.Path.Value)
-					}
-					if strings.HasSuffix(p, "/internal/hookio") {
-						t.Errorf("%s imports %s directly", name, p)
-					}
+		for _, f := range parseDirImportsOnly(t, fset, dir, notIntegrationTest) {
+			name := fset.Position(f.Package).Filename
+			for _, imp := range f.Imports {
+				p, err := strconv.Unquote(imp.Path.Value)
+				if err != nil {
+					t.Fatalf("%s: bad import %s", name, imp.Path.Value)
+				}
+				if strings.HasSuffix(p, "/internal/hookio") {
+					t.Errorf("%s imports %s directly", name, p)
 				}
 			}
 		}
@@ -83,20 +109,16 @@ func TestNoDirectHookioImport(t *testing.T) {
 func TestHookTypesImportsNothingInternal(t *testing.T) {
 	dir := filepath.Join("..", "hooktypes")
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ImportsOnly)
-	if err != nil {
-		t.Fatalf("parse %s: %v", dir, err)
-	}
-	for _, pkg := range pkgs {
-		for name, f := range pkg.Files {
-			for _, imp := range f.Imports {
-				p, err := strconv.Unquote(imp.Path.Value)
-				if err != nil {
-					t.Fatalf("%s: bad import %s", name, imp.Path.Value)
-				}
-				if strings.Contains(p, "/internal/") {
-					t.Errorf("%s imports %s, but internal/hooktypes must stay a zero-dependency leaf package", name, p)
-				}
+	keepAll := func(string) bool { return true }
+	for _, f := range parseDirImportsOnly(t, fset, dir, keepAll) {
+		name := fset.Position(f.Package).Filename
+		for _, imp := range f.Imports {
+			p, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				t.Fatalf("%s: bad import %s", name, imp.Path.Value)
+			}
+			if strings.Contains(p, "/internal/") {
+				t.Errorf("%s imports %s, but internal/hooktypes must stay a zero-dependency leaf package", name, p)
 			}
 		}
 	}

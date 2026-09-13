@@ -203,17 +203,17 @@ func (p *sedParser) regexFlags() bool {
 func (p *sedParser) regex(delim byte) bool {
 	for !p.eof() {
 		c := p.src[p.i]
-		switch {
-		case c == '\\':
+		switch c {
+		case '\\':
 			p.i += 2
-		case c == '[':
+		case '[':
 			if !p.bracket() {
 				return false
 			}
-		case c == delim:
+		case delim:
 			p.i++
 			return true
-		case c == '\n':
+		case '\n':
 			return p.fail("newline inside regex")
 		default:
 			p.i++
@@ -260,13 +260,13 @@ func (p *sedParser) bracket() bool {
 func (p *sedParser) part(delim byte) bool {
 	for !p.eof() {
 		c := p.src[p.i]
-		switch {
-		case c == '\\':
+		switch c {
+		case '\\':
 			p.i += 2
-		case c == delim:
+		case delim:
 			p.i++
 			return true
-		case c == '\n':
+		case '\n':
 			return p.fail("newline inside s/y text")
 		default:
 			p.i++
@@ -422,7 +422,13 @@ func (p *sedParser) transliterate() bool {
 	if delim == '\n' || delim == '\\' {
 		return p.fail("invalid y delimiter")
 	}
-	if !p.part(delim) || !p.part(delim) {
+	// y/src/dst/ has two delim-terminated parts (src, then dst); each call
+	// to part advances past its own part, so these are two distinct parses
+	// despite the identical call expression.
+	if !p.part(delim) {
+		return false
+	}
+	if !p.part(delim) {
 		return false
 	}
 	return p.endOfCmd()
