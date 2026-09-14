@@ -14,9 +14,9 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/pathspec"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
@@ -274,7 +274,7 @@ func matchRemotePathRules(rules []evalcontract.RemotePathRule, e cmddesc.Effect)
 // remotePathCategoryFinding maps one RemotePathRule.Category to the Finding
 // for a path effect of the given access class — the RULED taxonomy
 // RemotePathRule's own doc comment describes (tc-vn5z item 4b, ruled
-// 2026-09-08), mirroring internal/deletable's local Protected/Deletable/
+// 2026-09-08), mirroring internal/pathspec's local Protected/Deletable/
 // Writable classification and patheval's read/write zones rather than
 // inventing a new shape. ok is false for an unrecognised category (fail
 // closed, never guessed at).
@@ -711,7 +711,7 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 // DeleteAccess has one concern: EffectPath effects with Access ==
 // AccessDelete. It is the policy half of the operator-ruled delete model
 // (Phillip, 2026-09-07, design bead tc-z806 — verbatim there and in
-// internal/deletable's package doc): "rm would be rejected for paths which
+// internal/pathspec's package doc): "rm would be rejected for paths which
 // aren't at least writable. for writable it should abstain (by default) and
 // if deletable, then it can approve (by default). in both cases, there could
 // be other rules which change the default."
@@ -725,17 +725,17 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 //  4. secret path (raw or resolved)         -> Forbidden
 //  5. zone reject or read-only              -> Forbidden (not writable)
 //  6. the path IS a worktree root
-//     (deletable.AtWorktreeRoot, tc-lc8f
+//     (pathspec.AtWorktreeRoot, tc-lc8f
 //     item 4a — see below)                  -> judged by worktree STATE, not
 //     the Protected category: clean -> Permitted, dirty -> Forbidden, clean
 //     but ignored files present -> Unknown, state undeterminable -> Unknown
 //  7. the path IS a pn workforest SET
-//     CONTAINER (deletable.
+//     CONTAINER (pathspec.
 //     IsWorkforestSetContainer, tc-8og1
 //     item 1 — see below)                    -> judged by the WORST state
 //     among its member worktree slots: any member dirty -> Forbidden, every
 //     member clean -> Permitted, otherwise -> Unknown
-//  8. deletable.Classify (workspace
+//  8. pathspec.Classify (workspace
 //     declarations, tc-z806.3):
 //     Protected (.git, .worktrees, a pn
 //     workforest set's own workforests_dir
@@ -770,18 +770,18 @@ func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding
 // the worktree ROOT ITSELF, as a unit: `.git/` (always a directory for the
 // primary/canonical clone) stays Protected via step 8 exactly as before, and
 // so does any path INSIDE a worktree that is not the worktree's own root
-// (deletable.AtWorktreeRoot's doc comment). Step 6 runs BEFORE steps 7/8 so a
+// (pathspec.AtWorktreeRoot's doc comment). Step 6 runs BEFORE steps 7/8 so a
 // worktree root's fate is decided by its state, never by the blanket
-// category deletable.Classify would otherwise assign it.
+// category pathspec.Classify would otherwise assign it.
 //
 // Step 7 (workforest set state, tc-8og1 item 1) extends step 6's ruling to a
 // pn workforest SET CONTAINER — `<workforests_dir>/<set>`, one level above
 // the per-repo worktree slots step 6 already judges
 // (`<workforests_dir>/<set>/<repo>`, two levels under workforests_dir; see
-// deletable.IsDeclaredWorktreeSlot's doc comment for the depth history). A
+// pathspec.IsDeclaredWorktreeSlot's doc comment for the depth history). A
 // set container has no `.git` of its own to probe (each MEMBER repo does),
 // so it is judged by the worst state among its members instead
-// (deletable.ProbeWorkforestSetState) rather than by ProbeWorktreeState
+// (pathspec.ProbeWorkforestSetState) rather than by ProbeWorktreeState
 // directly — never treated as a slot in its own right, and never falling
 // through to step 8's blanket Protected declaration on the workforests_dir
 // entry.
@@ -821,40 +821,40 @@ func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
 	}
 	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" {
-		if deletable.AtWorktreeRoot(abs) {
+		if pathspec.AtWorktreeRoot(abs) {
 			return worktreeRemovalFinding(abs)
 		}
-		if deletable.IsWorkforestSetContainer(abs) {
+		if pathspec.IsWorkforestSetContainer(abs) {
 			return workforestSetRemovalFinding(abs)
 		}
 	}
-	class, why := deletable.Classify(ctx.PathEval, e.Path)
+	class, why := pathspec.Classify(ctx.PathEval, e.Path)
 	switch class {
-	case deletable.Protected:
+	case pathspec.Protected:
 		return Finding{Verdict: Forbidden, Reason: why}, true
-	case deletable.Deletable:
+	case pathspec.Deletable:
 		return Finding{Verdict: Permitted, Reason: why}, true
-	case deletable.Writable:
+	case pathspec.Writable:
 		return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
 	default:
 		return Finding{Verdict: Unknown, Reason: why}, true
 	}
 }
 
-// worktreeRemovalFinding maps deletable.ProbeWorktreeState(abs) to a Finding
+// worktreeRemovalFinding maps pathspec.ProbeWorktreeState(abs) to a Finding
 // per the operator ruling recorded on DeleteAccess's own doc comment (step
 // 6): clean -> Permitted, dirty -> Forbidden, clean-but-ignored -> Unknown,
 // undeterminable -> Unknown (the probe's error, when there is one, is folded
 // into the reason so a caller can tell "not actually a git repository"
 // apart from "clean").
 func worktreeRemovalFinding(abs string) (Finding, bool) {
-	state, err := deletable.ProbeWorktreeState(abs)
+	state, err := pathspec.ProbeWorktreeState(abs)
 	switch state {
-	case deletable.WorktreeClean:
+	case pathspec.WorktreeClean:
 		return Finding{Verdict: Permitted, Reason: "worktree root is clean (no tracked modifications, no untracked or ignored files): " + abs}, true
-	case deletable.WorktreeDirty:
+	case pathspec.WorktreeDirty:
 		return Finding{Verdict: Forbidden, Reason: "worktree root is dirty (tracked modifications, staged changes, or untracked files): " + abs}, true
-	case deletable.WorktreeCleanIgnored:
+	case pathspec.WorktreeCleanIgnored:
 		return Finding{Verdict: Unknown, Reason: "worktree root is clean but has ignored files: " + abs}, true
 	default:
 		reason := "worktree state could not be determined: " + abs
@@ -865,7 +865,7 @@ func worktreeRemovalFinding(abs string) (Finding, bool) {
 	}
 }
 
-// workforestSetRemovalFinding maps deletable.ProbeWorkforestSetState(abs) —
+// workforestSetRemovalFinding maps pathspec.ProbeWorkforestSetState(abs) —
 // the WORST WorktreeState among a pn workforest set container's own member
 // slots — to a Finding, per the SAME operator ruling worktreeRemovalFinding
 // applies to a single slot (tc-8og1 item 1, extending tc-vn5z's "removing a
@@ -879,13 +879,13 @@ func worktreeRemovalFinding(abs string) (Finding, bool) {
 // mapping should not silently miscategorize a WorktreeState value it wasn't
 // specifically told to expect.
 func workforestSetRemovalFinding(abs string) (Finding, bool) {
-	state, err := deletable.ProbeWorkforestSetState(abs)
+	state, err := pathspec.ProbeWorkforestSetState(abs)
 	switch state {
-	case deletable.WorktreeClean:
+	case pathspec.WorktreeClean:
 		return Finding{Verdict: Permitted, Reason: "workforest set is clean (every member worktree is clean): " + abs}, true
-	case deletable.WorktreeDirty:
+	case pathspec.WorktreeDirty:
 		return Finding{Verdict: Forbidden, Reason: "workforest set has a dirty member worktree: " + abs}, true
-	case deletable.WorktreeCleanIgnored:
+	case pathspec.WorktreeCleanIgnored:
 		return Finding{Verdict: Unknown, Reason: "workforest set has a clean-but-ignored member worktree: " + abs}, true
 	default:
 		reason := "workforest set member states could not be determined, or a member is not all-clean: " + abs
@@ -925,11 +925,11 @@ func (NoReadOfSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, b
 // node-level secret policy and the graph-level flow policy so both name a
 // secret the same way.
 //
-// tc-lc8f item 3z (deletable.go's "# NON-SECRET declarations" doc comment
+// tc-lc8f item 3z (pathspec.go's "# NON-SECRET declarations" doc comment
 // carries the operator rulings): a GenericSecretsDir match (the bare,
 // role-describing `secrets` path component — secretpath.Classify) is no
 // longer forbidden UNCONDITIONALLY. It is forbidden unless the project's
-// own workspace declaration (deletable.NonSecret) vouches for the path as
+// own workspace declaration (pathspec.NonSecret) vouches for the path as
 // non-secret. A WellKnownSecret match (a specific credential store or file
 // — `.ssh`/`.gnupg`, the credential basenames, `*.pem`/`*.key`) is
 // unaffected: it stays forbidden regardless of any project declaration,
@@ -951,12 +951,12 @@ func secretRead(p string, ctx PolicyContext) (string, bool) {
 // classifiedSecretRead applies secretpath.Classify to candidate and decides
 // whether it is a secret read: WellKnownSecret is unconditionally forbidden
 // (secretRead's doc explains why); GenericSecretsDir is forbidden UNLESS
-// deletable.NonSecret declares the path non-secret. suffix is appended to
+// pathspec.NonSecret declares the path non-secret. suffix is appended to
 // the reason text (secretRead's pre-existing "(resolved)" annotation for
 // the second, symlink-resolved check).
 //
 // candidate is mapped through stripGoPackagePattern before it is handed to
-// deletable.NonSecret (never before secretpath.Classify — Classify matches
+// pathspec.NonSecret (never before secretpath.Classify — Classify matches
 // the `secrets` component in "./internal/rules/secrets/..." exactly as
 // well as in the stripped form, so stripping earlier would buy nothing and
 // would change what every OTHER caller of Classify sees): a `go
@@ -968,7 +968,7 @@ func classifiedSecretRead(candidate string, ctx PolicyContext, suffix string) (s
 	case secretpath.WellKnownSecret:
 		return "secret path" + suffix, true
 	case secretpath.GenericSecretsDir:
-		if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+		if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
 			return "", false
 		}
 		return "secret path" + suffix, true
@@ -982,7 +982,7 @@ func classifiedSecretRead(candidate string, ctx PolicyContext, suffix string) (s
 // the directory it names. Deliberately done HERE, in the policy layer, not
 // in cmddesc (which would have to know this is a secrecy concern rather
 // than a generic path fact) or in deletable (whose Kind declarations are
-// go-agnostic by design — see deletable.go's doc comment): this mapping is
+// go-agnostic by design — see pathspec.go's doc comment): this mapping is
 // specific to how ONE tool family's operand SYNTAX maps onto a path, which
 // is a policy-layer judgment call, not a project-specification concern nor
 // a cmddesc parsing concern.
@@ -1021,7 +1021,7 @@ func stripGoPackagePattern(path string) string {
 // shape this policy set already gives an ordinary ambiguous write
 // (NoWriteToReadOnlyPath's own "zone unknown" case, DeleteAccess's
 // "writable, not deletable" case), not the irrevocable-harm shape a secret
-// read or a well-known-secret write is. When deletable.NonSecret vouches
+// read or a well-known-secret write is. When pathspec.NonSecret vouches
 // for the path (a tracked, non-gitignored file — the SAME declaration
 // secretRead already consults), this policy does not apply at all, and an
 // unrelated write policy (NoWriteToReadOnlyPath) is free to reach its own,
@@ -1037,7 +1037,7 @@ func stripGoPackagePattern(path string) string {
 // so a TRACKED `.env` (whose content is, by that same ruling, recoverable
 // from history — exactly the reasoning tc-z806 gave for demoting git rm
 // from PathDelete to PathModify in the first place) could never be
-// git-rm'd or git-mv'd. deletable.NonSecret already answers "is this path's
+// git-rm'd or git-mv'd. pathspec.NonSecret already answers "is this path's
 // content recoverable/non-secret because git tracks it" for the read side
 // (slice 3z); AccessModify is the one write access class the tc-z806
 // ruling itself says shares that recoverability property, so this is the
@@ -1045,7 +1045,7 @@ func stripGoPackagePattern(path string) string {
 //
 // The carve-out is deliberately narrower than "AccessModify + WellKnownSecret
 // is always Unknown-by-default like GenericSecretsDir": it only ADDS an
-// escape hatch when deletable.NonSecret returns true (tracked, not
+// escape hatch when pathspec.NonSecret returns true (tracked, not
 // gitignored); an UNTRACKED WellKnownSecret modify stays Forbidden, exactly
 // as before this slice. Generalising the untracked branch to Unknown too
 // was considered and rejected: the policy layer has no way to tell "this
@@ -1114,30 +1114,30 @@ func secretWrite(p string, access cmddesc.PathAccess, ctx PolicyContext) (Findin
 
 // classifiedSecretWrite applies secretpath.Classify to candidate and decides
 // the write-side Finding: WellKnownSecret is Forbidden UNLESS access is
-// AccessModify AND deletable.NonSecret declares the path non-secret (the
+// AccessModify AND pathspec.NonSecret declares the path non-secret (the
 // tc-8og1 item 2 carve-out — NoWriteToSecretPath's own doc comment has the
 // full ruling and why the untracked branch of AccessModify is deliberately
 // left Forbidden rather than relaxed to Unknown); GenericSecretsDir is
-// Unknown UNLESS deletable.NonSecret declares the path non-secret,
+// Unknown UNLESS pathspec.NonSecret declares the path non-secret,
 // regardless of access class, in which case this policy has no opinion (ok
 // false) and an ordinary write policy decides. suffix is appended to the
 // reason text (secretWrite's "(resolved)" annotation for the symlink-
 // resolved pass), matching classifiedSecretRead's own convention.
 //
 // candidate is mapped through stripGoPackagePattern before it is handed to
-// deletable.NonSecret, for the identical reason classifiedSecretRead does —
+// pathspec.NonSecret, for the identical reason classifiedSecretRead does —
 // see that function's doc comment.
 func classifiedSecretWrite(candidate string, access cmddesc.PathAccess, ctx PolicyContext, suffix string) (Finding, bool) {
 	switch secretpath.Classify(candidate) {
 	case secretpath.WellKnownSecret:
 		if access == cmddesc.AccessModify {
-			if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+			if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
 				return Finding{}, false
 			}
 		}
 		return Finding{Verdict: Forbidden, Reason: "write to secret path" + suffix}, true
 	case secretpath.GenericSecretsDir:
-		if nonSecret, _ := deletable.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
+		if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
 			return Finding{}, false
 		}
 		return Finding{Verdict: Unknown, Reason: "write to a path named \"secrets\"" + suffix + " needs consent (no project declaration vouches for it as non-secret)"}, true
@@ -1429,9 +1429,9 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 // "go") — but ONLY when the
 // invocation is actually running inside a checkout this machine recognises,
 // never unconditionally by command name: this policy's only question is
-// "is CWD inside a declared git/go workspace" (deletable.
-// InsideMarkerWorkspace over deletable.DefaultKinds' git/go Markers —
-// internal/deletable/workspace.go's gitKind/goKind), Permitted when so,
+// "is CWD inside a declared git/go workspace" (pathspec.
+// InsideMarkerWorkspace over pathspec.DefaultKinds' git/go Markers —
+// internal/pathspec/workspace.go's gitKind/goKind), Permitted when so,
 // Unknown otherwise (a go tool running against some OTHER directory this
 // machine has no workspace declaration for is not vouched for merely by
 // being the `go` binary). `go run` is deliberately NOT judged by this policy
@@ -1491,7 +1491,7 @@ func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 	if e.Family != "" {
 		return judgeBuildToolVerb(e, abs, ctx)
 	}
-	if deletable.InsideMarkerWorkspace(deletable.DefaultKinds(), []string{"git", "go"}, abs) {
+	if pathspec.InsideMarkerWorkspace(pathspec.DefaultKinds(), []string{"git", "go"}, abs) {
 		return Finding{Verdict: Permitted, Reason: "CWD is inside a recognised git/go workspace (ADR 0053's \"executing trusted checkout code\")"}, true
 	}
 	return Finding{Verdict: Unknown, Reason: "CWD is not inside any recognised git/go workspace"}, true
@@ -1511,7 +1511,7 @@ func (TrustedCheckoutExec) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, 
 // has the full class vocabulary):
 //
 //   - "" / evalcontract.VerbClassProjectTied: Permitted ONLY when
-//     deletable.DiscoveredVerbs (slice 3ag) independently finds Operation
+//     pathspec.DiscoveredVerbs (slice 3ag) independently finds Operation
 //     among the verbs a Kind named Family discovers at or above abs —
 //     otherwise Unknown ("operator declared it, but the workspace's own
 //     files do not currently define it — abstain, never guess", per Q3's
@@ -1540,7 +1540,7 @@ func judgeBuildToolVerb(e cmddesc.Effect, abs string, ctx PolicyContext) (Findin
 	}
 	switch class {
 	case evalcontract.VerbClassProjectTied:
-		if workspaceVouchesForVerb(deletable.DefaultKinds(), abs, e.Family, e.Operation) {
+		if workspaceVouchesForVerb(pathspec.DefaultKinds(), abs, e.Family, e.Operation) {
 			return Finding{Verdict: Permitted, Reason: fmt.Sprintf("workspace's own %s declaration defines %q as a project-tied verb", e.Family, e.Operation)}, true
 		}
 		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s verb %q is operator-declared project-tied, but no %s file at or above CWD defines it — abstaining rather than guessing", e.Family, e.Operation, e.Family)}, true
@@ -1597,17 +1597,17 @@ func findVerbScopedApproval(entries []evalcontract.VerbScopedApproval, tool, ver
 	return evalcontract.VerbScopedApproval{}, false
 }
 
-// workspaceVouchesForVerb reports whether deletable.DiscoveredVerbs finds
+// workspaceVouchesForVerb reports whether pathspec.DiscoveredVerbs finds
 // verb among the verbs a Kind named tool discovers at or above abs — the
 // "WORKSPACE vouches ... literally defined in-project" check Q3's ruling
 // calls for. An empty verb never matches (no operator entry should ever
 // have an empty Verb reach here in practice, but this keeps the function
 // total and fail-safe on its own).
-func workspaceVouchesForVerb(kinds []deletable.Kind, abs, tool, verb string) bool {
+func workspaceVouchesForVerb(kinds []pathspec.Kind, abs, tool, verb string) bool {
 	if verb == "" {
 		return false
 	}
-	for _, vs := range deletable.DiscoveredVerbs(kinds, abs) {
+	for _, vs := range pathspec.DiscoveredVerbs(kinds, abs) {
 		if vs.Kind != tool {
 			continue
 		}

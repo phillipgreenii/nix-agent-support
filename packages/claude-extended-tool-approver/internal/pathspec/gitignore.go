@@ -1,4 +1,4 @@
-package deletable
+package pathspec
 
 import (
 	"bufio"

@@ -1,7 +1,12 @@
-// Package deletable is the DELETABLE path class of the CETA effect-graph
-// spike (design bead tc-z806, children tc-z806.1 and tc-z806.3): a third
-// access class layered OVER patheval's read-only / read-write zones,
-// answering "may this path be removed without asking?".
+// Package pathspec (renamed from deletable, ADR 0068 — docs/adr/0068-ceta-
+// unified-path-access-resolution.md, tc-mkpaz.1, "the package MUST be
+// renamed internal/pathspec once it resolves more than deletability") is a
+// workspace-declaration layer OVER patheval's read-only / read-write zones,
+// answering three independent questions per path — "may this path be read /
+// written / removed without asking?" — instead of the single deletability
+// question the pre-rename package answered. It began (tc-z806, tc-z806.1,
+// tc-z806.3) as the DELETABLE path class of the CETA effect-graph spike: a
+// third access class layered over patheval's zones.
 //
 // Operator ruling (Phillip, 2026-09-07, recorded verbatim on tc-z806): "rm
 // would be rejected for paths which aren't at least writable. for writable it
@@ -105,7 +110,29 @@
 // question this package answers at all. internal/effectpolicy's
 // NoReadOfSecretPath/secretRead is the only caller and enforces that split
 // — see its own doc comment.
-package deletable
+//
+// # ADR 0068: Read/Write/Delete facets (workspace.go)
+//
+// tc-mkpaz.1 generalizes the Kind/Resolve mechanism above (a Composite of
+// per-root Strategies, folded by a Chain-of-Responsibility rule) so a Kind
+// states an opinion on THREE independent facets — Read, Write, Delete — not
+// only deletability: see workspace.go's AccessResult/Verdict/PathAccess and
+// ResolveAccess. Classify/ClassifyWith/NonSecret/NonSecretWithKinds above
+// keep their exact pre-ADR-0068 signature and behavior (byte-identical
+// reason strings included) — internal/effectpolicy's DeleteAccess policy
+// still calls them, unmodified by this ADR; only ResolveAccess is new.
+//
+// Import-cycle freedom-boundary decision (recorded here per tc-mkpaz.1's
+// packet text, "so P5 does not have to rediscover it"): the ADR's own
+// Verdict snippet types Result as effectpolicy.FindingVerdict, but
+// internal/effectpolicy already imports internal/pathspec (for Classify
+// etc.), so pathspec importing effectpolicy back would cycle. Verdict.Result
+// is therefore pathspec's OWN AccessResult type (Unknown/Permitted/
+// Forbidden — the same three semantic values as effectpolicy.FindingVerdict,
+// just not that Go type) — P5's policy-layer collapse maps AccessResult onto
+// effectpolicy.Finding/FindingVerdict at the effectpolicy side of the
+// boundary, where the import direction already runs the right way.
+package pathspec
 
 import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
@@ -169,17 +196,24 @@ func ClassifyWith(pe *patheval.PathEvaluator, kinds []Kind, path string) (Class,
 	if abs == "" {
 		return NotWritable, "path does not resolve"
 	}
-	res := Resolve(kinds, abs)
-	switch res.Category {
-	case CatProtected:
-		return Protected, "protected by " + res.Kind + " workspace at " + res.Root
-	case CatDeletable:
-		return Deletable, "deletable per " + res.Kind + " workspace at " + res.Root
-	case CatKeep:
+	// del is the RAW Delete-facet resolution (resolveFacets, workspace.go):
+	// unlike ResolveAccess's exported PathAccess.Delete, its raw value can
+	// still be the unexported holdKeep state — gitKind's "the workspace's
+	// own content, needs consent" opinion for an ordinary tracked file (see
+	// workspace.go's gitKind.Classify doc comment) — which Classify must
+	// tell apart from a genuine Unknown (no declaration matched at all) to
+	// reproduce this function's pre-ADR-0068 CatKeep behavior exactly.
+	_, _, del := resolveFacets(kinds, abs)
+	switch del.raw {
+	case Forbidden:
+		return Protected, "protected by " + del.kindName + " workspace at " + del.root
+	case Permitted:
+		return Deletable, "deletable per " + del.kindName + " workspace at " + del.root
+	case holdKeep:
 		if access.CanWrite() {
-			return Writable, "kept by " + res.Kind + " workspace at " + res.Root
+			return Writable, "kept by " + del.kindName + " workspace at " + del.root
 		}
-		return NotWritable, "zone " + access.String() + "; kept by " + res.Kind + " workspace at " + res.Root
+		return NotWritable, "zone " + access.String() + "; kept by " + del.kindName + " workspace at " + del.root
 	}
 	if access.CanWrite() {
 		return Writable, "no workspace declaration matched"

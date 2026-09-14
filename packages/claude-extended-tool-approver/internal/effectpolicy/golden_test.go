@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/deletable"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/effectgraph"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/pathspec"
 )
 
 var update = flag.Bool("update", false, "regenerate golden .mmd files")
@@ -25,8 +25,8 @@ var update = flag.Bool("update", false, "regenerate golden .mmd files")
 // directory, and an ignored .env (which the secret protection must still
 // refuse); README.md and sub/ are NOT ignored. The fixture lives under
 // t.TempDir(), which on this machine is under a temp root — deliberately
-// irrelevant, because internal/deletable lets the innermost workspace (the
-// git tree) decide, so a tracked file here is writable-not-deletable.
+// irrelevant, because internal/pathspec lets the innermost workspace (the
+// git tree) decide, so a tracked file here is writable-not-pathspec.
 func fixture(t *testing.T) (root, home string) {
 	t.Helper()
 	root = t.TempDir()
@@ -37,7 +37,7 @@ func fixture(t *testing.T) (root, home string) {
 		t.Fatal(err)
 	}
 	// go.mod (slice 3x, tc-lc8f item 4e): the fixture is ALSO a go module —
-	// TrustedCheckoutExec's own workspace check (deletable.
+	// TrustedCheckoutExec's own workspace check (pathspec.
 	// InsideMarkerWorkspace over git/go Markers) already finds this root via
 	// its `.git` directory above, so go.mod's presence here is not
 	// load-bearing for any golden's verdict; it is added so `cat go.mod`
@@ -77,7 +77,7 @@ func fixture(t *testing.T) (root, home string) {
 	// trackedenv/.env (tc-8og1 item 2, slice 3af): a `.env` that IS tracked
 	// by git and NOT gitignored (the `!/trackedenv/.env` negation above),
 	// for the git-rm/git-mv dotenv-verdict-table goldens — WellKnownSecret
-	// (basename) but deletable.NonSecret vouches for it via the git kind's
+	// (basename) but pathspec.NonSecret vouches for it via the git kind's
 	// Secrecy declaration (slice 3z), which NoWriteToSecretPath's AccessModify
 	// carve-out (policy.go) now consults. trackedenv/.env.bak is declared
 	// tracked in the same fake probe below WITHOUT being created on disk —
@@ -115,7 +115,7 @@ func fixture(t *testing.T) (root, home string) {
 	// Build-tool family verb-dispatch coverage (tc-8og1 item 3 sub-slice 4,
 	// slice 3aj): a justfile, package.json and devbox.json at the fixture
 	// root, each declaring a "build" verb (so a golden can prove the SAME
-	// verb name reaches deletable.DiscoveredVerbs independently per tool,
+	// verb name reaches pathspec.DiscoveredVerbs independently per tool,
 	// Family-scoped) and NOT declaring a "deploy" verb (so a golden can
 	// prove an operator-declared-but-undiscovered verb still abstains, per
 	// Q3's ruling). None of these three Kinds opine on path classification
@@ -136,9 +136,9 @@ func fixture(t *testing.T) (root, home string) {
 	// notaworktree. None of these directories are real git worktrees (the
 	// fixture's own `.git` is a plain directory, not a real repository, so
 	// there is nothing for `git worktree add` to attach to here) —
-	// deletable.SetWorktreeStateProbe below substitutes a fake keyed on the
+	// pathspec.SetWorktreeStateProbe below substitutes a fake keyed on the
 	// slot's basename, so this fixture (and every test that calls it) never
-	// starts a real git process for these paths. internal/deletable's own
+	// starts a real git process for these paths. internal/pathspec's own
 	// worktree_test.go covers the real git behaviour these fakes stand in
 	// for, against real throwaway repositories.
 	//
@@ -148,7 +148,7 @@ func fixture(t *testing.T) (root, home string) {
 	// is `.workforests/<set>`, and each member repo's own worktree slot is
 	// `.workforests/<set>/<repo>` (depth 2 under the default workforests_dir,
 	// matching pnWorkforestsDir's default). Three sets exercise the
-	// worst-of-members combining rule (deletable.ProbeWorkforestSetState):
+	// worst-of-members combining rule (pathspec.ProbeWorkforestSetState):
 	// "clean" (single clean member -> the set itself Approves), "dirty"
 	// (single dirty member -> the set itself Rejects), and "mixed" (one
 	// clean + one clean-but-ignored member, no dirty member -> the set
@@ -170,16 +170,16 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "pn-workspace.toml"), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restoreWorktreeProbe := deletable.SetWorktreeStateProbe(func(slotRoot string) (deletable.WorktreeState, error) {
+	restoreWorktreeProbe := pathspec.SetWorktreeStateProbe(func(slotRoot string) (pathspec.WorktreeState, error) {
 		switch filepath.Base(slotRoot) {
 		case "clean":
-			return deletable.WorktreeClean, nil
+			return pathspec.WorktreeClean, nil
 		case "dirty":
-			return deletable.WorktreeDirty, nil
+			return pathspec.WorktreeDirty, nil
 		case "ignored-only":
-			return deletable.WorktreeCleanIgnored, nil
+			return pathspec.WorktreeCleanIgnored, nil
 		default:
-			return deletable.WorktreeUnknown, fmt.Errorf("fixture fake: %s is not a real git repository", slotRoot)
+			return pathspec.WorktreeUnknown, fmt.Errorf("fixture fake: %s is not a real git repository", slotRoot)
 		}
 	})
 	t.Cleanup(restoreWorktreeProbe)
@@ -187,7 +187,7 @@ func fixture(t *testing.T) (root, home string) {
 	// NON-SECRET declaration coverage (tc-lc8f item 3z; slice 3z):
 	// internal/rules/secrets/{secrets.go,id_rsa} and the
 	// internal/rules/secrets DIRECTORY are declared TRACKED by the fake
-	// git-tracked probe below (deletable.SetGitTrackedProbe, the identical
+	// git-tracked probe below (pathspec.SetGitTrackedProbe, the identical
 	// injection-seam pattern the worktree-state fake above uses, and for
 	// the same reason: this fixture's `.git` is a plain directory, never a
 	// real repository, and must not start a real git process).
@@ -196,7 +196,7 @@ func fixture(t *testing.T) (root, home string) {
 	// secrets/.env is WellKnownSecret regardless (the `.env` basename), so
 	// it is unaffected by tracked-ness either way; config/secrets/token is
 	// the case that actually exercises the untracked branch.
-	// internal/deletable's own gittracked_test.go covers the real git
+	// internal/pathspec's own gittracked_test.go covers the real git
 	// behaviour this fake stands in for, against real throwaway repositories.
 	if err := os.MkdirAll(filepath.Join(root, "internal", "rules", "secrets"), 0o755); err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func fixture(t *testing.T) (root, home string) {
 	if err := os.WriteFile(filepath.Join(root, "secrets", ".env"), []byte("S=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	restoreGitTrackedProbe := deletable.SetGitTrackedProbe(func(root, rel string, isDir bool) (bool, error) {
+	restoreGitTrackedProbe := pathspec.SetGitTrackedProbe(func(root, rel string, isDir bool) (bool, error) {
 		switch rel {
 		case "internal/rules/secrets/secrets.go", "internal/rules/secrets", "internal/rules/secrets/id_rsa":
 			return true, nil
@@ -369,7 +369,7 @@ var goldenRemotePaths = map[string]map[string][]evalcontract.RemotePathRule{
 // sub-slice 4, slice 3aj; tc-vn5z Q1-Q5, ruled 2026-09-08): a case name that
 // has an entry here gets that slice as its Request.BuildToolVerbs — the
 // operator ELIGIBILITY declaration judgeBuildToolVerb (slice 3ai) requires
-// IN ADDITION to deletable.DiscoveredVerbs' own independent confirmation
+// IN ADDITION to pathspec.DiscoveredVerbs' own independent confirmation
 // (Q3's ruling) before a project-tied verb Permits. A case name absent here
 // gets nil, matching the ruling's own safe default: an operator-undeclared
 // verb always abstains, whatever the fixture's own
@@ -466,7 +466,7 @@ var goldenCases = []goldenCase{
 	// plain `rm` of trackedenv/.env — TRACKED and not gitignored — still
 	// Rejects. DeleteAccess's ladder step 4 calls secretRead, which is
 	// UNCHANGED by this slice: only NoWriteToSecretPath's AccessModify path
-	// (a git-rm/git-mv positional) consults deletable.NonSecret for a
+	// (a git-rm/git-mv positional) consults pathspec.NonSecret for a
 	// WellKnownSecret match. This is exactly the tc-z806 ruling's own
 	// distinction ("rm is different from git rm") — a plain rm's content is
 	// NOT recoverable from git history the way a tracked git-rm's is, so
@@ -485,7 +485,7 @@ var goldenCases = []goldenCase{
 	// Worktree-removal-by-state (tc-lc8f item 4a; operator ruling, Phillip,
 	// 2026-09-07, verbatim on tc-vn5z): a worktree ROOT — a direct child of
 	// `.worktrees` (or, below, a pn workforests_dir) — is judged by
-	// deletable.ProbeWorktreeState (faked by fixture()'s
+	// pathspec.ProbeWorktreeState (faked by fixture()'s
 	// SetWorktreeStateProbe keyed on basename), superseding slice 3l's
 	// blanket Protected for the root itself only. `.git` stays Protected
 	// (rm_rf_dot_git above), unaffected.
@@ -505,12 +505,12 @@ var goldenCases = []goldenCase{
 	// pn workforest set depth (tc-8og1 item 1): BOTH depths now route
 	// through worktree-state judgment, not pnKind's blanket Protected.
 	// Depth 2 (the per-repo slot itself, `.workforests/<set>/<repo>`) is
-	// judged individually, by deletable.ProbeWorktreeState — identical to a
+	// judged individually, by pathspec.ProbeWorktreeState — identical to a
 	// `.worktrees/<branch>` slot above, just one directory level deeper.
 	{"rm_rf_workforests_clean_repo", "rm -rf .workforests/clean/clean", evalcontract.Approve, nil},
 	{"rm_rf_workforests_dirty_repo", "rm -rf .workforests/dirty/dirty", evalcontract.Reject, nil},
 	// Depth 1 (the SET CONTAINER itself, `.workforests/<set>`) is judged by
-	// the WORST state among its member slots (deletable.
+	// the WORST state among its member slots (pathspec.
 	// ProbeWorkforestSetState), never by ProbeWorktreeState directly (the
 	// container has no `.git` of its own) and never by pnKind's blanket
 	// Protected declaration (workspace.go) either. "clean" has one clean
@@ -953,7 +953,7 @@ var goldenCases = []goldenCase{
 	// history"), and NoWriteToSecretPath unconditionally Forbade a
 	// WellKnownSecret write regardless of access class. Fix (policy.go's
 	// classifiedSecretWrite): a WellKnownSecret AccessModify effect now
-	// consults deletable.NonSecret (the SAME tracked-and-not-gitignored
+	// consults pathspec.NonSecret (the SAME tracked-and-not-gitignored
 	// declaration slice 3z already applies to reads), exactly the class of
 	// write the tc-z806 ruling itself says is history-recoverable. The full
 	// tracked/untracked x rm/git-rm/git-mv matrix (rm's two rows are above,
@@ -1146,7 +1146,7 @@ var goldenCases = []goldenCase{
 	// t.TempDir() (itself under a temp root): patheval's zone classifier
 	// checks `/tmp/**` (PathReadWrite) BEFORE its `~/go/pkg` read-only
 	// special-case, so the fixture never reaches that special-case at all —
-	// deletable.Classify then finds "~/.cache/go-build" Deletable via
+	// pathspec.Classify then finds "~/.cache/go-build" Deletable via
 	// homeKind's own ".cache/" rule and "~/go/pkg/mod" Deletable via
 	// goKind's OWN declared GOMODCACHE root (an exact-match, deepest
 	// candidate). On a REAL host whose HOME is NOT under a temp root (e.g.
@@ -1182,7 +1182,7 @@ var goldenCases = []goldenCase{
 	// (registry_breadth.go), so `go test ./internal/rules/secrets/...`
 	// newly reached NoReadOfSecretPath and Forbade the bare `secrets` path
 	// component, contradicting the 2026-09-07 ruling "go test ... are
-	// fine". See deletable.go's "# NON-SECRET declarations" doc comment for
+	// fine". See pathspec.go's "# NON-SECRET declarations" doc comment for
 	// the two operator rulings this fixes it with (the git kind declares a
 	// TRACKED, non-ignored path non-secret — a project-specification
 	// mechanism, not an in-git-repo relaxation inside the secret policy).
@@ -1510,7 +1510,7 @@ var goldenCases = []goldenCase{
 	// interpretVerbDispatch) that makes 3ai's judgeBuildToolVerb branch
 	// (added but UNREACHABLE by any real schema in slice 3ai) actually
 	// fire. Every Approve below requires BOTH an operator BuildToolVerbs
-	// declaration (goldenBuildToolVerbs above) AND deletable.DiscoveredVerbs
+	// declaration (goldenBuildToolVerbs above) AND pathspec.DiscoveredVerbs
 	// independently finding the verb in the fixture's own
 	// justfile/package.json/devbox.json (golden_test.go's fixture()) — per
 	// Q3's ruling, neither alone is sufficient.
@@ -1523,7 +1523,7 @@ var goldenCases = []goldenCase{
 	{"just_build_declared_confirmed", "just build", evalcontract.Approve, nil},
 	// just_deploy_declared_not_discovered: the OPPOSITE gap — operator
 	// declares "deploy" eligible, but the fixture's justfile has no such
-	// recipe, so deletable.DiscoveredVerbs finds nothing and this abstains
+	// recipe, so pathspec.DiscoveredVerbs finds nothing and this abstains
 	// too ("abstain, never guess", judgeBuildToolVerb's own doc comment).
 	{"just_deploy_declared_not_discovered", "just deploy", evalcontract.Abstain, nil},
 	// just_dynamic_verb_abstain: a runtime-expanded verb token is captured
@@ -1559,7 +1559,7 @@ var goldenCases = []goldenCase{
 	// the FINAL sub-slice of the build-tool family design; tc-vn5z Q1-Q4).
 	// Unlike the just/npm/devbox cases above, no fixture file is needed —
 	// evalcontract.VerbClassInstallableReference never consults
-	// deletable.DiscoveredVerbs (see its own doc comment); the operator
+	// pathspec.DiscoveredVerbs (see its own doc comment); the operator
 	// declaration in goldenBuildToolVerbs alone governs.
 	//
 	// nix_run_bare_declared: bare `nix run` dispatches the implicit
@@ -1586,7 +1586,7 @@ var goldenCases = []goldenCase{
 	// class (VerbClassProjectTied, since Class is left "") instead of
 	// VerbClassInstallableReference — proves that class can never Permit a
 	// nix verb: no nixKind.Verbs facet exists in deletable
-	// (deliberately, per Q1), so deletable.DiscoveredVerbs can never
+	// (deliberately, per Q1), so pathspec.DiscoveredVerbs can never
 	// independently confirm it, whatever the operator declares.
 	{"nix_run_dot_project_tied_never_confirmed", "nix run .", evalcontract.Abstain, nil},
 	// nix_run_dynamic_installable_abstain: a runtime-expanded installable

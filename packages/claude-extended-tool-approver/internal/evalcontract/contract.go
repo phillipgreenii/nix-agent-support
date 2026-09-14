@@ -240,7 +240,7 @@ type VerbChild struct {
 // RemotePaths's doc comment): a path on a configured host (or under the
 // RemoteHostWildcard entry) whose PREFIX matches Prefix is classified
 // Category instead of abstaining. Category is an OPEN vocabulary mirroring
-// internal/deletable's local classification shape (Classify's
+// internal/pathspec's local classification shape (Classify's
 // Protected/Deletable/Writable, patheval's read/write zones) rather than a
 // bespoke one, since the operator ruling's own "categorized paths" wording
 // implies reusing a familiar taxonomy, not inventing a new one: "read-only"
@@ -255,7 +255,7 @@ type VerbChild struct {
 //
 // "protected" vs "secret" (tc-vn5z item 4b part 2, ruled 2026-09-08,
 // Phillip, verbatim: "Keep protected/secret distinct (Recommended)" —
-// mirrors internal/deletable's existing local taxonomy exactly, one
+// mirrors internal/pathspec's existing local taxonomy exactly, one
 // vocabulary reused everywhere): the two names are kept as genuinely
 // SEPARATE, non-interchangeable Category values, matching internal/
 // deletable's own split between a STRUCTURAL declaration (deletable.

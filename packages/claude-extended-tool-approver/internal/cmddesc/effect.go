@@ -39,7 +39,7 @@ const (
 	// the checkout's own code (go test's compiled test binary, go
 	// generate's //go:generate directives) or writing to the tool's own
 	// declared, disposable build cache (go build/vet/fmt/list/env/version/
-	// mod's GOCACHE/GOMODCACHE traffic — internal/deletable/workspace.go's
+	// mod's GOCACHE/GOMODCACHE traffic — internal/pathspec/workspace.go's
 	// goKind). Deliberately NOT EffectProgram: that kind's own policy
 	// (ProgramInterpreted) is unconditionally Permitted once the dialect
 	// interpreter has vouched for the text, which is wrong here — this

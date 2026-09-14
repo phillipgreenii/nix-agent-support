@@ -712,7 +712,7 @@ var findSchema = CommandSchema{
 // install/get are Unknown (never Permitted: they write GOBIN/GOPATH/bin or
 // fetch modules over the network); clean's -cache/-modcache are ordinary
 // PathDelete effects judged by the EXISTING DeleteAccess policy against the
-// SAME cache roots goKind (internal/deletable/workspace.go) already
+// SAME cache roots goKind (internal/pathspec/workspace.go) already
 // declares deletable.
 //
 // `doc`, `tool`, `work` are DELIBERATELY ABSENT from Subcommands: the
@@ -1118,7 +1118,7 @@ var goModEditSchema = CommandSchema{
 
 // goCleanSchema: `go clean [-i] [-r] [-cache] [-testcache] [-modcache]
 // [-fuzzcache] [build flags] [packages]`. -cache/-modcache each delete an
-// ENTIRE cache root goKind (internal/deletable/workspace.go) already
+// ENTIRE cache root goKind (internal/pathspec/workspace.go) already
 // declares Deletable — DeleteAccess judges the resulting PathDelete exactly
 // like `rm -rf` would (tc-z806's own DeleteAccess ladder), so this schema
 // need not special-case go clean's verdict: whatever DeleteAccess concludes

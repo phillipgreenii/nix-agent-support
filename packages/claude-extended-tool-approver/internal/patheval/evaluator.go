@@ -957,7 +957,7 @@ func InGitRepo(path string) bool {
 //     DetectProjectRoot's own doc names exactly this ambiguity (pg2-byh62) as
 //     the reason a caller needing a yes/no repo-root answer must not read its
 //     fallback as a repo; GitRoot's explicit `found` return is that answer.
-//   - internal/deletable's gitignore source (tc-z806.1), which needs the
+//   - internal/pathspec's gitignore source (tc-z806.1), which needs the
 //     repository root as a base to evaluate paths relative to.
 //
 // Like InGitRepo, GitRoot deliberately ignores MONOREPO_ROOT and never falls

@@ -1,4 +1,4 @@
-package deletable
+package pathspec
 
 import (
 	"os"
@@ -177,14 +177,14 @@ func TestDiscoveredVerbsEmptyFileContributesNoVerbSet(t *testing.T) {
 
 // TestJustNpmDevboxKindsSilentOnPathClassification: the three new kinds
 // declare no Rules/Classify, so they must never surface as the DECIDING
-// kind for Resolve — Resolve stays Silent for a path under a justfile-only
-// root with no other kind present.
+// kind for ResolveAccess — every facet stays Unknown for a path under a
+// justfile-only root with no other kind present.
 func TestJustNpmDevboxKindsSilentOnPathClassification(t *testing.T) {
 	root := scratchOutsideTemp(t)
 	writeFile(t, root, "justfile", "check:\n    echo ok\n")
 	touch(t, root, "src/main.go")
-	res := Resolve(DefaultKinds(), filepath.Join(root, "src", "main.go"))
-	if res.Category != CatSilent {
-		t.Errorf("Resolve under justfile-only root = %+v, want CatSilent", res)
+	pa := ResolveAccess(DefaultKinds(), filepath.Join(root, "src", "main.go"))
+	if pa.Read.Result != Unknown || pa.Write.Result != Unknown || pa.Delete.Result != Unknown {
+		t.Errorf("ResolveAccess under justfile-only root = %+v, want all Unknown", pa)
 	}
 }

@@ -732,7 +732,7 @@ var gitBranchSchema = CommandSchema{
 // Subcommands map (interpretSubcommand recurses on the same code path for
 // any depth). Slice 3ac (tc-lc8f item 4h; tc-vn5z item 5; follow-up flagged
 // by slice 3t's rm_rf_worktree_* goldens): the tool's OWN worktree verbs are
-// now modeled so DeleteAccess's worktree-state ladder (internal/deletable/
+// now modeled so DeleteAccess's worktree-state ladder (internal/pathspec/
 // worktree.go, internal/effectpolicy/policy.go's worktreeRemovalFinding)
 // judges `git worktree remove`/`move`'s delete-shaped operand EXACTLY like a
 // plain `rm -rf <worktree-root>` — slice 3l's own principle that "the tool's

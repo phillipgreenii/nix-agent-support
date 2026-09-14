@@ -1,13 +1,37 @@
-package deletable
+package pathspec
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
+
+// wantAccess is the ADR 0068 rewrite of this file's pre-existing
+// Category/Resolution-based table-driven assertions (tc-mkpaz.1's packet
+// text: "update these assertions to the new per-facet shape your resolution
+// entry point returns, preserving what each test actually verifies"): it
+// resolves path's DELETE facet via ResolveAccess — every original assertion
+// in this file was a deletability question, since the pre-rename package
+// only ever answered one — and checks both the exported AccessResult and,
+// when wantReasonHas is non-empty, that the Reason names the deciding kind
+// (Verdict carries no separate Kind/Root field, only Result and Reason; see
+// workspace.go's Verdict doc comment). Pass wantReasonHas == "" for a
+// genuinely undecided path (no candidate had an opinion at all — the old
+// CatSilent/kind=="" case).
+func wantAccess(t *testing.T, kinds []Kind, path string, want AccessResult, wantReasonHas string) {
+	t.Helper()
+	pa := ResolveAccess(kinds, path)
+	if pa.Delete.Result != want {
+		t.Errorf("%s: Delete = %s (%q), want %s", path, pa.Delete.Result, pa.Delete.Reason, want)
+	}
+	if wantReasonHas != "" && !strings.Contains(pa.Delete.Reason, wantReasonHas) {
+		t.Errorf("%s: Delete reason %q does not name kind %q", path, pa.Delete.Reason, wantReasonHas)
+	}
+}
 
 // scratchOutsideTemp returns a fresh directory that is NOT under any temp
 // root, NOT inside a git working tree, and NOT under $HOME/.cache — so a
@@ -78,31 +102,25 @@ func TestGradleKind(t *testing.T) {
 	root := scratchOutsideTemp(t)
 	mkdirs(t, root, "build/classes", ".gradle/caches", "src/main")
 	touch(t, root, "settings.gradle", "build/classes/A.class", "src/main/A.java")
-	for rel, want := range map[string]Category{
-		"build": CatDeletable, "build/classes": CatDeletable, "build/classes/A.class": CatDeletable,
-		".gradle": CatDeletable, ".gradle/caches": CatDeletable,
-		"src": CatSilent, "src/main/A.java": CatSilent, "settings.gradle": CatSilent,
+	for rel, want := range map[string]AccessResult{
+		"build": Permitted, "build/classes": Permitted, "build/classes/A.class": Permitted,
+		".gradle": Permitted, ".gradle/caches": Permitted,
+		"src": Unknown, "src/main/A.java": Unknown, "settings.gradle": Unknown,
 	} {
-		res := Resolve([]Kind{gradleKind}, filepath.Join(root, filepath.FromSlash(rel)))
-		if res.Category != want {
-			t.Errorf("%s: got %s (kind %q), want %s", rel, res.Category, res.Kind, want)
+		wantKind := ""
+		if want != Unknown {
+			wantKind = "gradle"
 		}
-		if want != CatSilent && res.Kind != "gradle" {
-			t.Errorf("%s: decided by %q, want gradle", rel, res.Kind)
-		}
+		wantAccess(t, []Kind{gradleKind}, filepath.Join(root, filepath.FromSlash(rel)), want, wantKind)
 	}
 	// Negative: remove the marker, same tree, nothing is deletable.
 	if err := os.Remove(filepath.Join(root, "settings.gradle")); err != nil {
 		t.Fatal(err)
 	}
-	if res := Resolve([]Kind{gradleKind}, filepath.Join(root, "build")); res.Category != CatSilent {
-		t.Errorf("without marker: build is %s, want silent", res.Category)
-	}
+	wantAccess(t, []Kind{gradleKind}, filepath.Join(root, "build"), Unknown, "")
 	// Kotlin DSL marker also identifies.
 	touch(t, root, "settings.gradle.kts")
-	if res := Resolve([]Kind{gradleKind}, filepath.Join(root, "build")); res.Category != CatDeletable {
-		t.Errorf("settings.gradle.kts: build is %s, want deletable", res.Category)
-	}
+	wantAccess(t, []Kind{gradleKind}, filepath.Join(root, "build"), Permitted, "gradle")
 }
 
 // TestInsideMarkerWorkspace (slice 3x, tc-lc8f item 4e): a plain existence
@@ -141,26 +159,17 @@ func TestGoKind(t *testing.T) {
 	root := scratchOutsideTemp(t)
 	mkdirs(t, root, "mod/internal", "gocache/aa", "modcache/x@v1", "xdg/go-build")
 	touch(t, root, "mod/go.mod", "mod/internal/a.go")
-	if res := Resolve([]Kind{goKind}, filepath.Join(root, "mod", "internal", "a.go")); res.Category != CatSilent {
-		t.Errorf("module source: got %s, want silent", res.Category)
-	}
+	wantAccess(t, []Kind{goKind}, filepath.Join(root, "mod", "internal", "a.go"), Unknown, "")
 	t.Setenv("GOCACHE", filepath.Join(root, "gocache"))
 	t.Setenv("GOMODCACHE", filepath.Join(root, "modcache"))
 	for _, rel := range []string{"gocache", "gocache/aa", "modcache/x@v1"} {
-		res := Resolve([]Kind{goKind}, filepath.Join(root, rel))
-		if res.Category != CatDeletable || res.Kind != "go" {
-			t.Errorf("%s: got %s by %q, want deletable by go", rel, res.Category, res.Kind)
-		}
+		wantAccess(t, []Kind{goKind}, filepath.Join(root, rel), Permitted, "go")
 	}
 	// Default derivation without the env vars: $XDG_CACHE_HOME/go-build.
 	t.Setenv("GOCACHE", "")
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg"))
-	if res := Resolve([]Kind{goKind}, filepath.Join(root, "xdg", "go-build")); res.Category != CatDeletable {
-		t.Errorf("XDG default GOCACHE: got %s, want deletable", res.Category)
-	}
-	if res := Resolve([]Kind{goKind}, filepath.Join(root, "xdg")); res.Category != CatSilent {
-		t.Errorf("XDG_CACHE_HOME itself is not go's: got %s, want silent", res.Category)
-	}
+	wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg", "go-build"), Permitted, "go")
+	wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg"), Unknown, "")
 }
 
 // TestGoKindModCacheZoneConflict pins the documented interaction: the
@@ -174,9 +183,7 @@ func TestGoKindModCacheZoneConflict(t *testing.T) {
 	mkdirs(t, home, "go/pkg/mod/x@v1", "proj")
 	touch(t, home, "proj/.git")
 	target := filepath.Join(home, "go", "pkg", "mod", "x@v1")
-	if res := Resolve([]Kind{goKind}, target); res.Category != CatDeletable {
-		t.Fatalf("declaration: got %s, want deletable", res.Category)
-	}
+	wantAccess(t, []Kind{goKind}, target, Permitted, "go")
 	pe := patheval.NewWithCWD(filepath.Join(home, "proj"), filepath.Join(home, "proj"))
 	if got, reason := ClassifyWith(pe, DefaultKinds(), target); got != NotWritable {
 		t.Errorf("Classify: got %s (%s), want not-writable (read-only zone wins)", got, reason)
@@ -192,20 +199,19 @@ func TestHomeKind(t *testing.T) {
 	mkdirs(t, home, ".cache/x", ".ssh", ".gnupg", "docs")
 	mkdirs(t, scratch, "xdgcache/y")
 	t.Setenv("HOME", home)
-	for rel, want := range map[string]Category{
-		".cache": CatDeletable, ".cache/x": CatDeletable,
-		".ssh": CatProtected, ".ssh/id_rsa": CatProtected, ".gnupg": CatProtected,
-		"docs": CatSilent, ".": CatSilent,
+	for rel, want := range map[string]AccessResult{
+		".cache": Permitted, ".cache/x": Permitted,
+		".ssh": Forbidden, ".ssh/id_rsa": Forbidden, ".gnupg": Forbidden,
+		"docs": Unknown, ".": Unknown,
 	} {
-		res := Resolve([]Kind{homeKind}, filepath.Join(home, filepath.FromSlash(rel)))
-		if res.Category != want {
-			t.Errorf("~/%s: got %s, want %s", rel, res.Category, want)
+		wantKind := ""
+		if want != Unknown {
+			wantKind = "home"
 		}
+		wantAccess(t, []Kind{homeKind}, filepath.Join(home, filepath.FromSlash(rel)), want, wantKind)
 	}
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(scratch, "xdgcache"))
-	if res := Resolve([]Kind{homeKind}, filepath.Join(scratch, "xdgcache", "y")); res.Category != CatDeletable || res.Kind != "home" {
-		t.Errorf("XDG_CACHE_HOME: got %s by %q, want deletable by home", res.Category, res.Kind)
-	}
+	wantAccess(t, []Kind{homeKind}, filepath.Join(scratch, "xdgcache", "y"), Permitted, "home")
 }
 
 // TestPnKind: the workforests dir (default and configured) is Protected;
@@ -221,33 +227,26 @@ func TestPnKind(t *testing.T) {
 	}
 	kinds := []Kind{gitKind, pnKind}
 	for rel, want := range map[string]struct {
-		cat  Category
-		kind string
+		result AccessResult
+		kind   string
 	}{
-		".workforests":           {CatProtected, "pn"},
-		".workforests/feat":      {CatProtected, "pn"},
-		".workforests/feat/repo": {CatProtected, "pn"},
-		"repo/.worktrees":        {CatProtected, "git"},
-		"repo/.worktrees/x":      {CatProtected, "git"},
-		"repo/src/a.go":          {CatKeep, "git"},
-		"pn-workspace.toml":      {CatSilent, ""},
+		".workforests":           {Forbidden, "pn"},
+		".workforests/feat":      {Forbidden, "pn"},
+		".workforests/feat/repo": {Forbidden, "pn"},
+		"repo/.worktrees":        {Forbidden, "git"},
+		"repo/.worktrees/x":      {Forbidden, "git"},
+		"repo/src/a.go":          {Unknown, "git"}, // holdKeep: needs consent, held against a hypothetical outer source
+		"pn-workspace.toml":      {Unknown, ""},
 	} {
-		res := Resolve(kinds, filepath.Join(root, filepath.FromSlash(rel)))
-		if res.Category != want.cat || res.Kind != want.kind {
-			t.Errorf("%s: got %s by %q, want %s by %q", rel, res.Category, res.Kind, want.cat, want.kind)
-		}
+		wantAccess(t, kinds, filepath.Join(root, filepath.FromSlash(rel)), want.result, want.kind)
 	}
 	// Configured workforests_dir.
 	if err := os.WriteFile(filepath.Join(root, "pn-workspace.toml"), []byte("[workspace]\nworkforests_dir = 'sets'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mkdirs(t, root, "sets/feat")
-	if res := Resolve(kinds, filepath.Join(root, "sets", "feat")); res.Category != CatProtected {
-		t.Errorf("configured workforests_dir: got %s, want protected", res.Category)
-	}
-	if res := Resolve(kinds, filepath.Join(root, ".workforests", "feat")); res.Category != CatSilent {
-		t.Errorf("default dir once reconfigured: got %s, want silent", res.Category)
-	}
+	wantAccess(t, kinds, filepath.Join(root, "sets", "feat"), Forbidden, "pn")
+	wantAccess(t, kinds, filepath.Join(root, ".workforests", "feat"), Unknown, "")
 	if got := pnWorkforestsDir(filepath.Join(root, "nowhere")); got != ".workforests" {
 		t.Errorf("missing toml default: %q", got)
 	}
@@ -271,26 +270,21 @@ func TestPrecedence(t *testing.T) {
 	}
 	kinds := DefaultKinds()
 	for rel, want := range map[string]struct {
-		cat  Category
-		kind string
+		result AccessResult
+		kind   string
 	}{
-		"repo/gp/build":       {CatDeletable, "gradle"},
-		"repo/gp/src/A.java":  {CatKeep, "git"},
-		"repo/README.md":      {CatKeep, "git"},
-		"repo/ignored-dir":    {CatDeletable, "git"},
-		"repo/.git":           {CatProtected, "git"},
-		"repo/.workforests/s": {CatProtected, "pn"}, // gitignored (inner git says Deletable) but the pn kind protects: Protected wins
-		"outside.txt":         {CatDeletable, "temp"},
+		"repo/gp/build":       {Permitted, "gradle"},
+		"repo/gp/src/A.java":  {Unknown, "git"}, // holdKeep: needs consent, held against the outer temp root
+		"repo/README.md":      {Unknown, "git"}, // holdKeep: needs consent, held against the outer temp root
+		"repo/ignored-dir":    {Permitted, "git"},
+		"repo/.git":           {Forbidden, "git"},
+		"repo/.workforests/s": {Forbidden, "pn"}, // gitignored (inner git says Permitted) but the pn kind forbids: Forbidden wins
+		"outside.txt":         {Permitted, "temp"},
 	} {
-		res := Resolve(kinds, filepath.Join(root, filepath.FromSlash(rel)))
-		if res.Category != want.cat || res.Kind != want.kind {
-			t.Errorf("%s: got %s by %q, want %s by %q", rel, res.Category, res.Kind, want.cat, want.kind)
-		}
+		wantAccess(t, kinds, filepath.Join(root, filepath.FromSlash(rel)), want.result, want.kind)
 	}
 	scratch := scratchOutsideTemp(t)
-	if res := Resolve(kinds, filepath.Join(scratch, "x")); res.Category != CatSilent {
-		t.Errorf("under no kind: got %s by %q, want silent", res.Category, res.Kind)
-	}
+	wantAccess(t, kinds, filepath.Join(scratch, "x"), Unknown, "")
 }
 
 // TestClassifyDeletableImpliesWritable: a zone-unknown path under a
@@ -318,11 +312,15 @@ func TestClassifyDeletableImpliesWritable(t *testing.T) {
 	}
 }
 
-// TestCategoryString pins the names embedded in reasons.
-func TestCategoryString(t *testing.T) {
-	for c, want := range map[Category]string{CatSilent: "silent", CatDeletable: "deletable", CatKeep: "keep", CatProtected: "protected", Category(9): "category-invalid"} {
-		if got := c.String(); got != want {
-			t.Errorf("%d: %q, want %q", int(c), got, want)
+// TestAccessResultString pins the names embedded in reasons (ADR 0068
+// rewrite of the pre-rename TestCategoryString — this package's own
+// unexported holdKeep is included here since a package-internal test can
+// spell it, unlike any caller outside this package: see AccessResult's doc
+// comment).
+func TestAccessResultString(t *testing.T) {
+	for a, want := range map[AccessResult]string{Unknown: "unknown", Permitted: "permitted", Forbidden: "forbidden", holdKeep: "keep", AccessResult(99): "access-result-invalid"} {
+		if got := a.String(); got != want {
+			t.Errorf("%d: %q, want %q", int(a), got, want)
 		}
 	}
 }
