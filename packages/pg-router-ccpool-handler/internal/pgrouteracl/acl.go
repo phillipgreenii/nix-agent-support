@@ -304,24 +304,29 @@ func ensureReview(ctx context.Context, r beads.Runner, pr PR, mrs, reviews []bea
 	return id, nil
 }
 
-// ReadPRList shells `pg-pr pr list --json` with cwd=repoRoot so pg-pr
+// ReadPRList shells `<prTool> pr list --json` with cwd=repoRoot so the tool
 // auto-detects the repo from the monorepo's git remote. Base fields only (no
-// --reviewers): the cheap, network-free read seam.
+// --reviewers): the cheap, network-free read seam. prTool is the external
+// PR-management tool this package is an anti-corruption layer over — a
+// caller wiring this in supplies it (e.g. from config.Config.PRTool) rather
+// than this function assuming a fixed binary (GOAL-MIN-1's Floor: no
+// concrete tool compiled into pg-router's own contract surface).
 //
 // Because it is network-free, the rows it returns are exactly as current as
-// pg-pr's last sync — which is why each row carries LastSyncedAt + Stale, and why
-// Reconcile refuses to act on the rows that are past their bound.
-func ReadPRList(ctx context.Context, repoRoot string) ([]PR, error) {
-	cmd := exec.CommandContext(ctx, "pg-pr", "pr", "list", "--json")
+// that tool's last sync — which is why each row carries LastSyncedAt +
+// Stale, and why Reconcile refuses to act on the rows that are past their
+// bound.
+func ReadPRList(ctx context.Context, repoRoot, prTool string) ([]PR, error) {
+	cmd := exec.CommandContext(ctx, prTool, "pr", "list", "--json")
 	cmd.Dir = repoRoot
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("pg-pr pr list: %w: %s", err, msg)
+			return nil, fmt.Errorf("%s pr list: %w: %s", prTool, err, msg)
 		}
-		return nil, fmt.Errorf("pg-pr pr list: %w", err)
+		return nil, fmt.Errorf("%s pr list: %w", prTool, err)
 	}
 	return parsePRList(out)
 }
@@ -329,7 +334,7 @@ func ReadPRList(ctx context.Context, repoRoot string) ([]PR, error) {
 func parsePRList(b []byte) ([]PR, error) {
 	var prs []PR
 	if err := json.Unmarshal(b, &prs); err != nil {
-		return nil, fmt.Errorf("parse pg-pr pr list: %w", err)
+		return nil, fmt.Errorf("parse pr list: %w", err)
 	}
 	return prs, nil
 }

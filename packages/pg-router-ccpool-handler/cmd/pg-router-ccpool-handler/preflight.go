@@ -25,22 +25,26 @@ import (
 // of an unwired-but-ready seam — cmd/pg-router's bootCore never assigns
 // Orchestrator.Handler either).
 
-// resolveSelf shells out to `pg-pr config show --json` and reads .self_login.
-func resolveSelf(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "pg-pr", "config", "show", "--json").Output()
+// resolveSelf shells out to `<prTool> config show --json` and reads
+// .self_login. prTool is the external PR-management tool this module's own
+// config.Config.PRTool names — a caller wiring this in supplies it rather
+// than this function assuming a fixed binary (GOAL-MIN-1's Floor: no concrete
+// tool compiled into pg-router's own contract surface).
+func resolveSelf(ctx context.Context, prTool string) (string, error) {
+	out, err := exec.CommandContext(ctx, prTool, "config", "show", "--json").Output()
 	if err != nil {
-		return "", fmt.Errorf("pg-pr config show: %w", err)
+		return "", fmt.Errorf("%s config show: %w", prTool, err)
 	}
 	return parseSelfLogin(out)
 }
 
-// parseSelfLogin extracts self_login from pg-pr config JSON.
+// parseSelfLogin extracts self_login from the PR tool's config JSON.
 func parseSelfLogin(b []byte) (string, error) {
 	var cfg struct {
 		SelfLogin string `json:"self_login"`
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
-		return "", fmt.Errorf("parse pg-pr config: %w", err)
+		return "", fmt.Errorf("parse pr tool config: %w", err)
 	}
 	if cfg.SelfLogin == "" {
 		return "", fmt.Errorf("self_login is empty")

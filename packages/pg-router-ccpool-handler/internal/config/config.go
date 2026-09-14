@@ -61,6 +61,12 @@ type Config struct {
 	PermissionMode string
 	AllowedTools   string
 	Autonomous     bool
+	// PRTool is the external PR-management tool this module's ACL
+	// (internal/pgrouteracl) and preflight (resolveSelf) shell out to —
+	// configuration, never a name compiled into this module's own contract
+	// surface (GOAL-MIN-1's Floor). Empty (the default) adds no extra grant
+	// to the built-in AllowedTools default; see defaultAllowedTools below.
+	PRTool string
 	// SessionPrefix names the ccpool --name label prefix (Role.DisplayName).
 	SessionPrefix string
 	// SelfLogin is the GitHub login the worker safety preamble asserts
@@ -130,6 +136,24 @@ func (c Config) WorkerBudget() budget.Budget {
 	}
 }
 
+// baseAllowedTools is the built-in claude --allowed-tools allowlist granted
+// to every autonomous worker regardless of configuration. Mirrors
+// packages/pg-router/internal/config.baseAllowedTools (same value, same
+// rationale — see that package's own doc comment).
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)"
+
+// defaultAllowedTools builds the AllowedTools default: baseAllowedTools plus,
+// when prTool is configured, a Bash(<prTool>:*) grant — mirrors
+// packages/pg-router/internal/config.defaultAllowedTools's same rationale
+// (a review role's completion action needs that grant under dontAsk
+// deny-by-default; see pg2-vmbn7). Empty prTool omits the grant entirely.
+func defaultAllowedTools(prTool string) string {
+	if prTool == "" {
+		return baseAllowedTools
+	}
+	return baseAllowedTools + ",Bash(" + prTool + ":*)"
+}
+
 // Default returns this module's own baseline Config. Values mirror
 // packages/pg-router/internal/config.Default()'s corresponding fields as of
 // the 2026-09-11 move, so a deployment that supplies no overrides observes
@@ -144,7 +168,8 @@ func Default() Config {
 		Model:          "",
 		Autonomous:     true,
 		PermissionMode: "dontAsk",
-		AllowedTools:   "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(pg-pr:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
+		PRTool:         "",
+		AllowedTools:   defaultAllowedTools(""),
 		SessionPrefix:  "pg-router-",
 		ReminderMsg:    "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
 		WrapUpMsg:      "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",

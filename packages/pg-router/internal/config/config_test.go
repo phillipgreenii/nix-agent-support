@@ -447,11 +447,10 @@ func TestDefault_allowedTools(t *testing.T) {
 		t.Fatal("AllowedTools default must be a non-empty allowlist (deny-by-default needs an allowlist to be useful)")
 	}
 	// Sanity: the conservative default must grant the worker its core verbs and
-	// must NOT be a blanket "Bash" (which would re-open arbitrary RCE).
-	// Bash(pg-pr: is required so the review role can post reviews back through
-	// pg-pr (its only completion action) under dontAsk deny-by-default; see
-	// pg2-vmbn7. Scope of per-role access is revisited in pg2-f9vcg.
-	for _, must := range []string{"Read", "Edit", "Write", "Bash(git ", "Bash(pg-pr:"} {
+	// must NOT be a blanket "Bash" (which would re-open arbitrary RCE). PRTool
+	// defaults to empty, so no external review-post tool grant is baked in —
+	// see TestDefaultAllowedTools_prToolGrant below for that behavior.
+	for _, must := range []string{"Read", "Edit", "Write", "Bash(git "} {
 		if !strings.Contains(d.AllowedTools, must) {
 			t.Errorf("AllowedTools default %q missing required entry %q", d.AllowedTools, must)
 		}
@@ -459,6 +458,26 @@ func TestDefault_allowedTools(t *testing.T) {
 	if strings.Contains(d.AllowedTools, "Bash(*)") || strings.Contains(d.AllowedTools, ",Bash,") ||
 		strings.HasSuffix(d.AllowedTools, ",Bash") || d.AllowedTools == "Bash" {
 		t.Errorf("AllowedTools must not grant unrestricted Bash: %q", d.AllowedTools)
+	}
+}
+
+// TestDefaultAllowedTools_prToolGrant proves defaultAllowedTools folds a
+// configured PRTool into a Bash(<tool>:*) grant (docket pg2-oju6w's Task
+// 5.13 register-catch-down): a review role's only completion action is to
+// post its review back through that external tool, so under dontAsk
+// deny-by-default the grant MUST be present once PRTool names one — see
+// pg2-vmbn7 — but pg-router's own compiled-in default no longer names any
+// concrete tool itself (GOAL-MIN-1's Floor).
+func TestDefaultAllowedTools_prToolGrant(t *testing.T) {
+	if got := defaultAllowedTools(""); got != baseAllowedTools {
+		t.Errorf("defaultAllowedTools(\"\") = %q, want the base allowlist unchanged: %q", got, baseAllowedTools)
+	}
+	got := defaultAllowedTools("review-tool")
+	if !strings.Contains(got, "Bash(review-tool:*)") {
+		t.Errorf("defaultAllowedTools(%q) = %q, want it to contain Bash(review-tool:*)", "review-tool", got)
+	}
+	if !strings.Contains(got, "Bash(git ") {
+		t.Errorf("defaultAllowedTools(%q) = %q, must still contain the base allowlist", "review-tool", got)
 	}
 }
 
@@ -471,6 +490,41 @@ func TestLoad_allowedToolsEnvOverride(t *testing.T) {
 	}
 	if c.AllowedTools != "Read,Edit" {
 		t.Errorf("AllowedTools = %q, want Read,Edit (PG_ROUTER_ALLOWED_TOOLS overlay)", c.AllowedTools)
+	}
+}
+
+// TestLoad_prToolEnvOverride proves PG_ROUTER_PR_TOOL folds into the
+// built-in AllowedTools default (when PG_ROUTER_ALLOWED_TOOLS is not itself
+// set) rather than requiring an operator to spell out the whole allowlist
+// just to grant one more tool.
+func TestLoad_prToolEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_PR_TOOL", "review-tool")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PRTool != "review-tool" {
+		t.Errorf("PRTool = %q, want review-tool (PG_ROUTER_PR_TOOL overlay)", c.PRTool)
+	}
+	if !strings.Contains(c.AllowedTools, "Bash(review-tool:*)") {
+		t.Errorf("AllowedTools = %q, want it to contain Bash(review-tool:*)", c.AllowedTools)
+	}
+}
+
+// TestLoad_prToolDoesNotOverrideExplicitAllowedTools proves an explicit
+// PG_ROUTER_ALLOWED_TOOLS always wins outright — PRTool only fills the
+// built-in default, never appends onto an operator-supplied allowlist.
+func TestLoad_prToolDoesNotOverrideExplicitAllowedTools(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_PR_TOOL", "review-tool")
+	t.Setenv("PG_ROUTER_ALLOWED_TOOLS", "Read,Edit")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AllowedTools != "Read,Edit" {
+		t.Errorf("AllowedTools = %q, want Read,Edit (explicit PG_ROUTER_ALLOWED_TOOLS must win over PRTool)", c.AllowedTools)
 	}
 }
 

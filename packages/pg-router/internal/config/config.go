@@ -91,7 +91,16 @@ type Config struct {
 	// auto-denied (no human prompt). Empty omits the flag (claude's own default
 	// tool policy applies — used only when an operator deliberately clears it).
 	// SECURITY-SENSITIVE: the default value in Default() requires human sign-off.
-	AllowedTools  string
+	AllowedTools string
+	// PRTool is the external tool a review role's completion action posts its
+	// review back through, and reads PR facts from (docket pg2-oju6w's Task
+	// 5.13 register-catch-down / GOAL-MIN-1's Floor: pg-router's own contract
+	// surface names no concrete tool). Empty (the default) adds no extra grant
+	// to the built-in AllowedTools default — see defaultAllowedTools below. A
+	// deployment that wants review-post capability sets PG_ROUTER_PR_TOOL (or
+	// configures AllowedTools directly). Unlike AllowedTools, PRTool carries
+	// no [pool] TOML key today — env-only.
+	PRTool        string
 	SessionPrefix string
 
 	// Autonomous, when true, passes `--autonomous` to `ccpool new` so workers'
@@ -220,6 +229,30 @@ func (c Config) locator() CommandLocator {
 	return defaultLocator
 }
 
+// baseAllowedTools is the built-in claude --allowed-tools allowlist granted to
+// every autonomous worker regardless of configuration (HUMAN SIGN-OFF
+// REQUIRED — see plan). Minimum verbs an autonomous worker needs; deliberately
+// NOT blanket Bash. Per-entry rationale is in
+// docs/superpowers/plans/2026-06-23-pg-router-deny-by-default-allowlist.md.
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)"
+
+// defaultAllowedTools builds the SECURITY-SENSITIVE AllowedTools default:
+// baseAllowedTools plus, when prTool is configured, a Bash(<prTool>:*) grant.
+// A review role's ONLY completion action is to post its review back through
+// that external tool (which owns the actual write; the review prompt forbids
+// any other write path), so under dontAsk deny-by-default that grant MUST be
+// present or the post-back is auto-denied (pg2-vmbn7). Which tool that is is
+// deployment configuration (PRTool / PG_ROUTER_PR_TOOL) — unlike bd (this
+// pool's own toolbox), it is not a name pg-router's own contract surface
+// bakes in. Empty prTool omits the grant entirely; scoping tool access per
+// role (read-only review vs write-capable worker) is tracked in pg2-f9vcg.
+func defaultAllowedTools(prTool string) string {
+	if prTool == "" {
+		return baseAllowedTools
+	}
+	return baseAllowedTools + ",Bash(" + prTool + ":*)"
+}
+
 // Default returns the built-in defaults (mirrors pg-router.sh's ${VAR:-default}).
 func Default() Config {
 	cwd, _ := os.Getwd()
@@ -247,27 +280,19 @@ func Default() Config {
 		Model:              "",
 		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
 		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
-		// SECURITY-SENSITIVE default allowlist (HUMAN SIGN-OFF REQUIRED — see plan).
-		// Minimum verbs an autonomous worker needs; deliberately NOT blanket Bash.
-		// Per-entry rationale is in docs/superpowers/plans/2026-06-23-pg-router-deny-by-default-allowlist.md.
-		// Bash(pg-pr:*): the review role's ONLY completion action is to post the review
-		// back via `pg-pr review submit` (pg-pr owns the GitHub write; the review prompt
-		// forbids gh), so under dontAsk it MUST be allow-listed or the post-back is
-		// auto-denied (pg2-vmbn7). This is a pool-wide, full-pg-pr grant "for now" to see
-		// the flow work end-to-end; scoping tool access per role (read-only review vs
-		// write-capable worker) is tracked in pg2-f9vcg.
-		AllowedTools:  "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(pg-pr:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)",
-		SessionPrefix: "pg-router-",
-		BudgetTokens:  0,                // unlimited until ccpool N3
-		BudgetCost:    0,                // unlimited until ccpool N3
-		BudgetTime:    25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:   0.725,
-		CancelPct:     0.90,
-		HardPct:       1.00,
-		LogDir:        state + "/pg-router",
-		ReminderMsg:   "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
-		WrapUpMsg:     "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
-		ConfirmIngest: 90 * time.Second, // catch a dropped initial nudge well under BudgetTime
+		PRTool:             "",        // no review-post grant by default — see defaultAllowedTools's doc comment
+		AllowedTools:       defaultAllowedTools(""),
+		SessionPrefix:      "pg-router-",
+		BudgetTokens:       0,                // unlimited until ccpool N3
+		BudgetCost:         0,                // unlimited until ccpool N3
+		BudgetTime:         25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:        0.725,
+		CancelPct:          0.90,
+		HardPct:            1.00,
+		LogDir:             state + "/pg-router",
+		ReminderMsg:        "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:          "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:      90 * time.Second, // catch a dropped initial nudge well under BudgetTime
 	}
 }
 
@@ -297,7 +322,11 @@ func Load() (Config, error) {
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
 	c.Autonomous = envBool("PG_ROUTER_AUTONOMOUS", c.Autonomous)
-	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", c.AllowedTools)
+	// PRTool overlays BEFORE AllowedTools resolves, so a PG_ROUTER_PR_TOOL set
+	// without an explicit PG_ROUTER_ALLOWED_TOOLS still gets its Bash(<tool>:*)
+	// grant folded into the built-in default.
+	c.PRTool = envStr("PG_ROUTER_PR_TOOL", c.PRTool)
+	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", defaultAllowedTools(c.PRTool))
 	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
 	c.BudgetTokens = int64(envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
