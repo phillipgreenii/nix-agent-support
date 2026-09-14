@@ -148,9 +148,24 @@ func humanizePRCommits(raw json.RawMessage) (string, error) {
 // concatenated in backend registration order"), with each backend's own
 // health as one sources[] row (INV-OUT-1), mirroring ciListOutcome's
 // identical shape for the sibling PR-keyed "ci list" fan-out.
+//
+// PresentIDs is the concatenation of every queried backend's own
+// PRListResult.PresentIDs (schema/pr.go), which a backend populates
+// regardless of whether the caller passed ids_only — added by bug
+// pg2-nc3iy, which found that `--ids-only` always returned an empty
+// Entities with no way to recover the matched ids at all: with ids_only
+// true, a backend correctly leaves its own Entities empty per
+// PRListResult's documented ids_only contract, so
+// out.Entities = append(out.Entities, result.Entities...) below appends
+// nothing and the umbrella response carried the ids nowhere. Surfacing
+// PresentIDs here (mirroring the per-backend field's own
+// "always populated regardless of ids_only" invariant) is additive to
+// the existing {entities, sources} CLI wire shape, so no existing
+// consumer decoding only Entities/Sources is affected.
 type prListOutcome struct {
-	Entities []schema.PR    `json:"entities"`
-	Sources  []SourceResult `json:"sources"`
+	Entities   []schema.PR    `json:"entities"`
+	PresentIDs []string       `json:"present_ids"`
+	Sources    []SourceResult `json:"sources"`
 }
 
 // fanOutPRList queries "list" against every backend in backends (design
@@ -168,8 +183,9 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 	// answers with zero matches, still marshals entities[]/sources[] as
 	// [] rather than null [bug A15's convention, applied here].
 	out := prListOutcome{
-		Entities: make([]schema.PR, 0),
-		Sources:  make([]SourceResult, 0, len(backends)),
+		Entities:   make([]schema.PR, 0),
+		PresentIDs: make([]string, 0),
+		Sources:    make([]SourceResult, 0, len(backends)),
 	}
 	for _, b := range backends {
 		config, err := reg.BackendConfig(b)
@@ -188,6 +204,7 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 			continue
 		}
 		out.Entities = append(out.Entities, result.Entities...)
+		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
 	}
 	return out
@@ -234,15 +251,26 @@ func newPrListCmd() *cobra.Command {
 
 // humanizePRListOutcome formats "pr list"'s fan-out outcome for human
 // display, mirroring humanizeCiList's own shape for the analogous fan-out.
+// When the caller passed --ids-only, Entities is empty by design (see
+// prListOutcome's doc comment) and PresentIDs carries the matched ids
+// instead — rendered as a plain id list rather than falling through to
+// the empty-Entities "(none)" branch, which would misreport a non-zero
+// match count as zero (bug pg2-nc3iy).
 func humanizePRListOutcome(o prListOutcome) string {
 	var b strings.Builder
-	if len(o.Entities) == 0 {
-		b.WriteString("prs: (none)\n")
-	} else {
+	switch {
+	case len(o.Entities) > 0:
 		fmt.Fprintf(&b, "prs (%d):\n", len(o.Entities))
 		for _, pr := range o.Entities {
 			fmt.Fprintf(&b, "  [%s] %s#%d %q [%s]\n", pr.ID, pr.Repo, pr.Number, pr.Title, pr.State)
 		}
+	case len(o.PresentIDs) > 0:
+		fmt.Fprintf(&b, "prs (%d, ids only):\n", len(o.PresentIDs))
+		for _, id := range o.PresentIDs {
+			fmt.Fprintf(&b, "  %s\n", id)
+		}
+	default:
+		b.WriteString("prs: (none)\n")
 	}
 	b.WriteString("sources:\n")
 	b.WriteString(formatSourcesTable(o.Sources))

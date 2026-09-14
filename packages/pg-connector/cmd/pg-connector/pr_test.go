@@ -309,3 +309,133 @@ func TestRun_PrShow_NonExecutableBackendBinary_EmitsJSONEnvelope(t *testing.T) {
 		t.Fatalf("resp.Error = %+v, want a populated error for a non-executable backend binary", resp.Error)
 	}
 }
+
+// TestRun_PrList_Success_FullEntities is a baseline sanity check for "pr
+// list" without --ids-only: the pre-existing, already-correct path
+// (entities populated, present_ids populated alongside it per
+// PRListResult's "always populated regardless of ids_only" contract).
+// There was no existing coverage of "pr list" at all before bug
+// pg2-nc3iy's fix.
+func TestRun_PrList_Success_FullEntities(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-pr-list", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"o/r#1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}],"present_ids":["o/r#1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-pr-list")
+
+	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome prListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != 1 || outcome.Entities[0].ID != "o/r#1" {
+		t.Fatalf("outcome.Entities = %+v", outcome.Entities)
+	}
+	if len(outcome.PresentIDs) != 1 || outcome.PresentIDs[0] != "o/r#1" {
+		t.Fatalf("outcome.PresentIDs = %+v", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Status != SourceSucceeded || outcome.Sources[0].Count != 1 {
+		t.Fatalf("outcome.Sources = %+v", outcome.Sources)
+	}
+}
+
+// TestRun_PrList_IdsOnly_ReturnsPresentIDsNotEmptyEntities is the
+// regression test for bug pg2-nc3iy: `pg-connector pr list --ids-only`
+// always returned an empty entities array despite sources[].count
+// correctly reporting the real match count. Root cause: fanOutPRList
+// (pr.go) only ever forwarded a backend's result.Entities into the
+// umbrella outcome; with ids_only true, a backend correctly leaves its
+// own Entities empty per PRListResult's documented ids_only contract
+// (pkg/schema/pr.go) and populates only PresentIDs instead, so the
+// concatenation step appended nothing and the caller had no way to
+// recover the matched ids at all. The fix surfaces PresentIDs on
+// prListOutcome itself.
+func TestRun_PrList_IdsOnly_ReturnsPresentIDsNotEmptyEntities(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-pr-list-ids", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["o/r#1","o/r#2"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-pr-list-ids")
+
+	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome prListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != 0 {
+		t.Fatalf("outcome.Entities = %+v, want empty (ids_only leaves entities empty by design)", outcome.Entities)
+	}
+	if len(outcome.PresentIDs) != 2 || outcome.PresentIDs[0] != "o/r#1" || outcome.PresentIDs[1] != "o/r#2" {
+		t.Fatalf("outcome.PresentIDs = %+v, want both matched ids surfaced (the bug: this was always empty)", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Status != SourceSucceeded || outcome.Sources[0].Count != 2 {
+		t.Fatalf("outcome.Sources = %+v, want count 2 (sources[].count already worked pre-fix)", outcome.Sources)
+	}
+}
+
+// TestRun_PrList_IdsOnly_FanOut_ConcatenatesPresentIDsAcrossBackends
+// proves the fix also works across a multi-backend fan-out (the bug
+// report's "team" query repro: a 6-clause fan-out, not just a
+// single-backend "mine" query) — present_ids from every queried backend
+// must concatenate, exactly like entities does in the non-ids_only case.
+func TestRun_PrList_IdsOnly_FanOut_ConcatenatesPresentIDsAcrossBackends(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-pr-list-a", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["o/r#1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-pr-list-b", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["o/r#2"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	// writeConfigFor only supports a single backend and writeCiConfigFor
+	// hardcodes "connector.ci" -- pr needs its own list-valued
+	// "connector.pr" block with two entries, so build the config directly.
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - backend-pr-list-a\n    - backend-pr-list-b\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "team", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome prListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.PresentIDs) != 2 {
+		t.Fatalf("outcome.PresentIDs = %+v, want 2 concatenated ids across both backends", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 2 {
+		t.Fatalf("outcome.Sources = %+v, want one row per backend, never collapsed", outcome.Sources)
+	}
+}
+
+// TestRun_PrList_IdsOnly_HumanOutput_ShowsIDsNotNone covers the human
+// (--output human) rendering path, which branched on len(Entities) alone
+// before the fix and so always printed "prs: (none)" for --ids-only
+// regardless of how many ids actually matched.
+func TestRun_PrList_IdsOnly_HumanOutput_ShowsIDsNotNone(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-pr-list-human", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["o/r#1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-pr-list-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "pr", "list", "--query", "mine", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "prs: (none)") {
+		t.Fatalf("human output = %q, want it to show the matched id, not report zero matches", stdout)
+	}
+	if !strings.Contains(stdout, "o/r#1") {
+		t.Fatalf("human output = %q, want it to contain the matched id", stdout)
+	}
+}
