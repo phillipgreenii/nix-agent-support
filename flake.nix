@@ -382,6 +382,67 @@
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
 
+      # pg2-i5t0k: the `prevent-main-rebase` pre-rebase hook's shell text
+      # (used below as the `phillipgreenii.pre-commit.extraHooks` entry, and
+      # again -- unchanged -- as `checks.<system>.test-prevent-main-rebase-hook`'s
+      # own package in `perSystem`) is hoisted to this ONE shared `let`
+      # binding so the production hook and its bats regression test
+      # (tests/prevent-main-rebase.bats) can never silently diverge into two
+      # different implementations.
+      prevent-main-rebase-hook-script = ''
+        # The branch actually being REWRITTEN: the explicit two-arg
+        # form's branch (PRE_COMMIT_PRE_REBASE_BRANCH) if given,
+        # else whatever is currently checked out. Empty on a
+        # detached HEAD with no explicit branch -- can't be the
+        # primary branch, so it is allowed through untouched
+        # (matches git's own pre-rebase.sample: "we do not
+        # interrupt rebasing detached HEAD").
+        branch="''${PRE_COMMIT_PRE_REBASE_BRANCH:-}"
+        if [ -z "$branch" ]; then
+          branch="$(git symbolic-ref --short -q HEAD || true)"
+        fi
+
+        primary="$(git config --get pgii-integrate-branch.primaryBranch 2>/dev/null || true)"
+        if [ -z "$primary" ]; then
+          origin_head="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+          primary="''${origin_head#origin/}"
+        fi
+        [ -z "$primary" ] && primary="main"
+
+        if [ -n "$branch" ] && [ "$branch" = "$primary" ]; then
+          # pg2-i5t0k: auto-allow the SAFE case instead of refusing every
+          # rebase of the primary branch unconditionally. Operator-approved
+          # design (pg2-i5t0k, 2026-09-14 via /pb:unblock-human-beads):
+          # auto-allow ONLY when rebasing directly onto a freshly-fetched
+          # origin/"$primary" AND every commit that would actually be
+          # rewritten (the range origin/"$primary"..."$branch") is, by
+          # construction of `git rev-list`, structurally unpublished --
+          # i.e. not yet an ancestor of origin/"$primary" -- and none of
+          # them is a merge commit (this repo's ff-merge-to-main discipline
+          # means main should never legitimately contain one, so seeing one
+          # here is itself a red flag worth a human look). Anything else --
+          # a different/stale upstream, nothing unpublished, or a merge
+          # commit in the range -- falls through to today's blanket
+          # refusal below, unchanged.
+          upstream="''${PRE_COMMIT_PRE_REBASE_UPSTREAM:-}"
+          if [ -n "$upstream" ] && git fetch -q origin "$primary" 2>/dev/null; then
+            upstream_sha="$(git rev-parse --verify "''${upstream}^{commit}" 2>/dev/null || true)"
+            origin_sha="$(git rev-parse --verify "refs/remotes/origin/$primary^{commit}" 2>/dev/null || true)"
+            if [ -n "$upstream_sha" ] && [ -n "$origin_sha" ] && [ "$upstream_sha" = "$origin_sha" ]; then
+              range="$(git rev-list "origin/$primary..$branch" 2>/dev/null || true)"
+              if [ -n "$range" ] && [ -z "$(git rev-list --merges "origin/$primary..$branch" 2>/dev/null || true)" ]; then
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "prevent-main-rebase: refusing to rebase '$primary' directly (upstream: ''${PRE_COMMIT_PRE_REBASE_UPSTREAM:-<unknown>})." >&2
+          echo "This repo lands via ff-merge-to-main (CLAUDE.md R-1..R-9 / the integrate-branch skill), never a direct rebase of '$primary'. Bypass ONLY with explicit operator authorization -- never silently (pg2-m146l)." >&2
+          exit 1
+        fi
+        exit 0
+      '';
+
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
       # Mirror flake-utils.lib.eachDefaultSystem verbatim — standalone,
@@ -528,33 +589,7 @@
             pkgs.writeShellApplication {
               name = "prevent-main-rebase-hook";
               runtimeInputs = [ pkgs.git ];
-              text = ''
-                # The branch actually being REWRITTEN: the explicit two-arg
-                # form's branch (PRE_COMMIT_PRE_REBASE_BRANCH) if given,
-                # else whatever is currently checked out. Empty on a
-                # detached HEAD with no explicit branch -- can't be the
-                # primary branch, so it is allowed through untouched
-                # (matches git's own pre-rebase.sample: "we do not
-                # interrupt rebasing detached HEAD").
-                branch="''${PRE_COMMIT_PRE_REBASE_BRANCH:-}"
-                if [ -z "$branch" ]; then
-                  branch="$(git symbolic-ref --short -q HEAD || true)"
-                fi
-
-                primary="$(git config --get pgii-integrate-branch.primaryBranch 2>/dev/null || true)"
-                if [ -z "$primary" ]; then
-                  origin_head="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-                  primary="''${origin_head#origin/}"
-                fi
-                [ -z "$primary" ] && primary="main"
-
-                if [ -n "$branch" ] && [ "$branch" = "$primary" ]; then
-                  echo "prevent-main-rebase: refusing to rebase '$primary' directly (upstream: ''${PRE_COMMIT_PRE_REBASE_UPSTREAM:-<unknown>})." >&2
-                  echo "This repo lands via ff-merge-to-main (CLAUDE.md R-1..R-9 / the integrate-branch skill), never a direct rebase of '$primary'. Bypass ONLY with explicit operator authorization -- never silently (pg2-m146l)." >&2
-                  exit 1
-                fi
-                exit 0
-              '';
+              text = prevent-main-rebase-hook-script;
             }
           }/bin/prevent-main-rebase-hook";
           language = "system";
@@ -910,6 +945,43 @@
                 tests = ./tests/pg-pr-marker.bats;
                 extraInputs = [ pkgs.jq ];
               };
+
+              # `prevent-main-rebase` pre-rebase hook's safe-case auto-allow
+              # (pg2-i5t0k). Builds the EXACT SAME `prevent-main-rebase-hook-script`
+              # text the `phillipgreenii.pre-commit.extraHooks` entry above installs
+              # (never a second copy), so this test exercises the real production
+              # script rather than a re-implementation of it.
+              #
+              # NOT checksHelpers.testBashScripts: that helper's `bats ${tests}`
+              # interpolates the bats file as its OWN isolated store path, with
+              # no sibling tests/support/ directory alongside it -- exactly the
+              # pitfall test-behavior-docs-inter-conformance (above) already
+              # documents for behavior-docs-resolve-links.bats. This test's
+              # fixture needs the shared git-fixture-harness (pg2-31f13/pg2-gucfd),
+              # so it uses the same GFH_LIB env-var-override pattern instead.
+              test-prevent-main-rebase-hook =
+                let
+                  preventMainRebaseHookPkg = pkgs.writeShellApplication {
+                    name = "prevent-main-rebase-hook";
+                    runtimeInputs = [ pkgs.git ];
+                    text = prevent-main-rebase-hook-script;
+                  };
+                in
+                pkgs.runCommand "test-prevent-main-rebase-hook"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.which
+                      preventMainRebaseHookPkg
+                    ];
+                  }
+                  ''
+                    export PATH="${preventMainRebaseHookPkg}/bin:$PATH"
+                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
+                    bats ${./tests/prevent-main-rebase.bats}
+                    touch $out
+                  '';
 
               # Structural gate for the "never invoked" bug (pg2-o3eyk): the bats
               # suite cannot test CC auto-discovery, and mkClaudeMarketplace only
