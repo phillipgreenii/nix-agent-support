@@ -21,6 +21,10 @@ what it includes (`INV-22`).
 - **`STORY-PAM-NUDGE`** <!-- uuid: 996271ef-68f2-4c00-b5b1-33190ad4137a --> — As an operator, I
   want to nudge a specific stuck session myself, so I can unstick it without waiting on an
   automatic trigger. _(→ `USECASE-PAM-NUDGE`; `INV-ACT-1`, `INV-NUDGE-1`.)_
+- **`STORY-PAM-AUTOWRAP`** <!-- uuid: cdc6ecca-56b4-4d4d-bb4f-c9c8e7c8a171 --> — As an operator who
+  sometimes gets pulled away mid-task, I want an idle-but-still-live session to be nudged to wrap
+  up before its prompt cache expires, so resuming later does not cost a full re-hydration or manual
+  context recovery. _(→ `USECASE-PAM-AUTOWRAP`; `INV-AUTOWRAP-1`, `INV-AUTOWRAP-2`.)_
 
 ## Use cases
 
@@ -84,6 +88,33 @@ Extensions:
   delivered.
 - 2c. The session is reachable only through a boundary with no bridge currently registered:
   reported undelivered (`INTF-BRIDGE`'s guarantee).
+
+### `USECASE-PAM-AUTOWRAP` — nudge an idle session to wrap up before the cache expires <!-- uuid: a40b4582-2fa4-427e-a8cd-ccc781eadfa0 -->
+
+**Primary actor:** none — daemon-initiated, on behalf of `ACTOR-PAM-OP`.
+**Level:** user-goal.
+**Preconditions:** the operator has opted in (`auto_session_wrap_up.enable = true`,
+`packages/pa-monitor/README.md` § "AutoSessionWrapUp").
+_Requires:_ `INV-STATUS-1`, `INV-AUTOWRAP-1`, `INV-AUTOWRAP-2`, `INV-ACT-1`.
+
+1. On each tick, the daemon checks every `ACTOR-PAM-SESSION` whose status is **idle**
+   (`INV-STATUS-1`) for how long the current idle episode (`glossary.md`) has run.
+2. Once an episode exceeds the configured threshold, and the episode has not already been nudged
+   (`INV-AUTOWRAP-1`), the daemon checks the session's input surface for unsubmitted input
+   (`INV-AUTOWRAP-2`).
+3. Finding none, the daemon delivers a tagged directive (`INTF-NUDGE`) instructing the session to
+   wrap up if it has pending work, and records the episode as nudged.
+
+Extensions:
+
+- 1a. The session is **blocked**, not idle (even on a person): never a candidate — only idle
+  qualifies (`INV-STATUS-1`).
+- 2a. The episode was already nudged: suppressed, no delivery (`INV-AUTOWRAP-1`).
+- 2b. The session has no reachable input surface (the same no-surface gate other nudge sources
+  use): suppressed, no delivery.
+- 3a. Unsubmitted input is present, or cannot be determined either way: suppressed for this tick
+  only — the episode is NOT marked nudged, so a later tick with the input cleared still fires
+  (`INV-AUTOWRAP-2`).
 
 ### `USECASE-PAM-TOGGLE` — toggle keep-awake or auto-resume <!-- uuid: 693343be-82fd-4355-a357-3d4bede3154d -->
 

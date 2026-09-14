@@ -6,7 +6,7 @@ Per-user daemon + TUI for monitoring active Claude Code sessions. Renders contex
 
 Two cooperating processes per OS user:
 
-- **`pa-monitor daemon`** — long-running, owns all state. Polls sessions, tracks 5h blocks and the weekly limit, manages caffeinate, dispatches nudges, emits OTel. Started by a LaunchAgent at login.
+- **`pa-monitor daemon`** — long-running, owns all state. Polls sessions, tracks 5h blocks and the weekly limit, manages caffeinate, dispatches nudges, emits OTel. Started by a LaunchAgent at login on macOS (`darwin/modules/pa-monitor`), or by a `systemd --user` service on NixOS (`nixos/modules/pa-monitor`, gated on the same `phillipgreenii.programs.pa-monitor.daemon.enable` HM option).
 - **Clients** (TUI, CLI, cmux-bridge) — talk to the daemon over a Unix domain socket (gRPC). Stateless beyond per-process render caches. When the daemon is unreachable, clients show "daemon offline" rather than fabricating data from disk.
 
 ## Quick start
@@ -131,6 +131,43 @@ dropped (`pa_monitor.nudge.dropped_no_bridge_total`). Non-cmux terminals
 (tmux/ghostty/vscode) are still delivered directly by the daemon. See
 `docs/adr/0022-nudge-delivery-via-cmux-bridge.md`.
 
+### AutoSessionWrapUp: nudging idle-but-live sessions before the cache expires
+
+`AutoSessionWrapUpProducer` (bead tc-m08w3) nudges a session that has been **Idle** for at least
+`auto_session_wrap_up.idle_threshold_minutes` (config default 45m, safely under the ~1h prompt-cache
+TTL) to invoke `session-wrapup:wrap-up-session` with `auto-trigger`, so pending work is committed and
+handed off before the cache expires while the user is away (a meeting, lunch) but the session is
+still alive in its terminal. **Off by default** (`auto_session_wrap_up.enable = false`) — see
+[Configuration](#configuration).
+
+- Per ADR 0024's `{Working, Blocked, Idle}` status model, a **Blocked** session (including a
+  permission-prompt-parked one) never fires — only `Idle` does.
+- **Once per idle episode, never escalates or retries** (a firm, deliberate requirement): the
+  episode's start is the session's own `TranscriptMTime` (the instant the transcript last changed,
+  i.e. when idleness began); a persisted watermark (`LastAutoSessionWrapUpNudgedFor` in
+  `runtime.json`, alongside the other nudger watermarks — see [Storage](#storage-xdg)) records which
+  episode was last nudged, so a daemon restart mid-episode cannot re-fire it. A missed nudge costs
+  nothing extra; a duplicate one burns tokens for no benefit, so the producer is biased toward
+  under-firing.
+- **Unsubmitted-input guard (safety-critical).** Idle (no new transcript activity) is
+  indistinguishable from a session mid-composition — a long paste, or a thinking-pause, writes
+  nothing to the transcript until submitted. Before enqueueing, the producer checks whether the
+  target's terminal surface currently shows composed-but-not-yet-submitted input
+  (`internal/signal.HasUnsubmittedInput`) and skips that tick (without consuming the episode) if so.
+  This check **fails closed** on any uncertainty — a capture-pane error, no recognizable input-box
+  line, or a Signaler with no inspection capability (cmux today — see the function's doc for why) all
+  count as "unsubmitted input present, do not send." The practical effect: until
+  `TmuxSignaler.HasUnsubmittedInput`'s heuristic is validated against a live Claude Code TUI capture,
+  this guard may make the feature functionally inert (safe) rather than incorrect. Validate with a
+  real idle tmux-hosted session before relying on this in production.
+- Delivery reuses the existing `Signaler.Send` / cmux-bridge path like every other nudge source (see
+  [Nudge delivery](#nudge-delivery) above) — no tmux/cmux special-casing at the producer layer. The
+  directive text is a small template file
+  (`internal/daemon/nudger/auto_session_wrap_up_directive.txt`) opening with a provenance tag
+  (`[auto-nudge: pa-monitor, idle Nm]`) so a later reader can tell it was injected, not typed by the
+  user — delivery is literal typed input via `send-keys`/paste, so the directive becomes an ordinary
+  user turn in the session's own transcript.
+
 ## OpenTelemetry
 
 OTel is configured via the `[otel]` block in `~/.config/pa-monitor/config.toml` (see
@@ -250,9 +287,11 @@ endpoint = "http://127.0.0.1:4317"
 
 ### Other keys
 
-| Key                                | Type | Default | Description                                                                                                                                                     |
-| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto_restart_on_version_mismatch` | bool | `false` | Opt the `cmux-bridge` and `tui` into re-executing themselves on a daemon-version upgrade — see [Client self-restart](#client-self-restart-on-version-mismatch). |
+| Key                                           | Type | Default | Description                                                                                                                                                     |
+| --------------------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto_restart_on_version_mismatch`            | bool | `false` | Opt the `cmux-bridge` and `tui` into re-executing themselves on a daemon-version upgrade — see [Client self-restart](#client-self-restart-on-version-mismatch). |
+| `auto_session_wrap_up.enable`                 | bool | `false` | Opt in to the AutoSessionWrapUp nudge — see [AutoSessionWrapUp](#autosessionwrapup-nudging-idle-but-live-sessions-before-the-cache-expires).                    |
+| `auto_session_wrap_up.idle_threshold_minutes` | int  | `45`    | Minutes a session must be Idle before the nudge fires.                                                                                                          |
 
 ## TUI symbols
 

@@ -161,6 +161,42 @@ load_lib() {
   [[ "$output" == *'"updated_at":"2026-09-11T15:00:00Z"'* ]]
 }
 
+# --- session_mode_build_record: handoff_bead_id (bead tc-m08w3) ---
+#
+# handoff_bead_id follows detail's omitted-when-empty pattern (below), but
+# deliberately does NOT replicate detail's truncation-to-40-chars behavior: a
+# bead id (e.g. "tc-m08w3") is a fixed short format, not free text, so no
+# truncation test exists for it — its absence here is intentional, not a gap.
+
+@test "session_mode_build_record omits handoff_bead_id when the argument is absent (5-arg call)" {
+  load_lib
+  run session_mode_build_record "drain-beads" "" "running" "2026-09-11T14:32:00Z" "2026-09-11T14:32:00Z"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'"handoff_bead_id"'* ]]
+}
+
+@test "session_mode_build_record omits handoff_bead_id when the argument is an explicit empty string" {
+  load_lib
+  run session_mode_build_record "drain-beads" "" "running" "2026-09-11T14:32:00Z" "2026-09-11T14:32:00Z" ""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'"handoff_bead_id"'* ]]
+}
+
+@test "session_mode_build_record emits handoff_bead_id verbatim when present, untruncated" {
+  load_lib
+  run session_mode_build_record "wrap-up-session" "" "finished" "2026-09-11T14:32:00Z" "2026-09-11T15:00:00Z" "tc-m08w3"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"handoff_bead_id":"tc-m08w3"'* ]]
+}
+
+@test "session_mode_build_record emits both detail and handoff_bead_id together" {
+  load_lib
+  run session_mode_build_record "drain-beads" "P1 only" "running" "2026-09-11T14:32:00Z" "2026-09-11T14:32:00Z" "tc-m08w3"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"detail":"P1 only"'* ]]
+  [[ "$output" == *'"handoff_bead_id":"tc-m08w3"'* ]]
+}
+
 # --- session_mode_read ---
 
 @test "session_mode_read fails on a missing file" {

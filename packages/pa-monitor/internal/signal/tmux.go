@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,6 +123,53 @@ func (t *TmuxSignaler) Send(pid int, text string) error {
 	defer cancel()
 	_, err = t.run(ctx, "tmux", "-L", loc.socketName, "send-keys", "-t", loc.paneID, text, "Enter")
 	return err
+}
+
+// Compile-time interface check.
+var _ PaneInputInspector = (*TmuxSignaler)(nil)
+
+// promptInputLineRe matches a captured pane line carrying Claude Code's
+// input-box prompt glyph ("❯ ") plus any composed text after it. This
+// convention (glyph + typed content) is already used elsewhere in this repo
+// as the input-box signal — see packages/ccpool/internal/pane's
+// ReLiveCounter doc and its test fixtures, e.g. "❯ Think step by step..." for
+// composed-but-unsubmitted input.
+var promptInputLineRe = regexp.MustCompile(`(?m)^\s*❯\s?(.*)$`)
+
+// HasUnsubmittedInput implements signal.PaneInputInspector. It captures the
+// tmux pane hosting pid and inspects the LAST line carrying the input-box
+// prompt glyph: any non-whitespace content after "❯ " is treated as
+// composed-but-not-yet-submitted input.
+//
+// Fails closed (returns true = "assume unsubmitted input present") on any
+// capture error or when no recognizable prompt line is found — see
+// signal.HasUnsubmittedInput's doc for the cost-asymmetry rationale. This
+// heuristic has not been validated against a live Claude Code TUI capture
+// (bead tc-m08w3 verification item 5 — a manual dry run — covers that); until
+// then the practical effect of "fails closed" is that this guard may never
+// observe an empty input line, which would make AutoSessionWrapUp
+// functionally inert (safe, not harmful) rather than incorrect.
+func (t *TmuxSignaler) HasUnsubmittedInput(pid int) bool {
+	locs, err := t.cachedPanes()
+	if err != nil {
+		return true
+	}
+	loc := t.findPaneLocForPID(locs, pid)
+	if loc == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := t.run(ctx, "tmux", "-L", loc.socketName, "capture-pane", "-p", "-t", loc.paneID)
+	if err != nil {
+		return true
+	}
+	matches := promptInputLineRe.FindAllStringSubmatch(string(out), -1)
+	if len(matches) == 0 {
+		return true
+	}
+	last := matches[len(matches)-1][1]
+	return strings.TrimSpace(last) != ""
 }
 
 // processEnv returns the environment of pid (same-user readable on macOS/linux)

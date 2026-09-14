@@ -232,6 +232,39 @@ func TestWatermarkStoreLimitPauseFiredForRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWatermarkStoreAutoSessionWrapUpNudgedForSurvivesRestart is the
+// restart-survival test for bead tc-m08w3's core safety claim (verification
+// item 1's restart-survival bullet): construct a fresh WatermarkStore from a
+// runtime.json written by a prior run with LastAutoSessionWrapUpNudgedFor
+// already set for the current episode, and confirm the reloaded watermark
+// still reports it — the same persisted-state guarantee
+// TestWatermarkStorePersistsToDisk exercises for LastNudgedAt. This is what
+// lets AutoSessionWrapUpProducer.Reconcile refuse to re-fire for an episode
+// after a daemon restart mid-episode.
+func TestWatermarkStoreAutoSessionWrapUpNudgedForSurvivesRestart(t *testing.T) {
+	path := t.TempDir() + "/runtime.json"
+	episodeStart := time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC)
+
+	w, _ := NewWatermarkStore(path, nil)
+	w.SetAutoSessionWrapUpNudgedFor("sid-1", episodeStart)
+
+	// Reload from disk — simulates a daemon restart mid-episode.
+	w2, err := NewWatermarkStore(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wm := w2.SessionWatermark("sid-1")
+	if !wm.LastAutoSessionWrapUpNudgedFor.Equal(episodeStart) {
+		t.Errorf("after reload: LastAutoSessionWrapUpNudgedFor = %v, want %v", wm.LastAutoSessionWrapUpNudgedFor, episodeStart)
+	}
+
+	// The reloaded watermark must make Reconcile treat this episode as already
+	// nudged: episodeStart is NOT After LastAutoSessionWrapUpNudgedFor.
+	if episodeStart.After(wm.LastAutoSessionWrapUpNudgedFor) {
+		t.Error("reloaded watermark would let the producer re-fire for the same episode after a restart")
+	}
+}
+
 // TestWatermarkStoreLastNudgeSourcesRoundTrip verifies that the sources passed
 // to UpdateWatermarks survive a disk round-trip in sorted order so the details
 // panel renders a stable "via: [...]" line across daemon restarts.

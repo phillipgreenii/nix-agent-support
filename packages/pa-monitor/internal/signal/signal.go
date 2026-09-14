@@ -31,6 +31,54 @@ func DetectHost(signalers []Signaler, pid int) string {
 	return "unknown"
 }
 
+// PaneInputInspector is implemented by Signalers that can inspect whether
+// their target's terminal surface currently shows composed-but-not-yet-
+// submitted input (a half-typed prompt). Optional: a Signaler that does not
+// implement it has no inspection capability — see HasUnsubmittedInput for how
+// that is handled conservatively.
+type PaneInputInspector interface {
+	// HasUnsubmittedInput reports whether pid's surface currently shows
+	// non-empty composed-but-not-submitted input.
+	HasUnsubmittedInput(pid int) bool
+}
+
+// HasUnsubmittedInput reports whether pid's resolved Signaler shows
+// composed-but-not-yet-submitted input. Used by
+// nudger.AutoSessionWrapUpProducer's unsubmitted-input guard (bead tc-m08w3,
+// safety-critical): injecting a directive via send-keys+Enter while the user
+// is mid-compose would splice into their half-typed line and force-submit a
+// corrupted message.
+//
+// Conservative by design — fails closed (reports true = "assume unsubmitted
+// input present, do not send") on any uncertainty, per the feature's own
+// documented cost asymmetry: a missed nudge costs nothing extra, a
+// force-submitted half-typed message is much worse than a missed nudge:
+//   - no Signaler resolves for pid (surfaceless) -> true. (HasSurface already
+//     reaps a surfaceless session from the producer's candidate set upstream
+//     of this call, so in practice this path is defense-in-depth, not the
+//     primary gate.)
+//   - the resolved Signaler does not implement PaneInputInspector (e.g.
+//     CmuxSignaler has no capture-pane equivalent today — cmux delivery is
+//     routed through the cmux-bridge process per ADR 0022, which has no
+//     existing RPC for inspecting composed-but-unsubmitted input) -> true.
+//     This means a cmux-hosted session's AutoSessionWrapUp nudge never clears
+//     the guard until CmuxSignaler grows an equivalent inspection capability
+//     (real, separate follow-up work — see packages/pa-monitor/README.md).
+//   - the resolved Signaler's own inspection is itself uncertain (a
+//     capture-pane error, or no recognizable input-box line found) -> true.
+//     See TmuxSignaler.HasUnsubmittedInput.
+func HasUnsubmittedInput(signalers []Signaler, pid int) bool {
+	s := ResolveSignaler(signalers, pid)
+	if s == nil {
+		return true
+	}
+	insp, ok := s.(PaneInputInspector)
+	if !ok {
+		return true
+	}
+	return insp.HasUnsubmittedInput(pid)
+}
+
 // BinaryRequirer is implemented by Signalers that shell out to an external
 // executable for detection and/or delivery. The daemon checks these at
 // startup: a missing binary (e.g. tmux/cmux absent from the launchd PATH)

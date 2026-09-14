@@ -20,6 +20,8 @@ _session_mode() {
   set-status)
     if [[ $COMP_CWORD -eq 2 ]]; then
       mapfile -t COMPREPLY < <(compgen -W "running stopping finished" -- "$cur")
+    elif [[ $cur == -* ]]; then
+      mapfile -t COMPREPLY < <(compgen -W "--handoff-bead" -- "$cur")
     fi
     ;;
   hook)

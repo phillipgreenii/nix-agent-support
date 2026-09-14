@@ -60,6 +60,10 @@ type NudgerSessionWatermarks struct {
 	// a terminal nudgeable error with zero recorded attempts holds caffeinate
 	// awake until the first attempt, then releases. A failed attempt counts.
 	LastDisruptAttemptAt time.Time `json:"last_disrupt_attempt_at,omitempty"`
+	// LastAutoSessionWrapUpNudgedFor is the idle-episode-start timestamp the
+	// AutoSessionWrapUp nudge (bead tc-m08w3) last fired for. Persisted so a
+	// daemon restart mid-episode cannot re-fire the once-per-episode nudge.
+	LastAutoSessionWrapUpNudgedFor time.Time `json:"last_auto_session_wrap_up_nudged_for,omitempty"`
 }
 
 // ReadRuntimeState reads the file at path. A missing file is not an
@@ -165,12 +169,13 @@ func (w *WatermarkStore) SessionWatermark(sid string) nudger.SessionWatermark {
 		sources = append([]string(nil), x.LastNudgeSources...)
 	}
 	return nudger.SessionWatermark{
-		LastNudgedAt:         x.LastNudgedAt,
-		LastNudgeSources:     sources,
-		LastDisruptNudgeAt:   x.LastDisruptNudgeAt,
-		LastDisruptNudgeFor:  x.LastDisruptNudgeFor,
-		DisruptEscalated:     x.DisruptEscalated,
-		LastDisruptAttemptAt: x.LastDisruptAttemptAt,
+		LastNudgedAt:                   x.LastNudgedAt,
+		LastNudgeSources:               sources,
+		LastDisruptNudgeAt:             x.LastDisruptNudgeAt,
+		LastDisruptNudgeFor:            x.LastDisruptNudgeFor,
+		DisruptEscalated:               x.DisruptEscalated,
+		LastDisruptAttemptAt:           x.LastDisruptAttemptAt,
+		LastAutoSessionWrapUpNudgedFor: x.LastAutoSessionWrapUpNudgedFor,
 	}
 }
 
@@ -342,6 +347,24 @@ func (w *WatermarkStore) SetDisruptEscalated(sid string, escalated bool) {
 	}
 	wm := w.state.Nudger.Sessions[sid]
 	wm.DisruptEscalated = escalated
+	w.state.Nudger.Sessions[sid] = wm
+	_ = WriteRuntimeState(w.path, w.state)
+}
+
+// SetAutoSessionWrapUpNudgedFor implements nudger.WatermarkView. It persists,
+// for sid, the idle-episode-start timestamp an AutoSessionWrapUp nudge just
+// fired for (bead tc-m08w3) — the once-per-episode latch. Mirrors
+// SetDisruptEscalated: written directly by the producer at enqueue time, not
+// by the dispatcher on delivery outcome (a missed nudge is acceptable; a
+// duplicate is not).
+func (w *WatermarkStore) SetAutoSessionWrapUpNudgedFor(sid string, at time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state.Nudger.Sessions == nil {
+		w.state.Nudger.Sessions = map[string]NudgerSessionWatermarks{}
+	}
+	wm := w.state.Nudger.Sessions[sid]
+	wm.LastAutoSessionWrapUpNudgedFor = at
 	w.state.Nudger.Sessions[sid] = wm
 	_ = WriteRuntimeState(w.path, w.state)
 }

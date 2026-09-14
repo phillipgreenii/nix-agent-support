@@ -35,8 +35,9 @@ Vocabulary for pa-monitor's CLI and daemon. cmux-bridge and the TUI are named bo
   changes what is running, not merely what it observes.
 - **Nudge intent** — why a nudge fires: the account window lifted (**window-reset**), a session's
   own usage-limit block lifted with no lift the daemon can otherwise detect
-  (**limit-pause**), the session recovered from a disruption (**disrupted**), or the operator asked
-  for it directly (**manual**).
+  (**limit-pause**), the session recovered from a disruption (**disrupted**), the operator asked
+  for it directly (**manual**), or the session has been idle long enough that its prompt cache may
+  be close to expiring (**auto-session-wrap-up** — see "Idle wrap-up nudging" below).
 - **Suppression** — a nudge intent's obligation to withhold delivery when it would be wrong: never
   to a working session (nothing to nudge), never to a session blocked on a person (a nudge cannot
   answer a question a nudge did not ask), and never to a session opted out via the no-nudge
@@ -46,6 +47,22 @@ Vocabulary for pa-monitor's CLI and daemon. cmux-bridge and the TUI are named bo
   is held awake so that work is not lost to a sleep the operator never asked for. A session blocked
   on a person is let sleep — no amount of wakefulness helps a session waiting on a human
   (`INV-AWAKE-1`).
+
+## Idle wrap-up nudging (`INV-AUTOWRAP-*`)
+
+- **Idle episode** — the span from the instant a session's status becomes (or stays) **idle** with
+  no further transcript activity, up to the next transcript change. Its **start** is the instant
+  idleness began. Distinct from **`LastNudgedAt`** (`glossary.md`'s nudge history) — that field
+  answers "was there EVER a nudge", not "was there a nudge during THIS episode"; comparing against
+  it alone cannot tell a fresh episode from an old one (`INV-VOCAB-1`).
+- **Once-per-episode latch** — the daemon MUST fire at most one auto-session-wrap-up nudge per idle
+  episode, and MUST NOT retry or escalate within it (`INV-AUTOWRAP-1`). A missed nudge costs
+  nothing extra; a duplicate one burns tokens for no benefit — the latch is deliberately biased
+  toward under-firing.
+- **Unsubmitted input** — composed-but-not-yet-submitted text sitting in a session's own input
+  surface (a half-typed prompt). Indistinguishable from idleness by transcript signals alone, so a
+  nudge MUST NOT be injected while it is present (`INV-AUTOWRAP-2`) — doing so would splice into
+  the user's own words and force-submit a corrupted message.
 
 ## The gates
 

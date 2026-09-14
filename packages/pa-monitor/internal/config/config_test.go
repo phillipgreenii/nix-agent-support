@@ -469,3 +469,44 @@ interval_s = 1800
 		t.Errorf("BeadsWatch.Interval = %v, want 30m", cfg.BeadsWatch.Interval)
 	}
 }
+
+// TestAutoSessionWrapUpDefaultsWhenAbsent (bead tc-m08w3): Enable MUST default
+// to false — this ships inert until an operator opts in — while
+// IdleThresholdMinutes still gets a usable built-in default.
+func TestAutoSessionWrapUpDefaultsWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nonexistent.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSessionWrapUp.Enable {
+		t.Error("AutoSessionWrapUp.Enable default = true, want false (opt-in)")
+	}
+	if cfg.AutoSessionWrapUp.IdleThresholdMinutes != 45 {
+		t.Errorf("AutoSessionWrapUp.IdleThresholdMinutes default = %d, want 45", cfg.AutoSessionWrapUp.IdleThresholdMinutes)
+	}
+}
+
+// TestAutoSessionWrapUpParse: [auto_session_wrap_up] enable + idle_threshold_minutes parse onto Config.
+func TestAutoSessionWrapUpParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[auto_session_wrap_up]
+enable = true
+idle_threshold_minutes = 20
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AutoSessionWrapUp.Enable {
+		t.Error("AutoSessionWrapUp.Enable = false, want true")
+	}
+	if cfg.AutoSessionWrapUp.IdleThresholdMinutes != 20 {
+		t.Errorf("AutoSessionWrapUp.IdleThresholdMinutes = %d, want 20", cfg.AutoSessionWrapUp.IdleThresholdMinutes)
+	}
+}

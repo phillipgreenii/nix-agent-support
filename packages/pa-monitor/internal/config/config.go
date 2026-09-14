@@ -64,6 +64,23 @@ type Config struct {
 	// is standalone/config-driven and never hardcodes a personal workspace
 	// path; an operator opts in via `phillipgreenii.programs.pa-monitor.settings`.
 	BeadsWatch BeadsWatchConfig
+	// AutoSessionWrapUp is the [auto_session_wrap_up] block (bead tc-m08w3):
+	// nudges an idle-but-live session to run session-wrapup:wrap-up-session
+	// before its prompt cache expires. Enable defaults to false — this ships
+	// inert until an operator opts in, since the unsubmitted-input guard's
+	// heuristic (internal/signal.TmuxSignaler.HasUnsubmittedInput) has not yet
+	// been validated against a live Claude Code TUI capture.
+	AutoSessionWrapUp AutoSessionWrapUpConfig
+}
+
+// AutoSessionWrapUpConfig is the [auto_session_wrap_up] block.
+type AutoSessionWrapUpConfig struct {
+	Enable bool
+	// IdleThresholdMinutes is how long a session must be Idle before the nudge
+	// fires. A config default (not a hardcoded constant): the true prompt-cache
+	// TTL is not discoverable from outside a session, so this is a tunable
+	// approximation, chosen safely under the ~1h TTL.
+	IdleThresholdMinutes int
 }
 
 // BeadsWatchConfig is the [beads_watch] block.
@@ -136,13 +153,20 @@ type tomlConfig struct {
 	CmuxSidebarIntervalTicks *int    `toml:"cmux_sidebar_interval_ticks"`
 	// Longer field name than the aligned block above; the comment breaks the
 	// gofmt alignment run so the whole struct is not reflowed.
-	AutoRestartOnVersionMismatch *bool           `toml:"auto_restart_on_version_mismatch"`
-	BridgeSnapshotIntervalMS     *int            `toml:"bridge_snapshot_interval_ms"`
-	BridgeHeartbeatIntervalMS    *int            `toml:"bridge_heartbeat_interval_ms"`
-	Decorators                   []tomlDecorator `toml:"decorator"`
-	OTel                         *tomlOTel       `toml:"otel"`
-	Account                      *tomlAccount    `toml:"account"`
-	BeadsWatch                   *tomlBeadsWatch `toml:"beads_watch"`
+	AutoRestartOnVersionMismatch *bool                  `toml:"auto_restart_on_version_mismatch"`
+	BridgeSnapshotIntervalMS     *int                   `toml:"bridge_snapshot_interval_ms"`
+	BridgeHeartbeatIntervalMS    *int                   `toml:"bridge_heartbeat_interval_ms"`
+	Decorators                   []tomlDecorator        `toml:"decorator"`
+	OTel                         *tomlOTel              `toml:"otel"`
+	Account                      *tomlAccount           `toml:"account"`
+	BeadsWatch                   *tomlBeadsWatch        `toml:"beads_watch"`
+	AutoSessionWrapUp            *tomlAutoSessionWrapUp `toml:"auto_session_wrap_up"`
+}
+
+// tomlAutoSessionWrapUp is the [auto_session_wrap_up] block (bead tc-m08w3).
+type tomlAutoSessionWrapUp struct {
+	Enable               *bool `toml:"enable"`
+	IdleThresholdMinutes *int  `toml:"idle_threshold_minutes"`
 }
 
 // tomlBeadsWatch is the [beads_watch] block (pg2-zjopv).
@@ -208,6 +232,9 @@ func defaults() Config {
 		// Roots deliberately defaults to empty (watcher off) — see the
 		// BeadsWatch field doc.
 		BeadsWatch: BeadsWatchConfig{Interval: time.Hour},
+		// Enable defaults to false (opt-in) — see the AutoSessionWrapUp field
+		// doc. 45m is safely under the ~1h prompt-cache TTL.
+		AutoSessionWrapUp: AutoSessionWrapUpConfig{Enable: false, IdleThresholdMinutes: 45},
 	}
 }
 
@@ -329,6 +356,14 @@ func apply(cfg *Config, raw tomlConfig) {
 		}
 		if raw.BeadsWatch.IntervalS != nil {
 			cfg.BeadsWatch.Interval = time.Duration(*raw.BeadsWatch.IntervalS) * time.Second
+		}
+	}
+	if raw.AutoSessionWrapUp != nil {
+		if raw.AutoSessionWrapUp.Enable != nil {
+			cfg.AutoSessionWrapUp.Enable = *raw.AutoSessionWrapUp.Enable
+		}
+		if raw.AutoSessionWrapUp.IdleThresholdMinutes != nil {
+			cfg.AutoSessionWrapUp.IdleThresholdMinutes = *raw.AutoSessionWrapUp.IdleThresholdMinutes
 		}
 	}
 }

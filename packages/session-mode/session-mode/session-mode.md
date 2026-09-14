@@ -16,6 +16,10 @@
 
 `session-mode set-status {{finished}}`
 
+- Mark it finished and record a next-session handoff bead:
+
+`session-mode set-status {{finished}} --handoff-bead {{tc-m08w3}}`
+
 - Print the raw record for this session:
 
 `session-mode show`

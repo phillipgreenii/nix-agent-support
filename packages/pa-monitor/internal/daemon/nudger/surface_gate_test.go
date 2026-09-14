@@ -109,6 +109,31 @@ func TestWindowResetProducerReapsSurfacelessGhost(t *testing.T) {
 	}
 }
 
+// TestAutoSessionWrapUpProducerReapsSurfacelessGhost asserts the no-surface
+// gate also reaps surfaceless sessions from the AutoSessionWrapUp candidate
+// set (bead tc-m08w3, verification item 1's ghost-reap bullet).
+func TestAutoSessionWrapUpProducerReapsSurfacelessGhost(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	episodeStart := now.Add(-45 * time.Minute)
+	p := &AutoSessionWrapUpProducer{}
+	store := NewPendingStore()
+
+	ghost := newIdleSV("ghost", 45600, episodeStart)
+	healthy := newIdleSV("healthy", 1001, episodeStart)
+	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Sessions: []*aggregate.SessionView{ghost, healthy}}}}
+
+	ctx := autoWrapCtx(now, tree, wmStub{autoWrapNudgedFor: map[string]time.Time{}})
+	ctx.HasSurface = hasSurfaceExcept(45600)
+	p.Reconcile(ctx, store)
+
+	if store.HasAny("ghost") {
+		t.Error("surfaceless ghost enqueued by AutoSessionWrapUp producer; must be reaped")
+	}
+	if !store.HasAny("healthy") {
+		t.Error("healthy session not enqueued by AutoSessionWrapUp producer; gate over-reaped")
+	}
+}
+
 // TestLimitPauseProducerReapsSurfacelessGhost asserts the no-surface gate also
 // reaps surfaceless sessions from the limit-pause candidate set.
 func TestLimitPauseProducerReapsSurfacelessGhost(t *testing.T) {

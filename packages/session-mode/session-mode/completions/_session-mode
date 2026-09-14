@@ -28,7 +28,9 @@ _session_mode() {
         '1:kind:'
       ;;
     set-status)
-      _values 'state' running stopping finished
+      _arguments \
+        '--handoff-bead[Next-session resume bead id]:bead id:' \
+        '1:state:(running stopping finished)'
       ;;
     hook)
       _values 'hook event' session-end

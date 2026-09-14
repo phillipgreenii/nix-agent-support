@@ -4,13 +4,15 @@ description: >-
   Use before any `bd` command that creates, updates, closes, or adds a dependency to an
   issue; before parking, re-parking, escalating, releasing, or accepting a bead whose
   premise was recorded earlier than now; and before applying, checking, or removing the
-  `worktree-review` or `human` labels. Carries claim/release hygiene (a claim MUST be
-  released or closed, never abandoned), dependency-vs-human blocker modeling (when to wire
-  a `bd dep` edge instead of the `human` label), handoff-precondition phrasing (observable
-  outcomes, not implementation mechanisms), premise-freshness re-verification before
-  acting on stale state, and the `worktree-review` label's full lifecycle (entry marker,
-  promotion, exit verdict, release). Do NOT use for ordinary read-only `bd list`/`bd show`
-  queries, or for the beads-as-issue-tracker BINDING question (that's `wayfinder-beads`).
+  `worktree-review`, `human`, or `auto-session-wrapped` labels. Carries claim/release hygiene
+  (a claim MUST be released or closed, never abandoned), dependency-vs-human blocker modeling
+  (when to wire a `bd dep` edge instead of the `human` label), handoff-precondition phrasing
+  (observable outcomes, not implementation mechanisms), premise-freshness re-verification before
+  acting on stale state, the `worktree-review` label's full lifecycle (entry marker,
+  promotion, exit verdict, release), and the lightweight `auto-session-wrapped` provenance
+  label applied by session-wrapup:wrap-up-session's auto-trigger mode. Do NOT use for ordinary
+  read-only `bd list`/`bd show` queries, or for the beads-as-issue-tracker BINDING question
+  (that's `wayfinder-beads`).
 ---
 
 # Beads lifecycle: claim hygiene, blocker modeling, handoff, premise freshness, worktree-review
@@ -146,6 +148,35 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   priority: the question is still open. A narrow provably-lossless-close exception exists — see
   `references/worktree-review-exceptions.md`; it MUST NOT be extended to a RELEASE under any
   circumstances.
+
+## Auto-Session-Wrapped Label
+
+> `auto-session-wrapped` marks a P0 next-session handoff bead that
+> `session-wrapup:wrap-up-session` created or updated in its **auto-trigger** mode — an
+> unattended run kicked off by `pa-monitor`'s AutoSessionWrapUp nudge (bead tc-m08w3), not a
+> human typing "wrap up this session". It exists because the bead's body is, permanently, the
+> record of an unattended action taken in the user's voice-slot but not their words — a later
+> reader (the user, a future agent) needs to be able to tell that apart from a manually-invoked
+> wrapup at a glance, the same way a nudge's own delivered text opens with
+> `[auto-nudge: pa-monitor, idle Nm]`. Modeled on `worktree-review` above but deliberately
+> LIGHTER: there is no isolation artifact to rule on, no promoted priority to restore, and no
+> separate release step — the bead already has its own one-shot close lifecycle (wrap-up-session's
+> "Lifecycle: the P0 is one-shot"), so this label rides along for as long as that bead exists and
+> is never independently removed.
+
+- **AW-1** `auto-session-wrapped` MUST be applied together with `human` in the SAME `bd create`
+  or `bd update` call that creates or refreshes the P0 handoff bead, and ONLY when this skill run
+  is itself an auto-trigger run (`args` starting with `auto-trigger`) — never on a manually
+  invoked wrapup's P0, and never added to a bead this skill did not itself create as an
+  auto-trigger run.
+- **AW-2** The label MUST be applied at CREATION (first `bd create`) or, on a later auto-trigger
+  run for the SAME still-open P0, RE-applied idempotently via `bd update <id> --add-label
+human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a prior MANUAL
+  wrapup created (doing so would misattribute a human-authored bead as machine-authored).
+- **AW-3** There is no exit condition or release step of its own: `auto-session-wrapped` is a
+  permanent provenance marker, not a working-state marker like `worktree-review`. It is removed
+  only as a side effect of the bead itself being closed (per wrap-up-session's one-shot P0
+  lifecycle) — never by an explicit `--remove-label` call on its own.
 
 ## Blocker Modeling: Dependency vs Human
 

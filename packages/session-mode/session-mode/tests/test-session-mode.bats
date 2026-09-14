@@ -77,6 +77,17 @@ record_file() { echo "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.session-mode.js
   [ "$(jq -r '.detail' "$f")" = "second" ]
 }
 
+@test "start: idempotent same-kind refresh preserves a previously-set handoff_bead_id" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads --detail "first"
+  "$TEST_DIR/run_session-mode" set-status running --handoff-bead tc-m08w3
+  run "$TEST_DIR/run_session-mode" start drain-beads --detail "second"
+  [ "$status" -eq 0 ]
+  local f
+  f="$(record_file)"
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-m08w3" ]
+}
+
 @test "start: same kind but previously finished resets to running with a fresh started_at" {
   create_cmd_wrapper session-mode
   "$TEST_DIR/run_session-mode" start drain-beads
@@ -186,6 +197,53 @@ record_file() { echo "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.session-mode.js
   [[ "$output" == *"no session-mode record found"* ]]
 }
 
+# --- set-status --handoff-bead (bead tc-m08w3) ---
+
+@test "set-status --handoff-bead: sets handoff_bead_id on a record that had none" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads
+  local f
+  f="$(record_file)"
+  [ "$(jq -r '.handoff_bead_id // empty' "$f")" = "" ]
+  run "$TEST_DIR/run_session-mode" set-status finished --handoff-bead tc-m08w3
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-m08w3" ]
+  [ "$(jq -r '.state' "$f")" = "finished" ]
+}
+
+@test "set-status without --handoff-bead preserves a previously-set handoff_bead_id" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads
+  "$TEST_DIR/run_session-mode" set-status stopping --handoff-bead tc-m08w3
+  local f
+  f="$(record_file)"
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-m08w3" ]
+  # A later set-status call with no --handoff-bead (a plain state transition,
+  # unrelated to the handoff bead) MUST NOT clear the field.
+  run "$TEST_DIR/run_session-mode" set-status finished
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-m08w3" ]
+}
+
+@test "set-status --handoff-bead can update an already-set handoff_bead_id (the update path)" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads
+  "$TEST_DIR/run_session-mode" set-status stopping --handoff-bead tc-old0
+  run "$TEST_DIR/run_session-mode" set-status finished --handoff-bead tc-new1
+  [ "$status" -eq 0 ]
+  local f
+  f="$(record_file)"
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-new1" ]
+}
+
+@test "set-status --handoff-bead requires a value" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads
+  run "$TEST_DIR/run_session-mode" set-status finished --handoff-bead
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"requires a value"* ]]
+}
+
 # =====================================================================================
 # show
 # =====================================================================================
@@ -229,6 +287,19 @@ _hook_payload() {
   run bash -c "printf '%s' '$payload' | '$TEST_DIR/run_session-mode' hook session-end"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.state' "$f")" = "finished" ]
+}
+
+@test "hook session-end: preserves handoff_bead_id while marking finished" {
+  create_cmd_wrapper session-mode
+  "$TEST_DIR/run_session-mode" start drain-beads
+  "$TEST_DIR/run_session-mode" set-status stopping --handoff-bead tc-m08w3
+  local f payload
+  f="$(record_file)"
+  payload="$(_hook_payload "$CLAUDE_SESSION_ID" "$SESSION_MODE_STATE_DIR/$CLAUDE_SESSION_ID.jsonl")"
+  run bash -c "printf '%s' '$payload' | '$TEST_DIR/run_session-mode' hook session-end"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.state' "$f")" = "finished" ]
+  [ "$(jq -r '.handoff_bead_id' "$f")" = "tc-m08w3" ]
 }
 
 @test "hook session-end: a stopping record is marked finished" {

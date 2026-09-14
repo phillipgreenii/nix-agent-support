@@ -104,6 +104,25 @@ Detect this per repo (a `pn` workspace can mix both). Wherever the phases below 
 bead," "close a bead," or "leave a P0 bead," a no-beads repo does the markdown-handoff equivalent
 described in **"Markdown handoff doc (no-beads repos)."**
 
+## Auto-trigger mode (bead tc-m08w3)
+
+This skill is normally invoked interactively ("wrap up this session"), but it also has an
+**unattended entry point**: `args` starting with `auto-trigger`. That is how
+`pa-monitor`'s `AutoSessionWrapUpProducer` nudges an idle-but-live session before its prompt
+cache expires — the nudge, delivered as literal typed input into the session's own pane, is
+`[auto-nudge: pa-monitor, idle Nm]` followed by an instruction to invoke this skill with
+`args: "auto-trigger"` if there is genuine pending work (see `packages/pa-monitor/README.md`
+§ "AutoSessionWrapUp"). No human is present to react to a surprise, so three places below are
+tightened specifically when `args` starts with `auto-trigger` — each is marked **(auto-trigger
+only)**. Everywhere else, an auto-trigger run behaves exactly like a manual one.
+
+These are prose-only additions with no compiled/unit-test gate of their own (bead tc-m08w3
+verification item 3). Decided explicitly, not left implicit: this repo's grep-based
+content-assertion checks (`checks.<system>.test-agent-rules-tripwire-citations` in the
+repo-root `flake.nix`) are NOT extended to assert these sections exist — that check's existing scope
+is the always-on-core tripwire citations, a different concern from one skill's own prose. Manual
+dry-run coverage (verification items 4-8) is accepted as sufficient for these prose changes.
+
 ## The sequence
 
 Run these in order. Earlier phases are read-only or reversible; the irreversible ones come
@@ -115,7 +134,13 @@ Deliberately NOT inside phase 1 itself — that phase's own text says "Produce n
 destructive here," and a file create/overwrite would contradict that documented read-only
 contract even though it is harmless in practice.
 
-Attempt `session-mode start wrap-up-session` (no `--force`), best-effort end-to-end (its exit
+**(auto-trigger only)** Use kind `auto-session-wrap-up` in place of `wrap-up-session` below —
+a distinct, open-string `session-mode` kind (no library change needed: kind is deliberately not
+a closed enum) so `session-mode show` makes it unambiguous that an unattended
+AutoSessionWrapUp run happened here, not a manual one.
+
+Attempt `session-mode start wrap-up-session` (or, auto-trigger only, `session-mode start
+auto-session-wrap-up`) (no `--force`), best-effort end-to-end (its exit
 code is branched on when it succeeds, but a failure of ANY kind must never block or alter the
 actual wrapup), and branch on its exit code:
 
@@ -201,6 +226,28 @@ the resume prompt explains exactly what's red. A failed gate turns a "done" wrap
 "paused" one — that's the correct outcome, not a reason to push anyway.
 
 ### 4. Commit; leave the tree clean
+
+**(auto-trigger only) Canonical-clone safety check, before committing.** Manual runs skip this
+— a human is present to react if `integrate-branch`'s own FF-0a halt (phase 5) catches an
+off-primary/dirty canonical clone after the fact. An unattended run has no one to react, and a
+commit would otherwise land in place on a canonical clone that is unexpectedly off-primary or
+dirty (an R-3 violation that shouldn't normally happen) before FF-0a ever runs. So, per in-scope
+repo — including each repo in a `pn` coordinated workforest set, using `pn`'s
+workforest-aware worktree creation there rather than a plain `git worktree add`, so the new
+worktree doesn't fall outside the set phase 6 later tears down as a unit — replicate FF-0a's own
+two checks proactively against the **canonical clone** _before_ committing:
+
+- `git -C <repo> rev-parse --abbrev-ref HEAD` MUST equal the primary branch.
+- `git -C <repo> status --porcelain` MUST be empty.
+
+If either fails: do NOT commit in place. `git stash -u` in the canonical clone, `git checkout`
+the primary branch there, create a new worktree (`pn`-workforce-aware when the repo is a
+workforest member, otherwise a plain `git worktree add`), `git stash pop` in the new worktree,
+and commit there instead — then continue the sequence from that worktree for this repo. (Known,
+pre-existing, out-of-scope gap either way: neither this check nor FF-0a catches a commit made
+directly onto the canonical clone's own primary branch — clean-and-on-primary passes both even
+though R-2 says the work should have been in a worktree to begin with. Not introduced or fixed
+by this addition.)
 
 For each in-scope repo, commit the session's outstanding changes with a clear message. The
 end state is a clean working tree for everything in scope. If there are changes you can't
@@ -330,7 +377,11 @@ to the shared remote, so the housekeeping in phase 2 is already persisted.)
 Run `session-mode set-status finished` unconditionally (best-effort): this finishes
 whichever kind ended up active for this session — wrap-up-session's own record, or one it
 took over in the Preamble above. A no-op (silently) when the Preamble never got a record
-started in the first place.
+started in the first place. If this run created or updated a P0 next-session handoff bead
+above, pass its id along on the SAME call: `session-mode set-status finished --handoff-bead
+<id>` — `session-mode show` on this session then becomes the one consistent place to find the
+bead id, alongside the id already visible in this run's own output. Echo the id plainly in the
+end-of-run summary either way (bead or no bead — see "End-of-run summary").
 
 ## Next-session handoff bead
 
@@ -359,6 +410,33 @@ One P0 bead, not many — it's the single entry point for the next session, crea
 work carries over (interrupted, deferred, or discovered). The other follow-ups from phase 2 keep
 their own (non-P0) beads; this P0 doesn't replace them — it points at the one place to start and
 links them, so the next session sees a single front door instead of a scattered backlog.
+
+**(auto-trigger only) provenance labels + two extra description lines, on BOTH the create and
+update path.** A directive delivered as literal typed input becomes an ordinary user turn in the
+session's own transcript, permanently, in the user's voice-slot but not their words — so the
+bead this run files or updates needs its own provenance markers, not just the nudge text's tag:
+
+- **Labels.** Whether creating (`bd create --labels human,auto-session-wrapped ...`, alongside
+  the flags above) or updating an already-open P0 from a prior run (`bd update <id> --add-label
+human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels. `human` and
+  `auto-session-wrapped` are applied together, at bead creation only — never retrofitted onto a
+  bead this skill did not itself create as an auto-trigger run (see the `beads-lifecycle` skill's
+  `auto-session-wrapped` section).
+- **Two extra description lines**, built from THIS run's real, observed session id and
+  transcript path — never fabricated:
+  ```
+  Prior session: claude --resume <session_id>
+  Transcript: <absolute path to this session's transcript, e.g. /home/tcadmin/.claude/projects/<project>/<session_id>.jsonl>
+  ```
+  A raw transcript path alone is not directly actionable for a human; the ready-to-run
+  `claude --resume` command is.
+- **On update, append — never overwrite.** When this run is refreshing an already-open P0
+  (see "Safety and idempotency" below), append a new dated line to the description (`bd update
+<id> --description="$(existing)\n\n## <today's date> update\n<what changed>"` or equivalent)
+  rather than replacing the prior brief outright — mirroring `beads-lifecycle`'s dated-entry-marker
+  convention for `worktree-review`. Losing the prior brief on a second auto-nudge for the same
+  thread would silently produce a bead that looks freshly labeled but has forgotten what the
+  first nudge already recorded.
 
 ### Lifecycle: the P0 is one-shot
 
@@ -524,22 +602,23 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                                     | command                                                                                                    |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| in-progress beads (scope check)          | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)              |
-| PR-tracker beads                         | `bd list --type=merge-request`                                                                             |
-| close finished work                      | `bd close <id> [<id>...] --reason="..."`                                                                   |
-| file discovered/unfinished               | `bd create --title=... --description=... --type=... -p <0-4>`                                              |
-| dirty state                              | `git status` ; ahead of main: `git log main..`                                                             |
-| unpushed blocks the work?                | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`           |
-| run gates (nix-\* repos)                 | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check`   |
-| integrate a repo's work                  | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)      |
-| set teardown / stash cleanup             | see `references/cleanup.md`                                                                                |
-| remove pn workforest set                 | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                         |
-| prune stale worktree admin               | `pn workspace workforest prune`                                                                            |
-| next-session handoff                     | one P0 `bd create` (see "Next-session handoff bead")                                                       |
-| retire a spent P0 pointer                | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                        |
-| record work (no-beads repo)              | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                             |
-| next-session handoff (no-beads)          | update the handoff doc's top "Resume here" section                                                         |
-| this session's mode record               | `session-mode show` (see "Preamble: mark this session's mode")                                             |
-| cancel a live --monitor-if-empty monitor | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor") |
+| need                                              | command                                                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| in-progress beads (scope check)                   | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)              |
+| PR-tracker beads                                  | `bd list --type=merge-request`                                                                             |
+| close finished work                               | `bd close <id> [<id>...] --reason="..."`                                                                   |
+| file discovered/unfinished                        | `bd create --title=... --description=... --type=... -p <0-4>`                                              |
+| dirty state                                       | `git status` ; ahead of main: `git log main..`                                                             |
+| unpushed blocks the work?                         | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`           |
+| run gates (nix-\* repos)                          | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check`   |
+| integrate a repo's work                           | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)      |
+| set teardown / stash cleanup                      | see `references/cleanup.md`                                                                                |
+| remove pn workforest set                          | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                         |
+| prune stale worktree admin                        | `pn workspace workforest prune`                                                                            |
+| next-session handoff                              | one P0 `bd create` (see "Next-session handoff bead")                                                       |
+| retire a spent P0 pointer                         | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                        |
+| record work (no-beads repo)                       | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                             |
+| next-session handoff (no-beads)                   | update the handoff doc's top "Resume here" section                                                         |
+| this session's mode record                        | `session-mode show` (see "Preamble: mark this session's mode")                                             |
+| record this run's handoff bead on the mode record | `session-mode set-status finished --handoff-bead <id>` (see end of phase 7)                                |
+| cancel a live --monitor-if-empty monitor          | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor") |

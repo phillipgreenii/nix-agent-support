@@ -14,6 +14,7 @@ type Nudger struct {
 	limitPauseProd *LimitPauseProducer
 	disruptProd    *DisruptProducer
 	manualProd     *ManualProducer
+	autoWrapProd   *AutoSessionWrapUpProducer
 }
 
 // New constructs a Nudger ready for Tick. historyErrLog, when non-nil, receives
@@ -34,6 +35,7 @@ func New(deliverer Deliverer, recorder Recorder, nudgeRecorder NudgeRecorder, hi
 		limitPauseProd: &LimitPauseProducer{},
 		disruptProd:    NewDisruptProducer(),
 		manualProd:     &ManualProducer{},
+		autoWrapProd:   &AutoSessionWrapUpProducer{},
 	}
 }
 
@@ -70,6 +72,7 @@ func (n *Nudger) Reconcile(ctx TickContext) {
 	n.windowProd.Reconcile(ctx, n.store)
 	n.disruptProd.Reconcile(ctx, n.store)
 	n.limitPauseProd.Reconcile(ctx, n.store)
+	n.autoWrapProd.Reconcile(ctx, n.store)
 	// Manual is RPC-driven; Reconcile is a no-op but called for symmetry.
 	n.manualProd.Reconcile(ctx, n.store)
 	// Emit queued_total counter for each newly-added intent.

@@ -173,6 +173,113 @@ func TestTmuxSendDeliversWhenMarkerAbsent(t *testing.T) {
 	}
 }
 
+// captureRun wraps a base fakeMultiSocketRun handler to also serve
+// `tmux -L <name> capture-pane -p -t <pane>` -> body, for HasUnsubmittedInput
+// tests (bead tc-m08w3).
+func captureRun(base func(context.Context, string, ...string) ([]byte, error), body string) func(context.Context, string, ...string) ([]byte, error) {
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "tmux" && len(args) >= 3 && args[0] == "-L" && args[2] == "capture-pane" {
+			return []byte(body), nil
+		}
+		return base(ctx, name, args...)
+	}
+}
+
+func TestTmuxHasUnsubmittedInputTrueWhenComposed(t *testing.T) {
+	tree := map[int][2]string{1000: {"500", "claude"}, 500: {"100", "bash"}}
+	panes := map[string]string{"default": "100 main:0.0\n"}
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil)
+	sig := &signal.TmuxSignaler{RunCmd: captureRun(base, "❯ Think step by step in extensive detail...\n  -- INSERT --")}
+	if !sig.HasUnsubmittedInput(1000) {
+		t.Error("HasUnsubmittedInput = false, want true for a composed (non-empty) input line")
+	}
+}
+
+func TestTmuxHasUnsubmittedInputFalseWhenEmpty(t *testing.T) {
+	tree := map[int][2]string{1000: {"500", "claude"}, 500: {"100", "bash"}}
+	panes := map[string]string{"default": "100 main:0.0\n"}
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil)
+	sig := &signal.TmuxSignaler{RunCmd: captureRun(base, "❯ \n")}
+	if sig.HasUnsubmittedInput(1000) {
+		t.Error("HasUnsubmittedInput = true, want false for a bare (empty) prompt line")
+	}
+}
+
+func TestTmuxHasUnsubmittedInputFailsClosedOnCaptureError(t *testing.T) {
+	tree := map[int][2]string{1000: {"500", "claude"}, 500: {"100", "bash"}}
+	panes := map[string]string{"default": "100 main:0.0\n"}
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil)
+	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "tmux" && len(args) >= 3 && args[0] == "-L" && args[2] == "capture-pane" {
+			return nil, fmt.Errorf("tmux: capture-pane failed")
+		}
+		return base(ctx, name, args...)
+	}
+	sig := &signal.TmuxSignaler{RunCmd: run}
+	if !sig.HasUnsubmittedInput(1000) {
+		t.Error("HasUnsubmittedInput = false, want true (fail closed) on a capture-pane error")
+	}
+}
+
+func TestTmuxHasUnsubmittedInputFailsClosedWhenNoPaneFound(t *testing.T) {
+	tree := map[int][2]string{1000: {"500", "claude"}, 500: {"1", "bash"}}
+	panes := map[string]string{"default": "999 other:0.0\n"}
+	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil)}
+	if !sig.HasUnsubmittedInput(1000) {
+		t.Error("HasUnsubmittedInput = false, want true (fail closed) when no pane resolves for pid")
+	}
+}
+
+func TestTmuxHasUnsubmittedInputFailsClosedWhenNoPromptLineFound(t *testing.T) {
+	tree := map[int][2]string{1000: {"500", "claude"}, 500: {"100", "bash"}}
+	panes := map[string]string{"default": "100 main:0.0\n"}
+	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil)
+	sig := &signal.TmuxSignaler{RunCmd: captureRun(base, "some unrelated pane content, no prompt glyph\n")}
+	if !sig.HasUnsubmittedInput(1000) {
+		t.Error("HasUnsubmittedInput = false, want true (fail closed) when no recognizable prompt line is captured")
+	}
+}
+
+// HasUnsubmittedInput (package-level helper) tests: fake Signalers exercising
+// ResolveSignaler + the PaneInputInspector type-assertion fallback.
+
+type fakeSignaler struct {
+	name    string
+	detects bool
+}
+
+func (f fakeSignaler) Name() string                 { return f.name }
+func (f fakeSignaler) Detect(pid int) bool          { return f.detects }
+func (f fakeSignaler) Send(pid int, s string) error { return nil }
+
+type fakeInspectingSignaler struct {
+	fakeSignaler
+	unsubmitted bool
+}
+
+func (f fakeInspectingSignaler) HasUnsubmittedInput(pid int) bool { return f.unsubmitted }
+
+func TestHasUnsubmittedInputFailsClosedWhenNoSignalerResolves(t *testing.T) {
+	signalers := []signal.Signaler{fakeSignaler{name: "tmux", detects: false}}
+	if !signal.HasUnsubmittedInput(signalers, 1) {
+		t.Error("HasUnsubmittedInput = false, want true (fail closed) when no signaler resolves")
+	}
+}
+
+func TestHasUnsubmittedInputFailsClosedWhenSignalerLacksInspector(t *testing.T) {
+	signalers := []signal.Signaler{fakeSignaler{name: "cmux", detects: true}}
+	if !signal.HasUnsubmittedInput(signalers, 1) {
+		t.Error("HasUnsubmittedInput = false, want true (fail closed) when the resolved signaler has no PaneInputInspector")
+	}
+}
+
+func TestHasUnsubmittedInputDelegatesToInspector(t *testing.T) {
+	signalers := []signal.Signaler{fakeInspectingSignaler{fakeSignaler: fakeSignaler{name: "tmux", detects: true}, unsubmitted: false}}
+	if signal.HasUnsubmittedInput(signalers, 1) {
+		t.Error("HasUnsubmittedInput = true, want false: resolved inspector reported no unsubmitted input")
+	}
+}
+
 func TestResolveSignalerReturnsFirstMatch(t *testing.T) {
 	// TmuxSignaler where pid=1 is directly listed as a pane shell pid.
 	// Uses fakeMultiSocketRun so the new pid-aware Detect (which calls

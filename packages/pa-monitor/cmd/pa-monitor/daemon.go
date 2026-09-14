@@ -317,6 +317,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.AutoResumeDelay = cfg.AutoResumeDelay
 		opts.DisruptGrace = cfg.DisruptGrace
 		opts.EscalationAfter = cfg.EscalationAfter
+		// AutoSessionWrapUp (bead tc-m08w3): off unless the operator sets
+		// [auto_session_wrap_up].enable = true.
+		opts.AutoSessionWrapUpEnable = cfg.AutoSessionWrapUp.Enable
+		opts.AutoSessionWrapUpIdleThreshold = time.Duration(cfg.AutoSessionWrapUp.IdleThresholdMinutes) * time.Minute
 	}
 
 	return opts, cleanup, nil

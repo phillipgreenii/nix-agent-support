@@ -17,9 +17,12 @@ Subcommands:
       already finished, in which case it resets to running with a fresh
       started_at). With --force: always (re)creates the record for KIND
       fresh, discarding whatever was there before.
-  set-status running|stopping|finished
+  set-status running|stopping|finished [--handoff-bead ID]
       Update the state of this session's existing mode record. Fails
-      (exit 2) when no record exists.
+      (exit 2) when no record exists. --handoff-bead ID sets (or updates)
+      the record's handoff_bead_id field — the next-session resume bead a
+      skill such as session-wrapup:wrap-up-session created or updated;
+      omitted, whatever was already recorded is preserved unchanged.
   show
       Print the raw record JSON for this session. Fails (exit 2) when no
       record exists (or it is an empty file, which is treated the same).
@@ -47,6 +50,7 @@ Exit status:
 Examples:
   session-mode start drain-beads --force --detail "P1 only"
   session-mode set-status stopping
+  session-mode set-status finished --handoff-bead tc-m08w3
   session-mode show
   echo '{"session_id":"abc","transcript_path":"/x/abc.jsonl"}' | session-mode hook session-end
 
@@ -119,10 +123,11 @@ cmd_start() {
   existing="$(session_mode_read "$file" 2>/dev/null || true)"
 
   if [[ -n $existing ]] && [[ $force -eq 0 ]]; then
-    local existing_kind existing_state existing_started
+    local existing_kind existing_state existing_started existing_handoff_bead
     existing_kind="$(printf '%s' "$existing" | jq -r '.kind // empty')"
     existing_state="$(printf '%s' "$existing" | jq -r '.state // empty')"
     existing_started="$(printf '%s' "$existing" | jq -r '.started_at // empty')"
+    existing_handoff_bead="$(printf '%s' "$existing" | jq -r '.handoff_bead_id // empty')"
 
     if [[ $existing_kind != "$kind" ]]; then
       die "a different kind ('$existing_kind') is already active for this session; pass --force to override" 3
@@ -130,9 +135,10 @@ cmd_start() {
 
     if [[ $existing_state != "finished" ]]; then
       # Same kind, still running/stopping: refresh detail/updated_at in
-      # place, keeping the existing state and started_at.
+      # place, keeping the existing state, started_at, and handoff_bead_id
+      # (start has no flag of its own to set/change it; only set-status does).
       local record
-      record="$(session_mode_build_record "$kind" "$detail" "$existing_state" "$existing_started" "$now")"
+      record="$(session_mode_build_record "$kind" "$detail" "$existing_state" "$existing_started" "$now" "$existing_handoff_bead")"
       session_mode_write_atomic "$file" "$record" || die "failed to write $file"
       exit 0
     fi
@@ -146,8 +152,26 @@ cmd_start() {
 }
 
 cmd_set_status() {
-  local state="${1:-}"
-  [[ -n $state ]] || die "missing STATE (usage: session-mode set-status running|stopping|finished)"
+  local state="" handoff_bead="" handoff_bead_given=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --handoff-bead)
+      [[ $# -ge 2 ]] || die "option $1 requires a value"
+      handoff_bead="$2"
+      handoff_bead_given=1
+      shift 2
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      [[ -z $state ]] || die "unexpected argument: $1"
+      state="$1"
+      shift
+      ;;
+    esac
+  done
+  [[ -n $state ]] || die "missing STATE (usage: session-mode set-status running|stopping|finished [--handoff-bead ID])"
   session_mode_validate_state "$state" || die "invalid state '$state' (must be running, stopping, or finished)"
 
   local file existing
@@ -155,13 +179,23 @@ cmd_set_status() {
   existing="$(session_mode_read "$file" 2>/dev/null || true)"
   [[ -n $existing ]] || die "no session-mode record found at $file" 2
 
-  local kind detail started
+  local kind detail started existing_handoff_bead
   kind="$(printf '%s' "$existing" | jq -r '.kind // empty')"
   detail="$(printf '%s' "$existing" | jq -r '.detail // empty')"
   started="$(printf '%s' "$existing" | jq -r '.started_at // empty')"
+  existing_handoff_bead="$(printf '%s' "$existing" | jq -r '.handoff_bead_id // empty')"
+
+  # --handoff-bead, when passed, sets (or updates) the field; when omitted,
+  # whatever was already recorded is preserved (set-status is also called for
+  # plain running/stopping/finished transitions that have nothing to do with
+  # a handoff bead, and MUST NOT clear it).
+  local new_handoff_bead="$existing_handoff_bead"
+  if [[ $handoff_bead_given -eq 1 ]]; then
+    new_handoff_bead="$handoff_bead"
+  fi
 
   local record
-  record="$(session_mode_build_record "$kind" "$detail" "$state" "$started" "$(session_mode_now_iso)")"
+  record="$(session_mode_build_record "$kind" "$detail" "$state" "$started" "$(session_mode_now_iso)" "$new_handoff_bead")"
   session_mode_write_atomic "$file" "$record" || die "failed to write $file"
 }
 
@@ -196,12 +230,13 @@ cmd_hook_session_end() {
   state="$(printf '%s' "$existing" | jq -r '.state // empty' 2>/dev/null || true)"
   case "$state" in
   running | stopping)
-    local kind detail started
+    local kind detail started handoff_bead
     kind="$(printf '%s' "$existing" | jq -r '.kind // empty')"
     detail="$(printf '%s' "$existing" | jq -r '.detail // empty')"
     started="$(printf '%s' "$existing" | jq -r '.started_at // empty')"
+    handoff_bead="$(printf '%s' "$existing" | jq -r '.handoff_bead_id // empty')"
     local record
-    record="$(session_mode_build_record "$kind" "$detail" "finished" "$started" "$(session_mode_now_iso)")"
+    record="$(session_mode_build_record "$kind" "$detail" "finished" "$started" "$(session_mode_now_iso)" "$handoff_bead")"
     session_mode_write_atomic "$file" "$record" 2>/dev/null || true
     ;;
   esac

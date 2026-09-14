@@ -190,6 +190,13 @@ type RunOptions struct {
 	DisruptGrace      time.Duration
 	EscalationAfter   time.Duration
 	NudgerSignalers   []signal.Signaler
+	// AutoSessionWrapUpEnable / AutoSessionWrapUpIdleThreshold /
+	// AutoSessionWrapUpDirectiveTemplate configure
+	// nudger.AutoSessionWrapUpProducer (bead tc-m08w3). DirectiveTemplate, when
+	// empty, defaults to nudger.DefaultDirectiveTemplate.
+	AutoSessionWrapUpEnable            bool
+	AutoSessionWrapUpIdleThreshold     time.Duration
+	AutoSessionWrapUpDirectiveTemplate string
 	// Detectors run against each session at tick time to derive labels
 	// for emitted metrics. Built-in detectors live in
 	// internal/labels/detectors. Empty → only the {state, plan_tier}
@@ -806,6 +813,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if msg == "" {
 				msg = "continue"
 			}
+			directiveTemplate := opts.AutoSessionWrapUpDirectiveTemplate
+			if directiveTemplate == "" {
+				directiveTemplate = nudger.DefaultDirectiveTemplate
+			}
 			tctx := nudger.TickContext{
 				Now:               time.Now(),
 				Tree:              tree,
@@ -814,7 +825,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				AutoResumeDelay:   opts.AutoResumeDelay,
 				DisruptGrace:      opts.DisruptGrace,
 				EscalationAfter:   opts.EscalationAfter,
-				Watermarks:        wm,
+				// AutoSessionWrapUpProducer config (bead tc-m08w3).
+				AutoSessionWrapUpEnabled:           opts.AutoSessionWrapUpEnable,
+				AutoSessionWrapUpIdleThreshold:     opts.AutoSessionWrapUpIdleThreshold,
+				AutoSessionWrapUpDirectiveTemplate: directiveTemplate,
+				Watermarks:                         wm,
 				// Producer-side no-surface gate (bead pg2-gjekd): reap
 				// surfaceless "ghost" sessions from the candidate set so they
 				// are never enqueued. Uses the FULL opts.NudgerSignalers
@@ -825,6 +840,11 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				// dispatcher-side suppress-and-drop backstop.
 				HasSurface: func(pid int) bool {
 					return signal.ResolveSignaler(opts.NudgerSignalers, pid) != nil
+				},
+				// Unsubmitted-input guard (bead tc-m08w3, safety-critical): see
+				// signal.HasUnsubmittedInput's doc for the fail-closed rationale.
+				HasUnsubmittedInput: func(pid int) bool {
+					return signal.HasUnsubmittedInput(opts.NudgerSignalers, pid)
 				},
 			}
 			n.Reconcile(tctx)

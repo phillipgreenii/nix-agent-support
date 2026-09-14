@@ -13,17 +13,34 @@ type wmStub struct {
 	lp        time.Time // LimitPauseFiredFor latch
 	per       map[string]SessionWatermark
 	escalated map[string]bool // tracks SetDisruptEscalated calls (for assertions)
+	// autoWrapNudgedFor tracks SetAutoSessionWrapUpNudgedFor calls AND overlays
+	// SessionWatermark reads (unlike escalated, which is assertion-only) so a
+	// producer's write-then-read within one Reconcile (or across two Reconcile
+	// calls against the same stub) round-trips like the real WatermarkStore
+	// does. nil (the zero value) makes the setter a safe no-op, matching
+	// escalated's nil-guard below.
+	autoWrapNudgedFor map[string]time.Time
 }
 
 func (w wmStub) WindowResetFiredFor() time.Time { return w.wr }
 func (w wmStub) LimitPauseFiredFor() time.Time  { return w.lp }
 func (w wmStub) SessionWatermark(sid string) SessionWatermark {
-	return w.per[sid]
+	wm := w.per[sid]
+	if at, ok := w.autoWrapNudgedFor[sid]; ok {
+		wm.LastAutoSessionWrapUpNudgedFor = at
+	}
+	return wm
 }
 
 func (w wmStub) SetDisruptEscalated(sid string, escalated bool) {
 	if w.escalated != nil {
 		w.escalated[sid] = escalated
+	}
+}
+
+func (w wmStub) SetAutoSessionWrapUpNudgedFor(sid string, at time.Time) {
+	if w.autoWrapNudgedFor != nil {
+		w.autoWrapNudgedFor[sid] = at
 	}
 }
 

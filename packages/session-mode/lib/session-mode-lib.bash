@@ -78,14 +78,22 @@ session_mode_validate_state() {
   esac
 }
 
-# session_mode_build_record KIND DETAIL STATE STARTED_AT UPDATED_AT — emit the
-# record as a single-line JSON object via jq -n --arg. DETAIL is omitted
-# entirely when empty (never written as ""), and is truncated to a hard cap of
-# 40 chars with a trailing … when longer — the mechanical backstop; the
-# primary defense is the caller passing an already-short summary (see the
-# drain-beads.md / unblock-human-beads.md "Keeping detail short" instruction).
+# session_mode_build_record KIND DETAIL STATE STARTED_AT UPDATED_AT
+# [HANDOFF_BEAD_ID] — emit the record as a single-line JSON object via
+# jq -n --arg. DETAIL is omitted entirely when empty (never written as ""),
+# and is truncated to a hard cap of 40 chars with a trailing … when longer —
+# the mechanical backstop; the primary defense is the caller passing an
+# already-short summary (see the drain-beads.md / unblock-human-beads.md
+# "Keeping detail short" instruction).
+#
+# HANDOFF_BEAD_ID is optional (an omitted 6th argument is treated as empty,
+# via bash's "${6:-}" default) and follows the same omit-when-empty pattern
+# as DETAIL — but is deliberately NOT truncated: a bead id (e.g. "tc-m08w3")
+# is a fixed short format, not free text, so DETAIL's 40-char cap does not
+# apply to it (bead tc-m08w3's session-wrapup "next-session handoff bead"
+# field).
 session_mode_build_record() {
-  local kind="$1" detail="$2" state="$3" started_at="$4" updated_at="$5"
+  local kind="$1" detail="$2" state="$3" started_at="$4" updated_at="$5" handoff_bead_id="${6:-}"
   local truncated=""
   if [[ -n $detail ]]; then
     if [[ ${#detail} -gt 40 ]]; then
@@ -99,22 +107,22 @@ session_mode_build_record() {
   # jq-free session-mode-status.bash pattern-match plucker — jq's default
   # pretty-printer would spread it across multiple lines and insert a space
   # after each `:`, breaking both readers.
-  if [[ -n $truncated ]]; then
-    jq -nc \
-      --arg kind "$kind" \
-      --arg detail "$truncated" \
-      --arg state "$state" \
-      --arg started_at "$started_at" \
-      --arg updated_at "$updated_at" \
-      '{kind: $kind, detail: $detail, state: $state, started_at: $started_at, updated_at: $updated_at}'
-  else
-    jq -nc \
-      --arg kind "$kind" \
-      --arg state "$state" \
-      --arg started_at "$started_at" \
-      --arg updated_at "$updated_at" \
-      '{kind: $kind, state: $state, started_at: $started_at, updated_at: $updated_at}'
-  fi
+  #
+  # detail and handoff_bead_id are added via `+ (if ... else {} end)` rather
+  # than four separate literal-branch jq calls (one per present/absent
+  # combination): both are independently optional, and the additive-merge
+  # form stays correct as more optional fields are added later without the
+  # branch count doubling again.
+  jq -nc \
+    --arg kind "$kind" \
+    --arg detail "$truncated" \
+    --arg state "$state" \
+    --arg started_at "$started_at" \
+    --arg updated_at "$updated_at" \
+    --arg handoff_bead_id "$handoff_bead_id" \
+    '{kind: $kind, state: $state, started_at: $started_at, updated_at: $updated_at}
+     + (if $detail != "" then {detail: $detail} else {} end)
+     + (if $handoff_bead_id != "" then {handoff_bead_id: $handoff_bead_id} else {} end)'
 }
 
 # session_mode_read PATH — print the record at PATH. Returns non-zero, prints

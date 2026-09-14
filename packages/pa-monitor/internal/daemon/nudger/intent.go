@@ -10,10 +10,11 @@ import (
 type Source string
 
 const (
-	SourceWindowReset Source = "window_reset"
-	SourceDisrupted   Source = "disrupted"
-	SourceManual      Source = "manual"
-	SourceLimitPause  Source = "limit_pause"
+	SourceWindowReset       Source = "window_reset"
+	SourceDisrupted         Source = "disrupted"
+	SourceManual            Source = "manual"
+	SourceLimitPause        Source = "limit_pause"
+	SourceAutoSessionWrapUp Source = "auto_session_wrap_up"
 )
 
 // IntentKey uniquely identifies one pending intent in the store.
