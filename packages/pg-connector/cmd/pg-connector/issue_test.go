@@ -473,6 +473,137 @@ func TestRun_IssueShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 // assert for ci logs before this packet's change — that assertion moved
 // to ci logs' own new multi-backend resolution tests in ci_test.go; this
 // test keeps it alive for create, the one op it still applies to.
+// TestRun_IssueList_Success_FullEntities is a baseline sanity check for
+// "issue list" without --ids-only: the pre-existing, already-correct path
+// (entities populated, present_ids populated alongside it per
+// IssueListResult's "always populated regardless of ids_only" contract).
+// There was no existing coverage of "issue list" at all before bug
+// pg2-v6vhk's fix.
+func TestRun_IssueList_Success_FullEntities(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-list", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"issue-1","title":"t","state":"open"}],"present_ids":["issue-1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-list")
+
+	stdout, _, code := executePr(t, []string{"issue", "list", "--query", "mine"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome issueListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != 1 || outcome.Entities[0].ID != "issue-1" {
+		t.Fatalf("outcome.Entities = %+v", outcome.Entities)
+	}
+	if len(outcome.PresentIDs) != 1 || outcome.PresentIDs[0] != "issue-1" {
+		t.Fatalf("outcome.PresentIDs = %+v", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Status != SourceSucceeded || outcome.Sources[0].Count != 1 {
+		t.Fatalf("outcome.Sources = %+v", outcome.Sources)
+	}
+}
+
+// TestRun_IssueList_IdsOnly_ReturnsPresentIDsNotEmptyEntities is the
+// regression test for bug pg2-v6vhk: `pg-connector issue list --ids-only`
+// always returned an empty entities array despite sources[].count
+// correctly reporting the real match count. Root cause: fanOutIssueList
+// (issue.go) only ever forwarded a backend's result.Entities into the
+// umbrella outcome; with ids_only true, a backend correctly leaves its
+// own Entities empty per IssueListResult's documented ids_only contract
+// (pkg/schema/issue.go) and populates only PresentIDs instead, so the
+// concatenation step appended nothing and the caller had no way to
+// recover the matched ids at all. The fix surfaces PresentIDs on
+// issueListOutcome itself.
+func TestRun_IssueList_IdsOnly_ReturnsPresentIDsNotEmptyEntities(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-list-ids", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["issue-1","issue-2"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-list-ids")
+
+	stdout, _, code := executePr(t, []string{"issue", "list", "--query", "mine", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome issueListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != 0 {
+		t.Fatalf("outcome.Entities = %+v, want empty (ids_only leaves entities empty by design)", outcome.Entities)
+	}
+	if len(outcome.PresentIDs) != 2 || outcome.PresentIDs[0] != "issue-1" || outcome.PresentIDs[1] != "issue-2" {
+		t.Fatalf("outcome.PresentIDs = %+v, want both matched ids surfaced (the bug: this was always empty)", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Status != SourceSucceeded || outcome.Sources[0].Count != 2 {
+		t.Fatalf("outcome.Sources = %+v, want count 2 (sources[].count already worked pre-fix)", outcome.Sources)
+	}
+}
+
+// TestRun_IssueList_IdsOnly_FanOut_ConcatenatesPresentIDsAcrossBackends
+// proves the fix also works across a multi-backend fan-out, mirroring
+// pr_test.go's identical proof for "pr list" — present_ids from every
+// queried backend must concatenate, exactly like entities does in the
+// non-ids_only case.
+func TestRun_IssueList_IdsOnly_FanOut_ConcatenatesPresentIDsAcrossBackends(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-list-a", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["issue-1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-issue-list-b", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["issue-2"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	// writeIssueConfigFor only supports a single backend -- issue list's
+	// fan-out needs its own list-valued "connector.issue" block with two
+	// entries, so build the config directly (mirroring pr_test.go's
+	// identical multi-backend fan-out fixture).
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte("connector:\n  issue:\n    - backend-issue-list-a\n    - backend-issue-list-b\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	stdout, _, code := executePr(t, []string{"issue", "list", "--query", "team", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+
+	var outcome issueListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.PresentIDs) != 2 {
+		t.Fatalf("outcome.PresentIDs = %+v, want 2 concatenated ids across both backends", outcome.PresentIDs)
+	}
+	if len(outcome.Sources) != 2 {
+		t.Fatalf("outcome.Sources = %+v, want one row per backend, never collapsed", outcome.Sources)
+	}
+}
+
+// TestRun_IssueList_IdsOnly_HumanOutput_ShowsIDsNotNone covers the human
+// (--output human) rendering path, which branched on len(Entities) alone
+// before the fix and so always printed "issues: (none)" for --ids-only
+// regardless of how many ids actually matched.
+func TestRun_IssueList_IdsOnly_HumanOutput_ShowsIDsNotNone(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-list-human", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":["issue-1"],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeIssueConfigFor(t, "backend-issue-list-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "list", "--query", "mine", "--ids-only"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "issues: (none)") {
+		t.Fatalf("human output = %q, want it to show the matched id, not report zero matches", stdout)
+	}
+	if !strings.Contains(stdout, "issue-1") {
+		t.Fatalf("human output = %q, want it to contain the matched id", stdout)
+	}
+}
+
 func TestRun_IssueCreate_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T) {
 	dir := t.TempDir()
 	cfg := dir + "/config.yaml"

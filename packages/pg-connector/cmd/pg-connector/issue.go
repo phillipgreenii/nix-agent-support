@@ -284,17 +284,32 @@ func newIssueDepsCmd() *cobra.Command {
 // pkg/provider/issue/dispatch.go's identical shape, mirroring
 // prListOutcome (pr.go) exactly; see fanOutIssueList's doc comment for
 // what differs.
+//
+// PresentIDs is the concatenation of every queried backend's own
+// IssueListResult.PresentIDs (schema/issue.go), which a backend populates
+// regardless of whether the caller passed ids_only — added by bug
+// pg2-v6vhk, the sibling of pg2-nc3iy (pr.go's identical bug): with
+// ids_only true, a backend correctly leaves its own Entities empty per
+// IssueListResult's documented ids_only contract, so
+// out.Entities = append(out.Entities, result.Entities...) below appends
+// nothing and the umbrella response carried the ids nowhere. Surfacing
+// PresentIDs here (mirroring the per-backend field's own "always
+// populated regardless of ids_only" invariant) is additive to the
+// existing {entities, sources} CLI wire shape, so no existing consumer
+// decoding only Entities/Sources is affected.
 type issueListOutcome struct {
-	Entities []schema.Issue `json:"entities"`
-	Sources  []SourceResult `json:"sources"`
+	Entities   []schema.Issue `json:"entities"`
+	PresentIDs []string       `json:"present_ids"`
+	Sources    []SourceResult `json:"sources"`
 }
 
 // fanOutIssueList mirrors pr.go's fanOutPRList exactly, decoding into
 // schema.IssueListResult instead of schema.PRListResult.
 func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) issueListOutcome {
 	out := issueListOutcome{
-		Entities: make([]schema.Issue, 0),
-		Sources:  make([]SourceResult, 0, len(backends)),
+		Entities:   make([]schema.Issue, 0),
+		PresentIDs: make([]string, 0),
+		Sources:    make([]SourceResult, 0, len(backends)),
 	}
 	for _, b := range backends {
 		config, err := reg.BackendConfig(b)
@@ -313,6 +328,7 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 			continue
 		}
 		out.Entities = append(out.Entities, result.Entities...)
+		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
 	}
 	return out
@@ -351,16 +367,27 @@ func newIssueListCmd() *cobra.Command {
 }
 
 // humanizeIssueListOutcome formats "issue list"'s fan-out outcome for
-// human display, mirroring humanizePRListOutcome's own shape.
+// human display, mirroring humanizePRListOutcome's own shape. When the
+// caller passed --ids-only, Entities is empty by design (see
+// issueListOutcome's doc comment) and PresentIDs carries the matched ids
+// instead — rendered as a plain id list rather than falling through to
+// the empty-Entities "(none)" branch, which would misreport a non-zero
+// match count as zero (bug pg2-v6vhk).
 func humanizeIssueListOutcome(o issueListOutcome) string {
 	var b strings.Builder
-	if len(o.Entities) == 0 {
-		b.WriteString("issues: (none)\n")
-	} else {
+	switch {
+	case len(o.Entities) > 0:
 		fmt.Fprintf(&b, "issues (%d):\n", len(o.Entities))
 		for _, issue := range o.Entities {
 			fmt.Fprintf(&b, "  [%s] %q [%s]\n", issue.ID, issue.Title, issue.State)
 		}
+	case len(o.PresentIDs) > 0:
+		fmt.Fprintf(&b, "issues (%d, ids only):\n", len(o.PresentIDs))
+		for _, id := range o.PresentIDs {
+			fmt.Fprintf(&b, "  %s\n", id)
+		}
+	default:
+		b.WriteString("issues: (none)\n")
 	}
 	b.WriteString("sources:\n")
 	b.WriteString(formatSourcesTable(o.Sources))
