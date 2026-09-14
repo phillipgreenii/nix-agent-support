@@ -3,6 +3,7 @@ package effectpolicy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
@@ -72,7 +73,42 @@ func realHostFixture(t *testing.T) (root, home string) {
 		}
 		return r
 	}
-	return real(root), real(home)
+	realRoot, realHome := real(root), real(home)
+
+	// tc-fpbpp: this helper's whole premise is a HOME that is NOT itself
+	// shadowed by one of patheval's own hardcoded zones (see the doc comment
+	// above — that is the literal reason it exists instead of reusing
+	// golden_test.go's fixture()). Inside a `nix build` sandbox, though, the
+	// AMBIENT $HOME this helper reads via os.UserHomeDir() (before the
+	// t.Setenv("HOME", ...) above) is itself set by mkGoTest's buildPhase to
+	// $TMPDIR, which on this host is NIX_BUILD_TOP under
+	// /nix/var/nix/builds/<id> (internal/engine/engine.go's redirection
+	// check documents the identical HOME=$TMPDIR buildPhase behavior, and
+	// internal/patheval/escape_zone_ladder_test.go's pg2-lw19e writeup
+	// root-causes the same $TMPDIR-under-/nix mechanism for a different
+	// fixture). Every subdirectory built under that ambient HOME — including
+	// this scratch dir — therefore ALSO resolves under /nix, and ADR 0068's
+	// osNixKind (a Roots-based, unconditional prefix match, unlike the
+	// Home-anchored zones this helper exists to exercise) classifies it
+	// Forbidden regardless of the synthetic HOME this helper points
+	// pathspec at. Unlike the tmp-root collision internal/patheval/
+	// main_test.go's TestMain fixes (which safely relocates to a fresh
+	// directory under the ambient HOME), there is no available escape here:
+	// the ambient HOME itself is the thing that is nix-shadowed in this
+	// exact environment, and literal /tmp is not a substitute (it is
+	// osTmpKind/tempKind's OWN full-ReadWrite zone, which would silently
+	// mask the real-host HOME-zone behavior this fixture exists to prove —
+	// see TestPathAccessPolicy_GOMODCACHE_RealHost's own doc comment for why
+	// golden_test.go's temp-shadowed fixture cannot substitute for this one
+	// either). Skip rather than fail, mirroring escape_zone_ladder_test.go's
+	// own established precedent for this identical class of nix-sandbox
+	// artifact — a genuine classify()/pathspec regression on a normal
+	// machine (where ambient HOME is never under /nix) still hard-fails.
+	if strings.HasPrefix(realHome, "/nix/") || strings.HasPrefix(realRoot, "/nix/") {
+		t.Skipf("realHostFixture: ambient $HOME resolves under /nix (%s) — this build's HOME=$TMPDIR=NIX_BUILD_TOP, "+
+			"so no non-shadowed real-host HOME is available in this sandbox; nix-sandbox artifact, not a defect (see comment above)", realHome)
+	}
+	return realRoot, realHome
 }
 
 // TestNoWriteToSecretPath_RealHost is slice 3ab's (tc-lc8f item 4h; tc-vn5z
