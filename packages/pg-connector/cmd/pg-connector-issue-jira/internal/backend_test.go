@@ -608,11 +608,17 @@ func TestBackend_Close_EmptyID(t *testing.T) {
 
 // TestBackend_Deps_NoDependencyConcept_EmptyResult locks in Deps' own
 // binding decision: pjira has no dependency/link query op at all, so this
-// backend answers an empty result, never an error.
+// backend answers an empty result, never an error — for an id it
+// actually recognizes as its own. Fixed by pg2-ljk9k: Deps now verifies
+// existence via a follow-up Show call first [mirrors Create's own
+// call-then-Show pattern], so pjira IS invoked (unlike the pre-fix
+// version of this test).
 func TestBackend_Deps_NoDependencyConcept_EmptyResult(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		t.Fatal("pjira must not be invoked; no dependency op exists")
-		return "", nil
+		if args[0] != "issue" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		return `{"key":"PROJ-1","summary":"probe","status":"To Do"}`, nil
 	}}
 	b := New(fr)
 	got, err := b.Deps(context.Background(), "PROJ-1", true)
@@ -621,6 +627,25 @@ func TestBackend_Deps_NoDependencyConcept_EmptyResult(t *testing.T) {
 	}
 	if len(got.IDs) != 0 || len(got.Entities) != 0 {
 		t.Fatalf("got = %+v, want an empty result", got)
+	}
+}
+
+// TestBackend_Deps_UnknownID_NotFound is pg2-ljk9k's own regression test:
+// an id Jira does not recognize at all (e.g. a beads-shaped id from a
+// sibling issue-beads backend) must classify to scriptout.ErrNotFound,
+// not silently succeed with an empty result — otherwise
+// DispatchTargeted's multi-instance try-each resolution policy
+// (design's section 4.13) never falls through to try the next
+// registered backend, and a beads id's `deps` call resolves to an
+// empty set instead of the beads backend's own recursive answer.
+func TestBackend_Deps_UnknownID_NotFound(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira issue -- pg2-2j5ac.30: exit status 1: pjira: issue pg2-2j5ac.30 not found")
+	}}
+	b := New(fr)
+	_, err := b.Deps(context.Background(), "pg2-2j5ac.30", false)
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
 }
 

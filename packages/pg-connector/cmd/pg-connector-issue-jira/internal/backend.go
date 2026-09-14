@@ -611,11 +611,34 @@ func (b *Backend) Close(ctx context.Context, id, reason string) error {
 
 // Deps implements issue.Provider.Deps. pjira exposes no dependency/
 // issue-link query op at all, so this backend has no dependency concept
-// of its own — issue.Provider.Deps' own doc comment: "a backend with no
-// dependency concept ... answers an empty result, never an error."
+// of its own for an issue it DOES recognize — issue.Provider.Deps' own
+// doc comment: "a backend with no dependency concept ... answers an
+// empty result, never an error."
+//
+// Bug fix (pg2-ljk9k): the previous implementation returned that empty
+// result unconditionally, for ANY id, without ever checking whether the
+// id belongs to Jira at all. That broke DispatchTargeted's multi-instance
+// try-each resolution policy (design's section 4.13): a `not_found`
+// answer means "try the next backend," but this method never produced
+// one, so with issue-jira registered before issue-beads (the design's own
+// example `backends:` ordering), a beads-shaped id's `deps` call always
+// short-circuited on Jira's empty "success" before issue-beads was ever
+// tried — silently dropping the recursive result `--backend
+// pg-connector-issue-beads` returns correctly when pinned. Show already
+// avoids this by actually asking pjira and classifying a real 404 into
+// ErrNotFound (see classifyPJIRAErrorMessage); Deps now does the same
+// existence check via a follow-up Show call [mirrors Create's own
+// call-then-Show pattern above] before answering its own "no dependency
+// concept" empty result — so an id Jira does not recognize propagates
+// ErrNotFound and multi-instance resolution correctly falls through to
+// the next registered backend, exactly as it already does for Show.
 func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error) {
-	if strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	if _, err := b.Show(ctx, id); err != nil {
+		return nil, err
 	}
 	return &schema.IssueDepsResult{IDs: []string{}}, nil
 }

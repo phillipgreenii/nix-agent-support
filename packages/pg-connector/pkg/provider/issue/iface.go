@@ -127,6 +127,13 @@ type Provider interface {
 	// carries the full schema.Issue entity for each. A backend with no
 	// dependency concept of its own (e.g. issue-jira, which has no
 	// dependency/link query available) answers an empty result, never an
-	// error.
+	// error — but ONLY for an id it actually recognizes as its own
+	// (fixed by pg2-ljk9k: issue-jira now verifies existence via Show
+	// before answering empty). For an id the backend does NOT recognize
+	// at all, it MUST answer not_found like any other targeted op, so
+	// DispatchTargeted's multi-instance try-each resolution policy
+	// (design's section 4.13) can fall through to the next registered
+	// backend — an unconditional empty success for every id, regardless
+	// of ownership, silently defeats that resolution policy.
 	Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error)
 }
