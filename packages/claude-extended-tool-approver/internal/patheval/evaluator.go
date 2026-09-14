@@ -257,6 +257,69 @@ func (pe *PathEvaluator) ProjectRoot() string {
 	return pe.projectRoot
 }
 
+// ProjectRootGrantsZone exposes projectRootGrantsZone: whether ProjectRoot()
+// is narrow enough to grant a PathReadWrite zone over its subtree (see
+// rootGrantsZone — a too-broad/fabricated root, $HOME or an ancestor of it,
+// grants none). Added for internal/pathspec's session/config spec (ADR
+// 0068 P3, tc-mkpaz.3), which mirrors classify()'s <projectRoot>/** grant
+// and MUST apply this same guard. classify()'s WORKSPACE_ROOT/** grant
+// immediately below it has NO such guard — see WorkspaceRoot's doc comment
+// for that asymmetry, which this accessor does not paper over.
+func (pe *PathEvaluator) ProjectRootGrantsZone() bool {
+	return pe.projectRootGrantsZone
+}
+
+// WorkspaceRoot exposes workspaceRoot (WORKSPACE_ROOT, symlink-resolved, ""
+// when unset). Added for internal/pathspec's session/config spec (ADR 0068
+// P3, tc-mkpaz.3) — see ProjectRootGrantsZone's doc comment. classify()'s
+// WORKSPACE_ROOT/** grant is UNCONDITIONAL (no rootGrantsZone-style guard),
+// unlike ProjectRoot()'s grant; a caller mirroring classify() must port that
+// asymmetry faithfully rather than narrowing WORKSPACE_ROOT to match.
+func (pe *PathEvaluator) WorkspaceRoot() string {
+	return pe.workspaceRoot
+}
+
+// AllowWriteRoots exposes sandboxConfig.AllowWrite (symlink-resolved via
+// SetSandboxConfig; nil when no sandbox config is set) — the roots
+// sandbox.filesystem.allowWrite grants a PathReadWrite zone over in
+// classify(). Added for internal/pathspec's session/config spec (ADR 0068
+// P3, tc-mkpaz.3), which needs these roots to declare its own Kind grant
+// rather than reaching into classify()'s private zone ladder.
+func (pe *PathEvaluator) AllowWriteRoots() []string {
+	if pe.sandboxConfig == nil {
+		return nil
+	}
+	return pe.sandboxConfig.AllowWrite
+}
+
+// AllowReadRoots exposes sandboxConfig.AllowRead (symlink-resolved via
+// SetSandboxConfig; nil when no sandbox config is set) — see
+// AllowWriteRoots' doc comment. Unlike AllowWrite, AllowRead is consulted
+// TODAY only as an override inside IsDenyRead (an allowRead entry with no
+// matching denyRead grants nothing through Evaluate/classify); this
+// accessor exposes the raw configured roots so a caller can grant an
+// INDEPENDENT Read: Permitted spec entry from them (operator ruling,
+// 2026-09-13, recorded in ADR 0068) — that widening decision belongs to the
+// caller (internal/pathspec's session/config spec), not to this accessor.
+func (pe *PathEvaluator) AllowReadRoots() []string {
+	if pe.sandboxConfig == nil {
+		return nil
+	}
+	return pe.sandboxConfig.AllowRead
+}
+
+// ExtraReadWriteRoots exposes extraReadWrite (CETA_EXTRA_READWRITE_ROOTS,
+// symlink-resolved) — see AllowWriteRoots' doc comment.
+func (pe *PathEvaluator) ExtraReadWriteRoots() []string {
+	return pe.extraReadWrite
+}
+
+// ExtraReadOnlyRoots exposes extraReadOnly (CETA_EXTRA_READONLY_ROOTS,
+// symlink-resolved) — see AllowWriteRoots' doc comment.
+func (pe *PathEvaluator) ExtraReadOnlyRoots() []string {
+	return pe.extraReadOnly
+}
+
 // SetSandboxConfig sets the sandbox filesystem path config, resolving symlinks
 // in all config paths.
 func (pe *PathEvaluator) SetSandboxConfig(cfg *SandboxFilesystemConfig) {
