@@ -91,7 +91,14 @@ type ReferenceHandler struct {
 	seen     map[string]bool
 }
 
-// Serve implements Participant for the `dispatch` subcommand.
+// Serve implements Participant, dispatching on subcommand: `dispatch`
+// (INTF-HANDLER's per-event message, the original behavior this method
+// carried before it took a subcommand parameter at all) or `postStartup`/
+// `preShutdown` (pg2-oju6w.15's once-per-process-lifetime lifecycle hooks,
+// same transport, DEC-WIRE-1). Earlier this method ignored subcommand
+// entirely and always validated against "handler.dispatch" — a bug once a
+// second subcommand existed to invoke it with, fixed here in the same change
+// that introduces postStartup/preShutdown.
 func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
@@ -110,6 +117,16 @@ func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.W
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": "malformed JSON"})
 		return ExitError
 	}
+	switch subcommand {
+	case "postStartup", "preShutdown":
+		return h.serveLifecycleHook(subcommand, v, stdout)
+	default:
+		return h.serveDispatch(v, stdout)
+	}
+}
+
+// serveDispatch is Serve's original `dispatch` handling, unchanged.
+func (h *ReferenceHandler) serveDispatch(v any, stdout io.Writer) int {
 	if err := Check("handler.dispatch", v); err != nil {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
 		return ExitError
@@ -128,7 +145,26 @@ func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.W
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "deferred": true})
 		return ExitOK
 	}
-	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": map[string]any{"ok": true}})
+	// outcome is an opaque STRING (docket pg2-oju6w's Task 5.4, ADR 0065's
+	// "Wire contract" section): the schema's own outcome property retypes
+	// object -> string to match wireclient.Reply.Outcome's Go type, since
+	// encoding/json cannot unmarshal an object into a string field.
+	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": "delivered"})
+	return ExitOK
+}
+
+// serveLifecycleHook is Serve's `postStartup`/`preShutdown` handling
+// (pg2-oju6w.15): unlike dispatch, the reply carries no deferred branch —
+// these are not queued dispatches, so ErrBusy/exit-9 does not apply once
+// Serve is past the Busy check above.
+func (h *ReferenceHandler) serveLifecycleHook(subcommand string, v any, stdout io.Writer) int {
+	if err := Check("handler."+subcommand, v); err != nil {
+		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
+		return ExitError
+	}
+	obj := v.(map[string]any)
+	id, _ := obj["id"].(string)
+	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": "ok"})
 	return ExitOK
 }
 

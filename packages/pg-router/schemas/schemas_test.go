@@ -279,6 +279,8 @@ func TestRegistryLoadsAllInterfaces(t *testing.T) {
 	want := []string{
 		"event", "source.query", "source.query-reply",
 		"handler.dispatch", "handler.dispatch-reply",
+		"handler.postStartup", "handler.postStartup-reply",
+		"handler.preShutdown", "handler.preShutdown-reply",
 		"mon.read", "mon.read-reply", "mon.update", "mon.update-reply",
 		"store.request", "store.reply",
 		"cli.ingest-event", "cli.ingest-event-reply", "cli.push-inject", "cli.status", "cli.status-reply",

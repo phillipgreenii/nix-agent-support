@@ -79,10 +79,13 @@ func TestRoute(t *testing.T) {
 		{"help-short-flag", []string{"pg-router", "-h"}, routeHelp},
 		{"unknown-flag-is-usage-error", []string{"pg-router", "--bogus"}, routeUsageErr},
 		{"unknown-subcommand-is-usage-error", []string{"pg-router", "bogus"}, routeUsageErr},
-		{"sessions-subcommand", []string{"pg-router", "sessions"}, routeSessions},
-		{"sessions-with-arg-is-usage-error", []string{"pg-router", "sessions", "x"}, routeUsageErr},
-		{"reconcile-subcommand", []string{"pg-router", "reconcile"}, routeReconcile},
-		{"reconcile-with-arg-is-usage-error", []string{"pg-router", "reconcile", "x"}, routeUsageErr},
+		// sessions/reconcile were deleted outright, no deprecation shim (docket
+		// pg2-oju6w's Task 5.10, operator ruling 2026-09-02, ADR 0065's
+		// "No deprecation shim for sessions/reconcile" section): both names now
+		// get the ordinary unknown-subcommand usage error (exit 2), matching
+		// "drain-subcommand-is-retired" above.
+		{"sessions-subcommand-is-deleted", []string{"pg-router", "sessions"}, routeUsageErr},
+		{"reconcile-subcommand-is-deleted", []string{"pg-router", "reconcile"}, routeUsageErr},
 		{"pause-subcommand", []string{"pg-router", "pause"}, routePause},
 		{"resume-subcommand", []string{"pg-router", "resume"}, routeResume},
 	}
@@ -186,10 +189,10 @@ func TestRoute_runSubcommands(t *testing.T) {
 	}
 }
 
-func TestParseRunRoleArgs_carriesRoleAndBead(t *testing.T) {
-	r := parseRunRoleArgs([]string{"worker", "zr-9"})
-	if r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-9" {
-		t.Errorf("parseRunRoleArgs = %+v, want routeRunRole role=worker bead=zr-9", r)
+func TestParseRunRoleArgs_carriesRoleAndEventJSON(t *testing.T) {
+	r := parseRunRoleArgs([]string{"worker", `{"id":"e","type":"t"}`})
+	if r.kind != routeRunRole || r.role != "worker" || r.eventJSON != `{"id":"e","type":"t"}` {
+		t.Errorf(`parseRunRoleArgs = %+v, want routeRunRole role=worker eventJSON={"id":"e","type":"t"}`, r)
 	}
 }
 
@@ -334,5 +337,42 @@ func TestHelpText_MentionsActivityRingEnvVar(t *testing.T) {
 func TestHelpText_MentionsNoConfigWarnEnvVar(t *testing.T) {
 	if !strings.Contains(helpText, "PG_ROUTER_NO_CONFIG_WARN") {
 		t.Fatal("helpText does not mention PG_ROUTER_NO_CONFIG_WARN")
+	}
+}
+
+// TestHelpText_DoesNotMentionSessionsOrReconcile is the inverse of the
+// helpText-mentions tests above: sessions/reconcile were deleted outright, no
+// deprecation shim (docket pg2-oju6w's Task 5.10, operator ruling
+// 2026-09-02, ADR 0065's "No deprecation shim for sessions/reconcile"
+// section) — they no longer exist anywhere in this contract, so
+// usageLine/helpText MUST NOT advertise them.
+func TestHelpText_DoesNotMentionSessionsOrReconcile(t *testing.T) {
+	for _, s := range []string{"sessions", "reconcile"} {
+		if strings.Contains(usageLine, s) {
+			t.Errorf("usageLine still mentions %q", s)
+		}
+		if strings.Contains(helpText, s) {
+			t.Errorf("helpText still mentions %q", s)
+		}
+	}
+}
+
+// TestSessionsReconcile_DeletedOutright is the negative test the "No
+// deprecation shim for sessions/reconcile" binding decision requires: `pg-router
+// sessions`/`pg-router reconcile` now get the ordinary unknown-subcommand
+// usage error (exit 2 via main's routeUsageErr -> os.Exit(exitUsage), ADR
+// 0042), not a diagnostic stub, not a distinct exit code, and no stderr
+// discriminator naming them specifically (docket pg2-oju6w's Task 5.10,
+// closes register row R17-residual pg2-t5j54 and the pre-existing
+// GOAL-MIN-1 "Scope (extent out)" reconcile row pg2-ynhr.5/pg2-ynhr).
+func TestSessionsReconcile_DeletedOutright(t *testing.T) {
+	for _, name := range []string{"sessions", "reconcile"} {
+		r := route([]string{"pg-router", name})
+		if r.kind != routeUsageErr {
+			t.Errorf("route(%q).kind = %v, want routeUsageErr", name, r.kind)
+		}
+		if !strings.Contains(r.msg, "unknown subcommand: "+name) {
+			t.Errorf("route(%q).msg = %q, want it to name the unknown subcommand generically", name, r.msg)
+		}
 	}
 }

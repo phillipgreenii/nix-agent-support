@@ -1,9 +1,11 @@
 // Command pg-router-ccpool-handler is this module's wire-facing CLI
 // entrypoint: it makes the moved ccpool/command executor logic (internal/
-// executor) a real INTF-HANDLER participant, and gives the moved beads query
-// source a placeholder INTF-SOURCE participant (query subcommands are wired
-// for real by docket pg2-oju6w's Task 5.8 — this module's `query` today
-// always replies with zero events, a schema-valid stub).
+// executor) a real INTF-HANDLER participant, and its own `query` subcommand
+// a real INTF-SOURCE participant backing the beads-shaped query pg-router's
+// own (now-deleted) built-in default used to provide in-process (docket
+// pg2-oju6w's Task 5.8) — a schema-valid, zero-event stub reply when
+// unconfigured, or real `bd ready` results once --query-config/--config
+// name its filters and repo.
 //
 // Subcommands (interfaces.md's common manager contract plus INTF-HANDLER/
 // INTF-SOURCE): register, self-status, dispatch, query. register/self-status
@@ -48,6 +50,10 @@ func run(args []string) int {
 		return runDispatch(args[1:])
 	case "query":
 		return runQuery(args[1:])
+	case "postStartup":
+		return runPostStartup(args[1:])
+	case "preShutdown":
+		return runPreShutdown(args[1:])
 	default:
 		printUsageErr(fmt.Sprintf("pg-router-ccpool-handler: unknown subcommand %q", args[0]))
 		return conformance.ExitUsage

@@ -1,12 +1,28 @@
 // Package orchestrator is pg-router's mechanical drive loop: discover → per-role
 // bounded drain → teardown-all. It owns no claude/tmux mechanics (ccpool does)
-// and no LLM. Completion is bead-status-based; ccpool state is liveness only.
+// and no LLM. Work-outcome completion (created/closed/handed-back) is the
+// registered handler participant's own concern, not this package's (docket
+// pg2-oju6w's Task 5.5, ADR 0065's "Wire contract" section, closing
+// register row INV-WORKFLOW-1/R20, bead pg2-ctqo2); ccpool state is
+// liveness only.
 //
-// Per-dispatch execution is selected by role.Type: ccpool roles run the
-// ensure→send→wait path (with the budget watchdog when a finite budget is set);
-// command roles run a configured executable. The pg2-c1vp single-terminal race
-// between waitDone and the watchdog is unchanged — only its data source moved from
-// the deleted RoleKind enum to the role's typed config.
+// As of docket pg2-oju6w's Task 5.4 (ADR 0065's "Open question resolved" and
+// "Wire contract" sections), a dispatch no longer selects its execution path
+// by role.Type at all: every role's own handler participant is reached over
+// the wire (internal/wireclient's HandlerClient.Dispatch sends
+// handler.dispatch, correlated by a dsp-<...> tracking id), and the
+// ensure→send→wait ccpool path, the budget watchdog, and a bare-command
+// executable are entirely that participant's own private business now
+// (Task 5.2/5.3 moved the underlying mechanics to
+// packages/pg-router-ccpool-handler). Task 5.4 deliberately left buildResult's
+// own remaining created-bead-snapshot detection and bead-status-based
+// closed/handed-back branching alone; Task 5.5 (this change) finishes that
+// cleanup — snapshotIDs and createdByActor are deleted, and buildResult
+// stores wireclient.Reply.Outcome verbatim instead of switching on bead
+// status, so this package never again interprets created/closed/handed-back
+// itself. Sibling tasks 5.6-5.8 remove the OTHER remaining seams
+// (payload-path opacity, permission-mode passthrough, source-side boundary)
+// from pr-pool's own dependency graph.
 //
 // needs_input is intentionally non-terminal: the executor keeps polling such a
 // session to MaxWait and alerts the operator once on the edge (executor.waitDone),
@@ -25,40 +41,35 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
-	"strings"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/beads"
-	"github.com/phillipgreenii/pg-router/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
-	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
-	"github.com/phillipgreenii/pg-router/internal/executor"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/report"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/internal/usage"
-	"github.com/phillipgreenii/pg-router/internal/watchdog"
-	"github.com/phillipgreenii/pg-router/internal/worktree"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 type Orchestrator struct {
-	CC          ccpool.Runner
-	BD          beads.Runner
-	Reg         roles.RoleSet
-	Cfg         config.Config
-	Cmd         query.Commander                            // command-query/role exec seam (default OSCommander)
-	Log         *eventlog.Writer                           // may be nil (no-op); threaded onto Watchdog
-	now         func() time.Time                           // clock seam (default time.Now)
-	tick        func(context.Context, time.Duration) error // cancellable wait (default below)
-	stamp       func() string                              // per-attempt id stamp seam (default below)
-	usageReader usage.Reader                               // default usage.NewTranscriptReader()
-	git         watchdog.GitRunner                         // watchdog's hard-stop reset/clean seam (nil ⇒ executor's OSGit{}); tests inject a fake so they never touch the real repo
-	gitOpener   worktree.Opener                            // per-bead worktree creation seam (nil ⇒ executor's gitclient.New{} default); tests inject a fake so they never touch the real repo
+	Reg roles.RoleSet
+	Cfg config.Config
+	Cmd query.Commander  // command-query/role exec seam (default OSCommander)
+	Log *eventlog.Writer // may be nil (no-op); threaded onto Watchdog
+	// Handler is the wire client dispatch now goes through (Task 5.4),
+	// replacing the deleted in-process executor.For(role.Type).Dispatch(...)
+	// call and its Deps seam bag entirely. Required for a real dispatch to
+	// do anything; a nil Handler makes workOneWithID fail loudly rather than
+	// panic (see wireclient.Client.Dispatch's own nil-Command guard for the
+	// analogous seam one level down). Which command a wireclient.Client
+	// actually invokes per role is that Client's own CommandFor concern
+	// (wireclient's package doc), never this Orchestrator's.
+	Handler wireclient.HandlerClient
+	now     func() time.Time                           // clock seam (default time.Now)
+	tick    func(context.Context, time.Duration) error // cancellable wait (default below)
 
 	// SourceFailureObserver is notified of every pull-source query retry
 	// ProduceTick's discover.Produce call makes (INV-FAIL-3, register gap
@@ -112,16 +123,6 @@ type Orchestrator struct {
 	lastTick map[string]time.Time
 }
 
-// attemptStamp returns a fresh per-attempt timestamp token. A unique stamp per
-// dispatch yields a unique external_id, so ccpool always launches a brand-new
-// session and never resumes a prior attempt (ADR 0015).
-func (o *Orchestrator) attemptStamp() string {
-	if o.stamp != nil {
-		return o.stamp()
-	}
-	return time.Now().UTC().Format("20060102T150405")
-}
-
 func (o *Orchestrator) commander() query.Commander {
 	if o.Cmd != nil {
 		return o.Cmd
@@ -135,13 +136,9 @@ func (o *Orchestrator) commander() query.Commander {
 // nothing needs tearing down either.
 func (o *Orchestrator) Gated() bool { return o.gated() }
 
-// TeardownAll is teardownAll's exported form for cmd/pg-router's run /
-// run-until-idle entry points (a different package).
-func (o *Orchestrator) TeardownAll(ctx context.Context) int { return o.teardownAll(ctx) }
-
 // queryEnv builds the capability bag passed to each role's query.
 func (o *Orchestrator) queryEnv() query.Env {
-	return query.Env{BD: o.BD, RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
+	return query.Env{RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
 }
 
 // ProduceTick fires the configured query set once against q — the
@@ -206,76 +203,59 @@ func (o *Orchestrator) LastTick() map[string]time.Time {
 	return out
 }
 
-// RunOne dispatches a single self-contained EVENT through one role and then
-// closes that one session (the drain's pass-level teardownAll is not involved).
-// It is the single-bead entry behind `pg-router run-role`: smoke-test one role
-// against one bead without running discovery. Per the design's context-vs-event
-// resolution (Q-meta), run-role accepts an EVENT (self-contained, replayable)
-// and DERIVES the ephemeral DispatchContext here at dispatch. Unlike DrainOnce it
-// does NOT consult the operator/CICD gates and does NOT reap stray pg-router-*
-// sessions — it is a manual, intentional single dispatch where the operator is
-// in control.
-func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, ev event.Event) error {
-	d := discover.DeriveContext(role, ev)
-	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
-	defer func() {
-		// Tear down the one session we launched — but PRESERVE it if it ended in
-		// needs_input, exactly as drain's teardownAll does, so the operator can
-		// `ccpool attach` (the needs_input alert in waitDone advertises that). Without
-		// this, run-role would print "attach to continue" and then purge the session
-		// out from under the operator (pg2-2yn2). State unknown (absent / list error)
-		// falls through to a purge — closing a gone session is a harmless no-op.
-		state, _ := o.sessionStateByID(ctx, externalID)
-		o.closeUnlessNeedsInput(ctx, externalID, state)
-	}()
-	pre, preOK := o.snapshotIDs(ctx)
-	res, err := o.workOneWithID(ctx, d, externalID)
-	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(ctx, d.Role, d, pre, preOK, res, err), err)
+// RunOne dispatches a single self-contained event through one role. It is
+// the single-event entry behind `pg-router run-role`: smoke-test one role
+// against one event without running discovery.
+//
+// pg2-oju6w.15: RunOne no longer closes the session it launched itself —
+// ccpool session lifecycle lives entirely in the registered handler
+// participant's own process now, and this method has no way to observe or
+// close one directly any more (the CC field is gone). Its caller
+// (cmd/pg-router's run-role) instead brackets the call with its own
+// Handler.PreShutdown, exactly mirroring run.go's own per-role preShutdown
+// sweep at daemon/run-until-idle shutdown — the SAME mechanism, at run-role's
+// own single-dispatch scope, superseding the inline
+// sessionStateByID/closeUnlessNeedsInput pair this method used to run in its
+// own defer.
+//
+// evt is the eventqueue.Event shape wireclient.Dispatch's Contract signature
+// requires (Task 5.4's Interfaces block) — discover.DeriveContextFromQueueEvent
+// derives the ephemeral DispatchContext from it directly, the same
+// queue-event-in path the queue-driven roleListener.Offer already uses
+// (internal/orchestrator/listener.go), rather than the old
+// DeriveContext+ToQueueEvent pair built for a producer-emitted event.Event.
+func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventqueue.Event) error {
+	d := discover.DeriveContextFromQueueEvent(role, evt)
+	reply, err := o.workOneWithID(ctx, d, evt)
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(d, reply, err), err)
 	return err
 }
 
-// snapshotIDs returns the set of all bead IDs (any status, incl. closed) and
-// whether the read succeeded. A failed read returns (nil, false) so buildResult
-// reports an indeterminate "created" rather than a false "none".
-func (o *Orchestrator) snapshotIDs(ctx context.Context) (map[string]struct{}, bool) {
-	issues, err := beads.List(ctx, o.BD, "--all")
-	if err != nil {
-		return nil, false
+// buildResult stores the handler-reported outcome as pg-router's own opaque
+// dispatch record: reply.Outcome, verbatim, with no switch on its value.
+// Before docket pg2-oju6w's Task 5.5 this method instead re-derived a
+// created/closed/handed-back verdict itself — a created-bead snapshot diff
+// (the retired snapshotIDs/createdByActor pair) plus a post-dispatch
+// `beads.Status` read interpreted into closed/handed-back — duplicating
+// internal/complete's own policy, which had already moved out of pr-pool
+// with Task 5.2. Task 5.5 deletes that duplication for real: this package
+// never again interprets created/closed/handed-back itself (ADR 0065's
+// "Wire contract" section, closing register row INV-WORKFLOW-1/R20, bead
+// pg2-ctqo2).
+//
+// A failed dispatch (dispatchErr != nil) never carries a meaningful reply
+// (wireclient.Client.Dispatch's own contract: Reply is the zero value on
+// error), and an accepted-but-outcome-less reply (reply.Outcome == "") has
+// nothing to record either — in both cases this returns an empty
+// report.Result. The dispatch error itself is already surfaced separately,
+// by emitResult's own dispatchErr-logging path.
+func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.Reply, dispatchErr error) report.Result {
+	if dispatchErr != nil || reply.Outcome == "" {
+		return report.Result{}
 	}
-	ids := make(map[string]struct{}, len(issues))
-	for _, iss := range issues {
-		ids[iss.ID] = struct{}{}
-	}
-	return ids, true
-}
-
-// buildResult assembles the structured dispatch report from observable signals,
-// WITHOUT touching the single-terminal race code: the created marker from the
-// snapshot diff (or indeterminate on a failed read), plus the outcome verb — on
-// success the bead's final status (closed vs handed-back), on failure the verb
-// the executor actually applied to the bead (execRes — pg2-kj7j).
-func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d discover.DispatchContext, pre map[string]struct{}, preOK bool, execRes report.Result, dispatchErr error) report.Result {
-	var actions []report.Action
-	post, lerr := beads.List(ctx, o.BD, "--all")
-	switch {
-	case !preOK || lerr != nil:
-		actions = append(actions, report.Action{Verb: report.Indeterminate, Refs: beadRefs([]string{d.Item.ID})})
-	default:
-		if created := createdByActor(pre, post, actorOf(role)); len(created) > 0 {
-			actions = append(actions, report.Action{Verb: report.Created, Refs: beadRefs(created)})
-		}
-	}
-	if dispatchErr != nil {
-		actions = append(actions, execRes.Actions...) // verb the executor actually applied (pg2-kj7j)
-	} else {
-		switch status, _ := beads.Status(ctx, o.BD, d.Item.ID); status {
-		case "closed":
-			actions = append(actions, report.Action{Verb: report.Closed, Refs: beadRefs([]string{d.Item.ID})})
-		case "open":
-			actions = append(actions, report.Action{Verb: report.HandedBack, Refs: beadRefs([]string{d.Item.ID})})
-		}
-	}
-	return report.Result{Actions: actions}
+	return report.Result{Actions: []report.Action{
+		{Verb: report.Verb(reply.Outcome), Refs: beadRefs([]string{d.Item.ID})},
+	}}
 }
 
 // emitResult writes the dispatch report to the event log (when configured) and the
@@ -284,7 +264,7 @@ func (o *Orchestrator) buildResult(ctx context.Context, role roles.Role, d disco
 //
 // dispatchErr is the error workOne/workOneWithID actually returned (nil on
 // success). Before pg2-an65v this was accepted by every caller only to decide
-// branching (errors.Is(err, executor.ErrBusy) etc.) and then discarded — a
+// branching (errors.Is(err, wireclient.ErrBusy) etc.) and then discarded — a
 // launch failure (e.g. isolation.Ensure()/ccpool.Ensure() failing) surfaced
 // here as nothing but the bare verb the executor applied (escalated/
 // unclaimed/...), with the actual underlying error message never logged
@@ -316,15 +296,6 @@ func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID str
 	fmt.Printf("# dispatch %s %s: %v\n", role.Name, beadID, res.Actions)
 }
 
-// actorOf returns the BEADS_ACTOR a ccpool role's dispatch creates beads under, or
-// "" for a command role (no actor ⇒ the created-marker diff finds nothing).
-func actorOf(role roles.Role) string {
-	if role.CCPool != nil {
-		return role.CCPool.Actor
-	}
-	return ""
-}
-
 func beadRefs(ids []string) []report.Ref {
 	refs := make([]report.Ref, 0, len(ids))
 	for _, id := range ids {
@@ -333,114 +304,61 @@ func beadRefs(ids []string) []report.Ref {
 	return refs
 }
 
-// createdByActor returns, sorted, the IDs of beads present in post but absent
-// from the pre snapshot whose CreatedBy is actor. The snapshot diff drops every
-// pre-existing bead; the actor filter drops beads created concurrently by anyone
-// else (notably the pg-pr daemon's cycle/PR beads), so the result is exactly the
-// beads this dispatch's actor created. Feeds the per-dispatch "created" action.
-func createdByActor(pre map[string]struct{}, post []beads.Issue, actor string) []string {
-	if actor == "" {
-		return nil
-	}
-	var out []string
-	for _, iss := range post {
-		if _, existed := pre[iss.ID]; existed {
-			continue
-		}
-		if iss.CreatedBy == actor {
-			out = append(out, iss.ID)
-		}
-	}
-	sort.Strings(out)
-	return out
+// workOne dispatches a single item over the wire (Task 5.4). The session
+// (ccpool roles, now the registered handler participant's own concern) is
+// torn down by the pass-level teardownAll, not here (so strays are reaped
+// uniformly).
+func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext, qevt eventqueue.Event) (wireclient.Reply, error) {
+	return o.workOneWithID(ctx, d, qevt)
 }
 
-// buildDeps assembles the executor seam bag from the orchestrator's state. The
-// per-attempt externalID is resolved ONCE by the caller and threaded in so the
-// same id is reused for the deferred teardown Close (RunOne).
-func (o *Orchestrator) buildDeps(externalID string) executor.Deps {
-	return executor.Deps{
-		CC: o.CC, BD: o.BD, Cmd: o.commander(), Log: o.Log, Cfg: o.Cfg,
-		Now: o.now, Tick: o.tick, UsageReader: o.usageReader, ExternalID: externalID,
-		Git:       o.git,       // nil ⇒ executor falls back to OSGit{} in production
-		GitOpener: o.gitOpener, // nil ⇒ executor falls back to gitclient.New in production
-	}
-}
-
-// workOne dispatches a single item. The session (ccpool roles) is torn down by the
-// pass-level teardownAll, not here (so strays are reaped uniformly).
-func (o *Orchestrator) workOne(ctx context.Context, d discover.DispatchContext) (report.Result, error) {
-	externalID := d.Role.ExternalID(o.Cfg.SessionPrefix, d.Item.ID, o.attemptStamp())
-	return o.workOneWithID(ctx, d, externalID)
-}
-
-// workOneWithID dispatches one item with the per-attempt external_id pinned by the
-// caller, selecting the executor by role.Type.
-func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchContext, externalID string) (report.Result, error) {
-	return executor.For(d.Role.Type).Dispatch(ctx, d, o.buildDeps(externalID))
-}
-
-// teardownAll closes every session whose name carries pg-router's prefix — this
-// pass's sessions AND strays left by a crashed prior run (the only self-healing
-// behavior) — EXCEPT sessions in needs_input, which are preserved (left alive)
-// so the operator can still `ccpool attach` after the pass (pg2-th35). Sessions
-// outside the prefix are left untouched. Returns the number actually closed.
-func (o *Orchestrator) teardownAll(ctx context.Context) (closed int) {
-	sessions, err := o.CC.List(ctx)
-	if err != nil {
-		slog.Warn("teardown list failed", "err", err)
-		return 0
-	}
-	for _, s := range sessions {
-		if !strings.HasPrefix(s.ExternalID, o.Cfg.SessionPrefix) {
-			continue
-		}
-		if o.closeUnlessNeedsInput(ctx, s.ExternalID, s.State) {
-			closed++
-		}
-	}
-	slog.Info("teardown", "closed", closed)
-	return closed
-}
-
-// closeUnlessNeedsInput tears down one session UNLESS it is in needs_input, which is
-// PRESERVED (left alive) so the operator can still `ccpool attach <external_id>` — the
-// session is paused awaiting a human and the needs_input alert (waitDone) points them
-// here (pg2-th35, pg2-2yn2). Shared by teardownAll's per-session loop and run-role's
-// single-session teardown so the two paths can't drift. Returns true iff the session
-// was actually closed (purged).
+// workOneWithID dispatches one item by sending it, as qevt, to whichever
+// handler participant is registered for d.Role (internal/wireclient's
+// HandlerClient.Dispatch) — replacing the retired
+// executor.For(d.Role.Type).Dispatch(ctx, d, o.buildDeps(externalID)) call
+// and its Deps seam bag entirely (Task 5.4's Binding decisions).
 //
-// ccpool's reaper carries the peer predicate (session.preservedForHuman), spanning its
-// TTL and cap-eviction passes. Both realize ONE decision — ADR 0037 — which is itself
-// this repo's realization of the deployment set's INV-CCPOOL-6; change one only by
-// changing that ADR.
-func (o *Orchestrator) closeUnlessNeedsInput(ctx context.Context, externalID string, state ccpool.SessionState) bool {
-	if state == ccpool.StateNeedsInput {
-		slog.Info("teardown preserving needs_input session for operator attach",
-			"session", externalID, "attach", "ccpool attach "+externalID)
-		return false
-	}
-	if err := o.CC.Close(ctx, externalID, true); err != nil {
-		slog.Warn("teardown close failed", "session", externalID, "err", err)
-		return false
-	}
-	return true
+// The externalID parameter this method used to thread through to Deps for
+// the OLD in-process ccpool session launch no longer has anything to feed —
+// session naming is now the registered handler participant's own concern —
+// so it is gone from this method's signature; RunOne, which still needs its
+// OWN copy of that value for its deferred teardown Close, already computes
+// it independently before calling this method (see RunOne).
+//
+// The returned wireclient.Reply (ID/Deferred/Outcome) is passed straight
+// through to the caller (RunOne / roleListener.Offer), which hands it to
+// buildResult unmodified — this method itself never inspects Outcome
+// (docket pg2-oju6w's Task 5.5, ADR 0065's "Wire contract" section: the
+// opaque string is buildResult's own concern, not this dispatch call's).
+func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchContext, qevt eventqueue.Event) (wireclient.Reply, error) {
+	return o.wireClient().Dispatch(ctx, d.Role, qevt)
 }
 
-// sessionStateByID returns the current ccpool state of externalID, or ("", false) if
-// it is absent from the list or the list errors. The caller treats an unknown state
-// as "not needs_input" (so a gone/unknowable session is still purge-closed).
-func (o *Orchestrator) sessionStateByID(ctx context.Context, externalID string) (ccpool.SessionState, bool) {
-	sessions, err := o.CC.List(ctx)
-	if err != nil {
-		return "", false
+// wireClient returns o.Handler, or a client that always fails loudly (rather
+// than panicking on a nil interface call) when no Handler was configured —
+// a production caller (cmd/pg-router's bootCore, once a sibling task rewires
+// it) MUST set Handler; every existing test that does not is exercising a
+// path that no longer dispatches anything for real (see this task's own
+// test rewrites).
+func (o *Orchestrator) wireClient() wireclient.HandlerClient {
+	if o.Handler != nil {
+		return o.Handler
 	}
-	for _, s := range sessions {
-		if s.ExternalID == externalID {
-			return s.State, true
-		}
-	}
-	return "", false
+	return unconfiguredHandler{}
+}
+
+type unconfiguredHandler struct{}
+
+func (unconfiguredHandler) Dispatch(context.Context, roles.Role, eventqueue.Event) (wireclient.Reply, error) {
+	return wireclient.Reply{}, fmt.Errorf("orchestrator: no Handler configured (internal/wireclient.HandlerClient)")
+}
+
+func (unconfiguredHandler) PostStartup(context.Context, roles.Role) (wireclient.Reply, error) {
+	return wireclient.Reply{}, fmt.Errorf("orchestrator: no Handler configured (internal/wireclient.HandlerClient)")
+}
+
+func (unconfiguredHandler) PreShutdown(context.Context, roles.Role) (wireclient.Reply, error) {
+	return wireclient.Reply{}, fmt.Errorf("orchestrator: no Handler configured (internal/wireclient.HandlerClient)")
 }
 
 func (o *Orchestrator) gated() bool {

@@ -21,11 +21,9 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 | `run`                                   | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                                                                                                         |
 | `run-until-idle`                        | boot the core, discover once, drain the queue to idle, then exit                                                                                                                                                                                                                     |
 | `run-query [--json] query:<name>`       | smoke-test one named source's query once, read-only, and print the matches it would emit (text, or one JSON object with `--json`)                                                                                                                                                    |
-| `run-role [--json] <role> <bead>`       | dispatch one bead through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object)                                                                                                                                                                       |
+| `run-role [--json] <role> <json>`       | dispatch one caller-supplied event through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object). `<json>` is a full event blob, the same shape `push-inject <json>` takes — there is no bead-id shorthand any more                                   |
 | `config --print-defaults`               | print the built-in default `config.toml` (a copy-paste start)                                                                                                                                                                                                                        |
 | `config --show [--json]`                | print the resolved config path, role set, and worker dispatch scalars (permission-mode/allowed-tools/budget); text, or one JSON object with `--json`                                                                                                                                 |
-| `sessions`                              | list this pool's sessions (bead/role) from session metadata                                                                                                                                                                                                                          |
-| `reconcile`                             | report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads `pg-pr pr list`; mutates beads; exit-0-on-partial)                                                                                                                    |
 | `push-inject <json>`                    | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                                                                                                           |
 | `status`                                | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                                                                                          |
 | `tui [--socket <path>] [--token <tok>]` | continuous-interactive view: polls `status`'s activity ring and offers `pause`/`resume` from the same screen — never a third affordance. No `--json` (it is a terminal UI). **Never fails on "no running core"**: it renders a no-core screen and keeps polling instead (`ADR 0036`) |
@@ -148,11 +146,6 @@ already baked in, and the participant appends its arguments and runs it (see the
 else the discovery record under the log dir. With **no core running it fails** with a
 "no running core" error and exit 1 — it never starts one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
-
-At dispatch, pg-router stamps each ccpool session with metadata under the `pgrouter.*`
-namespace (`pgrouter.bead`, `pgrouter.role`, `pgrouter.pool`) via `ccpool new --meta`, so a
-session's bead/role/owner are first-class and queryable. `pg-router sessions` reads them
-back (`ListByMeta`/`Meta`) from the pool `CCPOOL_POOL` resolves (default XDG pool).
 
 ## Roles, prompts & queries (`config.toml`)
 

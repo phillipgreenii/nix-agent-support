@@ -9,21 +9,28 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
-	"github.com/phillipgreenii/pg-router/internal/executor"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/internal/watchdog"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // ResourceLimitObserver is notified when one Offer's dispatch ends because
 // the role hit its OWN resource ceiling — the glossary's "resource-limit"
 // outcome (`packages/pg-router/docs/behavior/glossary.md`'s "Outcomes"
 // section): "a capacity or quota ceiling was reached... not a defect, and
-// the handler will be able again once the ceiling lifts." Today the only
-// producer is the budget watchdog's hard stop (watchdog.ErrBudgetExceeded,
-// internal/watchdog) racing a ccpool role's wait (executor's
-// workerWaitWithWatchdog). Offer observes this INLINE, before it returns
-// its (accepted) OfferResult — the same synchronous dispatch-reply path
-// Offer already reports every other outcome through (its own doc: "no
+// the handler will be able again once the ceiling lifts." Before docket
+// pg2-oju6w's Task 5.4 the only producer was the budget watchdog's hard
+// stop (watchdog.ErrBudgetExceeded, internal/watchdog) racing a ccpool
+// role's wait in-process (executor's workerWaitWithWatchdog); Task 5.2/5.3
+// moved that entire mechanism out to the registered handler participant
+// (packages/pg-router-ccpool-handler), so this hook currently has NO
+// producer left to fire it at all — the wire protocol has no equivalent
+// signal yet (docs/decisions/wire.md names no resource-limit exit code or
+// reply field). This is not a NEW gap Task 5.4 introduces: it widens the
+// SAME already-recorded realization gap the note below describes, one
+// level further than "surfaced only on the handler's own surface" — for
+// now, not surfaced at all. Offer would observe it INLINE, before it
+// returns its (accepted) OfferResult — the same synchronous dispatch-reply
+// path Offer already reports every other outcome through (its own doc: "no
 // deferred/async form on this bridge"), never the async session-status
 // callback internal/core dropped 2026-07-28 (that package's own doc) — so
 // this hook does not reopen that decision, nor the internal/metrics
@@ -36,8 +43,9 @@ import (
 // post-accept outcome is surfaced only "on the handler's own surface,"
 // never back to the core. roleListener IS the INTF-HANDLER boundary from
 // the queue's own point of view, so this hook is a recorded gap against
-// that invariant — the SAME kind of gap the register already carries for
-// INV-WORKFLOW-1 (buildResult's created/closed/handed-back), not a new
+// that invariant — a similar-shaped core/handler-boundary gap to the one
+// INV-WORKFLOW-1's work-outcome row used to carry against buildResult,
+// before docket pg2-oju6w's Task 5.5 closed it (bead pg2-ctqo2); not a new
 // exception invented here.)
 type ResourceLimitObserver interface {
 	// OnResourceLimit fires once per dispatch whose handler-side outcome
@@ -57,8 +65,11 @@ type ResourceLimitObserver interface {
 // queue's own WithRetryBackoff default.
 var _ eventqueue.BackoffListener = (*roleListener)(nil)
 
-// roleListener bridges the durable event queue to executor.For(role).Dispatch
-// (INTF-HANDLER, core side) — the queue->executor Listener bridge (bead
+// roleListener bridges the durable event queue to wireclient.Dispatch, which
+// sends handler.dispatch to whichever handler participant is registered for
+// role (INTF-HANDLER, core side; Task 5.4 replaces the retired in-process
+// executor.For(role).Dispatch call here) — the queue->handler Listener
+// bridge (bead
 // pg2-f3mcb.2, queue-as-universal-intermediary). ID/Matches close over the
 // configured role; Offer runs the dispatch INLINE and reports an INLINE
 // completion (interfaces.md "Reply (sync)"): the offer call itself IS the
@@ -187,13 +198,16 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 	return false
 }
 
-// Offer dispatches the event through this role's executor. The call is
-// synchronous end-to-end (ensure -> send -> wait for a ccpool role, or
-// run-to-completion for a command role), so an ACCEPTED OfferResult and
-// "worked to completion" coincide here — there is no deferred/async form on
-// this bridge. The dispatch's own report.Result (created/closed/handed-back)
-// is logged/emitted exactly as it was under the retired drain()/DrainOnce
-// path, via the SAME Orchestrator helpers. Task 2.2 widened the signature to
+// Offer dispatches the event to this role's registered handler participant
+// over the wire (internal/wireclient.Dispatch, Task 5.4 — before it, this
+// ran the OLD in-process executor, ensure -> send -> wait for a ccpool
+// role, or run-to-completion for a command role). The call is still
+// synchronous end-to-end, so an ACCEPTED OfferResult and "worked to
+// completion" coincide here — there is no deferred/async form on this
+// bridge. The dispatch's own report.Result — the handler's opaque
+// reply.Outcome, stored verbatim rather than re-derived from bead status
+// (Task 5.5) — is logged/emitted exactly as it was under the retired
+// drain()/DrainOnce path, via the SAME Orchestrator helpers. Task 2.2 widened the signature to
 // Offering/OfferResult (a dispatch tracking id in, an Accepted/DeclineReason
 // pair out); before Task 2.3 this method always accepted.
 //
@@ -205,37 +219,37 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 //     set) is consulted FIRST, before any actual dispatch work, so a
 //     currently-unavailable participant costs nothing beyond the registry
 //     lookup.
-//  2. A busy command exit: workOne's error, when it resolves to
-//     executor.ErrBusy through the existing %w chain (errors.Is), means the
-//     dispatch attempt itself signaled "not right now" rather than
-//     completing — so it is reported as a decline, not run through the
-//     normal buildResult/emitResult completed-dispatch accounting (nothing
-//     meaningful happened to the bead for the caller to record).
+//  2. A busy handler exit: workOne's error, when it resolves to
+//     wireclient.ErrBusy through the existing %w chain (errors.Is) — DEC-
+//     WIRE-1's coarse exit code 9 — means the dispatch attempt itself
+//     signaled "not right now" rather than completing — so it is reported
+//     as a decline, not run through the normal buildResult/emitResult
+//     completed-dispatch accounting (nothing meaningful happened to the
+//     bead for the caller to record). Before Task 5.4 this was the retired
+//     in-process executor.ErrBusy.
 //
-// This bead (pg2-fm2gw) adds a THIRD, post-accept signal, checked after the
-// two pre-accept declines above: a budget hard-stop
-// (watchdog.ErrBudgetExceeded, surfaced through executor's
-// waitFailureResult/workerWaitWithWatchdog exactly as it already was before
-// this bead) is a genuine ACCEPT, never a decline — the dispatch ran to
-// completion inline, same as any other outcome — so it still returns
-// Accepted=true below. l.resourceLimitObs (nil unless o.ResourceLimitObserver
-// is set) is notified BEFORE emitResult, purely so a consumer's own
-// correlation state (cmd/pg-router/run.go's activityObserver) is updated
-// before anything else can observe this event id's outcome.
+// This bead (pg2-fm2gw) added a THIRD, post-accept signal, checked after the
+// two pre-accept declines above: a budget hard-stop was a genuine ACCEPT,
+// never a decline. As of Task 5.4 that signal (watchdog.ErrBudgetExceeded)
+// has no wire-level successor — ResourceLimitObserver's own doc comment
+// above records why — so l.resourceLimitObs is never notified today; the
+// field and the doc below describe the pre-Task-5.4 behavior this hook is
+// meant to widen back to once the wire protocol carries an equivalent
+// signal.
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
 	}
 	evt := o.Event
 	d := discover.DeriveContextFromQueueEvent(l.role, evt)
-	pre, preOK := l.o.snapshotIDs(l.ctx)
-	res, err := l.o.workOne(l.ctx, d)
-	if errors.Is(err, executor.ErrBusy) {
+	reply, err := l.o.workOne(l.ctx, d, evt)
+	if errors.Is(err, wireclient.ErrBusy) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
 	}
-	if errors.Is(err, watchdog.ErrBudgetExceeded) && l.resourceLimitObs != nil {
-		l.resourceLimitObs.OnResourceLimit(evt.ID, evt.Type)
-	}
-	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(l.ctx, l.role, d, pre, preOK, res, err), err)
+	// A resource-limit hit (l.resourceLimitObs) has no wire-level signal to
+	// detect it from anymore — see ResourceLimitObserver's own doc comment
+	// above for why this is a widened, already-recorded gap rather than a
+	// regression this task introduces.
+	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

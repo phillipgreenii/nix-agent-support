@@ -9,7 +9,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <bead> | config (--print-defaults | --show [--json]) | sessions | reconcile | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -31,12 +31,17 @@ Subcommands:
                           lines. Respects --only/--disable (below) even though it takes
                           no --only/--disable flags of its own: a source excluded by
                           PG_ROUTER_ONLY/PG_ROUTER_DISABLE stays unreachable by this command too.
-  run-role [--json] <role> <bead>
-                          dispatch one bead through a role, then tear down (smoke test); sets
-                          PG_ROUTER_TEST_MODE=1 (below); --json emits a small JSON report ({role,
-                          bead, accepted}) on success instead of nothing. Respects
-                          --only/--disable the same way run-query does: an excluded role stays
-                          unreachable.
+  run-role [--json] <role> <json>
+                          dispatch one caller-supplied event through a role, then tear down
+                          (smoke test); sets PG_ROUTER_TEST_MODE=1 (below); --json emits a small
+                          JSON report ({role, item, accepted}) on success instead of nothing.
+                          Respects --only/--disable the same way run-query does: an excluded role
+                          stays unreachable. <json> is the FULL event JSON (schemaVersion/id/
+                          type/payload, the same shape push-inject <json> takes) — quote it so
+                          the shell keeps it as one word. There is no bead-id shorthand any more:
+                          pg-router is event-generic, not beads-specific, and no longer resolves a
+                          bead through a beads.Runner of its own — the caller must build and
+                          supply the full event JSON directly.
   run/run-until-idle --only <selector> / --disable <selector>
                           run-scoped selectors (STORY-OP-3): restrict which configured
                           sources/handlers this ONE run activates, without editing
@@ -58,8 +63,6 @@ Subcommands:
   config --show [--json]  print the resolved config path, role set, and worker dispatch scalars
                           (permission-mode / allowed-tools / autonomous / budget); --json emits the
                           same information as one JSON object. --json is valid only with --show.
-  sessions                list this pool's sessions (bead/role) from session metadata (read-only)
-  reconcile               report stranded self-owned feedback cycles, then run the pg-pr ACL: ensure a review-pr bead per open PR (reads 'pg-pr pr list'; mutates beads; exit-0-on-partial)
   push-inject <json>      inject one operator-supplied event into the RUNNING core (the same core-side
                           enqueue as the ingest-event callback, operator-initiated). Text by default,
                           JSON with --json. Locates the core via --socket/--token, else
@@ -180,11 +183,9 @@ const (
 	routeUsageErr                      // print .msg + usage to stderr and exit 2
 	routeRun                           // boot the core as a long-running daemon (INV-LIFE-1)
 	routeRunUntilIdle                  // boot the core, discover once, drain to idle, exit (INV-LIFE-1)
-	routeRunRole                       // dispatch one bead through a role (.role, .bead)
+	routeRunRole                       // dispatch one caller-supplied event through a role (.role, .eventJSON)
 	routeRunQuery                      // smoke one named query source read-only (.query)
 	routeConfig                        // print/show config (.configMode)
-	routeSessions                      // list this pool's sessions from metadata (read-only)
-	routeReconcile                     // report stranded self-owned feedback cycles, then run the pg-pr ACL (mutates beads)
 	routeIngestEvent                   // manager->core callback: forward events on stdin to the running core (.rest)
 	routePushInject                    // operator: inject one event into the running core (.rest)
 	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
@@ -195,13 +196,20 @@ const (
 )
 
 type routeResult struct {
-	kind       routeKind
-	rest       []string // drain subcommand args (routeDrain only)
-	msg        string   // diagnostic for routeUsageErr
-	role       string   // run-role's role name
-	query      string   // run-query's "query:<name>" source name (Task 1.5c)
-	bead       string   // run-role bead id
-	configMode string   // "print-defaults" | "show" (routeConfig only)
+	kind  routeKind
+	rest  []string // drain subcommand args (routeDrain only)
+	msg   string   // diagnostic for routeUsageErr
+	role  string   // run-role's role name
+	query string   // run-query's "query:<name>" source name (Task 1.5c)
+	// eventJSON is run-role's <json> positional (pg2-oju6w.15): the caller's
+	// raw event JSON blob, passed through unparsed — route() stays pure (no
+	// I/O, no schema check), so validation/decode happens in the handler
+	// (runRunRole), same division of labor push-inject already uses for its
+	// own <json> positional. Replaces the retired <bead> positional: pg-router
+	// is event-generic, not beads-specific, and no longer has a beads.Runner
+	// of its own to resolve a bead id through.
+	eventJSON  string
+	configMode string // "print-defaults" | "show" (routeConfig only)
 	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
 	// gate name (already validated against the two known gates, defaulted to
 	// operator-paused when omitted) and, for routeResume only, whether --all was
@@ -259,10 +267,6 @@ func route(argv []string) routeResult {
 		return parseRunQueryArgs(args[1:])
 	case "config":
 		return parseConfigArgs(args[1:])
-	case "sessions":
-		return parseSessionsArgs(args[1:])
-	case "reconcile":
-		return parseReconcileArgs(args[1:])
 	case "ingest-event":
 		// The callback subcommand parses its OWN flags in its handler rather than
 		// here, because it renders its own subcommand-prefixed diagnostic alongside
@@ -330,24 +334,35 @@ func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	return routeResult{kind: kind, only: only.values, disable: disable.values}
 }
 
-// parseRunRoleArgs validates `run-role [--json] <role> <bead>`. Pure: it checks
-// only that a role TOKEN and a bead id are present (and no extra args), after
-// pulling out an optional --json occurring anywhere in args (extractJSONFlag).
-// The role NAME is NOT validated here — that needs the loaded config, so it
-// moves to the handler. A dash-prefixed first positional is a missing role (a
-// flag, not a name). (pg2-52rn)
+// parseRunRoleArgs validates `run-role [--json] <role> <json>`. Pure: it
+// checks only that a role TOKEN and an event JSON blob are present (and no
+// extra args), after pulling out an optional --json occurring anywhere in
+// args (extractJSONFlag). Neither the role NAME nor the event JSON's own
+// shape is validated here — the role needs the loaded config and the event
+// needs a schema check, so both move to the handler (runRunRole), matching
+// push-inject's own division of labor for its <json> positional. A
+// dash-prefixed first positional is a missing role (a flag, not a name).
+// (pg2-52rn)
+//
+// pg2-oju6w.15 removed the old <bead> positional: pg-router is
+// event-generic, not beads-specific, and run-role no longer resolves a bead
+// ID through a beads.Runner it no longer has. The caller now supplies the
+// full event JSON directly (an accepted, intentional loss of the old "just
+// type a bead id" convenience — no convenience tool for constructing that
+// JSON is being built).
 func parseRunRoleArgs(args []string) routeResult {
 	asJSON, pos := extractJSONFlag(args)
 	if len(pos) < 1 || pos[0] == "" || strings.HasPrefix(pos[0], "-") {
-		return routeResult{kind: routeUsageErr, msg: "run-role: missing role (usage: run-role [--json] <role> <bead>)"}
+		return routeResult{kind: routeUsageErr, msg: "run-role: missing role (usage: run-role [--json] <role> <json>)"}
 	}
 	if len(pos) < 2 || pos[1] == "" {
-		return routeResult{kind: routeUsageErr, msg: "run-role: missing bead id"}
+		return routeResult{kind: routeUsageErr, msg: "run-role: missing event JSON (usage: run-role [--json] <role> <json>)"}
 	}
 	if len(pos) > 2 {
-		return routeResult{kind: routeUsageErr, msg: "run-role: unexpected argument: " + pos[2]}
+		return routeResult{kind: routeUsageErr, msg: "run-role: unexpected argument: " + pos[2] +
+			"\nrun-role takes ONE event JSON argument; quote it so the shell keeps it as one word"}
 	}
-	return routeResult{kind: routeRunRole, role: pos[0], bead: pos[1], json: asJSON}
+	return routeResult{kind: routeRunRole, role: pos[0], eventJSON: pos[1], json: asJSON}
 }
 
 // parseRunQueryArgs validates `run-query [--json] query:<name>`. Pure, same
@@ -370,22 +385,6 @@ func parseRunQueryArgs(args []string) routeResult {
 		return routeResult{kind: routeUsageErr, msg: "run-query: not a query (usage: run-query [--json] query:<name>): " + pos[0]}
 	}
 	return routeResult{kind: routeRunQuery, query: name, json: asJSON}
-}
-
-// parseSessionsArgs validates `sessions` (no args; read-only).
-func parseSessionsArgs(args []string) routeResult {
-	if len(args) > 0 {
-		return routeResult{kind: routeUsageErr, msg: "sessions: unexpected argument: " + args[0]}
-	}
-	return routeResult{kind: routeSessions}
-}
-
-// parseReconcileArgs validates `reconcile` (no args; read-only).
-func parseReconcileArgs(args []string) routeResult {
-	if len(args) > 0 {
-		return routeResult{kind: routeUsageErr, msg: "reconcile: unexpected argument: " + args[0]}
-	}
-	return routeResult{kind: routeReconcile}
 }
 
 // parseConfigArgs validates `config (--print-defaults | --show [--json])`.

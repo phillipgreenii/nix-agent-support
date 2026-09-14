@@ -14,11 +14,14 @@ import (
 // per-process role (this handler process dispatches ONE role, registered
 // under its own `register --id`; DEC-WIRE-1's register message names the
 // participant, not a per-dispatch role selection) and the launch/prompt
-// Config. A fuller config story (this module's own TOML file, decoded like
+// Config. These small JSON files remain this packet's minimum viable config
+// story — a fuller one (this module's own TOML file, decoded like
 // packages/pg-router/internal/config/registry.go decodes pg-router's own
-// [[role]] table) is docket pg2-oju6w's Task 5.7, not this one's — these
-// small JSON files are this packet's minimum viable equivalent, sufficient
-// to make dispatch real without inventing Task 5.7's design.
+// [[role]] table) is still not built. Docket pg2-oju6w's Task 5.7 DID land
+// here, though, narrower than that: loadConfig below now calls
+// config.Config.Validate(), which rejects an invalid claude
+// --permission-mode value at THIS module's own config-load time (the real
+// enum check pg-router's own config used to duplicate).
 const (
 	envRoleConfig = "PG_ROUTER_CCPOOL_HANDLER_ROLE"
 	envConfig     = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
@@ -98,18 +101,26 @@ func loadRole(path string) (roles.Role, error) {
 
 // loadConfig reads and decodes the launch/prompt config.Config from path,
 // overlaying config.Default() so an absent/partial file still yields sane
-// values. An empty path uses config.Default() outright.
+// values. An empty path uses config.Default() outright (still validated: a
+// mis-edited Default() would otherwise ship silently).
+//
+// c.Validate() runs on every path — including the empty-path/Default() case
+// — so an invalid PermissionMode (docket pg2-oju6w Task 5.7's real claude
+// --permission-mode enum check) is rejected HERE, at this module's own
+// config-load time, rather than surfacing later as a rejected ccpool argv.
 func loadConfig(path string) (config.Config, error) {
 	c := config.Default()
-	if path == "" {
-		return c, nil
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return config.Config{}, fmt.Errorf("read config %s: %w", path, err)
+		}
+		if err := json.Unmarshal(data, &c); err != nil {
+			return config.Config{}, fmt.Errorf("decode config %s: %w", path, err)
+		}
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return config.Config{}, fmt.Errorf("read config %s: %w", path, err)
-	}
-	if err := json.Unmarshal(data, &c); err != nil {
-		return config.Config{}, fmt.Errorf("decode config %s: %w", path, err)
+	if err := c.Validate(); err != nil {
+		return config.Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
 	return c, nil
 }

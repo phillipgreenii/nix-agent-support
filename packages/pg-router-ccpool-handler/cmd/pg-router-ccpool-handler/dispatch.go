@@ -18,44 +18,30 @@ import (
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
-// itemPayloadKey mirrors packages/pg-router/internal/discover.go's own
-// unexported itemPayloadKey constant BYTE-FOR-BYTE: the wire event's opaque
-// `payload` object carries the item under this key exactly as
-// discover.ToQueueEvent used to pack it before this move. Task 5.6 (docket
-// pg2-oju6w) is what actually simplifies discover.go's packing on the
-// pg-router side to a pure passthrough — until it lands, a real core still
-// emits this shape, and this module's own dispatch handler is now the side
-// that interprets it (Task 5.6's "same shape, different side" framing;
-// docs/adr/0065's Addendum).
-const itemPayloadKey = "item"
-
 // itemFromPayload reconstructs an item.Item from a dispatch event's opaque
 // payload object — this module's own local replacement for
 // packages/pg-router/internal/discover.ItemFromPayload, which is
-// unreachable from here (Go's internal-package visibility rule). A payload
-// missing the expected shape yields a zero item.Item rather than an error,
-// matching discover.ItemFromPayload's own "absent path is a non-match, not
-// an error" posture.
+// unreachable from here (Go's internal-package visibility rule) and, as of
+// docket pg2-oju6w's Task 5.6, deleted entirely: the core-side
+// discover.ToQueueEvent now writes the item's fields directly at Payload's
+// top level (no wrapping key), and this function reads that same flat
+// shape — the SAME field names ItemFromPayload used to read, just no
+// longer nested under an "item" key (Task 5.6's "same shape, different
+// side" framing; docs/adr/0065's Addendum). A payload missing the expected
+// fields yields a zero item.Item rather than an error, matching
+// ItemFromPayload's own "absent path is a non-match, not an error" posture.
 func itemFromPayload(payload map[string]any) item.Item {
 	var it item.Item
-	raw, ok := payload[itemPayloadKey]
-	if !ok {
-		return it
-	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return it
-	}
-	if v, ok := m["id"].(string); ok {
+	if v, ok := payload["id"].(string); ok {
 		it.ID = v
 	}
-	if v, ok := m["type"].(string); ok {
+	if v, ok := payload["type"].(string); ok {
 		it.Type = v
 	}
-	if v, ok := m["title"].(string); ok {
+	if v, ok := payload["title"].(string); ok {
 		it.Title = v
 	}
-	if v, ok := m["metadata"].(map[string]any); ok {
+	if v, ok := payload["metadata"].(map[string]any); ok {
 		it.Metadata = v
 	}
 	return it
@@ -152,10 +138,24 @@ func runDispatch(args []string) int {
 		writeErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
 	}
+	// outcome is an opaque STRING on the wire (packages/pg-router's
+	// docket pg2-oju6w Task 5.4 retypes handler.dispatch-reply.schema.json's
+	// outcome property from object -> string, matching wireclient.
+	// Reply.Outcome's Go type — encoding/json cannot unmarshal an object
+	// into a string field). result.Fields() still carries the full
+	// structured actions/refs shape (report.go's own doc: "an opaque
+	// string [object] the core stores"); JSON-encoding it into a string is
+	// this module's own minimal fix to stay wire-legal without losing any
+	// information the core never interpreted anyway.
+	outcomeJSON, err := json.Marshal(result.Fields())
+	if err != nil {
+		writeErrorReply(os.Stdout, "encode outcome: "+err.Error())
+		return conformance.ExitError
+	}
 	writeReply(os.Stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
-		"outcome":       result.Fields(),
+		"outcome":       string(outcomeJSON),
 	})
 	return conformance.ExitOK
 }

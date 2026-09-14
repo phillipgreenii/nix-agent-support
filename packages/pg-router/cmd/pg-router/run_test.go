@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
-	"github.com/phillipgreenii/pg-router/internal/dtest"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/item"
@@ -25,10 +25,61 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
+// fakeHandlerClient is a local wireclient.HandlerClient test double for
+// cmd/pg-router's own tests (package orchestrator's own fakeHandler is
+// unexported and cannot be imported from package main). It records every
+// role name Dispatch/PostStartup/PreShutdown was called for.
+type fakeHandlerClient struct {
+	mu          sync.Mutex
+	dispatched  []string
+	postStartup []string
+	preShutdown []string
+}
+
+func (f *fakeHandlerClient) Dispatch(_ context.Context, role roles.Role, _ eventqueue.Event) (wireclient.Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dispatched = append(f.dispatched, role.Name)
+	return wireclient.Reply{Outcome: "delivered"}, nil
+}
+
+func (f *fakeHandlerClient) PostStartup(_ context.Context, role roles.Role) (wireclient.Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.postStartup = append(f.postStartup, role.Name)
+	return wireclient.Reply{Outcome: "ok"}, nil
+}
+
+func (f *fakeHandlerClient) PreShutdown(_ context.Context, role roles.Role) (wireclient.Reply, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.preShutdown = append(f.preShutdown, role.Name)
+	return wireclient.Reply{Outcome: "ok"}, nil
+}
+
+func (f *fakeHandlerClient) dispatchedCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.dispatched...)
+}
+
+func (f *fakeHandlerClient) postStartupCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.postStartup...)
+}
+
+func (f *fakeHandlerClient) preShutdownCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.preShutdown...)
+}
 
 // RoleSet.DeclaredBindTypes (moved from this package's own declaredBindTypes to
 // a shared home, Task 1.1) must still count a role's Binds even when that role
@@ -48,19 +99,6 @@ func TestDeclaredBindTypes_selectorDisabledRoleStillCounts(t *testing.T) {
 	}
 }
 
-// fakeCommander is a query.Commander stand-in that records every argv it is
-// asked to run, so a "command"-type role's dispatch is observable without
-// shelling out to a real executable. bootCore/queue.Dispatch tests below drive
-// the offer phase SEQUENTIALLY (queue.Dispatch's phase 2 is a plain for-loop,
-// not concurrent goroutines — internal/eventqueue/queue.go), so no locking is
-// needed here.
-type fakeCommander struct{ calls [][]string }
-
-func (f *fakeCommander) Run(_ context.Context, argv []string) ([]byte, error) {
-	f.calls = append(f.calls, argv)
-	return nil, nil
-}
-
 // TestBootCore_selectorExcludedRoleNotRegisteredAsListener proves the
 // acceptance criterion end to end: a role a run-scoped --disable excludes
 // (applySelectors flips its Enabled to false) never gets a Listener
@@ -70,12 +108,12 @@ func (f *fakeCommander) Run(_ context.Context, argv []string) ([]byte, error) {
 // bootCore's PRE-EXISTING role.Enabled skip (run.go) — nothing in bootCore
 // itself needed to change.
 func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
-	cmd := &fakeCommander{}
+	fh := &fakeHandlerClient{}
 	cfg := config.Config{
 		LogDir: shortDir(t), // AF_UNIX path length cap; see shortDir's doc (ingest_event_test.go)
 		Roles: roles.RoleSet{
-			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
-			{Name: "r2", Enabled: true, Type: "command", Binds: []string{"t2"}, Command: &roles.CommandConfig{Argv: []string{"r2-cmd"}}},
+			{Name: "r1", Enabled: true, Binds: []string{"t1"}},
+			{Name: "r2", Enabled: true, Binds: []string{"t2"}},
 		},
 	}
 	declaredRoles := cfg.Roles
@@ -90,13 +128,10 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 		t.Fatalf("precondition: r1 must remain enabled")
 	}
 
-	// BD must be a non-nil beads.Runner: the dispatched role's Offer path calls
-	// o.snapshotIDs/o.buildResult (a "created beads" diff + final status read),
-	// which shell out through it. Give it a status for the one item ("bd-t1")
-	// r1's dispatch will actually reach, so beads.Status finds a real entry
-	// rather than indexing an empty per-id sequence.
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"bd-t1": {"open"}}}
-	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: cmd, BD: bd}
+	// Role dispatch always goes through Handler now (pg2-oju6w.15 / Task
+	// 5.4) regardless of what used to be role.Type — never through o.Cmd,
+	// which is a query-source-only seam.
+	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: fh}
 	ctx := context.Background()
 	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded)
 	if err != nil {
@@ -106,11 +141,8 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 
 	future := time.Now().Add(time.Hour)
-	// Payload carries the dispatch item (discover.ItemFromPayload's "item" key)
-	// so the dispatched role's Offer resolves a real bead id, matching bd's
-	// StatusSeq above, instead of "".
 	payloadFor := func(typ string) map[string]any {
-		return map[string]any{"item": map[string]any{"id": "bd-" + typ, "type": "task"}}
+		return map[string]any{"id": "bd-" + typ, "type": "task"}
 	}
 	for _, typ := range []string{"t1", "t2"} {
 		if _, err := q.Enqueue(eventqueue.Event{ID: "ev-" + typ, Type: typ, ExpiresAt: future, Payload: payloadFor(typ)}); err != nil {
@@ -119,11 +151,8 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 	}
 	q.Dispatch()
 
-	if len(cmd.calls) != 1 {
-		t.Fatalf("commander calls = %v, want exactly 1 (r1 only; r2 has no registered listener so its event is never offered)", cmd.calls)
-	}
-	if cmd.calls[0][0] != "r1-cmd" {
-		t.Errorf("dispatched argv = %v, want r1's command", cmd.calls[0])
+	if got := fh.dispatchedCalls(); len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("dispatched roles = %v, want exactly [r1] (r2 has no registered listener so its event is never offered)", got)
 	}
 }
 
@@ -138,10 +167,10 @@ func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
 	cfg := config.Config{
 		LogDir: shortDir(t),
 		Roles: roles.RoleSet{
-			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
+			{Name: "r1", Enabled: true, Binds: []string{"t1"}},
 		},
 	}
-	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: &fakeCommander{}, BD: &dtest.ScriptBD{}}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
 	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, cfg.Roles, runExclusions{})
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
@@ -714,16 +743,17 @@ func writeGateFile(t *testing.T) string {
 }
 
 func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
-	cmd := &fakeCommander{}
+	fh := &fakeHandlerClient{}
 	logDir := shortDir(t)
 	cfg := config.Config{
 		LogDir:         logDir,
 		OperatorPaused: writeGateFile(t),
 		Roles: roles.RoleSet{
-			{Name: "r1", Enabled: true, Type: "command", Binds: []string{"t1"}, Command: &roles.CommandConfig{Argv: []string{"r1-cmd"}}},
+			{Name: "r1", Enabled: true, Binds: []string{"t1"}},
+			{Name: "r2", Enabled: false, Binds: []string{"t2"}}, // disabled: must never get a lifecycle hook
 		},
 	}
-	o := &orchestrator.Orchestrator{Cfg: cfg, Cmd: cmd, BD: &dtest.ScriptBD{}, CC: &dtest.FakeCC{}}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: fh}
 	if !o.Gated() {
 		t.Fatal("precondition: cfg must be gated (OperatorPaused sentinel present)")
 	}
@@ -744,6 +774,14 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 		t.Fatal("gated run-until-idle never became discoverable; it must still boot the core (INV-LIFE-1)")
 	}
 
+	// postStartupAll (pg2-oju6w.15) fires right after bootCore succeeds,
+	// before the gated drain loop even starts — by the time the core is
+	// discoverable it must already have fired, once, for the ENABLED role
+	// only (never declaredRoles' disabled r2).
+	if got := fh.postStartupCalls(); len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("postStartup calls = %v, want exactly [r1] (disabled r2 must never get the hook)", got)
+	}
+
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent,
 		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"t1"}]}`))
@@ -762,9 +800,66 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	if exitCode != exitOK {
 		t.Fatalf("runUntilIdleGated exit = %d, want %d", exitCode, exitOK)
 	}
-	if len(cmd.calls) != 0 {
-		t.Fatalf("gated run-until-idle must dispatch nothing; commander calls = %v", cmd.calls)
+	if len(fh.dispatchedCalls()) != 0 {
+		t.Fatalf("gated run-until-idle must dispatch nothing; dispatched = %v", fh.dispatchedCalls())
 	}
+	// preShutdownAll fires at the same point TeardownAll used to, once per
+	// enabled role only.
+	if got := fh.preShutdownCalls(); len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("preShutdown calls = %v, want exactly [r1] (disabled r2 must never get the hook)", got)
+	}
+}
+
+// TestPostStartupAll_onlyEnabledRoles and TestPreShutdownAll_onlyEnabledRoles
+// are pg2-oju6w.15's direct unit coverage for the two helpers run.go's three
+// entry points (runRun/runRunUntilIdle/runUntilIdleGated) share: each must
+// call Handler.PostStartup/PreShutdown exactly once per role with
+// r.Enabled == true (mirroring bootCore's own registration loop — never
+// declaredRoles, the full pre-selector superset), and skip silently (no
+// panic) when Handler is nil — the known, out-of-scope
+// CommandFor/bootCore-wiring gap (pg2-oju6w.15's own plan, Section 0).
+func TestPostStartupAll_onlyEnabledRoles(t *testing.T) {
+	fh := &fakeHandlerClient{}
+	o := &orchestrator.Orchestrator{Handler: fh}
+	cfg := config.Config{Roles: roles.RoleSet{
+		{Name: "enabled-1", Enabled: true},
+		{Name: "disabled-1", Enabled: false},
+		{Name: "enabled-2", Enabled: true},
+	}}
+	postStartupAll(context.Background(), o, cfg)
+	got := fh.postStartupCalls()
+	want := []string{"enabled-1", "enabled-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("postStartup calls = %v, want %v", got, want)
+	}
+}
+
+func TestPostStartupAll_nilHandlerDoesNotPanic(t *testing.T) {
+	o := &orchestrator.Orchestrator{}
+	cfg := config.Config{Roles: roles.RoleSet{{Name: "r1", Enabled: true}}}
+	postStartupAll(context.Background(), o, cfg) // must not panic
+}
+
+func TestPreShutdownAll_onlyEnabledRoles(t *testing.T) {
+	fh := &fakeHandlerClient{}
+	o := &orchestrator.Orchestrator{Handler: fh}
+	cfg := config.Config{Roles: roles.RoleSet{
+		{Name: "enabled-1", Enabled: true},
+		{Name: "disabled-1", Enabled: false},
+		{Name: "enabled-2", Enabled: true},
+	}}
+	preShutdownAll(context.Background(), o, cfg)
+	got := fh.preShutdownCalls()
+	want := []string{"enabled-1", "enabled-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("preShutdown calls = %v, want %v", got, want)
+	}
+}
+
+func TestPreShutdownAll_nilHandlerDoesNotPanic(t *testing.T) {
+	o := &orchestrator.Orchestrator{}
+	cfg := config.Config{Roles: roles.RoleSet{{Name: "r1", Enabled: true}}}
+	preShutdownAll(context.Background(), o, cfg) // must not panic
 }
 
 // TestRunOneTick_gatedStillExpiresDueEvent proves INV-LIFE-2's "Expiry MUST

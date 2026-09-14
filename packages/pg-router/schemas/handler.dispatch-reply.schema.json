@@ -9,7 +9,7 @@
       "properties": {
         "schemaVersion": { "const": "1" },
         "id": { "type": "string" },
-        "outcome": { "type": "object" }
+        "outcome": { "type": "string" }
       }
     },
     {

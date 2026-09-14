@@ -763,6 +763,65 @@ func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	}
 }
 
+// TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession is Task 5.9's
+// INV-EVT-2 test: the SAME event dispatched TWICE — as a crash-window
+// redelivery would, each attempt minting its OWN fresh per-attempt
+// ExternalID (Role.ExternalID's own stamp) — must launch exactly ONE ccpool
+// session for the pair, correlated on the stable per-bead DisplayName
+// (Role.DisplayName), not the per-attempt id (ADR 0065's "Register" section's
+// INV-EVT-2 note). The second (redelivered) dispatch must be absorbed into
+// the first session's own outcome rather than starting a second session.
+func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{}, // no session yet — the FIRST dispatch's own duplicate-absorption check
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
+		// att-1's own session has since settled by the time the redelivery lands.
+		{{ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle}},
+	}}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
+
+	dispatch := func(externalID string) (report.Result, error) {
+		deps := newExec(cc, bd, cfg).deps
+		deps.ExternalID = externalID
+		deps.Git = &dtest.NoopGit{}
+		deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+		return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	}
+
+	// First delivery: att-1's own session is created and runs to a normal close.
+	res1, err1 := dispatch("att-1")
+	if err1 != nil {
+		t.Fatalf("first dispatch should succeed, got %v", err1)
+	}
+	if v := verbOf(res1); v != "" {
+		t.Errorf("first dispatch success must report no verb, got %q", v)
+	}
+
+	// Redelivery: a fresh per-attempt ExternalID ("att-2"), same event/item/
+	// role — so the same DisplayName. Must be absorbed, not re-dispatched.
+	res2, err2 := dispatch("att-2")
+	if err2 != nil {
+		t.Fatalf("redelivery must be absorbed as success (existing outcome), got %v", err2)
+	}
+	if v := verbOf(res2); v != "" {
+		t.Errorf("absorbed redelivery of an already-settled success must report no verb, got %q", v)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-1" {
+		t.Errorf("exactly one ccpool session must ever be created for the pair; Ensured=%v", got)
+	}
+	if got := cc.Sent; len(got) != 1 || got[0] != "att-1" {
+		t.Errorf("exactly one Send (the first attempt's own nudge) may ever happen; Sent=%v", got)
+	}
+}
+
 func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	cfg := fastCfg()
 	cfg.BudgetTokens = 1000 // finite cap so the ramp trips it

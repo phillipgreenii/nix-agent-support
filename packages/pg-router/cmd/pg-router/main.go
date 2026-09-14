@@ -22,15 +22,11 @@ func main() {
 	case routeRunUntilIdle:
 		os.Exit(runRunUntilIdle(r.only, r.disable))
 	case routeRunRole:
-		os.Exit(runRunRole(r.role, r.bead, r.json))
+		os.Exit(runRunRole(r.role, r.eventJSON, r.json))
 	case routeRunQuery:
 		os.Exit(runRunQuery(r.query, r.json))
 	case routeConfig:
 		os.Exit(runConfig(r.configMode, r.json))
-	case routeSessions:
-		os.Exit(runSessions())
-	case routeReconcile:
-		os.Exit(runReconcile())
 	case routeIngestEvent:
 		os.Exit(runIngestEvent(r.rest))
 	case routePushInject:

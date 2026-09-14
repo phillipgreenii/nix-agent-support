@@ -164,11 +164,13 @@ func TestLiveDispatch_negative(t *testing.T) {
 }
 
 // TestLiveQuery invokes the real binary's `query` subcommand against
-// INTF-SOURCE's own golden source.query request and checks the reply
-// validates against source.query-reply. This module's `query` always
-// answers zero events today (docket pg2-oju6w's Task 5.8 wires the built-in
-// beads source for real — query.go's own doc comment), so this proves the
-// wire adapter, not a real query result.
+// INTF-SOURCE's own golden source.query request, with NO --query-config, and
+// checks the reply validates against source.query-reply. An unconfigured
+// invocation always answers zero events (docket pg2-oju6w's Task 5.8 wired
+// the beads-backed source in for real, but ONLY when --query-config names
+// its filters — see query.go's own doc comment; this module's query_test.go
+// covers that real path directly, against a fake beads.Runner), so this
+// proves the wire adapter, not a real query result.
 func TestLiveQuery(t *testing.T) {
 	bin := buildHandlerBinary(t)
 	req, err := conformance.Golden("source.query")

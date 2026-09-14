@@ -8,10 +8,12 @@
 // there by its own orchestrator, which stays in-core): a zero-dependency
 // leaf, so a byte-for-byte copy costs nothing (docket pg2-oju6w Task 5.2/5.3,
 // folded per the operator's 2026-09-11 decision; docs/adr/0065's Addendum).
-// Result.Fields() is what this module's dispatch handler marshals directly
-// into the wire dispatch-reply's opaque `outcome` object (handler.dispatch-reply
-// schema) — ADR 0065's "work-outcome... is an opaque string [object] the core
-// stores" framing, realized here as a JSON shape the core never interprets.
+// Result.Fields() is what this module's dispatch handler JSON-encodes into
+// the wire dispatch-reply's opaque `outcome` STRING (handler.dispatch-reply
+// schema — docket pg2-oju6w's Task 5.4 retypes that property from object to
+// string, matching the core's own wireclient.Reply.Outcome Go field) — ADR
+// 0065's "work-outcome... is an opaque string the core stores" framing,
+// realized here as a JSON shape (stringified) the core never interprets.
 package report
 
 type Verb string

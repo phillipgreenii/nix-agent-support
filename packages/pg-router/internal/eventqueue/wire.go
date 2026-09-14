@@ -56,8 +56,8 @@ type wireEvent struct {
 //
 // An absent wire `payload` decodes to a non-nil, empty map — never nil
 // (INTF-SOURCE, DEC-WIRE-1's payload normalization) — so every downstream
-// reader (a binding's narrowing path, discover's ItemFromPayload) can index
-// Payload unconditionally without a nil-map special case.
+// reader (a binding's narrowing path, discover's DeriveContextFromQueueEvent)
+// can index Payload unconditionally without a nil-map special case.
 //
 // DecodeEvent deliberately does NOT validate against the JSON Schema (that is
 // package conformance's job, run at the boundary before decoding) nor against

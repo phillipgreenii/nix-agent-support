@@ -4,13 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
-	"github.com/phillipgreenii/pg-router/internal/budget"
-	"github.com/phillipgreenii/pg-router/internal/prompt"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -94,12 +91,9 @@ type failureBackoffTOML struct {
 }
 
 type roleTOML struct {
-	Name    string         `toml:"name"`
-	Type    string         `toml:"type"`
-	Enabled *bool          `toml:"enabled"` // pointer: absent => default true
-	Binds   []string       `toml:"binds"`   // event types this role consumes (Observer)
-	CCPool  toml.Primitive `toml:"ccpool"`  // decoded by buildCCPool iff type==ccpool
-	Command toml.Primitive `toml:"command"` // decoded by buildCommand iff type==command
+	Name    string   `toml:"name"`
+	Enabled *bool    `toml:"enabled"` // pointer: absent => default true
+	Binds   []string `toml:"binds"`   // event types this role consumes (Observer)
 	// Retry is this role's HANDLER RETRY CADENCE override (INV-FAIL-2,
 	// pg2-0c8yz), overlaid onto the pool-wide default ([pool].retry). Absent:
 	// inherits the pool default verbatim.
@@ -145,33 +139,6 @@ type triggerTOML struct {
 	Every *duration `toml:"every"` // period
 	Count int       `toml:"count"` // threshold
 	Binds []string  `toml:"binds"` // threshold: the upstream types to count
-}
-
-// ccpoolTOML is decoded from the [role.ccpool] primitive. The enum fields validate
-// at decode (UnmarshalText), so an invalid value fails with TOML location context.
-type ccpoolTOML struct {
-	Actor           string                   `toml:"actor"`
-	SkillMD         string                   `toml:"skill_md"`
-	Completion      roles.Completion         `toml:"completion"`
-	OnFailure       roles.FailureAction      `toml:"on_failure"`
-	OnDispatchFail  roles.DispatchFailAction `toml:"on_dispatch_fail"`
-	AuthorshipGuard bool                     `toml:"authorship_guard"`
-	Prompt          string                   `toml:"prompt"`
-	PromptFile      string                   `toml:"prompt_file"`
-	Budget          *budgetTOML              `toml:"budget"`
-	Isolation       *isolationTOML           `toml:"isolation"`
-}
-
-// isolationTOML is decoded from the optional [role.ccpool.isolation] table. An
-// absent table (nil) leaves roles.IsolationConfig at its zero value, which
-// buildCCPool below resolves to "worktree" — today's only behavior.
-type isolationTOML struct {
-	Type string `toml:"type"`
-	Path string `toml:"path"`
-}
-
-type commandTOML struct {
-	Argv []string `toml:"argv"`
 }
 
 // monitorTOML is one top-level [[monitor]] entry (pg2-nhvdo, INTF-MON): the
@@ -379,24 +346,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("retry: %w", err)
 	}
-	role := roles.Role{Name: rt.Name, Type: rt.Type, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff}
-	switch rt.Type {
-	case "ccpool":
-		cc, err := buildCCPool(md, rt.CCPool, configDir, c)
-		if err != nil {
-			return roles.Role{}, err
-		}
-		role.CCPool = cc
-	case "command":
-		cmd, err := buildCommand(md, rt.Command)
-		if err != nil {
-			return roles.Role{}, err
-		}
-		role.Command = cmd
-	default:
-		return roles.Role{}, fmt.Errorf("unknown role type %q (known: ccpool, command)", rt.Type)
-	}
-	return role, nil
+	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff}, nil
 }
 
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its
@@ -502,104 +452,6 @@ func buildTrigger(t *triggerTOML, pollInterval time.Duration) (query.Trigger, er
 		return query.ManualTrigger{}, nil
 	default:
 		return nil, fmt.Errorf("unknown trigger kind %q (known: period, threshold, manual)", t.Kind)
-	}
-}
-
-func buildCCPool(md toml.MetaData, prim toml.Primitive, configDir string, c Config) (*roles.CCPoolConfig, error) {
-	var ct ccpoolTOML
-	if err := md.PrimitiveDecode(prim, &ct); err != nil {
-		return nil, err
-	}
-	if (ct.Prompt == "") == (ct.PromptFile == "") {
-		return nil, fmt.Errorf("ccpool role: exactly one of prompt / prompt_file is required")
-	}
-	if ct.Completion == "" || ct.OnFailure == "" || ct.OnDispatchFail == "" {
-		return nil, fmt.Errorf("ccpool role: completion, on_failure, and on_dispatch_fail are required")
-	}
-	// actor is required: a ccpool role dispatches under BEADS_ACTOR, and an empty
-	// actor (e.g. from a typo'd `actorr =` key, which BurntSushi silently ignores)
-	// would create beads with no attribution and break the created-marker diff.
-	if ct.Actor == "" {
-		return nil, fmt.Errorf("ccpool role: actor is required")
-	}
-	body := ct.Prompt
-	if ct.PromptFile != "" {
-		b, err := os.ReadFile(filepath.Join(configDir, ct.PromptFile))
-		if err != nil {
-			return nil, fmt.Errorf("ccpool role: prompt_file: %w", err)
-		}
-		body = string(b)
-	}
-	tmpl, err := prompt.Parse("role-prompt", body)
-	if err != nil {
-		return nil, fmt.Errorf("ccpool role: prompt template: %w", err)
-	}
-	b := c.WorkerBudget() // pool default budget; per-role budget overlays it
-	overlayBudget(&b, ct.Budget)
-	isolation, err := buildIsolation(ct.Isolation)
-	if err != nil {
-		return nil, fmt.Errorf("ccpool role: isolation: %w", err)
-	}
-	return &roles.CCPoolConfig{
-		Actor:           ct.Actor,
-		SkillMD:         ct.SkillMD,
-		Completion:      ct.Completion,
-		OnFailure:       ct.OnFailure,
-		OnDispatchFail:  ct.OnDispatchFail,
-		AuthorshipGuard: ct.AuthorshipGuard,
-		PromptBody:      body,
-		Prompt:          tmpl,
-		Budget:          b,
-		Isolation:       isolation,
-	}, nil
-}
-
-// buildIsolation validates an optional [role.ccpool.isolation] table. A nil
-// table (the key omitted entirely) resolves to the zero IsolationConfig, which
-// the executor treats as "worktree" — so an existing config is unaffected.
-func buildIsolation(t *isolationTOML) (roles.IsolationConfig, error) {
-	if t == nil {
-		return roles.IsolationConfig{}, nil
-	}
-	switch t.Type {
-	case "", "worktree", "none", "workforest":
-		if t.Path != "" {
-			return roles.IsolationConfig{}, fmt.Errorf("path is only valid for type %q, not %q", "path", t.Type)
-		}
-	case "path":
-		if t.Path == "" {
-			return roles.IsolationConfig{}, fmt.Errorf("type %q requires path", "path")
-		}
-	default:
-		return roles.IsolationConfig{}, fmt.Errorf("unknown type %q (known: worktree, none, path, workforest)", t.Type)
-	}
-	return roles.IsolationConfig{Type: t.Type, Path: t.Path}, nil
-}
-
-func buildCommand(md toml.MetaData, prim toml.Primitive) (*roles.CommandConfig, error) {
-	var ct commandTOML
-	if err := md.PrimitiveDecode(prim, &ct); err != nil {
-		return nil, err
-	}
-	if len(ct.Argv) == 0 {
-		return nil, fmt.Errorf("command role: argv is required")
-	}
-	return &roles.CommandConfig{Argv: ct.Argv}, nil
-}
-
-// overlayBudget applies a per-role budget over a base (pool default), field by field.
-func overlayBudget(b *budget.Budget, t *budgetTOML) {
-	if t == nil {
-		return
-	}
-	if t.Tokens != nil {
-		b.Tokens = budget.Limit(*t.Tokens)
-	}
-	if t.Cost != nil {
-		b.Cost = budget.Limit(*t.Cost)
-	}
-	if t.Time != nil {
-		b.Time = t.Time.D
 	}
 }
 

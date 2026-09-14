@@ -54,13 +54,12 @@ func TestMain(m *testing.M) {
 
 // --- wiring fixtures (INV-WORKFLOW-1 / USECASE-VALIDATE-CONFIG) ---
 
-// cmdRole is a handler bound to binds, backed by a command that resolves under
-// prefixLocator.
+// cmdRole is a handler bound to binds. As of docket pg2-oju6w's Task 5.4 a
+// role carries no backing command of its own (that is the registered
+// handler participant's own concern, reached over the wire) — the name is
+// kept for its many existing callers' sake.
 func cmdRole(name string, binds ...string) roles.Role {
-	return roles.Role{
-		Name: name, Type: "command", Enabled: true, Binds: binds,
-		Command: &roles.CommandConfig{Argv: []string{"present-tool"}},
-	}
+	return roles.Role{Name: name, Enabled: true, Binds: binds}
 }
 
 // eventSource is a period-triggered source emitting emits, backed by a command
@@ -173,53 +172,51 @@ func TestValidate_boundHandlerWithSomeEmittedTypeIsValid(t *testing.T) {
 	}
 }
 
-// Check 5 — a configured source or handler whose backing command is absent.
+// Check 5 — a configured source whose backing command is absent. As of
+// docket pg2-oju6w's Task 5.4 (ADR 0065's "Open question resolved" section)
+// a ROLE no longer declares a backing command at all — that check narrowed
+// to sources only (config.go's absentBackingCommands doc comment) — so this
+// test now covers the source half alone.
 func TestValidate_absentBackingCommand(t *testing.T) {
 	c := wiring(
 		query.SourceSet{{Name: "cmd-source", Query: query.CommandQuery{
 			Meta: query.Meta{EmitTypes: []string{"a.ready"}}, Argv: []string{"absent-lister"}, Format: query.FormatJSONL,
 		}}},
-		roles.RoleSet{{
-			Name: "cmd-role", Type: "command", Enabled: true, Binds: []string{"a.ready"},
-			Command: &roles.CommandConfig{Argv: []string{"absent-handler"}},
-		}},
+		roles.RoleSet{cmdRole("cmd-role", "a.ready")},
 	)
 	errs, warns := c.diagnose()
-	if !findingsContain(errs, `handler "cmd-role" backing command "absent-handler"`) {
-		t.Fatalf("an absent handler backing command must error; got %v", errs)
-	}
 	if !findingsContain(errs, `source "cmd-source" backing command "absent-lister"`) {
 		t.Fatalf("an absent source backing command must error; got %v", errs)
 	}
 	if len(warns) != 0 {
 		t.Fatalf("an absent backing command is an error, never a warning; warns=%v", warns)
 	}
-	// Present commands: the same wiring with a locator that resolves both is valid.
-	c.Locator = stubLocator{present: map[string]bool{"absent-lister": true, "absent-handler": true}}
+	// A present command: the same wiring with a locator that resolves it is valid.
+	c.Locator = stubLocator{present: map[string]bool{"absent-lister": true}}
 	if errs, warns := c.diagnose(); len(errs) != 0 || len(warns) != 0 {
 		t.Fatalf("present backing commands must be valid; errs=%v warns=%v", errs, warns)
 	}
 }
 
-// Every participant kind's backing command is probed, including the fixed
-// integration binaries (bd for a beads-backed source, ccpool for a ccpool handler).
+// A registered source PARTICIPANT's own invoked command (query.
+// ParticipantQuery, docket pg2-oju6w's Task 5.8 — the wire-client
+// replacement for the retired query.BeadsReady, which used to back this
+// same check with the fixed "bd" binary) is probed like any other source
+// backing command. The former ccpool-handler half of this test (asserting
+// the fixed "ccpool" binary for a ccpool-typed role) has no successor: a
+// role no longer declares any backing command (see
+// TestValidate_absentBackingCommand's updated doc comment).
 func TestValidate_backingCommandCoversFixedIntegrationBinaries(t *testing.T) {
 	c := wiring(
-		query.SourceSet{{Name: "beads-source", Query: query.BeadsReady{
-			Meta: query.Meta{EmitTypes: []string{"a.ready"}},
+		query.SourceSet{{Name: "participant-source", Query: query.ParticipantQuery{
+			Meta: query.Meta{EmitTypes: []string{"a.ready"}}, Command: []string{"pg-router-ccpool-handler"},
 		}}},
-		roles.RoleSet{{
-			Name: "ccpool-role", Type: "ccpool", Enabled: true, Binds: []string{"a.ready"},
-			CCPool: &roles.CCPoolConfig{Actor: "a"},
-		}},
+		roles.RoleSet{cmdRole("r", "a.ready")},
 	)
 	c.Locator = stubLocator{present: map[string]bool{}} // nothing installed
 	errs, _ := c.diagnose()
-	if !findingsContain(errs, `backing command "bd"`) {
-		t.Fatalf("a beads-backed source's backing command is bd; got %v", errs)
-	}
-	if !findingsContain(errs, `backing command "ccpool"`) {
-		t.Fatalf("a ccpool handler's backing command is ccpool; got %v", errs)
+	if !findingsContain(errs, `backing command "pg-router-ccpool-handler"`) {
+		t.Fatalf("a registered source participant's backing command is checked; got %v", errs)
 	}
 }
 
@@ -301,20 +298,22 @@ func TestValidate_aggregatesEveryFinding(t *testing.T) {
 		query.SourceSet{
 			eventSource("unheard", "nobody.binds.this"),
 			thresholdSource("loop", 1, []string{"loop.ready"}, "loop.ready"),
+			// A role no longer declares its own backing command (Task 5.4), so the
+			// "backing command" finding this test aggregates now comes from a
+			// source instead — bound to the same "loop.ready" type loop already
+			// emits/binds, so it introduces no NEW orphan-producer/-consumer finding.
+			{Name: "no-tool", Query: query.CommandQuery{
+				Meta: query.Meta{EmitTypes: []string{"loop.ready"}}, Argv: []string{"absent-tool"}, Format: query.FormatJSONL,
+			}},
 		},
 		roles.RoleSet{
 			cmdRole("unbound"),
 			cmdRole("deaf", "nobody.emits.this"),
-			{
-				Name: "no-tool", Type: "command", Enabled: true, Binds: []string{"loop.ready"},
-				Command: &roles.CommandConfig{Argv: []string{"absent-tool"}},
-			},
+			cmdRole("no-tool-consumer", "loop.ready"),
 		},
 	)
-	c.PermissionMode = "nonsense"
 	errs, warns := c.diagnose()
 	for _, want := range []string{
-		"invalid PG_ROUTER_PERMISSION_MODE",
 		"orphan consumer",
 		"orphan producer",
 		"disconnected handler",
@@ -347,20 +346,16 @@ name = "s"
 emits = ["a.ready"]
 type = "command"
 [query.command]
-argv = ["present-tool"]
+argv = ["absent-lister"]
 format = "jsonl"
 
 [[role]]
 name = "r"
-type = "command"
-cap = 1
 binds = ["a.ready"]
-[role.command]
-argv = ["absent-handler"]
 `)
 	_, err := Load()
 	if err == nil {
-		t.Fatal("a role whose backing command is absent must fail Load (absent backing command)")
+		t.Fatal("a source whose backing command is absent must fail Load (absent backing command)")
 	}
 	if !strings.Contains(err.Error(), "backing command") {
 		t.Fatalf("Load error must name the absent backing command; got %v", err)
@@ -479,23 +474,10 @@ func TestLoad_allowedToolsEnvOverride(t *testing.T) {
 	}
 }
 
-func TestValidate_permissionMode(t *testing.T) {
-	valid := []string{"", "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"}
-	for _, m := range valid {
-		c := Default()
-		c.PermissionMode = m
-		if err := c.Validate(); err != nil {
-			t.Errorf("Validate() with PermissionMode=%q = %v, want nil", m, err)
-		}
-	}
-	for _, m := range []string{"bypass", "Plan", "yolo", "skip-permissions"} {
-		c := Default()
-		c.PermissionMode = m
-		if err := c.Validate(); err == nil {
-			t.Errorf("Validate() with PermissionMode=%q = nil, want error", m)
-		}
-	}
-}
+// PermissionMode validation MOVED to the new module's own config validation
+// (packages/pg-router-ccpool-handler/internal/config), docket pg2-oju6w Task
+// 5.7 — pg-router itself no longer rejects an invalid PermissionMode value at
+// its own config-load time; see that package's TestValidate_permissionMode.
 
 func TestLoad_envOverrides(t *testing.T) {
 	absentConfig(t)
@@ -606,7 +588,8 @@ func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 // PG_ROUTER_MAX_WORKER and the other role env vars are dropped (spec C): setting
 // them must have NO effect. Per-role capacity is no longer a declarable concept
 // at all (bead pg2-f3mcb.2, INV-CONC-1) — there is no `cap` left to be a no-op
-// on, so this only locks that the built-in role SET itself is unaffected.
+// on, so this only locks that the (now zero, docket pg2-oju6w's Task 5.8) role
+// set is unaffected — no env var conjures a role into existence.
 func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PG_ROUTER_MAX_WORKER", "3")
@@ -615,7 +598,7 @@ func TestLoad_roleEnvVarsAreNoOps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 3 || c.Roles[1].Name != "worker" {
+	if len(c.Roles) != 0 {
 		t.Errorf("PG_ROUTER_MAX_WORKER must be a no-op; roles = %+v", c.Roles)
 	}
 }
@@ -652,19 +635,27 @@ func TestLoad_badIntFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// The budget SCALARS (BudgetTokens/BudgetCost/BudgetTime/Reminder|Cancel|
+// HardPct) are checked directly on Config now: Config.WorkerBudget()
+// (which converted them into a budget.Budget) had no successor once
+// "budget" moved out of pg-router entirely (docket pg2-oju6w's Task 5.2's
+// package move) — that conversion's only consumer was
+// roles.CCPoolConfig.Budget, itself deleted by Task 5.4. The scalars
+// themselves are plain fields, independent of the moved package, so they
+// stay.
 func TestWorkerBudget_defaults(t *testing.T) {
-	b := Default().WorkerBudget()
-	if !b.Tokens.Unlimited() || !b.Cost.Unlimited() {
-		t.Error("token/cost default must be unlimited")
+	c := Default()
+	if c.BudgetTokens > 0 || c.BudgetCost > 0 {
+		t.Error("token/cost default must be unlimited (<= 0)")
 	}
-	if b.Time != 25*time.Minute {
-		t.Errorf("time default = %v, want 25m (< MaxWait 30m)", b.Time)
+	if c.BudgetTime != 25*time.Minute {
+		t.Errorf("time default = %v, want 25m (< MaxWait 30m)", c.BudgetTime)
 	}
-	if b.Thresholds.Reminder != 0.725 || b.Thresholds.Cancel != 0.90 || b.Thresholds.Hard != 1.0 {
-		t.Errorf("thresholds = %+v", b.Thresholds)
+	if c.ReminderPct != 0.725 || c.CancelPct != 0.90 || c.HardPct != 1.0 {
+		t.Errorf("thresholds = reminder=%v cancel=%v hard=%v", c.ReminderPct, c.CancelPct, c.HardPct)
 	}
-	if b.Time >= Default().MaxWait {
-		t.Errorf("budget time %v must be < MaxWait %v", b.Time, Default().MaxWait)
+	if c.BudgetTime >= c.MaxWait {
+		t.Errorf("budget time %v must be < MaxWait %v", c.BudgetTime, c.MaxWait)
 	}
 }
 
@@ -677,9 +668,8 @@ func TestWorkerBudget_envOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := c.WorkerBudget()
-	if int64(b.Tokens) != 1000000 || b.Time != 600*time.Second {
-		t.Errorf("env overrides not applied: %+v", b)
+	if c.BudgetTokens != 1000000 || c.BudgetTime != 600*time.Second {
+		t.Errorf("env overrides not applied: tokens=%d time=%v", c.BudgetTokens, c.BudgetTime)
 	}
 }
 
@@ -695,18 +685,28 @@ func TestLoad_logDirIsStandardPath(t *testing.T) {
 	}
 }
 
-func TestLoad_noFile_builtinRoleSet(t *testing.T) {
+// TestLoad_noFile_zeroRolesAndQueries is the acceptance test for docket
+// pg2-oju6w's Task 5.8 (ADR 0065's "Source-side boundary" section, closing
+// register row USECASE-CREATE-SOURCE / bead pg2-u7rzl): with no config file
+// (config.toml absent), an unconfigured pg-router core now runs with ZERO
+// roles and ZERO queries — the former built-in feedback+worker+review
+// fallback (roles.BuiltinRoleSet/BuiltinQuerySet) is deleted outright, not
+// narrowed. It does nothing until an operator configures [[role]]/[[query]].
+func TestLoad_noFile_zeroRolesAndQueries(t *testing.T) {
 	absentConfig(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 3 || c.Roles[0].Name != "feedback" || c.Roles[1].Name != "worker" || c.Roles[2].Name != "review" {
-		t.Fatalf("no-file must yield built-in feedback+worker+review: %+v", c.Roles)
+	if len(c.Roles) != 0 {
+		t.Fatalf("no-file must yield zero roles, got: %+v", c.Roles)
+	}
+	if len(c.Queries) != 0 {
+		t.Fatalf("no-file must yield zero queries, got: %+v", c.Queries)
 	}
 }
 
-func TestLoad_tomlReplacesBuiltins(t *testing.T) {
+func TestLoad_tomlDefinesRoles(t *testing.T) {
 	writeCfg(t, `
 [[query]]
 name = "solo-source"
@@ -718,31 +718,21 @@ format = "jsonl"
 
 [[role]]
 name = "solo"
-type = "ccpool"
 enabled = true
 binds = ["work.ready"]
-[role.ccpool]
-actor = "a"
-completion = "close-or-handback"
-on_failure = "add-human"
-on_dispatch_fail = "leave"
-prompt = "do {{.BeadID}}"
 `)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.Roles) != 1 || c.Roles[0].Name != "solo" {
-		t.Fatalf("toml must replace built-ins: %+v", c.Roles)
+		t.Fatalf("toml [[role]] must decode: %+v", c.Roles)
 	}
 	if len(c.Roles[0].Binds) != 1 || c.Roles[0].Binds[0] != "work.ready" {
 		t.Fatalf("role binds not decoded: %+v", c.Roles[0].Binds)
 	}
 	if len(c.Queries) != 1 || c.Queries[0].Name != "solo-source" {
 		t.Fatalf("[[query]] not decoded: %+v", c.Queries)
-	}
-	if c.Roles[0].CCPool == nil || c.Roles[0].CCPool.Completion != "close-or-handback" {
-		t.Fatalf("ccpool config not decoded: %+v", c.Roles[0].CCPool)
 	}
 }
 
@@ -903,9 +893,8 @@ func TestLoad_globalBudget_appliesWhenAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := c.WorkerBudget()
-	if int64(b.Tokens) != 750000 || int64(b.Cost) != 1200 || b.Time != 45*time.Minute {
-		t.Errorf("global-only budget = %+v, want tokens=750000 cost=1200 time=45m", b)
+	if c.BudgetTokens != 750000 || c.BudgetCost != 1200 || c.BudgetTime != 45*time.Minute {
+		t.Errorf("global-only budget = tokens=%d cost=%d time=%v, want tokens=750000 cost=1200 time=45m", c.BudgetTokens, c.BudgetCost, c.BudgetTime)
 	}
 }
 
@@ -917,14 +906,13 @@ func TestLoad_repoLocalBudget_overridesGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := c.WorkerBudget()
-	if int64(b.Tokens) != 999 {
-		t.Errorf("Tokens = %d, want 999 (repo-local overrides global)", int64(b.Tokens))
+	if c.BudgetTokens != 999 {
+		t.Errorf("Tokens = %d, want 999 (repo-local overrides global)", c.BudgetTokens)
 	}
 	// time: repo-local omits it, so the global value survives (global < repo-local,
 	// each overlay is field-by-field).
-	if b.Time != 10*time.Minute {
-		t.Errorf("Time = %v, want 10m (global time survives when repo-local omits it)", b.Time)
+	if c.BudgetTime != 10*time.Minute {
+		t.Errorf("Time = %v, want 10m (global time survives when repo-local omits it)", c.BudgetTime)
 	}
 }
 
@@ -938,9 +926,8 @@ func TestLoad_globalBudget_overridesEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := c.WorkerBudget()
-	if int64(b.Tokens) != 222 || b.Time != 30*time.Minute {
-		t.Errorf("budget = %+v, want tokens=222 time=30m (file wins over env)", b)
+	if c.BudgetTokens != 222 || c.BudgetTime != 30*time.Minute {
+		t.Errorf("budget = tokens=%d time=%v, want tokens=222 time=30m (file wins over env)", c.BudgetTokens, c.BudgetTime)
 	}
 }
 
@@ -952,12 +939,11 @@ func TestLoad_noFiles_unchangedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := c.WorkerBudget()
-	if !b.Tokens.Unlimited() || !b.Cost.Unlimited() {
-		t.Error("absent files: token/cost must stay unlimited (default)")
+	if c.BudgetTokens > 0 || c.BudgetCost > 0 {
+		t.Error("absent files: token/cost must stay unlimited (default, <= 0)")
 	}
-	if b.Time != 25*time.Minute {
-		t.Errorf("absent files: Time = %v, want 25m (default)", b.Time)
+	if c.BudgetTime != 25*time.Minute {
+		t.Errorf("absent files: Time = %v, want 25m (default)", c.BudgetTime)
 	}
 }
 
@@ -1086,17 +1072,14 @@ func TestGatePaths_worksWhenLoadWouldFail(t *testing.T) {
 	writeCfg(t, `
 [[role]]
 name = "r"
-type = "command"
 binds = ["e"]
-[role.command]
-argv = ["absent-handler"]
 
 [[query]]
 name = "s"
 emits = ["e"]
 type = "command"
 [query.command]
-argv = ["present-tool"]
+argv = ["absent-lister"]
 format = "jsonl"
 `)
 	if _, err := Load(); err == nil {
@@ -1187,11 +1170,11 @@ subset = ["source_failures"]
 }
 
 // TestLoad_monitorSubsets_appliesWithoutRolesOrQueries proves [[monitor]] is a
-// pool-level key like [pool].worktree_dir/operator_paused_path — it applies even
-// when the file declares no [[role]]/[[query]], which otherwise makes Load()
-// fall back to the built-in role+query set entirely (decodeRoleSet's "pool-only
-// / empty => built-ins" early return). MonitorSubsets must NOT be swallowed by
-// that fallback.
+// pool-level key like [pool].worktree_dir/operator_paused_path — it applies
+// even when the file declares no [[role]]/[[query]] (which, since docket
+// pg2-oju6w's Task 5.8 deleted the former built-in role+query fallback,
+// leaves Roles/Queries at zero — decodeRoleSet's "pool-only / empty => nil"
+// early return). MonitorSubsets must NOT be swallowed by that.
 func TestLoad_monitorSubsets_appliesWithoutRolesOrQueries(t *testing.T) {
 	writeCfg(t, `
 [[monitor]]
@@ -1202,8 +1185,8 @@ subset = ["queue_depth"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 3 || c.Roles[0].Name != "feedback" {
-		t.Fatalf("a monitor-only config must still fall back to built-in roles: %+v", c.Roles)
+	if len(c.Roles) != 0 {
+		t.Fatalf("a monitor-only config must still yield zero roles: %+v", c.Roles)
 	}
 	if got := c.MonitorSubsets["mon-1"]; len(got) != 1 || got[0] != "queue_depth" {
 		t.Errorf("MonitorSubsets[mon-1] = %v, want [queue_depth] even with no [[role]]/[[query]]", got)

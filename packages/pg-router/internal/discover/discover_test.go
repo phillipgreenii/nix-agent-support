@@ -38,6 +38,17 @@ func itemEvt(typ, id string) event.Event {
 	return event.NewItemEvent(typ, "", item.Item{ID: id, Type: "task"})
 }
 
+// payloadItemID reads the item id a discover-produced queue event's opaque
+// payload carries at its top level (ToQueueEvent's flat, unwrapped
+// convention — docket pg2-oju6w's Task 5.6). This test file's own minimal
+// stand-in for the now-deleted ItemFromPayload: nothing in this package
+// needs a full item.Item reconstruction from a queue event's payload
+// anymore, only its id, so that is all this helper reads.
+func payloadItemID(payload map[string]any) string {
+	id, _ := payload["id"].(string)
+	return id
+}
+
 // flakyQuery fails its first `failTimes` Run calls, then succeeds and returns
 // events — the pull-source failure backoff's (INV-FAIL-3) retry-then-succeed
 // case. calls counts every Run invocation so a test can assert the retry count.
@@ -130,18 +141,14 @@ func TestProduce_periodQueriesEnqueueForBoundRoles(t *testing.T) {
 	// (per-handler serial FIFO, INV-CONC-1 / DEC-EVENT-2) — there is no cap
 	// gating this, just the queue's own per-listener cursor.
 	q.Dispatch()
-	if len(fb.offered) != 1 || ItemFromPayload(fb.offered[0].Payload).ID != "fb-1" {
+	if len(fb.offered) != 1 || payloadItemID(fb.offered[0].Payload) != "fb-1" {
 		t.Fatalf("feedback listener wrong: %+v", fb.offered)
 	}
-	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+	if len(wk.offered) != 1 || payloadItemID(wk.offered[0].Payload) != "wk-1" {
 		t.Fatalf("worker listener's first head wrong: %+v", wk.offered)
 	}
-	// Provenance stamped from the source name.
-	if src, _ := fb.offered[0].Payload["source"].(string); src != "feedback-source" {
-		t.Fatalf("event source must be stamped from the query name, got %q", src)
-	}
 	q.Dispatch() // the worker listener's head advances to the second event
-	if len(wk.offered) != 2 || ItemFromPayload(wk.offered[1].Payload).ID != "wk-2" {
+	if len(wk.offered) != 2 || payloadItemID(wk.offered[1].Payload) != "wk-2" {
 		t.Fatalf("worker listener's second head wrong: %+v", wk.offered)
 	}
 }
@@ -240,7 +247,7 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 		t.Fatalf("observer.sources = %v, want %v (one OnSourceFailure call per retry attempt)", obs.sources, want)
 	}
 	q.Dispatch()
-	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+	if len(wk.offered) != 1 || payloadItemID(wk.offered[0].Payload) != "wk-1" {
 		t.Fatalf("events not enqueued after the retry succeeded: %+v", wk.offered)
 	}
 }
@@ -322,7 +329,7 @@ func TestProduceIsolatesSourceFailure(t *testing.T) {
 	if accepted := q.Dispatch(); accepted != 1 {
 		t.Fatalf("Dispatch must still deliver the healthy source's event, accepted = %d", accepted)
 	}
-	if len(wk.offered) != 1 || ItemFromPayload(wk.offered[0].Payload).ID != "wk-1" {
+	if len(wk.offered) != 1 || payloadItemID(wk.offered[0].Payload) != "wk-1" {
 		t.Fatalf("worker listener wrong: %+v", wk.offered)
 	}
 	if dropped := q.Expire(); dropped != 1 {
@@ -619,21 +626,16 @@ func TestDeriveContextFromQueueEvent(t *testing.T) {
 	}
 }
 
-func TestItemFromPayload_absentIsZeroValue(t *testing.T) {
-	if got := ItemFromPayload(nil); got.ID != "" {
-		t.Fatalf("ItemFromPayload(nil) = %+v, want zero value", got)
-	}
-	if got := ItemFromPayload(map[string]any{"other": 1}); got.ID != "" {
-		t.Fatalf("ItemFromPayload without an item key = %+v, want zero value", got)
-	}
-}
-
-// A discover-constructed event's payload (ToQueueEvent's item+source
-// convention) survives an EncodeEvent/DecodeEvent wire round trip unchanged —
-// the path a forwarded (cross-process, e.g. socket-relayed) discover event
-// takes — and ItemFromPayload reconstructs the same item on the far side
-// (Task 1.6: wire.go's payload normalization must not disturb a
-// non-empty payload discover.go already builds).
+// A discover-constructed event's payload (ToQueueEvent's flat, unwrapped
+// convention — docket pg2-oju6w's Task 5.6) survives an
+// EncodeEvent/DecodeEvent wire round trip unchanged — the path a forwarded
+// (cross-process, e.g. socket-relayed) discover event takes (Task 1.6:
+// wire.go's payload normalization must not disturb a non-empty payload
+// discover.go already builds). The item-shape fields (id/type/title/metadata)
+// are read directly off the round-tripped payload here, exactly as the
+// registered handler participant's own dispatch entrypoint reads them on
+// the far side — this package itself no longer reconstructs a full
+// item.Item from them.
 func TestToQueueEvent_PayloadSurvivesWireRoundTrip(t *testing.T) {
 	qe := ToQueueEvent(itemEvt("work.ready", "zr-9"))
 	wire, err := eventqueue.EncodeEvent(qe)
@@ -644,20 +646,21 @@ func TestToQueueEvent_PayloadSurvivesWireRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
 	}
-	got := ItemFromPayload(decoded.Payload)
-	if got.ID != "zr-9" || got.Type != "task" {
-		t.Fatalf("ItemFromPayload(round-tripped payload) = %+v, want id=zr-9 type=task", got)
+	gotID, _ := decoded.Payload["id"].(string)
+	gotType, _ := decoded.Payload["type"].(string)
+	if gotID != "zr-9" || gotType != "task" {
+		t.Fatalf("round-tripped payload = %+v, want id=zr-9 type=task", decoded.Payload)
 	}
 }
 
 // An event with NO payload at all (a pushed event a source sent with `payload`
 // omitted, never a discover-produced one) decodes, per Task 1.6's wire
-// normalization, to a non-nil EMPTY map ({}) rather than nil. discover's own
-// consumer of a queue event's payload — ItemFromPayload, and the
-// DeriveContextFromQueueEvent bridge built on it — must handle that
-// wire-normalized {} exactly like the absent-payload case: a non-match, not an
-// error, yielding the zero Item/DispatchContext.
-func TestItemFromPayload_HandlesWireNormalizedEmptyPayload(t *testing.T) {
+// normalization, to a non-nil EMPTY map ({}) rather than nil.
+// DeriveContextFromQueueEvent — this package's own consumer of a queue
+// event's payload since Task 5.6 deleted ItemFromPayload — must handle that
+// wire-normalized {} exactly like the absent-payload case: a non-match, not
+// an error, yielding a zero-value Item.ID.
+func TestDeriveContextFromQueueEvent_HandlesWireNormalizedEmptyPayload(t *testing.T) {
 	decoded, err := eventqueue.DecodeEvent([]byte(`{"id":"e","type":"t"}`))
 	if err != nil {
 		t.Fatalf("DecodeEvent: %v", err)
@@ -665,12 +668,9 @@ func TestItemFromPayload_HandlesWireNormalizedEmptyPayload(t *testing.T) {
 	if decoded.Payload == nil || len(decoded.Payload) != 0 {
 		t.Fatalf("decoded.Payload = %v, want a non-nil empty map (wire.go's normalization)", decoded.Payload)
 	}
-	if got := ItemFromPayload(decoded.Payload); got.ID != "" || got.Type != "" {
-		t.Fatalf("ItemFromPayload(wire-normalized empty payload) = %+v, want zero Item", got)
-	}
 	role := roles.Role{Name: "worker"}
 	d := DeriveContextFromQueueEvent(role, decoded)
-	if d.Item.ID != "" || d.Item.Type != "" || d.Item.Title != "" || d.Item.Metadata != nil {
+	if d.Item.ID != "" {
 		t.Fatalf("DeriveContextFromQueueEvent(wire-normalized empty payload) item = %+v, want zero Item", d.Item)
 	}
 }

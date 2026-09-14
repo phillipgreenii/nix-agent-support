@@ -138,7 +138,9 @@ A dispatch, core → handler (`INTF-HANDLER`):
 ```
 
 Its two replies: the **inline completion**
-`{ "schemaVersion": "1", "id": "hs-771e", "outcome": { … } }`, and the **deferred ack**
+`{ "schemaVersion": "1", "id": "hs-771e", "outcome": "delivered" }` — `outcome` is an **opaque
+string** the core stores and never interprets (docket `pg2-oju6w`'s Task 5.4, `ADR 0065`'s "Wire
+contract" section) — and the **deferred ack**
 `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — which is itself the acceptance, so
 nothing further is owed for that dispatch.
 
@@ -313,3 +315,59 @@ makes a push source's events deliverable while a drain-and-exit run is still goi
 
 **Not decided here.** The socket's path convention, the token's format and lifetime, and the
 discovery mechanism are the implementation's own.
+
+### `DEC-WIRE-3` — `postStartup`/`preShutdown`: once-per-process-lifetime handler lifecycle hooks <!-- uuid: 8a1f2c4d-6e0b-4a5e-9d3c-2b7f1e9a4c60 -->
+
+**Decided (pg2-oju6w.15).** Two generic wire messages, `handler.postStartup` and
+`handler.preShutdown`, dispatched **once per process lifetime** — never per event — to every
+**enabled** role's registered handler participant, over the exact same transport `DEC-WIRE-1`
+already defines: `<command> <subcommand>`, JSON on stdin, JSON on stdout, a coarse exit code. The
+only differences from `dispatch` are the subcommand name and the call site:
+
+- `postStartup` fires once, immediately after the core's own boot (`bootCore`) succeeds, for each
+  of `run`'s three entry points (`run`, `run-until-idle`, `run-until-idle`'s gated slice).
+- `preShutdown` fires once, at the same point the core used to call the now-deleted
+  `Orchestrator.TeardownAll` — a **zero-behavior-change relocation** of that per-process ccpool
+  session sweep into the handler's own process, not a redesign: `TeardownAll` already fired once
+  per process invocation (via `defer`, before each entry point returns), never per internal tick.
+
+**Request/reply shape.** Both hooks share one shape family, distinct from `dispatch`'s:
+
+```json
+// request (either hook): no event — there is nothing to dispatch
+{ "schemaVersion": "1", "id": "hs-startup-1" }
+// reply: always a sync outcome, NEVER a deferred ack
+{ "schemaVersion": "1", "id": "hs-startup-1", "outcome": "ok" }
+```
+
+Unlike `handler.dispatch-reply`, there is no `{ "deferred": true }` branch: these are not queued
+dispatches, so a handler has nothing to defer and `ErrBusy`/exit `9` does not apply once past the
+ordinary lifecycle/malformed-request checks every subcommand shares. Role-identifying context
+travels the SAME way `dispatch` already carries it — the handler process is launched via
+`CommandFor(role)` plus its own `--role-config`/`--config` flags — so neither request schema needs
+a new payload field for "which role is this."
+
+**No de-duplication across roles sharing one handler process (decision #1).** When two enabled
+roles resolve to the SAME handler command (a shared process backing multiple roles), that process
+receives `postStartup`/`preShutdown` **once per role**, not once. This is deliberate, not an
+oversight: de-duplicating would require the core to know which roles share a process — domain
+knowledge `GOAL-MIN-1` says the core should not hold — and each call's payload already carries
+role-specific config context via `--role-config`, so a second call is redundant work, never a
+correctness problem (closing an already-torn-down session is a no-op).
+
+**`postStartup` is built for symmetry, not present need (decision #2).** Nothing consumes its
+outcome today; every registered handler's own `postStartup` implementation MAY be a pure no-op.
+It exists so a FUTURE participant with genuine boot-time setup (starting a daemon, warming a
+cache) has a hook to use, without a later change having to invent a THIRD lifecycle message and
+retrofit every existing handler to answer it.
+
+**Same transport, no new mechanism.** `DEC-WIRE-1`'s own text already states the general
+principle this decision merely instantiates twice: "a gRPC or in-code transport that carries the
+same message schema conforms equally." `postStartup`/`preShutdown` add two subcommand names and
+two call sites; they introduce no new addressing, authentication, or framing beyond what
+`dispatch` already established.
+
+**Not decided here.** Whether a future handler kind needs its own additional lifecycle hook (a
+mid-life health check, a graceful-drain signal distinct from `preShutdown`) is left open; nothing
+here forecloses adding a fourth or fifth hook the same way, each its own subcommand over this same
+transport.

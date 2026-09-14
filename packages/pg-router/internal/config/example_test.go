@@ -6,40 +6,30 @@ import (
 	"testing"
 )
 
-// TestExampleTOML_roundTrips guarantees the generated example config actually loads
-// and reproduces the built-in feedback + worker + review roles — so 'config
-// --print-defaults' output is always a valid, copy-pasteable starting point.
+// TestExampleTOML_roundTrips guarantees the generated example config actually
+// loads and decodes the one illustrative [[query]]/[[role]] pair it prints —
+// so 'config --print-defaults' output is always a valid, copy-pasteable
+// starting point. As of docket pg2-oju6w's Task 5.8, ExampleTOML() no longer
+// mirrors a built-in default set (there is none) — it just needs to be a
+// loadable, self-consistent example.
 func TestExampleTOML_roundTrips(t *testing.T) {
 	writeCfg(t, ExampleTOML())
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("example config must load: %v\n---\n%s", err, ExampleTOML())
 	}
-	if len(c.Roles) != 3 || c.Roles[0].Name != "feedback" || c.Roles[1].Name != "worker" || c.Roles[2].Name != "review" {
-		t.Fatalf("example must reproduce built-in feedback+worker+review: %+v", c.Roles)
+	if len(c.Roles) != 1 || c.Roles[0].Name != "example-role" {
+		t.Fatalf("example must decode its one illustrative role: %+v", c.Roles)
 	}
-	// The worker's authorship guard and completion mode must survive the round-trip.
-	if c.Roles[1].CCPool == nil || !c.Roles[1].CCPool.AuthorshipGuard || c.Roles[1].CCPool.Completion != "close-or-handback" {
-		t.Fatalf("worker ccpool config did not round-trip: %+v", c.Roles[1].CCPool)
+	r := c.Roles[0]
+	if !r.Enabled || len(r.Binds) != 1 || r.Binds[0] != "example.ready" {
+		t.Fatalf("example role did not round-trip: %+v", r)
 	}
-	// The review role reviews teammate PRs too, so its authorship guard MUST be
-	// off (a guard asserting "author is me + my branch" would block team reviews).
-	rv := c.Roles[2].CCPool
-	if rv == nil || rv.AuthorshipGuard || rv.Completion != "close-or-handback" {
-		t.Fatalf("review ccpool config did not round-trip (authorship_guard must be false): %+v", rv)
+	if len(c.Queries) != 1 || c.Queries[0].Name != "example-source" {
+		t.Fatalf("example must decode its one illustrative query: %+v", c.Queries)
 	}
-	// The feedback role carries budget.Budget{} (fully unlimited => NO watchdog) in
-	// roles.BuiltinRoleSet. Without an emitted [role.ccpool.budget] table, buildCCPool
-	// seeds it from the pool default (Time=25m) and the example reload silently adds a
-	// 25m watchdog. Assert the exact "fully unlimited" triple executor.budgetUnlimited
-	// checks: Tokens<=0 && Cost<=0 && Time<=0.
-	fb := c.Roles[0].CCPool
-	if fb == nil {
-		t.Fatalf("feedback ccpool config missing after round-trip: %+v", c.Roles[0])
-	}
-	if !fb.Budget.Tokens.Unlimited() || !fb.Budget.Cost.Unlimited() || fb.Budget.Time > 0 {
-		t.Fatalf("feedback budget did not round-trip to unlimited (got Tokens=%d Cost=%d Time=%v); "+
-			"print-defaults reload added a watchdog", int64(fb.Budget.Tokens), int64(fb.Budget.Cost), fb.Budget.Time)
+	if got := c.Queries[0].Query.Emits(); len(got) != 1 || got[0] != "example.ready" {
+		t.Fatalf("example query did not round-trip its emits: %+v", got)
 	}
 }
 

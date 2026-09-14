@@ -2,18 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/phillipgreenii/pg-router/conformance"
-	"github.com/phillipgreenii/pg-router/internal/beads"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
-	"github.com/phillipgreenii/pg-router/internal/reconcile"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -64,21 +58,14 @@ func warnTrackedConfig(ctx context.Context, cfg config.Config) {
 	}
 }
 
-// warnStrandedFeedback surfaces the pg2-eo4n failure mode: discovery filters the
-// feedback role with `bd ready --label mine`, so a self-owned `process-feedback:`
-// cycle that was never stamped `mine` is silently skipped (indistinguishable from
-// a team cycle) and idles the pool with no signal. This pre-flight guard counts
-// such cycles (parent merge-request author == self, but missing `mine`) and emits
-// a WARN naming them — a loud, observable signal. It is ADDITIVE and read-only:
-// it does not stamp the beads or alter the `--label mine` discovery itself. A bd
-// failure here is logged, not fatal (best-effort observability, like the other
-// pre-flight warns); the propagated error never becomes a false "nothing
-// stranded".
-func warnStrandedFeedback(ctx context.Context, br beads.Runner, self string) {
-	if _, err := reconcile.StrandedSelfCycles(ctx, br, self); err != nil {
-		slog.Warn("stranded-feedback reconcile guard could not run", "err", err)
-	}
-}
+// warnStrandedFeedback (the pg2-eo4n stranded-self-owned-feedback-cycle guard)
+// and its backing internal/reconcile package are DELETED outright, not
+// updated: this was the standalone/pre-flight pair to the deleted `reconcile`
+// subcommand's own StrandedSelfCycles call (reconcile_cmd.go, also deleted),
+// and the same "no live consumer" reasoning that authorizes the outright
+// subcommand deletion applies here — reconcile's read-only guard has no
+// remaining caller once the subcommand is gone (docket pg2-oju6w's Task 5.10,
+// ADR 0065's "No deprecation shim for sessions/reconcile" section).
 
 // warnStubQueries warns for any configured query whose type is a not-yet-
 // implemented stub (it will error when run); surfaces it at pre-flight instead.
@@ -90,74 +77,13 @@ func warnStubQueries(cfg config.Config) {
 	}
 }
 
-// resolveSelf shells out to `pg-pr config show --json` and reads .self_login.
-func resolveSelf(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "pg-pr", "config", "show", "--json").Output()
-	if err != nil {
-		return "", fmt.Errorf("pg-pr config show: %w", err)
-	}
-	return parseSelfLogin(out)
-}
-
-// parseSelfLogin extracts self_login from pg-pr config JSON.
-func parseSelfLogin(b []byte) (string, error) {
-	var cfg struct {
-		SelfLogin string `json:"self_login"`
-	}
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		return "", fmt.Errorf("parse pg-pr config: %w", err)
-	}
-	if cfg.SelfLogin == "" {
-		return "", fmt.Errorf("self_login is empty")
-	}
-	return cfg.SelfLogin, nil
-}
-
-// precheck asserts bd is reachable from RepoRoot and resolves the expected
-// store. It does NOT require a local .beads dir at RepoRoot: bd is
-// git-worktree-aware (it resolves the store from the cwd, the git common dir, or
-// the Dolt server), so RepoRoot may be a monorepo worktree/slot with no local
-// .beads — which is the normal case for workers. Everything is verified through
-// bd itself rather than by stat-ing a path.
-func precheck(ctx context.Context, cfg config.Config, br beads.Runner) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	if _, err := br.Run(ctx, "list", "--limit", "1", "--json"); err != nil {
-		return fmt.Errorf("bd unreachable from %s: %w", cfg.RepoRoot, err)
-	}
-	if err := precheckPrefix(ctx, br, cfg.BeadsPrefix); err != nil {
-		return err
-	}
-	return nil
-}
-
-// precheckPrefix asserts the store bd resolves carries the expected issue
-// prefix (a guard against pointing at the wrong store). Testable seam: tests
-// pass a fake runner returning the prefix.
-func precheckPrefix(ctx context.Context, br beads.Runner, want string) error {
-	got, err := readBeadsPrefix(ctx, br)
-	if err != nil {
-		return err
-	}
-	if got != want {
-		return fmt.Errorf("bead prefix %q != expected %q", got, want)
-	}
-	return nil
-}
-
-// readBeadsPrefix asks bd for the resolved issue prefix (`bd config get
-// issue_prefix`). This works in a monorepo worktree where there is no local
-// .beads/config.yaml — bd resolves it git-aware, exactly as every other bd call
-// here does.
-func readBeadsPrefix(ctx context.Context, br beads.Runner) (string, error) {
-	out, err := br.Run(ctx, "config", "get", "issue_prefix")
-	if err != nil {
-		return "", fmt.Errorf("bd config get issue_prefix: %w", err)
-	}
-	prefix := strings.TrimSpace(out)
-	if prefix == "" {
-		return "", fmt.Errorf("bd config get issue_prefix returned no prefix")
-	}
-	return prefix, nil
-}
+// precheck/precheckPrefix/resolveSelf/parseSelfLogin/readBeadsPrefix — the
+// R14 startup pre-flight blockers (bd unreachable, beads-prefix mismatch,
+// pg-pr config show self-login) — MOVED OUT of this file entirely (docket
+// pg2-oju6w's Task 5.8, ADR 0065's "Source-side boundary" section, closing
+// register row R14 / bead pg2-d4gvb): they were three extra checks run ahead
+// of INV-WORKFLOW-1's own closed six-check set (docs/behavior/README.md's
+// former register row for INV-WORKFLOW-1), and they no longer run in
+// pg-router at all. They now live as this module's own startup pre-flight
+// in packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/
+// preflight.go, exercised from that module's `query` subcommand.

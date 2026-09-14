@@ -9,15 +9,20 @@
 // pool-wide scalars (MaxFeedback/MaxWorker/gates/roles/queries), which have
 // no meaning on this side of the wire boundary.
 //
-// A fuller config story — decoding this module's own config file, real
-// `claude`-enum permission-mode validation — is Task 5.7's job (docket
-// pg2-oju6w), not this one's; Default() below is deliberately a plain Go
-// literal, mirroring packages/pg-router/internal/config.Default()'s own
-// values for the fields this module shares with it, so today's behavior is
-// unchanged for a deployment that never overrides them.
+// Default() below is deliberately a plain Go literal, mirroring
+// packages/pg-router/internal/config.Default()'s own values for the fields
+// this module shares with it, so today's behavior is unchanged for a
+// deployment that never overrides them.
+//
+// Validate's real claude --permission-mode enum check (docket pg2-oju6w Task
+// 5.7) lives HERE, not on pg-router's own Config: this module is the side
+// that actually invokes `ccpool new --permission-mode`, so it is the side
+// that needs the real values. pg-router itself now carries PermissionMode as
+// an opaque, un-validated string (kept only to display it).
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
@@ -34,6 +39,13 @@ type Config struct {
 	// RepoRoot is the repo a dispatched session's WORKSPACE_ROOT derives
 	// from (worktree/none isolation) or runs directly against.
 	RepoRoot string
+	// BeadsPrefix is the expected bd issue-store prefix, checked by this
+	// module's own precheck (docket pg2-oju6w's Task 5.8, ADR 0065's
+	// "Source-side boundary" section, closing register row R14 / bead
+	// pg2-d4gvb): a guard against a `query` invocation resolving the wrong
+	// beads store. Mirrors packages/pg-router/internal/config.Config's
+	// same-named field.
+	BeadsPrefix string
 	// WorktreeDir is the parent directory fresh per-item git worktrees are
 	// created under (worktree isolation, the default).
 	WorktreeDir string
@@ -74,6 +86,37 @@ type Config struct {
 	HardPct      float64
 }
 
+// validPermissionModes is the set of claude --permission-mode values this
+// module may pass through to `ccpool new` (mirrors ccpool's own
+// launch.PermissionMode enum; duplicated here rather than imported because
+// this module does not depend on the ccpool module's internal packages). The
+// empty string is valid: it means "omit the flag" (NewCLIRunner.Ensure only
+// appends --permission-mode when PermissionMode is non-empty — see
+// internal/ccpool/cli.go).
+var validPermissionModes = map[string]bool{
+	"":                  true,
+	"default":           true,
+	"acceptEdits":       true,
+	"plan":              true,
+	"auto":              true,
+	"dontAsk":           true,
+	"bypassPermissions": true,
+}
+
+// Validate rejects a Config whose PermissionMode is not one of the claude
+// --permission-mode values this module knows how to forward. Docket
+// pg2-oju6w Task 5.7: this is the real enum check pg-router's own Config used
+// to duplicate — it now lives only here, on the side that actually invokes
+// `ccpool new --permission-mode`. Callers (cmd/pg-router-ccpool-handler's
+// loadConfig) MUST call this after decoding so an invalid value fails at
+// config-load time rather than surfacing later as a rejected ccpool argv.
+func (c Config) Validate() error {
+	if !validPermissionModes[c.PermissionMode] {
+		return fmt.Errorf("invalid permissionMode %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
+	}
+	return nil
+}
+
 // WorkerBudget builds the budget.Budget a worker/review role's CCPoolConfig
 // carries, from this Config's BudgetTokens/BudgetCost/BudgetTime/*Pct
 // fields. Mirrors packages/pg-router/internal/config.Config.WorkerBudget()
@@ -94,6 +137,7 @@ func (c Config) WorkerBudget() budget.Budget {
 func Default() Config {
 	return Config{
 		WorktreeDir:    "",
+		BeadsPrefix:    "zr",
 		MaxWait:        1800 * time.Second,
 		PollInterval:   10 * time.Second,
 		Effort:         "max",

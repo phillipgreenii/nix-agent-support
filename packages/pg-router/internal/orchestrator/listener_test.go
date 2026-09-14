@@ -2,25 +2,19 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os/exec"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
-	"github.com/phillipgreenii/pg-router/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
-	"github.com/phillipgreenii/pg-router/internal/dtest"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/item"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/internal/usage"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // TestRoleListener_RetryBackoff_roleOverrideSelected is Task 1.3's first
@@ -75,65 +69,43 @@ func TestRoleListener_RetryBackoff_builtinKeepsPoolCadence(t *testing.T) {
 // reports OfferResult{Accepted: true, Decline: eventqueue.DeclineNone} — the
 // same "always accepts" behavior as before Task 2.2, just through the new
 // Offering/OfferResult signature. Task 2.3 is what adds a genuine decline.
+// As of docket pg2-oju6w's Task 5.4, Offer's own dispatch call goes through
+// the wire client (fakeHandler here) rather than the retired in-process
+// executor, so this asserts on the fake's own recorded call instead of
+// cc.Sent.
 func TestRoleListener_OfferAlwaysAccepts(t *testing.T) {
 	cfg := fastCfg()
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w1": {"closed"}}}
-	ext1 := "pg-router-worker-zr-w1-" + dtest.TestStamp
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: ext1, Live: true, State: ccpool.StateWorking},
-	}}}
-	o := newOrch(cc, bd, cfg)
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	handler := o.Handler.(*fakeHandler)
 	ctx := context.Background()
 	l := o.NewListener(ctx, workerRole(o))
 
-	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
+	evt := discover.ToQueueEvent(event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"}))
 	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
 
 	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 	if got != want {
 		t.Fatalf("Offer() = %+v, want %+v", got, want)
 	}
-	if len(cc.Sent) != 1 || cc.Sent[0] != ext1 {
-		t.Fatalf("Offer did not dispatch the worker session; sent=%v", cc.Sent)
+	if handler.callCount() != 1 {
+		t.Fatalf("Offer must dispatch the worker event via the wire client exactly once; calls=%d", handler.callCount())
+	}
+	if handler.calls[0].role.Name != "worker" || handler.calls[0].evt.ID != evt.ID {
+		t.Fatalf("dispatched call = %+v, want role=worker evt.ID=%q", handler.calls[0], evt.ID)
 	}
 }
 
-// fakeExitCommander is a query.Commander test double returning a fixed error
-// from every call — used to hand a command role's backing command a
-// fabricated *exec.ExitError (Task 2.3, pg2-84o3m.22's "test doubles
-// fabricate an *exec.ExitError").
-type fakeExitCommander struct{ err error }
-
-func (f fakeExitCommander) Run(_ context.Context, _ []string) ([]byte, error) { return nil, f.err }
-
-// fabricateExitError runs a trivial subprocess that exits with code so the
-// test gets back a REAL *exec.ExitError — os/exec.ExitError has no exported
-// constructor, so a genuine short-lived process is the only portable way to
-// produce one.
-func fabricateExitError(t *testing.T, code int) error {
-	t.Helper()
-	err := exec.Command("/bin/sh", "-c", fmt.Sprintf("exit %d", code)).Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("fabricateExitError(%d): did not produce *exec.ExitError; err=%v", code, err)
-	}
-	return exitErr
-}
-
-// TestListenerOffer_CommandExitBusyMapsToDeclineBusy is Task 2.3's required
-// RED test (Step 2.3.2): a command role whose backing command exits busy
-// (code 9, executor.ErrBusy) must make Offer report a pre-accept DeclineBusy
-// rather than treating the dispatch as completed.
-func TestListenerOffer_CommandExitBusyMapsToDeclineBusy(t *testing.T) {
+// TestListenerOffer_HandlerBusyMapsToDeclineBusy is Task 2.3's required RED
+// test (Step 2.3.2), updated for Task 5.4's wire client: a registered
+// handler participant whose dispatch subcommand exits busy (DEC-WIRE-1's
+// exit code 9, wireclient.ErrBusy — the wire successor to the retired
+// in-process executor.ErrBusy) must make Offer report a pre-accept
+// DeclineBusy rather than treating the dispatch as completed.
+func TestListenerOffer_HandlerBusyMapsToDeclineBusy(t *testing.T) {
 	cfg := fastCfg()
-	bd := &dtest.ScriptBD{}
-	cc := &dtest.FakeCC{}
-	o := newOrch(cc, bd, cfg)
-	o.Cmd = fakeExitCommander{err: fabricateExitError(t, 9)}
-	role := roles.Role{
-		Name: "cmdrole", Type: "command", Binds: []string{"work-ready"},
-		Command: &roles.CommandConfig{Argv: []string{"noop"}},
-	}
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{err: wireclient.ErrBusy}
+	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
 	ctx := context.Background()
 	l := o.NewListener(ctx, role)
 
@@ -148,13 +120,12 @@ func TestListenerOffer_CommandExitBusyMapsToDeclineBusy(t *testing.T) {
 
 // TestListenerOffer_UnavailableSelfStatusDeclines is Task 2.3's required RED
 // test (Step 2.3.3): a role whose registry entry self-reports `unavailable`
-// must make Offer decline BEFORE doing any dispatch work at all (no session
-// sent), never reaching the executor.
+// must make Offer decline BEFORE doing any dispatch work at all (no wire
+// dispatch sent), never reaching the handler.
 func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 	cfg := fastCfg()
-	bd := &dtest.ScriptBD{}
-	cc := &dtest.FakeCC{}
-	o := newOrch(cc, bd, cfg)
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	handler := o.Handler.(*fakeHandler)
 	role := workerRole(o)
 
 	reg := core.NewRegistry(nil)
@@ -172,123 +143,32 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 	ctx := context.Background()
 	l := o.NewListener(ctx, role)
 
-	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
+	evt := discover.ToQueueEvent(event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"}))
 	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
 
 	want := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
 	if got != want {
 		t.Fatalf("Offer() = %+v, want %+v", got, want)
 	}
-	if len(cc.Sent) != 0 {
-		t.Fatalf("Offer must not dispatch while self-status is unavailable; sent=%v", cc.Sent)
-	}
-}
-
-// fakeResourceLimitObserver is a test double for ResourceLimitObserver
-// (this bead, pg2-fm2gw): mutex-guarded since it is exercised from the
-// watchdog/waitDone race (workerWaitWithWatchdog runs both concurrently).
-type fakeResourceLimitObserver struct {
-	mu    sync.Mutex
-	calls [][2]string // {eventID, evtType} per call, in order
-}
-
-func (f *fakeResourceLimitObserver) OnResourceLimit(eventID, evtType string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, [2]string{eventID, evtType})
-}
-
-// TestRoleListener_Offer_ResourceLimitHitFiresHookAndStillAccepts is this
-// bead's (pg2-fm2gw) required RED test for acceptance criterion 1:
-// roleListener.Offer exposes a hook that reports a resource-limit outcome.
-// It replays executor/ccpool_test.go's TestDispatch_watchdogHardStop_unclaimed
-// recipe (a finite BudgetTokens cap + a RampReader immediately over 100%,
-// with the SAME Tick-wraps-a-real-sleep fix that test documents, so the
-// watchdog reliably wins its race against waitDone) through Offer rather
-// than the bare executor, and asserts TWO things at once: Offer still
-// reports Accepted=true (a budget hard-stop is a genuine accept — the
-// dispatch ran to completion inline, INV-EVT-1 — never a decline), and
-// o.ResourceLimitObserver.OnResourceLimit fired exactly once, carrying the
-// offered event's own id and type.
-func TestRoleListener_Offer_ResourceLimitHitFiresHookAndStillAccepts(t *testing.T) {
-	cfg := fastCfg()
-	cfg.BudgetTokens = 1000 // finite cap so the ramp trips it
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w1": {"in_progress"}}}
-	ext1 := "pg-router-worker-zr-w1-" + dtest.TestStamp
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: ext1, Live: true, TranscriptPath: "/t", CWD: "/repo"},
-	}}}
-	o := newOrch(cc, bd, cfg)
-	o.usageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately >100%
-
-	// Same wall-clock-vs-manual-clock fix as
-	// executor/ccpool_test.go's TestDispatch_watchdogHardStop_unclaimed: o.tick
-	// advances a manual clock with NO real sleep while the watchdog's own Poll
-	// wait is a real time.After, so without this the two racers can run on
-	// mismatched clocks and waitDone occasionally wins instead.
-	origTick := o.tick
-	o.tick = func(ctx context.Context, d time.Duration) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(d):
-		}
-		return origTick(ctx, d)
-	}
-
-	fake := &fakeResourceLimitObserver{}
-	o.ResourceLimitObserver = fake
-
-	ctx := context.Background()
-	l := o.NewListener(ctx, workerRole(o))
-	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
-	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
-
-	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
-	if got != want {
-		t.Fatalf("Offer() = %+v, want %+v (a budget hard-stop is a genuine accept, never a decline)", got, want)
-	}
-
-	fake.mu.Lock()
-	calls := fake.calls
-	fake.mu.Unlock()
-	if len(calls) != 1 {
-		t.Fatalf("OnResourceLimit calls = %d, want exactly 1; calls=%v", len(calls), calls)
-	}
-	if want := [2]string{evt.ID, evt.Type}; calls[0] != want {
-		t.Fatalf("OnResourceLimit call = %v, want {eventID, evtType} = %v", calls[0], want)
+	if handler.callCount() != 0 {
+		t.Fatalf("Offer must not dispatch while self-status is unavailable; calls=%d", handler.callCount())
 	}
 }
 
 // TestRoleListener_Offer_NoResourceLimitObserverIsSafe proves the nil-means-
 // no-op idiom this hook follows (matching l.reg's own doc): a role listener
-// built with no ResourceLimitObserver configured (every pre-this-bead
-// construction site, and most of this file's own tests) must not panic
-// when the SAME budget hard-stop that would otherwise fire the hook occurs.
+// built with no ResourceLimitObserver configured — every construction site
+// today, since the wire protocol has no resource-limit signal for Offer to
+// detect at all as of docket pg2-oju6w's Task 5.4 (ResourceLimitObserver's
+// own doc comment) — must not panic on an ordinary successful dispatch.
 func TestRoleListener_Offer_NoResourceLimitObserverIsSafe(t *testing.T) {
 	cfg := fastCfg()
-	cfg.BudgetTokens = 1000
-	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w1": {"in_progress"}}}
-	ext1 := "pg-router-worker-zr-w1-" + dtest.TestStamp
-	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: ext1, Live: true, TranscriptPath: "/t", CWD: "/repo"},
-	}}}
-	o := newOrch(cc, bd, cfg)
-	o.usageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}}
-	origTick := o.tick
-	o.tick = func(ctx context.Context, d time.Duration) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(d):
-		}
-		return origTick(ctx, d)
-	}
+	o := newOrch(cfg, testQuerySet(nil, nil))
 	// o.ResourceLimitObserver deliberately left nil.
 
 	ctx := context.Background()
 	l := o.NewListener(ctx, workerRole(o))
-	evt := discover.ToQueueEvent(event.NewItemEvent(roles.EventWorkReady, "t", item.Item{ID: "zr-w1"}))
+	evt := discover.ToQueueEvent(event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"}))
 	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt}) // must not panic
 
 	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}

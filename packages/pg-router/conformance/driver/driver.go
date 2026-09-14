@@ -194,6 +194,22 @@ var negativeMatrix = map[string][]negativeCase{
 	"handler.dispatch-reply": {
 		{"neither branch", `{"schemaVersion":"1","id":"h"}`},
 	},
+	"handler.postStartup": {
+		{"missing id", `{"schemaVersion":"1"}`},
+		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
+	},
+	"handler.postStartup-reply": {
+		{"missing outcome", `{"schemaVersion":"1","id":"h"}`},
+		{"wrong-type outcome", `{"schemaVersion":"1","id":"h","outcome":5}`},
+	},
+	"handler.preShutdown": {
+		{"missing id", `{"schemaVersion":"1"}`},
+		{"wrong-type id", `{"schemaVersion":"1","id":5}`},
+	},
+	"handler.preShutdown-reply": {
+		{"missing outcome", `{"schemaVersion":"1","id":"h"}`},
+		{"wrong-type outcome", `{"schemaVersion":"1","id":"h","outcome":5}`},
+	},
 	"mon.read": {
 		{"missing metrics", `{"schemaVersion":"1","id":"m"}`},
 		{"metrics wrong item type", `{"schemaVersion":"1","id":"m","metrics":[1,2]}`},

@@ -24,9 +24,15 @@ func NewQueryFactories() *Factories {
 	// (pg2-n75tk): each typed "how another tool is configured" into Core, and
 	// jira-issues was structurally unsatisfiable (its backing command exists
 	// only in a downstream flake). command is the one surviving generic
-	// source; see MIGRATION.md. query.BeadsReady itself is NOT deleted — it
-	// still backs the in-Go built-in default query set (roles.BuiltinQuerySet),
-	// which never goes through this factory.
+	// source; see MIGRATION.md. query.BeadsReady (the Go-native type that
+	// used to back the in-Go built-in default query set, roles.
+	// BuiltinQuerySet) is DELETED outright as of docket pg2-oju6w's Task 5.8
+	// — that built-in default no longer exists at all, and the beads-backed
+	// query it constructed moved to a registered kind:"source" participant
+	// in packages/pg-router-ccpool-handler. ParticipantQuery (query.go) is
+	// this package's own wire client to such a participant; like BeadsReady
+	// before it, it is NOT TOML-configurable and never goes through this
+	// factory.
 	return f
 }
 

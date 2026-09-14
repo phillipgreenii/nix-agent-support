@@ -37,6 +37,18 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 
+	// INV-EVT-2: a crash-window redelivery of the same dispatched item mints a
+	// FRESH per-attempt ExternalID (Role.ExternalID's own stamp), so ExternalID
+	// cannot be the correlation key that catches the duplicate — but the ccpool
+	// --name label (display, above) is stable per bead across attempts. Before
+	// launching a fresh session, check whether one already exists under that
+	// stable name; if so this dispatch is an already-in-flight duplicate, and
+	// absorbing it (rather than starting a second session for the same bead)
+	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
+	if existing, ok := r.findSessionByName(ctx, display); ok {
+		return r.absorbDuplicate(ctx, d, existing)
+	}
+
 	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
 	// default "worktree" — a fresh per-bead worktree so the worker never runs on a
 	// stale unrelated branch, pg2-yukh root cause #2). On failure, treat it like a
@@ -132,6 +144,51 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 // is needed and no budget prompt-line is appended).
 func budgetUnlimited(b budget.Budget) bool {
 	return b.Tokens.Unlimited() && b.Cost.Unlimited() && b.Time <= 0
+}
+
+// findSessionByName looks up a ccpool session by its --name display label
+// (Session.Name) — the stable per-bead identity (Role.DisplayName) INV-EVT-2's
+// duplicate-absorption check correlates a redelivered dispatch against,
+// unlike the per-attempt ExternalID (ADR 0065's "Register" section's
+// INV-EVT-2 note). A list error is treated as "no match" (can't tell ⇒ fall
+// through to launching normally), the same can't-tell posture active() and
+// sessionState() already take elsewhere in this file.
+func (r *ccpoolRun) findSessionByName(ctx context.Context, name string) (ccpool.Session, bool) {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return ccpool.Session{}, false
+	}
+	for _, s := range sessions {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return ccpool.Session{}, false
+}
+
+// absorbDuplicate treats this dispatch as an already-in-flight duplicate of
+// existing's session: it never re-Ensures/Sends (that would launch a SECOND
+// ccpool session for the same bead — exactly what INV-EVT-2 forbids), it only
+// waits on the EXISTING session's own outcome, addressing it by its own
+// ExternalID and reusing its own worktree (existing.CWD) for the watchdog's
+// guarded reset. If that session has already settled (idle/errored), waitDone
+// returns on its very first poll with the existing outcome; if it is still
+// in-flight, this call blocks until it settles — the "deferred ack pointing
+// at the same in-flight work" this task's Contract calls for, held open the
+// same way a normal inline dispatch already holds the call open for a
+// long-running session (cmd/pg-router-ccpool-handler/dispatch.go's own
+// doc comment). Mirrors run()'s own tail (budget-gated watchdog race +
+// waitFailureResult) so the terminal verb reported here is identical to what
+// a first-time dispatch of the same work would have reported.
+func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
+	cc := d.Role.CCPool
+	var werr error
+	if budgetUnlimited(cc.Budget) {
+		werr = r.waitDone(ctx, nil, d, existing.ExternalID)
+	} else {
+		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD)
+	}
+	return r.waitFailureResult(cc, d.Item.ID, werr), werr
 }
 
 // renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety

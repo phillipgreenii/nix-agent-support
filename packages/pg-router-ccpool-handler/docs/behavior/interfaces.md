@@ -30,9 +30,15 @@ crosses the line is named here, mirroring `packages/pa-monitor/docs/behavior/int
 treatment of its own named boundaries (`INTF-BRIDGE`).
 
 - **`INTF-CCH-CCPOOL`** <!-- uuid: d1fc9c42-5d04-4df3-bfb1-a11cc97d668d --> — a ccpool-backed
-  handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session.
-  **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its internals).
-  **Initiator:** this module. **Multiplicity:** one per ccpool-backed handler session.
+  handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session,
+  PLUS (pg2-oju6w.15) this module's own `preShutdown` hook sweeping every prefix-matching session
+  across the whole process — not scoped to one dispatch — the once-per-process-lifetime
+  relocation of a sweep pg-router's own core used to run directly against `ccpool` before this
+  module existed. **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its
+  internals). **Initiator:** this module. **Multiplicity:** one per ccpool-backed handler session
+  for the per-dispatch crossing; one sweep per `preShutdown` call (itself once per enabled role
+  sharing this process, per `INTF-HANDLER`'s own lifecycle-hooks note on no cross-role
+  de-duplication).
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

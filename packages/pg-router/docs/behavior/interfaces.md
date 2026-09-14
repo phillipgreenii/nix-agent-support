@@ -390,6 +390,35 @@ sequenceDiagram
     Note over Core,H: a pre-accept decline is a busy decline or an unavailable self-status, and the core re-offers
 ```
 
+**Lifecycle hooks: `postStartup`/`preShutdown` (pg2-oju6w.15).** Distinct from `dispatch`, the core
+sends each ENABLED handler exactly two additional messages across its whole process lifetime, never
+per event: `postStartup` once, immediately after the core itself finishes booting, and
+`preShutdown` once, at the point the core's own shutdown sequence used to sweep every session that
+handler's kind had created itself (this sweep is now the handler's own responsibility end to end —
+the core no longer inspects or closes a handler-owned session at all). Both hooks answer with a
+sync outcome only; **neither has a deferred form** — there is no event to hand back later, so a
+handler has nothing to defer.
+
+A handler sharing one process across several registered roles receives BOTH hooks once per role, not
+once per process: the core holds no cross-role de-duplication state (`GOAL-MIN-1` — this is exactly
+the kind of participant-topology knowledge the core must not carry), so a shared process simply
+answers the identical hook more than once. This is a documented cost, not a defect: a handler's own
+`preShutdown` implementation MUST be safe to invoke redundantly (idempotent), the same tolerance
+`INTF-HANDLER`'s "Obligations" paragraph already requires of `dispatch` for a duplicate event.
+
+```mermaid
+sequenceDiagram
+    participant Core as core
+    participant H as event handler (INTF-HANDLER)
+    Note over Core,H: once per process lifetime, never per event
+    Core->>H: postStartup { id }
+    H-->>Core: { id, outcome }
+    Note over Core,H: ... normal dispatch traffic ...
+    Core->>H: preShutdown { id }
+    H-->>Core: { id, outcome }
+    Note over Core,H: no deferred form on either hook - nothing to hand back later
+```
+
 ## `INTF-MON` — monitoring sink <!-- uuid: 11c08936-42df-4fd6-a912-70fe88244012 -->
 
 - **Counterparty:** `ACTOR-MON`, a pluggable monitoring sink. **Initiator:** either — the sink

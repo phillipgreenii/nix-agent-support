@@ -22,10 +22,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
-	"github.com/phillipgreenii/pg-router/internal/budget"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/internal/usage"
 	"github.com/phillipgreenii/x/gitclient"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
@@ -80,6 +78,12 @@ type Config struct {
 	CICDDown       string
 	Effort         string
 	Model          string
+	// PermissionMode is an OPAQUE, un-validated string on this side of the wire
+	// boundary (docket pg2-oju6w Task 5.7): pg-router forwards it verbatim to
+	// the new module's own dispatch config and displays it in `config --show`,
+	// but no longer checks it against the claude --permission-mode enum — that
+	// check now lives in packages/pg-router-ccpool-handler/internal/config,
+	// the side that actually invokes `ccpool new --permission-mode`.
 	PermissionMode string
 	// AllowedTools is the claude --allowed-tools allowlist forwarded verbatim to
 	// `ccpool new --allowed-tools`. Combined with PermissionMode=dontAsk it is the
@@ -186,11 +190,6 @@ func (c Config) Meter() metric.MeterProvider {
 	return noop.NewMeterProvider()
 }
 
-// CCPoolCommand is the ccpool binary a ccpool-type handler runs through
-// (internal/ccpool's CLIRunner invokes it). It lives here so the runner and the
-// pre-runtime absent-backing-command check share one literal.
-const CCPoolCommand = "ccpool"
-
 // CommandLocator resolves whether a participant's backing command can be invoked.
 // It is a one-method interface — the same seam idiom as query.Commander and
 // beads.Runner, not a bare func field — so a test substitutes it wholesale.
@@ -275,11 +274,13 @@ func Default() Config {
 // Load returns Default() overlaid with PG_ROUTER_* environment variables (pool scalars
 // only), then the resolved role set: the [[role]] array from the config file
 // (PG_ROUTER_CONFIG, else <RepoRoot>/.pg-router/config.toml resolved via
-// resolveConfigPath's git-common-dir read-through), or the built-in default
-// set when no file / no [[role]] is present. A present-but-malformed file, an
-// unknown type, or a failed validation is a hard error (never a silent fallback).
+// resolveConfigPath's git-common-dir read-through), or ZERO roles/queries
+// when no file / no [[role]] is present (docket pg2-oju6w's Task 5.8 deleted
+// the former built-in feedback/worker/review fallback — see this function's
+// own c.Validate() preamble below). A present-but-malformed file, an unknown
+// type, or a failed validation is a hard error (never a silent fallback).
 // The no-file case itself is not an error: it logs at WARN (or INFO when
-// PG_ROUTER_NO_CONFIG_WARN opts out — pg2-xl659) and falls back to built-in roles.
+// PG_ROUTER_NO_CONFIG_WARN opts out — pg2-xl659) and leaves Roles/Queries nil.
 func Load() (Config, error) {
 	c := Default()
 	// Pool-scalar env overlay. The legacy role-specific env vars
@@ -331,14 +332,14 @@ func Load() (Config, error) {
 			c.Roles = rs
 			slog.Info("loaded pg-router config", "path", path, "roles", len(rs))
 		} else {
-			slog.Info("pg-router config present but defines no [[role]]; using built-in roles", "path", path)
+			slog.Info("pg-router config present but defines no [[role]]; running with zero roles and zero queries", "path", path)
 		}
 	} else if !os.IsNotExist(statErr) {
 		return Config{}, fmt.Errorf("stat %s: %w", path, statErr)
 	} else if noConfigWarnSuppressed() {
-		slog.Info("no pg-router config found; using built-in roles", "path", path)
+		slog.Info("no pg-router config found; running with zero roles and zero queries until configured", "path", path)
 	} else {
-		slog.Warn("no pg-router config found; using built-in roles (set PG_ROUTER_NO_CONFIG_WARN=true to silence this for intentional built-in-role usage)", "path", path)
+		slog.Warn("no pg-router config found; running with zero roles and zero queries until configured (set PG_ROUTER_NO_CONFIG_WARN=true to silence this)", "path", path)
 	}
 	// Gate file defaults (INV-LIFE-2), filled AFTER the repo-TOML layer above (so
 	// [pool].operator_paused_path / cicd_down_path, if present, already won) and
@@ -351,22 +352,17 @@ func Load() (Config, error) {
 	if c.CICDDown == "" {
 		c.CICDDown = filepath.Join(c.LogDir, "gates", "cicd-down")
 	}
-	if c.Roles == nil {
-		bp := roles.BuiltinParams{
-			WorktreeDir:   c.WorktreeDir,
-			SkillMD:       c.SkillMD,
-			WorkerSkillMD: c.WorkerSkillMD,
-			MaxFeedback:   c.MaxFeedback,
-			MaxWorker:     c.MaxWorker,
-			WorkerBudget:  c.WorkerBudget(),
-			PollInterval:  c.PollInterval,
-		}
-		c.Roles = roles.BuiltinRoleSet(bp)
-		// The built-in query set is paired with the built-in roles (feedback query
-		// emits feedback.ready, feedback role binds it, ...) — reproducing today's
-		// coupled role+query behavior through the event model.
-		c.Queries = roles.BuiltinQuerySet(bp)
-	}
+	// The built-in feedback/worker/review role+query fallback (roles.
+	// BuiltinRoleSet/BuiltinQuerySet) is DELETED here (docket pg2-oju6w's
+	// Task 5.8, ADR 0065's "Source-side boundary" section, closing register
+	// row USECASE-CREATE-SOURCE / bead pg2-u7rzl): an unconfigured core
+	// (config.toml absent, or present with no [[role]]) now runs with c.Roles
+	// and c.Queries left at their zero value (nil) — zero roles, zero
+	// queries, doing nothing until configured. The beads-shaped role/query
+	// pairing this fallback used to provide now lives as a registered
+	// kind:"source" participant in packages/pg-router-ccpool-handler, wired
+	// through pg-router's own [[query]]/[[role]] TOML (query.ParticipantQuery),
+	// never as an automatic built-in.
 	if err := c.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -417,20 +413,6 @@ func noConfigWarnSuppressed() bool {
 	return envBool("PG_ROUTER_NO_CONFIG_WARN", false)
 }
 
-// validPermissionModes is the set of claude --permission-mode values pg-router may
-// pass through to `ccpool new` (mirrors ccpool's launch.PermissionMode; it is
-// duplicated here because pg-router does not depend on the ccpool module). The
-// empty string is valid: it means "omit the flag".
-var validPermissionModes = map[string]bool{
-	"":                  true,
-	"default":           true,
-	"acceptEdits":       true,
-	"plan":              true,
-	"auto":              true,
-	"dontAsk":           true,
-	"bypassPermissions": true,
-}
-
 // Validate runs the PRE-RUNTIME wiring checks and blocks on anything determinable
 // as an invalid configuration. Six conditions are blocking, and they are the ones
 // docs/behavior states (INV-WORKFLOW-1, USECASE-VALIDATE-CONFIG):
@@ -442,9 +424,17 @@ var validPermissionModes = map[string]bool{
 //  5. absent backing command     — a source's/handler's command cannot be invoked
 //  6. non-terminating re-entry   — a cycle the declared graph shows cannot terminate
 //
-// plus PermissionMode and each resolved query's own Validate. Errors are
-// AGGREGATED (errors.Join), never early-returned, so a bad config reports every
-// problem at once at pre-flight.
+// plus each resolved query's own Validate. Errors are AGGREGATED (errors.Join),
+// never early-returned, so a bad config reports every problem at once at
+// pre-flight.
+//
+// PermissionMode is deliberately NOT checked here (docket pg2-oju6w Task 5.7):
+// pg-router treats it as an opaque, un-validated string, kept only to display
+// in `config --show`/`config --show --json`. The real claude --permission-mode
+// enum check now lives in the new module's own config validation
+// (packages/pg-router-ccpool-handler/internal/config), which is the side that
+// actually invokes `ccpool new --permission-mode` and therefore needs the real
+// values.
 //
 // EXACTLY ONE condition warns instead of blocking — a re-entry cycle whose
 // termination is NOT determinable — and that category is closed at one member:
@@ -468,9 +458,6 @@ func (c Config) Validate() error {
 // findings and the non-blocking WARNING separately (Validate itself can only
 // return the errors).
 func (c Config) diagnose() (errs []error, warns []string) {
-	if !validPermissionModes[c.PermissionMode] {
-		errs = append(errs, fmt.Errorf("invalid PG_ROUTER_PERMISSION_MODE %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode))
-	}
 	// emitted collects every event type produced by some query; bound collects
 	// every event type consumed by some role.
 	emitted := map[string]bool{}
@@ -521,8 +508,8 @@ func (c Config) diagnose() (errs []error, warns []string) {
 // handlerIsDisconnected is check 3 — "a handler no binding can reach". A binding
 // is not a first-class object here: it is the handler's own Binds list, so the
 // only way no binding reaches a handler is for that list to be empty. (A TOML
-// role cannot reach this state — buildRole requires binds — so this guards the
-// role sets built in Go, e.g. roles.BuiltinRoleSet.)
+// role cannot reach this state — buildRole requires binds — so this guards a
+// role built directly in Go, e.g. by a test.)
 func handlerIsDisconnected(role roles.Role) bool { return len(role.Binds) == 0 }
 
 // handlerHasNoEventsToListenFor is check 4, and it is the ONE place that check's
@@ -549,23 +536,25 @@ func handlerHasNoEventsToListenFor(role roles.Role, emitted map[string]bool) boo
 	return true
 }
 
-// absentBackingCommands is check 5 — every configured handler's and source's
-// backing command must be invocable. This is the only check that probes the
-// ENVIRONMENT rather than the configuration, which is why the probe is injected
-// (Config.Locator) instead of calling exec.LookPath inline. A participant that
-// declares no backing command (an in-process event source) is skipped.
+// absentBackingCommands is check 5 — every configured source's backing
+// command must be invocable. This is the only check that probes the
+// ENVIRONMENT rather than the configuration, which is why the probe is
+// injected (Config.Locator) instead of calling exec.LookPath inline. A
+// participant that declares no backing command (an in-process event source)
+// is skipped.
+//
+// As of docket pg2-oju6w's Task 5.4 (ADR 0065's "Open question resolved"
+// section), a ROLE no longer declares a backing command at all — the former
+// handlerBackingCommand (role.Type-driven: a command role's own argv[0], or
+// the ccpool binary) had no successor once Type/CCPoolConfig/CommandConfig
+// were deleted from roles.Role: which executable a registered handler
+// participant runs through is now entirely that participant's own concern,
+// reached over the wire (internal/wireclient), never authored in pr-pool's
+// own config. So this check narrows to sources only; a handler-side
+// equivalent belongs to the handler module's own config validation.
 func (c Config) absentBackingCommands() []error {
 	loc := c.locator()
 	var errs []error
-	for _, role := range c.Roles {
-		cmd := handlerBackingCommand(role)
-		if cmd == "" {
-			continue
-		}
-		if err := loc.Locate(cmd); err != nil {
-			errs = append(errs, fmt.Errorf("handler %q backing command %q cannot be invoked: %w (absent backing command)", role.Name, cmd, err))
-		}
-	}
 	for _, s := range c.Queries {
 		if s.Query == nil {
 			continue
@@ -579,21 +568,6 @@ func (c Config) absentBackingCommands() []error {
 		}
 	}
 	return errs
-}
-
-// handlerBackingCommand returns the executable a role runs through: its own
-// argv[0] for a command role, the ccpool binary for a ccpool role. "" means the
-// role declares none.
-func handlerBackingCommand(role roles.Role) string {
-	switch role.Type {
-	case "command":
-		if role.Command != nil && len(role.Command.Argv) > 0 {
-			return role.Command.Argv[0]
-		}
-	case "ccpool":
-		return CCPoolCommand
-	}
-	return ""
 }
 
 // reentryCycleFindings walks the declared routing graph for re-entry cycles and
@@ -704,19 +678,6 @@ func (c Config) reentryCycleFindings() (errs []error, warns []string) {
 		}
 	}
 	return errs, warns
-}
-
-// WorkerBudget assembles the per-worker Budget from config scalars + the default
-// price table. Used as the pool-default budget for built-in roles and as the base
-// a per-role [role.ccpool].budget overlays.
-func (c Config) WorkerBudget() budget.Budget {
-	return budget.Budget{
-		Tokens:     budget.Limit(c.BudgetTokens),
-		Cost:       budget.Limit(c.BudgetCost),
-		Time:       c.BudgetTime,
-		Thresholds: budget.Thresholds{Reminder: c.ReminderPct, Cancel: c.CancelPct, Hard: c.HardPct},
-		Prices:     usage.DefaultPrices(),
-	}
 }
 
 // LogDir resolves ONLY the log/state directory — Default() overlaid with

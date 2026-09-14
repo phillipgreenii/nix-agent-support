@@ -1,0 +1,11 @@
+{
+  "$id": "handler.postStartup",
+  "title": "INTF-HANDLER postStartup (core -> handler, once per process lifetime)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "id": { "type": "string" }
+  }
+}

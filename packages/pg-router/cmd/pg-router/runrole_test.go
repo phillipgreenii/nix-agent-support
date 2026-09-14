@@ -2,25 +2,17 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
 func TestResolveRole(t *testing.T) {
-	d := config.Default()
-	rs := roles.BuiltinRoleSet(roles.BuiltinParams{
-		WorktreeDir:  d.WorktreeDir,
-		MaxFeedback:  d.MaxFeedback,
-		MaxWorker:    d.MaxWorker,
-		WorkerBudget: d.WorkerBudget(),
-	})
+	rs := roles.RoleSet{{Name: "feedback", Enabled: true}, {Name: "worker", Enabled: true}}
 	if r, ok := resolveRole(rs, "feedback"); !ok || r.Name != "feedback" {
 		t.Errorf("feedback should resolve; ok=%v r=%+v", ok, r)
 	}
@@ -39,51 +31,19 @@ func TestRoleNames(t *testing.T) {
 	}
 }
 
-// TestBuildRunRoleEvent_populatesMetadata is the pg2-jpci regression: the
-// direct-bead run-role path must load the bead's metadata into the event's Item
-// (mirroring the query/drain path), so the review prompt template renders the real
-// pr_number/repo/head_sha instead of <no value>. Under the event model run-role
-// builds a self-contained EVENT (design Q-meta); the dispatch context is derived
-// from it. fakeBR (drain_test.go) returns the bead's `bd show <id> --json` payload.
-func TestBuildRunRoleEvent_populatesMetadata(t *testing.T) {
-	const beadID = "zr-vd38a"
-	br := fakeBR{out: map[string]string{
-		"show " + beadID + " --json": `{"data":[{"id":"zr-vd38a","issue_type":"review-pr","title":"Review PR #99116","metadata":{"pr_number":99116,"repo":"acme/widgets","head_sha":"abc123def","branch":"feature/x"}}]}`,
-	}}
-	role := roles.Role{Name: "review", Binds: []string{"review.ready"}}
-	ev, err := buildRunRoleEvent(context.Background(), br, role, beadID)
-	if err != nil {
-		t.Fatalf("buildRunRoleEvent error: %v", err)
-	}
-	if ev.Item.ID != beadID {
-		t.Errorf("Item.ID = %q, want %q", ev.Item.ID, beadID)
-	}
-	// The event's type is the role's bind (provenance); the context is derived.
-	if ev.Type != "review.ready" {
-		t.Errorf("event type = %q, want the role's bind review.ready", ev.Type)
-	}
-	if ev.Item.Metadata == nil {
-		t.Fatalf("Item.Metadata is nil; run-role did not load bead metadata (pg2-jpci)")
-	}
-	for _, k := range []string{"pr_number", "repo", "head_sha"} {
-		if _, ok := ev.Item.Metadata[k]; !ok {
-			t.Errorf("Item.Metadata missing %q; got %#v", k, ev.Item.Metadata)
-		}
-	}
-}
-
 // TestRoute_runRoleJSON covers args.go's parseRunRoleArgs --json handling
-// (Task 1.5b): --json is accepted wherever it occurs relative to the role/bead
-// positionals, and defaults to false when absent.
+// (Task 1.5b): --json is accepted wherever it occurs relative to the
+// role/event-JSON positionals, and defaults to false when absent.
 func TestRoute_runRoleJSON(t *testing.T) {
-	if r := route([]string{"pg-router", "run-role", "--json", "worker", "zr-1"}); r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-1" || !r.json {
-		t.Errorf("route(run-role --json worker zr-1) = %+v, want routeRunRole role=worker bead=zr-1 json=true", r)
+	const evt = `{"id":"e","type":"t"}`
+	if r := route([]string{"pg-router", "run-role", "--json", "worker", evt}); r.kind != routeRunRole || r.role != "worker" || r.eventJSON != evt || !r.json {
+		t.Errorf("route(run-role --json worker %s) = %+v, want routeRunRole role=worker eventJSON=%s json=true", evt, r, evt)
 	}
-	if r := route([]string{"pg-router", "run-role", "worker", "zr-1", "--json"}); r.kind != routeRunRole || r.role != "worker" || r.bead != "zr-1" || !r.json {
-		t.Errorf("route(run-role worker zr-1 --json) = %+v, want the same, order-independent", r)
+	if r := route([]string{"pg-router", "run-role", "worker", evt, "--json"}); r.kind != routeRunRole || r.role != "worker" || r.eventJSON != evt || !r.json {
+		t.Errorf("route(run-role worker %s --json) = %+v, want the same, order-independent", evt, r)
 	}
-	if r := route([]string{"pg-router", "run-role", "worker", "zr-1"}); r.json {
-		t.Errorf("route(run-role worker zr-1) = %+v, want json=false when --json is absent", r)
+	if r := route([]string{"pg-router", "run-role", "worker", evt}); r.json {
+		t.Errorf("route(run-role worker %s) = %+v, want json=false when --json is absent", evt, r)
 	}
 	for _, want := range []string{"run-role", "--json"} {
 		if !strings.Contains(usageLine, want) {
@@ -141,8 +101,32 @@ func TestRoute_runQueryBareRoleFormIsUsageError(t *testing.T) {
 	}
 }
 
+// TestRunRunRole_RejectsMalformedEvent covers run-role's new <json>
+// positional (pg2-oju6w.15), mirroring push_inject_test.go's
+// TestPushInject_RejectsMalformedEvent table: runRunRole schema-validates
+// and decodes the event BEFORE loading config or resolving the role
+// (runrole.go's own ordering), so every case here fails the same way
+// regardless of role name or configured roles — none of these cases needs a
+// real config fixture.
+func TestRunRunRole_RejectsMalformedEvent(t *testing.T) {
+	cases := map[string]string{
+		"not json":              `{not json`,
+		"missing type":          `{"schemaVersion":"1","id":"x"}`,
+		"bad at":                `{"schemaVersion":"1","id":"x","type":"t","at":"yesterday"}`,
+		"bad expiresAt":         `{"schemaVersion":"1","id":"x","type":"t","expiresAt":"soon"}`,
+		"legacy duration field": `{"schemaVersion":"1","id":"x","type":"t","ttl":"5m"}`,
+	}
+	for desc, arg := range cases {
+		t.Run(desc, func(t *testing.T) {
+			if code := runRunRole("whatever-role", arg, false); code != exitGeneric {
+				t.Fatalf("exit = %d, want %d (a malformed event must be rejected before any role/config lookup)", code, exitGeneric)
+			}
+		})
+	}
+}
+
 // TestRenderRunRoleJSON covers renderRunRoleJSON's pure output shape: role,
-// bead, and accepted=true, with no schemaVersion field (Task 0.4's
+// item, and accepted=true, with no schemaVersion field (Task 0.4's
 // unversioned-by-default wire decision, docs/decisions/cli.md's DEC-CLI-1
 // "--json's versioning" note).
 func TestRenderRunRoleJSON(t *testing.T) {
@@ -153,8 +137,8 @@ func TestRenderRunRoleJSON(t *testing.T) {
 	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
 		t.Fatalf("output is not one JSON object: %v\n%s", err, b.String())
 	}
-	if got.Role != "worker" || got.Bead != "zr-9" || !got.Accepted {
-		t.Errorf("report = %+v, want role=worker bead=zr-9 accepted=true", got)
+	if got.Role != "worker" || got.Item != "zr-9" || !got.Accepted {
+		t.Errorf("report = %+v, want role=worker item=zr-9 accepted=true", got)
 	}
 	if bytes.Contains(b.Bytes(), []byte("schemaVersion")) {
 		t.Errorf("run-role --json must not carry a schemaVersion field (unversioned, Task 0.4); got:\n%s", b.String())

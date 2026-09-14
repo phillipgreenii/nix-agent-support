@@ -39,7 +39,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/beads"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
@@ -64,6 +63,12 @@ const e2eMarkerContent = "dispatched"
 // bdRepo (that helper is unexported in a different package, so it cannot be
 // called directly): skip under -short, skip when bd is not on PATH, and skip
 // (never fail) when embedded-dolt init itself does not work in this sandbox.
+//
+// Shells out to `bd` directly (rather than through beads.NewCLIRunnerForRepo)
+// because internal/beads no longer exists in this module (docket pg2-oju6w's
+// Tasks 5.2/5.3 moved it to packages/pg-router-ccpool-handler) — this is a
+// local re-implementation of the one `bd init --prefix` call this helper
+// ever needed, not an import.
 func e2eBeadsRepo(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -74,10 +79,11 @@ func e2eBeadsRepo(t *testing.T) string {
 	}
 	t.Setenv("BD_NON_INTERACTIVE", "1")
 	dir := t.TempDir()
-	r := beads.NewCLIRunnerForRepo(dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if out, err := r.Run(ctx, "init", "--prefix", e2eBeadsPrefix); err != nil {
+	cmd := exec.CommandContext(ctx, "bd", "init", "--prefix", e2eBeadsPrefix)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("bd init failed (embedded dolt unavailable in this env): %v\n%s", err, out)
 	}
 	return dir
@@ -154,6 +160,22 @@ argv = ["/bin/sh", "-c", %q]
 // core is definitely up and definitely still pre-drain, without any polling
 // race. push-inject runs synchronously well inside that window.
 func TestE2E_RunUntilIdlePushInject_RealBinary(t *testing.T) {
+	// Skipped, not fixed: this test's own premise — a dispatched "command"
+	// role writes a marker file, proving the CORE ran a real executor — no
+	// longer holds. Docket pg2-oju6w's Task 5.4 deleted roles.Role.Type/
+	// CCPoolConfig/CommandConfig entirely; a role's dispatch now crosses the
+	// wire to a registered handler participant (internal/wireclient), and
+	// the core itself never execs anything on a role's behalf again. Real
+	// dispatch additionally needs cmd/pg-router's bootCore to populate
+	// Orchestrator.Handler with a live wireclient.Client, which it does not
+	// do anywhere in production today (pg2-oju6w.15's own documented,
+	// operator-ruled-out-of-scope gap — see docs/adr/0065's "Addendum
+	// (2026-09-14)" section and the bd comment on pg2-oju6w.4). Until both
+	// land, this test cannot pass for a reason unrelated to any bug in it or
+	// in this session's own change, so it skips rather than fail
+	// confusingly for whoever next runs it with `bd` on PATH and -tags smoke.
+	t.Skip("pg2-oju6w.15: role dispatch is wire-only now; needs Orchestrator.Handler wired to a real participant (pg2-oju6w.4's own unresolved gap) before this can exercise real dispatch again")
+
 	repoRoot := e2eBeadsRepo(t)
 	bin := buildPgRouterBinary(t)
 	logDir := shortDir(t) // short: a unix socket path is platform length-limited

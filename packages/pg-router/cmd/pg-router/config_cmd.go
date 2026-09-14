@@ -52,7 +52,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "config path: %s\n", cfg.ConfigPath)
 	_, _ = fmt.Fprintf(w, "roles (%d):\n", len(cfg.Roles))
 	for _, r := range cfg.Roles {
-		_, _ = fmt.Fprintf(w, "  - %-12s type=%-8s enabled=%t binds=%v\n", r.Name, r.Type, r.Enabled, r.Binds)
+		_, _ = fmt.Fprintf(w, "  - %-12s enabled=%t binds=%v\n", r.Name, r.Enabled, r.Binds)
 	}
 	// Queries are the producers (event model): show each one's emits, flagging any
 	// stub query type (not yet implemented; it errors when run).
@@ -187,7 +187,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		},
 	}
 	for _, r := range cfg.Roles {
-		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Type: r.Type, Enabled: r.Enabled, Binds: r.Binds})
+		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds})
 	}
 	for _, s := range cfg.Queries {
 		var emits []string
@@ -215,7 +215,6 @@ type configShowReport struct {
 
 type configShowRole struct {
 	Name    string   `json:"name"`
-	Type    string   `json:"type"`
 	Enabled bool     `json:"enabled"`
 	Binds   []string `json:"binds"`
 }

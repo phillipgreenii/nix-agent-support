@@ -432,3 +432,64 @@ sections describe the packages that move; they do not enumerate the narrow local
 wire-driven rewrite needs in their place, which is an implementation detail below this ADR's own
 level, same as the socket's concrete framing (this ADR's Context, `DEC-WIRE-2`'s "Not decided
 here").
+
+## Addendum (2026-09-14): `pg2-oju6w.15` — the orchestrator's `CC`/`BD` gap, closed with two new lifecycle hooks
+
+Task 5.4's own work (the "Open question resolved" and "Wire contract" sections above) replaced
+`internal/orchestrator`'s in-process dispatch call with `wireclient.Dispatch`, but left its `CC
+ccpool.Runner`/`BD beads.Runner` fields, `TeardownAll`/`closeUnlessNeedsInput`/`sessionStateByID`,
+and `queryEnv()`'s `BD: o.BD` untouched — a genuine gap in this docket's own task decomposition,
+first flagged by a stuck comment on `pg2-oju6w.4` (2026-09-13) and filed as its own corrective task,
+`pg2-oju6w.15`. `internal/ccpool`/`internal/beads` no longer exist in `packages/pg-router` at all
+(Tasks 5.2/5.3 physically moved them out), so the orchestrator's own build was broken from the
+moment those tasks landed until this addendum's own change.
+
+**The `BD` half was dead code, not a design question.** `query.Env`'s `BD` field was already
+deleted by Task 5.8 (the "Source-side boundary" section above) — its one consumer,
+`query.BeadsReady`, moved out with it — so `orchestrator.go`'s own `query.Env{BD: o.BD, ...}`
+literal and `cmd/pg-router/{run,runrole}.go`'s `beads.NewCLIRunnerForRepo` plumbing were simply
+never updated to match. Deleting them is a mechanical fix, not a decision.
+
+**The `CC` half was real, load-bearing session-lifecycle logic**, confirmed by reading the
+handler-side executor (`packages/pg-router-ccpool-handler/internal/executor/ccpool.go`): it
+launches a ccpool session and waits on it, but never calls `.Close(` on one itself — the caller
+was always responsible for closing a finished session or preserving a `needs_input` one, and once
+`CC`/`TeardownAll` are deleted from the orchestrator, that responsibility has no home left. This is
+the actual decision `pg2-oju6w.15` resolves:
+
+- **Two new generic wire messages**, `handler.postStartup`/`handler.preShutdown` (`DEC-WIRE-3`,
+  added to `docs/decisions/wire.md` in this same change), dispatched once per process lifetime to
+  every enabled role's registered handler participant, over `dispatch`'s own existing
+  `DEC-WIRE-1` transport — no new mechanism.
+- **`preShutdown` relocates `TeardownAll`'s sweep into the handler's own process** — a
+  zero-behavior-change move, not a redesign: `TeardownAll` already fired once per process
+  invocation (via `defer`, at the same three call sites in `cmd/pg-router/run.go`), never per
+  internal tick, so `preShutdown` firing at that identical point preserves today's session-cleanup
+  behavior exactly. `RunOne`'s own inline `sessionStateByID`/`closeUnlessNeedsInput` teardown
+  (used only by `run-role`) is superseded the same way: `run-role` now brackets its single dispatch
+  with its own `preShutdown` call, unifying both call sites onto one mechanism.
+- **`postStartup` is built for symmetry (decision #2), not present need** — nothing in this
+  repo's own handler needs boot-time setup today, but the hook exists so a future participant that
+  does (starting a daemon, warming a cache) never needs a third lifecycle message invented for it.
+- **No de-duplication across roles sharing one handler process (decision #1)** — the core has no
+  business knowing which roles resolve to the same command, so a shared process answers each hook
+  once per role. Harmless (closing an already-gone session is a no-op), not a correctness gap.
+- **`run-role`'s `<bead>` positional is removed**, replaced by a `<json>` positional carrying the
+  full caller-supplied event — the same convention `push-inject <json>` already established.
+  `pg-router` is event-generic, not beads-specific, and no longer holds a `beads.Runner` of its own
+  to resolve a bead id through. No convenience tool for constructing that JSON was built (operator
+  ruling, in response to a UX review flagging the lost "just type a bead id" convenience) — an
+  accepted, intentional loss of convenience, not a gap left open.
+
+**Known, explicitly out-of-scope gap left by this addendum.** `internal/orchestrator.Orchestrator`'s
+`Handler` field (the `wireclient.HandlerClient` `dispatch`/`postStartup`/`preShutdown` all go
+through) is never populated with a real `wireclient.Client` anywhere in `cmd/pg-router` production
+code today — confirmed by grep; `bootCore`/`run.go` never sets `Orchestrator.Handler`, so real
+dispatch is currently exercised only in tests, via a fake. This predates `pg2-oju6w.15` (it is Task
+5.4's own scope, not something this change introduces) and stays unresolved here by explicit
+operator ruling: this addendum's goal was a green build with the session-cleanup behavior
+preserved, not wiring real production dispatch end to end. `run.go`'s new `postStartupAll`/
+`preShutdownAll` helpers guard the nil-`Handler` case explicitly (log and skip per role) rather
+than let it panic, so the gap fails safely rather than crashing `pg-router run` — but it is still a
+gap. Recorded via `bd comment` on `pg2-oju6w.4` and on the docket epic `pg2-oju6w` so a later
+session does not have to rediscover it.

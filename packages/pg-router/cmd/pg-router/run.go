@@ -16,8 +16,6 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
-	"github.com/phillipgreenii/pg-router/internal/beads"
-	"github.com/phillipgreenii/pg-router/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
@@ -213,6 +211,58 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 	}
 	return svc, q, mp, store.Close, nil
+}
+
+// postStartupAll dispatches handler.postStartup once to every ENABLED
+// role's registered handler participant (pg2-oju6w.15), immediately after
+// bootCore succeeds in each of runRun/runRunUntilIdle/runUntilIdleGated. It
+// mirrors bootCore's own registration loop (`for _, r := range cfg.Roles {
+// if !r.Enabled { continue } ...}`), never declaredRoles (the full
+// pre-selector superset used only for status reporting). Built for symmetry
+// with preShutdownAll (decision #2 — nothing consumes postStartup's outcome
+// today); a hook failure is logged and does not abort boot.
+//
+// A nil o.Handler (Task 5.4's own CommandFor/bootCore wiring gap, Section 0
+// of this task's plan — out of scope here) is guarded explicitly rather than
+// left to panic on a nil interface call: an unwired Handler is exactly the
+// same class of problem as a per-call error, so it is logged once per role
+// and skipped, not fatal.
+func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg config.Config) {
+	if o.Handler == nil {
+		slog.Warn("postStartup skipped: no Handler configured (internal/wireclient.HandlerClient)")
+		return
+	}
+	for _, r := range cfg.Roles {
+		if !r.Enabled {
+			continue
+		}
+		if _, err := o.Handler.PostStartup(ctx, r); err != nil {
+			slog.Warn("postStartup failed", "role", r.Name, "err", err)
+		}
+	}
+}
+
+// preShutdownAll dispatches handler.preShutdown once to every ENABLED
+// role's registered handler participant, at the same point TeardownAll used
+// to fire (pg2-oju6w.15) — a zero-behavior-change RELOCATION of that
+// once-per-process sweep into the handler's own process (ccpool session
+// lifecycle is now entirely the handler's private business, not this
+// core's), never a redesign. A hook failure is logged and MUST NOT crash
+// shutdown. See postStartupAll's doc for the nil-Handler guard's own
+// rationale.
+func preShutdownAll(ctx context.Context, o *orchestrator.Orchestrator, cfg config.Config) {
+	if o.Handler == nil {
+		slog.Warn("preShutdown skipped: no Handler configured (internal/wireclient.HandlerClient)")
+		return
+	}
+	for _, r := range cfg.Roles {
+		if !r.Enabled {
+			continue
+		}
+		if _, err := o.Handler.PreShutdown(ctx, r); err != nil {
+			slog.Warn("preShutdown failed", "role", r.Name, "err", err)
+		}
+	}
 }
 
 // resolveMeterProvider decides the MeterProvider metrics.New registers the
@@ -519,35 +569,36 @@ type preparedRun struct {
 }
 
 // prepareRun loads config, warns on stale env / tracked config / stub queries /
-// stranded feedback, prechecks bd reachability, applies this run's --only/
-// --disable selectors (STORY-OP-3), resolves self_login, and wires the
-// orchestrator + its event log — everything `run` / `run-until-idle` need
-// before they may touch the queue or the core. On failure it prints the same
-// diagnostic runDrain used to and returns a non-OK exit code; the caller MUST
-// check code before using the returned preparedRun.
+// stranded feedback, applies this run's --only/--disable selectors
+// (STORY-OP-3), and wires the orchestrator + its event log — everything
+// `run` / `run-until-idle` need before they may touch the queue or the core.
+// On failure it prints the same diagnostic runDrain used to and returns a
+// non-OK exit code; the caller MUST check code before using the returned
+// preparedRun.
 //
-// sel's selectors are applied AFTER precheck (which calls cfg.Validate())
-// deliberately, never before: applySelectors' own doc comment (selectors.go)
-// explains why a re-Validate against the run-scoped subset would produce
-// false findings — precheck must see the FULL, unfiltered cfg, and nothing
-// past this point may call Validate() again.
+// bd-reachability/prefix precheck and self_login resolution no longer run
+// here (Task 5.8, ADR 0065's "Source-side boundary" section): both moved to
+// the new pg-router-ccpool-handler module's own startup pre-flight
+// (cmd/pg-router-ccpool-handler/preflight.go) — pg-router's own pre-runtime
+// validation is exactly INV-WORKFLOW-1's six determinable conditions,
+// unrelated to bd/self_login.
+//
+// sel's selectors are applied AFTER config.Load() (whose own preamble already
+// calls cfg.Validate() — internal/config/config.go) deliberately, never
+// before: applySelectors' own doc comment (selectors.go) explains why a
+// re-Validate against the run-scoped subset would produce false findings —
+// nothing past this point may call Validate() again.
 func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return preparedRun{}, exitPrecheck
 	}
-	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
 	warnDroppedRoleEnv()
 	warnTrackedConfig(ctx, cfg)
 	warnStubQueries(cfg)
 
 	slog.Info("starting", "repo", cfg.RepoRoot, "config", cfg.ConfigPath, "roles", len(cfg.Roles))
-	if err := precheck(ctx, cfg, br); err != nil {
-		fmt.Fprintln(os.Stderr, "precheck:", err)
-		return preparedRun{}, exitPrecheck
-	}
-	slog.Info("precheck ok", "prefix", cfg.BeadsPrefix)
 
 	// declaredRoles captures the FULL, pre-selector role list (Task 4.1,
 	// Binding Decision 4) BEFORE applySelectors runs: applySelectors
@@ -569,20 +620,7 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	slog.Info("run-scoped selectors applied", "only", sel.Only, "disable", sel.Disable,
 		"active roles", activeRoles, "total roles", len(cfg.Roles), "active queries", len(cfg.Queries))
 
-	if cfg.SelfLogin == "" {
-		selfLogin, err := resolveSelf(ctx)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "resolve self:", err)
-			return preparedRun{}, exitPrecheck
-		}
-		cfg.SelfLogin = selfLogin
-	}
-	slog.Info("resolved self", "login", cfg.SelfLogin)
-	warnStrandedFeedback(ctx, br, cfg.SelfLogin)
-
 	o := &orchestrator.Orchestrator{
-		CC:  ccpool.NewCLIRunner(cfg),
-		BD:  br,
 		Reg: cfg.Roles,
 		Cfg: cfg,
 	}
@@ -808,11 +846,12 @@ func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.O
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
 	}
+	postStartupAll(ctx, o, cfg)
 	defer func() { _ = storeClose() }()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
-	defer o.TeardownAll(context.Background())
+	defer preShutdownAll(context.Background(), o, cfg)
 	defer func() {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
@@ -870,11 +909,12 @@ func runRunUntilIdle(only, disable []string) int {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
 	}
+	postStartupAll(ctx, pr.o, pr.cfg)
 	defer func() { _ = storeClose() }()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
-	defer pr.o.TeardownAll(context.Background())
+	defer preShutdownAll(context.Background(), pr.o, pr.cfg)
 	defer func() {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
@@ -968,11 +1008,12 @@ func runRun(only, disable []string) int {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric
 	}
+	postStartupAll(ctx, pr.o, pr.cfg)
 	defer func() { _ = storeClose() }()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
-	defer pr.o.TeardownAll(context.Background())
+	defer preShutdownAll(context.Background(), pr.o, pr.cfg)
 	defer func() {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {

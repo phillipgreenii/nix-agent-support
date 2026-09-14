@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
-	"github.com/phillipgreenii/pg-router/internal/beads"
-	"github.com/phillipgreenii/pg-router/internal/ccpool"
+	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/discover"
-	"github.com/phillipgreenii/pg-router/internal/event"
+	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
@@ -56,30 +56,52 @@ func roleNames(rs roles.RoleSet) string {
 	return strings.Join(names, ", ")
 }
 
-// runRunRole dispatches a single item through one role and tears down its
-// session. It does NOT run discovery: the bead is explicit. precheck validates
-// the store/prefix.
+// runRunRole dispatches a single, caller-supplied event JSON through one
+// role, then dispatches that role's preShutdown hook (pg2-oju6w.15 — RunOne
+// no longer tears its own session down; ccpool session lifecycle is
+// entirely the registered handler participant's own business now). It does
+// NOT run discovery: the event is explicit.
+//
+// pg2-oju6w.15 removed the old <bead> positional: pg-router is event-generic,
+// not beads-specific, and run-role no longer has a beads.Runner of its own to
+// resolve a bead ID through. The caller now builds and supplies the full
+// event JSON directly (the same "operator supplies raw event JSON"
+// convention `push-inject <json>` already established) — an accepted,
+// intentional loss of the old "just type a bead id" convenience (operator
+// ruling); no convenience tool for constructing that JSON is being built.
 //
 // asJSON (Task 1.5b) governs only the SUCCESS report: on success it prints one
 // JSON object (renderRunRoleJSON) instead of nothing (text mode's existing
 // silent-success behavior, unchanged). Every error path below prints its usual
 // stderr diagnostic regardless of asJSON — unlike push-inject, every failure
 // here happens BEFORE any dispatch outcome exists to report (a config/precheck
-// failure, an unknown role, a bad derived context), so there is no richer
-// "accepted: false" body worth echoing beyond the diagnostic already on
-// stderr; this is a deliberate, narrower choice than push-inject's
-// still-JSON-on-failure convention, not an oversight.
-func runRunRole(roleName, beadID string, asJSON bool) int {
+// failure, an unknown role, a malformed event, a bad derived context), so
+// there is no richer "accepted: false" body worth echoing beyond the
+// diagnostic already on stderr; this is a deliberate, narrower choice than
+// push-inject's still-JSON-on-failure convention, not an oversight.
+func runRunRole(roleName, eventJSON string, asJSON bool) int {
 	setTestMode()
 	ctx := context.Background()
+	// Schema-validate FIRST, exactly as push-inject does (internal/emit.Emit's
+	// conformance.CheckBytes(pushInjectSchema, ...) before DecodeEvent) and
+	// BEFORE loading config: eventqueue.DecodeEvent's own doc comment states
+	// it "deliberately does NOT validate against the JSON Schema" — skipping
+	// this step would let a typo'd field (e.g. "typ" instead of "type")
+	// silently produce a malformed event instead of a clear rejection. Doing
+	// this ahead of config.Load() means a bad event argument fails fast
+	// without the I/O cost of a config load only to discard it.
+	if err := conformance.CheckBytes("event", []byte(eventJSON)); err != nil {
+		fmt.Fprintln(os.Stderr, "run-role:", err)
+		return exitGeneric
+	}
+	evt, err := eventqueue.DecodeEvent([]byte(eventJSON))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run-role:", err)
+		return exitGeneric
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
-		return exitPrecheck
-	}
-	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
-	if err := precheck(ctx, cfg, br); err != nil {
-		fmt.Fprintln(os.Stderr, "precheck:", err)
 		return exitPrecheck
 	}
 	role, ok := resolveRole(cfg.Roles, roleName)
@@ -95,69 +117,60 @@ func runRunRole(roleName, beadID string, asJSON bool) int {
 		printUsageErr("run-role: " + err.Error())
 		return exitUsage
 	}
-	ev, err := buildRunRoleEvent(ctx, br, role, beadID)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "run-role:", err)
-		return exitGeneric
-	}
 	// Validate the DERIVED context (design Q-meta: run-role takes an event, the
-	// context is derived at dispatch) so a half-filled dispatch fails fast.
-	if err := discover.DeriveContext(role, ev).Validate(); err != nil {
+	// context is derived at dispatch) so a half-filled dispatch fails fast —
+	// discover.DeriveContextFromQueueEvent is the SAME derivation the
+	// queue-driven roleListener.Offer path already uses (Section 4).
+	d := discover.DeriveContextFromQueueEvent(role, evt)
+	if err := d.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitUsage
 	}
 	o := &orchestrator.Orchestrator{
-		CC:  ccpool.NewCLIRunner(cfg),
-		BD:  br,
 		Reg: cfg.Roles,
 		Cfg: cfg,
 	}
-	if err := o.RunOne(ctx, role, ev); err != nil {
+	if err := o.RunOne(ctx, role, evt); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitGeneric
 	}
+	// RunOne no longer closes the session it launched (Section 4's own
+	// disclosed behavior change): mirror run.go's new preShutdown bracket at
+	// this single-dispatch scope, so the one session run-role just made is
+	// torn down (or preserved, if needs_input) the same way the daemon's own
+	// per-role sweep does at its shutdown. A nil o.Handler (Task 5.4's own
+	// CommandFor/bootCore wiring gap, out of scope here) is guarded the same
+	// way postStartupAll/preShutdownAll guard it in run.go.
+	if o.Handler != nil {
+		if _, err := o.Handler.PreShutdown(ctx, role); err != nil {
+			slog.Warn("run-role: preShutdown failed", "role", role.Name, "err", err)
+		}
+	}
 	if asJSON {
-		renderRunRoleJSON(os.Stdout, role.Name, beadID)
+		renderRunRoleJSON(os.Stdout, role.Name, d.Item.ID)
 	}
 	return exitOK
 }
 
 // runRoleReport is `run-role --json`'s success report: bare identity, echoing
-// back which role/bead this smoke test dispatched. RunOne tears the session
-// down itself and returns no richer per-dispatch result to this caller, so
-// there is nothing beyond identity+outcome worth reporting here (unlike
-// push-inject's queue-durable enqueue, which has a socket/event/core worth
-// echoing). Per Task 0.4's wire decision (docs/decisions/cli.md's DEC-CLI-1
-// "--json's versioning" note): UNVERSIONED, no schemaVersion field, not a
+// back which role this smoke test dispatched and the derived item id (the
+// one field of the caller-supplied event this package's own downstream
+// bookkeeping reads, discover.DeriveContextFromQueueEvent's own doc). RunOne
+// returns no richer per-dispatch result to this caller, so there is nothing
+// beyond identity+outcome worth reporting here (unlike push-inject's
+// queue-durable enqueue, which has a socket/event/core worth echoing). Per
+// Task 0.4's wire decision (docs/decisions/cli.md's DEC-CLI-1 "--json's
+// versioning" note): UNVERSIONED, no schemaVersion field, not a
 // schemas/-registered wire shape.
 type runRoleReport struct {
 	Role     string `json:"role"`
-	Bead     string `json:"bead"`
+	Item     string `json:"item"`
 	Accepted bool   `json:"accepted"`
 }
 
 // renderRunRoleJSON writes run-role's --json success report.
-func renderRunRoleJSON(w io.Writer, role, bead string) {
-	writeJSON(w, runRoleReport{Role: role, Bead: bead, Accepted: true})
-}
-
-// buildRunRoleEvent builds the self-contained event for the direct-bead run-role
-// path (design Q-meta: run-role consumes an EVENT). It loads the bead via `bd
-// show` and maps its metadata into the event's Item through the same
-// query.FromIssue adapter the query/drain path uses (pg2-jpci), so the review
-// prompt template renders the real pr_number/repo/head_sha instead of <no value>.
-// The event type is the role's first bind (falling back to "run-role"); the type
-// is provenance only — RunOne derives the dispatch context from the event's Item.
-func buildRunRoleEvent(ctx context.Context, br beads.Runner, role roles.Role, beadID string) (event.Event, error) {
-	iss, err := beads.ShowObj(ctx, br, beadID)
-	if err != nil {
-		return event.Event{}, fmt.Errorf("load bead %s: %w", beadID, err)
-	}
-	eventType := "run-role"
-	if len(role.Binds) > 0 {
-		eventType = role.Binds[0]
-	}
-	return event.NewItemEvent(eventType, "run-role", query.FromIssue(iss)), nil
+func renderRunRoleJSON(w io.Writer, role, item string) {
+	writeJSON(w, runRoleReport{Role: role, Item: item, Accepted: true})
 }
 
 // runRunQuery is `run-query`'s entry point: it smokes exactly ONE named
@@ -172,18 +185,13 @@ func runRunQuery(queryArg string, asJSON bool) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return exitPrecheck
 	}
-	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
-	if err := precheck(ctx, cfg, br); err != nil {
-		fmt.Fprintln(os.Stderr, "precheck:", err)
-		return exitPrecheck
-	}
-	return runRunQuerySource(ctx, cfg, br, queryArg, asJSON)
+	return runRunQuerySource(ctx, cfg, queryArg, asJSON)
 }
 
 // runRunQuerySource smokes exactly ONE named query source, read-only: the
 // Task 1.5c "query:<name>" form. Unlike the retired role-fan-out form, there
 // is exactly one source and no role/handler involved at all.
-func runRunQuerySource(ctx context.Context, cfg config.Config, br beads.Runner, name string, asJSON bool) int {
+func runRunQuerySource(ctx context.Context, cfg config.Config, name string, asJSON bool) int {
 	src, ok := findSource(cfg.Queries, name)
 	if !ok {
 		printUsageErr(fmt.Sprintf("run-query: unknown source %q (configured: %s)", name, sourceNames(cfg.Queries)))
@@ -197,7 +205,7 @@ func runRunQuerySource(ctx context.Context, cfg config.Config, br beads.Runner, 
 		printUsageErr("run-query: " + err.Error())
 		return exitUsage
 	}
-	env := query.Env{BD: br, RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}}
+	env := query.Env{RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}}
 	evts, err := src.Query.Run(ctx, env)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-query:", err)

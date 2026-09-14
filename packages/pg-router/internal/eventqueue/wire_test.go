@@ -95,7 +95,8 @@ func TestDecodeEvent_RejectionNamesTheField(t *testing.T) {
 // A wire event that omits `payload` entirely decodes to a non-nil, empty map —
 // never nil (Task 1.6, INTF-SOURCE payload normalization) — so a handler is
 // never handed nothing in its place and every downstream reader (a binding's
-// narrowing path, discover's ItemFromPayload) can index Payload unconditionally.
+// narrowing path, discover's DeriveContextFromQueueEvent) can index Payload
+// unconditionally.
 func TestDecodeEvent_AbsentPayloadNormalizesToNonNilEmptyMap(t *testing.T) {
 	got, err := DecodeEvent([]byte(`{"id":"e","type":"t"}`))
 	if err != nil {

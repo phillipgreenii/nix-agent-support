@@ -1,19 +1,35 @@
 // Package query is pg-router's typed-union of work SOURCES (producers). Each
-// concrete query emits []event.Event; bead-backed queries map beads.Issue ->
-// item.Item -> Event. Run errors are propagated, never returned as "no work"
-// (pg2-qq9v): a bd/exec failure must not masquerade as an idle pool.
+// concrete query emits []event.Event; Run errors are propagated, never
+// returned as "no work" (pg2-qq9v): a source failure must not masquerade as
+// an idle pool.
 //
 // Under the event model (design 2026-06-25) a query is a PRODUCER: Run returns
 // typed events (was []item.Item), the query declares the event type(s) it Emits
 // (roles bind to these), and a pluggable Trigger strategy decides when it fires.
 // Emits/Trigger are carried by an embedded Meta so every concrete type gets them
 // uniformly; the type-specific fields still decode from the query sub-table.
+//
+// The beads-backed built-in query (query.BeadsReady) and its role pairing
+// (roles.BuiltinRoleSet/BuiltinQuerySet) moved OUT of this module entirely
+// (docket pg2-oju6w's Task 5.8, ADR 0065's "Source-side boundary" section):
+// they now live as a registered kind:"source" participant in
+// packages/pg-router-ccpool-handler. ParticipantQuery below is this
+// package's replacement seam for reaching such a participant — a real
+// INTF-SOURCE wire client, mirroring internal/wireclient.Client's
+// handler-side Dispatch (Task 5.3/5.4) — rather than an in-process call.
 package query
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/beads"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
 )
@@ -33,8 +49,13 @@ type Commander interface {
 
 // Env carries the capabilities a query needs. The orchestrator builds it from its
 // own fields in phase 1 (the Deps bag arrives in phase 2).
+//
+// BD (a beads.Runner, the in-process bd capability) was deleted here (Task
+// 5.8): its one consumer, query.BeadsReady, moved out of this module
+// entirely — see this file's package doc comment. A query that needs a
+// registered participant's own capability reaches it over the wire
+// (ParticipantQuery), never through this bag.
 type Env struct {
-	BD       beads.Runner
 	RepoRoot string
 	Cmd      Commander
 }
@@ -117,24 +138,16 @@ type Source struct {
 // SourceSet is the ordered set of producers a drain fires (config order).
 type SourceSet []Source
 
-// FromIssue maps a single bd issue to an item, copying its metadata (keeps item a
-// leaf — the adapter lives here). The query/drain path (fromIssues) and the
-// direct-bead run-role path (pg2-jpci) share this one adapter, so a dispatched Item
-// carries the bead's metadata identically no matter which path built it.
-func FromIssue(i beads.Issue) item.Item {
-	return item.Item{ID: i.ID, Type: i.Type, Title: i.Title, Metadata: i.Metadata}
-}
-
-// eventsFromIssues maps bd issues to events of the given type via FromIssue. It
-// is the shared M2 wrapper: each item.Item becomes an Event{Type, Item} with a
-// stable FingerprintID (Q3 dedup). source is the emitting query name.
-func eventsFromIssues(in []beads.Issue, eventType, source string) []event.Event {
-	out := make([]event.Event, 0, len(in))
-	for _, i := range in {
-		out = append(out, event.NewItemEvent(eventType, source, FromIssue(i)))
-	}
-	return out
-}
+// FromIssue (the beads.Issue -> item.Item adapter) is DELETED here (Task
+// 5.8): its only reason to live in this leaf package was the beads-backed
+// query, which moved out entirely (this file's package doc comment), and
+// internal/beads itself no longer exists in this module for a signature
+// here to reference. cmd/pg-router/runrole.go's own call site
+// (query.FromIssue(iss), buildRunRoleEvent) is left referencing a symbol
+// that no longer exists — that file already fails to build independently
+// (it imports the equally-moved internal/beads and internal/ccpool
+// packages directly), so this is not new breakage; reconciling it is
+// outside this task's own Files list.
 
 // firstEmit returns the query's primary emit type, or "" if it declares none.
 // The built-in single-emit queries wrap every item under this type.
@@ -163,3 +176,263 @@ func declaresEmit(q Query, emit string) bool {
 // types are stubs currently; the seam is retained so the drain pre-flight can
 // keep warning if a future type lands as a decode/validate-only stub.
 func IsStub(Query) bool { return false }
+
+// --- ParticipantQuery: the source-side wire client (Task 5.8) ---
+
+// ParticipantQuery is a Query that reaches a REGISTERED SOURCE PARTICIPANT
+// over the wire (INTF-SOURCE's `query` message, DEC-WIRE-1's default CLI
+// transport) instead of running any work in-process. It mirrors
+// internal/wireclient.Client's handler-side Dispatch exactly: a fresh
+// tracking id per call, an inline `{events}` reply decoded straight into
+// []event.Event, or a `{deferred: true}` reply that owes Run nothing this
+// tick — the events land later on the SAME tracking id via the existing
+// `ingest-event` callback path (cmd/pg-router/ingest_event.go), unchanged by
+// this type.
+//
+// Which command to invoke, and what ready-to-run `ingest-event` command the
+// request's own `callback` field should carry, are deliberately NOT resolved
+// here — mirrors wireclient.CommandFor's own doc comment: a deployment/
+// wiring concern. That wiring is still unbuilt for the handler side too
+// (cmd/pg-router's bootCore never assigns Orchestrator.Handler), so leaving
+// it unbuilt here as well is consistent with that precedent rather than a
+// gap unique to this type. Command/Callback/Runner are the injected seams a
+// caller supplies once real production wiring lands.
+//
+// Not TOML-configurable (no factory.go entry): the retired query.BeadsReady
+// was never TOML-configurable either — it only ever backed the in-Go
+// built-in default query set, which is now deleted (Task 5.8 Step 2). A
+// caller constructs a ParticipantQuery directly in Go.
+type ParticipantQuery struct {
+	Meta `toml:"-"`
+	// Command is the argv PREFIX to invoke (before "query" is appended) — the
+	// registered source participant's own resolved command.
+	Command []string
+	// Callback is the ready-to-run `ingest-event` command handed to the
+	// participant for a deferred reply (interfaces.md's "Callback"). Empty is
+	// schema-legal (source.query's `callback` is an unconstrained string) and
+	// is what an unwired deployment sends today.
+	Callback string
+	// Runner executes the invocation; defaults to OSParticipantRunner{}.
+	Runner ParticipantRunner
+}
+
+func (q ParticipantQuery) Validate() error {
+	if len(q.Command) == 0 {
+		return fmt.Errorf("participant query: command is required")
+	}
+	return nil
+}
+
+// BackingCommand: the invoked participant's own command is this source's
+// backing command (config.Validate's absent-backing-command check, same as
+// every other Query implementation).
+func (q ParticipantQuery) BackingCommand() string {
+	if len(q.Command) == 0 {
+		return ""
+	}
+	return q.Command[0]
+}
+
+// ErrParticipantBusy is returned when the invoked participant's query
+// subcommand exits busy (code 9 — DEC-WIRE-1's "coarse exit codes"),
+// mirroring wireclient.ErrBusy on the handler side.
+var ErrParticipantBusy = errors.New("query: source participant busy")
+
+// ParticipantRunner executes one query subcommand invocation: argv (the
+// participant's own CommandFor-resolved command, with "query" appended) fed
+// stdin, returning its stdout and coarse exit code. Mirrors
+// internal/wireclient.Runner exactly; duplicated rather than imported to
+// keep this task's diff confined to this package (this package must not
+// import internal/wireclient — see its own doc comment on the deployment
+// concerns this type deliberately leaves unresolved).
+type ParticipantRunner interface {
+	Run(ctx context.Context, argv []string, stdin []byte) (stdout []byte, exitCode int, err error)
+}
+
+// OSParticipantRunner is the production ParticipantRunner: a real
+// subprocess, matching DEC-WIRE-1's default transport.
+type OSParticipantRunner struct{}
+
+func (OSParticipantRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
+	if len(argv) == 0 {
+		return nil, 0, errors.New("query: empty argv")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return out.Bytes(), 0, nil
+	case errors.As(err, &exitErr):
+		// The reply body (if any) is still on stdout even on a non-zero exit
+		// (DEC-WIRE-1: "the rich outcome is in the JSON reply"). Return it
+		// alongside the exit code; Run below decides what, if anything, it
+		// means.
+		return out.Bytes(), exitErr.ExitCode(), nil
+	default:
+		return nil, 0, fmt.Errorf("query: run %v: %w", argv, err)
+	}
+}
+
+func (q ParticipantQuery) runner() ParticipantRunner {
+	if q.Runner != nil {
+		return q.Runner
+	}
+	return OSParticipantRunner{}
+}
+
+// sourceQueryRequest / sourceQueryReply / wireEvent mirror
+// packages/pg-router/schemas/source.query{,-reply}.schema.json /
+// event.schema.json — docs/decisions/wire.md's illustrative shapes, realized
+// here as the concrete Go types this client encodes/decodes.
+type sourceQueryRequest struct {
+	SchemaVersion string `json:"schemaVersion"`
+	ID            string `json:"id"`
+	Callback      string `json:"callback"`
+}
+
+type sourceQueryReply struct {
+	SchemaVersion string      `json:"schemaVersion"`
+	ID            string      `json:"id"`
+	Deferred      bool        `json:"deferred,omitempty"`
+	Events        []wireEvent `json:"events,omitempty"`
+	Error         string      `json:"error,omitempty"`
+}
+
+type wireEvent struct {
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	At        string         `json:"at,omitempty"`
+	ExpiresAt string         `json:"expiresAt,omitempty"`
+	Payload   map[string]any `json:"payload"`
+}
+
+// querySchemaVersion is the wire envelope version this client stamps on
+// every request it builds (DEC-WIRE-1's "schemaVersion") — matches
+// wireclient.SchemaVersion's own value.
+const querySchemaVersion = "1"
+
+// Run implements Query: it sends INTF-SOURCE's `query` message to the
+// registered participant's own invoked command (Command, with "query"
+// appended), using a freshly minted qry-<...> tracking id, and returns
+// UNMODIFIED events decoded from an inline reply, or nil (no error) for a
+// deferred one — the events land later via `ingest-event`, correlated by
+// this same tracking id.
+func (q ParticipantQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
+	if len(q.Command) == 0 {
+		return nil, errors.New("participant query: no command configured")
+	}
+	id, err := newQueryID()
+	if err != nil {
+		return nil, fmt.Errorf("participant query: mint tracking id: %w", err)
+	}
+	req := sourceQueryRequest{SchemaVersion: querySchemaVersion, ID: id, Callback: q.Callback}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("participant query: encode request: %w", err)
+	}
+
+	stdout, code, err := q.runner().Run(ctx, append(q.Command, "query"), body)
+	if err != nil {
+		return nil, err
+	}
+	switch code {
+	case 0:
+		if len(stdout) == 0 {
+			return nil, fmt.Errorf("participant query: empty reply on exit 0")
+		}
+		var reply sourceQueryReply
+		if err := json.Unmarshal(stdout, &reply); err != nil {
+			return nil, fmt.Errorf("participant query: decode reply: %w", err)
+		}
+		if reply.Error != "" {
+			return nil, fmt.Errorf("participant query: %s", reply.Error)
+		}
+		if reply.Deferred {
+			// Owes nothing now (interfaces.md's "Deferred replies" —
+			// INTF-SOURCE's query "owes events later"): the events arrive on
+			// the ingest-event callback, correlated by this SAME id.
+			return nil, nil
+		}
+		events := make([]event.Event, 0, len(reply.Events))
+		for _, we := range reply.Events {
+			events = append(events, eventFromWire(we))
+		}
+		return events, nil
+	case 9: // DEC-WIRE-1's "coarse exit codes": 9 is busy.
+		return nil, ErrParticipantBusy
+	default:
+		if len(stdout) > 0 {
+			var reply sourceQueryReply
+			if err := json.Unmarshal(stdout, &reply); err == nil && reply.Error != "" {
+				return nil, fmt.Errorf("participant query exited %d: %s", code, reply.Error)
+			}
+		}
+		return nil, fmt.Errorf("participant query exited %d", code)
+	}
+}
+
+// eventFromWire decodes one wire event (event.schema.json) into this
+// package's own Event, reconstructing Item from the payload's id/type/title/
+// metadata keys — the SAME flat shape discover.ToQueueEvent writes (docket
+// pg2-oju6w's Task 5.6) and the handler module's own itemFromPayload reads
+// back on the dispatch side (Task 5.6's "same shape, different side"
+// framing). at/expiresAt ride onto Attributes, mirroring CommandQuery.Run's
+// own handling of a command source's optional at/expiresAt fields.
+func eventFromWire(we wireEvent) event.Event {
+	evt := event.Event{ID: we.ID, Type: we.Type, Item: itemFromWirePayload(we.Payload)}
+	attrs := make(map[string]any, 2)
+	if we.At != "" {
+		if t, err := time.Parse(time.RFC3339, we.At); err == nil {
+			attrs["at"] = t
+		}
+	}
+	if we.ExpiresAt != "" {
+		if t, err := time.Parse(time.RFC3339, we.ExpiresAt); err == nil {
+			attrs["expiresAt"] = t
+		}
+	}
+	if len(attrs) > 0 {
+		evt.Attributes = attrs
+	}
+	return evt
+}
+
+// itemFromWirePayload reconstructs an item.Item from a wire event's opaque
+// payload object — this package's own local twin of
+// packages/pg-router-ccpool-handler/cmd/pg-router-ccpool-handler's
+// itemFromPayload (Go's internal-package visibility rule means neither side
+// may import the other's), reading the same flat id/type/title/metadata
+// shape. A payload missing an expected field yields a zero value for it
+// rather than an error, matching that function's own "absent path is a
+// non-match, not an error" posture.
+func itemFromWirePayload(payload map[string]any) item.Item {
+	var it item.Item
+	if v, ok := payload["id"].(string); ok {
+		it.ID = v
+	}
+	if v, ok := payload["type"].(string); ok {
+		it.Type = v
+	}
+	if v, ok := payload["title"].(string); ok {
+		it.Title = v
+	}
+	if v, ok := payload["metadata"].(map[string]any); ok {
+		it.Metadata = v
+	}
+	return it
+}
+
+// newQueryID mints a fresh query tracking id: "qry-" + 12 hex chars of
+// crypto/rand entropy, the same shape convention
+// internal/wireclient.newDispatchID uses for its own "dsp-" ids.
+func newQueryID() (string, error) {
+	b := make([]byte, 6) // 6 bytes -> 12 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "qry-" + hex.EncodeToString(b), nil
+}

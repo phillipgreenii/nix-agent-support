@@ -61,70 +61,54 @@ func DeriveContext(role roles.Role, e event.Event) DispatchContext {
 	return DispatchContext{Role: role, Item: e.Item}
 }
 
-// itemPayload / metadataKey / etc. name the fields ToQueueEvent packs an
-// item.Item's fields under inside eventqueue.Event.Payload, and ItemFromPayload
-// unpacks. This shape is an internal wire convention between this package's
-// producer and internal/orchestrator's queue->executor Listener bridge — it is
-// NOT a declared, config-checkable per-type payload shape (that is the deferred
-// OQ-EVT-CATALOG); a binding narrowing on a payload path would read one of these
-// keys, but nothing here validates such a path.
-const itemPayloadKey = "item"
-
 // ToQueueEvent converts a producer-emitted event.Event (item-carrying) into the
-// eventqueue.Event shape the durable queue stores. The item's fields ride under
-// payload["item"]; `at` is left unset so the queue resolves it against its OWN
-// ingest clock (INV-EVT-1) rather than the producer's tick time.
+// eventqueue.Event shape the durable queue stores. The item's own fields ride
+// at Payload's top level, VERBATIM — no itemPayloadKey wrapping layer, no
+// core-side re-shaping (docket pg2-oju6w's Task 5.6, ADR 0065's "Wire
+// contract" section, closing register row GOAL-MIN-1 / bead pg2-4t5ey): the
+// item-SHAPE (which fields exist, what they mean) is the registered handler
+// participant's own contract now, never interpreted here beyond this one
+// pass-through construction. Field names match what the handler's own
+// dispatch entrypoint decodes (the same names discover's own, now-deleted,
+// ItemFromPayload used to read). Source is no longer stamped onto the wire
+// payload either — nothing downstream of this package ever read
+// payload["source"], so packing it was itself the same over-reach GOAL-MIN-1
+// flags, just on a field a binding never named.
+//
+// `at` is left unset so the queue resolves it against its OWN ingest clock
+// (INV-EVT-1) rather than the producer's tick time.
 func ToQueueEvent(e event.Event) eventqueue.Event {
 	return eventqueue.Event{
 		ID:   e.ID,
 		Type: e.Type,
 		Payload: map[string]any{
-			itemPayloadKey: map[string]any{
-				"id":       e.Item.ID,
-				"type":     e.Item.Type,
-				"title":    e.Item.Title,
-				"metadata": e.Item.Metadata,
-			},
-			"source": e.Source,
+			"id":       e.Item.ID,
+			"type":     e.Item.Type,
+			"title":    e.Item.Title,
+			"metadata": e.Item.Metadata,
 		},
 	}
-}
-
-// ItemFromPayload reconstructs the item.Item a queue event carries, the inverse
-// of ToQueueEvent. A payload missing the expected shape (an externally pushed
-// event that never went through ToQueueEvent) yields a zero item.Item rather
-// than an error — the same "absent path is a non-match, not an error" posture
-// INV-DISP-1 states for a binding's own narrowing path.
-func ItemFromPayload(payload map[string]any) item.Item {
-	var it item.Item
-	raw, ok := payload[itemPayloadKey]
-	if !ok {
-		return it
-	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return it
-	}
-	if v, ok := m["id"].(string); ok {
-		it.ID = v
-	}
-	if v, ok := m["type"].(string); ok {
-		it.Type = v
-	}
-	if v, ok := m["title"].(string); ok {
-		it.Title = v
-	}
-	if v, ok := m["metadata"].(map[string]any); ok {
-		it.Metadata = v
-	}
-	return it
 }
 
 // DeriveContextFromQueueEvent is DeriveContext's counterpart for the queue-side
 // Listener bridge: it builds the ephemeral DispatchContext from the
 // eventqueue.Event a Listener was offered.
+//
+// It resolves ONLY Item.ID here — the one field this package's own downstream
+// dispatch bookkeeping still needs (Role.ExternalID's beadID argument,
+// report.Result's bead refs, the dispatch-result log line). The REST of
+// item.Item's shape (Type/Title/Metadata) is no longer this package's
+// business to reconstruct: docket pg2-oju6w's Task 5.6 moved that
+// interpretation to the registered handler participant's own dispatch
+// entrypoint, which decodes the identical opaque payload object this
+// function reads only one key of. A payload missing the expected "id" key
+// (an externally pushed event that never went through ToQueueEvent) yields a
+// zero-value Item.ID rather than an error — the same "absent path is a
+// non-match, not an error" posture INV-DISP-1 states for a binding's own
+// narrowing path.
 func DeriveContextFromQueueEvent(role roles.Role, evt eventqueue.Event) DispatchContext {
-	return DispatchContext{Role: role, Item: ItemFromPayload(evt.Payload)}
+	id, _ := evt.Payload["id"].(string)
+	return DispatchContext{Role: role, Item: item.Item{ID: id}}
 }
 
 // SourceFailureObserver is notified when a pull-source query exhausts a
@@ -395,8 +379,14 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 
 // runAndEnqueue runs one source's query, RETRYING on failure per its
 // configured pull-source failure backoff (INV-FAIL-3, pg2-0c8yz) before giving
-// up, then enqueues every emitted event onto the durable queue, stamping the
-// source query name as provenance when the query left it blank.
+// up, then enqueues every emitted event onto the durable queue. Provenance
+// (which source emitted an event) is no longer stamped onto the enqueued
+// event at all: docket pg2-oju6w's Task 5.6 stopped ToQueueEvent from
+// writing payload["source"] (nothing downstream of this package ever read
+// it), so a per-event Source value has nowhere left to ride on the wire —
+// s.Name is still this call's own provenance for rpt's per-source
+// accounting (LastTick/Emitted/Rejected/SourceErrors/Failure) below, just
+// never copied onto the event itself.
 //
 // The failure backoff is DISTINCT from Trigger's success-path polling
 // interval: Trigger says how often to ask when things are fine; this says how
@@ -467,9 +457,6 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		}
 	}
 	for _, e := range evts {
-		if e.Source == "" {
-			e.Source = s.Name
-		}
 		if !declared.Declares(e.Type) {
 			rpt.Rejected[s.Name]++
 			continue
