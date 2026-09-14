@@ -122,8 +122,8 @@ schema = 3
     hash = 'sha256-rDcdNYH6ZD8KouyyiZCUEy8JrjOQoAkxHBhugrfHjFo='
 
   [mod.'github.com/xo/terminfo']
-    version = 'v1.0.0'
-    hash = 'sha256-WRD2MrAHjXy2/DWPmUew1ojVQzamOJM3EEWmZedpYKs='
+    version = 'v1.2.0'
+    hash = 'sha256-cLY+3xdncFQA7wPfh21Pex3Q9LA7dhRe+IyH0x6bQfM='
 
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
