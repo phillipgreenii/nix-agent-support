@@ -169,10 +169,12 @@ allowed"`), `~/.claude` (with its existing `plans`/`projects` read-write carve-o
   zone from it, but `sandboxConfig.AllowRead` is consulted ONLY inside `IsDenyRead`, as an override
   that cancels a matching `denyRead` entry — an `allowRead` entry with no corresponding `denyRead`
   match grants nothing today (the path stays whatever zone it would otherwise be, `Unknown` if none
-  claims it). A conversion that treats `allowRead` as its own `Read: Permitted` grant, mirroring
-  `allowWrite`, would silently WIDEN read access beyond what the sandbox config grants today; the
-  completeness review must either preserve the current override-only behavior or call out the
-  widening as a deliberate, separately-decided change, not an incidental side effect of the port.
+  claims it).
+
+  **Decided** (operator, 2026-09-13, via `/unblock-human-beads` on `tc-2zu3e`): `allowRead`
+  converts to its own independent `Read: Permitted` spec grant, mirroring `allowWrite`. This is a
+  deliberate WIDENING of read access beyond today's override-only behavior, not an incidental side
+  effect of the port — implement it as a grant, not a preserved override-only shim.
 
 Sandbox `denyRead`/`denyWrite` (operator hard overrides) and `CETA_DENIED_ROOTS` (fabricated-root
 detection) stay OUTSIDE this walk — see "What does not collapse", below.
@@ -272,6 +274,11 @@ question than "what access does this path have":
   `internal/rules/deniedroots`. Wiring it into `effectpolicy`'s resolution is therefore NEW ground
   this decision opens up, not a continuation of an existing effectpolicy call site, and should be
   treated as such by whoever implements it.
+
+  **Decided** (operator, 2026-09-13, via `/unblock-human-beads` on `tc-2zu3e`): wire
+  `MatchedDeniedRoot` consultation into `internal/effectpolicy`'s resolver as part of this ADR's
+  implementation, rather than deferring fabricated-root protection out of the spike.
+
 - **Remote-scope paths** (`RemotePathRule`, ssh/scp targets) ARE genuinely declarative data —
   `(host, prefix) -> category` is already a tiny spec — but keyed by remote host rather than local
   filesystem structure, since no local marker-walk (`os.Stat`) can apply to a path on a machine this
@@ -321,6 +328,12 @@ have made behavior WORSE, not just structurally impure.
   can drift; keeping them in sync across any future change to either is a real, ongoing cost this
   decision introduces rather than removes, until a later, separately-approved decision unifies
   `internal/effectpolicy` with production's `RuleChain` (`tc-8og1` item 8).
+
+  **Tracked** (operator, 2026-09-13, via `/unblock-human-beads` on `tc-2zu3e`): the operator held
+  this question — do not proceed with implementation before it is at least tracked. It is filed as
+  bead `tc-uxknt`, with this ADR's implementation (`tc-2zu3e`) wired `blocked-by` it. `tc-uxknt`
+  itself still needs the operator's actual decision on whether/how to unify; it is not pre-decided
+  by this ADR.
 
 ### Neutral
 
