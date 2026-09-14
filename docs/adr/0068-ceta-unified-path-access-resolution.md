@@ -329,11 +329,13 @@ have made behavior WORSE, not just structurally impure.
   decision introduces rather than removes, until a later, separately-approved decision unifies
   `internal/effectpolicy` with production's `RuleChain` (`tc-8og1` item 8).
 
-  **Tracked** (operator, 2026-09-13, via `/unblock-human-beads` on `tc-2zu3e`): the operator held
-  this question — do not proceed with implementation before it is at least tracked. It is filed as
-  bead `tc-uxknt`, with this ADR's implementation (`tc-2zu3e`) wired `blocked-by` it. `tc-uxknt`
-  itself still needs the operator's actual decision on whether/how to unify; it is not pre-decided
-  by this ADR.
+  **Decided, tracked** (operator, 2026-09-13/14, via `/unblock-human-beads` on `tc-2zu3e` and
+  `tc-uxknt`): supersedes the "tracked, not pre-decided" framing this ADR previously carried here.
+  The WHETHER is now decided — YES, unify — but this ADR's implementation (`tc-2zu3e`) still stays
+  wired `blocked-by` `tc-uxknt` per the operator's explicit re-affirmation of that ordering. What
+  remains on `tc-uxknt` is the HOW (scoping the unification design, plan-decompose/epic-decompose
+  scale), which is ordinary design/planning work, not a further yes/no decision — do not re-treat
+  `tc-uxknt` as an undecided question.
 
 ### Neutral
 
