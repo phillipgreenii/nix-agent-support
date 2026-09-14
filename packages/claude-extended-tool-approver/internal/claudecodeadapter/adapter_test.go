@@ -13,6 +13,33 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
+// tempDirUnderRealTmp builds a fixture root under the LITERAL "/tmp" path
+// rather than t.TempDir() (which resolves against the ambient $TMPDIR).
+// tc-fpbpp: under `nix build`, $TMPDIR (and therefore every t.TempDir())
+// IS the build's own NIX_BUILD_TOP, which on this host lands under
+// /nix/var/nix/builds/<id> — and ADR 0068's osNixKind (internal/pathspec/
+// osspec.go) declares the WHOLE /nix tree Write:Forbidden/Delete:Forbidden,
+// a faithful port of production patheval.classify()'s own "/nix/**" rule.
+// A fixture built there is misclassified as living in a forbidden zone —
+// a nix-sandbox TMPDIR-placement artifact, not a defect in the policy under
+// test (see internal/patheval/escape_zone_ladder_test.go's near-identical
+// pg2-lw19e writeup, which root-caused the exact same TMPDIR-under-/nix
+// mechanism for a different test). That file's "tmp-root" subtest already
+// proved the fix used here: literal /tmp (bypassing $TMPDIR entirely) stays
+// outside NIX_BUILD_TOP even inside this same sandbox, and osTmpKind (the
+// pathspec port of classify()'s own /tmp rule) classifies all of /tmp as
+// full ReadWrite — so a fixture built here reaches the SAME verdict inside
+// or outside a nix sandbox, unlike one built via t.TempDir()/$TMPDIR.
+func tempDirUnderRealTmp(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ceta-adapter-fixture-")
+	if err != nil {
+		t.Skipf("cannot create fixture dir under /tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // fixture builds a throwaway project root: a plain `.git` directory (the
 // same marker internal/effectpolicy/golden_test.go's own fixture uses — a
 // directory suffices for patheval's project-root detection and zone
@@ -28,7 +55,7 @@ import (
 // exactly for the same reason.
 func fixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := tempDirUnderRealTmp(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

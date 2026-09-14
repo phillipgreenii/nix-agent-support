@@ -16,6 +16,33 @@ import (
 
 var update = flag.Bool("update", false, "regenerate golden .mmd files")
 
+// tempDirUnderRealTmp builds a fixture root under the LITERAL "/tmp" path
+// rather than t.TempDir() (which resolves against the ambient $TMPDIR).
+// tc-fpbpp: under `nix build`, $TMPDIR (and therefore every t.TempDir())
+// IS the build's own NIX_BUILD_TOP, which on this host lands under
+// /nix/var/nix/builds/<id> — and ADR 0068's osNixKind (internal/pathspec/
+// osspec.go) declares the WHOLE /nix tree Write:Forbidden/Delete:Forbidden,
+// a faithful port of production patheval.classify()'s own "/nix/**" rule.
+// A fixture built there is misclassified as living in a forbidden zone —
+// a nix-sandbox TMPDIR-placement artifact, not a defect in the policy under
+// test (see internal/patheval/escape_zone_ladder_test.go's near-identical
+// pg2-lw19e writeup, which root-caused the exact same TMPDIR-under-/nix
+// mechanism for a different test). That file's "tmp-root" subtest already
+// proved the fix used here: literal /tmp (bypassing $TMPDIR entirely) stays
+// outside NIX_BUILD_TOP even inside this same sandbox, and osTmpKind (the
+// pathspec port of classify()'s own /tmp rule) classifies all of /tmp as
+// full ReadWrite — so a fixture built here reaches the SAME verdict inside
+// or outside a nix sandbox, unlike one built via t.TempDir()/$TMPDIR.
+func tempDirUnderRealTmp(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ceta-golden-fixture-")
+	if err != nil {
+		t.Skipf("cannot create fixture dir under /tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // fixture builds a throwaway project root (with .git and README.md) and a
 // separate HOME, returning both realpath-resolved so substitution matches what
 // patheval resolves.
@@ -23,13 +50,16 @@ var update = flag.Bool("update", false, "regenerate golden .mmd files")
 // Deletable-class coverage (tc-z806.1): the root carries a .gitignore naming
 // `*.log`, `build/` and `.env`, an ignored ignored.log, an ignored build/
 // directory, and an ignored .env (which the secret protection must still
-// refuse); README.md and sub/ are NOT ignored. The fixture lives under
-// t.TempDir(), which on this machine is under a temp root — deliberately
-// irrelevant, because internal/pathspec lets the innermost workspace (the
-// git tree) decide, so a tracked file here is writable-not-pathspec.
+// refuse); README.md and sub/ are NOT ignored. The fixture and HOME both
+// live under tempDirUnderRealTmp (literal /tmp, NOT t.TempDir()/$TMPDIR —
+// see that helper's doc comment for why) rather than the ambient temp root,
+// so — unlike a t.TempDir()-rooted fixture — they land outside every zone
+// classify()/pathspec recognizes (including, critically, the os-nix zone
+// under a nix build sandbox), leaving the innermost workspace (the git
+// tree) free to decide, so a tracked file here is writable-not-pathspec.
 func fixture(t *testing.T) (root, home string) {
 	t.Helper()
-	root = t.TempDir()
+	root = tempDirUnderRealTmp(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +264,7 @@ func fixture(t *testing.T) (root, home string) {
 	})
 	t.Cleanup(restoreGitTrackedProbe)
 
-	home = t.TempDir()
+	home = tempDirUnderRealTmp(t)
 	t.Setenv("HOME", home)
 	for _, v := range []string{"WORKSPACE_ROOT", "CETA_EXTRA_READWRITE_ROOTS", "CETA_EXTRA_READONLY_ROOTS", "CETA_DENIED_ROOTS", "XDG_DATA_HOME"} {
 		t.Setenv(v, "")
@@ -1156,9 +1186,9 @@ var goldenCases = []goldenCase{
 	// go_clean_cache/go_clean_modcache RECORD whatever DeleteAccess concludes
 	// for goKind's declared cache roots (registry_breadth.go's goCleanSchema
 	// doc comment) rather than force an expectation — and what it concludes
-	// HERE is Approve for both, because fixture()'s own HOME is a
-	// t.TempDir() (itself under a temp root): patheval's zone classifier
-	// checks `/tmp/**` (PathReadWrite) BEFORE its `~/go/pkg` read-only
+	// HERE is Approve for both, because fixture()'s own HOME is built by
+	// tempDirUnderRealTmp (literal /tmp, itself a temp root): patheval's
+	// zone classifier checks `/tmp/**` (PathReadWrite) BEFORE its `~/go/pkg` read-only
 	// special-case, so the fixture never reaches that special-case at all —
 	// pathspec.Classify then finds "~/.cache/go-build" Deletable via
 	// homeKind's own ".cache/" rule and "~/go/pkg/mod" Deletable via
