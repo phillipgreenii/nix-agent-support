@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: cp README.md ~/.ssh/id_rsa<br/>- path:read README.md [arg 0]<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: no-write-to-secret-path (write to secret path)"]
+    n0["command: cp README.md ~/.ssh/id_rsa<br/>- path:read README.md [arg 0]<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: path-access (well-known credential store)"]
     n1[/"file: README.md"/]
     n2[/"file: ~/.ssh/id_rsa"/]
     n0 -->|"reads: read"| n1

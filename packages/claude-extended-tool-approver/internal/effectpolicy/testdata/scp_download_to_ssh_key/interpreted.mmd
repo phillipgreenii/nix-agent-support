@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: scp host:/etc/passwd ~/.ssh/id_rsa<br/>- path:read /etc/passwd {remote:host} [arg 0]<br/>- net:outbound host {scp} [arg 0]<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: no-write-to-secret-path (write to secret path)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    n0["command: scp host:/etc/passwd ~/.ssh/id_rsa<br/>- path:read /etc/passwd {remote:host} [arg 0]<br/>- net:outbound host {scp} [arg 0]<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: path-access (well-known credential store)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
     n1[/"file: /etc/passwd"/]
     n2[/"file: ~/.ssh/id_rsa"/]
     n0 -->|"reads: read"| n1

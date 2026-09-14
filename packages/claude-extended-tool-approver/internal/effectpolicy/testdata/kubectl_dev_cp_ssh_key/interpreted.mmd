@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: kubectl --context dev cp pod:/etc/x ~/.ssh/id_rsa<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>- remote:exec dev {kubectl}<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: no-write-to-secret-path (write to secret path)"]
+    n0["command: kubectl --context dev cp pod:/etc/x ~/.ssh/id_rsa<br/>- path:truncate ~/.ssh/id_rsa [arg 1]<br/>- remote:exec dev {kubectl}<br/>mark=forbidden: path:truncate ~/.ssh/id_rsa [arg 1]: path-access (well-known credential store)"]
     n1[/"file: ~/.ssh/id_rsa"/]
     n0 -->|"writes: truncate"| n1

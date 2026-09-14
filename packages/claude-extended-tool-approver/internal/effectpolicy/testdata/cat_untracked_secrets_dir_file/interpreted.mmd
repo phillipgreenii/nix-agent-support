@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: cat config/secrets/token<br/>- path:read config/secrets/token [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read config/secrets/token [arg 0]: no-read-of-secret-path (secret path)"]
+    n0["command: cat config/secrets/token<br/>- path:read config/secrets/token [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read config/secrets/token [arg 0]: path-access (bare #quot;secrets#quot; path component; no project declaration vouches for it as non-secret)"]
     n1[/"file: config/secrets/token"/]
     n0 -->|"reads: read"| n1

@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm ~/.ssh/id_rsa<br/>- path:delete ~/.ssh/id_rsa [arg 0]<br/>mark=forbidden: path:delete ~/.ssh/id_rsa [arg 0]: delete-access (secret path (protected paths are never deletable))"]
+    n0["command: rm ~/.ssh/id_rsa<br/>- path:delete ~/.ssh/id_rsa [arg 0]<br/>mark=forbidden: path:delete ~/.ssh/id_rsa [arg 0]: path-access (well-known credential store (protected paths are never deletable))"]
     n1[/"file: ~/.ssh/id_rsa"/]
     n0 -->|"writes: delete"| n1

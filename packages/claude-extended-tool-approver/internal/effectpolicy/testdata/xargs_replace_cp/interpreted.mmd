@@ -3,7 +3,7 @@ flowchart LR
     n1["command: xargs -I{} cp {} sub<br/>- stdio:stdin content<br/>mark=permitted"]
     n2[/"file: list.txt"/]
     subgraph sg_s0["xargs"]
-        n3["command: cp {} sub<br/>- path:read {} (dynamic) [arg 0]<br/>- path:truncate sub [arg 1]<br/>mark=insufficient: path:read {} (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)"]
+        n3["command: cp {} sub<br/>- path:read {} (dynamic) [arg 0]<br/>- path:truncate sub [arg 1]<br/>mark=insufficient: path:read {} (dynamic) [arg 0]: path-access (path is a runtime expansion)"]
         n4[/"file: {} (dynamic)"/]
         n5[/"file: sub"/]
     end

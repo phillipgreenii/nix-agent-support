@@ -1,6 +1,6 @@
 flowchart LR
     n0["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
-    n1["command: tee /nix/store/x<br/>- path:truncate /nix/store/x [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/x [arg 0]: no-write-to-read-only-path (write to read-only zone)"]
+    n1["command: tee /nix/store/x<br/>- path:truncate /nix/store/x [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/x [arg 0]: path-access (forbidden by os-nix workspace at /nix)"]
     n2[/"file: README.md"/]
     n3[/"file: /nix/store/x"/]
     n0 -->|"pipe"| n1

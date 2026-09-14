@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: find . -name '*.log' -delete<br/>- path:read . [arg 0]<br/>- path:delete . [arg 0] (find -delete)<br/>mark=insufficient: path:delete . [arg 0] (find -delete): delete-access (delete of a writable path needs consent (kept by git workspace at <ROOT>))"]
+    n0["command: find . -name '*.log' -delete<br/>- path:read . [arg 0]<br/>- path:delete . [arg 0] (find -delete)<br/>mark=insufficient: path:delete . [arg 0] (find -delete): path-access (delete of a writable path needs consent (held by git workspace at <ROOT>))"]
     n1[/"file: ."/]
     n0 -->|"reads: read"| n1
     n0 -->|"writes: delete"| n1

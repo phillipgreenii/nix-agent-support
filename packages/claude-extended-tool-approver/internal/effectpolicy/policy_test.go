@@ -11,14 +11,15 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
-// TestDeleteAccessPolicy walks the DeleteAccess ladder (see its doc
-// comment) against the shared golden fixture: dynamic and no-evaluator are
-// Unknown; a sandbox denyWrite/denyRead hit, a secret path, and a read-only
-// zone are Forbidden; a writable-but-tracked path is Unknown (consent); a
-// gitignored path is Permitted. A non-delete effect does not apply — and in
-// particular NoWriteToReadOnlyPath must NOT apply to a delete any more, so
-// each delete effect carries exactly one finding.
-func TestDeleteAccessPolicy(t *testing.T) {
+// TestPathAccessPolicy_Delete walks PathAccessPolicy's AccessDelete ladder
+// (see judgeDelete's doc comment) against the shared golden fixture: dynamic
+// and no-evaluator are Unknown; a sandbox denyWrite/denyRead hit, a secret
+// path, and a read-only zone are Forbidden; a writable-but-tracked path is
+// Unknown (consent); a gitignored path is Permitted. This is the ADR 0068 P5
+// (tc-mkpaz.5) collapse of the pre-existing TestDeleteAccessPolicy — every
+// case it pinned against the old DeleteAccess type is preserved verbatim
+// here against the new, unified PathAccessPolicy.
+func TestPathAccessPolicy_Delete(t *testing.T) {
 	root, home := fixture(t)
 	pe := patheval.NewWithCWD(root, root)
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
@@ -56,22 +57,19 @@ func TestDeleteAccessPolicy(t *testing.T) {
 		{"home cache deletable though unzoned", del(filepath.Join(home, ".cache", "x"), false), ctx, Permitted},
 		// (an unzoned, undeclared path cannot be isolated in this fixture —
 		// its HOME sits under a temp root on this machine — so that ladder
-		// step is pinned by internal/deletable's TestClassifyDeletableImpliesWritable)
+		// step is pinned by internal/pathspec's own workspace_test.go)
 	}
 	for _, tc := range cases {
-		f, applies := DeleteAccess{}.Judge(tc.e, tc.ctx)
+		f, applies := PathAccessPolicy{}.Judge(tc.e, tc.ctx)
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}
 	}
-	if _, applies := (DeleteAccess{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessModify, Path: "x"}, ctx); applies {
-		t.Error("applied to a modify effect")
+	if _, applies := (PathAccessPolicy{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectRemote, Operation: "read"}, ctx); applies {
+		t.Error("applied to a non-path effect")
 	}
-	if _, applies := (NoWriteToReadOnlyPath{}).Judge(del("README.md", false), ctx); applies {
-		t.Error("NoWriteToReadOnlyPath still applies to a delete; a delete must get exactly one finding")
-	}
-	if f, applies := (NoWriteToReadOnlyPath{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessModify, Path: "README.md"}, ctx); !applies || f.Verdict != Permitted {
-		t.Errorf("NoWriteToReadOnlyPath on a modify: applies=%v verdict=%s", applies, f.Verdict)
+	if f, applies := (PathAccessPolicy{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessModify, Path: "README.md"}, ctx); !applies || f.Verdict != Permitted {
+		t.Errorf("modify on a writable project file: applies=%v verdict=%s", applies, f.Verdict)
 	}
 }
 
@@ -456,27 +454,32 @@ func TestRemotePathGuard(t *testing.T) {
 
 	// Local (non-remote) effects are UNCHANGED by the wrap: a secret read is
 	// still Forbidden, a read-only-zone write is still Forbidden.
-	if f, applies := (remotePathGuard{NoReadOfSecretPath{}}).Judge(read(filepath.Join(home, ".ssh", "id_rsa"), ""), baseCtx); !applies || f.Verdict != Forbidden {
+	if f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(read(filepath.Join(home, ".ssh", "id_rsa"), ""), baseCtx); !applies || f.Verdict != Forbidden {
 		t.Errorf("local secret read: applies=%v verdict=%s, want Forbidden", applies, f.Verdict)
 	}
-	if f, applies := (remotePathGuard{NoWriteToReadOnlyPath{}}).Judge(write("/nix/store/x", ""), baseCtx); !applies || f.Verdict != Forbidden {
+	if f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(write("/nix/store/x", ""), baseCtx); !applies || f.Verdict != Forbidden {
 		t.Errorf("local read-only-zone write: applies=%v verdict=%s, want Forbidden", applies, f.Verdict)
 	}
 
 	// Remote effects abstain by DEFAULT, even where the local verdict would
-	// have been Forbidden or Permitted.
+	// have been Forbidden or Permitted. ADR 0068 P5 (tc-mkpaz.5) collapsed
+	// the four distinct policy VALUES this table used to exercise
+	// (NoReadOfSecretPath, NoWriteToReadOnlyPath, NoReadOfUnreadablePath,
+	// DeleteAccess) into the single PathAccessPolicy, so every row now
+	// wraps the same value — the point of the table is still that the
+	// REMOTE default abstains regardless of what the local verdict would
+	// have been for each effect shape.
 	remoteCases := []struct {
-		name   string
-		policy Policy
-		e      cmddesc.Effect
+		name string
+		e    cmddesc.Effect
 	}{
-		{"remote secret read no longer forbidden", NoReadOfSecretPath{}, read(filepath.Join(home, ".ssh", "id_rsa"), "host")},
-		{"remote read-only-zone write no longer forbidden", NoWriteToReadOnlyPath{}, write("/nix/store/x", "host")},
-		{"remote ordinary read no longer permitted", NoReadOfUnreadablePath{}, read("README.md", "host")},
-		{"remote delete-of-root no longer forbidden", DeleteAccess{}, del("/", "host")},
+		{"remote secret read no longer forbidden", read(filepath.Join(home, ".ssh", "id_rsa"), "host")},
+		{"remote read-only-zone write no longer forbidden", write("/nix/store/x", "host")},
+		{"remote ordinary read no longer permitted", read("README.md", "host")},
+		{"remote delete-of-root no longer forbidden", del("/", "host")},
 	}
 	for _, tc := range remoteCases {
-		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, baseCtx)
+		f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(tc.e, baseCtx)
 		if !applies || f.Verdict != Unknown {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want Unknown", tc.name, applies, f.Verdict, f.Reason)
 		}
@@ -497,23 +500,22 @@ func TestRemotePathGuard(t *testing.T) {
 	}
 	hookCases := []struct {
 		name    string
-		policy  Policy
 		e       cmddesc.Effect
 		verdict FindingVerdict
 	}{
-		{"read-only: read permitted", NoReadOfUnreadablePath{}, read("/var/log/syslog", "host"), Permitted},
-		{"read-only: write forbidden", NoWriteToReadOnlyPath{}, write("/var/log/syslog", "host"), Forbidden},
-		{"writable: write permitted", NoWriteToReadOnlyPath{}, write("/srv/data/x", "host"), Permitted},
-		{"writable: delete needs consent", DeleteAccess{}, del("/srv/data/x", "host"), Unknown},
-		{"deletable: delete permitted", DeleteAccess{}, del("/srv/scratch/x", "host"), Permitted},
-		{"protected: read forbidden", NoReadOfUnreadablePath{}, read("/srv/locked/x", "host"), Forbidden},
-		{"protected: write forbidden", NoWriteToReadOnlyPath{}, write("/srv/locked/x", "host"), Forbidden},
-		{"unrecognised category falls back to abstain", NoReadOfUnreadablePath{}, read("/srv/mystery/x", "host"), Unknown},
-		{"non-matching prefix falls back to abstain", NoReadOfUnreadablePath{}, read("/var/lib/other", "host"), Unknown},
-		{"non-matching host falls back to abstain", NoReadOfUnreadablePath{}, read("/var/log/syslog", "otherhost"), Unknown},
+		{"read-only: read permitted", read("/var/log/syslog", "host"), Permitted},
+		{"read-only: write forbidden", write("/var/log/syslog", "host"), Forbidden},
+		{"writable: write permitted", write("/srv/data/x", "host"), Permitted},
+		{"writable: delete needs consent", del("/srv/data/x", "host"), Unknown},
+		{"deletable: delete permitted", del("/srv/scratch/x", "host"), Permitted},
+		{"protected: read forbidden", read("/srv/locked/x", "host"), Forbidden},
+		{"protected: write forbidden", write("/srv/locked/x", "host"), Forbidden},
+		{"unrecognised category falls back to abstain", read("/srv/mystery/x", "host"), Unknown},
+		{"non-matching prefix falls back to abstain", read("/var/lib/other", "host"), Unknown},
+		{"non-matching host falls back to abstain", read("/var/log/syslog", "otherhost"), Unknown},
 	}
 	for _, tc := range hookCases {
-		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, hookCtx)
+		f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(tc.e, hookCtx)
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}
@@ -540,17 +542,16 @@ func TestRemotePathGuard(t *testing.T) {
 	}
 	wildcardCases := []struct {
 		name    string
-		policy  Policy
 		e       cmddesc.Effect
 		verdict FindingVerdict
 	}{
-		{"wildcard: unlisted host reads via wildcard read-only", NoReadOfUnreadablePath{}, read("/var/log/syslog", "otherhost"), Permitted},
-		{"wildcard: unlisted host delete via wildcard deletable", DeleteAccess{}, del("/var/tmp/x", "otherhost"), Permitted},
-		{"wildcard: unlisted host, unmatched prefix still abstains", NoReadOfUnreadablePath{}, read("/etc/passwd", "otherhost"), Unknown},
-		{"host-specific entry overrides the wildcard for the same host+prefix", NoReadOfUnreadablePath{}, read("/var/log/syslog", "host"), Forbidden},
+		{"wildcard: unlisted host reads via wildcard read-only", read("/var/log/syslog", "otherhost"), Permitted},
+		{"wildcard: unlisted host delete via wildcard deletable", del("/var/tmp/x", "otherhost"), Permitted},
+		{"wildcard: unlisted host, unmatched prefix still abstains", read("/etc/passwd", "otherhost"), Unknown},
+		{"host-specific entry overrides the wildcard for the same host+prefix", read("/var/log/syslog", "host"), Forbidden},
 	}
 	for _, tc := range wildcardCases {
-		f, applies := (remotePathGuard{tc.policy}).Judge(tc.e, wildcardCtx)
+		f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(tc.e, wildcardCtx)
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}

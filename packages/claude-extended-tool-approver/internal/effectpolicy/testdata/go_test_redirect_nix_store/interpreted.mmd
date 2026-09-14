@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: go test ./... #gt; /nix/store/x<br/>- path:read ./... [arg 0]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>- path:truncate /nix/store/x [redirect #gt;]<br/>mark=forbidden: path:truncate /nix/store/x [redirect #gt;]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: go test ./... #gt; /nix/store/x<br/>- path:read ./... [arg 0]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>- path:truncate /nix/store/x [redirect #gt;]<br/>mark=forbidden: path:truncate /nix/store/x [redirect #gt;]: path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: /nix/store/x"/]
     n2[/"file: ./..."/]
     n0 -->|"redirect-out: #gt;"| n1

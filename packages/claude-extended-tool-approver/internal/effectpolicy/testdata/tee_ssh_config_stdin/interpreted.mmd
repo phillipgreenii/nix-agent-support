@@ -1,6 +1,6 @@
 flowchart LR
     n0["command: cat README.md<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
-    n1["command: tee ~/.ssh/config<br/>- path:truncate ~/.ssh/config [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate ~/.ssh/config [arg 0]: no-write-to-secret-path (write to secret path)"]
+    n1["command: tee ~/.ssh/config<br/>- path:truncate ~/.ssh/config [arg 0]<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate ~/.ssh/config [arg 0]: path-access (well-known credential store)"]
     n2[/"file: README.md"/]
     n3[/"file: ~/.ssh/config"/]
     n0 -->|"pipe"| n1

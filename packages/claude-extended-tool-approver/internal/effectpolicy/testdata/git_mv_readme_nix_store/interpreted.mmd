@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: git mv README.md /nix/store/x<br/>- path:modify README.md [arg 0]<br/>- path:modify /nix/store/x [arg 1]<br/>- path:modify .git [implicit]<br/>mark=forbidden: path:modify /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: git mv README.md /nix/store/x<br/>- path:modify README.md [arg 0]<br/>- path:modify /nix/store/x [arg 1]<br/>- path:modify .git [implicit]<br/>mark=forbidden: path:modify /nix/store/x [arg 1]: path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: README.md"/]
     n2[/"file: /nix/store/x"/]
     n3[/"file: .git"/]

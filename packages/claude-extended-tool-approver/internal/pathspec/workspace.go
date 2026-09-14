@@ -235,6 +235,30 @@ func DefaultKinds() []Kind {
 	return []Kind{tempKind, homeKind, gitKind, goKind, gradleKind, pnKind, justKind, npmKind, devboxKind}
 }
 
+// EffectiveKinds composes P1's workspace Kinds (DefaultKinds), P2's OS-spec
+// Kinds (OSKinds), and P3's session/config-spec Kind (SessionKind(pe)) into
+// the single []Kind ADR 0068 P5 (tc-mkpaz.5, internal/effectpolicy's
+// PathAccessPolicy) resolves every path against. P4's secret-spec mechanism
+// (secretspec.go) is a separate RESOLVER-level step
+// (ResolveAccessWithSecrets), not a Kind, so it is not part of this set —
+// see secretspec.go's own package doc comment for why.
+//
+// Order matters only as the depth tie-break (sortedCandidates); DefaultKinds
+// is listed first purely for readability, matching this function's own
+// argument order.
+//
+// A nil pe yields SessionKind(nil), which itself contributes no roots (see
+// SessionKind's own nil-pe doc comment) rather than panicking.
+func EffectiveKinds(pe *patheval.PathEvaluator) []Kind {
+	def := DefaultKinds()
+	os := OSKinds()
+	kinds := make([]Kind, 0, len(def)+len(os)+1)
+	kinds = append(kinds, def...)
+	kinds = append(kinds, os...)
+	kinds = append(kinds, SessionKind(pe))
+	return kinds
+}
+
 // tempKind: everything under a temp root (temproot.Roots: $TMPDIR,
 // /private/var/folders, /private/tmp, /tmp, CETA_EXTRA_TEMP_ROOTS) is
 // disposable. Outermost by nature; any inner kind holds paths against it.

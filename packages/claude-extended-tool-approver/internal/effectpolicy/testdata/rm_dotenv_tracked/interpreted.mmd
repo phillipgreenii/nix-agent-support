@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm trackedenv/.env<br/>- path:delete trackedenv/.env [arg 0]<br/>mark=forbidden: path:delete trackedenv/.env [arg 0]: delete-access (secret path (protected paths are never deletable))"]
+    n0["command: rm trackedenv/.env<br/>- path:delete trackedenv/.env [arg 0]<br/>mark=forbidden: path:delete trackedenv/.env [arg 0]: path-access (well-known credential store (protected paths are never deletable))"]
     n1[/"file: trackedenv/.env"/]
     n0 -->|"writes: delete"| n1

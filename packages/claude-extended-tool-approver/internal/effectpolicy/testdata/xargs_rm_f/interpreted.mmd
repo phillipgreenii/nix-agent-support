@@ -3,7 +3,7 @@ flowchart LR
     n1["command: xargs rm -f<br/>- stdio:stdin content<br/>mark=permitted"]
     n2[/"file: list.txt"/]
     subgraph sg_s0["xargs"]
-        n3["command: rm -f #lt;stdin-item#gt;<br/>- path:delete #lt;stdin-item#gt; (dynamic) [arg 1]<br/>mark=insufficient: path:delete #lt;stdin-item#gt; (dynamic) [arg 1]: delete-access (path is a runtime expansion)"]
+        n3["command: rm -f #lt;stdin-item#gt;<br/>- path:delete #lt;stdin-item#gt; (dynamic) [arg 1]<br/>mark=insufficient: path:delete #lt;stdin-item#gt; (dynamic) [arg 1]: path-access (path is a runtime expansion)"]
         n4[/"file: #lt;stdin-item#gt; (dynamic)"/]
     end
     n0 -->|"pipe"| n1

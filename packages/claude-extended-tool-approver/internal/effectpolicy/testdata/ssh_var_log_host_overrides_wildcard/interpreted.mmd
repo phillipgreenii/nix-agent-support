@@ -1,7 +1,7 @@
 flowchart LR
     n0["command: ssh host cat /var/log/syslog<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host {ssh} [arg 0]<br/>mark=insufficient: net:outbound host {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
     subgraph sg_s0["ssh host"]
-        n1["command: cat /var/log/syslog<br/>- path:read /var/log/syslog {remote:host} [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read /var/log/syslog {remote:host} [arg 0]: no-read-of-unreadable-path (remote path categorized protected)"]
+        n1["command: cat /var/log/syslog<br/>- path:read /var/log/syslog {remote:host} [arg 0]<br/>- stdio:stdout content<br/>mark=forbidden: path:read /var/log/syslog {remote:host} [arg 0]: path-access (remote path categorized protected)"]
         n2[/"file: /var/log/syslog"/]
     end
     n1 -->|"reads: read"| n2

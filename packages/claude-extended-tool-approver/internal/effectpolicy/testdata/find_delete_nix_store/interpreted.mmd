@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: find /nix/store -delete<br/>- path:read /nix/store [arg 0]<br/>- path:delete /nix/store [arg 0] (find -delete)<br/>mark=forbidden: path:delete /nix/store [arg 0] (find -delete): delete-access (delete of read-only zone)"]
+    n0["command: find /nix/store -delete<br/>- path:read /nix/store [arg 0]<br/>- path:delete /nix/store [arg 0] (find -delete)<br/>mark=forbidden: path:delete /nix/store [arg 0] (find -delete): path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: /nix/store"/]
     n0 -->|"reads: read"| n1
     n0 -->|"writes: delete"| n1

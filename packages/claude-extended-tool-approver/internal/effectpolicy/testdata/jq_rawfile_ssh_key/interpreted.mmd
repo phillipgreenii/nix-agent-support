@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: jq --rawfile k ~/.ssh/id_rsa '.' README.md<br/>- path:read ~/.ssh/id_rsa [arg 2]<br/>- path:read README.md [arg 4]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 2]: no-read-of-secret-path (secret path)"]
+    n0["command: jq --rawfile k ~/.ssh/id_rsa '.' README.md<br/>- path:read ~/.ssh/id_rsa [arg 2]<br/>- path:read README.md [arg 4]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 2]: path-access (well-known credential store)"]
     n1[/"file: ~/.ssh/id_rsa"/]
     n2[/"file: README.md"/]
     n0 -->|"reads: read"| n1

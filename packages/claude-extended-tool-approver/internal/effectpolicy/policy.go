@@ -148,29 +148,27 @@ type Policy interface {
 }
 
 // DefaultPolicies returns the spike's policy set. Each policy has exactly one
-// concern; the read side is split so a secret-path hit and an unreadable-zone
-// hit are distinguishable reasons. StdioIsLocal, ProgramInterpreted and
-// EnvAssignment (slice 3f) were added so EffectStdio/EffectProgram/EffectEnv
-// are no longer effect kinds "no policy judges" — see judgeNode's fail-closed
-// fold in evaluate.go for why an unjudged effect can no longer ride to
-// MarkPermitted for free.
+// concern. StdioIsLocal, ProgramInterpreted and EnvAssignment (slice 3f) were
+// added so EffectStdio/EffectProgram/EffectEnv are no longer effect kinds "no
+// policy judges" — see judgeNode's fail-closed fold in evaluate.go for why an
+// unjudged effect can no longer ride to MarkPermitted for free.
 //
-// The five PATH policies (NoWriteToReadOnlyPath, DeleteAccess,
-// NoReadOfSecretPath, NoReadOfUnreadablePath, NoWriteToSecretPath) are
-// wrapped in remotePathGuard (slice 3aa, tc-lc8f item 4g; tc-vn5z item 4): a
-// single guard, applied here ONCE rather than copy-pasted into each policy's
-// own Judge, that makes every one of them abstain by default on a
-// REMOTE-scope path effect (Effect.Remote != "") unless the operator's
-// categorized-path hook (PolicyContext.RemotePaths) supplies an override —
-// see remotePathGuard's own doc comment. No other policy touches EffectPath,
-// so no other entry needs wrapping.
+// ADR 0068 P5 (tc-mkpaz.5, docs/adr/0068-ceta-unified-path-access-
+// resolution.md, "Policy-layer consequence") collapses the five PATH-only
+// policies that used to live here (NoWriteToReadOnlyPath, DeleteAccess,
+// NoReadOfSecretPath, NoReadOfUnreadablePath, NoWriteToSecretPath) into ONE
+// PathAccessPolicy — an Adapter mapping (resolved pathspec.PathAccess,
+// effect.Access) to a Finding, replacing five parallel ladders with one
+// lookup over internal/pathspec's now-complete workspace+OS+session+secret
+// spec (P1-P4). It is wrapped in remotePathGuard (slice 3aa, tc-lc8f item
+// 4g; tc-vn5z item 4), exactly as the five it replaces were, so a
+// REMOTE-scope path effect (Effect.Remote != "") still abstains by default
+// unless the operator's categorized-path hook (PolicyContext.RemotePaths)
+// supplies an override — see remotePathGuard's own doc comment. No other
+// policy touches EffectPath, so no other entry needs wrapping.
 func DefaultPolicies() []Policy {
 	return []Policy{
-		remotePathGuard{NoWriteToReadOnlyPath{}},
-		remotePathGuard{DeleteAccess{}},
-		remotePathGuard{NoReadOfSecretPath{}},
-		remotePathGuard{NoReadOfUnreadablePath{}},
-		remotePathGuard{NoWriteToSecretPath{}},
+		remotePathGuard{PathAccessPolicy{}},
 		NetworkAccess{},
 		RemoteMutation{},
 		KubeContextPolicy{},
@@ -660,492 +658,6 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	}
 }
 
-// NoWriteToReadOnlyPath applies to every write-class path effect EXCEPT
-// delete (create, modify, truncate — PathAccess.IsWrite minus
-// AccessDelete), whatever command produced it: Forbidden when patheval's
-// zone (or a sandbox denyWrite entry) forbids writing, Unknown when the
-// path is dynamic or unzoned, Permitted otherwise.
-//
-// Deletes are carved out (tc-z806.1) so that a delete effect gets EXACTLY
-// ONE finding, from DeleteAccess below, which re-implements this policy's
-// zone/denyWrite checks as its own protection ladder and then goes further
-// (writable is not enough to delete). Had this policy kept judging deletes
-// too, a writable-but-not-deletable path would carry a Permitted finding
-// from here and an Unknown one from DeleteAccess; the fold's outcome would
-// be the same (Unknown wins), but the reason text would name whichever
-// policy happened to run first and the two policies would silently
-// disagree about the same effect. With the carve-out, a policy set that
-// omits DeleteAccess leaves deletes UNJUDGED, which judgeNode's fail-closed
-// fold turns into Insufficient — never Permitted — so the carve-out cannot
-// widen anything.
-type NoWriteToReadOnlyPath struct{}
-
-// Name implements Policy.
-func (NoWriteToReadOnlyPath) Name() string { return "no-write-to-read-only-path" }
-
-// Judge implements Policy.
-func (NoWriteToReadOnlyPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || !e.Access.IsWrite() || e.Access == cmddesc.AccessDelete {
-		return Finding{}, false
-	}
-	if e.Dynamic {
-		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
-	}
-	if ctx.PathEval == nil {
-		return Finding{Verdict: Unknown, Reason: "no path evaluator"}, true
-	}
-	if ctx.PathEval.IsDenyWrite(e.Path) {
-		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
-	}
-	access := ctx.PathEval.Evaluate(e.Path)
-	switch {
-	case access.CanWrite():
-		return Finding{Verdict: Permitted, Reason: "zone " + access.String()}, true
-	case access == patheval.PathUnknown:
-		return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
-	default:
-		return Finding{Verdict: Forbidden, Reason: "write to " + access.String() + " zone"}, true
-	}
-}
-
-// DeleteAccess has one concern: EffectPath effects with Access ==
-// AccessDelete. It is the policy half of the operator-ruled delete model
-// (Phillip, 2026-09-07, design bead tc-z806 — verbatim there and in
-// internal/pathspec's package doc): "rm would be rejected for paths which
-// aren't at least writable. for writable it should abstain (by default) and
-// if deletable, then it can approve (by default). in both cases, there could
-// be other rules which change the default."
-//
-// Ladder, protections first, so a gitignored `.env` or a `~/.ssh` key is
-// Forbidden before deletability is ever a question:
-//
-//  1. dynamic path                          -> Unknown
-//  2. no evaluator                          -> Unknown
-//  3. sandbox denyWrite or denyRead entry   -> Forbidden
-//  4. secret path (raw or resolved)         -> Forbidden
-//  5. zone reject or read-only              -> Forbidden (not writable)
-//  6. the path IS a worktree root
-//     (pathspec.AtWorktreeRoot, tc-lc8f
-//     item 4a — see below)                  -> judged by worktree STATE, not
-//     the Protected category: clean -> Permitted, dirty -> Forbidden, clean
-//     but ignored files present -> Unknown, state undeterminable -> Unknown
-//  7. the path IS a pn workforest SET
-//     CONTAINER (pathspec.
-//     IsWorkforestSetContainer, tc-8og1
-//     item 1 — see below)                    -> judged by the WORST state
-//     among its member worktree slots: any member dirty -> Forbidden, every
-//     member clean -> Permitted, otherwise -> Unknown
-//  8. pathspec.Classify (workspace
-//     declarations, tc-z806.3):
-//     Protected (.git, .worktrees, a pn
-//     workforest set's own workforests_dir
-//     entry not itself a set container,
-//     ~/.ssh)                                -> Forbidden
-//     Deletable (gitignored, build/ of a
-//     gradle project, ~/.cache, go's build
-//     cache, a temp root)                   -> Permitted, even where the
-//     zone is unknown: a declaration that a path is disposable vouches for
-//     removing it
-//  9. zone unknown, no declaration          -> Unknown   (not known writable)
-//
-// 10. writable, not deletable              -> Unknown   ("needs consent")
-//
-// Step 3 includes denyRead deliberately: the ruling says protections above
-// this rule win, and a path the operator has marked unreadable is protected
-// whether or not it is also marked unwritable — refusing to remove it is the
-// fail-safe reading. Step 4 uses the same secretRead helper the read-side
-// policies use, so a secret is named the same way whichever access class
-// touches it. Step 5 runs BEFORE steps 6/7/8, so a declared-deletable cache
-// that sits in a read-only zone (go's module cache under patheval's
-// `~/go/pkg`) is still Forbidden — the zone is the older, narrower decision
-// and wins, and a worktree sitting in a read-only zone is never approved
-// merely for being clean.
-//
-// Step 6 (worktree state) — operator ruling (Phillip, 2026-09-07, verbatim,
-// recorded on bead tc-vn5z): "removing a worktree is fine, assuming it osnt
-// dirty. well, a completely clean one can be approved. use rejext if there
-// are dirtt workspace. abstain for if clean but ignored files exist." This
-// SUPERSEDES slice 3l's unconditional Protected on a `.worktrees` entry (git
-// kind) and a pn workspace's workforests_dir entry (pn kind) — but ONLY for
-// the worktree ROOT ITSELF, as a unit: `.git/` (always a directory for the
-// primary/canonical clone) stays Protected via step 8 exactly as before, and
-// so does any path INSIDE a worktree that is not the worktree's own root
-// (pathspec.AtWorktreeRoot's doc comment). Step 6 runs BEFORE steps 7/8 so a
-// worktree root's fate is decided by its state, never by the blanket
-// category pathspec.Classify would otherwise assign it.
-//
-// Step 7 (workforest set state, tc-8og1 item 1) extends step 6's ruling to a
-// pn workforest SET CONTAINER — `<workforests_dir>/<set>`, one level above
-// the per-repo worktree slots step 6 already judges
-// (`<workforests_dir>/<set>/<repo>`, two levels under workforests_dir; see
-// pathspec.IsDeclaredWorktreeSlot's doc comment for the depth history). A
-// set container has no `.git` of its own to probe (each MEMBER repo does),
-// so it is judged by the worst state among its members instead
-// (pathspec.ProbeWorkforestSetState) rather than by ProbeWorktreeState
-// directly — never treated as a slot in its own right, and never falling
-// through to step 8's blanket Protected declaration on the workforests_dir
-// entry.
-//
-// "By default" in the ruling means a consumer rule ABOVE this policy may
-// widen (a project that declares its build/ disposable) or narrow; this
-// policy never sees a command name and never decides more than the effect
-// in front of it. Breadth (`-r`, a whole tree vs one file) is NOT a factor,
-// by the same ruling: the class is per path.
-type DeleteAccess struct{}
-
-// Name implements Policy.
-func (DeleteAccess) Name() string { return "delete-access" }
-
-// Judge implements Policy.
-func (DeleteAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || e.Access != cmddesc.AccessDelete {
-		return Finding{}, false
-	}
-	if e.Dynamic {
-		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
-	}
-	if ctx.PathEval == nil {
-		return Finding{Verdict: Unknown, Reason: "no path evaluator"}, true
-	}
-	if ctx.PathEval.IsDenyWrite(e.Path) {
-		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
-	}
-	if ctx.PathEval.IsDenyRead(e.Path) {
-		return Finding{Verdict: Forbidden, Reason: "path is denyRead (protected paths are never deletable)"}, true
-	}
-	if reason, secret := secretRead(e.Path, ctx); secret {
-		return Finding{Verdict: Forbidden, Reason: reason + " (protected paths are never deletable)"}, true
-	}
-	access := ctx.PathEval.Evaluate(e.Path)
-	if access == patheval.PathReject || access == patheval.PathReadOnly {
-		return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
-	}
-	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" {
-		if pathspec.AtWorktreeRoot(abs) {
-			return worktreeRemovalFinding(abs)
-		}
-		if pathspec.IsWorkforestSetContainer(abs) {
-			return workforestSetRemovalFinding(abs)
-		}
-	}
-	class, why := pathspec.Classify(ctx.PathEval, e.Path)
-	switch class {
-	case pathspec.Protected:
-		return Finding{Verdict: Forbidden, Reason: why}, true
-	case pathspec.Deletable:
-		return Finding{Verdict: Permitted, Reason: why}, true
-	case pathspec.Writable:
-		return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + why + ")"}, true
-	default:
-		return Finding{Verdict: Unknown, Reason: why}, true
-	}
-}
-
-// worktreeRemovalFinding maps pathspec.ProbeWorktreeState(abs) to a Finding
-// per the operator ruling recorded on DeleteAccess's own doc comment (step
-// 6): clean -> Permitted, dirty -> Forbidden, clean-but-ignored -> Unknown,
-// undeterminable -> Unknown (the probe's error, when there is one, is folded
-// into the reason so a caller can tell "not actually a git repository"
-// apart from "clean").
-func worktreeRemovalFinding(abs string) (Finding, bool) {
-	state, err := pathspec.ProbeWorktreeState(abs)
-	switch state {
-	case pathspec.WorktreeClean:
-		return Finding{Verdict: Permitted, Reason: "worktree root is clean (no tracked modifications, no untracked or ignored files): " + abs}, true
-	case pathspec.WorktreeDirty:
-		return Finding{Verdict: Forbidden, Reason: "worktree root is dirty (tracked modifications, staged changes, or untracked files): " + abs}, true
-	case pathspec.WorktreeCleanIgnored:
-		return Finding{Verdict: Unknown, Reason: "worktree root is clean but has ignored files: " + abs}, true
-	default:
-		reason := "worktree state could not be determined: " + abs
-		if err != nil {
-			reason += " (" + err.Error() + ")"
-		}
-		return Finding{Verdict: Unknown, Reason: reason}, true
-	}
-}
-
-// workforestSetRemovalFinding maps pathspec.ProbeWorkforestSetState(abs) —
-// the WORST WorktreeState among a pn workforest set container's own member
-// slots — to a Finding, per the SAME operator ruling worktreeRemovalFinding
-// applies to a single slot (tc-8og1 item 1, extending tc-vn5z's "removing a
-// worktree is fine, assuming it osnt dirty" to a set of them): any member
-// dirty -> Forbidden (Reject), every member clean -> Permitted (Approve),
-// otherwise (a mix, an ignored-only member, an undeterminable member, or no
-// members at all) -> Unknown (Abstain). ProbeWorkforestSetState never
-// returns WorktreeCleanIgnored itself (its own doc comment folds that case
-// into WorktreeUnknown), so that branch here is unreachable in practice but
-// kept for the same reason worktreeRemovalFinding keeps it: a Finding
-// mapping should not silently miscategorize a WorktreeState value it wasn't
-// specifically told to expect.
-func workforestSetRemovalFinding(abs string) (Finding, bool) {
-	state, err := pathspec.ProbeWorkforestSetState(abs)
-	switch state {
-	case pathspec.WorktreeClean:
-		return Finding{Verdict: Permitted, Reason: "workforest set is clean (every member worktree is clean): " + abs}, true
-	case pathspec.WorktreeDirty:
-		return Finding{Verdict: Forbidden, Reason: "workforest set has a dirty member worktree: " + abs}, true
-	case pathspec.WorktreeCleanIgnored:
-		return Finding{Verdict: Unknown, Reason: "workforest set has a clean-but-ignored member worktree: " + abs}, true
-	default:
-		reason := "workforest set member states could not be determined, or a member is not all-clean: " + abs
-		if err != nil {
-			reason += " (" + err.Error() + ")"
-		}
-		return Finding{Verdict: Unknown, Reason: reason}, true
-	}
-}
-
-// NoReadOfSecretPath has one concern: a read of a SECRET path (secretpath,
-// on the raw or the resolved path) is Forbidden. A dynamic path is Unknown
-// (it might resolve to a secret). Any other read is outside this policy's
-// concern — it does not apply, and readability is NoReadOfUnreadablePath's
-// job.
-type NoReadOfSecretPath struct{}
-
-// Name implements Policy.
-func (NoReadOfSecretPath) Name() string { return "no-read-of-secret-path" }
-
-// Judge implements Policy.
-func (NoReadOfSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || e.Access != cmddesc.AccessRead {
-		return Finding{}, false
-	}
-	if e.Dynamic {
-		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
-	}
-	if reason, secret := secretRead(e.Path, ctx); secret {
-		return Finding{Verdict: Forbidden, Reason: reason}, true
-	}
-	return Finding{}, false
-}
-
-// secretRead reports whether a statically known path is a secret path, on
-// the raw text or on patheval's resolution of it. It is shared by the
-// node-level secret policy and the graph-level flow policy so both name a
-// secret the same way.
-//
-// tc-lc8f item 3z (pathspec.go's "# NON-SECRET declarations" doc comment
-// carries the operator rulings): a GenericSecretsDir match (the bare,
-// role-describing `secrets` path component — secretpath.Classify) is no
-// longer forbidden UNCONDITIONALLY. It is forbidden unless the project's
-// own workspace declaration (pathspec.NonSecret) vouches for the path as
-// non-secret. A WellKnownSecret match (a specific credential store or file
-// — `.ssh`/`.gnupg`, the credential basenames, `*.pem`/`*.key`) is
-// unaffected: it stays forbidden regardless of any project declaration,
-// exactly as before this slice.
-func secretRead(p string, ctx PolicyContext) (string, bool) {
-	if reason, secret := classifiedSecretRead(p, ctx, ""); secret {
-		return reason, true
-	}
-	if ctx.PathEval != nil {
-		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" {
-			if reason, secret := classifiedSecretRead(resolved, ctx, " (resolved)"); secret {
-				return reason, true
-			}
-		}
-	}
-	return "", false
-}
-
-// classifiedSecretRead applies secretpath.Classify to candidate and decides
-// whether it is a secret read: WellKnownSecret is unconditionally forbidden
-// (secretRead's doc explains why); GenericSecretsDir is forbidden UNLESS
-// pathspec.NonSecret declares the path non-secret. suffix is appended to
-// the reason text (secretRead's pre-existing "(resolved)" annotation for
-// the second, symlink-resolved check).
-//
-// candidate is mapped through stripGoPackagePattern before it is handed to
-// pathspec.NonSecret (never before secretpath.Classify — Classify matches
-// the `secrets` component in "./internal/rules/secrets/..." exactly as
-// well as in the stripped form, so stripping earlier would buy nothing and
-// would change what every OTHER caller of Classify sees): a `go
-// test`/`go build`/... package-pattern operand names a directory in Go's
-// own package-pattern SYNTAX, not in a form patheval/deletable's path
-// machinery or a `git ls-files` probe can resolve directly.
-func classifiedSecretRead(candidate string, ctx PolicyContext, suffix string) (string, bool) {
-	switch secretpath.Classify(candidate) {
-	case secretpath.WellKnownSecret:
-		return "secret path" + suffix, true
-	case secretpath.GenericSecretsDir:
-		if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
-			return "", false
-		}
-		return "secret path" + suffix, true
-	default:
-		return "", false
-	}
-}
-
-// stripGoPackagePattern maps a Go package-pattern operand's "/..." suffix
-// (e.g. "./internal/rules/secrets/..." -> "./internal/rules/secrets") to
-// the directory it names. Deliberately done HERE, in the policy layer, not
-// in cmddesc (which would have to know this is a secrecy concern rather
-// than a generic path fact) or in deletable (whose Kind declarations are
-// go-agnostic by design — see pathspec.go's doc comment): this mapping is
-// specific to how ONE tool family's operand SYNTAX maps onto a path, which
-// is a policy-layer judgment call, not a project-specification concern nor
-// a cmddesc parsing concern.
-func stripGoPackagePattern(path string) string {
-	return strings.TrimSuffix(path, "/...")
-}
-
-// NoWriteToSecretPath is the WRITE-side counterpart of NoReadOfSecretPath
-// (slice 3ab, tc-lc8f item 4h; tc-vn5z item 5): a write-class path effect
-// (create, modify, or truncate — Access.IsWrite() minus AccessDelete, the
-// same carve-out NoWriteToReadOnlyPath documents on its own doc comment)
-// whose target is a WELL-KNOWN secret store is Forbidden, exactly as
-// unconditionally as a READ of the same path already is — EXCEPT for the
-// AccessModify carve-out documented below (slice 3af).
-//
-// Deletes are carved out for the identical reason NoWriteToReadOnlyPath
-// carves them out: DeleteAccess already judges every AccessDelete path
-// effect, including its own secretRead check (its doc comment's ladder step
-// 4), so a delete effect must get EXACTLY ONE finding rather than two
-// policies silently agreeing (or, worse, disagreeing on the reason text).
-//
-// The GenericSecretsDir/WellKnownSecret split mirrors secretRead's own
-// split (slice 3z, tc-lc8f item 3z: "Tracked-by-git means non-secret") but
-// is NOT a verbatim copy of its verdicts: a WellKnownSecret match (a
-// specific credential store or file — .ssh/.gnupg, the credential
-// basenames, *.pem/*.key) stays unconditionally Forbidden for AccessCreate
-// and AccessTruncate, matching the read side exactly, because writing NEW
-// content into (or truncating) a named credential store is exactly as
-// disqualifying as reading it — either way the operator's key material is
-// being touched by an agent action nobody reviewed. A bare GenericSecretsDir
-// match (the role-describing "secrets" path component with no project
-// declaration vouching for it), however, is Unknown here rather than
-// Forbidden: unlike a read, which IRREVERSIBLY discloses whatever is
-// already there, a write to an unproven "secrets"-named location has not
-// yet disclosed or destroyed anything — it is exactly the "needs consent"
-// shape this policy set already gives an ordinary ambiguous write
-// (NoWriteToReadOnlyPath's own "zone unknown" case, DeleteAccess's
-// "writable, not deletable" case), not the irrevocable-harm shape a secret
-// read or a well-known-secret write is. When pathspec.NonSecret vouches
-// for the path (a tracked, non-gitignored file — the SAME declaration
-// secretRead already consults), this policy does not apply at all, and an
-// unrelated write policy (NoWriteToReadOnlyPath) is free to reach its own,
-// ordinary zone-based verdict.
-//
-// # AccessModify carve-out (tc-8og1 item 2, slice 3af)
-//
-// 3ab's corpus root-cause found `git rm <path>/.env` Rejecting: gitRmSchema
-// (registry.go) models every git-rm/git-mv positional as PathModify, not
-// PathDelete, per the tc-z806 operator ruling "git rm can be considered the
-// same as edit because the value can be retrieved from git history" — but
-// this policy still Forbade a WellKnownSecret PathModify unconditionally,
-// so a TRACKED `.env` (whose content is, by that same ruling, recoverable
-// from history — exactly the reasoning tc-z806 gave for demoting git rm
-// from PathDelete to PathModify in the first place) could never be
-// git-rm'd or git-mv'd. pathspec.NonSecret already answers "is this path's
-// content recoverable/non-secret because git tracks it" for the read side
-// (slice 3z); AccessModify is the one write access class the tc-z806
-// ruling itself says shares that recoverability property, so this is the
-// SAME declaration, applied to the ONE access class the ruling covers.
-//
-// The carve-out is deliberately narrower than "AccessModify + WellKnownSecret
-// is always Unknown-by-default like GenericSecretsDir": it only ADDS an
-// escape hatch when pathspec.NonSecret returns true (tracked, not
-// gitignored); an UNTRACKED WellKnownSecret modify stays Forbidden, exactly
-// as before this slice. Generalising the untracked branch to Unknown too
-// was considered and rejected: the policy layer has no way to tell "this
-// Modify effect came from git rm/mv" from "this Modify effect came from an
-// ordinary in-place edit" (Effect carries no command provenance, by this
-// spike's own "nothing branches on a command name" design) — sed's -i is
-// modeled as the identical PathModify access class (registry_breadth.go),
-// and the existing golden `sed_i_ssh_config` ("sed -i 's/a/b/' ~/.ssh/config"
-// -> Reject) exercises exactly that case: ~/.ssh/config is WellKnownSecret,
-// AccessModify, and untracked (no git workspace at $HOME in the fixture).
-// Loosening untracked-Modify to Unknown would flip that existing Reject to
-// Abstain — a real regression against an unrelated, already-settled golden,
-// not something this slice's corpus finding calls for. So: tracked ->
-// Approve (this slice's fix); untracked -> unchanged Forbidden (deliberately
-// NOT touched). See golden_test.go's dotenv-verdict-table comment for the
-// full tracked/untracked x rm/git-rm/git-mv matrix this produces.
-type NoWriteToSecretPath struct{}
-
-// Name implements Policy.
-func (NoWriteToSecretPath) Name() string { return "no-write-to-secret-path" }
-
-// Judge implements Policy.
-func (NoWriteToSecretPath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || !e.Access.IsWrite() || e.Access == cmddesc.AccessDelete {
-		return Finding{}, false
-	}
-	if e.Dynamic {
-		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
-	}
-	return secretWrite(e.Path, e.Access, ctx)
-}
-
-// secretWrite reports the Finding a write to a statically known path
-// deserves, on the raw path text or on patheval's resolution of it —
-// mirroring secretRead's own raw-then-resolved two-pass shape exactly (see
-// secretRead's doc comment) so a symlinked secret store is caught the same
-// way whichever access class touches it. ok is false when neither the raw
-// nor the resolved path is any kind of secret path at all, letting the
-// write fall through to whichever other write policy (NoWriteToReadOnlyPath)
-// has an opinion. access is threaded through so classifiedSecretWrite can
-// apply the AccessModify carve-out (NoWriteToSecretPath's own doc comment,
-// "AccessModify carve-out" section) only to the one access class it covers.
-//
-// This is a SEPARATE helper from secretRead/classifiedSecretRead, not a
-// parameterisation of them: NoReadOfSecretPath and DeleteAccess both already
-// depend on secretRead's exact (string, bool) "is this secret" signature,
-// and the write side's GenericSecretsDir tier needs a DIFFERENT verdict
-// (Unknown, not Forbidden — see NoWriteToSecretPath's own doc comment for
-// why), not merely a different reason string. Duplicating the two-pass
-// control flow here keeps both read- and write-side helpers simple single-
-// purpose functions rather than growing secretRead an extra parameter only
-// the write side needs.
-func secretWrite(p string, access cmddesc.PathAccess, ctx PolicyContext) (Finding, bool) {
-	if f, ok := classifiedSecretWrite(p, access, ctx, ""); ok {
-		return f, true
-	}
-	if ctx.PathEval != nil {
-		if resolved := ctx.PathEval.ResolvePath(p); resolved != "" {
-			if f, ok := classifiedSecretWrite(resolved, access, ctx, " (resolved)"); ok {
-				return f, true
-			}
-		}
-	}
-	return Finding{}, false
-}
-
-// classifiedSecretWrite applies secretpath.Classify to candidate and decides
-// the write-side Finding: WellKnownSecret is Forbidden UNLESS access is
-// AccessModify AND pathspec.NonSecret declares the path non-secret (the
-// tc-8og1 item 2 carve-out — NoWriteToSecretPath's own doc comment has the
-// full ruling and why the untracked branch of AccessModify is deliberately
-// left Forbidden rather than relaxed to Unknown); GenericSecretsDir is
-// Unknown UNLESS pathspec.NonSecret declares the path non-secret,
-// regardless of access class, in which case this policy has no opinion (ok
-// false) and an ordinary write policy decides. suffix is appended to the
-// reason text (secretWrite's "(resolved)" annotation for the symlink-
-// resolved pass), matching classifiedSecretRead's own convention.
-//
-// candidate is mapped through stripGoPackagePattern before it is handed to
-// pathspec.NonSecret, for the identical reason classifiedSecretRead does —
-// see that function's doc comment.
-func classifiedSecretWrite(candidate string, access cmddesc.PathAccess, ctx PolicyContext, suffix string) (Finding, bool) {
-	switch secretpath.Classify(candidate) {
-	case secretpath.WellKnownSecret:
-		if access == cmddesc.AccessModify {
-			if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
-				return Finding{}, false
-			}
-		}
-		return Finding{Verdict: Forbidden, Reason: "write to secret path" + suffix}, true
-	case secretpath.GenericSecretsDir:
-		if nonSecret, _ := pathspec.NonSecret(ctx.PathEval, stripGoPackagePattern(candidate)); nonSecret {
-			return Finding{}, false
-		}
-		return Finding{Verdict: Unknown, Reason: "write to a path named \"secrets\"" + suffix + " needs consent (no project declaration vouches for it as non-secret)"}, true
-	default:
-		return Finding{}, false
-	}
-}
-
 // isVettedConnectionProducer reports whether producer (Effect.NetProducer)
 // is one of the two EffectNet producers the tc-hjtb ruling scoped the
 // vetted-host outbound Permit to: ssh and scp. Any other value — including
@@ -1378,18 +890,106 @@ func (KubeContextPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bo
 	return Finding{Verdict: Unknown, Reason: fmt.Sprintf("kube context %q is not configured (default: needs consent, tc-vn5z)", context)}, true
 }
 
-// NoReadOfUnreadablePath has one concern: patheval READABILITY of a read path
-// effect. Forbidden when the zone is reject or a sandbox denyRead entry
-// matches, Unknown when the path is dynamic or unzoned (or there is no
-// evaluator), Permitted when the zone can be read.
-type NoReadOfUnreadablePath struct{}
+// secretRead reports whether a statically known path is a secret path, via
+// pathspec.ResolveAccessWithSecrets' Read facet (P4's secretspec.go —
+// WellKnownSecret unconditionally, GenericSecretsDir unless
+// pathspec.NonSecret vouches). Shared by PathAccessPolicy's own judgeRead
+// (policy.go) and graphpolicy.go's NoContentFlowToUnvettedNetwork (a
+// content-flow read, not a node-level path effect) so both name a secret
+// read the same way.
+//
+// A nil ctx.PathEval (graphpolicy_test.go's hand-built graphs construct a
+// PolicyContext with no evaluator at all) is handled the same way the
+// pre-ADR-0068 secretRead handled it: secretpath.Classify's WellKnownSecret
+// match needs no evaluator at all (it is purely lexical), and
+// pathspec.NonSecret's own nil-pe handling (pathspec.go) makes the
+// GenericSecretsDir vouch fail closed (no vouch) rather than panic — see
+// resolvePathAccessAbs's own nil handling.
+func secretRead(p string, ctx PolicyContext) (string, bool) {
+	abs := resolvePathAccessAbs(ctx.PathEval, p)
+	if abs == "" {
+		return "", false
+	}
+	kinds := pathspec.EffectiveKinds(ctx.PathEval)
+	if v := pathspec.ResolveAccessWithSecrets(kinds, abs).Read; v.Result == pathspec.Forbidden {
+		return v.Reason, true
+	}
+	return "", false
+}
+
+// PathAccessPolicy is the ADR 0068 P5 (tc-mkpaz.5) collapse of the five
+// path-only policies that used to live here (NoWriteToReadOnlyPath,
+// DeleteAccess, NoReadOfSecretPath, NoReadOfUnreadablePath,
+// NoWriteToSecretPath) into ONE policy judging every EffectPath effect,
+// regardless of access class — "an Adapter mapping (resolved PathAccess,
+// effect.Access) to a verdict, replacing five parallel ladders with one
+// lookup" [design: "Policy-layer consequence", cited verbatim]. It wires
+// internal/pathspec's now-complete workspace (P1) + OS-spec (P2) +
+// session/config-spec (P3) + secret-spec (P4) declarations into the
+// resolution, via pathspec.EffectiveKinds/ResolveAccessWithSecrets, and
+// wires patheval.MatchedDeniedRoot's fabricated-root detection in as NEW
+// ground this ADR opens up — see this type's Judge for the full ladder.
+//
+// # What still does NOT collapse into the pathspec walk
+//
+// Five mechanisms are preserved as policy-layer/sidecar logic sitting
+// around the one call into pathspec, mirroring the pre-ADR-0068
+// DeleteAccess's own ladder structure [design: "What does not collapse
+// into a static os/workspace/app path table"]:
+//
+//  1. Live filesystem/VCS state (worktree/workforest-set membership,
+//     pathspec.AtWorktreeRoot/IsWorkforestSetContainer via
+//     ProbeWorktreeState/ProbeWorkforestSetState) — a dynamic probe, not a
+//     static Kind fact; still the SAME early-ladder special case, BEFORE
+//     the declared-spec walk, that DeleteAccess ran.
+//  2. The AccessModify secret carve-out (git rm/mv's narrower relief for a
+//     tracked-and-not-gitignored WellKnownSecret path) — a POLICY-LAYER
+//     rule combining pathspec's secret classification with the effect's
+//     access sub-kind (accessModifySecretCarveOut below); P4's
+//     secretspec.go deliberately does NOT build this itself (its own doc
+//     comment: WellKnownSecret is "Forbidden, unconditionally — no project
+//     declaration can relax it").
+//  3. Path resolution/normalization plumbing (symlink-escape detection,
+//     ~/env expansion) — unchanged, stays in patheval; this policy still
+//     calls ctx.PathEval.ResolvePath/Evaluate exactly as the five policies
+//     it replaces did, for READ and WRITE's positive zone grant
+//     specifically (see judgeRead/judgeWrite) — pathspec's OS-spec Kinds
+//     duplicate patheval's classify() zone table faithfully, but only
+//     patheval.Evaluate itself carries the symlink-escape guard (a path
+//     that textually looks project-rooted but resolves elsewhere), so
+//     routing the ordinary positive grant through Evaluate (rather than
+//     re-deriving it from the pathspec fold) keeps that guard intact.
+//     pathspec's per-facet fold IS used directly for DELETE (whose old
+//     zone gate had no escape-guard analogue to preserve — DeleteAccess's
+//     own ladder already resolved deletability from the plain resolved
+//     path via pathspec.Classify, unaffected by escape status either
+//     before or after this packet) and for the NEW allowRead grant, secret
+//     Forbidden detection, and every workspace/OS Forbidden declaration
+//     (.git, .worktrees, /nix, ~/.ssh, ...), none of which are subject to
+//     the escape scenario: a Forbidden opinion only ever narrows, never
+//     widens, so honoring it unconditionally cannot reintroduce the
+//     escape hazard the guard exists to prevent.
+//  4. Fabricated-root detection (patheval.MatchedDeniedRoot) — wired in as
+//     NEW ground (operator ruling, Phillip, 2026-09-13, recorded in the
+//     ADR: "wire MatchedDeniedRoot consultation into internal/effectpolicy's
+//     resolver as part of this ADR's implementation"), as a sidecar
+//     consulted early in Judge, before the declared-spec walk, mirroring
+//     how IsDenyRead/IsDenyWrite are already consulted directly.
+//  5. Remote-scope paths (RemotePathRule/remotePathGuard) — UNCHANGED.
+//     remotePathGuard continues wrapping PathAccessPolicy exactly as it
+//     wrapped the five policies today (DefaultPolicies, above).
+type PathAccessPolicy struct{}
 
 // Name implements Policy.
-func (NoReadOfUnreadablePath) Name() string { return "no-read-of-unreadable-path" }
+func (PathAccessPolicy) Name() string { return "path-access" }
 
-// Judge implements Policy.
-func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
-	if e.Kind != cmddesc.EffectPath || e.Access != cmddesc.AccessRead {
+// Judge implements Policy. It applies to every EffectPath effect, of every
+// access class — the five policies it replaces collectively covered the
+// same ground, split by access class; this type keeps that split as
+// internal dispatch (judgeRead/judgeWrite/judgeDelete) rather than as
+// separate Policy values.
+func (PathAccessPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if e.Kind != cmddesc.EffectPath {
 		return Finding{}, false
 	}
 	if e.Dynamic {
@@ -1398,8 +998,110 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 	if ctx.PathEval == nil {
 		return Finding{Verdict: Unknown, Reason: "no path evaluator"}, true
 	}
+	// Fabricated-root sidecar (item 4 above): consulted early, before the
+	// declared-spec walk, independent of access class — a model inventing
+	// an absolute root is equally wrong whether it then reads, writes, or
+	// deletes through it.
+	if root, matched := ctx.PathEval.MatchedDeniedRoot(e.Path); matched {
+		return Finding{
+			Verdict: Forbidden,
+			Reason:  root + " does not exist on this machine — " + e.Path + " is a fabricated root; resolve the intended path against the session cwd instead",
+		}, true
+	}
+	switch e.Access {
+	case cmddesc.AccessDelete:
+		return judgeDelete(e, ctx)
+	case cmddesc.AccessRead:
+		return judgeRead(e, ctx)
+	default: // AccessCreate, AccessModify, AccessTruncate
+		return judgeWrite(e, ctx)
+	}
+}
+
+// resolvePathAccessAbs resolves path exactly as the pre-ADR-0068 policies
+// did (ctx.PathEval.ResolvePath), falling back to the cleaned (env/~/cwd-
+// expanded, lexically cleaned, NOT symlink-resolved) form when resolution
+// itself fails (a broken symlink, a not-yet-existing path), and to path
+// itself when pe is nil (secretRead's own doc comment covers why a nil pe
+// reaches here at all: graphpolicy.go's flow policy calls secretRead with
+// whatever PolicyContext the caller built, which may carry no evaluator) —
+// so a pathspec walk always has SOME absolute-shaped string to reason
+// about rather than giving up outright.
+//
+// stripGoPackagePattern is applied to the result (mirroring the
+// pre-ADR-0068 classifiedSecretRead/classifiedSecretWrite, which stripped a
+// Go package-pattern operand's "/..." suffix ONLY before consulting
+// pathspec.NonSecret's git-tracked vouch, never before secretpath.Classify
+// — see that function's own doc comment for why: a `go test
+// ./internal/rules/secrets/...` operand names a directory in Go's own
+// package-pattern SYNTAX, which pathspec's git-tracked-probe rel
+// computation cannot resolve directly). Every caller of this function feeds
+// its result into a pathspec resolver, never into
+// ctx.PathEval.Evaluate/IsDenyRead/IsDenyWrite (those are called with the
+// original e.Path, unaffected by this stripping), and secretpath.Classify's
+// own component-matching is insensitive to a trailing "/..." component, so
+// stripping unconditionally here is safe for every caller, not just the
+// read-side one the pre-ADR-0068 code applied it to.
+func resolvePathAccessAbs(pe *patheval.PathEvaluator, path string) string {
+	if pe == nil {
+		return stripGoPackagePattern(path)
+	}
+	if abs := pe.ResolvePath(path); abs != "" {
+		return stripGoPackagePattern(abs)
+	}
+	return stripGoPackagePattern(pe.CleanPath(path))
+}
+
+// accessModifySecretCarveOut mirrors the pre-ADR-0068 classifiedSecretWrite's
+// WellKnownSecret+AccessModify branch exactly (see the pre-P5 history in
+// this package's git log): a git rm/mv's PathModify effect on a TRACKED,
+// non-gitignored WellKnownSecret path (its content recoverable from git
+// history — the tc-z806 ruling that demoted git rm from PathDelete to
+// PathModify in the first place) is not Forbidden by the secret check; an
+// ordinary write policy decides instead. This is POLICY-LAYER logic
+// pathspec.ResolveAccessWithSecrets deliberately does not itself apply (see
+// PathAccessPolicy's own doc comment, item 2) — P4 built the underlying
+// pathspec.NonSecret vouch; this carve-out combines it with the effect's
+// access sub-kind, exactly as classifiedSecretWrite did.
+func accessModifySecretCarveOut(pe *patheval.PathEvaluator, access cmddesc.PathAccess, abs string) bool {
+	if access != cmddesc.AccessModify || abs == "" {
+		return false
+	}
+	if secretpath.Classify(abs) != secretpath.WellKnownSecret {
+		return false
+	}
+	nonSecret, _ := pathspec.NonSecret(pe, stripGoPackagePattern(abs))
+	return nonSecret
+}
+
+// stripGoPackagePattern maps a Go package-pattern operand's "/..." suffix
+// (e.g. "./internal/rules/secrets/..." -> "./internal/rules/secrets") to
+// the directory it names — see the pre-ADR-0068 history for why this
+// mapping belongs at the policy layer rather than in cmddesc or pathspec.
+func stripGoPackagePattern(path string) string {
+	return strings.TrimSuffix(path, "/...")
+}
+
+// judgeRead is PathAccessPolicy's AccessRead branch — the pre-ADR-0068
+// NoReadOfSecretPath + NoReadOfUnreadablePath ladders, unified: a sandbox
+// denyRead entry wins first (item 3 sidecar, unchanged); then a secret
+// match (pathspec.ResolveAccessWithSecrets' Forbidden, folding P4's
+// WellKnownSecret/GenericSecretsDir handling in ahead of the ordinary
+// zone); then patheval's own escape-aware zone verdict (item 3); then, only
+// once the zone ladder has no opinion, the NEW independent allowRead grant
+// (ADR 0068, operator ruling Phillip 2026-09-13 — "allowRead converts to
+// its own independent Read: Permitted spec grant... a deliberate WIDENING
+// of read access beyond today's override-only behavior") — checked last
+// because every OTHER pathspec Read grant (OS zones, project/workspace
+// root) is a strict subset of what patheval.Evaluate already grants, so
+// only this one NEW grant can ever change the outcome once the zone ladder
+// has spoken.
+func judgeRead(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 	if ctx.PathEval.IsDenyRead(e.Path) {
 		return Finding{Verdict: Forbidden, Reason: "path is denyRead"}, true
+	}
+	if reason, secret := secretRead(e.Path, ctx); secret {
+		return Finding{Verdict: Forbidden, Reason: reason}, true
 	}
 	access := ctx.PathEval.Evaluate(e.Path)
 	switch {
@@ -1407,8 +1109,170 @@ func (NoReadOfUnreadablePath) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 		return Finding{Verdict: Permitted, Reason: "zone " + access.String()}, true
 	case access == patheval.PathReject:
 		return Finding{Verdict: Forbidden, Reason: "read of " + access.String() + " zone"}, true
-	default:
+	}
+	if abs := resolvePathAccessAbs(ctx.PathEval, e.Path); abs != "" {
+		sessionOnly := []pathspec.Kind{pathspec.SessionKind(ctx.PathEval)}
+		if v := pathspec.ResolveAccess(sessionOnly, abs).Read; v.Result == pathspec.Permitted {
+			return Finding{Verdict: Permitted, Reason: v.Reason}, true
+		}
+	}
+	return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
+}
+
+// judgeWrite is PathAccessPolicy's write-class branch (AccessCreate,
+// AccessModify, AccessTruncate — Access.IsWrite() minus AccessDelete,
+// exactly the pre-ADR-0068 NoWriteToReadOnlyPath/NoWriteToSecretPath
+// carve-out): a sandbox denyWrite entry wins first; then, UNLESS the
+// AccessModify secret carve-out applies, a secret match
+// (pathspec.ResolveAccessWithSecrets' Forbidden — this now also covers an
+// UNVOUCHED GenericSecretsDir write, tightened from the pre-ADR-0068
+// Unknown to Forbidden, per P4's secretspec.go: "Forbidden unless vouched
+// otherwise" applies uniformly across all three facets, with no
+// write-specific carve-out beyond AccessModify); then patheval's own
+// escape-aware zone verdict, exactly as NoWriteToReadOnlyPath used it.
+func judgeWrite(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if ctx.PathEval.IsDenyWrite(e.Path) {
+		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
+	}
+	abs := resolvePathAccessAbs(ctx.PathEval, e.Path)
+	if abs != "" && !accessModifySecretCarveOut(ctx.PathEval, e.Access, abs) {
+		kinds := pathspec.EffectiveKinds(ctx.PathEval)
+		if v := pathspec.ResolveAccessWithSecrets(kinds, abs).Write; v.Result == pathspec.Forbidden {
+			return Finding{Verdict: Forbidden, Reason: v.Reason}, true
+		}
+	}
+	access := ctx.PathEval.Evaluate(e.Path)
+	switch {
+	case access.CanWrite():
+		return Finding{Verdict: Permitted, Reason: "zone " + access.String()}, true
+	case access == patheval.PathUnknown:
 		return Finding{Verdict: Unknown, Reason: "zone " + access.String()}, true
+	default:
+		return Finding{Verdict: Forbidden, Reason: "write to " + access.String() + " zone"}, true
+	}
+}
+
+// judgeDelete is PathAccessPolicy's AccessDelete branch — the pre-ADR-0068
+// DeleteAccess's own ladder, per the operator-ruled delete model (Phillip,
+// 2026-09-07, design bead tc-z806): "rm would be rejected for paths which
+// aren't at least writable. for writable it should abstain (by default)
+// and if deletable, then it can approve (by default)."
+//
+//  1. sandbox denyWrite or denyRead entry            -> Forbidden
+//  2. the path IS a worktree root or a pn workforest
+//     set container (item 1 sidecar, unchanged)      -> judged by live
+//     state, not the declared spec: clean -> Permitted, dirty ->
+//     Forbidden, clean-but-ignored or undeterminable -> Unknown
+//  3. pathspec.ResolveAccessWithSecrets(...).Delete — folding P1-P4's
+//     workspace/OS/secret declarations in ONE call (replacing the old
+//     separate secretRead check plus pathspec.Classify call):
+//     Forbidden  -> Forbidden (a secret, .git, .worktrees, a pn set's own
+//     workforests_dir entry, /nix, ~/.ssh, ...)
+//     Permitted  -> Permitted (gitignored, a declared cache/build dir —
+//     INCLUDING goKind's GOMODCACHE root even where it sits inside
+//     patheval's read-only ~/go/pkg zone: osHomeKind (P2) deliberately
+//     leaves that zone's Delete facet Unknown rather than Forbidden, per
+//     osspec.go's "The ~/go/pkg exception", so goKind's deeper Permitted
+//     is free to win here where the pre-ADR-0068 zone-gate-first ladder
+//     could not — this is the GOMODCACHE fix the whole ADR exists for)
+//     Unknown    -> falls to the zone-based step below (a declaration that
+//     does not cover this facet at all, e.g. the Gradle/XDG OS zones,
+//     which OSKinds does not give a Delete opinion)
+//  4. zone reject or read-only (patheval.Evaluate)    -> Forbidden (not
+//     writable, so not deletable either)
+//  5. otherwise                                        -> Unknown (needs
+//     consent — writable but not declared deletable, or genuinely unzoned)
+func judgeDelete(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	if ctx.PathEval.IsDenyWrite(e.Path) {
+		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
+	}
+	if ctx.PathEval.IsDenyRead(e.Path) {
+		return Finding{Verdict: Forbidden, Reason: "path is denyRead (protected paths are never deletable)"}, true
+	}
+	if abs := ctx.PathEval.ResolvePath(e.Path); abs != "" {
+		if pathspec.AtWorktreeRoot(abs) {
+			return worktreeRemovalFinding(abs)
+		}
+		if pathspec.IsWorkforestSetContainer(abs) {
+			return workforestSetRemovalFinding(abs)
+		}
+	}
+	abs := resolvePathAccessAbs(ctx.PathEval, e.Path)
+	if abs == "" {
+		return Finding{Verdict: Unknown, Reason: "path does not resolve"}, true
+	}
+	kinds := pathspec.EffectiveKinds(ctx.PathEval)
+	pa := pathspec.ResolveAccessWithSecrets(kinds, abs).Delete
+	switch pa.Result {
+	case pathspec.Forbidden:
+		reason := pa.Reason
+		if secretpath.Classify(abs) != secretpath.NotSecret {
+			reason += " (protected paths are never deletable)"
+		}
+		return Finding{Verdict: Forbidden, Reason: reason}, true
+	case pathspec.Permitted:
+		return Finding{Verdict: Permitted, Reason: pa.Reason}, true
+	default:
+		access := ctx.PathEval.Evaluate(e.Path)
+		if access == patheval.PathReject || access == patheval.PathReadOnly {
+			return Finding{Verdict: Forbidden, Reason: "delete of " + access.String() + " zone"}, true
+		}
+		if access.CanWrite() {
+			return Finding{Verdict: Unknown, Reason: "delete of a writable path needs consent (" + pa.Reason + ")"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: pa.Reason}, true
+	}
+}
+
+// worktreeRemovalFinding maps pathspec.ProbeWorktreeState(abs) to a Finding
+// per the operator ruling recorded on judgeDelete's own doc comment: clean
+// -> Permitted, dirty -> Forbidden, clean-but-ignored -> Unknown,
+// undeterminable -> Unknown (the probe's error, when there is one, is
+// folded into the reason so a caller can tell "not actually a git
+// repository" apart from "clean").
+func worktreeRemovalFinding(abs string) (Finding, bool) {
+	state, err := pathspec.ProbeWorktreeState(abs)
+	switch state {
+	case pathspec.WorktreeClean:
+		return Finding{Verdict: Permitted, Reason: "worktree root is clean (no tracked modifications, no untracked or ignored files): " + abs}, true
+	case pathspec.WorktreeDirty:
+		return Finding{Verdict: Forbidden, Reason: "worktree root is dirty (tracked modifications, staged changes, or untracked files): " + abs}, true
+	case pathspec.WorktreeCleanIgnored:
+		return Finding{Verdict: Unknown, Reason: "worktree root is clean but has ignored files: " + abs}, true
+	default:
+		reason := "worktree state could not be determined: " + abs
+		if err != nil {
+			reason += " (" + err.Error() + ")"
+		}
+		return Finding{Verdict: Unknown, Reason: reason}, true
+	}
+}
+
+// workforestSetRemovalFinding maps pathspec.ProbeWorkforestSetState(abs) —
+// the WORST WorktreeState among a pn workforest set container's own member
+// slots — to a Finding, per the SAME operator ruling worktreeRemovalFinding
+// applies to a single slot: any member dirty -> Forbidden (Reject), every
+// member clean -> Permitted (Approve), otherwise (a mix, an ignored-only
+// member, an undeterminable member, or no members at all) -> Unknown
+// (Abstain). ProbeWorkforestSetState never returns WorktreeCleanIgnored
+// itself (its own doc comment folds that case into WorktreeUnknown), so
+// that branch here is unreachable in practice but kept for the same reason
+// worktreeRemovalFinding keeps it.
+func workforestSetRemovalFinding(abs string) (Finding, bool) {
+	state, err := pathspec.ProbeWorkforestSetState(abs)
+	switch state {
+	case pathspec.WorktreeClean:
+		return Finding{Verdict: Permitted, Reason: "workforest set is clean (every member worktree is clean): " + abs}, true
+	case pathspec.WorktreeDirty:
+		return Finding{Verdict: Forbidden, Reason: "workforest set has a dirty member worktree: " + abs}, true
+	case pathspec.WorktreeCleanIgnored:
+		return Finding{Verdict: Unknown, Reason: "workforest set has a clean-but-ignored member worktree: " + abs}, true
+	default:
+		reason := "workforest set member states could not be determined, or a member is not all-clean: " + abs
+		if err != nil {
+			reason += " (" + err.Error() + ")"
+		}
+		return Finding{Verdict: Unknown, Reason: reason}, true
 	}
 }
 

@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: cat #quot;$F#quot;<br/>- path:read $F (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read $F (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)"]
+    n0["command: cat #quot;$F#quot;<br/>- path:read $F (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read $F (dynamic) [arg 0]: path-access (path is a runtime expansion)"]
     n1[/"file: $F (dynamic)"/]
     n0 -->|"reads: read"| n1

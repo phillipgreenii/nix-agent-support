@@ -1,7 +1,7 @@
 flowchart LR
     n0["command: ssh user@host.example.com ls<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host.example.com {ssh} [arg 0]<br/>mark=insufficient: net:outbound host.example.com {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host.example.com)"]
     subgraph sg_s0["ssh host.example.com"]
-        n1["command: ls<br/>- path:read . {remote:host.example.com} [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: path:read . {remote:host.example.com} [implicit]: no-read-of-unreadable-path (remote path on host.example.com: no local classification)"]
+        n1["command: ls<br/>- path:read . {remote:host.example.com} [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: path:read . {remote:host.example.com} [implicit]: path-access (remote path on host.example.com: no local classification)"]
         n2[/"file: ."/]
     end
     n1 -->|"reads: read"| n2

@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: echo x #gt; ~/.aws/credentials<br/>- stdio:stdout content<br/>- path:truncate ~/.aws/credentials [redirect #gt;]<br/>mark=forbidden: path:truncate ~/.aws/credentials [redirect #gt;]: no-write-to-secret-path (write to secret path)"]
+    n0["command: echo x #gt; ~/.aws/credentials<br/>- stdio:stdout content<br/>- path:truncate ~/.aws/credentials [redirect #gt;]<br/>mark=forbidden: path:truncate ~/.aws/credentials [redirect #gt;]: path-access (well-known credential store)"]
     n1[/"file: ~/.aws/credentials"/]
     n0 -->|"redirect-out: #gt;"| n1
     n0 -->|"writes: truncate"| n1

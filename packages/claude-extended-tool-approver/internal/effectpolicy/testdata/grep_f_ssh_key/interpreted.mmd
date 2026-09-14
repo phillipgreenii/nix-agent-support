@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: grep -f ~/.ssh/id_rsa README.md<br/>- path:read ~/.ssh/id_rsa [arg 1]<br/>- path:read README.md [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 1]: no-read-of-secret-path (secret path)"]
+    n0["command: grep -f ~/.ssh/id_rsa README.md<br/>- path:read ~/.ssh/id_rsa [arg 1]<br/>- path:read README.md [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 1]: path-access (well-known credential store)"]
     n1[/"file: ~/.ssh/id_rsa"/]
     n2[/"file: README.md"/]
     n0 -->|"reads: read"| n1

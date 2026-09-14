@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: treefmt .env<br/>- path:modify .env [arg 0]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:modify .env [arg 0]: no-write-to-secret-path (write to secret path)"]
+    n0["command: treefmt .env<br/>- path:modify .env [arg 0]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:modify .env [arg 0]: path-access (well-known credential store)"]
     n1[/"file: .env"/]
     n0 -->|"writes: modify"| n1

@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: cat README.md #gt; #quot;$OUT#quot;<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:truncate $OUT (dynamic) [redirect #gt;]<br/>mark=insufficient: path:truncate $OUT (dynamic) [redirect #gt;]: no-write-to-read-only-path (path is a runtime expansion)"]
+    n0["command: cat README.md #gt; #quot;$OUT#quot;<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:truncate $OUT (dynamic) [redirect #gt;]<br/>mark=insufficient: path:truncate $OUT (dynamic) [redirect #gt;]: path-access (path is a runtime expansion)"]
     n1[/"file: $OUT"/]
     n2[/"file: README.md"/]
     n3[/"file: $OUT (dynamic)"/]

@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm -- -weird-name<br/>- path:delete -weird-name [arg 1]<br/>mark=insufficient: path:delete -weird-name [arg 1]: delete-access (delete of a writable path needs consent (kept by git workspace at <ROOT>))"]
+    n0["command: rm -- -weird-name<br/>- path:delete -weird-name [arg 1]<br/>mark=insufficient: path:delete -weird-name [arg 1]: path-access (delete of a writable path needs consent (held by git workspace at <ROOT>))"]
     n1[/"file: -weird-name"/]
     n0 -->|"writes: delete"| n1

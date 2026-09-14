@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: scp host:/var/log/syslog ./syslog<br/>- path:read /var/log/syslog {remote:host} [arg 0]<br/>- net:outbound host {scp} [arg 0]<br/>- path:truncate ./syslog [arg 1]<br/>mark=insufficient: path:read /var/log/syslog {remote:host} [arg 0]: no-read-of-unreadable-path (remote path on host: no local classification)"]
+    n0["command: scp host:/var/log/syslog ./syslog<br/>- path:read /var/log/syslog {remote:host} [arg 0]<br/>- net:outbound host {scp} [arg 0]<br/>- path:truncate ./syslog [arg 1]<br/>mark=insufficient: path:read /var/log/syslog {remote:host} [arg 0]: path-access (remote path on host: no local classification)"]
     n1[/"file: /var/log/syslog"/]
     n2[/"file: ./syslog"/]
     n0 -->|"reads: read"| n1

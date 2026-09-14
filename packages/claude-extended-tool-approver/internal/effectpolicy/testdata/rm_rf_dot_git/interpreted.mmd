@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm -rf .git<br/>- path:delete .git [arg 1]<br/>mark=forbidden: path:delete .git [arg 1]: delete-access (protected by git workspace at <ROOT>)"]
+    n0["command: rm -rf .git<br/>- path:delete .git [arg 1]<br/>mark=forbidden: path:delete .git [arg 1]: path-access (forbidden by git workspace at <ROOT>)"]
     n1[/"file: .git"/]
     n0 -->|"writes: delete"| n1

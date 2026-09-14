@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: git mv .env .env.bak<br/>- path:modify .env [arg 0]<br/>- path:modify .env.bak [arg 1]<br/>- path:modify .git [implicit]<br/>mark=forbidden: path:modify .env [arg 0]: no-write-to-secret-path (write to secret path)"]
+    n0["command: git mv .env .env.bak<br/>- path:modify .env [arg 0]<br/>- path:modify .env.bak [arg 1]<br/>- path:modify .git [implicit]<br/>mark=forbidden: path:modify .env [arg 0]: path-access (well-known credential store)"]
     n1[/"file: .env"/]
     n2[/"file: .env.bak"/]
     n3[/"file: .git"/]

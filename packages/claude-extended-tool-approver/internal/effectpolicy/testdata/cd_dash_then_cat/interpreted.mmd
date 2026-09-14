@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: cd -<br/>- path:read - (dynamic) [arg 0] (previous directory)<br/>- chdir - (dynamic) [arg 0] (previous directory)<br/>mark=insufficient: path:read - (dynamic) [arg 0] (previous directory): no-read-of-secret-path (path is a runtime expansion)"]
+    n0["command: cd -<br/>- path:read - (dynamic) [arg 0] (previous directory)<br/>- chdir - (dynamic) [arg 0] (previous directory)<br/>mark=insufficient: path:read - (dynamic) [arg 0] (previous directory): path-access (path is a runtime expansion)"]
     n1["command: cat README.md<br/>- path:read README.md (dynamic) [arg 0] (working directory unknown)<br/>- stdio:stdout content<br/>mark=insufficient: working directory unknown after cd - (previous directory)"]
     n2[/"file: - (dynamic)"/]
     n3[/"file: README.md (dynamic)"/]

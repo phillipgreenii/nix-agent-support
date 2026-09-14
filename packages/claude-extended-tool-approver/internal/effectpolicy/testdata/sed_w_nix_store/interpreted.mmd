@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: sed 'w /nix/store/out' README.md<br/>- program:sed #quot;w /nix/store/out#quot;<br/>- path:truncate /nix/store/out [sed w]<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/out [sed w]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: sed 'w /nix/store/out' README.md<br/>- program:sed #quot;w /nix/store/out#quot;<br/>- path:truncate /nix/store/out [sed w]<br/>- path:read README.md [arg 1]<br/>- stdio:stdout content<br/>mark=forbidden: path:truncate /nix/store/out [sed w]: path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: /nix/store/out"/]
     n2[/"file: README.md"/]
     n0 -->|"reads: read"| n2

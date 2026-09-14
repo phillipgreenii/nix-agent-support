@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: grep -r x secrets/<br/>- path:read secrets/ [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read secrets/ [arg 2]: no-read-of-secret-path (secret path)"]
+    n0["command: grep -r x secrets/<br/>- path:read secrets/ [arg 2]<br/>- stdio:stdout content<br/>mark=forbidden: path:read secrets/ [arg 2]: path-access (bare #quot;secrets#quot; path component; no project declaration vouches for it as non-secret)"]
     n1[/"file: secrets/"/]
     n0 -->|"reads: read"| n1

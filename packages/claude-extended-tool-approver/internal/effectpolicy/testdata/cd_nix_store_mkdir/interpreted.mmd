@@ -1,6 +1,6 @@
 flowchart LR
     n0["command: cd /nix/store<br/>- path:read /nix/store [arg 0]<br/>- chdir /nix/store [arg 0]<br/>mark=permitted"]
-    n1["command: mkdir -p x<br/>- path:create /nix/store/x [arg 1]<br/>mark=forbidden: path:create /nix/store/x [arg 1]: no-write-to-read-only-path (write to read-only zone)"]
+    n1["command: mkdir -p x<br/>- path:create /nix/store/x [arg 1]<br/>mark=forbidden: path:create /nix/store/x [arg 1]: path-access (forbidden by os-nix workspace at /nix)"]
     n2[/"file: /nix/store"/]
     n3[/"file: /nix/store/x"/]
     n0 -->|"reads: read"| n2

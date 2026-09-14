@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: echo x #gt; config/secrets/token<br/>- stdio:stdout content<br/>- path:truncate config/secrets/token [redirect #gt;]<br/>mark=insufficient: path:truncate config/secrets/token [redirect #gt;]: no-write-to-secret-path (write to a path named #quot;secrets#quot; needs consent (no project declaration vouches for it as non-secret))"]
+    n0["command: echo x #gt; config/secrets/token<br/>- stdio:stdout content<br/>- path:truncate config/secrets/token [redirect #gt;]<br/>mark=forbidden: path:truncate config/secrets/token [redirect #gt;]: path-access (bare #quot;secrets#quot; path component; no project declaration vouches for it as non-secret)"]
     n1[/"file: config/secrets/token"/]
     n0 -->|"redirect-out: #gt;"| n1
     n0 -->|"writes: truncate"| n1

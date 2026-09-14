@@ -1,4 +1,4 @@
 flowchart LR
-    n0["command: rm -rf .worktrees/dirty<br/>- path:delete .worktrees/dirty [arg 1]<br/>mark=forbidden: path:delete .worktrees/dirty [arg 1]: delete-access (worktree root is dirty (tracked modifications, staged changes, or untracked files): <ROOT>/.worktrees/dirty)"]
+    n0["command: rm -rf .worktrees/dirty<br/>- path:delete .worktrees/dirty [arg 1]<br/>mark=forbidden: path:delete .worktrees/dirty [arg 1]: path-access (worktree root is dirty (tracked modifications, staged changes, or untracked files): <ROOT>/.worktrees/dirty)"]
     n1[/"file: .worktrees/dirty"/]
     n0 -->|"writes: delete"| n1

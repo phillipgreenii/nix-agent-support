@@ -5,7 +5,7 @@ flowchart LR
     n3[/"file: list.txt"/]
     n6[/"file: copy.md"/]
     subgraph sg_s0["xargs"]
-        n4["command: head #lt;stdin-item#gt;<br/>- path:read #lt;stdin-item#gt; (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read #lt;stdin-item#gt; (dynamic) [arg 0]: no-read-of-secret-path (path is a runtime expansion)"]
+        n4["command: head #lt;stdin-item#gt;<br/>- path:read #lt;stdin-item#gt; (dynamic) [arg 0]<br/>- stdio:stdout content<br/>mark=insufficient: path:read #lt;stdin-item#gt; (dynamic) [arg 0]: path-access (path is a runtime expansion)"]
         n5[/"file: #lt;stdin-item#gt; (dynamic)"/]
     end
     n0 -->|"pipe"| n1

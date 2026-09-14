@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: cat README.md #gt; /nix/store/hosts<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:truncate /nix/store/hosts [redirect #gt;]<br/>mark=forbidden: path:truncate /nix/store/hosts [redirect #gt;]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: cat README.md #gt; /nix/store/hosts<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>- path:truncate /nix/store/hosts [redirect #gt;]<br/>mark=forbidden: path:truncate /nix/store/hosts [redirect #gt;]: path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: /nix/store/hosts"/]
     n2[/"file: README.md"/]
     n0 -->|"redirect-out: #gt;"| n1

@@ -1,5 +1,5 @@
 flowchart LR
-    n0["command: git rm /nix/store/x<br/>- path:modify /nix/store/x [arg 0]<br/>- path:modify .git [implicit]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:modify /nix/store/x [arg 0]: no-write-to-read-only-path (write to read-only zone)"]
+    n0["command: git rm /nix/store/x<br/>- path:modify /nix/store/x [arg 0]<br/>- path:modify .git [implicit]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:modify /nix/store/x [arg 0]: path-access (forbidden by os-nix workspace at /nix)"]
     n1[/"file: /nix/store/x"/]
     n2[/"file: .git"/]
     n0 -->|"writes: modify"| n1
