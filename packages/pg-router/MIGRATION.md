@@ -389,3 +389,95 @@ formal "exactly two named gates" text) is a larger, separately-scoped change tha
 acceptance criteria required, and was deliberately left undone here rather than half-removed
 across the ~15 Go files (and the `home/programs/pg-router`/`darwin/modules/pg-router` Nix options) that
 reference it.
+
+## Deployment: participant extraction — `pg-router-ccpool-handler` is now required (Phase 5, `docs/adr/0065`)
+
+Phase 5 (docket `pg2-oju6w`) moved every concrete participant implementation — the ccpool-backed
+and command-backed role executors, the beads-backed pull query, and the tool-naming/connectivity
+pre-flight checks that back them — out of this package and into a new sibling module,
+**`packages/pg-router-ccpool-handler`** (its own binary: `pg-router-ccpool-handler`). This
+package (`packages/pg-router`) keeps only the generic dispatcher: events, bindings, participants,
+handler sessions, and wiring — it no longer knows about `bd`, `ccpool`, `claude`, or any other
+concrete tool (`docs/adr/0065`'s "Positive consequences"). This is a **breaking deployment
+change**, not an internal refactor:
+
+- **The handler binary must be on `PATH` and running/registered.** Before this change, an
+  unconfigured (`.pg-router/config.toml`-less) core fell back to a built-in feedback/worker role
+  and query set, running entirely in-process. That built-in fallback is now **gone** (see "Breaking:
+  the core ships with no built-in role/query set" below) — so a deployment that has not yet stood
+  up `pg-router-ccpool-handler` alongside its `pg-router` core hits `INV-WORKFLOW-1` check 5's
+  backing-command resolution and refuses to start: this is now a **hard startup failure**, not a
+  degraded-but-working state. There is no soft landing for an unmigrated upgrade.
+- **`home/programs/pg-router-ccpool-handler`** (new home-manager capability) and
+  **`darwin/modules/pg-router-ccpool-handler`** (its LaunchAgent mirror) deploy the register step
+  against a running `pg-router` core — see their own doc comments for the current, narrower scope
+  (registration only; the core spawning `dispatch`/`query`/lifecycle-hook calls into this binary
+  for real is docket `pg2-oju6w`'s Task 5.4, an accepted gap as of this change — `docs/adr/0065`'s
+  Addendum).
+
+### Breaking: `[[role]].type` is removed — role kind moves to the handler's own config
+
+Before this change, a `[[role]]` block named its own participant kind and carried that kind's
+config inline:
+
+```toml
+[[role]]
+name = "feedback"
+type = "ccpool"
+enabled = true
+binds = ["feedback.requested"]
+[role.ccpool]
+actor = "claude"
+completion = "close-only"
+on_failure = "unclaim"
+on_dispatch_fail = "unclaim"
+authorship_guard = true
+prompt = '''
+...
+'''
+[role.ccpool.budget]
+tokens = 0
+cost = 0
+time = "25m0s"
+```
+
+After this change, `roles.Role` (and its TOML decode, `internal/config/registry.go`'s `roleTOML`)
+carries only `name`, `enabled`, `binds`, and an optional `retry` override — **`type` and
+`ccpool`/`command` are gone entirely**, not narrowed:
+
+```toml
+[[role]]
+name = "feedback"
+enabled = true
+binds = ["feedback.requested"]
+```
+
+The kind-specific configuration (`type = "ccpool" | "command"`, the `actor`/`completion`/
+`on_failure`/`on_dispatch_fail`/`authorship_guard`/`prompt`/`budget`/`isolation` fields) moves to
+`pg-router-ccpool-handler`'s own role-config JSON file (`--role-config`, or
+`PG_ROUTER_CCPOOL_HANDLER_ROLE`) — see that module's `cmd/pg-router-ccpool-handler/roleconfig.go`
+for the exact JSON shape. There is no automatic TOML-to-JSON converter shipped for this move;
+translate each `[[role]]` block's `type`/`[role.ccpool]`/`[role.command]` fields into the
+equivalent JSON `roleFile` by hand (field names are unchanged, only the container format is).
+
+### Breaking: the core ships with no built-in role/query set
+
+Before this change, an operator relying on zero-config defaults (no `.pg-router/config.toml`) saw
+`pg-router` log "config present but defines no `[[role]]`; using built-in roles" and fall back to
+an in-process feedback/worker role set and a `bd`-backed built-in query. **That fallback is
+deleted, not degraded** (`docs/adr/0065`'s "Source-side boundary" decision): a core with no
+configured roles/queries today simply dispatches nothing — there is no equivalent "it still mostly
+works" state to fall into. Any deployment that never wrote its own `config.toml` MUST author real
+`[[role]]`/`[[query]]` configuration (see `pg-router config --print-defaults` for a
+behaviorally-equivalent starting point, translated to the post-move shape above) and deploy
+`pg-router-ccpool-handler` before upgrading.
+
+### Removed with no migration path: `sessions` / `reconcile`
+
+The `sessions` and `reconcile` CLI subcommands are **deleted outright** in this change (per the
+superseding operator ruling of 2026-09-02, recorded in `docs/adr/0065`'s "No deprecation shim"
+decision). There is deliberately **no** deprecation shim, no dedicated diagnostic stderr line, and
+no grace period: invoking either name now gets the binary's ordinary unknown-subcommand usage
+error (exit `2`, `docs/adr/0042-coarse-exit-code-convention-busy-is-not-2.md`), exactly as any
+other unrecognized subcommand would. No migration path is offered for either — this is a
+deliberate omission, not an oversight.
