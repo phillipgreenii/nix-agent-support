@@ -7,13 +7,13 @@ module's implementation is checked against once Task 5.2 onward populates it.
 
 ## Realized (this module is the implementer, pg-router's core is the counterparty)
 
-- **`INTF-SOURCE`** — typed events into the core, over pg-router's one opaque source contract.
-  **Counterparty:** `ACTOR-CCH-CORE`. Fully defined by
+- Realizes **`INTF-SOURCE`** — typed events into the core, over pg-router's one opaque source
+  contract. **Counterparty:** `ACTOR-CCH-CORE`. Fully defined by
   `packages/pg-router/docs/behavior/interfaces.md`'s `INTF-SOURCE` section
   (uuid `fe42416a-5f10-4db1-b8c3-46b1609213c7`); not restated here — this module implements it,
   it does not own it.
-- **`INTF-HANDLER`** — dispatch to a handler session and its accept-or-decline/deferred-ack reply.
-  **Counterparty:** `ACTOR-CCH-CORE`. Fully defined by
+- Realizes **`INTF-HANDLER`** — dispatch to a handler session and its accept-or-decline/deferred-ack
+  reply. **Counterparty:** `ACTOR-CCH-CORE`. Fully defined by
   `packages/pg-router/docs/behavior/interfaces.md`'s `INTF-HANDLER` section
   (uuid `10939663-7a48-4d44-8c4a-9a2df8ae4654`); not restated here.
 
