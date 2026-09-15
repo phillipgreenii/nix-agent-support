@@ -204,11 +204,76 @@ and it STOPs unconditionally regardless of this flag.
    result). A transient error → retry. If the invocation supplied `$ARGUMENTS`, apply them as
    additional NARROWING filters here (see "Optional scope arguments").
 
-2. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn
+2. **CONTAINER GUARD** (defense in depth against a D-9 `beads-lifecycle` container-parent
+   dominating the claim — ported from `/drain-beads`' own Container guard, provenance
+   `tc-ipgw`, ported by `tc-qwdys`). Run TWO checks, in this order, before treating the
+   claimed bead as workable:
+   1. **Container-note check.** Does the claimed bead's `notes` contain a container-marker
+      pattern (contains "Do NOT claim this container bead for direct work", or is prefixed
+      `[container note`)? This marker is a convention SHARED with `/drain-beads` — either
+      command may write or read it.
+   2. **Children-existence probe** — run ONLY when check 1 did NOT match:
+      `bd list --parent <id> --status all -n 0 --json`. A NON-EMPTY `.data` is necessary but
+      NOT sufficient — a bead can have children and still need its own independent human
+      decision, so confirm against **D-9** (`beads-lifecycle` skill) that nothing on THIS
+      bead's own text asks a question distinct from its children's (every live child either
+      resolves on its own — closed, or already independently `human`-labeled so its own
+      question surfaces on its own merits). If genuinely ambiguous, this is NOT a hit — fall
+      through to UNDERSTAND/FRESHNESS/TRIAGE as normal; class 8/9 may still ENGAGE on this
+      bead's own merits.
+
+   A confirmed hit is a **CONTAINER-RELEASE**, distinct from the ordinary RELEASE in
+   "Terminal actions" (which strips `human`): a container-parent's only two honest states are
+   OPEN or CLOSED (**D-9**) — stripping `human` would hand it to drain with nothing
+   implementable of its own — so `human` and every other label are left UNTOUCHED; only
+   status and assignee change:
+
+   ```bash
+   bd comment <id> "FRESHNESS <ISO date> (/unblock-human-beads, Container guard): <sibling-open? per live child, verbatim> ⇒ premise LIVE. D-9 container-parent, no independent decision of its own -- real work/decisions are on its children. Releasing plainly (keep human, no defer, no close)." --actor "ID"
+   bd update <id> --status open --assignee "" --actor "ID"
+   ```
+
+   Bound consecutive container-guard hits (a hit on either check counts) to a shared budget
+   of 3 within one CLAIM invocation. A 4th hit without progress means the guard alone will not
+   resolve the hazard — almost always because this container TIES or OUTRANKS every other
+   ready `human` bead on priority, so `bd`'s created_at-DESCENDING tie-break re-selects it
+   every single pass (provenance `tc-ipgw`; the SAME hazard was independently rediscovered
+   here on `tc-w5rib.1`/`tc-d45t.1`/`tc-d45t`/`tc-gdpv` across 8+ `/unblock-human-beads`
+   sessions over 6 days before this guard existed — `tc-qwdys` ported the fix). Before
+   falling through to the skip-set STOP condition (step 1 above), take the one D-9-compliant
+   lever available — demote the container's own priority to match its children's (read it off
+   the check-2 listing, or run that query now if only check 1 fired):
+
+   ```bash
+   bd update <id> --priority <n> --actor "ID"
+   ```
+
+   This is neither a blocking edge nor a defer (**D-9** forbids both on a container), is
+   non-destructive and fully reversible, and stops the container from dominating the same
+   priority tie next pass. Release it (keeping `human`, as above) and return to CLAIM — this
+   alone resolves the common case. Only if the SAME container exhausts the guard AGAIN after
+   its priority was already demoted — meaning it still wins the claim even at its new,
+   demoted priority — write the container-note marker (check 1) into `notes`, so NEITHER
+   command needs the children-existence probe on it again, and ADD this id to the session
+   skip-set (same mechanism "DEFER termination" below uses) before returning to CLAIM:
+
+   ```bash
+   bd update <id> --append-notes "[container note $(date +%F)] Do NOT claim this container bead for direct work in /drain-beads or /unblock-human-beads -- D-9 container-parent, no independent decision of its own; real work/decisions are on its children." --actor "ID"
+   ```
+
+   Do NOT loop a third round on the same container by re-running this guard on it again —
+   return to CLAIM instead. Most passes end there: with the marker and demoted priority now
+   in place, the next `bd ready --claim` picks something else. If it instead returns this
+   SAME id again, step 1's pre-existing "id already in your skip-set → STOP UNCONDITIONALLY"
+   condition fires — this command's ordinary defensive halt for "the loop cannot make forward
+   progress," the same one a wrongly-reappearing DEFER would trip, not a condition this guard
+   invents.
+
+3. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn
    the blocker, and — if `/drain-beads` parked one — note the worktree/branch/set location
    (drain records it as `branch drain/<id>` in the repo at its worktree path).
 
-3. **FRESHNESS CHECK** (MANDATORY, and BEFORE triage) — the bead was parked at some earlier
+4. **FRESHNESS CHECK** (MANDATORY, and BEFORE triage) — the bead was parked at some earlier
    time and its body reads as though it were current. Re-verify its PREMISE against CURRENT
    reality with the named probes before you classify it. This is the step that stops the
    operator being handed a non-question. See "Freshness check" below. A premise the probes
@@ -219,7 +284,7 @@ and it STOPs unconditionally regardless of this flag.
    CLOSED-WITH-ABSORPTION-TRACE, because its evidence is a TRACE of where each item now lives,
    not a probe reading.
 
-4. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
+5. **TRIAGE + UNBLOCK** — classify the bead with the rubric below (evaluate in order; first
    match wins) and do ONLY enough to lift the human blocker. **To ENGAGE means: pause the
    loop, present the specific decision/question to the operator in this session, and WAIT
    for their answer before acting** — this is the one point where autonomy yields to
@@ -227,12 +292,13 @@ and it STOPs unconditionally regardless of this flag.
    MUST NOT prompt. Any change that produces committed code/docs happens in the REUSED parked
    isolation (see "Isolation"). Obey the stop predicate.
 
-5. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
+6. **Terminal action** — take exactly one (RELEASE / CLOSE / DEFER), per the rubric and
    "Terminal actions" below. Then go to 1.
 
 While a bead is claimed (`in_progress` + owned by ID), it is invisible to every
 `/drain-beads` and peer unblock session (`bd ready` excludes `in_progress`), so all of
-step 3–5 happens with no race. The bead re-enters a queue only at the terminal action.
+step 3–6 happens with no race. The bead re-enters a queue only at the terminal action
+(including a CONTAINER-RELEASE, step 2's own terminal action for a confirmed hit).
 
 ## Freshness check (before TRIAGE — MANDATORY)
 
@@ -265,7 +331,7 @@ output verbatim:
 - **Premise PROVABLY MOOT** → **CLOSE-AS-MOOT** (see "Terminal actions"). The bead is
   answered, not blocked: it MUST NOT be RELEASEd (drain would just re-park it) and MUST NOT be
   DEFERred (it returns unchanged next window). A class-1 substrate bead and a class-2 HANDOFF
-  POINTER are the two carve-outs (step 3).
+  POINTER are the two carve-outs (step 4).
 - The `sibling-open?` reading is ALSO the recognition test for class 3
   (`label-to-dependency conversion`): a `stuck:` comment naming another bead as the thing it
   waits on is a DEPENDENCY, not a human question, and this probe already tells you whether
@@ -766,6 +832,10 @@ longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
 
 ## Terminal actions (exactly one per claimed bead — there is no automatic "re-park")
 
+This catalog governs disposition after TRIAGE (Main loop step 5). A bead the Container guard
+(Main loop step 2) confirms a hit on is dispositioned by CONTAINER-RELEASE instead — see that
+step — and never reaches TRIAGE at all.
+
 - **RELEASE** (default) — the human blocker is lifted and drain can make progress on what
   remains. If lifting the blocker produced an artifact, commit ONLY that artifact — the
   thing that IS the blocker-lift (e.g. the operator's decision captured as an ADR/spec/
@@ -1021,6 +1091,27 @@ queue minus `human-focus-required` beads (the default exclusion).
   terminal action's `bd update`/comment. Every RELEASE call site that strips `human` MUST also
   strip `human-focus-required` in the SAME call, so a bead that earned it during an earlier
   ENGAGE can never be orphaned from both commands after a later RELEASE.
+- **Container guard.** Immediately after claim and BEFORE UNDERSTAND, a claimed bead MUST be
+  checked for the container-note marker in `notes`, then — only if that check did not match —
+  for children via `bd list --parent <id> --status all -n 0 --json`. A NON-EMPTY result is
+  necessary but not sufficient for a hit: it MUST also be confirmed against **D-9** that
+  nothing on the bead's own text asks a question distinct from its children's; an ambiguous
+  case MUST fall through to ordinary TRIAGE rather than being treated as a hit. A confirmed
+  hit MUST be dispositioned by a CONTAINER-RELEASE — `--status open --assignee ""` with
+  `human` and every other label left UNTOUCHED — never the ordinary RELEASE (which strips
+  `human`), never a DEFER, and never a CLOSE (a container-parent's only two honest states are
+  OPEN or CLOSED per **D-9**, and CLOSE requires the container itself, not its children, to be
+  resolved). Consecutive container-guard hits within one CLAIM invocation MUST be bounded to a
+  shared budget of 3 (a hit on either check counts); on a 4th hit the agent MUST demote the
+  container's own priority to match its children's (`bd update <id> --priority <n>` — neither
+  a blocking edge nor a defer, both forbidden on a container by **D-9**) before releasing and
+  continuing, and MUST NOT loop a third round on the same container without that demotion. If
+  the SAME container exhausts the guard again after its priority was already demoted, the
+  agent MUST write the container-note marker into `notes` (so neither this command nor
+  `/drain-beads` needs the children-existence probe on it again), MUST add the id to the
+  session skip-set, and MUST return to CLAIM rather than looping a third round on it — the
+  pre-existing "id already in your skip-set" condition on the NEXT claim (not this guard
+  itself) is what stops the run if the container still wins even at its demoted priority.
 - **Minimality + stop predicate.** MUST stop and RELEASE the instant the bead no longer
   needs a human to proceed as ordinary drain work; MUST NOT drive the bead to completion
   (except the substrate carve-out), land, merge, or push. A commit made while unblocking
@@ -1180,7 +1271,14 @@ flowchart TD
     C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
     C -->|id already in skip-set| DONE
     C -->|transient bd/dolt error| C
-    C -->|got bead| U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
+    C -->|got bead| CG{"CONTAINER GUARD:<br/>container-note in notes, else<br/>bd list --parent id --status all,<br/>confirmed against D-9?"}
+    CG -- "no (not a container, or genuinely ambiguous)" --> U["UNDERSTAND: bd show,<br/>read stuck: comment + parked isolation"]
+    CG -- "hit, this is the 1st-3rd hit this CLAIM" --> CGR["CONTAINER-RELEASE:<br/>bd comment FRESHNESS + D-9 rationale →<br/>bd update --status open --assignee '' (keep ALL labels)"]
+    CG -- "hit, 4th this CLAIM, priority NOT yet demoted" --> CGD["Demote: bd update --priority n<br/>(match children's priority) → CONTAINER-RELEASE"]
+    CG -- "hit again after demotion" --> CGM["bd update --append-notes '[container note] Do NOT claim...' →<br/>add id to session skip-set"]
+    CGR --> C
+    CGD --> C
+    CGM --> C
     U --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
     FC -- "provably moot (not substrate, not a handoff pointer)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
     FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
