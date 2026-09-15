@@ -124,19 +124,57 @@ backend.
 existing PR-keyed `list_runs` fan-out unchanged) resolves `args.query` (a caller-facing NAME, e.g.
 `"team"`) against the backend's own `config.queries` block (`INV-WIRE-3`, `INV-STATE-1`) —
 resolved centrally by that capability's dispatch table, never by the backend's own `List`
-implementation, so every `pr`/`issue` backend answers an unrecognized name identically. `cursor`
-in `args` MUST always be `null` in this op's current scope (incremental fetching is a later
-concern); `ids_only` toggles whether the reply's `entities` array is populated, but
-`present_ids` — the COMPLETE id set the query currently matches — is always populated regardless.
-A `config.queries` value MAY be one string or a list of strings; a backend runs each, unions the
-results deduplicated by id, and reports `truncated` if any one member's own search reported
-truncated.
+implementation, so every `pr`/`issue` backend answers an unrecognized name identically. `ids_only`
+toggles whether the reply's `entities` array is populated, but `present_ids` — the COMPLETE id set
+the query currently matches — is always populated regardless. A `config.queries` value MAY be one
+string or a list of strings; a backend runs each, unions the results deduplicated by id, and
+reports `truncated` if any one member's own search reported truncated.
+
+`cursor` in `args` is `null` whenever an operator invokes `list` directly (`pr list`/`issue list`)
+— incremental fetching was a later concern when `list` itself landed. `changes` (below) is that
+later concern, and the one caller that ever supplies a non-`null` cursor: the delta ledger's own
+opaque, backend-returned cursor blob from the LAST `list` call for that `(type, backend, query)`,
+so an incremental-capable backend can resume from it. A backend declaring no incremental support
+MAY simply ignore `cursor` and answer with its full current match set every call — `changes`'s own
+ledger (`ledger.go`'s hash-based diff) tolerates a full re-fetch correctly either way, since it
+re-derives added/changed/removed from the returned `entities`/`present_ids` regardless of how much
+of the match set the backend actually skipped via its own cursor.
 
 A name the backend's own config does not define answers `query_not_recognized` (`INV-ERR-3`) —
 never a usage error, a crash, or a silently empty result. The umbrella's own fan-out treats that
 answer as "not applicable to this backend" (`disabled` in `sources[]`, excluded from
 degraded-outcome accounting) unless EVERY registered backend of the type answers it, in which case
 the umbrella fails the whole call as its own `invalid_argument` CLI-level failure (`INV-ERR-3`).
+`changes` (below) reuses this exact classification unchanged.
+
+### `changes` / `ledger show` / `ledger clear` — the delta ledger's CLI surface
+
+`changes` (`pr` and `issue` only, wired as a subcommand of each type's own verb group exactly like
+`list` — see this repo's `changes.go` header comment for why `thread`, named alongside `pr`/`issue`
+by the design of record's own section 4.2, has no CLI surface here: it has no schema type, no
+registry entry, and no backend anywhere in this module yet, landing only in a later phase) is the
+umbrella-facing surface over the on-disk delta ledger (`ledger.go`): one independent ledger per
+`(type, backend, query)`, tracking a fetch cursor, an entity hash index, a version counter, and
+per-consumer cursor positions.
+
+- `pg-connector <type> changes --query <name> --consumer <id> [--cached] [--reset] [--backend <b>]`
+  is a **fan-out** op, same exit-code scheme as `list` (`0`/`2`/`3`, `query_not_recognized`
+  excluded from degraded accounting). Unless `--cached`, it refreshes each queried backend's own
+  ledger via `list` (forwarding that ledger's stored cursor, per the note above), then reports
+  every change the named consumer has not yet seen and advances that consumer's cursor — but only
+  AFTER the response is fully written, so a crash between the write and the advance costs the next
+  call one duplicate delivery, never a lost one. `--cached` skips the backend call entirely,
+  answering only from what the ledger already has on disk. `--reset` replays every live entity to
+  that consumer as freshly added, with no tombstone for anything already removed before the reset.
+  The response shape is `{sources: [{backend, status, version, truncated}], changes: [{change,
+source, entity}]}` — `change` is one of `added`/`changed`/`removed`.
+- `pg-connector ledger show [--type] [--backend] [--query] [--consumer]` and
+  `pg-connector ledger clear [--type] [--backend] [--query]` read or delete on-disk ledger file(s)
+  directly, matched by a PARTIAL filter (an omitted flag matches any value in that field) — never
+  dispatching to a backend, so neither has a `sources[]`/exit-code concept of its own; both always
+  exit `0`. `show` prints each matching ledger's cursor, entity-index size, version, and
+  consumer-position(s) (`--consumer` narrows which consumer's position is printed, without
+  narrowing which ledgers match); `clear` deletes the matching ledger file(s) entirely.
 
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 
@@ -202,10 +240,13 @@ not authorize (`INV-COMP-1`).
   capability (`pr show`, `pr files`, `pr commits`, `issue show/create/comment/
 transition/update/close/deps`, `ci logs`, `ci rerun-failed`, `scm worktree add/remove/list`, `scm branch
 detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
-  `issue list`, `ci list`, `auth status`), across every backend registered under the top-level
-  `attention.sources`/`search.sources` keys (`attention list`, `search <query>`), or across every
-  backend registered for **any** entity-type capability (`config validate`); and choose the CLI's
-  own presentation mode (`--output json|human`, a persistent flag inherited by every verb group).
+  `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`), across every backend
+  registered under the top-level `attention.sources`/`search.sources` keys (`attention list`,
+  `search <query>`), or across every backend registered for **any** entity-type capability
+  (`config validate`); inspect or reset the on-disk delta ledger directly, with no backend dispatch
+  at all (`ledger show`, `ledger clear` — see "`changes`/`ledger show`/`ledger clear`" below); and
+  choose the CLI's own presentation mode (`--output json|human`, a persistent flag inherited by
+  every verb group).
 - **Registry resolution.** Every `pr`/`issue`/`ci`/`scm` verb resolves its target backend(s) from
   the `connector.<type>` registry (`INV-REG-1`) before dispatching — `attention list`/`search`
   instead resolve from the separate `attention.sources`/`search.sources` keys (`INV-REG-3`) and
@@ -279,6 +320,16 @@ sequenceDiagram
   `Ledger.Refresh` call surfaces only as a returned Go `error`, propagated by whatever CLI verb
   eventually calls it — no telemetry of its own beyond that. Revisit once the sibling
   `changes`/`ledger show`/`ledger clear` CLI verbs packet lands an actual operator-facing surface.
+- **Telemetry (D24, bead pg2-2j5ac.30.2).** `changes`, `ledger show`, and `ledger clear` — the
+  operator-facing surface the note directly above was written to revisit — land with no
+  OpenTelemetry or Prometheus emission and no structured logging of their own: pg-connector still
+  has no telemetry emitter anywhere in this module (unchanged from bead pg2-2j5ac.28.3's own
+  telemetry note above). A `changes` refresh failure surfaces only via its `sources[]` row's
+  `status`/no-reason-on-the-wire-shape (this packet's own Contract deliberately adapts the design's
+  illustrative `{backend, status, version, truncated}` shape, which carries no `reason` field,
+  unlike `list`'s `sources[]`); `ledger show`/`ledger clear` surface a failure only as a plain CLI
+  error. Nothing here writes to stderr beyond the ordinary wire-level error propagation every other
+  verb in this catalog already has. Feeds the observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`

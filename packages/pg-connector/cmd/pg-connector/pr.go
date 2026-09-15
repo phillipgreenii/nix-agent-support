@@ -42,6 +42,7 @@ func newPrCmd() *cobra.Command {
 	prCmd.AddCommand(newPrListCmd())
 	prCmd.AddCommand(newPrFilesCmd())
 	prCmd.AddCommand(newPrCommitsCmd())
+	prCmd.AddCommand(newPrChangesCmd())
 	return prCmd
 }
 

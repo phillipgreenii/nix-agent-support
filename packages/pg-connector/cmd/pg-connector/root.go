@@ -104,6 +104,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newScmCmd())
 	root.AddCommand(newAttentionCmd())
 	root.AddCommand(newSearchCmd())
+	root.AddCommand(newLedgerCmd())
 	addOutputFlag(root)
 	return root
 }
