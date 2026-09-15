@@ -75,7 +75,7 @@ func (r *Rule) flagPolicyFor(tool string) flagPolicy {
 // ApprovedScriptDirs matching (may be nil if that feature is not exercised).
 // cfg carries the consumer-specific tool / script approvals injected by
 // factory.go; a zero cfg yields the base generic tool set only (go/gradle/bats/…
-// plus devbox search / cue vet / jar xf).
+// plus cue vet / jar xf).
 func New(pe *patheval.PathEvaluator, cfg configrules.BuildtoolsConfig) *Rule {
 	r := &Rule{
 		pe:                 pe,
@@ -236,13 +236,6 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}, nil
 		}
 		// Base-generic verb-scoped approvals (stay in the base, not config).
-		if basename == "devbox" && baseVerbIs(pc.Args, "devbox", "search") {
-			return hookio.RuleResult{
-				Decision: hookio.Approve,
-				Reason:   "devbox search is approved",
-				Module:   r.Name(),
-			}, nil
-		}
 		if basename == "cue" && baseVerbIs(pc.Args, "cue", "vet") {
 			return hookio.RuleResult{
 				Decision: hookio.Approve,
@@ -336,7 +329,7 @@ func (r *Rule) scriptInApprovedDir(executable, cwd string) bool {
 }
 
 // baseVerbFlags is the BUILT-IN pre-verb flag allowlist behind the base-generic
-// verb-scoped approvals (`devbox search`, `cue vet`, `jar xf`). Every tool named
+// verb-scoped approvals (`cue vet`, `jar xf`). Every tool named
 // here resolves its verb under STRICT rules, so a dash token that is not listed
 // resolves NO verb and the command Abstains. The predecessor of this table was a
 // resolver that skipped every dash token unconditionally, with no allowlist.
@@ -351,16 +344,6 @@ func (r *Rule) scriptInApprovedDir(executable, cwd string) bool {
 // Every entry is a flag the tool accepts BEFORE its verb AND that alters only
 // OUTPUT, never execution. Enumeration recorded 2026-08-09 (bead tc-457w):
 //
-//   - devbox 0.17.5, from `devbox --help` and the "Global Flags" block of
-//     `devbox search --help`. The root command's only persistent flags are
-//     `-q/--quiet` and `-h/--help`; both are boolean and log-suppressing. Nothing
-//     names an interpreter, a config file, an env/dotenv file or a directory, and
-//     devbox itself rejects anything else in that position ("Error: unknown flag:
-//     --config"). NOT exploitable. Listed anyway, so the path fails closed if
-//     devbox later grows such a flag. `--show-all` is deliberately absent: it
-//     belongs to `search`, and written pre-verb cobra consumes the verb token as
-//     its value (`devbox --show-all search cowsay` reports `unknown command
-//     "cowsay"`), so allowing it would approve a spelling that never searches.
 //   - cue 0.16.1, from the "Global Flags" block of `cue vet --help` and
 //     `cue mod --help`. The root persistent flags are `-E/--all-errors`,
 //     `-i/--ignore`, `-s/--simplify` and `-h/--help`, all boolean and output-only.
@@ -386,10 +369,24 @@ func (r *Rule) scriptInApprovedDir(executable, cwd string) bool {
 // consumer needing a wider pre-verb surface declares its own verbScopedApprovals
 // entry for the tool; that path is evaluated separately and carries its own
 // consumer-authored policy, so the base approvals cannot be widened by config.
+//
+// flox decision (tc-tnhq.2, 2026-09-15): devbox's removal was considered for a
+// like-for-like `flox search`/`flox list` base-generic entry (flox is the
+// devbox replacement in the homelab/mobilecombackup migrations this bead's
+// dependencies completed) but deliberately NOT added here. No consumer or test
+// in this repo currently exercises a `flox search`/`flox list` invocation
+// through this rule (cmdparse's own flox handling is limited to unwrapping
+// `flox activate -- CMD`'s `--` boundary, unrelated to base-generic approval),
+// so there is no observed need yet, and doing this properly would require the
+// same live `flox --help`/`flox search --help` global-flag exploit enumeration
+// jar/cue/devbox each received above (e.g. whether a pre-verb flag can smuggle
+// a value into the verb slot the way `devbox --show-all search` could) —
+// out of scope for a devbox-removal change. Revisit if/when a consumer
+// actually needs `flox search`/`flox list` approved (file a bead then, with
+// its own enumeration).
 var baseVerbFlags = map[string][]string{
-	"devbox": {"-q", "--quiet", "-h", "--help"},
-	"cue":    {"-E", "--all-errors", "-i", "--ignore", "-s", "--simplify", "-h", "--help"},
-	"jar":    {},
+	"cue": {"-E", "--all-errors", "-i", "--ignore", "-s", "--simplify", "-h", "--help"},
+	"jar": {},
 }
 
 // baseFlagPolicies compiles baseVerbFlags through the same parseFlagName

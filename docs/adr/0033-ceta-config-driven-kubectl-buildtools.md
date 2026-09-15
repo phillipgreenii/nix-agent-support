@@ -77,7 +77,7 @@ flowchart LR
   `scopedApproveVerbs`, `positionalWorkspaceVerbs`, `devWorkspaceFlags`,
   `clusterEnvVar`, `devClusterPrefixes`, `devWorkspacePrefix`, `nonDevAccounts`.
 - **build-tools STAYS base-generic**: `go`, `gradle`, `gradlew`, `pre-commit`,
-  `prek`, `bats`, `bd`, `tilt`, plus `devbox search` / `cue vet` / `jar xf`.
+  `prek`, `bats`, `bd`, `tilt`, plus `cue vet` / `jar xf`.
 - **build-tools MOVES to config**: `approvedTools` (`prove`/`yath`),
   `approvedScripts` (the five scripts), and an additive `verbScopedApprovals`
   schema for future consumer verb-scoped tools.

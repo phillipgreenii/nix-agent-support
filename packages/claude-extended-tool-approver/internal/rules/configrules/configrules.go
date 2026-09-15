@@ -190,7 +190,7 @@ type BuildtoolsConfig struct {
 	// `bash <script>` / `sh <script>`.
 	ApprovedScripts []string `json:"approvedScripts"`
 	// VerbScopedApprovals approve a tool only for a specific first subcommand
-	// (like the base generic `devbox search` / `cue vet` / `jar xf`).
+	// (like the base generic `cue vet` / `jar xf`).
 	VerbScopedApprovals []VerbScopedApproval `json:"verbScopedApprovals"`
 	// ValueFlags declares, per tool basename, the flags that CONSUME one or more
 	// following tokens as their value (e.g. "just" -> ["-f","--justfile"]). Without

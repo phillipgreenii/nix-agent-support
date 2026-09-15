@@ -113,18 +113,6 @@ func TestBuildtools_Prek_Approve(t *testing.T) {
 	}
 }
 
-func TestBuildtools_DevboxSearch_Approve(t *testing.T) {
-	r := New(testPE(), zrBuildtoolsConfig(t))
-	input := &hookio.HookInput{
-		ToolName:  "Bash",
-		ToolInput: mustJSON(map[string]string{"command": "devbox search nodejs"}),
-	}
-	got := hookio.Verdict(r.Evaluate(input))
-	if got.Decision != hookio.Approve {
-		t.Errorf("devbox search nodejs: got %s, want approve", got.Decision)
-	}
-}
-
 func TestBuildtools_Gogate_Approve(t *testing.T) {
 	// pg2-waxh7: gogate (phillipg-nix-repo-base) is not read-only — it writes
 	// the Go build cache — so it needs its own base-tool approval rather than
@@ -1168,7 +1156,7 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 	for _, cmd := range []string{
 		"go build ./...", "gradle build", "./gradlew test", "pre-commit run",
 		"prek run", "bats tests/", "bd ready", "tilt up",
-		"devbox search x", "cue vet ./x", "jar xf /tmp/a.jar",
+		"cue vet ./x", "jar xf /tmp/a.jar",
 		"gogate", "gogate --pkg ./...", "gogate --quick", "gogate -- -run TestFoo",
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
@@ -1228,7 +1216,7 @@ func TestBuildtools_NoZRLiteralsInSource(t *testing.T) {
 
 // --- Base-generic verb resolution (bead tc-457w) ---
 //
-// The base path behind `devbox search` / `cue vet` / `jar xf` used to skip every
+// The base path behind `cue vet` / `jar xf` used to skip every
 // dash-prefixed token with no allowlist, which is the wrong-approve class tc-080p
 // fixed for consumer-configured tools. These tests pin the strict replacement.
 
@@ -1240,12 +1228,8 @@ func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
 	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
 		// canonical, no pre-verb flags
-		"devbox search nodejs",
 		"cue vet ./schemas/",
 		"jar xf /tmp/cache/some.jar",
-		// devbox: the root command's only persistent flags
-		"devbox -q search nodejs",
-		"devbox --quiet search nodejs",
 		// cue: the root command's persistent flags, singly and combined
 		"cue -E vet ./x",
 		"cue --all-errors vet ./x",
@@ -1255,7 +1239,6 @@ func TestBuildtools_BaseVerbs_PinnedApprovals(t *testing.T) {
 		"cue --simplify vet ./x",
 		"cue -E -i -s vet ./x",
 		// post-verb flags never reach verb resolution
-		"devbox search --show-all nodejs",
 		"cue vet -c ./x",
 		"jar xf /tmp/a.jar META-INF/MANIFEST.MF",
 	} {
@@ -1284,11 +1267,6 @@ func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
 		{"jar exploit: extract from an attacker-named archive", "jar -x --file=/tmp/evil.jar xf"},
 		{"jar: no flag may precede the legacy operand", "jar -v xf /tmp/a.jar"},
 		{"jar: end-of-flags separator is never allowlisted", "jar -- xf /tmp/a.jar"},
-		{"devbox: undeclared glued flag", "devbox --config=/tmp/evil search nodejs"},
-		{"devbox: undeclared bare flag", "devbox --debug search nodejs"},
-		{"devbox: clustered shorts fail closed", "devbox -qh search nodejs"},
-		{"devbox: value glued onto a boolean flag", "devbox --quiet=x search nodejs"},
-		{"devbox: end-of-flags separator", "devbox -- search nodejs"},
 		{"cue: undeclared glued flag", "cue --schema=/tmp/evil vet ./x"},
 		{"cue: undeclared bare flag", "cue --inject-vars vet ./x"},
 		{"cue: attached short value", "cue -E/tmp/x vet ./x"},
@@ -1310,7 +1288,6 @@ func TestBuildtools_BaseVerbs_UnrecognisedFlagAbstains(t *testing.T) {
 func TestBuildtools_BaseVerbs_WrongVerbAbstains(t *testing.T) {
 	r := New(testPE(), configrules.BuildtoolsConfig{})
 	for _, cmd := range []string{
-		"devbox run build", "devbox -q shell", "devbox",
 		"cue export ./x", "cue -E eval ./x", "cue cmd deploy", "cue",
 		"jar cf out.jar src/", "jar xvf /tmp/a.jar", "jar",
 	} {
@@ -1326,7 +1303,7 @@ func TestBuildtools_BaseVerbs_WrongVerbAbstains(t *testing.T) {
 // empty. A new entry added without strict:true would silently reinstate
 // unconditional dash-skipping for that tool.
 func TestBuildtools_BaseFlagPolicies_AllStrict(t *testing.T) {
-	for _, tool := range []string{"devbox", "cue", "jar"} {
+	for _, tool := range []string{"cue", "jar"} {
 		policy, ok := baseFlagPolicies[tool]
 		if !ok {
 			t.Fatalf("%s: no base flag policy compiled", tool)
