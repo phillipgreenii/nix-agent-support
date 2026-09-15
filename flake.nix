@@ -4532,6 +4532,7 @@
               pg-connector-issue-jira
               pg-connector-scm-git
               pg-ccaudit
+              pg-router-source-pg-connector
               integrate-branch-support
               ;
             # The two agent-activity-api wrappers, re-exported for the same
