@@ -270,6 +270,15 @@ sequenceDiagram
   wire-level `error` envelope (`INV-ERR-1`) and, for the two issue backends, whatever `bd`/`pjira`
   themselves wrote to stderr, already folded into the classified error message. Feeds the
   observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.30.1).** The delta ledger engine (`cmd/pg-connector/ledger.go`
+  — the per-`(type, backend, query)` persisted fetch cursor/entity hash index/version
+  counter/consumer cursors, its refresh algorithm, and its three eviction rules) emits nothing
+  yet over OpenTelemetry or Prometheus and writes no structured logs of its own: this packet has
+  no CLI surface (it produces only a Go API a later packet wires into cobra commands), so there
+  is no operator-facing entry point yet for a metric/trace/log to attach to. A failed
+  `Ledger.Refresh` call surfaces only as a returned Go `error`, propagated by whatever CLI verb
+  eventually calls it — no telemetry of its own beyond that. Revisit once the sibling
+  `changes`/`ledger show`/`ledger clear` CLI verbs packet lands an actual operator-facing surface.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`

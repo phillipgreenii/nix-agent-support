@@ -46,6 +46,7 @@ type Registry struct {
 	attentionSources []string
 	searchSources    []string
 	backends         map[string]yaml.Node
+	state            map[string]yaml.Node
 }
 
 type registryDoc struct {
@@ -60,6 +61,13 @@ type registryDoc struct {
 	// multi-capability backend, INV-REG-1), and this config is per-BINARY,
 	// not per-(type, binary) pair.
 	Backends map[string]yaml.Node `yaml:"backends"`
+	// State is the top-level state: map (bead pg2-2j5ac.30.1) — the
+	// already-landed home/programs/pg-connector state option's arbitrary
+	// attrset, rendered verbatim into the shared config file (e.g.
+	// state.consumer_prune_after). This packet is the first Go-side reader
+	// of it, via Registry.StateValue below; nothing else in this module
+	// parses it.
+	State map[string]yaml.Node `yaml:"state"`
 }
 
 // sourcesDoc is the shape of the top-level attention:/search: mappings: a
@@ -173,7 +181,7 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	if err := validateConnectorKeys(doc.Connector); err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
-	reg := &Registry{raw: doc.Connector, backends: doc.Backends}
+	reg := &Registry{raw: doc.Connector, backends: doc.Backends, state: doc.State}
 	if doc.Attention != nil {
 		reg.attentionSources = doc.Attention.Sources
 	}
@@ -367,6 +375,33 @@ func (r *Registry) BackendQueryNames(name string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// StateValue returns the string value of a scalar key under the top-level
+// state: block (e.g. "consumer_prune_after"), matching the shared config
+// file's state: block already rendered by home/programs/pg-connector's
+// state option (an arbitrary attrset rendered verbatim — see this file's
+// registryDoc doc comment). Returns ("", false) when the state: block is
+// absent, key is absent, or the key's value is not a scalar — callers
+// apply their own default in every one of those cases, matching every
+// other Registry accessor's "absent -> zero value, not an error"
+// convention (List/Single/BackendConfig's own doc comments).
+func (r *Registry) StateValue(key string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	node, ok := r.state[key]
+	if !ok {
+		return "", false
+	}
+	if node.Kind != yaml.ScalarNode {
+		return "", false
+	}
+	var v string
+	if err := node.Decode(&v); err != nil {
+		return "", false
+	}
+	return v, true
 }
 
 // AttentionSources returns the bare binary names registered under the
