@@ -214,5 +214,5 @@ schema = 3
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.58.0'
-    hash = 'sha256-cO1uE6/DGc1+jJ22bmqjQFqGPyFt3mTK1cmHRQXBTqk='
+    version = 'v1.59.0'
+    hash = 'sha256-CaNi9UvS9y6aiiSy3GUlRHX84og+i4MWOZmxbFONeb4='
