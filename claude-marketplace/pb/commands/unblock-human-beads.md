@@ -50,12 +50,52 @@ ordinary work — defeating the `human` guard. Refer to your id below as ID, and
 
 ## Sourcing invariant (deferred-safety by construction — DO NOT REGRESS)
 
-Claim work ONLY via `bd ready --claim --label human`. `bd ready` already excludes
+Claim work ONLY via the preview-then-claim sequence in "Template/formula exclusion" below
+(never the bare atomic `bd ready --claim --label human`). `bd ready` already excludes
 `in_progress`, `blocked`, `deferred`, and `hooked` issues, so deferred and in-flight beads
 can never be processed. **Maintainer note:** do NOT switch the work source to
 `bd list --label human` (it would surface deferred/blocked/in-progress beads) and do NOT
 add `--include-deferred` — the "never touch a deferred bead" rule holds by construction,
 not by a guard.
+
+**Template/formula exclusion — claim via preview-then-claim, never the bare atomic claim.**
+`bd ready` does NOT exclude `is_template=true` issues (a molecule TEMPLATE, e.g.
+`merge-request.pr` — title `PR: {{title}}`, unrendered `{{base_branch}}` placeholders). Once
+claimed, a template is READ-ONLY: every `bd` write path (`bd update`, `bd comment`) refuses it
+with `cannot modify template : templates are read-only; use bd mol pour to create a work item`
+— including the release write — so a template claimed via the bare atomic
+`bd ready --claim` is PERMANENTLY STRANDED; there is no `--force`/override on any `bd update`
+or `bd mol` subcommand to release it (observed live, 2026-09-15: `merge-request.pr`, this
+bead's own trigger). Therefore the CLAIM step everywhere in this command (Goal/termination and
+Main loop step 1) is NEVER the bare atomic form — it is always this two-step sequence:
+
+1. **List candidates** (no `--claim`), applying whichever label filters the active mode uses
+   (DEFAULT shown; substitute the `--include-focus-required` / `--focus-required-only` label
+   set — see below — when one of those flags is active):
+
+   ```bash
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
+   ```
+
+2. **Filter client-side**: walk `.data[]` in the returned (priority) order and skip any entry
+   whose `is_template` field is `true`. A template's OWN labels can omit `template` while its
+   parent molecule carries it (`merge-request.pr` carries only `["human","merge-request"]`; its
+   parent `merge-request` carries `["template"]`) — `is_template` is the only reliable signal;
+   do not rely on the `template` label being present.
+3. **Claim the first surviving candidate**:
+
+   ```bash
+   bd update <id> --claim --actor "ID" --json
+   ```
+
+This introduces a small, ACCEPTED race window between steps 1 and 3 (a peer session could
+claim the same candidate first) — strictly safer than the atomic form's failure mode, since a
+lost race here just means retrying, never an unrecoverable stranded claim. Treat a step-3
+failure (the candidate was claimed, closed, or deferred out from under you between steps 1 and 3) as a transient error: back off briefly and restart from step 1, never re-issue step 3 on the
+same id unchanged. If EVERY candidate step 1 returns is a template (`is_template=true`), that
+reads as an EMPTY result for whatever step invoked this sequence (Goal/termination → STOP per
+"Goal / termination"; Main loop step 1 → no bead this pass) — never fall back to claiming a
+template as a last resort.
 
 **`human-focus-required` — dual-labeling invariant and default exclusion.**
 `human-focus-required` is applied ONLY in addition to `human`, never instead of it — a bead
@@ -90,20 +130,23 @@ are visible, by design, not a general safety-filter override.
 
 ## Goal / termination
 
-You are DONE when a SUCCESSFUL claim returns no ready bead in scope, under whichever flag mode
-is active (see "Sourcing invariant" above):
+You are DONE when a SUCCESSFUL run of the preview-then-claim sequence ("Sourcing invariant" →
+"Template/formula exclusion") yields no non-template ready bead in scope, under whichever flag
+mode is active:
 
 ```bash
-bd ready --claim --label human --exclude-label refactor-campaign,human-focus-required --actor "ID" --json
+bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
 refactor spec §3). `human-focus-required` is excluded here by DEFAULT only — drop it from
 `--exclude-label` under `--include-focus-required`, or replace `--label human` with
 `--label human-focus-required` (dropping this exclusion entirely) under
-`--focus-required-only`.
+`--focus-required-only`. Filter out any `is_template=true` entry client-side before judging
+whether the result is empty — a template left in the candidate set is NOT agent-workable and
+MUST NOT be claimed as a last resort (see "Template/formula exclusion").
 
-If that SUCCEEDS (exit 0) and is empty, STOP — UNLESS this session was invoked with
+If that list SUCCEEDS (exit 0) and has no non-template candidate, STOP — UNLESS this session was invoked with
 `--monitor-if-empty` (see "--monitor-if-empty" below), in which case an empty result ARMS
 a recurring check instead of stopping. If a claim ever returns a bead whose id is
 already in your session **skip-set**, also STOP, UNCONDITIONALLY — `--monitor-if-empty`
@@ -182,27 +225,42 @@ and it STOPs unconditionally regardless of this flag.
 
 ## Main loop — repeat until the Goal is met
 
-1. **CLAIM** (atomic, race-safe — the ONLY claim path; do NOT list-then-claim):
+1. **CLAIM** — the preview-then-claim sequence from "Sourcing invariant" → "Template/formula
+   exclusion" (the ONLY claim path; NEVER the bare atomic `bd ready --claim`, which can claim
+   an unreleasable template):
 
    ```bash
-   bd ready --claim --label human --exclude-label refactor-campaign,human-focus-required --actor "ID" --json
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
    refactor spec §3). `human-focus-required` is excluded here by DEFAULT only — see
    "Sourcing invariant" above for the `--include-focus-required` / `--focus-required-only`
-   variants, which are parsed out of `$ARGUMENTS` before the narrowing filters below.
+   variants, which are parsed out of `$ARGUMENTS` before the narrowing filters below. If the
+   invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters on this list
+   query (see "Optional scope arguments").
 
-   Atomically claims the highest-priority ready `human` bead (assignee=ID,
-   status=`in_progress`) and returns it; no other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
-   best-effort) — UNLESS this session was invoked with `--monitor-if-empty`, in which case
-   take the ARM path in "--monitor-if-empty" above instead of stopping. A returned id
-   already in your skip-set → STOP UNCONDITIONALLY, regardless of `--monitor-if-empty` (also
+   Filter `.data[]` client-side, in the returned (priority) order, skipping any entry whose
+   `is_template` is `true`. Then claim the first surviving candidate:
+
+   ```bash
+   bd update <id> --claim --actor "ID" --json
+   ```
+
+   This claims the highest-priority NON-TEMPLATE ready `human` bead (assignee=ID,
+   status=`in_progress`) and returns it. A SUCCESSFUL list with no non-template candidate →
+   Goal met → STOP (also run `session-mode set-status finished`, best-effort) — UNLESS this
+   session was invoked with `--monitor-if-empty`, in which case take the ARM path in
+   "--monitor-if-empty" above instead of stopping. A candidate id already in your skip-set →
+   skip it too (do not re-claim it) and continue down the candidate list; if EVERY remaining
+   candidate is either a template or already in your skip-set, that is the "id already in your
+   skip-set" STOP condition → STOP UNCONDITIONALLY, regardless of `--monitor-if-empty` (also
    run `session-mode set-status finished`, best-effort — missing this STOP would leave the
    record `running` whenever the loop ends via this defensive guard instead of an empty
-   result). A transient error → retry. If the invocation supplied `$ARGUMENTS`, apply them as
-   additional NARROWING filters here (see "Optional scope arguments").
+   result). A transient error on either call, OR the claim call failing because a peer claimed
+   the same candidate first (the accepted preview-then-claim race window) → back off briefly
+   and retry the WHOLE sequence from the list step, never re-issue the same claim call
+   unchanged.
 
 2. **CONTAINER GUARD** (defense in depth against a D-9 `beads-lifecycle` container-parent
    dominating the claim — ported from `/drain-beads`' own Container guard, provenance
@@ -263,7 +321,7 @@ and it STOPs unconditionally regardless of this flag.
 
    Do NOT loop a third round on the same container by re-running this guard on it again —
    return to CLAIM instead. Most passes end there: with the marker and demoted priority now
-   in place, the next `bd ready --claim` picks something else. If it instead returns this
+   in place, the next CLAIM pass's list step picks something else. If it instead returns this
    SAME id again, step 1's pre-existing "id already in your skip-set → STOP UNCONDITIONALLY"
    condition fires — this command's ordinary defensive halt for "the loop cannot make forward
    progress," the same one a wrongly-reappearing DEFER would trip, not a condition this guard
@@ -1042,11 +1100,14 @@ both are present, ask the operator which was meant rather than silently resolvin
 The REMAINDER of `$ARGUMENTS`, after the mode flags are parsed out, MAY further **restrict**
 the work this command claims — e.g. an extra label, a priority, a parent/epic, a type, a
 specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
-filters on the CLAIM query. Honor a specific bead id via the safe path: first confirm the id
+filters on the list step of the CLAIM sequence (see "Sourcing invariant" →
+"Template/formula exclusion"). Honor a specific bead id via the safe path: first confirm the id
 appears in `bd ready --label human --exclude-label refactor-campaign,human-focus-required
 [scope] --json` (under the DEFAULT mode; adjust `--label`/`--exclude-label` to match whichever
 mode flag is active, exactly as the CLAIM query does) — ready, in-scope, `human`, not deferred —
-then claim it with `bd update <id> --claim --actor "ID"` (the single-id claim — `bd ready
+AND that its `is_template` field is NOT `true` (a template MUST NOT be targeted even by an
+explicit id, for the same permanently-stranded-claim reason as the ordinary claim path) — then
+claim it with `bd update <id> --claim --actor "ID"` (the single-id claim — `bd ready
 --claim` cannot target a chosen id, it claims the first filter match).
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-refactor
@@ -1061,14 +1122,16 @@ queue minus `human-focus-required` beads (the default exclusion).
 
 ## Rules (RFC 2119)
 
-- **Sourcing.** Work MUST be claimed only via
-  `bd ready --claim --label human --exclude-label refactor-campaign,human-focus-required`
-  (DEFAULT mode; plus narrowing
-  `$ARGUMENTS`); MUST NOT use `bd list --label human` as a work source; MUST NOT pass
-  `--include-deferred`. zr-refactor campaign beads carry their own protocol; excluded
-  here by design (zr-refactor spec §3). A specific-id claim MUST first confirm the id is
-  in the `bd ready --label human` set (also carrying the campaign and, by default,
-  `human-focus-required` exclusions above).
+- **Sourcing.** Work MUST be claimed only via the preview-then-claim sequence — list with
+  `bd ready --label human --exclude-label refactor-campaign,human-focus-required --json` (DEFAULT
+  mode; plus narrowing `$ARGUMENTS`), skip any `is_template=true` entry client-side, then
+  `bd update <id> --claim --actor "ID"` on the first surviving candidate — and MUST NOT use the
+  bare atomic `bd ready --claim` (it cannot exclude templates, and a claimed template's write
+  paths are all refused, permanently stranding the claim); MUST NOT use `bd list --label human`
+  as a work source; MUST NOT pass `--include-deferred`. zr-refactor campaign beads carry their
+  own protocol; excluded here by design (zr-refactor spec §3). A specific-id claim MUST first
+  confirm the id is in the `bd ready --label human` set (also carrying the campaign and, by
+  default, `human-focus-required` exclusions above) AND that its `is_template` is not `true`.
 - **Focus-required sourcing (default exclusion, and the two mode flags).** By DEFAULT (no mode
   flag), every claim/goal-check query MUST exclude `human-focus-required` in addition to
   sourcing `human`. `--include-focus-required` MUST source both `human` and
@@ -1267,7 +1330,7 @@ Freshness` rules (F-3) —
 flowchart TD
     A["Start: set actor ID = session-unblock, bd prime, parse $ARGUMENTS<br/>(mode flags first), empty skip-set"] --> R{Own an unfinished<br/>in_progress human bead?}
     R -- yes --> U
-    R -- no --> C["CLAIM: bd ready --claim --label human<br/>--exclude-label refactor-campaign,human-focus-required (default mode)<br/>[+narrowing] --actor ID --json"]
+    R -- no --> C["CLAIM (preview-then-claim): bd ready --label human<br/>--exclude-label refactor-campaign,human-focus-required (default mode)<br/>[+narrowing] --json, skip is_template=true, then<br/>bd update id --claim --actor ID --json"]
     C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
     C -->|id already in skip-set| DONE
     C -->|transient bd/dolt error| C
@@ -1318,8 +1381,10 @@ flowchart TD
 ## Running several at once
 
 Open N Claude Code sessions inside this pn-workspace and run `/unblock-human-beads` in
-each; every session self-assigns a distinct `-unblock` actor id and the atomic
-`bd ready --claim --label human` guarantees no two ever get the same bead. Honest caveat:
+each; every session self-assigns a distinct `-unblock` actor id and the preview-then-claim
+sequence's per-id `bd update --claim` is atomic per bead, so a lost race just means one
+session's list step picked a candidate a peer claimed first — a transient failure to retry,
+never two sessions holding the same bead. Honest caveat:
 parallelism helps throughput on the **auto-resolvable** beads (provably-lossless teardowns /
 absorbed pointers / label-to-dependency conversions / planning-session re-checks / apply-waiting /
 mislabeled);

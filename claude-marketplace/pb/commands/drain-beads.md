@@ -40,18 +40,51 @@ claim/unclaim/gate/close so your ownership never collides with another session:
 Refer to it below as ID. (Across a full process restart your id may change; the
 resume step then won't find an earlier-claimed bead.)
 
+## Template/formula exclusion (claim-sourcing safety — DO NOT REGRESS)
+
+`bd ready` does NOT exclude `is_template=true` issues (a molecule TEMPLATE, e.g.
+`merge-request.pr` — title `PR: {{title}}`, unrendered `{{base_branch}}` placeholders), and a
+template's OWN labels need not include `human` — its label set can be anything, or empty — so
+neither `--exclude-label human,human-focus-required,refactor-campaign` nor `--exclude-type epic`
+reliably excludes one. Once claimed, a template is READ-ONLY: every `bd` write path
+(`bd update`, `bd comment`) refuses it with
+`cannot modify template : templates are read-only; use bd mol pour to create a work item` —
+including the release write — so a template claimed via the bare atomic `bd ready --claim` is
+PERMANENTLY STRANDED; there is no `--force`/override on any `bd update` or `bd mol` subcommand
+to release it (observed live, 2026-09-15: `merge-request.pr`, provenance bead `tc-vr4ad`).
+
+Therefore EVERY claim in this command (Main loop step 1, the Epic drill-down's descendant
+claim, and the id-targeted safe path) is NEVER the bare atomic `bd ready --claim` form — it is
+always a two-step preview-then-claim:
+
+1. **List candidates** with the SAME filters the claim call would have used, but WITHOUT
+   `--claim`, and WITH `--json` so `is_template` is visible.
+2. **Filter client-side**: walk `.data[]` in the returned (priority) order and skip any entry
+   whose `is_template` field is `true`.
+3. **Claim the first surviving candidate**: `bd update <id> --claim --actor "ID" --json`.
+
+This introduces a small, ACCEPTED race window between steps 1 and 3 (a peer session could
+claim the same candidate first) — strictly safer than the atomic form's failure mode, since a
+lost race here just means retrying, never an unrecoverable stranded claim. Treat a step-3
+failure (the candidate was claimed, closed, or deferred out from under you between steps 1 and 3) as a transient error: back off briefly and restart from step 1, never re-issue step 3 on the
+same id unchanged. If EVERY candidate step 1 returns is a template, that reads as an EMPTY
+result for whichever step invoked this sequence — never fall back to claiming a template as a
+last resort.
+
 ## Goal / termination
 
-You are DONE only when a SUCCESSFUL query returns no agent-workable beads:
+You are DONE only when a SUCCESSFUL query returns no agent-workable, non-template bead:
 
 ```bash
 bd ready --exclude-label human,human-focus-required,refactor-campaign --json -n 10
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
-refactor spec §3).
+refactor spec §3). Filter out any `is_template=true` entry client-side before judging whether
+the result is empty (see "Template/formula exclusion" above) — a template left in the result is
+not agent-workable and MUST NOT be claimed.
 
-If that command SUCCEEDS (exit 0) and is empty, STOP (see "Unpushed commits when
+If that command SUCCEEDS (exit 0) and has no non-template entry, STOP (see "Unpushed commits when
 you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
 "--monitor-if-empty" below), in which case an empty result ARMS a recurring
 check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
@@ -147,7 +180,9 @@ condition that otherwise means Goal met and STOP.
 
 ## Main loop — repeat until the Goal is met
 
-1. **CLAIM** (atomic, race-safe — the ONLY claim path; do NOT list-then-claim):
+1. **CLAIM** — the preview-then-claim sequence from "Template/formula exclusion" above (the
+   ONLY claim path; NEVER the bare atomic `bd ready --claim`, which can claim an unreleasable
+   template):
 
    **SELF-CHECK freshness first, once per CLAIM** — the cheapest checkpoint,
    since a claim already costs several `bd` round-trips, so one more local
@@ -196,23 +231,31 @@ proceeding on currently loaded text (direct interactive invocation).`)
        content is stale and the session should be restarted fresh.
 
    ```bash
-   bd ready --claim --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --actor "ID" --json
+   bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
-   refactor spec §3).
+   refactor spec §3). If the invocation supplied `$ARGUMENTS`, apply them as additional
+   NARROWING filters here (see "Optional scope arguments"); they never remove
+   `--exclude-label human,human-focus-required` (nor its campaign counterpart above), the
+   `--exclude-type epic` exclusion, or the deferred exclusion.
 
-   Atomically claims the highest-priority ready bead (assignee=ID,
-   status=in_progress) and returns it. No other session can get the same bead. A
-   SUCCESSFUL empty result → Goal met → STOP (also run `session-mode set-status finished`,
-   best-effort — this is the loop's own natural, deterministic termination point; no hook
-   is used or needed for this) — UNLESS this session was invoked with
-   `--monitor-if-empty`, in which case take the ARM path in "--monitor-if-empty"
-   above instead of stopping. A transient error → retry. If the
-   invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters here
-   (see "Optional scope arguments"); they never remove `--exclude-label human,human-focus-required` (nor
-   its campaign counterpart in the CLAIM query above), the `--exclude-type epic`
-   exclusion, or the deferred exclusion.
+   Filter `.data[]` client-side, in the returned (priority) order, skipping any entry whose
+   `is_template` is `true`. Then claim the first surviving candidate:
+
+   ```bash
+   bd update <id> --claim --actor "ID" --json
+   ```
+
+   This claims the highest-priority NON-TEMPLATE ready bead (assignee=ID, status=in_progress)
+   and returns it. A SUCCESSFUL list with no non-template candidate → Goal met → STOP (also run
+   `session-mode set-status finished`, best-effort — this is the loop's own natural,
+   deterministic termination point; no hook is used or needed for this) — UNLESS this session
+   was invoked with `--monitor-if-empty`, in which case take the ARM path in
+   "--monitor-if-empty" above instead of stopping. A transient error on either call, OR the
+   claim call failing because a peer claimed the same candidate first (the accepted
+   preview-then-claim race window) → back off briefly and retry the WHOLE sequence from the
+   list step, never re-issue the same claim call unchanged.
 
    **`--exclude-type epic` is load-bearing, not cosmetic** (provenance: bead
    `pg2-xcw7u`). In this workspace's convention every epic — sampled across all
@@ -256,12 +299,12 @@ proceeding on currently loaded text (direct interactive invocation).`)
    A match on EITHER check means this is a dependency-shaped non-issue, not a
    park: release it in ONE call — `bd update <id> --status open --assignee ""
    --actor "ID"` (B-2/B-3: status and assignee together, no label change) —
-   then re-run the atomic claim above. Bound the two checks to a SHARED budget
+   then re-run the CLAIM sequence above. Bound the two checks to a SHARED budget
    of 3 consecutive container-guard releases (a hit on either check counts)
    within one CLAIM invocation; a 4th hit without making progress means the
    guard itself isn't resolving the hazard — most often a non-`epic` container
-   that OUTRANKS every other ready bead on priority, so it re-wins the atomic
-   claim's tie-break every single pass (provenance: `tc-ipgw`, live instance
+   that OUTRANKS every other ready bead on priority, so it re-wins the list
+   step's tie-break every single pass (provenance: `tc-ipgw`, live instance
    `tc-w5rib.1` — a P1 container whose only live children were `human`-labeled
    sat above every P2 ready bead and re-won the claim 4 times running). **D-9**
    forbids the two mechanisms that would normally pull a bead out of this race
@@ -284,7 +327,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
 
    **Epic drill-down — when the CLAIMED bead genuinely IS type `epic` with
    open children** (provenance: `tc-b02v`, live instance `tc-soml9`). The
-   atomic claim above already carries `--exclude-type epic`, so this path is
+   CLAIM sequence above already carries `--exclude-type epic`, so this path is
    reached only when an epic ends up claimed on purpose — the id-targeted safe
    path in "Optional scope arguments" below, or Startup/resume recovering a
    bead this actor id already held `in_progress` from an earlier turn. Every
@@ -306,35 +349,41 @@ proceeding on currently loaded text (direct interactive invocation).`)
       — proceed to UNDERSTAND and work it directly, exactly like any other
       claimed bead. A NON-EMPTY `.data` means it genuinely is a container with
       decomposed children: continue to step 2.
-   2. Find the first claimable descendant in ONE atomic call — this reuses
-      `bd ready`'s own priority-sorted, blocker-aware descendant search
-      instead of hand-rolling a walk. `--parent` is TRANSITIVE (verified
-      against `bd` 1.0.4: it returns descendants at every depth, not only
-      direct children), so a NESTED epic-with-no-deliverable is skipped over
-      on its own — `bd ready` recurses past it to whichever of ITS OWN
-      descendants is actually workable, never surfacing the nested epic
-      itself for direct claim (`--exclude-type epic` again):
+   2. Find the first claimable descendant via the SAME preview-then-claim sequence as the
+      top-level CLAIM step ("Template/formula exclusion" above) — this reuses `bd ready`'s own
+      priority-sorted, blocker-aware descendant search instead of hand-rolling a walk.
+      `--parent` is TRANSITIVE (verified against `bd` 1.0.4: it returns descendants at every
+      depth, not only direct children), so a NESTED epic-with-no-deliverable is skipped over
+      on its own — `bd ready` recurses past it to whichever of ITS OWN descendants is
+      actually workable, never surfacing the nested epic itself for direct claim
+      (`--exclude-type epic` again). List WITHOUT `--claim`:
 
       ```bash
-      bd ready --parent <id> --exclude-type epic --exclude-label human,human-focus-required,refactor-campaign --claim --actor "ID" --json
+      bd ready --parent <id> --exclude-type epic --exclude-label human,human-focus-required,refactor-campaign --json
       ```
 
-      Apply the SAME label filters this session's own atomic CLAIM query
-      above uses (drain's `--exclude-label human,human-focus-required,refactor-campaign`; a sibling
-      command sourcing work the same way, e.g. `/unblock-human-beads`,
-      substitutes its own mirrored filters here instead — see the bead's
-      DESIRED BEHAVIOR for the mapping).
+      Apply the SAME label filters this session's own top-level CLAIM step above uses (drain's
+      `--exclude-label human,human-focus-required,refactor-campaign`; a sibling command
+      sourcing work the same way, e.g. `/unblock-human-beads`, substitutes its own mirrored
+      filters here instead — see the bead's DESIRED BEHAVIOR for the mapping). Filter `.data[]`
+      client-side, skipping any `is_template=true` entry, then claim the first surviving
+      candidate:
 
-   3. NON-EMPTY result → a descendant is now claimed under ID. Release the
+      ```bash
+      bd update <id> --claim --actor "ID" --json
+      ```
+
+   3. Claim SUCCEEDED (a descendant is now claimed under ID). Release the
       epic in the SAME call shape the Container guard uses
       (`bd update <id> --status open --assignee "" --actor "ID"`, B-2/B-3 —
       status and assignee together, no label change), then continue the Main
       loop on the NEWLY claimed descendant from UNDERSTAND (step 2) below —
-      do NOT re-run the top-level atomic claim, which would just pull
+      do NOT re-run the top-level CLAIM sequence, which would just pull
       whatever else is next in queue and abandon this one.
-   4. EMPTY result → every descendant under this epic is
-      blocked/deferred/`in_progress`/closed: there is nothing claimable here
-      right now. Release the epic plainly — the SAME
+   4. The list came back EMPTY, or every candidate was a template → every
+      descendant under this epic is blocked/deferred/`in_progress`/closed/
+      template-only: there is nothing claimable here right now. Release the
+      epic plainly — the SAME
       `bd update <id> --status open --assignee "" --actor "ID"` call — and
       move to the next ready item. Do NOT loop on the same epic again within
       this pass; a re-claim of the SAME epic id belongs to a later pass, once
@@ -827,9 +876,12 @@ This command MAY be invoked with additional context (`$ARGUMENTS`) that
 further **restricts** the work it claims — e.g. an extra label, a
 priority, a parent/epic, a type, a specific bead id, or a one-bead /
 N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
-CLAIM query. Honor a specific bead id via the safe path: confirm the id
+list step of the CLAIM sequence (see "Template/formula exclusion" above). Honor a specific bead
+id via the safe path: confirm the id
 appears in `bd ready --exclude-label human,human-focus-required,refactor-campaign [scope] --json`
-(ready, in-scope, not deferred, not `human`), then claim it with
+(ready, in-scope, not deferred, not `human`) AND that its `is_template` field is NOT `true` (a
+template MUST NOT be targeted even by an explicit id, for the same permanently-stranded-claim
+reason as the ordinary claim path), then claim it with
 `bd update <id> --claim --actor "ID"` (`bd ready --claim` cannot target a
 chosen id — it claims the first filter match).
 
@@ -847,6 +899,13 @@ arguments, behavior is otherwise unchanged.
 
 ## Rules
 
+- **Sourcing.** Work MUST be claimed only via the preview-then-claim sequence in
+  "Template/formula exclusion" above — list with `bd ready` (no `--claim`), skip any
+  `is_template=true` entry client-side, then `bd update <id> --claim --actor "ID"` on the first
+  surviving candidate — and MUST NOT use the bare atomic `bd ready --claim` form anywhere (Main
+  loop step 1, the Epic drill-down's descendant claim, or the id-targeted safe path): it cannot
+  exclude templates, and a claimed template's write paths are all refused, permanently
+  stranding the claim (observed live, 2026-09-15: `merge-request.pr`).
 - Orchestrator vs subagent: CLAIM, GATE, CLEANUP, CLOSE stay in THIS session;
   each bead's IMPLEMENTATION goes to one subagent and its LANDING to another
   (both dispatched serially — never fan out claiming, landing, gating, or
@@ -870,7 +929,7 @@ arguments, behavior is otherwise unchanged.
   primary branch.
 - A claimed bead that genuinely IS type `epic` with decomposed children — reachable
   only via the id-targeted safe path or a resumed `in_progress` claim, since the
-  atomic CLAIM query already carries `--exclude-type epic` — is never dispatched for
+  CLAIM sequence already carries `--exclude-type epic` — is never dispatched for
   direct implementation and never just released-and-reclaimed forever. CLAIM's "Epic
   drill-down" step finds and claims its first ready non-`epic` descendant (via
   `bd ready --parent`, which is transitive and skips past any nested container
@@ -971,9 +1030,12 @@ arguments, behavior is otherwise unchanged.
 
 Open N Claude Code sessions, each with its working directory inside this
 pn-workspace, and run `/drain-beads` in each. Every session self-assigns a
-distinct actor id; the atomic `bd ready --claim` guarantees no two sessions ever
-get the same bead. Each session stops on its own when a successful
-`bd ready --exclude-label human,human-focus-required,refactor-campaign -n 10` is empty (zr-refactor
+distinct actor id; the preview-then-claim sequence's per-id `bd update --claim` is atomic per
+bead, so a lost race just means one session's list step picked a candidate a peer claimed
+first — a transient failure to retry, never two sessions holding the same bead. Each session
+stops on its own when a successful
+`bd ready --exclude-label human,human-focus-required,refactor-campaign -n 10` is empty of
+non-template entries (zr-refactor
 campaign beads carry their own protocol; excluded here by design (zr-refactor spec
 §3)). A parked (`human`-labeled) bead,
 or a stale-converted gate, stays out of the queue until a human reviews it. A bead
