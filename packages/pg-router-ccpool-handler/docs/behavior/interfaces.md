@@ -27,7 +27,7 @@ copies drifting; this module is bound by the upstream text as written.
 
 Per this set's floor, each backing tool's own internal behavior is out of extent — only what
 crosses the line is named here, mirroring `packages/pa-monitor/docs/behavior/interfaces.md`'s
-treatment of its own named boundaries (`INTF-BRIDGE`).
+treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a citation).
 
 - **`INTF-CCH-CCPOOL`** <!-- uuid: d1fc9c42-5d04-4df3-bfb1-a11cc97d668d --> — a ccpool-backed
   handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session,
