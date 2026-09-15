@@ -55,6 +55,10 @@ func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([
 	return nil, nil
 }
 
+func (fakeGH) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
+	return 0, nil
+}
+
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
 	return internal.New(fakeGH{})

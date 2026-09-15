@@ -50,6 +50,18 @@ type fakeGH struct {
 	viewerLogin         string
 	viewerLoginErr      error
 	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
+
+	// reviewThreadCount/reviewThreadCountErr back List's own supplemental
+	// ReviewThreadCount fetch (bead pg2-2j5ac.30.7). reviewThreadCountFn
+	// lets a test observe the exact repo/number the call was made with
+	// (schema.PR does not surface ReviewThreadCount today -- see this
+	// packet's own "does not wire into Backend.List's cursor emission"
+	// scope note -- so asserting via the returned schema.PR is not an
+	// option; the call itself, plus the direct mergeSupplementalFields
+	// unit test, are what prove the threading).
+	reviewThreadCount    int
+	reviewThreadCountErr error
+	reviewThreadCountFn  func(ctx context.Context, repo string, number int) (int, error)
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
@@ -132,6 +144,16 @@ func (f *fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int)
 		return f.reviewsWithCommitFn(ctx, repo, number)
 	}
 	return nil, nil
+}
+
+func (f *fakeGH) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
+	if f.reviewThreadCountFn != nil {
+		return f.reviewThreadCountFn(ctx, repo, number)
+	}
+	if f.reviewThreadCountErr != nil {
+		return 0, f.reviewThreadCountErr
+	}
+	return f.reviewThreadCount, nil
 }
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {
@@ -396,12 +418,13 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 		},
 		// ids_only must skip the supplemental per-PR enrichment fetch
 		// entirely (bead pg2-2j5ac.30.6) -- present_ids never needs
-		// HeadSHA/ChecksRollup/ReviewCount, so paying for N extra gh
-		// calls here would be pure waste.
+		// HeadSHA/ChecksRollup/ReviewCount/ReviewThreadCount, so paying
+		// for N extra gh calls here would be pure waste.
 		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
 			t.Fatal("GetPR must not be called when ids_only is true")
 			return nil, nil
 		},
+		reviewThreadCountErr: errors.New("ReviewThreadCount must not be called when ids_only is true"),
 	}
 	b := newTestBackend(t, gh)
 
@@ -526,15 +549,16 @@ func TestBackend_List_SupplementalFetchError_Classified(t *testing.T) {
 
 // TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount is a
 // direct, IO-free unit test of List's own merge step (bead
-// pg2-2j5ac.30.6): the three fields gh search prs' own --json field
-// list cannot carry come from full, while everything else -- including
-// fields full ALSO happens to carry, like Title -- stays m's own,
-// cheaper-search-call value untouched ("list" is an enumeration op, not
-// a full re-fetch of every field).
+// pg2-2j5ac.30.6, extended by pg2-2j5ac.30.7's reviewThreadCount
+// parameter): the fields gh search prs' own --json field list cannot
+// carry come from full/reviewThreadCount, while everything else --
+// including fields full ALSO happens to carry, like Title -- stays m's
+// own, cheaper-search-call value untouched ("list" is an enumeration op,
+// not a full re-fetch of every field).
 func TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount(t *testing.T) {
 	m := api.PR{Repo: "owner/repo", Number: 1, Title: "from search", State: "open"}
 	full := api.PR{HeadSHA: "deadbeef", ChecksRollup: "success", ReviewCount: 3, Title: "from view (must be ignored)"}
-	got := mergeSupplementalFields(m, full)
+	got := mergeSupplementalFields(m, full, 5)
 	if got.HeadSHA != "deadbeef" {
 		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, "deadbeef")
 	}
@@ -544,11 +568,78 @@ func TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount(t *testing
 	if got.ReviewCount != 3 {
 		t.Fatalf("ReviewCount = %d, want 3", got.ReviewCount)
 	}
+	if got.ReviewThreadCount != 5 {
+		t.Fatalf("ReviewThreadCount = %d, want 5", got.ReviewThreadCount)
+	}
 	if got.Title != "from search" {
 		t.Fatalf("Title = %q, want the search result's own title preserved", got.Title)
 	}
 	if got.Repo != "owner/repo" || got.Number != 1 {
 		t.Fatalf("Repo/Number = %q/%d, want the search result's own identity preserved", got.Repo, got.Number)
+	}
+}
+
+// TestBackend_List_CallsReviewThreadCountPerMatchedPR proves List's
+// supplemental-fetch step (bead pg2-2j5ac.30.7) calls
+// ghProvider.ReviewThreadCount for each matched PR, with the correct
+// repo/number, alongside the existing GetPR supplemental fetch --
+// schema.PR does not surface ReviewThreadCount itself (this packet
+// deliberately does not wire the field into Backend.List's output; that
+// remains pg2-2j5ac.30.3's job), so the call itself is what this test
+// observes. TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount
+// is the direct, IO-free proof that the fetched value actually reaches
+// api.PR.ReviewThreadCount via the merge step.
+func TestBackend_List_CallsReviewThreadCountPerMatchedPR(t *testing.T) {
+	var got []string
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{HeadSHA: "deadbeef", ChecksRollup: "success"}, nil
+		},
+		reviewThreadCountFn: func(ctx context.Context, repo string, number int) (int, error) {
+			got = append(got, formatPRID(repo, number))
+			return 7, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	result, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(result.Entities) != 1 {
+		t.Fatalf("Entities = %+v", result.Entities)
+	}
+	if len(got) != 1 || got[0] != "owner/repo#1" {
+		t.Fatalf("ReviewThreadCount calls = %+v, want exactly one call for owner/repo#1", got)
+	}
+}
+
+// TestBackend_List_ReviewThreadCountFetchError_Classified mirrors
+// TestBackend_List_SupplementalFetchError_Classified for the new
+// supplemental fetch (bead pg2-2j5ac.30.7): a transient/failed
+// ReviewThreadCount call degrades EXACTLY like a failed GetPR
+// supplemental fetch already does -- List fails the whole call rather
+// than silently omitting the field or crashing, per this packet's own
+// binding decision to read and reuse GetPR's existing failure handling
+// rather than inventing a different one.
+func TestBackend_List_ReviewThreadCountFetchError_Classified(t *testing.T) {
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{}, nil
+		},
+		reviewThreadCountErr: github.ErrGHAuthInvalid,
+	}
+	b := newTestBackend(t, gh)
+
+	_, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
 	}
 }
 

@@ -1535,6 +1535,77 @@ func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number in
 	return out, nil
 }
 
+// reviewThreadCountQuery fetches a PR's inline code-review comment thread
+// count (GraphQL's own PullRequest.reviewThreads.totalCount — distinct
+// from CommentCount's issue-level comments) — the 8th and final raw field
+// a future GitHub fingerprint cursor needs (bead pg2-2j5ac.30.7). Neither
+// `gh search prs --json` nor `gh pr view --json` support a reviewThreads
+// field (verified live 2026-09-15: both error "Unknown JSON field" and
+// list their full supported field sets, neither containing reviewThreads),
+// so this mirrors pg-pr's own proven mechanism for this exact field
+// (packages/pg-pr/pkg/provider/vcs/github/fingerprint.go's fingerprintQuery
+// requests the identical `reviewThreads { totalCount }` sub-selection with
+// no pagination args), narrowed here to a single PR via the same
+// repository/pullRequest node shape reviewsWithCommitQuery above already
+// uses.
+const reviewThreadCountQuery = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads { totalCount }
+    }
+  }
+}
+`
+
+// ReviewThreadCount runs reviewThreadCountQuery for repo/number and returns
+// reviewThreads.totalCount — List's own supplemental-fetch source for the
+// one fingerprint field (bead pg2-2j5ac.30.6's own mergeSupplementalFields
+// extension left uncovered) that neither gh search prs nor gh pr view can
+// carry. Mirrors ReviewsWithCommit's own error handling exactly: a `gh`
+// failure (transient GraphQL error, auth failure, …) is returned unwrapped
+// so provider.go's List call site classifies and fails the whole call the
+// same way a failed GetPR supplemental fetch already does — see
+// provider.go's List doc comment on that all-or-nothing semantics.
+func (p *Provider) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
+	if err := validateRepo(repo); err != nil {
+		return 0, err
+	}
+	if number <= 0 {
+		return 0, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return 0, fmt.Errorf("github: repo %q is not in owner/name form", repo)
+	}
+	args := []string{
+		"api", "graphql",
+		"-F", "query=" + reviewThreadCountQuery,
+		"-f", "owner=" + owner,
+		"-f", "name=" + name,
+		"-F", fmt.Sprintf("number=%d", number),
+	}
+	raw, err := p.gh.Run(ctx, args...)
+	if err != nil {
+		return 0, err
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						TotalCount int `json:"totalCount"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return 0, fmt.Errorf("github: parse review-thread-count graphql response: %w", err)
+	}
+	return resp.Data.Repository.PullRequest.ReviewThreads.TotalCount, nil
+}
+
 // Compile-time check that Provider satisfies vcs.Provider.
 var _ vcs.Provider = (*Provider)(nil)
 

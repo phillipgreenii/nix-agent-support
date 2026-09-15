@@ -129,6 +129,18 @@ type PR struct {
 	// prListFields call that already carries HeadSHA/ChecksRollup for
 	// List — see prListFields' own doc comment.
 	ReviewCount int `json:"review_count,omitempty"`
+	// ReviewThreadCount is the PR's inline code-review comment thread count
+	// (GraphQL's PullRequest.reviewThreads.totalCount — distinct from
+	// CommentCount's issue-level comments) — the 8th and final raw field a
+	// future GitHub fingerprint cursor needs (bead pg2-2j5ac.30.7). Neither
+	// gh search prs' nor gh pr view's own --json field lists carry this
+	// field (verified 2026-09-15 against the real gh binary: both error
+	// "Unknown JSON field"), so List's own supplemental per-matched-PR
+	// fetch (provider.go's mergeSupplementalFields) fills this in via a
+	// dedicated raw-GraphQL call (internal/github.Provider.ReviewThreadCount),
+	// mirroring pg-pr's own proven mechanism for this exact field
+	// (packages/pg-pr/pkg/provider/vcs/github/fingerprint.go).
+	ReviewThreadCount int `json:"review_thread_count,omitempty"`
 }
 
 // HasConflict reports whether GitHub signals a merge conflict on this PR, via

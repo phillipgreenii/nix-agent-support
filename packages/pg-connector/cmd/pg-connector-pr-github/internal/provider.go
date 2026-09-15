@@ -53,6 +53,12 @@ type ghProvider interface {
 	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
 	ViewerLogin(ctx context.Context) (string, error)
 	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// ReviewThreadCount reads a single PR's reviewThreads.totalCount via a
+	// dedicated raw-GraphQL call (bead pg2-2j5ac.30.7) — List's own
+	// supplemental-fetch source for the one fingerprint-needed field
+	// neither gh search prs --json nor gh pr view --json can carry (see
+	// internal/github/github.go's reviewThreadCountQuery doc comment).
+	ReviewThreadCount(ctx context.Context, repo string, number int) (int, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
@@ -199,16 +205,20 @@ func rateReservePoints(config json.RawMessage) int {
 // for an ids_only caller avoids N wasted gh calls, matching the
 // interface's own "MAY still choose to populate Entities anyway
 // (harmless, just wasted work) but need not" freedom boundary now that
-// there IS a non-trivial cost to skip), this runs one supplemental
-// per-matched-PR GetPR fetch to fill in the three fields gh search prs'
-// own --json field list cannot carry at all — head OID, checks rollup,
-// review count (searchPRFields' own doc comment has the verified
-// gh-search-prs field-list gap) — bounded by the SAME parallelMap
-// helper ListAttention's own per-candidate GetPR fan-out below already
-// uses for an identical N+1 shape (bead pg2-zutee). A supplemental-fetch
-// failure for any one matched PR fails the whole List call, matching
-// ListAttention's own existing all-or-nothing error semantics for this
-// same fan-out shape — not a new risk profile.
+// there IS a non-trivial cost to skip), this runs two supplemental
+// per-matched-PR fetches: GetPR, filling in the three fields gh search
+// prs' own --json field list cannot carry at all — head OID, checks
+// rollup, review count (searchPRFields' own doc comment has the verified
+// gh-search-prs field-list gap) — and ReviewThreadCount (bead
+// pg2-2j5ac.30.7), the 8th and final fingerprint field neither gh search
+// prs nor gh pr view can carry via --json at all (internal/github/
+// github.go's reviewThreadCountQuery doc comment). Both run inside the
+// SAME parallelMap helper ListAttention's own per-candidate GetPR fan-out
+// below already uses for an identical N+1 shape (bead pg2-zutee). A
+// supplemental-fetch failure for any one matched PR — from either call —
+// fails the whole List call, matching ListAttention's own existing
+// all-or-nothing error semantics for this same fan-out shape — not a new
+// risk profile.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
@@ -252,7 +262,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		if err != nil {
 			return api.PR{}, err
 		}
-		return mergeSupplementalFields(m, *full), nil
+		threadCount, err := b.gh.ReviewThreadCount(ctx, m.Repo, m.Number)
+		if err != nil {
+			return api.PR{}, err
+		}
+		return mergeSupplementalFields(m, *full, threadCount), nil
 	})
 	if err != nil {
 		return nil, classifyGHError(err)
@@ -272,8 +286,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 // mergeSupplementalFields copies the three fields gh search prs' own
 // --json field list cannot carry (bead pg2-2j5ac.30.6: head OID, checks
 // rollup, review count — searchPRFields' own doc comment) from full (a
-// per-PR GetPR-equivalent fetch) onto m (one of SearchPRs' own matched
-// results), leaving every other field of m untouched — m's own
+// per-PR GetPR-equivalent fetch), plus reviewThreadCount (bead
+// pg2-2j5ac.30.7 — the 8th and final fingerprint field, fetched via its
+// own dedicated raw-GraphQL call since neither gh search prs nor gh pr
+// view can carry it via --json at all), onto m (one of SearchPRs' own
+// matched results) — leaving every other field of m untouched. m's own
 // Title/State/Author/UpdatedAt/CommentCount/… already came from the
 // cheaper search call and are not overwritten by full's own (possibly
 // differently-formatted, but not more authoritative for this op's
@@ -281,10 +298,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 // not a full re-fetch of every field [freedom boundary]. A pure
 // function so List's own supplemental-fetch merge step is unit-testable
 // without spawning a fake ghProvider fan-out.
-func mergeSupplementalFields(m, full api.PR) api.PR {
+func mergeSupplementalFields(m, full api.PR, reviewThreadCount int) api.PR {
 	m.HeadSHA = full.HeadSHA
 	m.ChecksRollup = full.ChecksRollup
 	m.ReviewCount = full.ReviewCount
+	m.ReviewThreadCount = reviewThreadCount
 	return m
 }
 

@@ -1575,6 +1575,92 @@ func TestMinimizeComment_PostsGraphQL(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// ReviewThreadCount (bead pg2-2j5ac.30.7)
+// ----------------------------------------------------------------------
+
+func TestReviewThreadCount_ParsesTotalCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(
+		`{"data":{"repository":{"pullRequest":{"reviewThreads":{"totalCount":4}}}}}`,
+	)
+	p := NewWithRunner(gh)
+	got, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ReviewThreadCount: %v", err)
+	}
+	if got != 4 {
+		t.Fatalf("ReviewThreadCount = %d, want 4", got)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "owner=foo") || !strings.Contains(joined, "name=bar") || !strings.Contains(joined, "number=42") {
+		t.Fatalf("expected owner/name/number args: %v", last)
+	}
+}
+
+// TestReviewThreadCount_PropagatesGHError proves a `gh` failure (a
+// transient GraphQL error, auth failure, …) propagates unwrapped exactly
+// like ReviewsWithCommit's own `p.gh.Run` failure does — provider.go's
+// List call site is the one that classifies and fails the whole call,
+// matching the existing GetPR supplemental-fetch failure handling this
+// packet's binding decision requires reusing rather than reinventing.
+func TestReviewThreadCount_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["api graphql"] = errors.New("boom")
+	p := NewWithRunner(gh)
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
+func TestReviewThreadCount_MalformedJSON(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`not json`)
+	p := NewWithRunner(gh)
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+// TestReviewThreadCount_EmptyResponseDegradesToZero proves a `gh api
+// graphql` call that succeeds but returns a degenerate/empty response
+// body degrades sanely to a zero count rather than crashing List — this
+// packet's acceptance criterion for a "failure/empty-response case
+// degrading sanely." json.Unmarshal of "{}" leaves every nested field at
+// its zero value, so the parsed totalCount is simply 0 — no error, no
+// panic — matching this backend's existing convention elsewhere (e.g.
+// ReviewsWithCommit's own null-commit handling) of treating a missing
+// GraphQL field as its zero value.
+func TestReviewThreadCount_EmptyResponseDegradesToZero(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{}`)
+	p := NewWithRunner(gh)
+	got, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ReviewThreadCount: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("ReviewThreadCount = %d, want 0 for an empty response", got)
+	}
+}
+
+func TestReviewThreadCount_ValidatesInputs(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ReviewThreadCount(context.Background(), "", 1); err == nil {
+		t.Fatal("expected error for empty repo")
+	}
+	if _, err := p.ReviewThreadCount(context.Background(), "no-slash", 1); err == nil {
+		t.Fatal("expected error for repo not in owner/name form")
+	}
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 0); err == nil {
+		t.Fatal("expected error for non-positive PR number")
+	}
+}
+
 func TestListComments_EmptyArrays(t *testing.T) {
 	p := NewWithRunner(&pathFakeGH{
 		responses: map[string][]byte{
