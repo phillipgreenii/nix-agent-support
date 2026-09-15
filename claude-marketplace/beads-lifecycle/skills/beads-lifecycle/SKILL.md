@@ -327,10 +327,10 @@ human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a 
 - **F-2** The check MUST be mechanical and cheap — the probes in `references/premise-freshness-probes.md`
   (**F-3**), run verbatim. It MUST NOT be a judgement about whether the recorded text "still looks right".
 - **F-3** See `references/premise-freshness-probes.md` for the full probe table (landed?,
-  pushed?, patch-identical?, path-exists?, decided-against?, symbol-shape?, ticket-open?,
-  sibling-open?, next-free-id?) and F-4 through F-8's surrounding rules (ambiguity handling,
-  unrecorded-referent recording, review-quality-is-not-staleness, close-as-superseded, and
-  derived-identifier recomputation).
+  pushed?, patch-identical?, path-exists?, decided-against?, own-decision-recorded?,
+  symbol-shape?, ticket-open?, sibling-open?, next-free-id?) and F-4 through F-8's surrounding
+  rules (ambiguity handling, unrecorded-referent recording, review-quality-is-not-staleness,
+  close-as-superseded, and derived-identifier recomputation).
 - **F-9** ABSENCE IS AMBIGUOUS. An ABSENT `path-exists?` reading means EITHER "not done yet" OR
   "RULED AGAINST — the absence IS the executed decision", and the two demand OPPOSITE actions.
   Before treating any absence as work to do — and specifically BEFORE briefing a subagent to
@@ -338,3 +338,17 @@ human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a 
   probe (full runnable form in `references/premise-freshness-probes.md`) and MUST record its
   output. Absent from `git` is NOT absent from DISK: an artifact deliberately left uncommitted
   still exists untracked, and its own header is the usual place the ruling is written.
+- **F-10** A BEAD'S OWN DESCRIPTION IS ALSO A SNAPSHOT, NOT ONLY EXTERNAL REFERENTS. A
+  description that reads as an open question ("DECISION NEEDED", "a person must choose",
+  "operator: pick (a) or (b)") ages exactly like any other snapshot — except the newer record
+  can live INSIDE the same bead, in its `acceptance_criteria` field or a later comment, rather
+  than in an external system. Before parking, re-parking, or otherwise treating that
+  question-framing as still live, the agent MUST run the `own-decision-recorded?` probe (full
+  runnable form in `references/premise-freshness-probes.md`) against THIS bead's own
+  `acceptance_criteria` field and its comments, in that order, and MUST record the decisive
+  output. A recorded decision found there makes the description's question-framing STALE: the
+  bead reads as ORDINARY WORK, not a fresh human question, and MUST NOT be parked or re-parked
+  on a question that is already answered — regardless of how the description's own raw text is
+  still worded. (Provenance: `tc-uqw6s` — `tc-oyp6`/`tc-ts8f`/`tc-ldoz`/`tc-a8f8s` were each
+  released with the decision already recorded, then re-parked as `human` within hours on the
+  strength of the stale description text alone.)

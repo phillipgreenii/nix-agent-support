@@ -47,12 +47,22 @@ person really is the blocker.
    write any park comment or apply any label. The bead body is a snapshot from FILING
    time and the reason you are stuck may already be answered: in one pass over the
    parked queue, 5 of 9 beads were already resolved or void. Follow the
-   `beads-lifecycle` skill's `Premise Freshness` rules (F-1..F-9) and run the NAMED PROBES from F-3 — one per
+   `beads-lifecycle` skill's `Premise Freshness` rules (F-1..F-10) and run the NAMED PROBES from F-3 — one per
    external referent this bead names — keeping each decisive output verbatim:
    - `landed?` / `pushed?` / `patch-identical?` for commits and parked branches;
      `path-exists?` / `symbol-shape?` for the files, modules, and symbols the bead's
      steps or design edit; `ticket-open?` for external tickets; `sibling-open?` for
      referenced beads; `next-free-id?` for any "next free" number the bead recorded.
+   - **Before treating a description that reads as an open question ("DECISION NEEDED",
+     "a person must choose", "operator: pick (a) or (b)") as still live, run `own-decision-recorded?`
+     (F-10) against THIS bead's own `acceptance_criteria` field and its comments — in that
+     order — BEFORE anything else in this step.** A recorded operator decision in either place
+     makes the description's question-framing STALE even though its raw text still poses the
+     question: the bead is ORDINARY WORK, not a fresh human question, and this step MUST NOT
+     route it to a park/label on that already-answered question (provenance: `tc-uqw6s` —
+     `tc-oyp6`, `tc-ts8f`, `tc-ldoz`, `tc-a8f8s` were each released with the decision already
+     recorded, then re-parked as `human` within hours on the strength of the stale description
+     text alone).
    - An earlier REVIEW of this bead's plan is NOT a freshness signal (F-6). A reviewed
      snapshot ages exactly as fast as the snapshot, so "already reviewed" / "looks
      plan-ready" MUST NOT stand in for running the probes.

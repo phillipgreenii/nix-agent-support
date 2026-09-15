@@ -367,7 +367,7 @@ module trees had been DELETED and unified elsewhere — one approval away from l
 "Accepted" ADR prescribing edits to modules that do not exist. `git ls-tree` on the two paths
 it named was the whole check.
 
-Invoke the `beads-lifecycle` skill and follow its `Premise Freshness` rules (F-1..F-9), running the NAMED PROBES from F-3 —
+Invoke the `beads-lifecycle` skill and follow its `Premise Freshness` rules (F-1..F-10), running the NAMED PROBES from F-3 —
 one per external referent the bead OR its `stuck:` comment names — keeping each decisive
 output verbatim:
 
@@ -375,6 +375,13 @@ output verbatim:
   `path-exists?` / `symbol-shape?` for every file, module, or symbol the bead's design or
   steps EDIT; `ticket-open?` for external tickets; `sibling-open?` for referenced beads;
   `next-free-id?` for any "next free" number the bead recorded.
+- **Before treating a description that reads as an open question ("DECISION NEEDED", "a person
+  must choose", "operator: pick (a) or (b)") as still live, run `own-decision-recorded?` (F-10)
+  against THIS bead's own `acceptance_criteria` field and its comments — in that order — first.**
+  A recorded operator decision in either place makes the description's question-framing STALE
+  even though its raw text still poses the question: the bead is class 7 (mislabeled / normal
+  work), not class 8/9, and MUST NOT be re-presented to the operator as a live question
+  (provenance: `tc-uqw6s`).
 - **An earlier review is NOT a freshness signal** (F-6). The ADR above had been adversarially
   reviewed — verdict REVISE, two findings fixed, field tables checked against live source —
   and was stale anyway, because a thorough review of a snapshot ages exactly as fast as the
@@ -899,7 +906,25 @@ step — and never reaches TRIAGE at all.
   thing that IS the blocker-lift (e.g. the operator's decision captured as an ADR/spec/
   config the drain subagent will build on) — never implementation progress; if no
   committed artifact was needed, RELEASE without committing. Then `bd comment <id>`
-  recording what unblocked it (and the worktree pointer, if any). Then hand it to the
+  recording what unblocked it (and the worktree pointer, if any).
+
+  **If the human blocker was lifted by an OPERATOR DECISION (an ENGAGE this session — not a
+  mechanical class 3/6/7 finding, which has no decision to record), the agent MUST ALSO rewrite
+  the bead's DESCRIPTION in the SAME exchange as the release-comment above — a comment alone is
+  NOT sufficient.** The description is what a later freshness check's `own-decision-recorded?`
+  probe (F-10) and the NEXT drain claim read first; recording the decision ONLY in a comment is
+  exactly the gap `tc-uqw6s` reported: `tc-ldoz` and `tc-a8f8s` had the decision in a comment
+  only (never in `acceptance_criteria` or the description) and were re-parked as `human` within
+  hours on the strength of the still-question-framed description text alone. Use
+  `bd update <id> -d "..."` for a short rewrite or `bd update <id> --description-file <path>`
+  for a long one, matching whichever the bead's existing description style calls for. The
+  rewrite MUST SUPERSEDE the stale framing, never merely append alongside it: rewrite or strike
+  the "DECISION NEEDED" / "a person must choose" / "(a) ... or (b) ..." question text, state
+  plainly what was decided (and, when it matters to a later reader, by whom and when), and keep
+  any part of the original description that still describes real, undone work. This is the same
+  supersession discipline the always-on agent rules' "Superseding Rulings" (S-1/S-2) require for
+  a bead body carrying an instruction a later ruling supersedes, applied here to the RELEASE
+  path specifically. Then hand it to the
   drain pool with a SINGLE atomic update:
 
   ```bash
@@ -1085,8 +1110,9 @@ step — and never reaches TRIAGE at all.
   ISOLATE reuses it.
 - **Never create a fresh multi-repo set mid-session.** `fork-workforest` MUST run from the
   canonical workspace root and MUST NOT be nested inside a set. If a NEW multi-repo
-  isolation would be needed, record the decision/plan on the bead and RELEASE (or DEFER),
-  letting `/drain-beads` fork it.
+  isolation would be needed, record the decision on the bead per the RELEASE terminal action's
+  description-rewrite requirement above (not just a comment) and RELEASE (or DEFER), letting
+  `/drain-beads` fork it.
 
 ## Optional scope arguments
 
@@ -1279,13 +1305,24 @@ Freshness` rules (F-3) —
   one per external referent the bead or its `stuck:` comment names (commits, external tickets,
   files/modules/symbols, sibling beads, recorded "next free" ids) — and each decisive output
   MUST be recorded verbatim as a `FRESHNESS:` line in whatever comment the terminal action
-  writes. A bead whose premise is provably moot MUST be CLOSEd-AS-MOOT: it MUST NOT be
+  writes. Before treating a description that reads as an open question as still live, the agent
+  MUST ALSO run `own-decision-recorded?` (F-10) against the bead's own `acceptance_criteria`
+  field and its comments — a decision recorded there makes the description's framing STALE
+  regardless of the description's own raw wording. A bead whose premise is provably moot MUST be
+  CLOSEd-AS-MOOT: it MUST NOT be
   RELEASEd (drain would re-park it) and MUST NOT be DEFERred (it returns unchanged) — EXCEPT a
   class-1 substrate bead, which is dispositioned by class 1 on the ISOLATION's evidence (1a's
   three-leg proof, else 1b's ENGAGE), and a class-2 handoff pointer, which is
   CLOSEd-WITH-ABSORPTION-TRACE. A moot premise MUST NOT be read as a losslessness proof. An
   ambiguous or unresolvable probe MUST be read as STILL LIVE. Prior review of the bead's
   content MUST NOT be treated as evidence of freshness.
+- **Description rewrite on a decision-bearing RELEASE.** Whenever this command records an
+  OPERATOR DECISION while releasing a `human` bead (an ENGAGE resolved this session — not a
+  mechanical class 3/6/7 finding), it MUST rewrite the bead's DESCRIPTION in the SAME exchange
+  as the release, via `bd update <id> -d "..."` or `--description-file <path>`, to state the
+  decision directly and SUPERSEDE the stale question-framing text — never leave the decision
+  recorded ONLY in a comment. See the RELEASE terminal action above for the full requirement and
+  its worked case (`tc-uqw6s`).
 - **Extract before close-as-moot.** A CLOSE-AS-MOOT MUST first read the stale work and, if it
   makes a claim CURRENT source violates, MUST file that as its own bead
   (`bd create … --deps "discovered-from:<id>"`) and MUST name the new id in the close reason.

@@ -952,7 +952,7 @@ arguments, behavior is otherwise unchanged.
   verification child itself (see the gating-scope rule below).
 - `human` means A PERSON IS THE BLOCKER, never "not workable right now". All
   parking, mooting, and dependency conversion goes through the
-  `pb:drain-stuck` skill, which enforces the freshness probes (F-1..F-9), the
+  `pb:drain-stuck` skill, which enforces the freshness probes (F-1..F-10), the
   blocker classification (D-1..D-8), outcome-shaped preconditions (P-1..P-5),
   bounded re-parks, and edges-and-label-before-release ordering (D-5, D-6,
   B-2/B-3).
