@@ -192,7 +192,7 @@ func newLedgerClearCmd() *cobra.Command {
 			if err := deleteLedger(k); err != nil {
 				return err
 			}
-			result.Cleared = append(result.Cleared, ledgerClearRow{Type: k.Type, Backend: k.Backend, Query: k.Query})
+			result.Cleared = append(result.Cleared, ledgerClearRow(k))
 		}
 		return writeFanOutResult(cmd, result, 0, func() string { return humanizeLedgerClearResult(result) })
 	}
