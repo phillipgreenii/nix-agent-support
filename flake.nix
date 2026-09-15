@@ -197,6 +197,16 @@
           pg-ccaudit = final.callPackage ./packages/pg-ccaudit {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-source-pg-connector: Pattern A (ADR 0008), same shape as
+          # pg-ccaudit above — a standalone adapter binary (docket pg2-2j5ac.30
+          # Phase 8) exposing pg-connector's changes/list verbs as pg-router
+          # command-query rawItem sources. It execs pg-connector as a
+          # subprocess (ambient $PATH) and has no compile-time dependency on
+          # packages/pg-connector, so it needs no local `replace`/modRoot
+          # either.
+          pg-router-source-pg-connector = final.callPackage ./packages/pg-router-source-pg-connector {
+            inherit (goBuilders) mkGoApp;
+          };
           pg-router = final.callPackage ./packages/pg-router {
             inherit (goBuilders) mkGoApp;
             # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
@@ -783,8 +793,11 @@
               # `patternBTaggedGoLints` has a companion check, so its tagged
               # files are linted. A module NOT listed there
               # (`pa-monitor-decorator-scope`, `claude-transcript`,
-              # `pg-ccaudit` as of tc-t3wx) is a DELIBERATE exemption: verified
-              # 2026-08-31 via `grep -rln '^//go:build' packages/<module>` to
+              # `pg-ccaudit` as of tc-t3wx; `pg-router-source-pg-connector`
+              # added docket pg2-2j5ac.30 Phase 8 — its own wire double is a
+              # reentrant test-helper PROCESS, not a build-tagged file) is a
+              # DELIBERATE exemption: verified 2026-08-31 (and again for the
+              # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
               # carrier to one of those modules (or a new module), grep it and
               # either add it to `taggedGoLintModules`/`patternBTaggedGoLints`
@@ -838,6 +851,7 @@
                 "claude-transcript"
                 "pg-ccaudit"
                 "pg-connector"
+                "pg-router-source-pg-connector"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -1588,6 +1602,18 @@
                 pname = "pg-ccaudit-go-tests";
                 src = lib.cleanSource ./packages/pg-ccaudit; # matches default.nix
                 gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+              };
+
+              # pg-router-source-pg-connector — the changes/sweep/list golden
+              # suite against a reentrant test-helper-process wire double for
+              # pg-connector (testmain_test.go, mirroring
+              # packages/pg-connector's own pkg/scriptout/exec_test.go
+              # pattern). No testDeps: the suite execs no real subprocess —
+              # execCmdFactory is swapped to re-exec the test binary itself.
+              pg-router-source-pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-source-pg-connector-go-tests";
+                src = lib.cleanSource ./packages/pg-router-source-pg-connector; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-source-pg-connector/gomod2nix.toml;
               };
 
               # T-14 enforcement, mechanical rather than aspirational: the
