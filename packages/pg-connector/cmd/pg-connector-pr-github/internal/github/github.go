@@ -146,7 +146,16 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 // pg2-2j5ac.28.2's PR-facts design bullet — all three are documented
 // `gh pr view --json` fields (gh's own PullRequest export shape), so no
 // separate GraphQL enrich call is needed to populate them.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,statusCheckRollup"
+//
+// reviews was added by bead pg2-2j5ac.30.6, purely to COUNT (never to
+// inspect) this PR's reviews: List's own supplemental per-matched-PR fetch
+// (provider.go's mergeSupplementalFields) reuses this SAME call (rather
+// than inventing a second gh invocation shape) to fill in ReviewCount —
+// one of the three fingerprint-needed fields gh search prs' own --json
+// field list cannot carry (verified 2026-09-15 against the real gh
+// binary — see searchPRFields' own doc comment below). ghPR.Reviews below
+// decodes each element as an empty struct: only len() is ever read.
+var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,statusCheckRollup,reviews"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -209,6 +218,12 @@ type ghPR struct {
 		// CheckRun entry.
 		State string `json:"state"`
 	} `json:"statusCheckRollup"`
+	// Reviews is gh's reviews array (bead pg2-2j5ac.30.6) — decoded only
+	// to count via len(); no element field is ever read (see prListFields'
+	// own doc comment on why this call, rather than a second gh
+	// invocation, is List's own supplemental-fetch source for review
+	// count).
+	Reviews []struct{} `json:"reviews"`
 }
 
 // checksRollupFromContexts folds gh's flattened statusCheckRollup array
@@ -286,6 +301,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Mergeable:        p.Mergeable,
 		MergeStateStatus: p.MergeStateStatus,
 		ChecksRollup:     checksRollupFromContexts(p.StatusCheckRollup),
+		ReviewCount:      len(p.Reviews),
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
@@ -492,7 +508,26 @@ func (p *Provider) listForAuthor(ctx context.Context, repo, author string) ([]ap
 // Branch/Base/HeadSHA/Merged fields are always their zero value
 // [freedom boundary: "list" is an enumeration op, not a full-detail
 // read — a caller wanting that detail calls "show" on the matched id].
-var searchPRFields = "number,title,url,state,body,isDraft,author,labels,repository"
+//
+// updatedAt/commentsCount were added by bead pg2-2j5ac.30.6: two of the
+// six raw fields a future GitHub fingerprint cursor needs (the parked
+// sibling packet pg2-2j5ac.30.3's own GitHubPRSnapshot field set) that
+// gh search prs' own --json field list already supports directly, at no
+// extra call cost — re-verified against the real gh binary's field-name
+// error 2026-09-15: gh search prs --json supports exactly assignees,
+// author, authorAssociation, body, closedAt, commentsCount, createdAt,
+// id, isDraft, isLocked, isPullRequest, labels, number, repository,
+// state, title, updatedAt, url. The remaining three fingerprint fields
+// (head OID, checks rollup, review count) are NOT in that list — List's
+// own supplemental per-matched-PR GetPR fetch (provider.go's
+// mergeSupplementalFields) fills those in instead, rather than switching
+// this call to a bespoke raw-GraphQL search query: GetPR's own
+// prListFields call already carries head OID/checks rollup today, and
+// bounding the per-PR fan-out via the SAME parallelMap helper
+// ListAttention's own per-candidate GetPR fan-out already uses (bead
+// pg2-zutee) keeps this packet's fetch mechanism a straight reuse of two
+// already-existing, already-tested code paths rather than a new one.
+var searchPRFields = "number,title,url,state,body,isDraft,author,labels,repository,updatedAt,commentsCount"
 
 // ghSearchPR is `gh search prs --json <searchPRFields>`'s own decoded
 // shape.
@@ -512,18 +547,24 @@ type ghSearchPR struct {
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
+	// UpdatedAt/CommentsCount back api.PR.UpdatedAt/CommentCount (bead
+	// pg2-2j5ac.30.6) — see searchPRFields' own doc comment.
+	UpdatedAt     string `json:"updatedAt"`
+	CommentsCount int    `json:"commentsCount"`
 }
 
 func (p ghSearchPR) toAPI() api.PR {
 	out := api.PR{
-		Repo:   p.Repository.NameWithOwner,
-		Number: p.Number,
-		Title:  p.Title,
-		State:  strings.ToLower(p.State),
-		Author: p.Author.Login,
-		URL:    p.URL,
-		Draft:  p.IsDraft,
-		Body:   p.Body,
+		Repo:         p.Repository.NameWithOwner,
+		Number:       p.Number,
+		Title:        p.Title,
+		State:        strings.ToLower(p.State),
+		Author:       p.Author.Login,
+		URL:          p.URL,
+		Draft:        p.IsDraft,
+		Body:         p.Body,
+		UpdatedAt:    p.UpdatedAt,
+		CommentCount: p.CommentsCount,
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)

@@ -15,7 +15,7 @@ import (
 // op to the right method and passes args/results/errors straight through.
 type fakeProvider struct {
 	showFn    func(ctx context.Context, id string) (*schema.PR, error)
-	listFn    func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error)
+	listFn    func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error)
 	filesFn   func(ctx context.Context, id string) (*schema.PRFilesResult, error)
 	commitsFn func(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }
@@ -26,8 +26,8 @@ func (f *fakeProvider) Show(ctx context.Context, id string) (*schema.PR, error) 
 	return f.showFn(ctx, id)
 }
 
-func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
-	return f.listFn(ctx, query, idsOnly)
+func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
+	return f.listFn(ctx, query, idsOnly, cursor)
 }
 
 func (f *fakeProvider) Files(ctx context.Context, id string) (*schema.PRFilesResult, error) {
@@ -103,7 +103,7 @@ func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
 	var gotQuery schema.QueryExpr
 	var gotIDsOnly bool
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 			gotQuery = query
 			gotIDsOnly = idsOnly
 			return &schema.PRListResult{Entities: []schema.PR{{ID: "pr-1"}}, PresentIDs: []string{"pr-1"}}, nil
@@ -127,6 +127,64 @@ func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
 	}
 }
 
+// TestNewDispatchTable_List_PassesCursorThrough proves the "list" entry
+// decodes a non-null wire cursor into an opaque json.RawMessage and hands
+// it to p.List UNCHANGED, rather than discarding it (bead pg2-2j5ac.30.6 —
+// dispatch.go's prior behavior decoded-then-dropped it; only its own
+// Provider decides what a cursor means, so this table must not interpret
+// or validate its shape).
+func TestNewDispatchTable_List_PassesCursorThrough(t *testing.T) {
+	var gotCursor json.RawMessage
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
+			gotCursor = cursor
+			return &schema.PRListResult{PresentIDs: []string{}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"team":"is:open"}}`))
+	if _, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"team","cursor":{"v":1,"fp":{"owner/repo#1":"abc"}}}`)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	var decoded struct {
+		V  int               `json:"v"`
+		FP map[string]string `json:"fp"`
+	}
+	if err := json.Unmarshal(gotCursor, &decoded); err != nil {
+		t.Fatalf("cursor passed to p.List did not decode: %v (raw: %s)", err, gotCursor)
+	}
+	if decoded.V != 1 || decoded.FP["owner/repo#1"] != "abc" {
+		t.Fatalf("cursor = %#v, want the opaque blob passed through unchanged", decoded)
+	}
+}
+
+// TestNewDispatchTable_List_NilCursorPassesThroughAsNil proves the common
+// case (no cursor field on the wire, or an explicit JSON null) reaches
+// p.List as a nil json.RawMessage — a full/first fetch, per design's own
+// "MUST treat an undecodable cursor as null" framing.
+func TestNewDispatchTable_List_NilCursorPassesThroughAsNil(t *testing.T) {
+	var gotCursor json.RawMessage
+	sawCall := false
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
+			sawCall = true
+			gotCursor = cursor
+			return &schema.PRListResult{PresentIDs: []string{}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"team":"is:open"}}`))
+	if _, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"team"}`)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !sawCall {
+		t.Fatal("p.List was never called")
+	}
+	if len(gotCursor) != 0 {
+		t.Fatalf("cursor = %s, want empty/nil when the wire request carries no cursor", gotCursor)
+	}
+}
+
 // TestNewDispatchTable_List_QueryNotRecognized proves an unresolvable
 // query name is rejected with ErrQueryNotRecognized BEFORE p.List is ever
 // called — design's "MUST NOT treat an unrecognized name as a usage
@@ -134,7 +192,7 @@ func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
 // worry about, since the dispatch table itself never reaches it.
 func TestNewDispatchTable_List_QueryNotRecognized(t *testing.T) {
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 			t.Fatal("List must not be invoked for an unrecognized query name")
 			return nil, nil
 		},
@@ -153,7 +211,7 @@ func TestNewDispatchTable_List_QueryNotRecognized(t *testing.T) {
 // nil-pointer panic.
 func TestNewDispatchTable_List_NoConfig_QueryNotRecognized(t *testing.T) {
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 			t.Fatal("List must not be invoked when no config was ever registered")
 			return nil, nil
 		},
@@ -167,7 +225,7 @@ func TestNewDispatchTable_List_NoConfig_QueryNotRecognized(t *testing.T) {
 
 func TestNewDispatchTable_List_DecodeFailureIsInvalidArgument(t *testing.T) {
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 			t.Fatal("List must not be invoked when args fail to decode")
 			return nil, nil
 		},

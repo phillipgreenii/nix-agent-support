@@ -44,19 +44,24 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 		// than inside every backend's own p.List — so query_not_recognized
 		// is reported identically by every pr backend, with
 		// no duplicated resolution logic across them [freedom boundary].
-		// cursor is decoded but deliberately unused/unvalidated: design's
-		// own binding decision is that cursor "MUST always be null in this
-		// packet" — a caller sending a non-null cursor is simply ignored
-		// rather than rejected, since rejecting it would require this
-		// packet to invent its own validation error for a field phase 8
-		// (changes) actually owns.
+		// cursor is decoded off the wire as an opaque JSON blob
+		// (json.RawMessage, not a bare string — design: section 4.2, a
+		// per-backend-opaque cursor, e.g. a Jira cursor carrying a
+		// structured "updated >= " bound) and passed straight through to
+		// p.List UNVALIDATED (bead pg2-2j5ac.30.6, widening the prior
+		// "cursor MUST always be null in this packet" phase-7 binding now
+		// that phase 8's changes/ledger refresh path needs to send a real
+		// one): this table does no shape validation of its own, since a
+		// cursor's shape is entirely Provider-specific — a Provider that
+		// does not support incremental listing MUST simply ignore
+		// whatever it is handed (pr.Provider.List's own doc comment).
 		"list": {
 			SchemaVersion: schema.PRSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
-					Query   string  `json:"query"`
-					Cursor  *string `json:"cursor"`
-					IDsOnly bool    `json:"ids_only"`
+					Query   string          `json:"query"`
+					Cursor  json.RawMessage `json:"cursor"`
+					IDsOnly bool            `json:"ids_only"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list args: "+err.Error())
@@ -66,7 +71,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, scriptout.WrapError(scriptout.ErrQueryNotRecognized,
 						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
 				}
-				return p.List(ctx, expr, a.IDsOnly)
+				return p.List(ctx, expr, a.IDsOnly, a.Cursor)
 			},
 		},
 		// files/commits are targeted ops (bead pg2-2j5ac.28.2), matching

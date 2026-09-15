@@ -357,6 +357,54 @@ func TestGetPR_ChecksRollup_NoChecksIsNone(t *testing.T) {
 	}
 }
 
+// TestGetPR_ParsesReviewCount proves prListFields' widened "reviews"
+// field (bead pg2-2j5ac.30.6) decodes into api.PR.ReviewCount via a plain
+// len() -- no review's own fields are ever read, only the array length.
+// List's own supplemental per-matched-PR fetch (provider.go's
+// mergeSupplementalFields) reuses this SAME gh pr view call, rather than
+// a second gh invocation shape, to fill in review count -- the one
+// fingerprint-needed field gh search prs' own --json field list cannot
+// carry at all.
+func TestGetPR_ParsesReviewCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviews": [
+			{"id": "PRR_1", "state": "APPROVED"},
+			{"id": "PRR_2", "state": "COMMENTED"},
+			{"id": "PRR_3", "state": "CHANGES_REQUESTED"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ReviewCount != 3 {
+		t.Fatalf("ReviewCount = %d, want 3", pr.ReviewCount)
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "reviews") {
+		t.Errorf("gh pr view must request reviews; args=%v", gh.calls)
+	}
+}
+
+// TestGetPR_ReviewCount_NoReviewsIsZero proves an absent/empty reviews
+// array decodes to ReviewCount 0, not a nil-slice panic.
+func TestGetPR_ReviewCount_NoReviewsIsZero(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ReviewCount != 0 {
+		t.Fatalf("ReviewCount = %d, want 0", pr.ReviewCount)
+	}
+}
+
 // TestChecksRollupFromContexts_FoldRules is a table-driven test of the
 // fold rule checksRollupFromContexts implements (bead pg2-2j5ac.28.2): a
 // mix of outcomes across both CheckRun and StatusContext shapes, proving
@@ -589,7 +637,9 @@ const sampleSearchPRs = `[
     "isDraft": false,
     "author": {"login": "octocat"},
     "labels": [{"name": "bug"}, {"name": "p1"}],
-    "repository": {"nameWithOwner": "owner/repo"}
+    "repository": {"nameWithOwner": "owner/repo"},
+    "updatedAt": "2026-09-14T10:00:00Z",
+    "commentsCount": 5
   }
 ]`
 
@@ -614,6 +664,33 @@ func TestSearchPRs_ParsesAndConverts(t *testing.T) {
 	}
 	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
 		t.Fatalf("Labels = %v", pr.Labels)
+	}
+	// UpdatedAt/CommentCount (bead pg2-2j5ac.30.6): two of the six raw
+	// fields a future GitHub fingerprint cursor needs, carried directly by
+	// gh search prs' own --json field list at no extra call cost.
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Fatalf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.CommentCount != 5 {
+		t.Fatalf("CommentCount = %d, want 5", pr.CommentCount)
+	}
+}
+
+// TestSearchPRs_RequestsUpdatedAtAndCommentsCount proves the widened
+// searchPRFields --json value (bead pg2-2j5ac.30.6) actually asks gh for
+// updatedAt/commentsCount, or gh would return neither field at all.
+func TestSearchPRs_RequestsUpdatedAtAndCommentsCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "updatedAt") || !strings.Contains(joined, "commentsCount") {
+		t.Fatalf("expected --json to request updatedAt and commentsCount: %v", last)
 	}
 }
 

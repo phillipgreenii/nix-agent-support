@@ -185,7 +185,31 @@ func rateReservePoints(config json.RawMessage) int {
 // schema.PRListResult's own doc comment), so a caller wanting a matched
 // PR's full comment/review detail calls "show" on its id [freedom
 // boundary].
-func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.PRListResult, error) {
+//
+// cursor (bead pg2-2j5ac.30.6, widening pr.Provider.List's own signature)
+// is deliberately IGNORED here: this backend still always answers
+// Cursor: nil, per its own interface doc comment ("A backend that does
+// not support incremental listing MUST return null and MUST ignore any
+// cursor it is handed") — wiring a real fingerprint cursor into this
+// method is sibling packet pg2-2j5ac.30.3's job, unblocked once this
+// packet lands, not this one's.
+//
+// Once the matched-and-deduped set is known, and only when idsOnly is
+// false (PresentIDs never needs anything below — skipping this step
+// for an ids_only caller avoids N wasted gh calls, matching the
+// interface's own "MAY still choose to populate Entities anyway
+// (harmless, just wasted work) but need not" freedom boundary now that
+// there IS a non-trivial cost to skip), this runs one supplemental
+// per-matched-PR GetPR fetch to fill in the three fields gh search prs'
+// own --json field list cannot carry at all — head OID, checks rollup,
+// review count (searchPRFields' own doc comment has the verified
+// gh-search-prs field-list gap) — bounded by the SAME parallelMap
+// helper ListAttention's own per-candidate GetPR fan-out below already
+// uses for an identical N+1 shape (bead pg2-zutee). A supplemental-fetch
+// failure for any one matched PR fails the whole List call, matching
+// ListAttention's own existing all-or-nothing error semantics for this
+// same fan-out shape — not a new risk profile.
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
 		return nil, classifyGHError(err)
@@ -197,8 +221,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	}
 
 	seen := make(map[string]bool)
-	entities := make([]schema.PR, 0)
-	asOf := time.Now().UTC()
+	matched := make([]api.PR, 0)
 	for _, q := range query {
 		prs, err := b.gh.SearchPRs(ctx, q)
 		if err != nil {
@@ -211,18 +234,58 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 				continue
 			}
 			seen[id] = true
-			entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
+			matched = append(matched, ghPR)
 		}
 	}
-	ids := make([]string, 0, len(entities))
-	for _, e := range entities {
-		ids = append(ids, e.ID)
+
+	ids := make([]string, 0, len(matched))
+	for _, m := range matched {
+		ids = append(ids, formatPRID(m.Repo, m.Number))
 	}
-	result := &schema.PRListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}
+	result := &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: false}
 	if idsOnly {
-		result.Entities = nil
+		return result, nil
 	}
+
+	enriched, err := parallelMap(ctx, matched, func(ctx context.Context, m api.PR) (api.PR, error) {
+		full, err := b.gh.GetPR(ctx, m.Repo, m.Number)
+		if err != nil {
+			return api.PR{}, err
+		}
+		return mergeSupplementalFields(m, *full), nil
+	})
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+
+	entities := make([]schema.PR, 0, len(enriched))
+	asOf := time.Now().UTC()
+	for i := range enriched {
+		ghPR := enriched[i]
+		id := formatPRID(ghPR.Repo, ghPR.Number)
+		entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
+	}
+	result.Entities = entities
 	return result, nil
+}
+
+// mergeSupplementalFields copies the three fields gh search prs' own
+// --json field list cannot carry (bead pg2-2j5ac.30.6: head OID, checks
+// rollup, review count — searchPRFields' own doc comment) from full (a
+// per-PR GetPR-equivalent fetch) onto m (one of SearchPRs' own matched
+// results), leaving every other field of m untouched — m's own
+// Title/State/Author/UpdatedAt/CommentCount/… already came from the
+// cheaper search call and are not overwritten by full's own (possibly
+// differently-formatted, but not more authoritative for this op's
+// purposes) copies of those same fields: "list" is an enumeration op,
+// not a full re-fetch of every field [freedom boundary]. A pure
+// function so List's own supplemental-fetch merge step is unit-testable
+// without spawning a fake ghProvider fan-out.
+func mergeSupplementalFields(m, full api.PR) api.PR {
+	m.HeadSHA = full.HeadSHA
+	m.ChecksRollup = full.ChecksRollup
+	m.ReviewCount = full.ReviewCount
+	return m
 }
 
 // Search implements the search capability's search.Provider via the same

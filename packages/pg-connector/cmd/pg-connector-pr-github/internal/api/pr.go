@@ -107,6 +107,28 @@ type PR struct {
 	// stacked on top of this one. Empty when this PR is the topmost stacked
 	// entry or not stacked.
 	StackDownstreamHeadRefName string `json:"stack_downstream_head_ref_name,omitempty"`
+
+	// UpdatedAt/CommentCount/ReviewCount (bead pg2-2j5ac.30.6) are three of
+	// the raw fields a future GitHub fingerprint cursor needs (the parked
+	// sibling packet pg2-2j5ac.30.3's own GitHubPRSnapshot field set) that
+	// gh search prs's own --json field list carries directly — verified
+	// against the real gh binary's field-name error, 2026-09-15. Populated
+	// only by SearchPRs (List's own search path); zero-valued on the
+	// GetPR/gh-pr-view path, which has no updatedAt/commentsCount fields of
+	// its own in prListFields.
+	UpdatedAt    string `json:"updated_at,omitempty"`
+	CommentCount int    `json:"comment_count,omitempty"`
+	// ReviewCount is the PR's review count (bead pg2-2j5ac.30.6) — the one
+	// fingerprint-needed field gh search prs' own --json field list does
+	// NOT carry (verified 2026-09-15: gh search prs --json only supports
+	// assignees, author, authorAssociation, body, closedAt, commentsCount,
+	// createdAt, id, isDraft, isLocked, isPullRequest, labels, number,
+	// repository, state, title, updatedAt, url — no reviews field). List's
+	// own supplemental per-matched-PR GetPR fetch (provider.go's
+	// mergeSupplementalFields) fills this in from the SAME widened
+	// prListFields call that already carries HeadSHA/ChecksRollup for
+	// List — see prListFields' own doc comment.
+	ReviewCount int `json:"review_count,omitempty"`
 }
 
 // HasConflict reports whether GitHub signals a merge conflict on this PR, via

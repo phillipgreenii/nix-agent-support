@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -327,20 +328,30 @@ func TestParsePRID_RejectsMalformed(t *testing.T) {
 // ----------------------------------------------------------------------
 
 func TestBackend_List_SingleExpr(t *testing.T) {
-	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-		if query != "is:open author:@me" {
-			t.Fatalf("query = %q", query)
-		}
-		return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
-	}}
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			if query != "is:open author:@me" {
+				t.Fatalf("query = %q", query)
+			}
+			return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{HeadSHA: "deadbeef", ChecksRollup: "success"}, nil
+		},
+	}
 	b := newTestBackend(t, gh)
 
-	got, err := b.List(context.Background(), []string{"is:open author:@me"}, false)
+	got, err := b.List(context.Background(), []string{"is:open author:@me"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(got.Entities) != 1 || got.Entities[0].ID != "owner/repo#1" {
 		t.Fatalf("Entities = %+v", got.Entities)
+	}
+	// HeadSHA/ChecksRollup come from the supplemental per-PR GetPR fetch
+	// (bead pg2-2j5ac.30.6), not from SearchPRs' own field set.
+	if got.Entities[0].HeadSHA != "deadbeef" || got.Entities[0].ChecksRollup != "success" {
+		t.Fatalf("Entities[0] = %+v, want the supplemental fetch's HeadSHA/ChecksRollup merged in", got.Entities[0])
 	}
 	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "owner/repo#1" {
 		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
@@ -352,16 +363,21 @@ func TestBackend_List_SingleExpr(t *testing.T) {
 
 func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	calls := 0
-	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-		calls++
-		if query == "is:open author:@me" {
-			return []api.PR{{Repo: "owner/repo", Number: 1}, {Repo: "owner/repo", Number: 2}}, nil
-		}
-		return []api.PR{{Repo: "owner/repo", Number: 2}}, nil
-	}}
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			calls++
+			if query == "is:open author:@me" {
+				return []api.PR{{Repo: "owner/repo", Number: 1}, {Repo: "owner/repo", Number: 2}}, nil
+			}
+			return []api.PR{{Repo: "owner/repo", Number: 2}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{}, nil
+		},
+	}
 	b := newTestBackend(t, gh)
 
-	got, err := b.List(context.Background(), []string{"is:open author:@me", "is:open review-requested:@me"}, false)
+	got, err := b.List(context.Background(), []string{"is:open author:@me", "is:open review-requested:@me"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -374,12 +390,22 @@ func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 }
 
 func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
-	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-		return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
-	}}
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+		},
+		// ids_only must skip the supplemental per-PR enrichment fetch
+		// entirely (bead pg2-2j5ac.30.6) -- present_ids never needs
+		// HeadSHA/ChecksRollup/ReviewCount, so paying for N extra gh
+		// calls here would be pure waste.
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			t.Fatal("GetPR must not be called when ids_only is true")
+			return nil, nil
+		},
+	}
 	b := newTestBackend(t, gh)
 
-	got, err := b.List(context.Background(), []string{"is:open"}, true)
+	got, err := b.List(context.Background(), []string{"is:open"}, true, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -397,7 +423,7 @@ func TestBackend_List_SearchError_Classified(t *testing.T) {
 	}}
 	b := newTestBackend(t, gh)
 
-	_, err := b.List(context.Background(), []string{"is:open"}, false)
+	_, err := b.List(context.Background(), []string{"is:open"}, false, nil)
 	if !errors.Is(err, scriptout.ErrUnauthenticated) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
 	}
@@ -419,7 +445,7 @@ func TestBackend_List_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
 	b := newTestBackend(t, gh)
 
 	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
-	_, err := b.List(ctx, []string{"is:open"}, false)
+	_, err := b.List(ctx, []string{"is:open"}, false, nil)
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
 	}
@@ -434,16 +460,95 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
 		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{}, nil
+		},
 	}
 	b := newTestBackend(t, gh)
 
 	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
-	got, err := b.List(ctx, []string{"is:open"}, false)
+	got, err := b.List(ctx, []string{"is:open"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if len(got.Entities) != 1 {
 		t.Fatalf("Entities = %+v", got.Entities)
+	}
+}
+
+// TestBackend_List_CursorIgnored_StillReturnsNilCursor proves a non-nil
+// incoming cursor (bead pg2-2j5ac.30.6's widened pr.Provider.List
+// signature) is simply ignored by this backend -- it still always
+// answers Cursor: nil, per the interface's own "a backend that does not
+// support incremental listing MUST return null and MUST ignore any
+// cursor it is handed" doc comment. Wiring a real cursor is sibling
+// packet pg2-2j5ac.30.3's job, unblocked once this packet lands.
+func TestBackend_List_CursorIgnored_StillReturnsNilCursor(t *testing.T) {
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return &api.PR{}, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.List(context.Background(), []string{"is:open"}, false, json.RawMessage(`{"v":1,"fp":{"owner/repo#1":"abc"}}`))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %v, want nil", got.Cursor)
+	}
+}
+
+// TestBackend_List_SupplementalFetchError_Classified proves a failure in
+// the supplemental per-matched-PR GetPR fetch (bead pg2-2j5ac.30.6) is
+// classified the same way a SearchPRs failure already is -- List fails
+// the whole call rather than silently omitting the enrichment, matching
+// ListAttention's own existing all-or-nothing semantics for the same
+// per-candidate GetPR fan-out shape.
+func TestBackend_List_SupplementalFetchError_Classified(t *testing.T) {
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+		},
+		getPRErr: github.ErrGHAuthInvalid,
+	}
+	b := newTestBackend(t, gh)
+
+	_, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+// TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount is a
+// direct, IO-free unit test of List's own merge step (bead
+// pg2-2j5ac.30.6): the three fields gh search prs' own --json field
+// list cannot carry come from full, while everything else -- including
+// fields full ALSO happens to carry, like Title -- stays m's own,
+// cheaper-search-call value untouched ("list" is an enumeration op, not
+// a full re-fetch of every field).
+func TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount(t *testing.T) {
+	m := api.PR{Repo: "owner/repo", Number: 1, Title: "from search", State: "open"}
+	full := api.PR{HeadSHA: "deadbeef", ChecksRollup: "success", ReviewCount: 3, Title: "from view (must be ignored)"}
+	got := mergeSupplementalFields(m, full)
+	if got.HeadSHA != "deadbeef" {
+		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, "deadbeef")
+	}
+	if got.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want %q", got.ChecksRollup, "success")
+	}
+	if got.ReviewCount != 3 {
+		t.Fatalf("ReviewCount = %d, want 3", got.ReviewCount)
+	}
+	if got.Title != "from search" {
+		t.Fatalf("Title = %q, want the search result's own title preserved", got.Title)
+	}
+	if got.Repo != "owner/repo" || got.Number != 1 {
+		t.Fatalf("Repo/Number = %q/%d, want the search result's own identity preserved", got.Repo, got.Number)
 	}
 }
 
