@@ -314,15 +314,17 @@ proceeding on currently loaded text (direct interactive invocation).`)
    --actor "ID"`. This is neither a blocking edge nor a defer, is
    non-destructive and reversible, and stops the container from dominating the
    same priority tie next pass. Release it (as above) and return to CLAIM —
-   this alone resolves the common case without ever reaching STUCK. Only if
-   the SAME container exhausts this guard AGAIN after its priority was already
-   demoted does this route to STUCK, reporting the bead id, whichever check
-   fired (the note verbatim for check 1, the child ids and statuses for check
-   2), and the priority already applied, rather than looping (P-4: a blocked
-   precondition MUST bound its repeats and name the escalation). A bead
-   surfaced to STUCK this way is a candidate for having the container-note
-   marker added to its `notes` by whoever resolves it, so the same parent does
-   not need check 2 again on its next claim.
+   this alone resolves the common case without ever reaching STUCK. Do NOT
+   loop a third round of the budget-of-3 on the same container waiting for it
+   to recur that many times again — a SINGLE post-demotion hit is what routes
+   it to STUCK, not a fresh budget of 3: the very next time the SAME container
+   hits this guard after its priority was already demoted, report the bead id,
+   whichever check fired (the note verbatim for check 1, the child ids and
+   statuses for check 2), and the priority already applied, rather than
+   looping (P-4: a blocked precondition MUST bound its repeats and name the
+   escalation). A bead surfaced to STUCK this way is a candidate for having
+   the container-note marker added to its `notes` by whoever resolves it, so
+   the same parent does not need check 2 again on its next claim.
 
    **Epic drill-down — when the CLAIMED bead genuinely IS type `epic` with
    open children** (provenance: `tc-b02v`, live instance `tc-soml9`). The
