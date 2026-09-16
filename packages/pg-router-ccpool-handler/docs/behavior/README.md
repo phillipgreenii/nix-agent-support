@@ -4,7 +4,7 @@
 ccpool-backed and command-backed participant kinds: it is an **implementer** of
 `INTF-HANDLER`/`INTF-SOURCE` as those interfaces are defined by pg-router's own behavior docs
 (`phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`), the same way that set's own
-[README](../../../pg-router/docs/behavior/README.md) `## Scope` names "concrete participant
+README's `## Scope` names "concrete participant
 implementations ... and any deployment-specific behavior" as content that "live[s] in a downstream
 deployment set that implements these interfaces" and excludes from its own extent. This set follows
 the behavior-docs method (`phillipgreenii-nix-agent-support · behavior-docs/docs/behavior`).

@@ -104,7 +104,11 @@ type Registration struct {
 //
 // The registry deliberately holds NO transport handle. The core reaches a
 // participant by running its configured command; the registry records only the
-// facts the core reasons about.
+// facts the core reasons about. This is INV-DISP-2 in code: the core reaches
+// every source and handler ONLY through this manager interface (the
+// registration + its callback command) — nothing specific to a source's,
+// handler's, monitor's, or storage's own implementation lives in the core, and
+// nothing here holds a reference into one.
 type Registry struct {
 	mu   sync.Mutex
 	now  func() time.Time
