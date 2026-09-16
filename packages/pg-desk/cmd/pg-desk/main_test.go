@@ -13,11 +13,15 @@ import (
 // 'not implemented')": every subcommand this packet introduces MUST be
 // reachable on rootCmd and MUST fail with a "not implemented" error rather
 // than silently succeeding or panicking.
+//
+// import-pg-pr-annotations is deliberately absent from this list: packet 9
+// of this docket (pg2-2j5ac.32) gave it a real implementation (see
+// import_pg_pr_annotations.go), so it no longer returns a "not implemented"
+// error — it is covered by import_test.go instead.
 func TestStubSubcommandsRespondNotImplemented(t *testing.T) {
 	names := []string{
 		"run", "serve", "open", "hide", "unhide", "wip", "feedback", "show",
-		"status", "doctor", "heartbeat", "heartbeat-item",
-		"import-pg-pr-annotations", "ledger",
+		"status", "doctor", "heartbeat", "heartbeat-item", "ledger",
 	}
 
 	for _, name := range names {
