@@ -429,7 +429,7 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 	switch subcommand {
 	case "put":
 		f.data[req.Key] = req.Value
-		reply["ok"] = !(failing && f.failMode == "notok")
+		reply["ok"] = !failing || f.failMode != "notok"
 	case "get":
 		v, found := f.data[req.Key]
 		if failing {
@@ -453,7 +453,7 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 		}
 	case "delete":
 		delete(f.data, req.Key)
-		reply["ok"] = !(failing && f.failMode == "notok")
+		reply["ok"] = !failing || f.failMode != "notok"
 	default:
 		return conformance.ExitError
 	}
