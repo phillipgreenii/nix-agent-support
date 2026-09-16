@@ -11,6 +11,14 @@ change's `git patch-id` (survives the local rebases this workflow uses), not its
 commit SHA. You attach the gate; a later `pn workspace apply` + the apply
 post-hook (`pb gate check`) resolves it and the bead surfaces.
 
+## Prerequisite: `pb` on `PATH`
+
+`pb` is not on `PATH` by default on every machine (`command -v pb` may be empty). Before
+falling back to any other approach, build it on-demand: `cd nix-agent-support && nix build
+.#pb -o <scratchpad>/pb-result` (run in the background or with an explicit timeout — it pulls
+in go, dolt, and beads as build deps and can exceed a 2-minute default). Prepend
+`<scratchpad>/pb-result/bin` to `PATH` to get a working `pb gate create` / `pb gate check`.
+
 ## When to gate
 
 Gate a follow-up bead when its work only makes sense **after the change is live**

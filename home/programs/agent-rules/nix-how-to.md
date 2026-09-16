@@ -76,3 +76,23 @@ has previously caused a lander agent to believe the gate didn't apply when it di
 `pg2-5hww2`). So do not assume a repo without that FF-2a scoping has NO land-time gate at all: it
 still gets FF-1b's prek check; it just does not get the heavier `checks.*` derivations FF-2a covers
 unless you run `nix flake check` yourself before landing.
+
+## A repo's own `check.sh`/convenience wrapper is not equivalent to `nix flake check`
+
+If a repo ships its own `./check.sh` (or similar) convenience script, a clean run of it does
+NOT by itself satisfy the `nix flake check` MUST-pass obligation. A `check.sh` that passes
+`--no-build` skips derivation builds entirely, and — like the commit-time `prek`/`pre-commit`
+hook — it only lints the files it targets, not the whole repo. A gate can be fully green on
+`check.sh` and `pre-commit` while bare `nix flake check` still fails on a repo-wide lint or a
+consumer-input-alignment derivation the narrower script never runs. Always run bare
+`nix flake check` as the actual land-time acceptance gate — `check.sh` alone is not a
+substitute, however convenient.
+
+## `end-of-file-fixer` can still modify a file at commit time after a clean `pre-commit run`
+
+Pre-commit's `end-of-file-fixer` hook (auto-adds a trailing newline to Markdown files) can fire
+and modify a file during `git commit` even when a prior `pre-commit run` on that same file was
+clean — the commit-time hook run may use a different file-discovery path than a manual `run`.
+Symptom: `pre-commit run` shows green, `git commit` re-runs the hooks, `end-of-file-fixer`
+modifies the file, and the commit aborts needing a re-stage. Don't be surprised by this —
+workaround: stage the change, run pre-commit, re-stage anything it modified, then commit.

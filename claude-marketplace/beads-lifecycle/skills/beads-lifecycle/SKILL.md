@@ -54,6 +54,13 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   operator deliberately took the bead.
 - **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
   rather than silently steal or clear it — it is this defect, and the operator decides.
+- **B-7** `bd ready --claim` (or any other MUTATING `bd`/git command) MUST NOT appear on
+  either side of a shell `||`, in a retry loop keyed on parse success, or in any construct
+  whose exit code depends on downstream parsing. A parse failure on the command's OWN output
+  (e.g. a `jq` filter erroring on an unexpected shape) still counts as non-zero and re-triggers
+  the `||` branch even though the claim already succeeded and mutated state — re-running it
+  claims a SECOND bead, stranding the first. Run the mutating command ONCE, alone, capturing
+  raw output; parse it in a separate step.
 
 ## Worktree-Review Label Lifecycle
 
@@ -320,10 +327,14 @@ human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a 
 > prescribing edits to two module trees that had already been deleted and unified elsewhere.
 > One `git ls-tree` on the two paths it named would have settled it.
 
-- **F-1** Before parking, re-parking, escalating, releasing, or ACCEPTING work whose premise
-  was recorded EARLIER than now, an agent MUST re-verify that premise against CURRENT reality,
-  and MUST record the check where the next reader will see it. Work MUST NOT be parked,
-  re-parked, or accepted on an unverified premise.
+- **F-1** Before parking, re-parking, escalating, releasing, CLOSING on a claim that prior work
+  landed/shipped, or ACCEPTING work whose premise was recorded EARLIER than now, an agent MUST
+  re-verify that premise against CURRENT reality, and MUST record the check where the next
+  reader will see it. Work MUST NOT be parked, re-parked, closed on an unverified landed-claim,
+  or accepted on an unverified premise. The `landed?` probe (F-3) is the exact check for a
+  landed-claim close — run `git merge-base --is-ancestor <sha> main` rather than trusting a
+  close reason like "rebased onto main and ff-merged" at face value (incident: `tc-perh.17` was
+  closed on that unverified claim while the commit was actually dangling, never merged).
 - **F-2** The check MUST be mechanical and cheap — the probes in `references/premise-freshness-probes.md`
   (**F-3**), run verbatim. It MUST NOT be a judgement about whether the recorded text "still looks right".
 - **F-3** See `references/premise-freshness-probes.md` for the full probe table (landed?,
