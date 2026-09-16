@@ -1549,6 +1549,26 @@ func TestUnmatchedBindings(t *testing.T) {
 	}
 }
 
+// ListenerCount (Task 6.5): a public accessor over the same lock-free
+// listenerCount mirror Dispatch itself reads to size a pass's dispatch ids
+// -- it is the "total" half of the status/TUI dispatch concurrency pair
+// (SessionsInFlight, tested elsewhere in this package, is "busy").
+func TestListenerCount(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	if got := q.ListenerCount(); got != 0 {
+		t.Fatalf("ListenerCount() = %d before any Register, want 0", got)
+	}
+	q.Register(newListener("h1", "T"))
+	if got := q.ListenerCount(); got != 1 {
+		t.Fatalf("ListenerCount() = %d after one Register, want 1", got)
+	}
+	q.Register(newListener("h2", "T"))
+	if got := q.ListenerCount(); got != 2 {
+		t.Fatalf("ListenerCount() = %d after two Registers, want 2", got)
+	}
+}
+
 // Task 2.2's dispatch tracking id: dsp-<12 hex from crypto/rand>, minted
 // before q.mu is taken for the pass (Dispatch's doc comment) and handed to
 // Listener.Offer via Offering.ID. This pins the id's SHAPE; the pin test in
