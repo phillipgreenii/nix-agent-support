@@ -28,8 +28,16 @@ otherwise.
    stated timeout runs in foreground Bash with that timeout. A command that legitimately
    outlives one turn runs via `run_in_background`, never `Monitor` — `Monitor` delivers a
    separate notification per output line and cannot block a turn, so it cannot satisfy "wait
-   until this one thing finishes." If you must end your turn before a backgrounded validation
-   resolves, the report is NEVER a bare status line ("waiting", "still running") with no other
+   until this one thing finishes." **You are a dispatched (non-top-level) agent: no
+   task-notification ever resumes THIS invocation when that backgrounded command finishes —
+   that mechanism only resumes the top-level session that dispatched YOU, when its own dispatch
+   of you completes.** So stay in this same invocation and keep calling tools — poll the
+   backgrounded job yourself (e.g. a short foreground `Bash` check, repeated) — until it
+   actually resolves. Never end your turn with something like "I'll wait for it to finish" or
+   "I'll check back once the notification arrives": either phrasing is a permanent no-op, not a
+   pause, because this invocation gets no second turn. Only as a genuine last resort — you are
+   forced to end your turn for some other reason before the command resolves — does a status
+   report apply, and even then it is NEVER a bare "waiting"/"still running" line with no other
    content: it MUST include everything already committed (the commit SHA) plus the exact
    pending command and how to check its result. Count your validation retries.
 5. **When stuck**, in order: (a) re-read your packet — is it actually answered?; (b) re-check
