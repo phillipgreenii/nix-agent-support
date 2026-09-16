@@ -4,12 +4,14 @@
 // CLI surface — pr is one of its verb groups, never a separate binary
 // (interfaces.md's INTF-CLI).
 //
-// show is a targeted, id-keyed op dispatched via dispatch.go's
-// DispatchTargeted, which implements this docket's multi-instance
-// resolution policy across every backend registered under connector.pr
-// (try each in registration order, stopping at the first non-not_found
-// answer), and uses the Tier-1 targeted-op exit-code scheme (0/4/1) via
-// outcome.go's TargetedExitCode — this file calls the dispatcher and
+// show is a targeted, id-keyed op dispatched via cache_dispatch.go's
+// dispatchShowWithCache (phase 14, bead pg2-2j5ac.42.2), which mirrors
+// dispatch.go's DispatchTargeted's own multi-instance resolution policy
+// across every backend registered under connector.pr (try each in
+// registration order, stopping at the first non-not_found answer) but
+// additionally falls back to this docket's umbrella entity cache on a
+// per-backend "unavailable" answer, and uses the Tier-1 targeted-op
+// exit-code scheme (0/4/1) via outcome.go's TargetedExitCode — this file calls the dispatcher and
 // hands TargetedExitCode the raw per-call result/error it got back; it
 // never decides the exit code itself (INV-EXIT-1). show and files/commits
 // (below), PLUS the new "list" verb below, carry their own --backend flag
@@ -25,6 +27,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -58,7 +61,13 @@ func newPrShowCmd() *cobra.Command {
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, err, humanizePRShow)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "pr", "show", map[string]string{"id": args[0]}, *backendFlag)
+		resp, backend, fromCache, dispatchErr := dispatchShowWithCache(cmd.Context(), reg, "pr", args[0], *backendFlag)
+		if dispatchErr == nil && !fromCache && resp != nil {
+			// Live success (not a cache-served read): keep this backend's
+			// cache current for the next unavailable window [design:
+			// docket design field, "Produces"].
+			putLiveEntity(cmd.Context(), reg, "pr", backend, resp.Result)
+		}
 		return reportPrTargetedOutcome(cmd, resp, dispatchErr, humanizePRShow)
 	}
 	return cmd
@@ -178,6 +187,17 @@ type prListOutcome struct {
 // caller can tell "every registered backend answered
 // query_not_recognized" apart from "some backends don't implement list at
 // all."
+//
+// A backend answering scriptout.ErrUnavailable instead falls back to
+// this docket's own umbrella entity cache (phase 14, bead pg2-2j5ac.42.2,
+// cache_dispatch.go's cacheFallbackEntities): every live, within-max-age
+// cached entry for that (type, backend) is served, stamped stale, with
+// that backend's own sources[] row marked degraded (never "succeeded" —
+// this docket's own Binding decision: a fallback-served backend does not
+// claim "ok") and a reason noting the fallback. A live success instead
+// Puts every returned entity into that backend's own cache
+// (putLiveEntity) so the cache stays current for the next unavailable
+// window.
 func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) prListOutcome {
 	// Entities and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
@@ -196,6 +216,19 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 		}
 		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
+			if errors.Is(err, scriptout.ErrUnavailable) {
+				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "pr", b); ok {
+					for _, raw := range entries {
+						var pr schema.PR
+						if decErr := scriptout.Decode(raw, &pr); decErr == nil {
+							out.Entities = append(out.Entities, pr)
+						}
+					}
+					out.PresentIDs = append(out.PresentIDs, ids...)
+					out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Count: len(entries), Reason: cacheFallbackReason})
+					continue
+				}
+			}
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue
 		}
@@ -207,6 +240,13 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 		out.Entities = append(out.Entities, result.Entities...)
 		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
+		for _, entity := range result.Entities {
+			raw, err := json.Marshal(entity)
+			if err != nil {
+				continue
+			}
+			putLiveEntity(ctx, reg, "pr", b, raw)
+		}
 	}
 	return out
 }

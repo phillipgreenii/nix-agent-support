@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -22,6 +24,10 @@ func writeIssueConfigFor(t *testing.T, backend string) {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
+	// Phase 14 (bead pg2-2j5ac.42.2): see pr_test.go's writeConfigFor's
+	// identical comment — "issue show"/"issue list" now read/write this
+	// docket's umbrella entity cache too, so isolate it the same way.
+	t.Setenv("XDG_STATE_HOME", dir)
 }
 
 func TestRun_IssueShow_Success(t *testing.T) {
@@ -628,5 +634,59 @@ func TestRun_IssueCreate_AmbiguousMultipleBackends_IsGenericFailure(t *testing.T
 	}
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "backends registered") {
 		t.Fatalf("resp.Error = %+v, want the same ambiguous-registration message Dispatch has always produced", resp.Error)
+	}
+}
+
+// TestIssueShowCacheFallback_ServesStaleOnBackendUnavailable mirrors
+// pr_test.go's TestPrShowCacheFallback_ServesStaleOnBackendUnavailable:
+// proves issue.go's newIssueShowCmd wiring (dispatchShowWithCache +
+// putLiveEntity) end to end through the real CLI entry point.
+func TestIssueShowCacheFallback_ServesStaleOnBackendUnavailable(t *testing.T) {
+	liveAsOf := time.Now().UTC().Format(time.RFC3339)
+	writeOpAwareFakeBackend(t, "backend-issue-cache-fallback", map[string]string{
+		"show": fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","title":"t","state":"open","url":"u","as_of":%q,"stale":false}}`, liveAsOf),
+	}, `{"protocolVersion":1,"schemaVersions":{"issue":1},"ops":["capabilities","show"]}`)
+	writeIssueConfigFor(t, "backend-issue-cache-fallback")
+
+	stdout, _, code := executePr(t, []string{"issue", "show", "issue-1"})
+	if code != 0 {
+		t.Fatalf("live show exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var issue schema.Issue
+	if err := scriptout.Decode(resp.Result, &issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	if issue.Stale {
+		t.Fatal("live issue.Stale = true, want false")
+	}
+
+	writeOpAwareFakeBackend(t, "backend-issue-cache-fallback", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
+	}, `{"protocolVersion":1,"schemaVersions":{"issue":1},"ops":["capabilities","show"]}`)
+
+	stdout2, _, code2 := executePr(t, []string{"issue", "show", "issue-1"})
+	if code2 != 0 {
+		t.Fatalf("cache-fallback show exit code = %d, want 0 (a stale-but-served read); stdout=%s", code2, stdout2)
+	}
+	var resp2 scriptout.Response
+	if err := json.Unmarshal([]byte(stdout2), &resp2); err != nil {
+		t.Fatalf("decode response 2: %v", err)
+	}
+	var issue2 schema.Issue
+	if err := scriptout.Decode(resp2.Result, &issue2); err != nil {
+		t.Fatalf("decode issue 2: %v", err)
+	}
+	if !issue2.Stale {
+		t.Fatal("cache-fallback issue.Stale = false, want true")
+	}
+	if issue2.AsOf != liveAsOf {
+		t.Fatalf("cache-fallback issue.AsOf = %q, want the ORIGINAL live as_of %q", issue2.AsOf, liveAsOf)
+	}
+	if issue2.ID != "issue-1" {
+		t.Fatalf("cache-fallback issue.ID = %q, want issue-1", issue2.ID)
 	}
 }

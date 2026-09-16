@@ -50,6 +50,25 @@
 //     step 4 and this step leaves the consumer's cursor exactly where it
 //     was before this call, so the NEXT call's ChangesSince recomputes
 //     and reports the same entries again — a duplicate, never a loss.
+//
+// Phase 14 (bead pg2-2j5ac.42.2, docket pg2-2j5ac.42) adds two further
+// edits to this file, both scoped to the umbrella entity cache
+// (cache.go/cache_dispatch.go), never to the ledger above:
+//
+//   - mergeChanges's own "since" loop's ChangeRemoved branch (step 3,
+//     the ONLY place a ChangeRemoved changesEntry is ever built) now
+//     looks up that id in the same backend's entity cache first: a live
+//     (non-tombstoned), within-max-age copy there is used as Entity
+//     INSTEAD OF idOnlyEntity(id) — "a removed change carries the last
+//     content" [design of record section 5.6]. Purely a READ, never a
+//     cache write — mergeChanges runs before step 4's write+flush.
+//   - a new step 6, run alongside step 5 (order between the two is
+//     immaterial — they touch disjoint on-disk files): for every id this
+//     call's own response reported as ChangeRemoved, tombstone that id
+//     in its backend's own entity cache (Cache.Remove — idempotent) and
+//     evict, so a later show/list cache-fallback read stops offering a
+//     removed entity's stale content once its removal has actually been
+//     reported. See commitCacheTombstones's own doc comment.
 package main
 
 import (
@@ -169,6 +188,14 @@ func newChangesCmd(entityType string) *cobra.Command {
 		if err := ensureLedgerDirExists(); err != nil {
 			return err
 		}
+		// Phase 14 (bead pg2-2j5ac.42.2): mergeChanges's own ChangeRemoved
+		// branch and this RunE's own post-flush commitCacheTombstones step
+		// (below) both call loadCache, which needs the cache directory to
+		// already exist for the same reason ensureLedgerDirExists exists
+		// for the ledger above — establish it here too.
+		if err := ensureCacheDirExists(); err != nil {
+			return err
+		}
 		backends, err := resolveListBackends(reg, entityType, *backendFlag)
 		if err != nil {
 			return err
@@ -187,6 +214,14 @@ func newChangesCmd(entityType string) *cobra.Command {
 		// unexpected internal failure than an ordinary degraded/failed
 		// fan-out outcome, so it takes priority over werr if both occur.
 		if commitErr := commitAdvances(results, consumer); commitErr != nil {
+			return commitErr
+		}
+		// Step 6 (this file's own header comment, phase 14): tombstone
+		// every id this call's own response reported as ChangeRemoved in
+		// its backend's own entity cache. Same post-flush position as
+		// step 5 above; order between the two is immaterial (they touch
+		// disjoint on-disk files).
+		if commitErr := commitCacheTombstones(reg, entityType, results); commitErr != nil {
 			return commitErr
 		}
 		return werr
@@ -259,7 +294,7 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 			res.status = SourceSucceeded
 		}
 
-		res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges)
+		res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg)
 		res.ledger = l
 		results = append(results, res)
 	}
@@ -322,7 +357,12 @@ func changesListFn(ctx context.Context, reg *Registry, backend, query string, la
 // CLI-layer synthesis of the wire response, squarely within the
 // "implementer's choice" freedom this packet's Contract leaves for how
 // the response is assembled.
-func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange) []changesEntry {
+//
+// entityType/reg (added by phase 14, bead pg2-2j5ac.42.2) are used SOLELY
+// by the ChangeRemoved branch below, to look up a removed id in that
+// backend's own entity cache — READ-ONLY, no cache write of any kind
+// happens in this function (see this file's own header comment for why).
+func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange, entityType string, reg *Registry) []changesEntry {
 	full := make(map[string]LedgerChange, len(refreshChanges))
 	for _, c := range refreshChanges {
 		if c.Change == ChangeRemoved {
@@ -350,7 +390,22 @@ func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64,
 			if preCursor == 0 {
 				continue // never seen it; a removal is meaningless to report.
 			}
-			out = append(out, changesEntry{Change: ChangeRemoved, Source: backend, Entity: c.Entity})
+			// "A removed change carries the last content" [design of
+			// record section 5.6]: if this backend's own entity cache
+			// still holds a live (non-tombstoned), within-max-age copy of
+			// id, use it instead of c.Entity's idOnlyEntity(id) fallback.
+			// cacheEnabled is deliberately NOT checked here — Get alone
+			// already behaves correctly for an opted-out type/backend
+			// (nothing was ever Put for it, so Get naturally reports no
+			// entry, and the idOnlyEntity fallback applies exactly as it
+			// would for any other cache miss).
+			entity := c.Entity
+			if cache, err := loadCache(CacheKey{Type: entityType, Backend: backend}); err == nil {
+				if content, _, ok := cache.Get(id, resolveCacheMaxAge(reg), time.Now()); ok {
+					entity = content
+				}
+			}
+			out = append(out, changesEntry{Change: ChangeRemoved, Source: backend, Entity: entity})
 			continue
 		}
 		kind := c.Change // ChangeChanged, per ChangesSince's own contract.
@@ -376,6 +431,70 @@ func commitAdvances(results []changesBackendResult, consumerID string) error {
 		r.ledger.AdvanceConsumer(consumerID, now)
 		if err := saveLedger(r.key, r.ledger); err != nil {
 			return fmt.Errorf("changes: advance consumer %q for backend %q: %w", consumerID, r.backend, err)
+		}
+	}
+	return nil
+}
+
+// commitCacheTombstones is this file's own step 6 (this file's header
+// comment, phase 14/bead pg2-2j5ac.42.2): for every id THIS call's own
+// response reported as ChangeRemoved for backend b, tombstone that id in
+// b's own entity cache (Cache.Remove — idempotent, so a repeat report
+// during a lagging consumer's catch-up is a no-op, never restarting the
+// retention clock) and evict, so a later show/list cache-fallback read
+// stops offering a removed entity's stale content once its removal has
+// actually been reported [design: docket design field, "Produces"].
+// consumersPassed is built per backend from that backend's own
+// already-loaded *Ledger (results[i].ledger, set only on fanOutChanges'
+// own success path — the same skip condition commitAdvances above uses),
+// matching Ledger.Evict's rule 1 ("vacuously true when zero consumers
+// remain"). Called only AFTER the response has been written and flushed
+// (same call site as commitAdvances) — never before, per this docket's
+// own cache-write ordering rule.
+func commitCacheTombstones(reg *Registry, entityType string, results []changesBackendResult) error {
+	now := time.Now()
+	for _, r := range results {
+		if r.skipAdvance || r.ledger == nil {
+			continue
+		}
+		var removedIDs []string
+		for _, e := range r.entries {
+			if e.Change != ChangeRemoved {
+				continue
+			}
+			if id, err := entityID(e.Entity); err == nil {
+				removedIDs = append(removedIDs, id)
+			}
+		}
+		if len(removedIDs) == 0 {
+			continue
+		}
+
+		key := CacheKey{Type: entityType, Backend: r.backend}
+		c, err := loadCache(key)
+		if err != nil {
+			return fmt.Errorf("changes: load cache for backend %q: %w", r.backend, err)
+		}
+		for _, id := range removedIDs {
+			c.Remove(id, now)
+		}
+
+		ledger := r.ledger
+		consumersPassed := func(id string) bool {
+			entry, ok := ledger.Entries[id]
+			if !ok || entry.RemovedAtVersion == nil {
+				return false
+			}
+			for _, cs := range ledger.Consumers {
+				if cs.Cursor < *entry.RemovedAtVersion {
+					return false
+				}
+			}
+			return true
+		}
+		c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, consumersPassed, now)
+		if err := saveCache(key, c); err != nil {
+			return fmt.Errorf("changes: save cache for backend %q: %w", r.backend, err)
 		}
 	}
 	return nil

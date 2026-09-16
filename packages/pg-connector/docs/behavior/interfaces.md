@@ -167,7 +167,11 @@ per-consumer cursor positions.
   answering only from what the ledger already has on disk. `--reset` replays every live entity to
   that consumer as freshly added, with no tombstone for anything already removed before the reset.
   The response shape is `{sources: [{backend, status, version, truncated}], changes: [{change,
-source, entity}]}` — `change` is one of `added`/`changed`/`removed`.
+source, entity}]}` — `change` is one of `added`/`changed`/`removed`. As of phase 14 (bead
+  `pg2-2j5ac.42.2`, below), a `removed` row's `entity` carries that id's last cached content
+  (the same `{id, ...}` shape a live read would have returned) instead of the bare `{id: ...}`
+  envelope, whenever the umbrella's own entity cache still holds a live copy — the envelope, change
+  kinds, and cursor semantics are otherwise UNCHANGED for every existing consumer.
 - `pg-connector ledger show [--type] [--backend] [--query] [--consumer]` and
   `pg-connector ledger clear [--type] [--backend] [--query]` read or delete on-disk ledger file(s)
   directly, matched by a PARTIAL filter (an omitted flag matches any value in that field) — never
@@ -175,6 +179,48 @@ source, entity}]}` — `change` is one of `added`/`changed`/`removed`.
   exit `0`. `show` prints each matching ledger's cursor, entity-index size, version, and
   consumer-position(s) (`--consumer` narrows which consumer's position is printed, without
   narrowing which ledgers match); `clear` deletes the matching ledger file(s) entirely.
+
+### Stale fallback — serving `show`/`list`/`changes` from the umbrella entity cache
+
+Phase 14 (bead `pg2-2j5ac.42.2`, docket `pg2-2j5ac.42`) wires the umbrella's own on-disk entity
+cache (`cache.go`, bead `pg2-2j5ac.42.1`'s Go API — no CLI surface of its own) into `pr`/`issue`
+`show`, `list`, and `changes` so that a backend answering `unavailable` is served from cache
+instead of failing outright, per the design of record's section 5.6:
+
+- **`show`** (`cache_dispatch.go`'s `dispatchShowWithCache`) mirrors `DispatchTargeted`'s own
+  try-each policy over every registered backend (or the pinned one), but on that backend's own
+  `unavailable` answer, MUST first check whether caching applies to `(type, backend)` and, on a
+  live within-max-age cache hit, serve that content instead: the response's `as_of` becomes the
+  CACHED as-of time and `stale` becomes `true`, and the call exits `0` — a stale-but-served read,
+  never the targeted op's ordinary `unavailable` exit code for that read. A cache miss, an
+  opted-out type/backend, or an expired entry falls through to today's unmodified behavior (the
+  real error). A live success instead writes the returned entity into that backend's own cache, so
+  it stays current for the next unavailable window.
+- **`list`** (`fanOutPRList`/`fanOutIssueList`, `pr.go`/`issue.go`) applies the same per-backend
+  fallback, but since list has no single id, falls back to EVERY live, within-max-age cached entry
+  for that `(type, backend)`. That backend's own `sources[]` row is marked `degraded` — never
+  `succeeded` — with a `reason` noting the fallback: the design's own "served from cache" language
+  describes what content the caller receives, not a claim that the live call itself did not fail,
+  so the overall exit code still follows the EXISTING, unmodified fan-out scheme (`0`/`2`/`3`)
+  computed from every backend's status exactly as it already was — a solo backend that only ever
+  falls back to cache therefore still reports exit `3` (no OTHER healthy source), even though its
+  own row served real content. A live success writes every returned entity into that backend's own
+  cache the same way `show` does.
+- **`changes`** never falls back to the cache for its own `list` refresh call (a refresh failure
+  keeps today's unmodified `sources[]`/exit-code handling) — only the RESPONSE's own removed-row
+  content is affected, per the bullet above. `mergeChanges` (`changes.go`) is a READ-ONLY
+  substitution: the one place a `removed` `changesEntry` is ever built now looks up that id in the
+  same backend's cache first, using its content instead of the bare id-only envelope when a live
+  copy is present; no cache write happens during response assembly. Only AFTER the response is
+  written and flushed (the same post-flush position `changes`'s own consumer-cursor advance
+  already uses) does `newChangesCmd` tombstone every id its own response reported as removed in
+  that backend's cache and evict — so a later `show`/`list` cache-fallback stops offering a removed
+  entity's stale content once its removal has actually been reported, while a still-lagging
+  consumer's own later catch-up call can still receive that last content in the meantime.
+- Never falls back to cache for any wire error OTHER than `unavailable` (`not_found`,
+  `unauthenticated`, `unknown_op`, `version_mismatch`, `invalid_argument`, `query_not_recognized`
+  all keep their existing, unmodified handling) — the backend, not the umbrella, stays the sole
+  computer of its own staleness for every read this fallback path does NOT serve.
 
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 
@@ -342,6 +388,19 @@ sequenceDiagram
   as a returned Go `error`, propagated by whatever CLI verb eventually calls it. Revisit once the
   sibling verbs/integration packets of this same phase land an actual operator-facing surface.
   Feeds the observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.42.2).** The `show`/`list`/`changes` stale-fallback wiring
+  above (`cache_dispatch.go`, plus `pr.go`/`issue.go`/`changes.go`'s own edits) emits nothing over
+  OpenTelemetry or Prometheus and writes no structured logs of its own: pg-connector still has no
+  telemetry emitter anywhere in this module (unchanged from every telemetry note above). This
+  packet's only OBSERVABLE surface is the wire response's own `stale`/`as_of` fields on a
+  cache-served `show`, and the fan-out `sources[]` row's `reason` string noting a cache-served
+  `list` fallback — both already covered by this same section's own wire-envelope description
+  above; neither is a metric/trace a caller can aggregate without parsing the response body
+  itself. A `cacheEnabled` capabilities-call failure fails open silently, exactly as bead
+  `pg2-2j5ac.42.1`'s own telemetry note above already describes; every other cache-write/read
+  failure on this path is swallowed as best-effort (never turning a successful live read into a
+  reported failure) and so surfaces nowhere at all, by this packet's own Binding decision. Feeds
+  the observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`

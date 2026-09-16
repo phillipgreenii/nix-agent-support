@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -48,6 +50,14 @@ func writeConfigFor(t *testing.T, backend string) {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
+	// Phase 14 (bead pg2-2j5ac.42.2): "pr show"/"pr list" now read/write
+	// this docket's umbrella entity cache on every call (default-on,
+	// no opt-out configured here), which resolves under
+	// $XDG_STATE_HOME/pg-connector/cache/ — isolate it to this test's own
+	// temp dir so a test never touches the real
+	// ~/.local/state/pg-connector/cache/ on whatever machine runs `go
+	// test` [code-file-standards' unit-test-isolation rule].
+	t.Setenv("XDG_STATE_HOME", dir)
 }
 
 func TestRun_PrShow_Success(t *testing.T) {
@@ -437,5 +447,122 @@ func TestRun_PrList_IdsOnly_HumanOutput_ShowsIDsNotNone(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "o/r#1") {
 		t.Fatalf("human output = %q, want it to contain the matched id", stdout)
+	}
+}
+
+// TestPrShowCacheFallback_ServesStaleOnBackendUnavailable exercises this
+// packet's own wiring in newPrShowCmd end to end through the real CLI
+// entry point (dispatchShowWithCache_test.go's own tests cover the helper
+// directly; this proves pr.go actually calls it and Puts a live success
+// into the cache): a live "pr show" success, then a subsequent call
+// against the same backend now answering unavailable is served from that
+// cache with stale: true and exit 0 (this docket's own Binding decision).
+func TestPrShowCacheFallback_ServesStaleOnBackendUnavailable(t *testing.T) {
+	liveAsOf := time.Now().UTC().Format(time.RFC3339)
+	writeOpAwareFakeBackend(t, "backend-pr-cache-fallback", map[string]string{
+		"show": fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"id":"pr-1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"as_of":%q,"stale":false}}`, liveAsOf),
+	}, `{"protocolVersion":1,"schemaVersions":{"pr":1},"ops":["capabilities","show"]}`)
+	writeConfigFor(t, "backend-pr-cache-fallback")
+
+	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
+	if code != 0 {
+		t.Fatalf("live show exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var pr schema.PR
+	if err := scriptout.Decode(resp.Result, &pr); err != nil {
+		t.Fatalf("decode PR: %v", err)
+	}
+	if pr.Stale {
+		t.Fatal("live pr.Stale = true, want false")
+	}
+
+	// Re-point the same registered backend name at a script now answering
+	// unavailable for "show".
+	writeOpAwareFakeBackend(t, "backend-pr-cache-fallback", map[string]string{
+		"show": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
+	}, `{"protocolVersion":1,"schemaVersions":{"pr":1},"ops":["capabilities","show"]}`)
+
+	stdout2, _, code2 := executePr(t, []string{"pr", "show", "pr-1"})
+	if code2 != 0 {
+		t.Fatalf("cache-fallback show exit code = %d, want 0 (a stale-but-served read); stdout=%s", code2, stdout2)
+	}
+	var resp2 scriptout.Response
+	if err := json.Unmarshal([]byte(stdout2), &resp2); err != nil {
+		t.Fatalf("decode response 2: %v", err)
+	}
+	var pr2 schema.PR
+	if err := scriptout.Decode(resp2.Result, &pr2); err != nil {
+		t.Fatalf("decode PR 2: %v", err)
+	}
+	if !pr2.Stale {
+		t.Fatal("cache-fallback pr.Stale = false, want true")
+	}
+	if pr2.AsOf != liveAsOf {
+		t.Fatalf("cache-fallback pr.AsOf = %q, want the ORIGINAL live as_of %q", pr2.AsOf, liveAsOf)
+	}
+	if pr2.ID != "pr-1" {
+		t.Fatalf("cache-fallback pr.ID = %q, want pr-1", pr2.ID)
+	}
+}
+
+// TestPrListCacheFallback_DegradedSourceServesStaleEntities covers this
+// docket's own acceptance criterion for "pr list": a per-backend fallback
+// reports that backend's sources[] row as degraded (never "succeeded" —
+// this docket's own Binding decision: never claim "ok" for a
+// fallback-served backend) with a reason noting the fallback, while still
+// serving the cached, stale-stamped entities in Entities — alongside a
+// second, healthy backend, so the aggregate exit code is 2 (degraded: one
+// healthy, one failed), not 3 (which a solo fallback-only backend would
+// report under the EXISTING, unmodified exit-code scheme).
+func TestPrListCacheFallback_DegradedSourceServesStaleEntities(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-pr-list-cache-fallback", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
+	}, `{"protocolVersion":1,"schemaVersions":{"pr":1},"ops":["capabilities","list"]}`)
+	writeOpAwareFakeBackend(t, "backend-pr-list-healthy", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":[],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - backend-pr-list-cache-fallback\n    - backend-pr-list-healthy\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	seedCache(t, CacheKey{Type: "pr", Backend: "backend-pr-list-cache-fallback"}, &Cache{Entries: map[string]CacheEntry{
+		"o/r#1": {
+			Content:    json.RawMessage(`{"id":"o/r#1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"as_of":"2026-01-01T00:00:00Z","stale":false}`),
+			AsOf:       time.Now(),
+			LastAccess: time.Now(),
+		},
+	}})
+
+	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine"})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 (degraded: one healthy, one fallback-served-but-still-degraded); stdout=%s", code, stdout)
+	}
+	var outcome prListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Entities) != 1 || outcome.Entities[0].ID != "o/r#1" || !outcome.Entities[0].Stale {
+		t.Fatalf("outcome.Entities = %+v, want exactly one stale-stamped o/r#1", outcome.Entities)
+	}
+	if len(outcome.Sources) != 2 {
+		t.Fatalf("outcome.Sources = %+v, want one row per backend", outcome.Sources)
+	}
+	var fallbackRow *SourceResult
+	for i := range outcome.Sources {
+		if outcome.Sources[i].Source == "backend-pr-list-cache-fallback" {
+			fallbackRow = &outcome.Sources[i]
+		}
+	}
+	if fallbackRow == nil || fallbackRow.Status != SourceDegraded || fallbackRow.Reason == "" {
+		t.Fatalf("fallback backend's own source row = %+v, want a degraded row with a reason noting the fallback", fallbackRow)
 	}
 }

@@ -412,3 +412,127 @@ func TestRun_IssueChanges_Wired(t *testing.T) {
 		t.Fatalf("Changes = %+v, want 1", w.Changes)
 	}
 }
+
+// TestChangesRemovedCarriesLastCachedContent covers this packet's own
+// Validation item (d): a "pr changes" call whose backend reports an id as
+// removed, when that id has a live entry in this docket's own umbrella
+// entity cache, reports the CACHED content instead of the ordinary
+// id-only envelope — and, as a regression check on this file's own new
+// step 6, that reported removal then tombstones the cache's own copy too
+// (Cache.Remove), so a later show/list cache-fallback stops offering it.
+func TestChangesRemovedCarriesLastCachedContent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	writeOpAwareFakeBackend(t, "backend-changes-removed", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":[],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-changes-removed")
+
+	// A consumer already caught up to version 1 -- so THIS call's own
+	// removal (version 2, computed below by Refresh) is new to it and
+	// preCursor != 0, the precondition mergeChanges' own ChangeRemoved
+	// branch requires before reporting anything at all.
+	key := LedgerKey{Type: "pr", Backend: "backend-changes-removed", Query: "mine"}
+	seedLedger(t, key, &Ledger{
+		Entries: map[string]LedgerEntry{
+			"o/r#1": {Hash: "h1", VersionLastChanged: 1},
+		},
+		Version:   1,
+		Consumers: map[string]ConsumerState{"c1": {Cursor: 1, LastSeen: time.Now()}},
+	})
+	seedCache(t, CacheKey{Type: "pr", Backend: "backend-changes-removed"}, &Cache{
+		Entries: map[string]CacheEntry{
+			"o/r#1": {
+				Content:    json.RawMessage(`{"id":"o/r#1","title":"cached before removal"}`),
+				AsOf:       time.Now(),
+				LastAccess: time.Now(),
+			},
+		},
+	})
+
+	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	w := decodeChangesWire(t, stdout)
+	if len(w.Changes) != 1 {
+		t.Fatalf("Changes = %+v, want exactly 1 removed entry", w.Changes)
+	}
+	c := w.Changes[0]
+	if string(c.Change) != "removed" {
+		t.Fatalf("Changes[0].Change = %q, want removed", c.Change)
+	}
+	if !strings.Contains(string(c.Entity), "cached before removal") {
+		t.Fatalf("Changes[0].Entity = %s, want the CACHED content, not id-only", c.Entity)
+	}
+
+	// Regression on this file's own new step 6: the cache's own copy is no
+	// longer served as a live hit -- Cache.Remove tombstones it, and since
+	// consumer c1 (the only known consumer) is ALSO the one this very
+	// call just advanced past the removal, Cache.Evict's own
+	// consumersPassed check (built from this same call's already-advanced
+	// ledger) may legitimately drop the tombstoned entry entirely in the
+	// same call, exactly mirroring Ledger.Evict's own identical rule 1
+	// ("vacuously true when zero consumers remain" -- here, "true once no
+	// consumer still needs it"). Either outcome (absent, or present but
+	// tombstoned) is correct; what must NOT happen is the entry surviving
+	// as still-live.
+	c2, err := loadCache(CacheKey{Type: "pr", Backend: "backend-changes-removed"})
+	if err != nil {
+		t.Fatalf("loadCache: %v", err)
+	}
+	if entry, ok := c2.Entries["o/r#1"]; ok && entry.RemovedAt == nil {
+		t.Fatalf("cache entry for o/r#1 = %+v, want tombstoned or evicted after the removed report (not still live)", entry)
+	}
+}
+
+// TestChangesRemovedFallsBackToIDOnlyWhenNoCacheEntry is the regression
+// half of Validation item (d): an id with no matching cache entry
+// (opted out, expired, or already evicted -- here, simply never cached)
+// still carries id-only, exactly as before this packet.
+func TestChangesRemovedFallsBackToIDOnlyWhenNoCacheEntry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	writeOpAwareFakeBackend(t, "backend-changes-removed-nocache", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":[],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-changes-removed-nocache")
+
+	key := LedgerKey{Type: "pr", Backend: "backend-changes-removed-nocache", Query: "mine"}
+	seedLedger(t, key, &Ledger{
+		Entries: map[string]LedgerEntry{
+			"o/r#1": {Hash: "h1", VersionLastChanged: 1},
+		},
+		Version:   1,
+		Consumers: map[string]ConsumerState{"c1": {Cursor: 1, LastSeen: time.Now()}},
+	})
+
+	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	w := decodeChangesWire(t, stdout)
+	if len(w.Changes) != 1 {
+		t.Fatalf("Changes = %+v, want exactly 1 removed entry", w.Changes)
+	}
+	c := w.Changes[0]
+	if string(c.Change) != "removed" {
+		t.Fatalf("Changes[0].Change = %q, want removed", c.Change)
+	}
+	var idOnly struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(c.Entity, &idOnly); err != nil {
+		t.Fatalf("decode Changes[0].Entity: %v", err)
+	}
+	if idOnly.ID != "o/r#1" {
+		t.Fatalf("Changes[0].Entity id = %q, want o/r#1", idOnly.ID)
+	}
+	var extra map[string]json.RawMessage
+	if err := json.Unmarshal(c.Entity, &extra); err != nil {
+		t.Fatalf("decode Changes[0].Entity as map: %v", err)
+	}
+	if len(extra) != 1 {
+		t.Fatalf("Changes[0].Entity = %s, want the id-only envelope unchanged (exactly one key)", c.Entity)
+	}
+}

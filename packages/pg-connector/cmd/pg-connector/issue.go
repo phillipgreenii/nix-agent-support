@@ -8,11 +8,14 @@
 // targeted-op exit-code scheme (0/4/1) via outcome.go's TargetedExitCode —
 // this file calls the dispatcher and hands TargetedExitCode the raw
 // per-call result/error it got back; it never decides the exit code
-// itself. show/comment/transition are id-keyed and dispatch via
-// dispatch.go's DispatchTargeted, which implements this docket's
-// multi-instance resolution policy across every backend registered under
-// connector.issue (try each in registration order, stopping at the first
-// non-not_found answer). create is the one id-less write in this
+// itself. comment/transition are id-keyed and dispatch via dispatch.go's
+// DispatchTargeted, which implements this docket's multi-instance
+// resolution policy across every backend registered under connector.issue
+// (try each in registration order, stopping at the first non-not_found
+// answer). show instead dispatches via cache_dispatch.go's
+// dispatchShowWithCache (phase 14, bead pg2-2j5ac.42.2), which mirrors
+// that same try-each policy but additionally falls back to this docket's
+// umbrella entity cache on a per-backend "unavailable" answer. create is the one id-less write in this
 // docket's scope and stays on Dispatch itself, which keeps hard-failing
 // at N > 1 registered backends with no --backend pin exactly as before —
 // the multi-instance resolution policy is scoped to id-keyed ops only, by
@@ -38,6 +41,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -75,7 +79,13 @@ func newIssueShowCmd() *cobra.Command {
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueShow)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "show", map[string]string{"id": args[0]}, *backendFlag)
+		resp, backend, fromCache, dispatchErr := dispatchShowWithCache(cmd.Context(), reg, "issue", args[0], *backendFlag)
+		if dispatchErr == nil && !fromCache && resp != nil {
+			// Live success (not a cache-served read): keep this backend's
+			// cache current for the next unavailable window [design:
+			// docket design field, "Produces"].
+			putLiveEntity(cmd.Context(), reg, "issue", backend, resp.Result)
+		}
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueShow)
 	}
 	return cmd
@@ -305,7 +315,10 @@ type issueListOutcome struct {
 }
 
 // fanOutIssueList mirrors pr.go's fanOutPRList exactly, decoding into
-// schema.IssueListResult instead of schema.PRListResult.
+// schema.IssueListResult instead of schema.PRListResult — including its
+// cache-fallback/cache-write behavior on scriptout.ErrUnavailable/live
+// success respectively (see fanOutPRList's own doc comment for the full
+// description; this docket's design of record section 5.6).
 func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) issueListOutcome {
 	out := issueListOutcome{
 		Entities:   make([]schema.Issue, 0),
@@ -320,6 +333,19 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 		}
 		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
+			if errors.Is(err, scriptout.ErrUnavailable) {
+				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "issue", b); ok {
+					for _, raw := range entries {
+						var issue schema.Issue
+						if decErr := scriptout.Decode(raw, &issue); decErr == nil {
+							out.Entities = append(out.Entities, issue)
+						}
+					}
+					out.PresentIDs = append(out.PresentIDs, ids...)
+					out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Count: len(entries), Reason: cacheFallbackReason})
+					continue
+				}
+			}
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue
 		}
@@ -331,6 +357,13 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 		out.Entities = append(out.Entities, result.Entities...)
 		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
+		for _, entity := range result.Entities {
+			raw, err := json.Marshal(entity)
+			if err != nil {
+				continue
+			}
+			putLiveEntity(ctx, reg, "issue", b, raw)
+		}
 	}
 	return out
 }
