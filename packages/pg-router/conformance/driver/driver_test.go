@@ -16,10 +16,12 @@ import (
 // (TestGoldenFixturesValidate, TestNegative_Generic, TestNegative_Matrix): every
 // golden/negative-generic/negative-matrix Result passes with a nil Target,
 // since none of those cases ever needed a live participant. The four
-// invoking/store-shaped results are Skipped instead — Target{} carries no
-// mon.read, query, or command-role participant, and the store check is
-// unconditionally pre-skipped (Task 3.13 Binding decisions; invoking/command
-// added by Task pg2-2j5ac.23.3).
+// invoking/*-shaped results are Skipped instead — Target{} carries no
+// mon.read, query, command-role, or store participant, so each invoking
+// check reports Skipped via its own nil convention (Task 3.13 Binding
+// decisions; invoking/command added by Task pg2-2j5ac.23.3; invoking/store's
+// nil-Skipped convention added by Task 6.8 once INTF-STORE was realized —
+// Task 6.7).
 func TestRun_ReproducesConformanceCases(t *testing.T) {
 	results := Run(context.Background(), Target{})
 	if len(results) == 0 {
@@ -44,23 +46,42 @@ func TestRun_ReproducesConformanceCases(t *testing.T) {
 	}
 }
 
-// TestRun_StoreAlwaysSkipped proves the store check ships pre-skipped with the
-// exact reason string regardless of Target (INTF-STORE is not realized until
-// Phase 6, Task 3.13 Binding decisions / Objective).
-func TestRun_StoreAlwaysSkipped(t *testing.T) {
-	results := Run(context.Background(), Target{})
-	found := false
-	for _, r := range results {
-		if r.Name != "invoking/store" {
-			continue
-		}
-		found = true
-		if !r.Skipped || r.SkipReason != "enabled by Task 6.0" {
-			t.Fatalf("store case = %+v, want Skipped with reason %q", r, "enabled by Task 6.0")
-		}
+// TestRun_InvokingStore_SkippedWhenNil proves the store check reports Skipped
+// with a store-specific reason when Target carries no Store participant —
+// mirroring MonRead/Query's nil-Skipped convention (Target's own doc
+// comment). This replaces the old TestRun_StoreAlwaysSkipped: INTF-STORE is
+// realized now (Task 6.7), so the store check is no longer unconditionally
+// skipped, and the old "enabled by Task 6.0" reason string is gone (Task 6.8
+// Produces).
+func TestRun_InvokingStore_SkippedWhenNil(t *testing.T) {
+	r := findResult(t, Run(context.Background(), Target{}), "invoking/store")
+	const want = "target carries no store participant"
+	if !r.Skipped || r.Err != nil || r.SkipReason != want {
+		t.Fatalf("invoking/store = %+v, want Skipped=true, no error, reason %q", r, want)
 	}
-	if !found {
-		t.Fatal("Run produced no invoking/store result")
+}
+
+// TestRun_InvokingStore_Pass proves the store check runs and passes a
+// put/get/delete round trip against a live Target.Store (Task 6.8 Produces):
+// put a value, get it back, delete it, then get once more and confirm the
+// absent-key convention (value: null).
+func TestRun_InvokingStore_Pass(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Skipped || r.Err != nil {
+		t.Fatalf("invoking/store = %+v, want a clean pass", r)
+	}
+}
+
+// TestRun_InvokingStore_GetAfterPutMismatch proves invokeStore fails when a
+// participant's get does not echo back the value just put — the round-trip
+// assertion this task's Produces requires, not merely that each verb
+// individually returns a schema-valid reply.
+func TestRun_InvokingStore_GetAfterPutMismatch(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{corruptGet: true}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when get-after-put does not echo the put value")
 	}
 }
 
@@ -244,6 +265,66 @@ func TestRun_InvokingCommand_SkippedWhenNil(t *testing.T) {
 	if !r.Skipped || r.Err != nil {
 		t.Fatalf("invoking/command = %+v, want Skipped=true, no error, against a Target with no Command", r)
 	}
+}
+
+// fakeStoreParticipant is a minimal in-memory conformance.Participant double
+// exercising get/put/delete (Task 6.7's SubcommandGet/Put/Delete) the same
+// way internal/core.Service's real handleGet/handlePut/handleDelete do,
+// without pulling in internal/core — this driver package deliberately stays
+// independent of it (Task 3.13 Binding decisions). corruptGet, when set,
+// makes get always report a value distinct from whatever was actually put,
+// to prove invokeStore's round-trip assertion — not just a per-verb schema
+// check — is what fails.
+type fakeStoreParticipant struct {
+	data       map[string]string
+	corruptGet bool
+}
+
+func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return conformance.ExitError
+	}
+	var req struct {
+		ID    string `json:"id"`
+		Op    string `json:"op"`
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return conformance.ExitError
+	}
+	if f.data == nil {
+		f.data = map[string]string{}
+	}
+	reply := map[string]any{"schemaVersion": "1", "id": req.ID}
+	switch subcommand {
+	case "put":
+		f.data[req.Key] = req.Value
+		reply["ok"] = true
+	case "get":
+		v, found := f.data[req.Key]
+		if found && f.corruptGet {
+			v = v + "-corrupted"
+		}
+		reply["ok"] = found
+		if found {
+			reply["value"] = v
+		} else {
+			reply["value"] = nil
+		}
+	case "delete":
+		delete(f.data, req.Key)
+		reply["ok"] = true
+	default:
+		return conformance.ExitError
+	}
+	b, err := json.Marshal(reply)
+	if err != nil {
+		return conformance.ExitError
+	}
+	_, _ = stdout.Write(b)
+	return conformance.ExitOK
 }
 
 // findResult locates the one result named name, failing the test outright if

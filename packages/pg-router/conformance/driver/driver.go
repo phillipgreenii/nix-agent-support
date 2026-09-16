@@ -61,6 +61,12 @@ type Target struct {
 	// classification, never through Participant's stdin/stdout JSON protocol
 	// (Task pg2-2j5ac.23.3 Binding decisions #2).
 	Command CommandParticipant
+	// Store, when set, is invoked over the get/put/delete subcommands
+	// (INTF-STORE, Task 6.7) the same way MonRead/Query are invoked over
+	// their own subcommands — proving the get/put/delete round-trip wire
+	// contract holds live against this target, not just against a golden
+	// fixture (Task 6.8 Contract/Produces).
+	Store conformance.Participant
 }
 
 // CommandParticipant is the argv-invoked contract a command-role role speaks:
@@ -81,9 +87,10 @@ type CommandParticipant interface {
 // tests ran directly before this extraction (golden fixtures validate; the
 // generic additionalProperties negative; the per-message-type negative
 // matrix) — the identical pass/fail set, through one importable call — plus
-// the invoking checks for query and mon.read that target's participants
-// enable, and the store check, which ships pre-skipped: INTF-STORE is not
-// realized until Phase 6 (Task 3.13 Objective / Binding decisions).
+// the invoking checks for query, mon.read, and store that target's
+// participants enable. The store check ran pre-skipped from Task 3.13 until
+// INTF-STORE was realized (Task 6.7); it now invokes the get/put/delete
+// round trip when target carries a Store participant (Task 6.8).
 //
 // A canceled ctx short-circuits Run with a single error Result rather than
 // running the (side-effect-free, but potentially live-network-backed once a
@@ -98,7 +105,7 @@ func Run(ctx context.Context, target Target) []Result {
 		results = append(results, goldenCase(mt), negativeGenericCase(mt))
 	}
 	results = append(results, negativeMatrixCases()...)
-	results = append(results, invokeMonRead(target.MonRead), invokeQuery(target.Query), invokeCommand(ctx, target.Command), storeCase())
+	results = append(results, invokeMonRead(target.MonRead), invokeQuery(target.Query), invokeCommand(ctx, target.Command), invokeStore(target.Store))
 	return results
 }
 
@@ -422,9 +429,98 @@ func invokeCommand(ctx context.Context, participant CommandParticipant) Result {
 	}
 }
 
-// storeCase always reports the store check Skipped: INTF-STORE is not
-// realized until Phase 6, so there is nothing yet for any Target to carry
-// (Task 3.13 Objective / Binding decisions).
-func storeCase() Result {
-	return Result{Name: "invoking/store", Skipped: true, SkipReason: "enabled by Task 6.0"}
+// invokeStore runs the get/put/delete round trip (INTF-STORE, Task 6.7's
+// SubcommandGet/Put/Delete) through participant: put a value, get it back,
+// delete it, then get once more and confirm the absent-key wire convention
+// (value: null) holds — proving the round-trip semantics live end to end
+// (Task 6.8 Produces), not merely that each verb passes its own single-shot
+// schema check the way invokeCheck's shared mechanism does for mon.read/query.
+// A nil participant reports Skipped, mirroring invokeMonRead's nil-Skipped
+// convention (Target's own doc comment) but with a store-specific reason:
+// storeCase's old unconditional "enabled by Task 6.0" skip is gone now that
+// INTF-STORE is realized (Task 6.7) — this task's own driver_test.go change
+// replaces that assertion (Task 6.8 Contract).
+func invokeStore(participant conformance.Participant) Result {
+	const name = "invoking/store"
+	if participant == nil {
+		return Result{Name: name, Skipped: true, SkipReason: "target carries no store participant"}
+	}
+
+	req, err := conformance.Golden("store.request")
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("read store.request golden: %w", err)}
+	}
+	key, _ := req["key"].(string)
+	value, _ := req["value"].(string)
+
+	putReply, err := storeStep(participant, "put", key, value)
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("put: %w", err)}
+	}
+	if ok, _ := putReply["ok"].(bool); !ok {
+		return Result{Name: name, Err: fmt.Errorf("put: reply ok=%v, want true", putReply["ok"])}
+	}
+
+	afterPut, err := storeStep(participant, "get", key, "")
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("get after put: %w", err)}
+	}
+	if got, _ := afterPut["value"].(string); got != value {
+		return Result{Name: name, Err: fmt.Errorf("get after put: value=%v, want %q", afterPut["value"], value)}
+	}
+
+	delReply, err := storeStep(participant, "delete", key, "")
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("delete: %w", err)}
+	}
+	if ok, _ := delReply["ok"].(bool); !ok {
+		return Result{Name: name, Err: fmt.Errorf("delete: reply ok=%v, want true", delReply["ok"])}
+	}
+
+	afterDelete, err := storeStep(participant, "get", key, "")
+	if err != nil {
+		return Result{Name: name, Err: fmt.Errorf("get after delete: %w", err)}
+	}
+	if v, present := afterDelete["value"]; !present || v != nil {
+		return Result{Name: name, Err: fmt.Errorf("get after delete: value=%v (present=%v), want an explicit null", v, present)}
+	}
+
+	return Result{Name: name}
+}
+
+// storeStep sends one store.request op (get/put/delete) through participant
+// over the CLI transport — op doubles as the dispatched subcommand, matching
+// internal/core.Service's own SubcommandGet/Put/Delete wiring (Task 6.7's
+// Binding decision 3: three distinct socket verbs, never one "store" verb
+// branching on op) — and returns the decoded, schema-validated store.reply
+// body.
+func storeStep(participant conformance.Participant, op, key, value string) (map[string]any, error) {
+	req := map[string]any{
+		"schemaVersion": "1",
+		"id":            "invoking/store",
+		"op":            op,
+		"key":           key,
+	}
+	if op == "put" {
+		req["value"] = value
+	}
+	reply, code, err := conformance.RoundTrip(participant, op, req)
+	if err != nil {
+		return nil, fmt.Errorf("%s round trip: %w", op, err)
+	}
+	if code != conformance.ExitOK {
+		return nil, fmt.Errorf("%s exit=%d, want %d", op, code, conformance.ExitOK)
+	}
+	var v any
+	if err := json.Unmarshal(reply, &v); err != nil {
+		return nil, fmt.Errorf("%s reply not JSON: %w", op, err)
+	}
+	if err := conformance.Check("store.reply", v); err != nil {
+		return nil, fmt.Errorf("%s reply failed store.reply schema: %w", op, err)
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s reply not a JSON object", op)
+	}
+	return m, nil
 }
