@@ -68,6 +68,53 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 	return nil
 }
 
+// ListInterpretations returns every interpretation row, ordered by
+// (repo, entity_type, entity_id) for a deterministic result — this
+// docket's packet 7 (serve) routes rows into a fixed set of panel arrays
+// and needs a stable order across calls, not incidental SQLite scan order.
+func (s *Store) ListInterpretations() ([]Interpretation, error) {
+	rows, err := s.sql.Query(
+		`SELECT repo, entity_type, entity_id, ownership, enrichment, urgency, category,
+		        dispositions, approvals, gate_state, match_reasons, panel,
+		        ready_to_promote, degraded, sync_error, as_of
+		 FROM interpretation ORDER BY repo, entity_type, entity_id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list interpretations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Interpretation
+	for rows.Next() {
+		var interp Interpretation
+		var syncError sql.NullString
+		if err := rows.Scan(&interp.Repo, &interp.EntityType, &interp.EntityID, &interp.Ownership,
+			&interp.Enrichment, &interp.Urgency, &interp.Category, &interp.Dispositions, &interp.Approvals,
+			&interp.GateState, &interp.MatchReasons, &interp.Panel, &interp.ReadyToPromote, &interp.Degraded,
+			&syncError, &interp.AsOf); err != nil {
+			return nil, fmt.Errorf("store: scan interpretation row: %w", err)
+		}
+		interp.SyncError = syncError.String
+		out = append(out, interp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list interpretations: %w", err)
+	}
+	return out, nil
+}
+
+// HasAnyInterpretation reports whether the interpretation table holds at
+// least one row. This is the 503-until-first-interpretation gate this
+// docket's packet 7 (serve) applies to every route (Binding decisions:
+// "503 for every route until the interpretation table has ≥1 row").
+func (s *Store) HasAnyInterpretation() (bool, error) {
+	var exists int
+	if err := s.sql.QueryRow(`SELECT EXISTS(SELECT 1 FROM interpretation LIMIT 1)`).Scan(&exists); err != nil {
+		return false, fmt.Errorf("store: has any interpretation: %w", err)
+	}
+	return exists != 0, nil
+}
+
 // GetInterpretation returns the interpretation row for
 // (repo, entityType, entityID), or found=false if no such row exists.
 func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Interpretation, found bool, err error) {

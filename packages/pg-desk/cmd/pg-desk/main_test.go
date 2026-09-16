@@ -14,13 +14,18 @@ import (
 // reachable on rootCmd and MUST fail with a "not implemented" error rather
 // than silently succeeding or panicking.
 //
-// import-pg-pr-annotations is deliberately absent from this list: packet 9
-// of this docket (pg2-2j5ac.32) gave it a real implementation (see
-// import_pg_pr_annotations.go), so it no longer returns a "not implemented"
-// error — it is covered by import_test.go instead.
+// "serve" and "import-pg-pr-annotations" are deliberately absent from this
+// list: this docket's packet 7 (Phase 9) replaced serve's stub RunE with a
+// real implementation (serve.go), so it no longer returns "not implemented"
+// — it is instead covered by packages/pg-desk/internal/httpapi's own tests
+// (the payload/metrics behavior) rather than a direct RunE call here, which
+// would try to open the real default store and block forever on
+// http.ListenAndServe. Likewise, packet 9 gave import-pg-pr-annotations a
+// real implementation (see import_pg_pr_annotations.go), so it is covered by
+// import_test.go instead.
 func TestStubSubcommandsRespondNotImplemented(t *testing.T) {
 	names := []string{
-		"run", "serve", "open", "hide", "unhide", "wip", "feedback", "show",
+		"run", "open", "hide", "unhide", "wip", "feedback", "show",
 		"status", "doctor", "heartbeat", "heartbeat-item", "ledger",
 	}
 

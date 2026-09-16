@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-09-16T12:00:00Z",
+  "age_seconds": 30,
+  "stale": false,
+  "stale_after_seconds": 120,
+  "sync_interval_seconds": 60,
+  "dropped_count": 0,
+  "mine_act_now": [
+    {
+      "number": 101,
+      "title": "Fix flaky test",
+      "url": "https://github.com/acme/widgets/pull/101",
+      "draft": false,
+      "build_state": "passing",
+      "human_approved": true,
+      "agent_approved": false,
+      "has_conflicts": false,
+      "bot_verdict": "no_decision",
+      "repo": "acme/widgets",
+      "entity_type": "pull_request",
+      "entity_id": "101",
+      "ownership": "mine",
+      "category": "bug",
+      "gate_state": "satisfied",
+      "as_of": "2026-09-16T12:00:00Z",
+      "ready_to_promote": true,
+      "degraded": false
+    }
+  ],
+  "mine_awaiting_others": [],
+  "mine_awaiting_other_things": [],
+  "team_act_now": [
+    {
+      "number": 202,
+      "title": "Add widget export",
+      "url": "https://github.com/acme/widgets/pull/202",
+      "owner": "teammate1",
+      "files_changed": 5,
+      "lines_changed": 120,
+      "build_state": "broken",
+      "human_approved": false,
+      "agent_approved": true,
+      "has_conflicts": false,
+      "bot_verdict": "disapproved",
+      "self_approval_state": "not_approved",
+      "self_commented": true,
+      "match_reasons": ["team-authored", "label:urgent"],
+      "match_team_authored": true,
+      "match_review_requested": false,
+      "match_has_watch_label": true,
+      "repo": "acme/widgets",
+      "entity_type": "pull_request",
+      "entity_id": "202",
+      "ownership": "team",
+      "category": "feature",
+      "gate_state": "unsatisfied",
+      "as_of": "2026-09-16T11:55:00Z",
+      "ready_to_promote": false,
+      "degraded": true
+    }
+  ],
+  "team_blocked": [],
+  "hidden": [
+    {
+      "number": 303,
+      "title": "WIP cleanup",
+      "url": "https://github.com/acme/widgets/pull/303",
+      "draft": true,
+      "repo": "acme/widgets",
+      "entity_type": "pull_request",
+      "entity_id": "303",
+      "ownership": "mine",
+      "category": "chore",
+      "as_of": "2026-09-16T10:00:00Z",
+      "ready_to_promote": false,
+      "degraded": false
+    }
+  ],
+  "last_run_at": "2026-09-16T11:59:00Z",
+  "last_sweep_at": "2026-09-16T11:00:00Z",
+  "runs_failed_24h": 0,
+  "errors": []
+}
