@@ -1,0 +1,70 @@
+# Full example covering every key in the docket design's section 7.8 table
+# (docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md
+# lines 997-1011). Values are fictional/generic per this repo's public-repo
+# identifier rule (pg2-tphcc) — only the operator's own identity and this
+# module's generic placeholders appear (see
+# cmd/pg-desk/identifier_allowlist_test.go's allowlistedIdentifiers).
+# Loaded by TestLoadFile_FullExample and scanned by
+# cmd/pg-desk/identifier_allowlist_test.go's TestIdentifierAllowlistGuard.
+
+self_login: phillipgreenii
+team_members: [phillipgreenii, teammate]
+watch_labels: [needs-review]
+
+repos:
+  - remote: phillipgreenii/example-repo
+    beads_dir: /tmp/example-repo/.beads
+
+ticket_patterns:
+  - "PROJ-[0-9]+"
+
+agents:
+  - login: review-bot
+    approval_regex: "(?im)^ok-to-land$"
+    policy: advisory
+
+approver_allowlist: [teammate]
+
+verdict_generations:
+  - id: v1
+    body_marker: "<!-- verdict:v1 -->"
+    findings_patterns: ["([0-9]+) findings"]
+    authority_patterns: ["^APPROVE$"]
+
+check_interpreters:
+  - patterns: ["^lint$"]
+    type: approval-gate
+
+ci_only_attempts_threshold: 3
+
+jira:
+  high_priority_values: [Highest, High]
+  incident_labels: [incident]
+  incident_issue_types: [Incident]
+
+category_vocabulary:
+  bugfix: [fix, bug]
+  docs: [docs, readme]
+
+urgency:
+  labels: [urgent]
+  keywords: [outage]
+  thresholds:
+    high: 3
+    critical: 5
+
+agent_tracker_backend: beads
+actor: pg-desk
+
+sync:
+  mode: off
+
+heartbeat_period: 5m
+stale_after: 30m
+
+serve:
+  addr: 127.0.0.1:8090
+  log: ~/Library/Logs/pg-desk-serve.log
+
+open:
+  chrome_bin: /usr/bin/example-browser
