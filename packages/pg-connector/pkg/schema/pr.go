@@ -18,6 +18,8 @@
 // migrated/persisted here).
 package schema
 
+import "encoding/json"
+
 // PRSchemaVersion is the pr capability's own schema version, populated into
 // the wire envelope's schemaVersion field by each of the pr capability's
 // dispatch-table entries (pkg/provider/pr.NewDispatchTable) — independent
@@ -190,12 +192,20 @@ type PRReview struct {
 // design's exact response shape: `{"entities": [], "present_ids":
 // [], "cursor": null, "truncated": false}`).
 //
-// Cursor is *string (not a bare string) so the wire encoding always
-// explicitly emits "cursor": null rather than omitting the field —
-// design's own binding decision states cursor "MUST always be null in
-// this packet" (incremental fetching is changes, phase 8), so this type
-// never actually sets it to a non-nil value today, but the pointer form
-// keeps the wire shape self-documenting either way.
+// Cursor is json.RawMessage, not *string: a per-backend-opaque JSON blob,
+// never a bare string (pkg/provider/pr.Provider.List's own doc comment,
+// bead pg2-2j5ac.30.6 — which widened that same interface's INCOMING
+// cursor parameter to json.RawMessage for exactly this reason). This
+// field was still *string as of bead pg2-2j5ac.28.1 (when cursor was
+// pinned to always-null); a *string field holding an encoded JSON-object
+// blob would be double-JSON-encoded by encoding/json (marshaled as a
+// quoted string, not the raw object), silently breaking the cursor
+// round-trip the moment a backend actually returns one — json.RawMessage
+// avoids that, matching the request-side type exactly (bead
+// pg2-2j5ac.30.3, discovered while wiring the first real, non-null
+// cursor a pr backend ever returns). nil still marshals to "cursor":
+// null unchanged, so this widening is backward compatible with every
+// backend that still always answers nil.
 //
 // Entities carries the FULL matched PR set (each entry the same PR shape
 // "show" returns) unless a caller passed ids_only, in which case a
@@ -211,10 +221,10 @@ type PRReview struct {
 // now — populated regardless of ids_only, since ids_only
 // only controls whether Entities is ALSO populated.
 type PRListResult struct {
-	Entities   []PR     `json:"entities"`
-	PresentIDs []string `json:"present_ids"`
-	Cursor     *string  `json:"cursor"`
-	Truncated  bool     `json:"truncated"`
+	Entities   []PR            `json:"entities"`
+	PresentIDs []string        `json:"present_ids"`
+	Cursor     json.RawMessage `json:"cursor"`
+	Truncated  bool            `json:"truncated"`
 }
 
 // PRFile is one changed file entry in a PR's diff, an element of the

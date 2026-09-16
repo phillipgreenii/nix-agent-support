@@ -378,8 +378,16 @@ func TestBackend_List_SingleExpr(t *testing.T) {
 	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "owner/repo#1" {
 		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
 	}
-	if got.Cursor != nil {
-		t.Fatalf("Cursor = %v, want nil (always null)", got.Cursor)
+	// Cursor is no longer always null (bead pg2-2j5ac.30.3 wired a real
+	// fingerprint cursor into this non-ids_only path); this test's own
+	// concern is Entities/PresentIDs, so it only checks Cursor decodes
+	// rather than duplicating TestBackend_List_NilCursor_ReturnsRealFingerprintCursor's
+	// full assertion.
+	if got.Cursor == nil {
+		t.Fatal("Cursor = nil, want a real fingerprint cursor")
+	}
+	if _, err := github.DecodeCursor(got.Cursor); err != nil {
+		t.Fatalf("DecodeCursor(got.Cursor): %v", err)
 	}
 }
 
@@ -437,6 +445,14 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	}
 	if len(got.PresentIDs) != 1 {
 		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
+	}
+	// ids_only skips the supplemental fetches ComputeFingerprint needs
+	// (asserted above via the fatal getPRFn/reviewThreadCountErr), so
+	// there is no live snapshot to fingerprint -- Cursor stays nil here,
+	// matching this method's own doc comment (bead pg2-2j5ac.30.3 wires
+	// cursor handling into the non-ids_only path only).
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %s, want nil when ids_only is true", got.Cursor)
 	}
 }
 
@@ -499,30 +515,109 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 	}
 }
 
-// TestBackend_List_CursorIgnored_StillReturnsNilCursor proves a non-nil
-// incoming cursor (bead pg2-2j5ac.30.6's widened pr.Provider.List
-// signature) is simply ignored by this backend -- it still always
-// answers Cursor: nil, per the interface's own "a backend that does not
-// support incremental listing MUST return null and MUST ignore any
-// cursor it is handed" doc comment. Wiring a real cursor is sibling
-// packet pg2-2j5ac.30.3's job, unblocked once this packet lands.
-func TestBackend_List_CursorIgnored_StillReturnsNilCursor(t *testing.T) {
+// TestBackend_List_NilCursor_ReturnsRealFingerprintCursor proves a nil
+// incoming cursor (a first/full fetch) now makes List answer a real,
+// version-tagged fingerprint cursor instead of always emitting null
+// (bead pg2-2j5ac.30.3, wiring internal/github's DecodeCursor/
+// EncodeCursor/RefreshCursor codec into this method now that
+// pg2-2j5ac.30.6/.30.7 have landed every field ComputeFingerprint needs).
+// The returned cursor decodes cleanly and its ByPR entry for the one
+// matched PR equals github.ComputeFingerprint of that PR's own snapshot
+// -- proving the round-trip uses the SAME composition the codec's own
+// unit tests pin, not a reimplementation.
+func TestBackend_List_NilCursor_ReturnsRealFingerprintCursor(t *testing.T) {
+	// mergeSupplementalFields (see its own doc comment/test below) copies
+	// only HeadSHA/ChecksRollup/ReviewCount/ReviewThreadCount from the
+	// GetPR/ReviewThreadCount supplemental fetch -- UpdatedAt/State/Draft/
+	// CommentCount stay the cheaper SearchPRs result's own values, so
+	// this test sets each field on the side List actually reads it from.
+	full := &api.PR{
+		HeadSHA:      "deadbeef",
+		ChecksRollup: "success",
+		ReviewCount:  2,
+	}
 	gh := &fakeGH{
 		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
+			return []api.PR{{
+				Repo: "owner/repo", Number: 1,
+				UpdatedAt: "2026-09-01T00:00:00Z", State: "open", Draft: false,
+				CommentCount: 3,
+			}}, nil
 		},
 		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{}, nil
+			return full, nil
 		},
+		reviewThreadCount: 4,
 	}
 	b := newTestBackend(t, gh)
 
-	got, err := b.List(context.Background(), []string{"is:open"}, false, json.RawMessage(`{"v":1,"fp":{"owner/repo#1":"abc"}}`))
+	got, err := b.List(context.Background(), []string{"is:open"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if got.Cursor != nil {
-		t.Fatalf("Cursor = %v, want nil", got.Cursor)
+	if got.Cursor == nil {
+		t.Fatal("Cursor = nil, want a real fingerprint cursor on a full fetch")
+	}
+	cur, err := github.DecodeCursor(got.Cursor)
+	if err != nil || cur == nil {
+		t.Fatalf("DecodeCursor(got.Cursor) = (%v, %v), want a decodable cursor", cur, err)
+	}
+	want := github.ComputeFingerprint(github.GitHubPRSnapshot{
+		ID: "owner/repo#1", UpdatedAt: "2026-09-01T00:00:00Z", HeadOID: "deadbeef",
+		StatusRollup: "success", State: "open", IsDraft: false,
+		ReviewCount: 2, CommentCount: 3, ReviewThreadCount: 4,
+	})
+	if cur.ByPR["owner/repo#1"] != want {
+		t.Fatalf("cur.ByPR[owner/repo#1] = %q, want %q", cur.ByPR["owner/repo#1"], want)
+	}
+}
+
+// TestBackend_List_ValidPriorCursor_Refreshes proves a valid, previously
+// -stored cursor is actually decoded and threaded through RefreshCursor
+// (not ignored): feeding a cursor whose stored fingerprint for the one
+// matched PR already matches its current live fingerprint still yields a
+// response cursor whose ByPR entry reflects that same (unchanged)
+// fingerprint -- proving DecodeCursor's output genuinely reached
+// RefreshCursor rather than being silently discarded like the pre-
+// pg2-2j5ac.30.3 behavior this test replaces.
+func TestBackend_List_ValidPriorCursor_Refreshes(t *testing.T) {
+	full := &api.PR{
+		HeadSHA:      "deadbeef",
+		ChecksRollup: "success",
+		ReviewCount:  2,
+	}
+	gh := &fakeGH{
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{
+				Repo: "owner/repo", Number: 1,
+				UpdatedAt: "2026-09-01T00:00:00Z", State: "open", Draft: false,
+				CommentCount: 3,
+			}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			return full, nil
+		},
+		reviewThreadCount: 4,
+	}
+	b := newTestBackend(t, gh)
+
+	fp := github.ComputeFingerprint(github.GitHubPRSnapshot{
+		ID: "owner/repo#1", UpdatedAt: "2026-09-01T00:00:00Z", HeadOID: "deadbeef",
+		StatusRollup: "success", State: "open", IsDraft: false,
+		ReviewCount: 2, CommentCount: 3, ReviewThreadCount: 4,
+	})
+	prevCursor := json.RawMessage(`{"v":1,"fp":{"owner/repo#1":"` + fp + `"}}`)
+
+	got, err := b.List(context.Background(), []string{"is:open"}, false, prevCursor)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	cur, err := github.DecodeCursor(got.Cursor)
+	if err != nil || cur == nil {
+		t.Fatalf("DecodeCursor(got.Cursor) = (%v, %v), want a decodable cursor", cur, err)
+	}
+	if cur.ByPR["owner/repo#1"] != fp {
+		t.Fatalf("cur.ByPR[owner/repo#1] = %q, want %q (the incoming cursor's own fingerprint, unchanged)", cur.ByPR["owner/repo#1"], fp)
 	}
 }
 

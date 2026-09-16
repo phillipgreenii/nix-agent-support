@@ -193,12 +193,20 @@ func rateReservePoints(config json.RawMessage) int {
 // boundary].
 //
 // cursor (bead pg2-2j5ac.30.6, widening pr.Provider.List's own signature)
-// is deliberately IGNORED here: this backend still always answers
-// Cursor: nil, per its own interface doc comment ("A backend that does
-// not support incremental listing MUST return null and MUST ignore any
-// cursor it is handed") — wiring a real fingerprint cursor into this
-// method is sibling packet pg2-2j5ac.30.3's job, unblocked once this
-// packet lands, not this one's.
+// is now honored (bead pg2-2j5ac.30.3): internal/github's
+// DecodeCursor/EncodeCursor/RefreshCursor codec (fingerprint.go) turns it
+// into a real, version-tagged fingerprint cursor instead of always
+// answering Cursor: nil, now that the entity-mapping step below computes
+// every field that composite fingerprint needs (bead pg2-2j5ac.30.6's
+// supplemental GetPR fetch plus pg2-2j5ac.30.7's ReviewThreadCount
+// fetch). Per this packet's own Contract ("every other part of that list
+// implementation — entity mapping, present_ids, truncated — is
+// unchanged"), only cursor handling changes here: Entities/PresentIDs/
+// Truncated are computed exactly as before, unfiltered by
+// RefreshCursor's own changedIDs return value — this method does not
+// prune Entities to the changed subset (Ledger.Refresh's own doc comment
+// notes a cursor-scoped refresh MAY do that, not MUST; narrowing
+// Entities is left to a future packet, not assumed here).
 //
 // Once the matched-and-deduped set is known, and only when idsOnly is
 // false (PresentIDs never needs anything below — skipping this step
@@ -273,13 +281,41 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	}
 
 	entities := make([]schema.PR, 0, len(enriched))
+	snapshots := make([]github.GitHubPRSnapshot, 0, len(enriched))
 	asOf := time.Now().UTC()
 	for i := range enriched {
 		ghPR := enriched[i]
 		id := formatPRID(ghPR.Repo, ghPR.Number)
 		entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
+		snapshots = append(snapshots, github.GitHubPRSnapshot{
+			ID:                id,
+			UpdatedAt:         ghPR.UpdatedAt,
+			HeadOID:           ghPR.HeadSHA,
+			StatusRollup:      ghPR.ChecksRollup,
+			State:             ghPR.State,
+			IsDraft:           ghPR.Draft,
+			ReviewCount:       ghPR.ReviewCount,
+			CommentCount:      ghPR.CommentCount,
+			ReviewThreadCount: ghPR.ReviewThreadCount,
+		})
 	}
 	result.Entities = entities
+
+	// prevCursor decodes the incoming opaque blob (nil on a first/full
+	// fetch, or an undecodable/wrong-version one — DecodeCursor's own
+	// contract treats both as "no cursor", never an error). RefreshCursor
+	// then computes this call's next cursor from the live snapshot;
+	// changedIDs is intentionally discarded here (see this method's own
+	// doc comment above: entity mapping/present_ids/truncated stay
+	// unchanged by this packet, so nothing narrows Entities to the
+	// changed subset yet).
+	prevCursor, _ := github.DecodeCursor(cursor)
+	_, nextCursor := github.RefreshCursor(prevCursor, snapshots)
+	encoded, err := github.EncodeCursor(nextCursor)
+	if err != nil {
+		return nil, fmt.Errorf("pg-connector-pr-github: encode fingerprint cursor: %w", err)
+	}
+	result.Cursor = encoded
 	return result, nil
 }
 
