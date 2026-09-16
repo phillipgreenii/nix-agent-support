@@ -125,6 +125,51 @@ func BenchmarkDispatchQmuHoldTimeP99AtTenK(b *testing.B) {
 	b.ReportMetric(float64(p99Of(samples).Nanoseconds()), "p99-ns/op")
 }
 
+// concurrentListenerCount is the N BenchmarkDispatchQmuHoldTimeP99AtTenKConcurrentListeners
+// registers below (Task 6.8 Produces: "a benchmark exercising concurrent
+// Dispatch() fan-out against N listeners"). The exact N is this task's own
+// Freedom boundary choice — large enough that phase 2's per-listener
+// goroutine fan-out (Task 6.2, bead pg2-3brwx.2) is genuinely exercised
+// (BenchmarkDispatchQmuHoldTimeP99AtTenK above registers only one listener,
+// the degenerate single-goroutine case), small enough to stay well under the
+// 10k retained-entries pool this benchmark shares with it.
+const concurrentListenerCount = 8
+
+// BenchmarkDispatchQmuHoldTimeP99AtTenKConcurrentListeners is
+// BenchmarkDispatchQmuHoldTimeP99AtTenK's Task 6.8 sibling: the identical
+// p99 wall-time-as-lock-hold-time-proxy measurement (same rationale: each
+// listener always-accepts immediately, so phase 2 does negligible work per
+// listener and the call's wall time stays a close proxy for phases 1+3's
+// locked time), but with concurrentListenerCount always-accepting listeners
+// of the same type registered instead of one. Each Dispatch pass therefore
+// fans out concurrentListenerCount goroutines in phase 2 rather than the
+// single-goroutine case the original benchmark exercises, so comparing this
+// figure against perf-baselines.txt's single-listener pre-Phase-6 baseline
+// (dispatch_phases1and3_p99_at_10k_entries_ns) is how Task 6.8 re-measures
+// that baseline with Task 6.2's concurrent fan-out factored in.
+func BenchmarkDispatchQmuHoldTimeP99AtTenKConcurrentListeners(b *testing.B) {
+	q, err := New(NewMemStore(), WithEarlyEviction())
+	if err != nil {
+		b.Fatalf("New: %v", err)
+	}
+	for l := 0; l < concurrentListenerCount; l++ {
+		q.Register(&statelessAcceptListener{id: fmt.Sprintf("h%d", l), typ: "T"})
+	}
+	for i := 0; i < 10_000; i++ {
+		if _, err := q.Enqueue(Event{ID: fmt.Sprintf("e%d", i), Type: "T"}); err != nil {
+			b.Fatalf("Enqueue: %v", err)
+		}
+	}
+	samples := make([]time.Duration, 0, b.N)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		q.Dispatch()
+		samples = append(samples, time.Since(start))
+	}
+	b.ReportMetric(float64(p99Of(samples).Nanoseconds()), "p99-ns/op")
+}
+
 // BenchmarkExpireQmuHoldTimeP99AtTenK approximates Expire's q.mu hold time
 // at 10k retained, already-expired-with-nothing-owed entries (no bound
 // listener, so retainedLocked's second half is vacuous and every entry

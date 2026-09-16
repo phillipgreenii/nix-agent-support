@@ -37,3 +37,50 @@
 #   metric                                          value
 dispatch_phases1and3_p99_at_10k_entries_ns          551917
 expire_p99_at_10k_entries_ns                        6522583
+
+# Task 6.8 re-measurement: concurrent dispatch (Task 6.2) factored in ------
+#
+# Task 6.2 (bead pg2-3brwx.2) changed Dispatch's phase 2 (OFFER, unlocked)
+# from a sequential per-listener loop to fanning out one goroutine per
+# pending offer, joined by wg.Wait() before phase 3 (RECORD, locked) begins.
+# This re-measures the p99-hold-time-proxy baseline above with that change
+# now landed, per this task's own escalation trigger (Task 6.8 Produces: a
+# regression beyond budget must be escalated, not silently absorbed).
+#
+# Method: the same BenchmarkDispatchQmuHoldTimeP99AtTenK as above (now
+# exercising Task 6.2's code path, still a single always-accepting listener
+# — the degenerate one-goroutine case), plus its new sibling
+# BenchmarkDispatchQmuHoldTimeP99AtTenKConcurrentListeners (8
+# always-accepting listeners of the same type, so each Dispatch pass fans
+# out 8 goroutines in phase 2), run via:
+#
+#   go test ./internal/eventqueue/... -run '^$' -bench 'QmuHoldTimeP99AtTenK' \
+#     -benchmem -benchtime 2000x
+#
+# Measured 2026-09-16, Task 6.8, against Task 6.2 (concurrent Dispatch
+# fan-out) as landed at that revision, on: darwin/arm64 (Apple M3 Pro),
+# go1.25.9. Run three times back to back to characterize noise (this
+# harness, unlike perf_test.go's paired/interleaved TestDispatchOverheadUnderRingReader,
+# takes one plain wall-clock sample per run, so it is more exposed to
+# ambient machine load — see that test's own doc for the workspace's prior
+# field experience with this class of noise, pg2-7n1gb):
+#
+#   run   1-listener (re-measured)   8-listeners (concurrent)
+#   1     558292                     573125
+#   2     555958                     428084
+#   3     447417                     411000
+#
+# Both figures range within, or below, the pre-Task-6.2 single-listener
+# baseline above (551917): the re-measured 1-listener figure is -19.0% to
+# +1.2% of it, and the new 8-listener concurrent figure is -25.5% to +3.8%
+# of it, despite doing 8x the per-pass listener-offer work — i.e. fanning
+# out to 8 listeners concurrently costs no more, wall-clock, than serving 1
+# did before Task 6.2, which is the intended effect of parallelizing phase 2
+# rather than a regression. This is well inside any reasonable budget (the
+# workspace's own comparable convention, perf_test.go's
+# TestDispatchOverheadUnderRingReader, budgets a *worse* case — wiring a
+# whole new observability path — at 40% overhead). No regression beyond
+# budget was found, so this task's escalation trigger does not fire and
+# nothing here needed to be escalated or renegotiated with the operator.
+dispatch_p99_at_10k_entries_1listener_posttask6_2_ns    555958
+dispatch_p99_at_10k_entries_8listeners_concurrent_ns    428084
