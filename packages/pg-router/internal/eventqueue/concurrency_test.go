@@ -91,19 +91,21 @@ func TestDispatchReentrantEnqueueNoDeadlock(t *testing.T) {
 	}
 }
 
-// TEST B (concurrency, run under -race). Concurrent Enqueue while several
-// Dispatch goroutines run must not deadlock or race, and every enqueued event
-// must be delivered at least once (INV-EVT-1). Because Dispatch's OFFER phase
-// runs unlocked (see queue.go's locking-discipline note), two concurrent
-// Dispatch passes can snapshot the SAME (listener, event) pair before either
-// records an acceptance, offering that listener the same event concurrently —
-// a latent duplicate-offer race (register row, bead pg2-84o3m.31; fixed in
-// Phase 6 by per-listener outstanding-offer accounting under q.mu). Today the
-// duplicate is merely tolerated by the idempotent-listener contract
-// (INV-EVT-2); the queue still records each acceptance at most once. This
-// test only asserts every enqueued id was delivered at least once — it does
-// not pin the duplicate-offer count either way, so it is unaffected by the
-// eventual Phase 6 fix. Guarded by a timeout.
+// TEST B (concurrency, run under -race). Concurrent Enqueue while a Dispatch
+// goroutine runs must not deadlock or race, and every enqueued event must be
+// delivered at least once (INV-EVT-1). NARROWED from 3 dispatcher goroutines
+// to exactly 1 (Task 6.1, operator ruling 2026-09-16): this test's own
+// introducing commit (bead pg2-56186, the fix for Dispatch holding q.mu across
+// the listener Offer callback — a deadlock/serialization bug) was about
+// Enqueue racing Dispatch, not about multiple concurrent Dispatch() callers;
+// the extra dispatcher goroutines were an incidental broadening past what
+// that bug required, never a deliberate assertion that multiple concurrent
+// Dispatch() callers must be supported. This test's actual assertion
+// (at-least-once delivery under concurrent Enqueue) is unaffected by the
+// dispatcher count. A genuinely-concurrent Dispatch() collision against a
+// shared listener is now Queue.inFlight's job to guard (Task 6.1, bead
+// pg2-84o3m.31 — see TestDispatchConcurrentPassesSkipListenerAlreadyInFlight
+// below), not this test's concern. Guarded by a timeout.
 func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 	q, err := New(NewMemStore()) // real clock; a far-future expiresAt so nothing expires mid-test
 	if err != nil {
@@ -117,7 +119,7 @@ func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 	go func() {
 		defer close(done)
 		var wg sync.WaitGroup
-		// Producer: concurrent Enqueue while dispatchers run.
+		// Producer: concurrent Enqueue while the dispatcher runs.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -127,19 +129,17 @@ func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 				}
 			}
 		}()
-		// Dispatchers + read-only observers hammering the queue concurrently.
-		for d := 0; d < 3; d++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for i := 0; i < n; i++ {
-					q.Dispatch()
-					q.Expire()
-					_ = q.DepthByType()
-					_ = q.Idle()
-				}
-			}()
-		}
+		// One dispatcher + read-only observers hammering the queue concurrently.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < n; i++ {
+				q.Dispatch()
+				q.Expire()
+				_ = q.DepthByType()
+				_ = q.Idle()
+			}
+		}()
 		wg.Wait()
 		// Deterministic final drain (single-threaded now): dispatch until idle.
 		for i := 0; i < n+10; i++ {
@@ -162,60 +162,79 @@ func TestConcurrentEnqueueDuringDispatchNoRace(t *testing.T) {
 	}
 }
 
-// An entry that leaves the queue DURING the (now unlocked) Offer — here a
-// re-entrant Dispatch accepts it and, with early eviction on, EVICTS it before the
-// outer pass re-acquires to record — has the OUTER acceptance SKIPPED (the
-// documented mid-dispatch eviction decision): no second durable opAccept, no
-// second observer accept, nothing to redeliver. The listener already took
-// responsibility when Offer returned true.
-//
-// Eviction (not expiry) is what removes it, and that is forced by the contract
-// rather than chosen for convenience: under INV-EVT-4 a merely EXPIRED entry is
-// still RETAINED while the listener being offered it is owed that very attempt, so
-// a re-entrant Expire mid-offer cannot remove it — only completing every owed
-// attempt, or early eviction, can.
+// An entry that leaves the queue DURING the (now unlocked) Offer used to be
+// exercised here via a re-entrant Dispatch that accepted it and, with early
+// eviction on, EVICTED it before the outer pass re-acquired to record — the
+// documented mid-dispatch eviction decision. Task 6.1 (operator ruling,
+// 2026-09-16, reverting an intervening panic-based ruling from 2026-09-15)
+// supersedes that: the nested Dispatch call now targets the SAME listener
+// ("h") whose offer the outer pass has not yet settled, so Queue.inFlight
+// (INV-CONC-1) SKIPS it in phase 1 — no headFor call, no Offer call — before
+// the nested pass can race the outer pass to accept/evict the entry first.
+// REWRITTEN (not left unmodified, per this bead's ruling) to assert the
+// nested Dispatch call is silently skipped (0 accepted, no Offer call) and
+// the OUTER pass's own offer completes normally, instead of the old
+// "acceptance skipped by mid-offer eviction" assertions, which described a
+// code path that no longer exists.
 func TestDispatchEntryEvictedMidOfferSkipsRecord(t *testing.T) {
 	clk := newClock()
 	obs := &recordingObserver{}
 	q := newQueue(t, clk, WithObserver(obs), WithEarlyEviction())
 	l := &callbackListener{id: "h", binds: map[string]bool{"T": true}}
 	reentered := false
+	var nestedAccepted int
 	l.onOffer = func(e Event) {
 		if !reentered {
 			reentered = true
-			// The nested pass accepts the same head; it is the only bound listener,
-			// so maybeEvict removes the entry before the outer record phase runs.
-			q.Dispatch()
+			// The nested pass finds "h" already in-flight (the outer offer
+			// is still outstanding) and is skipped in phase 1 — no headFor
+			// call, no Offer call, no acceptance.
+			nestedAccepted = q.Dispatch()
 		}
 	}
 	q.Register(l)
 	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
 
-	if n := q.Dispatch(); n != 0 {
-		t.Fatalf("outer accepted count = %d, want 0 (entry evicted mid-dispatch; acceptance skipped)", n)
+	if n := q.Dispatch(); n != 1 {
+		t.Fatalf("outer accepted count = %d, want 1 (the nested pass was skipped; the outer offer completes normally)", n)
+	}
+	if nestedAccepted != 0 {
+		t.Fatalf("nested Dispatch accepted count = %d, want 0 (listener was busy, skipped this pass)", nestedAccepted)
+	}
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offered = %v, want [e1] (the nested pass never reached Offer; only the outer offer happened)", l.offered)
 	}
 	if len(obs.accepted) != 1 {
-		t.Fatalf("recorded acceptances = %v, want exactly one (the nested pass's)", obs.accepted)
+		t.Fatalf("recorded acceptances = %v, want exactly one (the outer pass's — the nested pass never reached Offer)", obs.accepted)
 	}
 	if q.DepthByType()["T"] != 0 {
-		t.Fatalf("evicted entry still retained: %v", q.DepthByType())
+		t.Fatalf("accepted entry still retained (should have early-evicted after the outer accept): %v", q.DepthByType())
 	}
 }
 
-// A re-entrant Dispatch from inside Offer records the same head first; when the
-// outer pass re-acquires to record it must see the entry already accepted by this
-// listener and SKIP — preserving at-most-once acceptance per (event, listener)
-// even though the listener was offered the head twice (INV-EVT-2 idempotency).
+// A re-entrant Dispatch from inside Offer used to be exercised here racing the
+// outer pass to record the same head first, with the outer pass then SKIPPING
+// on re-acquire (already-accepted, INV-EVT-2 idempotency). Task 6.1 (operator
+// ruling, 2026-09-16, reverting an intervening panic-based ruling from
+// 2026-09-15) supersedes that: the nested pass now targets the same listener
+// ("h") the outer pass has not yet settled, so it is SKIPPED in phase 1
+// (INV-CONC-1) before it ever reaches Offer — it never gets a chance to race
+// the outer pass to record first. REWRITTEN (not left unmodified) to assert
+// the nested Dispatch call is silently skipped (0 accepted, no Offer call);
+// at-most-once acceptance still holds (obs.accepted has exactly one entry),
+// now because the nested offer never happens at all rather than because a
+// duplicate is idempotently absorbed.
 func TestDispatchReentrantDispatchAtMostOnceAccept(t *testing.T) {
 	clk := newClock()
 	obs := &recordingObserver{}
 	q := newQueue(t, clk, WithObserver(obs))
 	l := &callbackListener{id: "h", binds: map[string]bool{"T": true}}
 	reentered := false
+	var nestedAccepted int
 	l.onOffer = func(e Event) {
 		if !reentered {
 			reentered = true
-			q.Dispatch() // nested pass offers the same head and records it first
+			nestedAccepted = q.Dispatch() // nested pass: skipped in phase 1, never reaches Offer
 		}
 	}
 	q.Register(l)
@@ -223,11 +242,14 @@ func TestDispatchReentrantDispatchAtMostOnceAccept(t *testing.T) {
 
 	q.Dispatch()
 
-	if !equal(l.offered, []string{"e1", "e1"}) {
-		t.Fatalf("offered = %v, want [e1 e1] (outer + nested offer of the same head)", l.offered)
+	if !equal(l.offered, []string{"e1"}) {
+		t.Fatalf("offered = %v, want [e1] (the nested pass was skipped in phase 1 before ever reaching Offer, so only the outer offer happened)", l.offered)
+	}
+	if nestedAccepted != 0 {
+		t.Fatalf("nested Dispatch accepted count = %d, want 0 (listener was busy, skipped this pass)", nestedAccepted)
 	}
 	if len(obs.accepted) != 1 {
-		t.Fatalf("recorded acceptances = %v, want exactly one e1/h (at-most-once)", obs.accepted)
+		t.Fatalf("recorded acceptances = %v, want exactly one e1/h (at-most-once, now because the nested offer never happens rather than an idempotent skip)", obs.accepted)
 	}
 }
 
@@ -467,10 +489,16 @@ func TestObserverHooksFireWithQueueUnlocked(t *testing.T) {
 // TestGlobalCounters_ConcurrentIncrementNoRace is Task 2.3's required RED
 // test (Step 2.3.6): the pool-wide atomic delivered counter, read WITHOUT
 // q.mu, must survive concurrent Dispatch passes under -race and end up
-// exactly right — every enqueued event is accepted EXACTLY ONCE (INV-EVT-2),
-// even though the concurrent-dispatch duplicate-offer race (documented on
-// TestConcurrentEnqueueDuringDispatchNoRace above) can offer the same head to
-// two goroutines before either records it.
+// exactly right — every enqueued event is accepted EXACTLY ONCE (INV-EVT-2).
+// NARROWED from 4 dispatcher goroutines to exactly 1 (Task 6.1, operator
+// ruling 2026-09-16): this test's own introducing commit (Task 2.3, bead
+// pg2-84o3m.22, adding the pool-wide atomic delivered/declined counters) used
+// "N goroutines calling Dispatch()" purely as a mechanism to generate
+// concurrent WRITES to the new atomic.Int64 counters for -race to exercise —
+// its original form (commit 0d7d1993) has no Enqueue-during-Dispatch concern
+// at all and never needed multiple dispatchers, only *some* concurrent
+// activity hitting the counters. This test's actual assertion (exact global
+// counter correctness) is unaffected by the dispatcher count.
 func TestGlobalCounters_ConcurrentIncrementNoRace(t *testing.T) {
 	q, err := New(NewMemStore()) // real clock; far-future expiresAt so nothing expires mid-test
 	if err != nil {
@@ -490,15 +518,13 @@ func TestGlobalCounters_ConcurrentIncrementNoRace(t *testing.T) {
 	go func() {
 		defer close(done)
 		var wg sync.WaitGroup
-		for d := 0; d < 4; d++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for i := 0; i < n; i++ {
-					q.Dispatch()
-				}
-			}()
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < n; i++ {
+				q.Dispatch()
+			}
+		}()
 		wg.Wait()
 	}()
 	select {
@@ -509,5 +535,123 @@ func TestGlobalCounters_ConcurrentIncrementNoRace(t *testing.T) {
 
 	if got := q.delivered.Load(); got != int64(n) {
 		t.Fatalf("global delivered = %d, want %d (each event accepted exactly once, INV-EVT-2)", got, n)
+	}
+}
+
+// --- Task 6.1: per-listener in-flight tracking (bead pg2-84o3m.31) ---------
+
+// slowListener blocks inside Offer until its proceed channel is closed, and
+// counts how many times Offer runs — the instrument for the duplicate-offer
+// race this task closes: two concurrent Dispatch passes racing against the
+// SAME still-outstanding offer must invoke Offer only once between them, not
+// once each. entered closes the first time an Offer call starts blocking, so
+// the test can observe the race while it is still outstanding.
+type slowListener struct {
+	id      string
+	binds   map[string]bool
+	proceed chan struct{}
+	entered chan struct{}
+
+	mu     sync.Mutex
+	offers int
+}
+
+func (l *slowListener) ID() string           { return l.id }
+func (l *slowListener) Matches(e Event) bool { return l.binds[e.Type] }
+func (l *slowListener) Offer(Offering) OfferResult {
+	l.mu.Lock()
+	l.offers++
+	first := l.offers == 1
+	l.mu.Unlock()
+	if first {
+		close(l.entered)
+	}
+	<-l.proceed
+	return OfferResult{Accepted: false, Decline: DeclineBusy}
+}
+
+func (l *slowListener) offerCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.offers
+}
+
+// TestDispatchConcurrentPassesSkipListenerAlreadyInFlight is this task's
+// pinned RED-first test (bead pg2-84o3m.31, INV-CONC-1: "one outstanding
+// offer per handler" at a time; operator ruling 2026-09-16, reverting an
+// intervening panic-based ruling from 2026-09-15). Before this task, Queue
+// tracked outstanding offers only by per-attempt dispatch id (custody) —
+// nothing indexed by LISTENER — so two concurrent Dispatch passes could each
+// snapshot the same (listener, event) pair in phase 1 before either recorded
+// an outcome in phase 3, offering that listener the same event twice while
+// its first offer was still outstanding. Queue.inFlight (keyed by listener
+// id) closes that: phase 1 now SKIPS a listener already present in inFlight
+// — no headFor call, no pendingOffer minted, no Offer call — so the
+// genuinely-concurrent second pass is a no-op for that listener this pass
+// instead of quietly double-offering; the listener is naturally offered
+// again on a later pass once its first offer settles.
+func TestDispatchConcurrentPassesSkipListenerAlreadyInFlight(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := &slowListener{id: "h", binds: map[string]bool{"T": true}, proceed: make(chan struct{}), entered: make(chan struct{})}
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		q.Dispatch() // blocks in l.Offer until l.proceed closes below
+	}()
+
+	select {
+	case <-l.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Dispatch pass never reached the slow listener's Offer (timeout)")
+	}
+
+	// A second, genuinely concurrent pass: its phase 1 runs in a different
+	// goroutine while the first pass's offer for "h" is still outstanding, so
+	// it must SKIP that listener (no Offer call, 0 accepted) rather than
+	// being offered the same event a second time.
+	secondAcceptedCh := make(chan int, 1)
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		secondAcceptedCh <- q.Dispatch()
+	}()
+
+	select {
+	case <-secondDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second concurrent Dispatch pass never returned (timeout)")
+	}
+
+	if secondAccepted := <-secondAcceptedCh; secondAccepted != 0 {
+		t.Fatalf("second concurrent Dispatch pass accepted count = %d, want 0 (busy listener skipped this pass while the first pass's offer was outstanding)", secondAccepted)
+	}
+
+	if got := l.offerCount(); got != 1 {
+		t.Fatalf("Offer invoked %d times while the first pass's offer was outstanding, want exactly 1 (second pass skipped instead of offering again)", got)
+	}
+
+	close(l.proceed)
+	select {
+	case <-firstDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Dispatch pass never returned after being unblocked (timeout)")
+	}
+
+	if got := l.offerCount(); got != 1 {
+		t.Fatalf("Offer invoked %d times once the first pass returned, want exactly 1 (still no duplicate offer)", got)
+	}
+
+	// inFlight is deleted in phase 3 regardless of outcome (same point custody
+	// is deleted); once the decline's retry cooldown (INV-FAIL-2) elapses, a
+	// later pass offers the same head again — inFlight no longer withholds it
+	// once cleared.
+	clk.advance(10 * time.Second)
+	q.Dispatch()
+	if got := l.offerCount(); got != 2 {
+		t.Fatalf("Offer invoked %d times after a subsequent pass ran once inFlight cleared, want 2 (offered again)", got)
 	}
 }

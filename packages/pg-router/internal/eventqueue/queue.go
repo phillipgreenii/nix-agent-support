@@ -336,6 +336,25 @@ type Queue struct {
 	// listener at a time, synchronously, within a single goroutine.
 	custody map[string]custody
 
+	// inFlight is a SECOND index alongside custody, keyed by LISTENER id rather
+	// than dispatch id (Task 6.1, bead pg2-84o3m.31, INV-CONC-1: "one
+	// outstanding offer per handler" at a time). Set in phase 1 the moment a
+	// pendingOffer is minted for a listener (same critical section as
+	// q.custody[id] = custody{}), deleted in phase 3 at the same point that
+	// pair's custody entry is deleted — WHATEVER the offer's outcome, exactly
+	// like custody's own lifecycle above. Phase 1 SKIPS a listener already
+	// present here — headFor is not called and no pendingOffer is minted for
+	// it this pass — whichever concurrent/reentrant Dispatch pass set it
+	// (operator ruling 2026-09-16, reverting an intervening panic-based
+	// ruling from 2026-09-15): the busy listener is naturally offered again
+	// on a later pass once its outstanding offer has settled. Neither shape
+	// that can trigger this (a genuinely concurrent racing goroutine, or a
+	// listener calling Dispatch reentrantly from inside its own Offer) is
+	// exercised by any shipped caller today, so no machinery distinguishes
+	// them — skip handles both identically. custody alone cannot do this job
+	// since it is keyed per-attempt, not per-listener.
+	inFlight map[string]struct{}
+
 	// delivered/declined are Task 2.3's POOL-WIDE delivery counters (Step
 	// 2.3.6) — the aggregate counterpart to each listenerState's own
 	// per-listener tally above. Written from Dispatch's phase 3, which
@@ -446,6 +465,7 @@ func New(store Store, opts ...Option) (*Queue, error) {
 		retryBackoff: backoff.Default(),
 		entries:      map[string]*entry{},
 		custody:      map[string]custody{},
+		inFlight:     map[string]struct{}{},
 	}
 	q.cell.Store(&depthCell{depth: map[string]int{}, everSeen: map[string]struct{}{}})
 	for _, opt := range opts {
@@ -923,6 +943,21 @@ func (q *Queue) Dispatch() (accepted int) {
 	now := q.now()
 	pending := make([]pendingOffer, 0, len(q.listeners))
 	for _, ls := range q.listeners {
+		lid := ls.l.ID()
+		if _, busy := q.inFlight[lid]; busy {
+			// Task 6.1 (pg2-84o3m.31), operator ruling 2026-09-16 (reverting
+			// an intervening panic-based ruling from 2026-09-15): an
+			// outstanding offer from another, still in-flight Dispatch pass
+			// for this SAME listener simply means this pass SKIPS it —
+			// headFor is not called and no pendingOffer is minted for it —
+			// the busy listener is naturally offered again on a later pass
+			// once its outstanding offer has settled. Neither shape that can
+			// trigger this (a genuinely concurrent racing goroutine, or a
+			// listener calling Dispatch reentrantly from inside its own
+			// Offer) is exercised by any shipped caller today; skip handles
+			// both identically, with no need to tell them apart.
+			continue
+		}
 		e := q.headFor(ls.l)
 		if e == nil {
 			continue
@@ -932,6 +967,7 @@ func (q *Queue) Dispatch() (accepted int) {
 		}
 		id := takeID()
 		q.custody[id] = custody{}
+		q.inFlight[lid] = struct{}{}
 		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, lastAttempt: e.evt.Expired(now)})
 	}
 	q.mu.Unlock()
@@ -967,12 +1003,16 @@ func (q *Queue) Dispatch() (accepted int) {
 	var evicts []Record
 	var signals []dispatchSignal
 	for _, p := range pending {
-		// The pass's phase 2 for this offer has concluded either way — delete
-		// custody FIRST, before any of the skip/settle branches below, so an
-		// entry that never reaches settlement (e.g. gone by the time this
-		// loop reaches it) still leaves custody accurately empty.
-		delete(q.custody, p.id)
 		lid := p.ls.l.ID()
+		// The pass's phase 2 for this offer has concluded either way — delete
+		// custody and inFlight FIRST, before any of the skip/settle branches
+		// below, so an entry that never reaches settlement (e.g. gone by the
+		// time this loop reaches it) still leaves both accurately empty. This
+		// listener is no longer in-flight regardless of outcome (Task 6.1,
+		// pg2-84o3m.31): a next Dispatch pass mints an entirely fresh
+		// pendingOffer for it, exactly like a fresh custody entry.
+		delete(q.custody, p.id)
+		delete(q.inFlight, lid)
 		e, ok := q.entries[p.evt.ID]
 		if !ok {
 			continue // entry left the queue mid-dispatch (retired/evicted): skip
