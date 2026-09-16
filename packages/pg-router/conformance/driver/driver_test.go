@@ -78,10 +78,90 @@ func TestRun_InvokingStore_Pass(t *testing.T) {
 // assertion this task's Produces requires, not merely that each verb
 // individually returns a schema-valid reply.
 func TestRun_InvokingStore_GetAfterPutMismatch(t *testing.T) {
-	target := Target{Store: &fakeStoreParticipant{corruptGet: true}}
+	target := Target{Store: &fakeStoreParticipant{failOp: "get", failOccurrence: 1, failMode: "wrongvalue"}}
 	r := findResult(t, Run(context.Background(), target), "invoking/store")
 	if r.Err == nil {
 		t.Fatal("expected invoking/store to fail when get-after-put does not echo the put value")
+	}
+}
+
+// TestRun_InvokingStore_FinalGetNonNilAfterDelete proves invokeStore fails
+// when the get AFTER delete reports a present, non-null value instead of
+// the absent-key convention (value: null) — the other half of the
+// round-trip assertion GetAfterPutMismatch covers for put/get.
+func TestRun_InvokingStore_FinalGetNonNilAfterDelete(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "get", failOccurrence: 2, failMode: "nonnull"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when get-after-delete reports a non-null value")
+	}
+}
+
+// TestRun_InvokingStore_PutTransportFails proves invokeStore surfaces a
+// storeStep transport failure (a non-OK exit code) on the put step, rather
+// than treating a broken transport as a clean pass.
+func TestRun_InvokingStore_PutTransportFails(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "put", failOccurrence: 1, failMode: "exit"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when put's transport exits non-OK")
+	}
+}
+
+// TestRun_InvokingStore_PutNotOK proves invokeStore fails when put's own
+// reply reports ok=false — put's documented contract (Task 6.7) is that a
+// successful put always reports ok=true.
+func TestRun_InvokingStore_PutNotOK(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "put", failOccurrence: 1, failMode: "notok"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when put's reply reports ok=false")
+	}
+}
+
+// TestRun_InvokingStore_GetAfterPutMalformedReply proves storeStep's own
+// malformed-JSON check surfaces through invokeStore's get-after-put step,
+// not just through invokeCheck's identical mechanism for mon.read/query.
+func TestRun_InvokingStore_GetAfterPutMalformedReply(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "get", failOccurrence: 1, failMode: "badjson"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when get-after-put's reply is malformed JSON")
+	}
+}
+
+// TestRun_InvokingStore_DeleteFailsSchema proves storeStep's schema check
+// surfaces through invokeStore's delete step when delete's own reply
+// violates store.reply.schema.json (here: a wrong-typed `ok`).
+func TestRun_InvokingStore_DeleteFailsSchema(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "delete", failOccurrence: 1, failMode: "schema"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when delete's reply violates store.reply's schema")
+	}
+}
+
+// TestRun_InvokingStore_DeleteNotOK proves invokeStore fails when delete's
+// own reply reports ok=false — delete's documented contract (Task 6.7) is
+// that it always reports ok=true once the underlying store call itself does
+// not error, even for an already-absent key.
+func TestRun_InvokingStore_DeleteNotOK(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "delete", failOccurrence: 1, failMode: "notok"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when delete's reply reports ok=false")
+	}
+}
+
+// TestRun_InvokingStore_FinalGetTransportFails proves invokeStore surfaces a
+// storeStep transport failure on the SECOND get (after delete), distinct
+// from PutTransportFails/GetAfterPutMalformedReply covering the earlier
+// steps — the fake's failOccurrence targets exactly the second `get` call.
+func TestRun_InvokingStore_FinalGetTransportFails(t *testing.T) {
+	target := Target{Store: &fakeStoreParticipant{failOp: "get", failOccurrence: 2, failMode: "exit"}}
+	r := findResult(t, Run(context.Background(), target), "invoking/store")
+	if r.Err == nil {
+		t.Fatal("expected invoking/store to fail when get-after-delete's transport exits non-OK")
 	}
 }
 
@@ -271,13 +351,39 @@ func TestRun_InvokingCommand_SkippedWhenNil(t *testing.T) {
 // exercising get/put/delete (Task 6.7's SubcommandGet/Put/Delete) the same
 // way internal/core.Service's real handleGet/handlePut/handleDelete do,
 // without pulling in internal/core — this driver package deliberately stays
-// independent of it (Task 3.13 Binding decisions). corruptGet, when set,
-// makes get always report a value distinct from whatever was actually put,
-// to prove invokeStore's round-trip assertion — not just a per-verb schema
-// check — is what fails.
+// independent of it (Task 3.13 Binding decisions).
+//
+// failOp/failOccurrence/failMode let a test target exactly one call in
+// invokeStore's four-step round trip (put, get, delete, get) and make it
+// misbehave in a specific way — proving invokeStore's own step-by-step
+// error handling AND storeStep's shared transport/schema checks, not just
+// the happy path. failOp names the subcommand ("put"/"get"/"delete") whose
+// failOccurrence'th call (1-indexed; the two `get` calls count separately)
+// misbehaves per failMode:
+//   - "exit": the transport reports a non-OK exit code (storeStep's exit
+//     check).
+//   - "badjson": the reply body is not valid JSON (storeStep's decode
+//     check).
+//   - "schema": the reply is valid JSON but violates store.reply's schema
+//     (a wrong-typed `ok`) (storeStep's schema check).
+//   - "notok": put/delete's reply reports ok=false (invokeStore's own
+//     ok-check on those two verbs).
+//   - "wrongvalue": get's reply carries a value distinct from whatever was
+//     actually put (invokeStore's round-trip assertion, not a schema or
+//     transport failure).
+//   - "nonnull": get's reply reports a present, non-null value for a key
+//     that was actually deleted (invokeStore's absent-key assertion).
+//
+// The zero value never fails: every call succeeds against an in-memory map,
+// which is what TestRun_InvokingStore_Pass exercises.
 type fakeStoreParticipant struct {
-	data       map[string]string
-	corruptGet bool
+	data map[string]string
+
+	failOp         string
+	failOccurrence int
+	failMode       string
+
+	calls map[string]int
 }
 
 func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
@@ -297,15 +403,47 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 	if f.data == nil {
 		f.data = map[string]string{}
 	}
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[subcommand]++
+	failing := f.failOp == subcommand && f.calls[subcommand] == f.failOccurrence
+
+	if failing {
+		switch f.failMode {
+		case "exit":
+			return conformance.ExitError
+		case "badjson":
+			_, _ = stdout.Write([]byte("{ not json"))
+			return conformance.ExitOK
+		case "schema":
+			// A wrong-typed `ok` violates store.reply.schema.json
+			// (properties.ok: {"type":"boolean"}).
+			b, _ := json.Marshal(map[string]any{"schemaVersion": "1", "id": req.ID, "ok": "yes"})
+			_, _ = stdout.Write(b)
+			return conformance.ExitOK
+		}
+	}
+
 	reply := map[string]any{"schemaVersion": "1", "id": req.ID}
 	switch subcommand {
 	case "put":
 		f.data[req.Key] = req.Value
-		reply["ok"] = true
+		reply["ok"] = !(failing && f.failMode == "notok")
 	case "get":
 		v, found := f.data[req.Key]
-		if found && f.corruptGet {
-			v = v + "-corrupted"
+		if failing {
+			switch f.failMode {
+			case "wrongvalue":
+				if found {
+					v += "-corrupted"
+				}
+			case "nonnull":
+				found = true
+				if v == "" {
+					v = "stale-value"
+				}
+			}
 		}
 		reply["ok"] = found
 		if found {
@@ -315,7 +453,7 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 		}
 	case "delete":
 		delete(f.data, req.Key)
-		reply["ok"] = true
+		reply["ok"] = !(failing && f.failMode == "notok")
 	default:
 		return conformance.ExitError
 	}
