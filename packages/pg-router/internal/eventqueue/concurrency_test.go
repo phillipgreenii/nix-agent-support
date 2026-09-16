@@ -655,3 +655,67 @@ func TestDispatchConcurrentPassesSkipListenerAlreadyInFlight(t *testing.T) {
 		t.Fatalf("Offer invoked %d times after a subsequent pass ran once inFlight cleared, want 2 (offered again)", got)
 	}
 }
+
+// --- Task 6.2: bounded fan-out — phase 2 becomes concurrent (bead pg2-3brwx.2) ---
+
+// gateListener is Task 6.2's pinned proof instrument. It blocks inside Offer
+// until BOTH pass listeners have entered their own Offer call, then
+// proceeds. A sequential (one-listener-at-a-time) phase 2 cannot ever
+// satisfy this: the second listener's Offer would not even start until the
+// first one has already returned, so the first would sit blocked on
+// `other` forever (caught here by a bounded wait, not a real hang). A
+// normal, prompt return is possible only if both Offer calls were
+// genuinely in flight — overlapping in wall-clock time — at once.
+type gateListener struct {
+	id      string
+	binds   map[string]bool
+	entered chan struct{}   // closed the instant THIS listener's Offer starts
+	other   <-chan struct{} // the OTHER pass listener's entered signal
+	t       *testing.T
+}
+
+func (l *gateListener) ID() string           { return l.id }
+func (l *gateListener) Matches(e Event) bool { return l.binds[e.Type] }
+func (l *gateListener) Offer(Offering) OfferResult {
+	close(l.entered)
+	select {
+	case <-l.other:
+	case <-time.After(5 * time.Second):
+		l.t.Errorf("gateListener %q: timed out waiting for the other pass listener to enter Offer (offers did not overlap)", l.id)
+	}
+	return OfferResult{Accepted: true, Decline: DeclineNone}
+}
+
+// TestDispatchPhase2OffersOverlap is Task 6.2's own pinned acceptance test
+// (design: Task 6.2 Files, Test): two listeners' Offer calls within the SAME
+// Dispatch pass must genuinely overlap in wall-clock time. Each listener
+// blocks inside its own Offer until the OTHER has also entered its Offer —
+// a shape only a concurrent (goroutine-per-pendingOffer) phase 2 can satisfy;
+// against the old sequential loop this listener's own 5s wait times out and
+// fails the test via t.Errorf (RED), rather than the whole suite hanging.
+func TestDispatchPhase2OffersOverlap(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	enteredA := make(chan struct{})
+	enteredB := make(chan struct{})
+	lA := &gateListener{id: "a", binds: map[string]bool{"TA": true}, entered: enteredA, other: enteredB, t: t}
+	lB := &gateListener{id: "b", binds: map[string]bool{"TB": true}, entered: enteredB, other: enteredA, t: t}
+	q.Register(lA)
+	q.Register(lB)
+	mustEnqueue(t, q, evtUntil("ea", "TA", clk.in(time.Hour)))
+	mustEnqueue(t, q, evtUntil("eb", "TB", clk.in(time.Hour)))
+
+	done := make(chan int, 1)
+	go func() {
+		done <- q.Dispatch()
+	}()
+
+	select {
+	case accepted := <-done:
+		if accepted != 2 {
+			t.Fatalf("Dispatch accepted = %d, want 2 (both listeners' offers accepted)", accepted)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("Dispatch did not return (phase 2 offers never overlapped)")
+	}
+}

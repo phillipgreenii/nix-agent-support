@@ -877,7 +877,9 @@ func offerSafely(l Listener, o Offering) (result OfferResult, dispatchFailed boo
 //     what makes a synchronous listener's accept path free to re-enter the
 //     queue (Enqueue / push-inject a follow-on event) without self-deadlocking
 //     on the non-reentrant q.mu, and stops all ingest from serializing behind
-//     an in-flight (possibly long) handler offer.
+//     an in-flight (possibly long) handler offer. Task 6.2 (bead pg2-3brwx.2):
+//     offers within a pass now run CONCURRENTLY, one goroutine per pending
+//     offer, bounded by len(pending) <= len(q.listeners).
 //  3. RECORD (locked): delete each pair's custody entry FIRST — the offer is no
 //     longer outstanding whatever its outcome, including one whose underlying
 //     entry vanished mid-offer and so never reaches the settle logic below at
@@ -978,10 +980,21 @@ func (q *Queue) Dispatch() (accepted int) {
 	// Phase 2 — OFFER (UNLOCKED). ls.l is set once at Register and never mutated,
 	// so reading it here without the lock is safe. offerSafely recovers a
 	// panicking Offer so one listener's bug cannot abort the rest of this
-	// pass's offers (see its own doc).
+	// pass's offers (see its own doc). Task 6.2 (bead pg2-3brwx.2): fan out one
+	// goroutine per pending offer, joined by wg.Wait() below before phase 3
+	// begins; each goroutine writes only its own distinct pending[i] slice
+	// index, so there is no shared mutable state between them and no extra
+	// semaphore/worker-pool limiter is needed — the bound is already
+	// len(pending) <= len(q.listeners), enforced in phase 1 above.
+	var wg sync.WaitGroup
+	wg.Add(len(pending))
 	for i := range pending {
-		pending[i].result, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, Offering{ID: pending[i].id, Event: pending[i].evt})
+		go func(i int) {
+			defer wg.Done()
+			pending[i].result, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, Offering{ID: pending[i].id, Event: pending[i].evt})
+		}(i)
 	}
+	wg.Wait()
 
 	// Phase 3 — RECORD (locked), re-validating each outcome against current state
 	// (see the locking-discipline note above).
