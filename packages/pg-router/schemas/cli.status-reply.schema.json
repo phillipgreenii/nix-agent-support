@@ -52,6 +52,15 @@
       }
     },
     "mode": { "type": "string" },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["busy", "total"],
+      "properties": {
+        "busy": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      }
+    },
     "resolvedConfig": {
       "type": "object",
       "additionalProperties": false,

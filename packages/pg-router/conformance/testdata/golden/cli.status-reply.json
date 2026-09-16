@@ -17,6 +17,7 @@
     "configPath": "/repo/.pg-router/config.toml"
   },
   "mode": "long-running",
+  "dispatch": { "busy": 1, "total": 3 },
   "resolvedConfig": {
     "repoRoot": "/repo",
     "beadsPrefix": "zr",

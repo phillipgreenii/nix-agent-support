@@ -1359,6 +1359,17 @@ func (q *Queue) SessionsInFlight() int {
 	return len(q.custody)
 }
 
+// ListenerCount reports how many listeners are currently registered with the
+// queue (len(listeners)) — the "total" half of the status/TUI dispatch
+// concurrency pair (Task 6.5; SessionsInFlight above is "busy"). It reads the
+// same lock-free atomic mirror Dispatch itself uses to size a pass's dispatch
+// ids before taking q.mu (see listenerCount's own field doc); this is simply
+// a public accessor for that already-existing counter, not a new tracking
+// mechanism. Caller must NOT hold q.mu (not that it would matter here).
+func (q *Queue) ListenerCount() int {
+	return int(q.listenerCount.Load())
+}
+
 // RunUntilIdle dispatches and expires on a fixed tick until the queue is idle
 // (INV-LIFE-1) or ctx is cancelled. It is the drive loop behind the
 // `run-until-idle` operator subcommand; a busy handler simply keeps its head

@@ -260,6 +260,10 @@ var negativeMatrix = map[string][]negativeCase{
 		{"listeners backoff malformed (neither null nor {streak,nextEligible})", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"listeners":[{"role":"r","binds":[],"enabled":true,"excluded":false,"delivered":0,"declined":0,"backoff":"soon"}]}`},
 		{"counters.unconsumedExpired wrong type (not an object)", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"counters":{"unconsumedExpired":"oops","unknownTypeRejected":{},"deduped":{}}}`},
 		{"resolvedConfig.perParticipant wrong type (not an object)", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"resolvedConfig":{"repoRoot":"/r","beadsPrefix":"p","activeRoles":0,"activeQueries":0,"perParticipant":"oops"}}`},
+		// Task 6.5: dispatch.busy/dispatch.total (the handlers-busy-of-N
+		// widening) is optional at the top level but, like counters/gates[]
+		// above, requires both its own sub-fields once present.
+		{"dispatch missing total", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"dispatch":{"busy":1}}`},
 	},
 	"cli.status": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},

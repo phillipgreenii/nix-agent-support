@@ -35,7 +35,7 @@ type topZoneData struct {
 // Task 4.6 Step 3].
 func renderTopZone(d topZoneData) string {
 	gated := anyGateSet(d.reply.Gates)
-	if text := bannerText(gated, d.quiescing, inFlightCount(d.reply)); text != "" {
+	if text := bannerText(gated, d.quiescing, inFlightCount(d.reply), d.reply.Dispatch); text != "" {
 		return renderPausedBanner(text, d.width, d.theme)
 	}
 	return renderHeader(d)
@@ -46,15 +46,31 @@ func renderTopZone(d topZoneData) string {
 // gate is set -- never both at once (INV-LIFE-2's mutual exclusivity).
 // Returns "" when neither applies, telling the caller to render the header
 // instead [design: Task 4.6 Step 3; Binding decisions 6].
-func bannerText(gated, quiescing bool, inFlight int) string {
+//
+// Both branches also carry dispatch's own busy/N summary (Task 6.5,
+// dispatchSummary below) -- additive, and distinct from -- never a
+// replacement for -- inFlight's own pinned "N in flight" wording, which is
+// UNCHANGED by this addition [design: Binding decision 5].
+func bannerText(gated, quiescing bool, inFlight int, dispatch Dispatch) string {
 	switch {
 	case gated:
-		return fmt.Sprintf("PAUSED — dispatch halted · %d in flight", inFlight)
+		return fmt.Sprintf("PAUSED — dispatch halted · %d in flight · %s", inFlight, dispatchSummary(dispatch))
 	case quiescing:
-		return "quiescing — core is draining toward exit (no gate set)"
+		return fmt.Sprintf("quiescing — core is draining toward exit (no gate set) · %s", dispatchSummary(dispatch))
 	default:
 		return ""
 	}
+}
+
+// dispatchSummary renders the additive dispatch: { busy, total } field
+// (Task 6.5) as a short "busy B/T" token, fitting alongside the existing
+// gate/banner line in every tier -- the real fan-out ratio
+// (Queue.SessionsInFlight() over the active listener count), never to be
+// confused with the pinned banner's own "N in flight" reading above (that
+// one reads Deliveries; this one reads the new dispatch object) [design:
+// Task 6.5 Files; Binding decision 5].
+func dispatchSummary(d Dispatch) string {
+	return fmt.Sprintf("busy %d/%d", d.Busy, d.Total)
 }
 
 // inFlightCount reports the number of deliveries currently in a handler's
@@ -110,12 +126,19 @@ func renderHeader(d topZoneData) string {
 		d.theme,
 	)
 
+	// busy is the additive dispatch-concurrency token (Task 6.5) rendered
+	// alongside the existing gates line in every tier -- fitting each
+	// tier's own column budget via the same render.Block/Line clipping the
+	// header already runs through below, never by hand-truncating the text
+	// itself [design: Task 6.5 Files; Binding decision 5].
+	busy := dispatchSummary(d.reply.Dispatch)
+
 	var lines []string
 	switch tier {
 	case render.TierTiny:
 		lines = []string{
 			fmt.Sprintf(" pg-router  core: %s       up %s", coreStateLabel(ci.State), uptime),
-			" gates: " + gatesSummary(d.reply.Gates),
+			" gates: " + gatesSummary(d.reply.Gates) + "  " + busy,
 		}
 	default:
 		lines = []string{
@@ -125,10 +148,11 @@ func renderHeader(d topZoneData) string {
 			fmt.Sprintf(" [%s] pg-router · core: %s · up %s", health, coreStateLabel(ci.State), uptime),
 			// Line 2: version detail, secondary to health/uptime.
 			fmt.Sprintf(" client v%s · core v%s", d.clientVersion, coreVersion),
-			// Line 3: gates + config path, tertiary -- the config path is
-			// muted so it competes least for attention (it's the longest,
-			// least actionable field on the banner).
-			" gates: " + gatesSummary(d.reply.Gates) + "   config: " + d.theme.Muted.Render(configPath),
+			// Line 3: gates + dispatch concurrency + config path, tertiary
+			// -- the config path is muted so it competes least for
+			// attention (it's the longest, least actionable field on the
+			// banner).
+			" gates: " + gatesSummary(d.reply.Gates) + "   " + busy + "   config: " + d.theme.Muted.Render(configPath),
 		}
 	}
 

@@ -1012,6 +1012,18 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		"deliveries":    []any{}, // see handleStatus's doc: no tracking-id source this docket phase
 		"queues":        statusQueues(s.q.DepthByType()),
 		"config":        map[string]any{"sources": legacySources, "handlers": legacyHandlers},
+		// dispatch.busy/dispatch.total (Task 6.5): the real-time fan-out
+		// concurrency pair, additive to the frozen status-field tree
+		// (interfaces.md's "Inspecting a running core"; wire.md's evolution
+		// strategy). busy is Queue.SessionsInFlight() (len(custody)), now
+		// able to legitimately exceed 1 post-Task 6.2's bounded fan-out;
+		// total is the active listener count. Distinct from -- and does not
+		// change -- the pinned banner's own, unrelated "N in flight" wording
+		// (banner.go's bannerText, still reading len(Deliveries)).
+		"dispatch": map[string]any{
+			"busy":  s.q.SessionsInFlight(),
+			"total": s.q.ListenerCount(),
+		},
 		"core": map[string]any{
 			"state":      s.State().String(),
 			"pid":        os.Getpid(),

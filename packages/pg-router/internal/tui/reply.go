@@ -34,6 +34,14 @@ type StatusReply struct {
 	Deliveries []Delivery     `json:"deliveries"`
 	Registry   []Registration `json:"registry"`
 
+	// Dispatch mirrors the wire's `dispatch` object (Task 6.5): the
+	// real-time fan-out concurrency pair, additive to the frozen
+	// status-field tree. A zero value (both fields 0) decodes an absent
+	// `dispatch` object the same way it decodes one present with zero
+	// counts -- composeStatusReply always sends it today, but nothing here
+	// requires that.
+	Dispatch Dispatch `json:"dispatch"`
+
 	UnmatchedBindings []string        `json:"unmatchedBindings"`
 	Activity          []ActivityEntry `json:"activity"`
 	ActivityDropped   bool            `json:"activityDropped"`
@@ -83,6 +91,17 @@ type Delivery struct {
 	ID      string `json:"id"`
 	Handler string `json:"handler"`
 	Event   string `json:"event"`
+}
+
+// Dispatch mirrors the wire's `dispatch` object (Task 6.5): Busy is
+// Queue.SessionsInFlight() (len(custody), can exceed 1 post-Task 6.2's
+// bounded fan-out) and Total is the active listener count
+// (Queue.ListenerCount()) -- the busy/N dispatch-concurrency ratio, distinct
+// from the pinned banner's own, unchanged "N in flight" wording (which
+// reads Deliveries, above).
+type Dispatch struct {
+	Busy  int `json:"busy"`
+	Total int `json:"total"`
 }
 
 // Registration mirrors one entry of the wire's `registry` array: a

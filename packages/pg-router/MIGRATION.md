@@ -472,6 +472,24 @@ works" state to fall into. Any deployment that never wrote its own `config.toml`
 behaviorally-equivalent starting point, translated to the post-move shape above) and deploy
 `pg-router-ccpool-handler` before upgrading.
 
+## Additive: `status`/TUI now report dispatch concurrency (`dispatch: { busy, total }`, Task 6.5)
+
+`status --json`'s reply (and the TUI header/banner) gained a new, optional `dispatch` object:
+`busy` (how many delivery sessions are currently in a handler's custody,
+`Queue.SessionsInFlight()`) and `total` (how many listeners are currently registered,
+`Queue.ListenerCount()`). This is **purely additive** — `additionalProperties: false` is preserved,
+`busy`/`total` are required only within `dispatch` once it is present, and nothing lands on the
+reply's own top-level `required` array — so a client parsing only the pre-existing fields, or a
+pre-Phase-6 core's reply lacking `dispatch` entirely, keeps working unchanged. **No migration step
+is owed.**
+
+Before Task 6.2's bounded fan-out, a dispatch pass offered one listener at a time, synchronously,
+so `busy` would have legitimately saturated at `0` or `1` had this field existed then. Now that a
+pass may hold more than one session in custody at once, `busy` is free to exceed `1` — the TUI's
+pinned "N in flight" banner wording is unrelated and unchanged; `dispatch.busy`/`dispatch.total` are
+the new, real fan-out signal, rendered alongside the existing gates line in every TUI tier
+(Wide/Narrow/Tiny).
+
 ### Removed with no migration path: `sessions` / `reconcile`
 
 The `sessions` and `reconcile` CLI subcommands are **deleted outright** in this change (per the

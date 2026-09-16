@@ -684,6 +684,16 @@ Inspection's **MUST** set has widened to also offer:
   status, and when it registered and was last updated — the same registry the common manager
   contract's "Registry & lifecycle" describes above, now readable through inspection; usually empty,
   since production participants do not yet self-report through it.
+- **Dispatch concurrency** — how many delivery sessions are currently in a handler's custody
+  (**busy**) against how many listeners are currently registered to receive one (**total**): the
+  real-time fan-out signal a bounded-concurrency dispatch pass makes meaningful, once a single pass
+  may hold more than one session in custody at a time (a pass that offers one listener at a time,
+  synchronously, legitimately saturates busy at 0 or 1). This is distinct from the **queue depths**
+  reading above, which counts undelivered work rather than work currently in a handler's custody,
+  and from the pinned TUI banner's own, unchanged **"N in flight"** wording. This reading is itself
+  an additive schema change discovered **after** the widening above, and carries the explicit
+  operator note this section's own rule requires: **operator-approved** as part of
+  `phillipgreenii-nix-agent-support` bead `pg2-3brwx.5` (2026-09-16).
 
 A **fourth** reading beyond this now-wider **MUST** set is still a **MAY**: a core **MAY** also
 report **which configured bindings have matched no event this run**, which is a debugging

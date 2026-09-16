@@ -247,6 +247,16 @@ per-participant-kind breakdown under the resolved-configuration field is the one
 shape is deliberately left unenumerated (role/kind-specific, optional at every level); no other
 addition's shape is left open.
 
+**A post-freeze addition: `dispatch`.** The widening above did not stop once approved: `dispatch: {
+busy, total }` (Task 6.5) lands the identical way — a new top-level property, `additionalProperties:
+false` preserved, `busy`/`total` required only WITHIN that object once it is present, and no new
+entry on the reply's own top-level `required` array — so a reply predating it, or the legacy
+four-field reply itself, keeps validating unchanged. `busy` is `Queue.SessionsInFlight()`
+(`len(custody)`, `internal/eventqueue/queue.go`) and `total` is the same package's own
+listener-count mirror (`Queue.ListenerCount()`); `interfaces.md`'s "Inspecting a running core"
+carries the behavior side, including the explicit operator note a field discovered after a freeze
+requires (`pg2-3brwx.5`).
+
 **Version pair and `ADR 0027`.** The core's own `version` field (part of the identity facts above)
 is what a continuously-polling client uses to show a version pair — `pg-router <v> · core <v>` — and
 raise a hint on mismatch. `phillipgreenii-nix-agent-support` `ADR 0027` (pa-monitor's
