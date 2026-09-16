@@ -3,6 +3,7 @@ module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-de
 go 1.26.0
 
 require (
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,3 +22,12 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// pg-connector is a sibling module in this same repo, used only by
+// internal/gather's own test suite to reuse pkg/scriptout/conformance's
+// real wire-envelope schema checker rather than hand-rolling a parallel
+// one (docket pg2-2j5ac.32, packet 4's own Files instruction) — resolved
+// natively via a local replace, the same "local replace => ../sibling"
+// pattern packages/pg-router-ccpool-handler's go.mod already uses for its
+// own sibling-module dependencies (phillipg-nix-repo-base ADR 0008).
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector => ../pg-connector
