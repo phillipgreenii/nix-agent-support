@@ -210,6 +210,10 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_PERMISSION_MODE` — claude `--permission-mode` for workers (default `dontAsk`: deny-by-default; `bypassPermissions` is the opt-in escape)
 - `PG_ROUTER_ALLOWED_TOOLS` — claude `--allowed-tools` allowlist for workers (default: a conservative set; `git push` excluded. Empty clears the flag)
 - `PG_ROUTER_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
+- `PG_ROUTER_HANDLER_COMMAND` — the argv prefix invoked, over the wire (DEC-WIRE-1), for every
+  enabled role's registered handler participant (e.g. `pg-router-ccpool-handler`). No default —
+  GOAL-MIN-1's Floor keeps this binary's own contract surface from naming a concrete tool; an
+  unconfigured deployment gets a clear per-dispatch error instead of a hardcoded participant name.
 - `PG_ROUTER_LOG_DIR` — override the event-log directory (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_LOG_DIR` — override the event-log/state directory: gates, `events.jsonl`, the discovery record (default: the standard path below)
