@@ -49,9 +49,10 @@ XDG_DATA_HOME=<snapshot> ./ceta-post evaluate --format json
 - Prove the post build IS the deployed engine by diffing its verdicts against the deployed
   wrapper across the whole corpus (`pg2-899h3`: 327,286 rows, 0 differing).
 
-**Caveat**: `evaluate` is ENGINE-ONLY. inputproc (the `rtk rewrite` `CETA_INPUT_PROCESSOR`) is
-applied only on the hook path (`main.go`), not in `evaluate`. Fine for an A/B since both arms omit
-it, but the full deployed pipeline is only covered by probes driven through the wrapper.
+**Caveat**: `evaluate` is ENGINE-ONLY. inputproc (the `rtk rewrite` processor chain,
+`CETA_INPUT_PROCESSORS` as of `tc-7m85u`) is applied only on the hook path (`main.go`), not in
+`evaluate`. Fine for an A/B since both arms omit it, but the full deployed pipeline is only
+covered by probes driven through the wrapper.
 
 ## Asklog read access — three distinct failures
 

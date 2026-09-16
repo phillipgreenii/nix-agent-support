@@ -184,11 +184,29 @@ func handlePreToolUse(input *hookio.HookInput) {
 	}
 	result := eng.EvaluateHook(input)
 
+	// updatedInput rewrites the Bash command through ceta's ORDERED
+	// input-processor chain (internal/inputproc) — but ONLY on Approve/Ask,
+	// never on NoOpinion (Abstain). This gating is DELIBERATE, not an
+	// oversight, and MUST NOT be widened to include Abstain without
+	// re-measuring: Claude Code matches its settings/--allowedTools allowlist
+	// against the REWRITTEN command, so rewriting an abstained (allowlisted)
+	// command can turn a silent auto-run into an interactive prompt. Measured
+	// 2026-09-16 (run set hooktest-D round2, bead tc-7m85u item 3): an
+	// `export X=1;` / `X=1 <cmd>` prefix on an otherwise-allowlisted command
+	// needed `Bash(export:*)` to still auto-run — R2/R4 were denied where R3
+	// (the Approve/Ask path) was allowed for the identical rewrite. See ADR
+	// 0070.
 	var updatedInput map[string]interface{}
 	if (result.Decision == hookio.Approve || result.Decision == hookio.Ask) &&
 		inputproc.Configured() && input.ToolName == "Bash" {
 		if cmd, err := input.BashCommand(); err == nil {
-			if rewritten, changed := inputproc.Process(cmd); changed {
+			payload := inputproc.Payload{
+				SessionID: input.SessionID,
+				AgentID:   input.AgentID,
+				AgentType: input.AgentType,
+				CWD:       input.CWD,
+			}
+			if rewritten, changed := inputproc.Process(cmd, payload); changed {
 				updatedInput = map[string]interface{}{
 					"command": rewritten,
 				}

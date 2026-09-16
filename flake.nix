@@ -3833,6 +3833,12 @@
                           {
                             # Stubs for the config surface the module reads/writes;
                             # the real options live in claude-code / home-manager.
+                            # `warnings` is stubbed for the same reason
+                            # test-pg-router-module stubs `assertions` above: this
+                            # bare lib.evalModules call never imports home-manager's
+                            # own base modules, which is where `warnings` normally
+                            # comes from, and the module's inputProcessor deprecation
+                            # warning (bead tc-7m85u) writes to it.
                             options = {
                               phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
                               home.homeDirectory = lib.mkOption {
@@ -3841,6 +3847,10 @@
                               };
                               home.packages = lib.mkOption {
                                 type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
                                 default = [ ];
                               };
                             };

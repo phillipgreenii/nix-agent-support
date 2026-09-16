@@ -770,7 +770,7 @@ func TestIntegration_InputProcessor_RewritesBashApprove(t *testing.T) {
 	if err := os.WriteFile(procScript, []byte("#!/bin/sh\necho \"wrapped $1\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
+	t.Setenv("CETA_INPUT_PROCESSORS", procScript)
 
 	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
 	result := runHook(t, input)
@@ -851,12 +851,12 @@ func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) 
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
 
-	// Pinned empty rather than assumed absent: an ambient CETA_INPUT_PROCESSOR
+	// Pinned empty rather than assumed absent: an ambient CETA_INPUT_PROCESSORS
 	// inherited from the developer's shell would run a REAL processor during the
 	// control, inflating it and shrinking the difference — i.e. biasing the test
 	// toward passing, the one direction that must not happen silently. Empty is
 	// how "not configured" is spelled here (TestIntegration_InputProcessor_NotConfigured).
-	t.Setenv("CETA_INPUT_PROCESSOR", "")
+	t.Setenv("CETA_INPUT_PROCESSORS", "")
 
 	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
 
@@ -872,7 +872,7 @@ func TestIntegration_InputProcessor_DeadlineKillIsVisibleOnStderr(t *testing.T) 
 	if err := os.WriteFile(procScript, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
+	t.Setenv("CETA_INPUT_PROCESSORS", procScript)
 
 	start := time.Now()
 	result, stderr := runHookOnce(t, input)
@@ -904,7 +904,7 @@ func TestIntegration_InputProcessor_SkipsNonBash(t *testing.T) {
 	if err := os.WriteFile(procScript, []byte("#!/bin/sh\necho \"wrapped $1\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
+	t.Setenv("CETA_INPUT_PROCESSORS", procScript)
 
 	input := `{"tool_name":"AskQuestion","tool_input":{},"cwd":"/tmp"}`
 	result := runHook(t, input)
@@ -926,7 +926,7 @@ func TestIntegration_InputProcessor_SkipsDeny(t *testing.T) {
 	if err := os.WriteFile(procScript, []byte("#!/bin/sh\necho \"wrapped $1\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CETA_INPUT_PROCESSOR", procScript)
+	t.Setenv("CETA_INPUT_PROCESSORS", procScript)
 
 	// nix rule rejects darwin-rebuild switch
 	input := `{"tool_name":"Bash","tool_input":{"command":"darwin-rebuild switch"},"cwd":"/tmp"}`
@@ -946,7 +946,7 @@ func TestIntegration_InputProcessor_SkipsDeny(t *testing.T) {
 func TestIntegration_InputProcessor_NotConfigured(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dir)
-	t.Setenv("CETA_INPUT_PROCESSOR", "")
+	t.Setenv("CETA_INPUT_PROCESSORS", "")
 
 	input := `{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/tmp"}`
 	result := runHook(t, input)
