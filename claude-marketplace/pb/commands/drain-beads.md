@@ -826,10 +826,27 @@ semantics, stale handling, and the squash-merge prohibition:
 the `pb:pb-gate-lifecycle` skill.
 
 **SCOPE — this gate path applies ONLY when the changed repo is a `pn workspace`
-MEMBER and its resolved strategy is `ff-merge-to-main`.** `pb gate create`
-cannot resolve `--repo` outside the workspace, and a squash-merged PR rewrites
-the patch-id so a gate could never auto-resolve (provenance: the
-`pb:pb-gate-lifecycle` skill).
+MEMBER, its resolved strategy is `ff-merge-to-main`, AND the changed FILES are
+actually applied by the terminal host's own `pn workspace apply`
+(nixos-rebuild).** The repo/strategy conditions are NECESSARY but NOT
+SUFFICIENT. `pb gate create` cannot resolve `--repo` outside the workspace, and
+a squash-merged PR rewrites the patch-id so a gate could never auto-resolve
+(provenance: the `pb:pb-gate-lifecycle` skill) — but even inside a qualifying
+repo/strategy, `pb gate check` resolves a `pn:applied` gate from the REPO's
+applied git history alone (patch-id presence in whatever the terminal built): it
+has no notion of which files within that repo a given apply actually applies.
+A same-repo change whose real deployment mechanism is something else — a k8s
+cluster deploy via `just deploy <cluster>` (kubectl/kustomize against a REMOTE
+cluster), a `just deploy-remote <ip>` to a non-terminal machine, or any other
+out-of-band mechanism — can make the gate resolve on some unrelated LATER
+`pn workspace apply`, proving nothing about whether that real deployment step
+ever ran. Before attaching the gate, ASK: does `pn workspace apply` on the
+terminal host actually cause THIS SPECIFIC change to take effect, or does it
+require a separate `just deploy` / `just deploy-remote` step? If the latter,
+take the FALLBACK below even though the repo/strategy conditions are met.
+(Discovered live: `tc-satmb` and `tc-vpaki`, two homelab k8s-manifest-only
+drain beads whose `pn:applied` gates had to be manually caught and converted to
+`human` follow-ups after this was noticed.)
 
 **FALLBACK when the gate path does NOT apply** (repo outside a pn-workspace, or
 resolved strategy `pull-request`): file the verification child as a `human`
@@ -1013,10 +1030,16 @@ arguments, behavior is otherwise unchanged.
   done (the handler's PR-3), nor MAY any primary branch be pushed, and the worktree and
   branch MUST be KEPT rather than retired (PR-4).
 - Post-deploy `pn:applied` gating applies ONLY to a pn-workspace member repo landed via
-  `ff-merge-to-main`; `pb gate create` cannot resolve `--repo` outside a workspace and a
-  squash-merged PR rewrites the patch-id. Outside that case a
-  `done-pending-apply-verification` outcome MUST take the documented `human`-child
-  fallback — it MUST NOT create an unresolvable gate, and MUST NOT route to STUCK.
+  `ff-merge-to-main` WHOSE CHANGED FILES are actually applied by the terminal host's own
+  `pn workspace apply` (nixos-rebuild) — repo/strategy alone is necessary but NOT
+  sufficient (see the POST-DEPLOY VERIFICATION GATE SCOPE note above). `pb gate create`
+  cannot resolve `--repo` outside a workspace and a squash-merged PR rewrites the
+  patch-id. Outside either case — including a same-repo change whose real deployment
+  mechanism is a k8s cluster `just deploy <cluster>` or a `just deploy-remote` to a
+  non-terminal machine — a `done-pending-apply-verification` outcome MUST take the
+  documented `human`-child fallback — it MUST NOT create an unresolvable gate (or, worse,
+  one that resolves on an unrelated apply and proves nothing about the real deployment),
+  and MUST NOT route to STUCK.
 - Landing locally leaves commits unpushed. That is expected and MUST NOT be reported —
   no heading, no probe output, no counts, no remediation path — unless being unpublished
   BLOCKS the work, which earns ONE line. Never push to clear it (read-only probes only,

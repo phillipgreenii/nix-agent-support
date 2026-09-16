@@ -126,3 +126,22 @@ Then the bead surfaces as ordinary work.
 - The follow-up has no post-deploy dependency → just create an ordinary bead.
 - You cannot commit the change yet → gate later, after committing.
 - You expect a squash-merge of the gated change → see Rule 4.
+- **The change's real application mechanism is NOT the terminal host's own
+  `pn workspace apply` / nixos-rebuild.** `pb gate check` resolves a `pn:applied`
+  gate purely from the REPO's applied git history (patch-id presence, Rule 5) — it
+  has no notion of which FILES within that repo a given apply actually applies. A
+  change whose real deployment is something else entirely — a k8s cluster deploy
+  via `just deploy <cluster>` (kubectl/kustomize against a REMOTE cluster), a
+  `just deploy-remote <ip>` to a machine that is not the terminal host, or any
+  other out-of-band mechanism — will make the gate resolve as soon as (a) the
+  commit lands on the repo's main branch AND (b) ANY subsequent
+  `pn workspace apply` runs, for ANY reason, proving nothing about whether the
+  real deployment step ever happened. Ask: does `pn workspace apply` on the
+  terminal host actually cause THIS change to take effect, or does it require a
+  separate `just deploy` / `just deploy-remote` step? If the latter, gating is
+  wrong even though the repo is a pn-workspace member on `ff-merge-to-main` — use
+  an ordinary human-labeled follow-up instead (`bd create ... --labels human
+--deps discovered-from:<impl>`, no gate). Discovered live (`tc-satmb`,
+  `tc-vpaki`): two homelab k8s-manifest-only drain beads that got `pn:applied`
+  gates via `pb gate attach-verified-child` and had to be manually caught and
+  converted to `human` follow-ups.
