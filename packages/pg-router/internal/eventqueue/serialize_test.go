@@ -193,3 +193,116 @@ func TestSerializeMarkOrphanEntryIsVacuouslyReleased(t *testing.T) {
 		t.Fatalf("accepted = %v, want [reachable] (an orphan entry of a marked type must not occupy the slot)", l.accepted)
 	}
 }
+
+// --- Task 6.3 (pg2-3brwx.3): the serialize mark becomes load-bearing -------
+//
+// The tests above prove INV-CONC-1's occupancy gate using DECLINE-based
+// simulation (fakeListener's busyRemaining / idFilterListener), which never
+// exercises a genuinely BLOCKED, concurrently-running Offer call — under the
+// pre-Task-6.2 sequential phase 2, "no two same-type offers outstanding at
+// once" held merely because a for-loop calling Offer one at a time can never
+// have two offers in flight simultaneously to begin with, occupancy gate or
+// not. Task 6.2 (bead pg2-3brwx.2) made phase 2 fan out one goroutine per
+// pendingOffer, so that free "sequential dispatch already gives you this"
+// guarantee is gone — headFor's occupancy gate (computed entirely in phase 1,
+// under q.mu, BEFORE any phase-2 goroutine starts) is now the ONLY thing
+// standing between a marked type's second event and a concurrently-launched
+// Offer call for it.
+
+// onlyIDBlockingListener matches exactly one (type, id) pair and blocks
+// inside Offer until told to proceed. Matching a single id (not merely a
+// type, as fakeListener does) is what lets two of these, registered
+// together, each own a DIFFERENT event of the SAME marked type — the shape
+// TestSerializeOccupancyWithholdsSuccessorFromConcurrentPhase2 needs so that
+// one listener's still-outstanding, genuinely-blocked offer can be checked
+// against the OTHER listener's offer never even starting.
+type onlyIDBlockingListener struct {
+	id      string
+	typ     string
+	onlyID  string
+	entered chan struct{} // closed the instant Offer is invoked
+	proceed chan struct{} // Offer blocks reading this until the test closes it
+}
+
+func newOnlyIDBlockingListener(id, typ, onlyID string) *onlyIDBlockingListener {
+	return &onlyIDBlockingListener{
+		id: id, typ: typ, onlyID: onlyID,
+		entered: make(chan struct{}),
+		proceed: make(chan struct{}),
+	}
+}
+
+func (l *onlyIDBlockingListener) ID() string           { return l.id }
+func (l *onlyIDBlockingListener) Matches(e Event) bool { return e.Type == l.typ && e.ID == l.onlyID }
+
+func (l *onlyIDBlockingListener) Offer(Offering) OfferResult {
+	close(l.entered)
+	<-l.proceed
+	return OfferResult{Accepted: true, Decline: DeclineNone}
+}
+
+// TestSerializeOccupancyWithholdsSuccessorFromConcurrentPhase2 is Task 6.3's
+// proof test. Two listeners each match a DIFFERENT event of the same marked
+// type, enqueued in order (e1, then e2); e1's listener blocks inside Offer.
+// If headFor had minted a pendingOffer for e2's listener in this SAME pass,
+// Task 6.2's goroutine-per-pendingOffer phase 2 would launch that Offer call
+// immediately — genuinely concurrently with e1's listener's still-blocked
+// one, not after it. This asserts that never happens: e2's listener is never
+// even entered until e1's listener has settled e1 (INV-CONC-1's "same TYPE,
+// different EVENTS never have outstanding offers simultaneously" — the two
+// listeners here are never offered the SAME event, so the "concurrently
+// offering one event to two listeners is fine" carve-out is untouched).
+func TestSerializeOccupancyWithholdsSuccessorFromConcurrentPhase2(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk, WithSerializeTypes("shutdown"))
+	l1 := newOnlyIDBlockingListener("l1", "shutdown", "e1")
+	l2 := newOnlyIDBlockingListener("l2", "shutdown", "e2")
+	q.Register(l1)
+	q.Register(l2)
+	mustEnqueue(t, q, evtUntil("e1", "shutdown", clk.in(time.Hour)))
+	mustEnqueue(t, q, evtUntil("e2", "shutdown", clk.in(time.Hour)))
+
+	dispatchDone := make(chan int, 1)
+	go func() { dispatchDone <- q.Dispatch() }()
+
+	select {
+	case <-l1.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("l1 was never offered e1 (timeout)")
+	}
+
+	// e1 (the occupant) is still unreleased — l1's Offer is blocked inside
+	// the running Dispatch call's phase 2. If e2's pendingOffer had been
+	// minted in the same pass, its goroutine would enter l2.Offer right
+	// away; assert it never does within a generous bounded wait.
+	select {
+	case <-l2.entered:
+		t.Fatal("l2 was offered e2 while e1 (the occupant) was still unreleased — the serialize occupancy gate failed to withhold the successor from a concurrently-launched phase-2 offer")
+	case <-time.After(200 * time.Millisecond):
+		// expected: l2 has not been entered
+	}
+
+	close(l1.proceed)
+	if accepted := <-dispatchDone; accepted != 1 {
+		t.Fatalf("first Dispatch() accepted = %d, want 1 (only e1 this pass)", accepted)
+	}
+
+	// e1 is now released: a fresh pass must reach l2 for e2 immediately.
+	close(l2.proceed) // pre-arm so this pass's Offer returns right away
+	secondDone := make(chan int, 1)
+	go func() { secondDone <- q.Dispatch() }()
+
+	select {
+	case <-l2.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("l2 was never offered e2 even after e1 released (timeout)")
+	}
+	select {
+	case accepted := <-secondDone:
+		if accepted != 1 {
+			t.Fatalf("second Dispatch() accepted = %d, want 1 (e2, now the occupant)", accepted)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second Dispatch() never returned (timeout)")
+	}
+}
