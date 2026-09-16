@@ -336,10 +336,10 @@ func (o *Orchestrator) workOneWithID(ctx context.Context, d discover.DispatchCon
 
 // wireClient returns o.Handler, or a client that always fails loudly (rather
 // than panicking on a nil interface call) when no Handler was configured —
-// a production caller (cmd/pg-router's bootCore, once a sibling task rewires
-// it) MUST set Handler; every existing test that does not is exercising a
-// path that no longer dispatches anything for real (see this task's own
-// test rewrites).
+// a production caller (cmd/pg-router's bootCore/runRunRole, wired by bead
+// pg2-g068j) always sets Handler now; every existing test that does not is
+// exercising a path that no longer dispatches anything for real (see this
+// task's own test rewrites).
 func (o *Orchestrator) wireClient() wireclient.HandlerClient {
 	if o.Handler != nil {
 		return o.Handler

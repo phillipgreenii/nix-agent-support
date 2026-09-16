@@ -528,6 +528,33 @@ func TestLoad_prToolDoesNotOverrideExplicitAllowedTools(t *testing.T) {
 	}
 }
 
+// TestDefault_handlerCommandIsEmpty locks GOAL-MIN-1's Floor (ADR 0065's
+// Register row R16, bead pg2-g068j's own doc comment on HandlerCommand):
+// pg-router's own built-in defaults MUST name no concrete tool, so an
+// unconfigured deployment gets HandlerCommand == "" — never a hardcoded
+// participant binary name.
+func TestDefault_handlerCommandIsEmpty(t *testing.T) {
+	if got := Default().HandlerCommand; got != "" {
+		t.Errorf("Default().HandlerCommand = %q, want empty (GOAL-MIN-1's Floor: no baked-in tool name)", got)
+	}
+}
+
+// TestLoad_handlerCommandEnvOverride proves PG_ROUTER_HANDLER_COMMAND folds
+// into Config.HandlerCommand — the wireclient.CommandFor seam bootCore/
+// runRunRole (cmd/pg-router) resolve every enabled role's registered handler
+// participant command through (bead pg2-g068j).
+func TestLoad_handlerCommandEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_HANDLER_COMMAND", "/usr/local/bin/pg-router-ccpool-handler")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HandlerCommand != "/usr/local/bin/pg-router-ccpool-handler" {
+		t.Errorf("HandlerCommand = %q, want /usr/local/bin/pg-router-ccpool-handler (PG_ROUTER_HANDLER_COMMAND overlay)", c.HandlerCommand)
+	}
+}
+
 // PermissionMode validation MOVED to the new module's own config validation
 // (packages/pg-router-ccpool-handler/internal/config), docket pg2-oju6w Task
 // 5.7 — pg-router itself no longer rejects an invalid PermissionMode value at

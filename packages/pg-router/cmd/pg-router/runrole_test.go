@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -122,6 +123,87 @@ func TestRunRunRole_RejectsMalformedEvent(t *testing.T) {
 				t.Fatalf("exit = %d, want %d (a malformed event must be rejected before any role/config lookup)", code, exitGeneric)
 			}
 		})
+	}
+}
+
+// writeFakeHandlerScript writes a shell script standing in for a real
+// pg-router-ccpool-handler participant: it appends "invoked:<subcommand>" to
+// logPath (the LOGFILE env var this test sets, threaded through
+// os/exec.Cmd's inherited environment — internal/wireclient.OSRunner.Run
+// passes a nil Env, so the child inherits this test process's own os.Environ()
+// unchanged), drains stdin, and replies with a minimal wire-legal success
+// body regardless of which subcommand (dispatch/postStartup/preShutdown) it
+// was invoked with.
+func writeFakeHandlerScript(t *testing.T, dir, logPath string) string {
+	t.Helper()
+	p := filepath.Join(dir, "fake-handler.sh")
+	body := "#!/bin/sh\n" +
+		"sub=\"$1\"\n" +
+		"echo \"invoked:$sub\" >> \"" + logPath + "\"\n" +
+		"cat > /dev/null\n" +
+		"echo '{\"schemaVersion\":\"1\",\"id\":\"fake\",\"outcome\":\"ok\"}'\n"
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake handler script: %v", err)
+	}
+	return p
+}
+
+// TestRunRunRole_DispatchesThroughARealHandlerParticipant is this bead's own
+// (pg2-g068j) live-repro regression test at the run-role CLI seam: BEFORE
+// this bead, runRunRole built its own Orchestrator with no Handler at all,
+// so RunOne always failed with "orchestrator: no Handler configured" — the
+// exact repro the bead's own description reproduces live against a running
+// core. This test proves the fix by exec'ing a REAL (if fake) handler
+// participant script over internal/wireclient's real DEC-WIRE-1 CLI
+// transport (OSRunner, a genuine subprocess — not a fakeHandlerClient test
+// double), and asserting both that runRunRole now exits OK and that the
+// script's own invocation log shows a real "dispatch" call reached it,
+// alongside the "preShutdown" hook this same run-role invocation always
+// brackets its dispatch with (runrole.go's own preShutdown call after
+// RunOne).
+func TestRunRunRole_DispatchesThroughARealHandlerParticipant(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "handler-invocations.log")
+	script := writeFakeHandlerScript(t, dir, logPath)
+
+	cfgPath := filepath.Join(dir, "config.toml")
+	cfgBody := `[[query]]
+name = "example-query"
+emits = ["example.ready"]
+type = "command"
+[query.command]
+argv = ["true"]
+format = "json"
+
+[[role]]
+name = "example-role"
+enabled = true
+binds = ["example.ready"]
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	t.Setenv("PG_ROUTER_CONFIG", cfgPath)
+	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config.toml"))
+	t.Setenv("PG_ROUTER_HANDLER_COMMAND", script)
+
+	eventJSON := `{"id":"try-1","type":"example.ready","payload":{"id":"item-1","type":"example.ready"}}`
+	code := runRunRole("example-role", eventJSON, false)
+	if code != exitOK {
+		t.Fatalf("runRunRole exit = %d, want %d (exitOK)", code, exitOK)
+	}
+
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("the fake handler participant was never invoked (no log file written): %v", err)
+	}
+	got := string(logged)
+	if !strings.Contains(got, "invoked:dispatch") {
+		t.Errorf("handler invocation log = %q, want it to contain invoked:dispatch (the acceptance criterion: a real handler.dispatch call reached the participant)", got)
+	}
+	if !strings.Contains(got, "invoked:preShutdown") {
+		t.Errorf("handler invocation log = %q, want it to also contain invoked:preShutdown (runrole.go's own post-dispatch hook)", got)
 	}
 }
 

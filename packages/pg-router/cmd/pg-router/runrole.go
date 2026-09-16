@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // envTestMode is PG_ROUTER_TEST_MODE (docs/decisions/cli.md's DEC-CLI-2): both
@@ -127,8 +128,9 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 		return exitUsage
 	}
 	o := &orchestrator.Orchestrator{
-		Reg: cfg.Roles,
-		Cfg: cfg,
+		Reg:     cfg.Roles,
+		Cfg:     cfg,
+		Handler: wireclient.New(handlerCommandFor(cfg)),
 	}
 	if err := o.RunOne(ctx, role, evt); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
@@ -138,9 +140,11 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 	// disclosed behavior change): mirror run.go's new preShutdown bracket at
 	// this single-dispatch scope, so the one session run-role just made is
 	// torn down (or preserved, if needs_input) the same way the daemon's own
-	// per-role sweep does at its shutdown. A nil o.Handler (Task 5.4's own
-	// CommandFor/bootCore wiring gap, out of scope here) is guarded the same
-	// way postStartupAll/preShutdownAll guard it in run.go.
+	// per-role sweep does at its shutdown. o.Handler is always non-nil now
+	// (set above, this bead pg2-g068j), but the guard stays — the same
+	// defensive shape postStartupAll/preShutdownAll use in run.go — rather
+	// than assuming a future refactor of this function can't reintroduce a
+	// nil one.
 	if o.Handler != nil {
 		if _, err := o.Handler.PreShutdown(ctx, role); err != nil {
 			slog.Warn("run-role: preShutdown failed", "role", role.Name, "err", err)

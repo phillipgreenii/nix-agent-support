@@ -183,6 +183,91 @@ func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
 	}
 }
 
+// TestHandlerCommandFor_unconfiguredIsAnError proves handlerCommandFor names
+// PG_ROUTER_HANDLER_COMMAND (not a hardcoded participant) and the role that
+// needed it, when cfg.HandlerCommand is unset — GOAL-MIN-1's Floor (this
+// bead, pg2-g068j) means this seam has no baked-in default to fall back to.
+func TestHandlerCommandFor_unconfiguredIsAnError(t *testing.T) {
+	commandFor := handlerCommandFor(config.Config{})
+	_, err := commandFor(roles.Role{Name: "r1"})
+	if err == nil {
+		t.Fatal("commandFor with no HandlerCommand configured must error, not silently resolve a command")
+	}
+	if !strings.Contains(err.Error(), "r1") || !strings.Contains(err.Error(), "PG_ROUTER_HANDLER_COMMAND") {
+		t.Errorf("err = %q, want it to name the role and PG_ROUTER_HANDLER_COMMAND", err)
+	}
+}
+
+// TestHandlerCommandFor_configuredReturnsArgv proves a configured
+// HandlerCommand resolves to a one-element argv every enabled role shares
+// (DEC-WIRE-3's "shared process backing multiple roles" is an accepted
+// shape) — wireclient.Client.Dispatch appends the subcommand itself.
+func TestHandlerCommandFor_configuredReturnsArgv(t *testing.T) {
+	commandFor := handlerCommandFor(config.Config{HandlerCommand: "pg-router-ccpool-handler"})
+	got, err := commandFor(roles.Role{Name: "r1"})
+	if err != nil {
+		t.Fatalf("commandFor: %v", err)
+	}
+	want := []string{"pg-router-ccpool-handler"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commandFor = %v, want %v", got, want)
+	}
+}
+
+// TestBootCore_wiresRealHandlerWhenUnset proves this bead's own acceptance
+// criterion at the bootCore seam: bootCore now sets o.Handler to a real
+// wireclient.Client (never leaves it nil, which used to fall through to
+// orchestrator's unconfiguredHandler and "no Handler configured") whenever
+// the caller has not already injected one.
+func TestBootCore_wiresRealHandlerWhenUnset(t *testing.T) {
+	cfg := config.Config{LogDir: shortDir(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{})
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if o.Handler == nil {
+		t.Fatal("bootCore must wire a real Handler, never leave it nil")
+	}
+	if _, ok := o.Handler.(*wireclient.Client); !ok {
+		t.Fatalf("o.Handler = %T, want *wireclient.Client", o.Handler)
+	}
+	// cfg.HandlerCommand is unset here, so the wired client's own CommandFor
+	// errors per-call rather than resolving — proving it is a REAL
+	// wireclient.Client attempting real resolution (a different, more
+	// specific error than "no Handler configured"), not a disguised
+	// unconfiguredHandler.
+	if _, err := o.Handler.Dispatch(context.Background(), roles.Role{Name: "r1"}, eventqueue.Event{}); err == nil {
+		t.Fatal("Dispatch with no HandlerCommand configured must still error")
+	} else if strings.Contains(err.Error(), "orchestrator: no Handler configured") {
+		t.Errorf("err = %q, want the wireclient-level CommandFor error, not orchestrator's own unconfiguredHandler message", err)
+	}
+}
+
+// TestBootCore_preservesCallerInjectedHandler proves bootCore's own "caller
+// wins" pattern (the same seam-override shape o.Cmd/o.Log already use): a
+// test double the caller sets BEFORE calling bootCore (this package's own
+// fakeHandlerClient, used throughout this file) survives bootCore untouched
+// — bootCore must not clobber it with a real wireclient.Client.
+func TestBootCore_preservesCallerInjectedHandler(t *testing.T) {
+	fh := &fakeHandlerClient{}
+	cfg := config.Config{LogDir: shortDir(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: fh}
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{})
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	if o.Handler != fh {
+		t.Fatalf("bootCore replaced the caller-injected Handler; got %T, want the original *fakeHandlerClient", o.Handler)
+	}
+}
+
 // selTestQuery is a minimal query.Query stand-in (mirrors internal/discover's
 // own unexported fakeQuery, copied here since that one is package-private):
 // it records whether Run was ever called and returns one canned event of its

@@ -103,6 +103,24 @@ type Config struct {
 	PRTool        string
 	SessionPrefix string
 
+	// HandlerCommand is the argv PREFIX cmd/pg-router invokes (Task 5.4's
+	// wireclient.CommandFor seam, cmd/pg-router/run.go's handlerCommandFor)
+	// for EVERY enabled role's registered handler participant, over
+	// internal/wireclient's DEC-WIRE-1 CLI transport — the "deployment
+	// concern" wireclient's own package doc and ADR 0065's Addendum both
+	// forward-reference (bead pg2-g068j resolves it). It carries NO
+	// baked-in default: GOAL-MIN-1's Floor (ADR 0065's Register row R16)
+	// requires pg-router's own contract surface — --help, config
+	// validation, built-in defaults — to name no concrete tool, so an
+	// unconfigured deployment gets a clear per-dispatch error
+	// ("wireclient: resolve command for role ...") rather than this binary
+	// silently invoking a hardcoded participant name. Env-only
+	// (PG_ROUTER_HANDLER_COMMAND), mirroring PRTool's own env-only wiring —
+	// no [pool] TOML key today. Every enabled role resolves to the SAME
+	// command today (DEC-WIRE-3's "shared process backing multiple roles"
+	// is an accepted shape, not a defect this seam needs to solve).
+	HandlerCommand string
+
 	// Autonomous, when true, passes `--autonomous` to `ccpool new` so workers'
 	// AskUserQuestion is structurally blocked (no human to answer). Default true.
 	// Can be disabled via PG_ROUTER_AUTONOMOUS=false for operator debugging.
@@ -282,6 +300,7 @@ func Default() Config {
 		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
 		PRTool:             "",        // no review-post grant by default — see defaultAllowedTools's doc comment
 		AllowedTools:       defaultAllowedTools(""),
+		HandlerCommand:     "", // no baked-in handler participant name — GOAL-MIN-1's Floor; see HandlerCommand's doc comment
 		SessionPrefix:      "pg-router-",
 		BudgetTokens:       0,                // unlimited until ccpool N3
 		BudgetCost:         0,                // unlimited until ccpool N3
@@ -328,6 +347,7 @@ func Load() (Config, error) {
 	c.PRTool = envStr("PG_ROUTER_PR_TOOL", c.PRTool)
 	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", defaultAllowedTools(c.PRTool))
 	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
+	c.HandlerCommand = envStr("PG_ROUTER_HANDLER_COMMAND", c.HandlerCommand)
 	c.BudgetTokens = int64(envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PG_ROUTER_BUDGET_TIME", c.BudgetTime)

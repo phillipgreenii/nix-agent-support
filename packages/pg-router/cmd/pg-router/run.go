@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
 // idleDrainTick is the between-pass wait runRunUntilIdle's own drive loop
@@ -39,6 +40,30 @@ import (
 // a handler; the wait only paces how quickly a role's next already-queued
 // head gets its turn.
 const idleDrainTick = 500 * time.Millisecond
+
+// handlerCommandFor builds the wireclient.CommandFor seam bootCore and
+// runRunRole both hand to wireclient.New — the "deployment/wiring layer"
+// internal/wireclient's own package doc names as the caller who answers
+// "which command does this role's registered handler participant run" (bead
+// pg2-g068j resolves the gap both that doc and ADR 0065's Addendum
+// forward-reference: docket pg2-oju6w's Task 5.4 wired everything up to this
+// seam and deliberately left this seam itself for "a sibling task").
+//
+// cfg.HandlerCommand (PG_ROUTER_HANDLER_COMMAND) carries no baked-in default
+// — see its own doc comment (internal/config/config.go) for why: GOAL-MIN-1's
+// Floor forbids this binary's own contract surface from naming a concrete
+// tool. Every enabled role resolves to the SAME command today; per-role
+// differentiation (DEC-WIRE-3 already anticipates roles sharing one handler
+// process) is left to a later change — this seam's signature (a func of
+// role, not a constant) already allows that without a further rewrite.
+func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
+	return func(role roles.Role) ([]string, error) {
+		if cfg.HandlerCommand == "" {
+			return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
+		}
+		return []string{cfg.HandlerCommand}, nil
+	}
+}
 
 // bootCore loads the durable queue, registers a queue->executor Listener
 // (orchestrator.NewListener) for every ENABLED role, and starts the core socket
@@ -86,6 +111,17 @@ const idleDrainTick = 500 * time.Millisecond
 // `enabled` (see core.Options' own docs on DeclaredRoles/ExcludedRoles/
 // ExcludedSources).
 func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
+	// o.Handler (this bead, pg2-g068j): wire a real wireclient.Client so
+	// dispatch/postStartup/preShutdown reach a registered handler
+	// participant instead of falling through to unconfiguredHandler — the
+	// "no Handler configured" gap docket pg2-oju6w's Task 5.4 left open (see
+	// handlerCommandFor's own doc). Only when unset: a caller (a test's
+	// fakeHandlerClient) that pre-set o.Handler before calling bootCore MUST
+	// keep its own value, exactly the same "caller wins" pattern o.Cmd/
+	// o.Log already follow elsewhere in this package.
+	if o.Handler == nil {
+		o.Handler = wireclient.New(handlerCommandFor(cfg))
+	}
 	store, err := eventqueue.NewFileStore(filepath.Join(cfg.LogDir, "queue.jsonl"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
@@ -222,11 +258,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 // with preShutdownAll (decision #2 — nothing consumes postStartup's outcome
 // today); a hook failure is logged and does not abort boot.
 //
-// A nil o.Handler (Task 5.4's own CommandFor/bootCore wiring gap, Section 0
-// of this task's plan — out of scope here) is guarded explicitly rather than
-// left to panic on a nil interface call: an unwired Handler is exactly the
-// same class of problem as a per-call error, so it is logged once per role
-// and skipped, not fatal.
+// A nil o.Handler is guarded explicitly rather than left to panic on a nil
+// interface call: bootCore now always wires a real wireclient.Client (this
+// bead, pg2-g068j, closing the CommandFor/bootCore gap Task 5.4 left open),
+// so this guard only still fires for a caller that builds its own
+// Orchestrator without going through bootCore at all — an unwired Handler is
+// exactly the same class of problem as a per-call error, so it is logged
+// once per role and skipped, not fatal.
 func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg config.Config) {
 	if o.Handler == nil {
 		slog.Warn("postStartup skipped: no Handler configured (internal/wireclient.HandlerClient)")

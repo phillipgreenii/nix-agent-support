@@ -19,9 +19,9 @@
 // explicitly to this task ("it depends on how docket pg2-oju6w's Task 5.4
 // wire client invokes this subcommand, which is that task's own call to
 // make"): CommandFor is the injected seam a caller (the deployment/wiring
-// layer, e.g. cmd/pg-router's bootCore once it is rewired by a sibling task)
-// supplies to answer it, so this package never has to guess the answer for
-// every possible deployment.
+// layer — cmd/pg-router's bootCore and runRunRole, wired by bead pg2-g068j's
+// handlerCommandFor) supplies to answer it, so this package never has to
+// guess the answer for every possible deployment.
 package wireclient
 
 import (
