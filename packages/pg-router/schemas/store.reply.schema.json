@@ -8,6 +8,6 @@
     "schemaVersion": { "const": "1" },
     "id": { "type": "string" },
     "ok": { "type": "boolean" },
-    "value": { "type": "string" }
+    "value": { "oneOf": [{ "enum": [null] }, { "type": "string" }] }
   }
 }

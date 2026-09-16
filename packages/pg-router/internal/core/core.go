@@ -69,8 +69,10 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/kvstore"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/wireclient"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -137,6 +139,24 @@ type Options struct {
 	Command string
 	// Now is the clock seam for the registry and the discovery record.
 	Now func() time.Time
+
+	// StoreCommand resolves the argv prefix to invoke a registered
+	// KindStorage participant's own get/put/delete verbs (Task 6.7, Binding
+	// decision 4) — the storage-side counterpart to
+	// internal/wireclient.CommandFor (INTF-HANDLER's own resolver),
+	// injected the same way: a deployment/wiring concern, never resolved by
+	// this package on its own initiative. Optional, and left unset by every
+	// caller today: no production wiring can supply one yet
+	// (internal/core/storeclient.go's package doc records the BLOCKING GAP
+	// this seam exists ahead of — internal/roles/roles.go and
+	// internal/config/config.go both document that a role no longer
+	// declares a backing command at all). nil means Service.Register's
+	// KindStorage branch still swaps Service.store to the wire-forwarding
+	// implementation (Binding decision 4's "resolved once... never
+	// re-resolved per call"), but calling it reports the missing resolver
+	// plainly rather than silently succeeding or panicking — see
+	// storeclient.go's wireStore.call.
+	StoreCommand StoreCommandFor
 
 	// DeclaredRoles is the FULL, pre-selector configured role list
 	// (roles.Role{Name, Binds, Enabled} — Enabled here is the CONFIG-level
@@ -244,12 +264,36 @@ type Service struct {
 	gates gateState
 
 	// readSem is the verb-classed admission semaphore (Task 3.10 Step 4): a
-	// non-blocking counting semaphore over exactly the {status, mon.read} read
-	// verbs, gated in handleConn AFTER frame decode (the verb lives inside the
-	// frame, so it can never sit around Accept). Every other verb — write/
-	// lifecycle verbs, unknown verbs, and any pre-Serve outcome (malformed
-	// frame, bad token, liveness probe) — never touches this semaphore.
+	// non-blocking counting semaphore over exactly the {status, mon.read, get}
+	// read verbs (get joined the allowlist at Task 6.7), gated in handleConn
+	// AFTER frame decode (the verb lives inside the frame, so it can never sit
+	// around Accept). Every other verb — write/lifecycle verbs, unknown verbs,
+	// and any pre-Serve outcome (malformed frame, bad token, liveness probe) —
+	// never touches this semaphore.
 	readSem chan struct{}
+
+	// storeMu guards store — a small, DEDICATED mutex (never mu above,
+	// mirroring gates' own "its own small mutex" precedent): store is
+	// written at most once per registered KindStorage participant, from
+	// Service.Register's KindStorage branch (Binding decision 4: "resolved
+	// ONCE at Listen/register time... never re-resolved per call"), and read
+	// on every get/put/delete socket call via getStore().
+	storeMu sync.RWMutex
+	// store is Service's kvstore.Store field (Task 6.7, Binding decision 4):
+	// kvstore.NewInMemory() from Listen until a KindStorage participant
+	// registers, the wire-forwarding implementation (storeclient.go)
+	// thereafter. No participant ever deregisters today, so there is no
+	// reverse-swap path (a documented known limitation if deregistration is
+	// ever added).
+	store kvstore.Store
+	// storeCommand / storeRunner are the wire-forwarding store's two
+	// construction seams (Options.StoreCommand and — test-only, no Options
+	// field, since no real deployment has any legitimate reason to replace
+	// the transport itself — a stub wireclient.Runner). Both stay nil in
+	// production; storeclient.go's newWireStore defaults a nil runner to
+	// wireclient.OSRunner{} the same way wireclient.Client does.
+	storeCommand StoreCommandFor
+	storeRunner  wireclient.Runner
 }
 
 // readSemCapacity bounds how many concurrent status/mon.read calls the core
@@ -281,13 +325,17 @@ const readRefusalMessage = "too many concurrent status/mon.read calls in flight;
 // doc.
 const PollerBackoffCap = 5 * time.Second
 
-// isReadVerb reports whether subcommand is one of the two admission-controlled
-// read verbs — exactly {status, mon.read}, never register (Task 3.10 Binding
-// decisions: register is a same-process Go method, unreachable via handleConn's
-// switch, so it is vacuous to name here) and never a write/lifecycle verb.
+// isReadVerb reports whether subcommand is one of the admission-controlled
+// read verbs — exactly {status, mon.read, get} (get joined the allowlist at
+// Task 6.7, Binding decision 3: it is INTF-STORE's own read operation, so it
+// is admitted and refusable with exit 9 when saturated exactly like status/
+// mon.read), never register (Task 3.10 Binding decisions: register is a
+// same-process Go method, unreachable via handleConn's switch, so it is
+// vacuous to name here) and never a write/lifecycle verb — put/delete stay
+// OUT of this allowlist, admitted unconditionally, same as ingest-event.
 func isReadVerb(subcommand string) bool {
 	switch subcommand {
-	case SubcommandStatus, SubcommandMonRead:
+	case SubcommandStatus, SubcommandMonRead, SubcommandGet:
 		return true
 	default:
 		return false
@@ -445,6 +493,8 @@ func Listen(opts Options) (*Service, error) {
 		excludedRoles:   opts.ExcludedRoles,
 		excludedSources: opts.ExcludedSources,
 		listenerCounts:  opts.ListenerCounts,
+		store:           kvstore.NewInMemory(),
+		storeCommand:    opts.StoreCommand,
 	}, nil
 }
 
@@ -531,7 +581,34 @@ func (s *Service) Register(id string, kind Kind) (Registration, error) {
 		}
 		reg, _ = s.reg.Get(id) // re-fetch: SetSubset just updated it
 	}
+	if kind == KindStorage {
+		// Resolved ONCE here, never re-resolved per call (Binding decision 4):
+		// in-memory (Listen's default) until the FIRST KindStorage participant
+		// registers, wire-forwarding from then on. s.storeCommand/s.storeRunner
+		// stay nil in every real deployment today (see Options.StoreCommand's
+		// doc and storeclient.go's package doc for the BLOCKING GAP this seam
+		// exists ahead of) — the swap still happens, but a nil storeCommand
+		// makes the resulting store report that plainly on first use rather
+		// than silently keeping the in-memory fallback.
+		s.setStore(newWireStore(id, s.storeCommand, s.storeRunner))
+	}
 	return reg, nil
+}
+
+// getStore returns Service's current kvstore.Store — the in-memory default,
+// or the wire-forwarding implementation once a KindStorage participant has
+// registered (setStore, called only from Register's KindStorage branch).
+func (s *Service) getStore() kvstore.Store {
+	s.storeMu.RLock()
+	defer s.storeMu.RUnlock()
+	return s.store
+}
+
+// setStore swaps Service's kvstore.Store field.
+func (s *Service) setStore(store kvstore.Store) {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	s.store = store
 }
 
 // ingestCallbackFor returns the ONE event-delivery callback command a
@@ -744,6 +821,12 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handlePause(stdin, stdout)
 	case SubcommandResume:
 		return s.handleResume(stdin, stdout)
+	case SubcommandGet:
+		return s.handleGet(stdin, stdout)
+	case SubcommandPut:
+		return s.handlePut(stdin, stdout)
+	case SubcommandDelete:
+		return s.handleDelete(stdin, stdout)
 	default:
 		// `session-status` deliberately lands HERE, as an unknown subcommand. It was
 		// dropped 2026-07-28: pg-router consumes no post-accept session outcome, so the
@@ -931,6 +1014,162 @@ func (s *Service) handleGateToggle(stdin io.Reader, stdout io.Writer, pause bool
 	}
 	writeBody(stdout, body)
 	return conformance.ExitOK
+}
+
+// SubcommandGet / SubcommandPut / SubcommandDelete are INTF-STORE's core-
+// initiated wire subcommands (Task 6.7): three socket verbs, each carrying
+// the existing store.request/store.reply schema pair (whose `op` field MUST
+// equal the subcommand — validated at decode below), mirroring
+// SubcommandStatus/SubcommandPause's shape exactly (Binding decision 3).
+// This — not one "store" subcommand branching internally on op — is what
+// lets isReadVerb classify SubcommandGet alone with a one-line addition to
+// its existing string switch, with no signature change and no payload
+// inspection added to admission control. No human ever runs `pg-router get`
+// (these are core<->participant wire subcommands, never a NEW
+// operator-typed CLI subcommand — the Global Constraints'
+// Operator-command-surface rule does not apply here).
+const (
+	SubcommandGet    = "get"
+	SubcommandPut    = "put"
+	SubcommandDelete = "delete"
+)
+
+// The message types backing the three INTF-STORE subcommands above
+// (schemas/, checked via package conformance — INV-INTF-2). Both schemas
+// pre-date this task (Task 0.7); this file only wires the three handlers,
+// plus store.reply's Task 6.7 widening (schemas/store.reply.schema.json:
+// `value` may now be null).
+const (
+	StoreRequestSchema = "store.request"
+	StoreReplySchema   = "store.reply"
+)
+
+// storeRequest is the decoded store.request envelope common to all three
+// verbs. Value is only ever populated for `put` — package conformance's own
+// storeRequestRule cross-field check ("value required IFF op==put") already
+// enforces that a `get`/`delete` request never carries one, so decoding into
+// a plain string here (rather than a pointer) loses nothing.
+type storeRequest struct {
+	ID    string `json:"id"`
+	Op    string `json:"op"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// decodeStoreRequest reads+validates one store.request (the conformance
+// schema check, which also runs storeRequestRule), then confirms the
+// request's own `op` field matches subcommand — SubcommandGet/Put/Delete are
+// three DISTINCT socket verbs, never one "store" verb branching on op
+// (Binding decision 3), so a mismatch (whichever way) is reported as a
+// request-shaped error, never a silent misroute to the wrong store method.
+func decodeStoreRequest(stdin io.Reader, stdout io.Writer, subcommand string) (storeRequest, bool) {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		writeBody(stdout, errorReply(subcommand+": read request: "+err.Error()))
+		return storeRequest{}, false
+	}
+	if err := conformance.CheckBytes(StoreRequestSchema, data); err != nil {
+		writeBody(stdout, errorReply(subcommand+": "+err.Error()))
+		return storeRequest{}, false
+	}
+	var req storeRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		// Unreachable once CheckBytes has passed — see handleStatus's identical note.
+		writeBody(stdout, errorReply(subcommand+": malformed request: "+err.Error()))
+		return storeRequest{}, false
+	}
+	if req.Op != subcommand {
+		writeBody(stdout, errorReply(fmt.Sprintf("%s: request op %q does not match the dispatched subcommand", subcommand, req.Op)))
+		return storeRequest{}, false
+	}
+	return req, true
+}
+
+// writeStoreReply marshals+writes one store.reply body, mirroring
+// handleStatus's identical marshal-error handling.
+func writeStoreReply(stdout io.Writer, reply map[string]any, verb string) int {
+	body, err := json.Marshal(reply)
+	if err != nil { // unreachable: reply holds only JSON-safe scalars
+		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
+		return conformance.ExitError
+	}
+	writeBody(stdout, body)
+	return conformance.ExitOK
+}
+
+// handleGet runs the `get` socket verb (Task 6.7): a read verb (isReadVerb),
+// resolved against Service.store (the in-memory default, or the
+// wire-forwarding implementation once a KindStorage participant has
+// registered — Binding decision 4). A missing key is reported as
+// `{ok:false, value:null}` — kvstore.Store's own documented "absent" idiom
+// (its Get doc: "ok=false and a nil error... is how absent is
+// represented"), never an error, and never an OMITTED `value` field: the
+// widened store.reply.schema.json (this task) is what lets `value` carry an
+// explicit null here rather than one caller having to infer absence from a
+// missing key.
+func (s *Service) handleGet(stdin io.Reader, stdout io.Writer) int {
+	req, ok := decodeStoreRequest(stdin, stdout, SubcommandGet)
+	if !ok {
+		return conformance.ExitError
+	}
+	value, found, err := s.getStore().Get(req.Key)
+	if err != nil {
+		writeBody(stdout, errorReply("get: "+err.Error()))
+		return conformance.ExitError
+	}
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"id":            req.ID,
+		"ok":            found,
+	}
+	if found {
+		reply["value"] = value
+	} else {
+		reply["value"] = nil
+	}
+	return writeStoreReply(stdout, reply, "get")
+}
+
+// handlePut runs the `put` socket verb (Task 6.7): a write verb (isReadVerb
+// excludes it, admitted unconditionally same as ingest-event), resolved
+// against Service.store exactly like handleGet.
+func (s *Service) handlePut(stdin io.Reader, stdout io.Writer) int {
+	req, ok := decodeStoreRequest(stdin, stdout, SubcommandPut)
+	if !ok {
+		return conformance.ExitError
+	}
+	if err := s.getStore().Put(req.Key, req.Value); err != nil {
+		writeBody(stdout, errorReply("put: "+err.Error()))
+		return conformance.ExitError
+	}
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"id":            req.ID,
+		"ok":            true,
+	}
+	return writeStoreReply(stdout, reply, "put")
+}
+
+// handleDelete runs the `delete` socket verb (Task 6.7): a write verb
+// (isReadVerb excludes it), resolved against Service.store exactly like
+// handleGet/handlePut. Deleting an absent key is a no-op, not an error
+// (kvstore.Store's own documented Delete contract), so this always reports
+// ok=true once the underlying store call itself does not error.
+func (s *Service) handleDelete(stdin io.Reader, stdout io.Writer) int {
+	req, ok := decodeStoreRequest(stdin, stdout, SubcommandDelete)
+	if !ok {
+		return conformance.ExitError
+	}
+	if err := s.getStore().Delete(req.Key); err != nil {
+		writeBody(stdout, errorReply("delete: "+err.Error()))
+		return conformance.ExitError
+	}
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"id":            req.ID,
+		"ok":            true,
+	}
+	return writeStoreReply(stdout, reply, "delete")
 }
 
 // activityReadWindow bounds one status reply's activity[] slice. It matches

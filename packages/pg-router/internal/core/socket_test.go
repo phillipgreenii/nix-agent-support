@@ -688,6 +688,74 @@ func TestSaturatedReadSemaphoreRefusesMonRead(t *testing.T) {
 	}
 }
 
+// get joins the read-admission allowlist at Task 6.7 (Binding decision 3):
+// a saturated get call is refused with exit 9 exactly like status/mon.read,
+// never blocked-then-succeed.
+func TestSaturatedReadSemaphoreRefusesGet(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	client, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	reply, code, err := client.Call(context.Background(), SubcommandGet,
+		[]byte(`{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated get call", code, conformance.ExitBusy)
+	}
+	if !strings.Contains(string(reply), "too many concurrent") {
+		t.Fatalf("reply = %s, want the human-readable refusal message", reply)
+	}
+}
+
+// put/delete are write verbs (Task 6.7, Binding decision 3): with the read
+// semaphore fully saturated, both must still succeed — never refused with
+// exit 9 by this semaphore, same as ingest-event today.
+func TestSaturatedReadSemaphoreAllowsPutDelete(t *testing.T) {
+	dir := shortDir(t)
+	svc, ref := startService(t, dir)
+	release := acquireNReadSlots(t, svc, readSemCapacity)
+	defer release()
+
+	// Client is single-use (one connection, one request/reply — its own
+	// doc), so put and delete each dial their own connection rather than
+	// sharing one, the same way every other Call in this file does.
+	putClient, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = putClient.Close() }()
+	putReply, code, err := putClient.Call(context.Background(), SubcommandPut,
+		[]byte(`{"schemaVersion":"1","id":"s-1","op":"put","key":"k1","value":"v1"}`), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call put: %v", err)
+	}
+	if code != conformance.ExitOK {
+		t.Fatalf("put with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, conformance.ExitOK, putReply)
+	}
+
+	delClient, err := Dial(ref, DefaultProbeTimeout)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer func() { _ = delClient.Close() }()
+	delReply, code, err := delClient.Call(context.Background(), SubcommandDelete,
+		[]byte(`{"schemaVersion":"1","id":"s-1","op":"delete","key":"k1"}`), CallOptions{})
+	if err != nil {
+		t.Fatalf("Call delete: %v", err)
+	}
+	if code != conformance.ExitOK {
+		t.Fatalf("delete with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, conformance.ExitOK, delReply)
+	}
+}
+
 // TestExitBusy_IsThePollerBackoffSignal documents+tests Task 3.10's
 // poller-side contract (Step 6; the poller itself is Task 4.0's, out of
 // scope here): a saturated status/mon.read call returns exit 9 -- the exact

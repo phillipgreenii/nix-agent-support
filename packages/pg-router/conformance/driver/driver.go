@@ -229,6 +229,11 @@ var negativeMatrix = map[string][]negativeCase{
 	},
 	"store.reply": {
 		{"wrong-type ok", `{"schemaVersion":"1","id":"s","ok":"yes"}`},
+		// Task 6.7 widened value to accept null (the absent-key wire shape,
+		// {value: null}) alongside string — this proves the widening did NOT
+		// also open the door to any other JSON type: a number is neither
+		// branch of the oneOf and must still be rejected.
+		{"wrong-type value (non-null, non-string)", `{"schemaVersion":"1","id":"s","value":5}`},
 	},
 	"cli.ingest-event": {
 		{"missing events", `{"schemaVersion":"1","id":"t"}`},
