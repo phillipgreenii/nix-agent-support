@@ -1,5 +1,4 @@
 ---
-disable-model-invocation: true
 description: >-
   Autonomously drain this pn-workspace's beads queue as an orchestrator: loop
   claim → isolate → delegate the implementation to a subagent → validate → land
