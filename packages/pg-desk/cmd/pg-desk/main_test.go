@@ -22,10 +22,14 @@ import (
 // would try to open the real default store and block forever on
 // http.ListenAndServe. Likewise, packet 9 gave import-pg-pr-annotations a
 // real implementation (see import_pg_pr_annotations.go), so it is covered by
-// import_test.go instead.
+// import_test.go instead. "run" is absent for the same reason as of packet
+// 6: it now has a real implementation for <type>=pr (run.go,
+// internal/pipeline), covered by run_test.go and internal/pipeline's own
+// tests instead — only run issue/run thread still return "not
+// implemented" (run_test.go's own TestRunCmdRejectsUnsupportedEntityType).
 func TestStubSubcommandsRespondNotImplemented(t *testing.T) {
 	names := []string{
-		"run", "open", "hide", "unhide", "wip", "feedback", "show",
+		"open", "hide", "unhide", "wip", "feedback", "show",
 		"status", "doctor", "heartbeat", "heartbeat-item", "ledger",
 	}
 
