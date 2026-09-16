@@ -229,7 +229,7 @@ func TestDispatch_PerListenerCountersIncrementUnderExistingLock(t *testing.T) {
 	q.Dispatch() // e1 accepted by "h1"
 
 	q.mu.Lock()
-	delivered, declined := q.listeners[0].delivered, q.listeners[0].declined
+	delivered, declined := q.listeners[0].delivered.Load(), q.listeners[0].declined.Load()
 	q.mu.Unlock()
 	if delivered != 1 || declined != 0 {
 		t.Fatalf("h1 counters = delivered=%d declined=%d, want delivered=1 declined=0", delivered, declined)
@@ -242,7 +242,7 @@ func TestDispatch_PerListenerCountersIncrementUnderExistingLock(t *testing.T) {
 	q.Dispatch()
 
 	q.mu.Lock()
-	d2, decl2 := q.listeners[1].delivered, q.listeners[1].declined
+	d2, decl2 := q.listeners[1].delivered.Load(), q.listeners[1].declined.Load()
 	gotDelivered, gotDeclined := q.delivered.Load(), q.declined.Load()
 	q.mu.Unlock()
 	if d2 != 0 || decl2 != 1 {

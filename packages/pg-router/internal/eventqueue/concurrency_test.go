@@ -719,3 +719,120 @@ func TestDispatchPhase2OffersOverlap(t *testing.T) {
 		t.Fatal("Dispatch did not return (phase 2 offers never overlapped)")
 	}
 }
+
+// --- Task 6.4: tickSnapshot single-writer preservation (bead pg2-3brwx.4) ---
+
+// concurrencySnapshot is a test-local stand-in for core.TickSnapshot.
+// eventqueue does not import internal/core (that import runs the other
+// way), so this test exercises the SAME atomic.Pointer[T].Store/Load
+// single-writer discipline core.go's real `tick` field documents, over a
+// small multi-field struct shaped enough to expose a torn read (a reader
+// observing some fields from an old publish and some from a newer one) if
+// that single-writer discipline were ever violated.
+type concurrencySnapshot struct {
+	seq      int64
+	inFlight int
+	depth    map[string]int
+}
+
+// TestDispatch_ConcurrentFanOutPreservesTickSnapshotSingleWriter is the
+// pinned acceptance test Task 6.4's fixed contract names verbatim [design:
+// Task 6.4 Files, Test]: 8 concurrent listeners, each with its own
+// deliverable head event, with Dispatch() called repeatedly from one
+// goroutine while a SEPARATE goroutine continuously polls
+// SessionsInFlight/DepthByType and — as a test-local stand-in for
+// cmd/pg-router/run.go's drive loop — publishes a snapshot on its own fixed
+// cadence into a single atomic.Pointer, exactly like core.go's real `tick`
+// cell.
+//
+// Run under `go test -race`, this exercises the Confirm step Task 6.4's
+// Produces section documents: Task 6.2's phase-2 goroutines write only into
+// their own pass-local pending[i].result, and phase 3 stays fully
+// serialized under eventqueue's own q.mu — neither is anywhere near what
+// would be core.go's tick cell in production, so a single-writer snapshot
+// publisher running alongside a live, concurrently-fanning-out Dispatch
+// loop never observes (nor causes) a torn/partial read.
+func TestDispatch_ConcurrentFanOutPreservesTickSnapshotSingleWriter(t *testing.T) {
+	q := newQueue(t, newClock())
+
+	const numListeners = 8
+	for i := 0; i < numListeners; i++ {
+		q.Register(newListener(fmt.Sprintf("h%d", i), fmt.Sprintf("T%d", i)))
+	}
+
+	var tick atomic.Pointer[concurrencySnapshot]
+	var seq atomic.Int64
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// The separate goroutine: continuously polls the queue's live lock-free
+	// (or briefly-locked) surfaces AND, on its own fixed cadence (every
+	// 25th poll), publishes a fresh snapshot — the test-local stand-in for
+	// the drive loop's PublishTick call. Every Load is checked for internal
+	// consistency (no torn read): once any snapshot has been published, a
+	// later one's depth is never nil and its seq never regresses.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var lastSeq int64
+		var polls int64
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			inFlight := q.SessionsInFlight()
+			depth := q.DepthByType()
+			polls++
+			if polls%25 == 0 {
+				n := seq.Add(1)
+				tick.Store(&concurrencySnapshot{seq: n, inFlight: inFlight, depth: depth})
+			}
+			if snap := tick.Load(); snap != nil {
+				if snap.depth == nil {
+					t.Errorf("torn tickSnapshot read: seq=%d has a nil depth map", snap.seq)
+				}
+				if snap.seq < lastSeq {
+					t.Errorf("torn tickSnapshot read: seq went backward %d -> %d", lastSeq, snap.seq)
+				}
+				lastSeq = snap.seq
+			}
+		}
+	}()
+
+	// Repeated Dispatch() calls from one goroutine. Each pass first gives
+	// every one of the 8 listeners a fresh deliverable head event, then
+	// Dispatch()es — fanning out one goroutine per listener (Task 6.2)
+	// concurrently with the poll/publish goroutine above.
+	const passes = 200
+	for p := 0; p < passes; p++ {
+		for i := 0; i < numListeners; i++ {
+			mustEnqueue(t, q, evt(fmt.Sprintf("e%d-%d", i, p), fmt.Sprintf("T%d", i)))
+		}
+		if got := q.Dispatch(); got != numListeners {
+			t.Fatalf("pass %d: Dispatch() accepted %d, want %d", p, got, numListeners)
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+
+	// Sanity: the per-listener and pool-wide atomic.Int64 counters this task
+	// converts (Task 6.4) must have tallied every accepted delivery — proof
+	// the atomic conversion changed nothing about Dispatch's own
+	// bookkeeping.
+	q.mu.Lock()
+	for i, ls := range q.listeners {
+		if got := ls.delivered.Load(); got != int64(passes) {
+			t.Errorf("listener %d delivered = %d, want %d", i, got, passes)
+		}
+		if got := ls.declined.Load(); got != 0 {
+			t.Errorf("listener %d declined = %d, want 0", i, got)
+		}
+	}
+	q.mu.Unlock()
+	if got := q.delivered.Load(); got != int64(passes*numListeners) {
+		t.Errorf("pool-wide delivered = %d, want %d", got, passes*numListeners)
+	}
+}

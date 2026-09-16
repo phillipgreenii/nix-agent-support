@@ -199,12 +199,15 @@ type listenerState struct {
 	// delivered/declined are Task 2.3's per-listener delivery counters (Step
 	// 2.3.6), incremented inside Dispatch's phase 3 ONLY — under the
 	// ALREADY-HELD q.mu, never from an observer hook (those fire unlocked,
-	// Step 2.3.5) and never behind a separate mutex. Plain ints are safe
-	// here precisely because every access is under q.mu; Queue's own
-	// pool-wide delivered/declined below are atomic because THOSE are read
-	// without q.mu (a future status surface, Task 3.0).
-	delivered int
-	declined  int
+	// Step 2.3.5) and never behind a separate mutex. Task 6.4 (bead
+	// pg2-3brwx.4) widens these from plain int to atomic.Int64, matching
+	// Queue's own pool-wide delivered/declined below: phase 3's increments
+	// themselves stay under q.mu (so remain single-writer even now that
+	// Task 6.2 made phase 2 concurrent — that concurrency never reaches
+	// phase 3's bookkeeping), but the atomic type keeps this field's access
+	// discipline identical to the pool-wide counters it mirrors.
+	delivered atomic.Int64
+	declined  atomic.Int64
 }
 
 // eligibleNow reports whether ls's retry-cadence cool-down (if any) for head
@@ -1001,10 +1004,11 @@ func (q *Queue) Dispatch() (accepted int) {
 	//
 	// Task 2.3 (Steps 2.3.5 + 2.3.6) adds two things to this phase, both
 	// staying strictly under the ALREADY-HELD q.mu:
-	//   - per-listener delivered/declined counters (p.ls.delivered/declined)
-	//     and the pool-wide atomic counterparts (q.delivered/q.declined) —
-	//     incremented HERE, never from an observer hook, never behind a
-	//     separate mutex;
+	//   - per-listener delivered/declined counters (p.ls.delivered/declined,
+	//     atomic.Int64 since Task 6.4 — see listenerState's own doc) and the
+	//     pool-wide atomic counterparts (q.delivered/q.declined) —
+	//     incremented HERE via .Add(1), never from an observer hook, never
+	//     behind a separate mutex;
 	//   - every OnAccept/OnDeclined observer notification is queued into
 	//     `signals` instead of firing inline, and fanned out ONLY after q.mu
 	//     is released below (panic-safe unlockOnce) — the lock-order
@@ -1050,7 +1054,7 @@ func (q *Queue) Dispatch() (accepted int) {
 			if p.dispatchFailed {
 				signals = append(signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type})
 			} else {
-				p.ls.declined++
+				p.ls.declined.Add(1)
 				q.declined.Add(1)
 				signals = append(signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline})
 			}
@@ -1086,7 +1090,7 @@ func (q *Queue) Dispatch() (accepted int) {
 			slog.Error("eventqueue: accept-append failed; event will redeliver on restart until the write succeeds",
 				"eventId", p.evt.ID, "listenerId", lid, "err", err)
 		}
-		p.ls.delivered++
+		p.ls.delivered.Add(1)
 		q.delivered.Add(1)
 		signals = append(signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid})
 		accepted++

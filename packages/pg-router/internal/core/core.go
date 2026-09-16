@@ -229,6 +229,17 @@ type Service struct {
 	// tick is written by PublishTick (status.go) and gates is written by
 	// ObserveGateFromTick/ObserveGateFromSocketVerb (status.go, its own small
 	// mutex — never mu above).
+	//
+	// tick's single-writer discipline survives Task 6.2's concurrent
+	// phase-2 fan-out in internal/eventqueue unchanged (Task 6.4, bead
+	// pg2-3brwx.4 — a Confirm step, no code change needed here): each
+	// phase-2 goroutine writes only into its own pass-local
+	// pending[i].result, and phase 3 — still fully serialized under
+	// eventqueue's own q.mu — writes only into q.custody/q.inFlight, the
+	// per-listener/pool-wide delivery counters, the durable store, and the
+	// queued observer signals. None of that ever reaches this cell.
+	// cmd/pg-router/run.go's drive loop remains the ONLY caller of
+	// tick.Store (via PublishTick), exactly as before Task 6.2.
 	tick  atomic.Pointer[TickSnapshot]
 	gates gateState
 
