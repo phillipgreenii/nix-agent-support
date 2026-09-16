@@ -1,0 +1,70 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+)
+
+// Entity is one row of the entity table: the last gathered facts for a
+// single (repo, entity_type, entity_id), as JSON, per the design doc's
+// section 7.6. Written by the gather stage (a later packet in this
+// docket); this packet exposes the writer/reader only.
+type Entity struct {
+	Repo        string
+	EntityType  string
+	EntityID    string
+	Facts       string // JSON blob of last-gathered facts
+	AsOf        string // RFC3339 timestamp
+	Stale       bool
+	ContentHash string
+	HeadSHA     string // set for files/commits only; empty otherwise
+}
+
+// UpsertEntity inserts or replaces the entity row keyed by
+// (Repo, EntityType, EntityID).
+func (s *Store) UpsertEntity(e Entity) error {
+	_, err := s.sql.Exec(
+		`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
+		   facts = excluded.facts,
+		   as_of = excluded.as_of,
+		   stale = excluded.stale,
+		   content_hash = excluded.content_hash,
+		   head_sha = excluded.head_sha`,
+		e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA),
+	)
+	if err != nil {
+		return fmt.Errorf("store: upsert entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
+	}
+	return nil
+}
+
+// GetEntity returns the entity row for (repo, entityType, entityID), or
+// found=false if no such row exists.
+func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, found bool, err error) {
+	var headSHA sql.NullString
+	row := s.sql.QueryRow(
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha
+		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
+		repo, entityType, entityID,
+	)
+	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA); err != nil {
+		if err == sql.ErrNoRows {
+			return Entity{}, false, nil
+		}
+		return Entity{}, false, fmt.Errorf("store: get entity (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	entity.HeadSHA = headSHA.String
+	return entity, true, nil
+}
+
+// nullableString maps an empty Go string to a SQL NULL, so optional
+// TEXT columns (e.g. entity.head_sha) round-trip as NULL rather than "".
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
