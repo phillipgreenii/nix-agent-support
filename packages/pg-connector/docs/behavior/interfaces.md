@@ -330,6 +330,18 @@ sequenceDiagram
   unlike `list`'s `sources[]`); `ledger show`/`ledger clear` surface a failure only as a plain CLI
   error. Nothing here writes to stderr beyond the ordinary wire-level error propagation every other
   verb in this catalog already has. Feeds the observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.42.1).** The umbrella entity cache engine (`cmd/pg-connector/cache.go`
+  — the per-`(type, backend)` on-disk store of full entity copies, its max-age/LRU/tombstone
+  eviction rules, and the per-type/per-backend opt-out checks) emits nothing yet over
+  OpenTelemetry or Prometheus and writes no structured logs of its own: like the ledger engine
+  before it (bead `pg2-2j5ac.30.1`'s telemetry note, above), this packet has no CLI surface of
+  its own — it produces only a Go API a later packet wires into `show`/`list`/`changes` and a
+  `cache` verb group — so there is no operator-facing entry point yet for a metric/trace/log to
+  attach to. A `cacheEnabled` capabilities-call failure fails open silently (by design — see the
+  function's own doc comment) rather than surfacing anywhere; every other failure surfaces only
+  as a returned Go `error`, propagated by whatever CLI verb eventually calls it. Revisit once the
+  sibling verbs/integration packets of this same phase land an actual operator-facing surface.
+  Feeds the observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`

@@ -64,6 +64,20 @@ distinction come from the behavior-docs method
   from that backend's own registered config, resolved centrally by that capability's dispatch
   table before ever reaching the backend's own `List` implementation (`INV-ERR-3`).
 
+## Caching
+
+- **`INV-CACHE-1`** <!-- uuid: 892af663-9a46-4229-93d3-ac43d73f73c6 --> — The umbrella-owned
+  entity cache (`cmd/pg-connector/cache.go`, phase 14) is default-on per type, with an explicit
+  opt-out per type (a `state:` key) and per backend (a `capabilities` `vocabulary` flag); an
+  opted-out `(type, backend)` pair still keeps its ledger (`INV-STATE-1`'s ledger is unaffected by
+  a cache opt-out). The cache MUST NOT hold any content a backend did not already report to this
+  umbrella through an ordinary op response — it is a copy of what was already returned, not an
+  independent source of entity data. Caching this umbrella's own copy of what a stateless backend
+  already returned does NOT weaken `D3` (statelessness, `INV-STATE-1`): the backend itself gains
+  no store; only the umbrella does. A capabilities-call failure while checking a backend's own
+  per-backend opt-out MUST fail OPEN (caching stays enabled for that backend) rather than closed —
+  an already-unavailable backend must not be made doubly unavailable by a second failed call.
+
 ## Versioning
 
 - **`INV-VER-1`** <!-- uuid: a47b92f1-34ec-451e-93ca-0e41e2f2081d --> — Every wire response MUST
