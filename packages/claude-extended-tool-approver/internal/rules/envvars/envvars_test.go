@@ -323,10 +323,14 @@ func TestEnvVars_InCommandAssignedVar_Approve(t *testing.T) {
 // pg2-qhhil's Acceptance Criteria calls for by name: the narrow middle option MUST
 // NOT widen into the blanket-widen shape it was deliberately carved out of. Every
 // case here names a variable this seam CANNOT resolve — either because it is
-// AMBIENT (never assigned by the command's own text: $PWD, $JAVA_HOME, $TMP), or
-// because the in-command binding was revoked, was a different name, or was scoped
-// out (prefix assignment) — so every one MUST still reach the decisive Ask, exactly
-// as before this bead.
+// AMBIENT (never assigned by the command's own text: $JAVA_HOME, $TMP — $PWD
+// itself moved to TestEnvVars_PWDRootedComponent_Approve, pg2-pi7pz, 2026-09-17:
+// operator override of pg2-553z3's KEEP STRICT for that one ambient reference
+// specifically, resolved through a SEPARATE code path from this seam's
+// in-command $VAR resolution, so it no longer belongs in a test about THIS
+// seam's own ambient fallthrough), or because the in-command binding was
+// revoked, was a different name, or was scoped out (prefix assignment) — so
+// every one MUST still reach the decisive Ask, exactly as before this bead.
 //
 // Each command carries a trailing `; true` (pg2-7sqk8): without a real downstream
 // consumer, mechanism 2 (downstreamConsumerExists) would relieve every one of these
@@ -337,9 +341,6 @@ func TestEnvVars_InCommandAssignedVar_Approve(t *testing.T) {
 // the value-based ambient-variable question it was written for.
 func TestEnvVars_InCommandAssignedVar_AmbientStaysAsk(t *testing.T) {
 	commands := []string{
-		// THE bead's own coherence example: $PWD is never assigned by the command,
-		// so it must keep asking exactly like the empty-component case it mirrors.
-		`export PATH="$PWD/bin:$PATH"; true`,
 		`export PATH="$JAVA_HOME/bin:$PATH"; true`,
 		`export PATH="$TMP:$PATH"; true`,
 		// The referenced name is simply never assigned anywhere in this command.
@@ -369,6 +370,126 @@ func TestEnvVars_InCommandAssignedVar_AmbientStaysAsk(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestEnvVars_PWDRootedComponent_Approve pins pg2-pi7pz's relief: an operator
+// override, 2026-09-17, of pg2-553z3's 2026-07-30 "KEEP STRICT" ruling for the
+// ambient-$PWD shape specifically (see the askVars doc comment's OPERATOR
+// RULING sections for the full provenance). A PATH component that is an
+// ambient $PWD/${PWD} reference with a literal absolute-shaped suffix is now
+// affirmatively safe, exactly like a literal static-absolute component.
+//
+// The first two rows are the REAL corpus shape this bead was measured against
+// (12 rows, all `export PATH="<static-prefix>:$PWD/<suffix>:$PATH"` or the
+// two-component variant); the rest exercise the braced spelling, the
+// append-side position, and combining the relief with the OTHER surviving
+// exceptions (pg2-qhhil's in-command var, pg2-kzqw2's safe substitution)
+// beside a static component, all in one value.
+func TestEnvVars_PWDRootedComponent_Approve(t *testing.T) {
+	commands := []string{
+		// THE real corpus shape (pg2-pi7pz's own measured basis).
+		`export PATH="/tmp/gozr-go125/go/bin:$PWD/www/starterview/bin:$PATH"`,
+		`export PATH="/tmp/gozr-go125/go/bin:$PWD/bin:$PWD/www/starterview/bin:$PATH"`,
+		// Braced spelling.
+		`export PATH="${PWD}/bin:$PATH"`,
+		// Append side, not just prepend.
+		`export PATH="$PATH:$PWD/bin"`,
+		// Bare spelling (no `export`).
+		`PATH="$PWD/bin:$PATH"`,
+		// Beside the OTHER surviving exceptions in the same value.
+		`bindir=/tmp/x/bin; export PATH="$bindir:$PWD/bin:$PATH"`,
+		`export PATH="$(dirname /usr/local/bin/go)/bin:$PWD/bin:$PATH"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_PWDRootedComponent_StillAsk is pg2-pi7pz's own required negative
+// test: the relief MUST NOT widen beyond its narrow gate.
+//
+// Each command carries a trailing `; true` (pg2-7sqk8), for the same reason
+// TestEnvVars_InCommandAssignedVar_AmbientStaysAsk's own comment gives.
+func TestEnvVars_PWDRootedComponent_StillAsk(t *testing.T) {
+	commands := []string{
+		// A bare, suffix-less $PWD/${PWD} names the CWD itself — a STRICTLY
+		// WORSE instance of the empty-component CWD hazard this relief's own
+		// gate (isStaticAbsolutePath on the suffix) exists to keep refusing.
+		`export PATH="$PWD:$PATH"; true`,
+		`export PATH="${PWD}:$PATH"; true`,
+		// $PWDX names a DIFFERENT, still-ambient variable (bash reads the
+		// longest valid identifier after '$') — not $PWD with a literal "X".
+		`export PATH="$PWDX/bin:$PATH"; true`,
+		// $PWD immediately followed by a non-'/' character is not a clean
+		// path-separated continuation and is refused rather than guessed at.
+		`export PATH="$PWD-backup/bin:$PATH"; true`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Ask {
+					t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestPreservesCallerValue_PWDRootedComponent_HOMENotRelieved is the EXPLICIT
+// HOME-non-regression pin pg2-pi7pz's own scope caution demands, mirroring
+// TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved's structure:
+// this bead's relief is gated to `ev.Name == "PATH"` in preservesCallerValue,
+// so the identical $PWD-rooted-suffix shape that Approves for PATH must NOT
+// newly Approve for HOME — HOME's own decisive fallback (Reject, pg2-sir2l)
+// is unchanged.
+func TestPreservesCallerValue_PWDRootedComponent_HOMENotRelieved(t *testing.T) {
+	cmd := `HOME="$PWD/fakehome" ./run.sh`
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		t.Run(ctor.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := hookio.Verdict(ctor.rule.Evaluate(input))
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want reject (HOME's own fallback, unchanged by the PATH-only pg2-pi7pz relief)", cmd, got.Decision, got.Reason)
+			}
+		})
 	}
 }
 
@@ -1015,6 +1136,15 @@ func TestEnvVars_PersistentAssignment_ConsumerFound_HomeStillRejects(t *testing.
 // found — mechanism 1/2 never widen an Approve, and never relieve a genuinely
 // strict (ambient-variable) Ask, once something downstream actually consumes the
 // change.
+//
+// UPDATED (pg2-pi7pz, 2026-09-17, operator override of pg2-553z3's KEEP STRICT
+// for the ambient-$PWD shape specifically): the OLD strict-only expectation for
+// `$PWD/bin:$PATH` is REMOVED — that shape now Approves, beside a consumer or
+// not, exactly like every other verified-safe preserve-form value. The
+// pg2-553z3 "strict fallback beside a consumer" check this test also pins is
+// re-pointed at `$JAVA_HOME`, an ambient name this ruling did NOT override, so
+// the test still proves what it always proved: mechanism 1/2 never relieve a
+// genuinely still-strict Ask once a real consumer is in scope.
 func TestEnvVars_ExistingValueReliefs_UnaffectedWhenConsumerFound(t *testing.T) {
 	r := New()
 	// The verified-safe preserve shape still Approves beside a consumer — mechanism
@@ -1023,9 +1153,17 @@ func TestEnvVars_ExistingValueReliefs_UnaffectedWhenConsumerFound(t *testing.T) 
 	if got := hookio.Verdict(r.Evaluate(approve)); got.Decision != hookio.Approve {
 		t.Errorf("preserve-form beside a consumer: got %s (%s), want approve (unaffected by pg2-7sqk8)", got.Decision, got.Reason)
 	}
-	// pg2-553z3's own strict fallback ($PWD is ambient, never assigned by the
-	// command's own text) still asks once a real consumer is in scope.
-	ambientAsk := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": `export PATH="$PWD/bin:$PATH"; git push --force origin main`})}
+	// pg2-pi7pz's $PWD-rooted relief also Approves beside a consumer — the SAME
+	// "fallback, never reached once the value already cleared" property, now
+	// true of this shape too.
+	pwdApprove := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": `export PATH="$PWD/bin:$PATH"; git push --force origin main`})}
+	if got := hookio.Verdict(r.Evaluate(pwdApprove)); got.Decision != hookio.Approve {
+		t.Errorf("$PWD-rooted relief beside a consumer: got %s (%s), want approve (pg2-pi7pz unaffected by pg2-7sqk8)", got.Decision, got.Reason)
+	}
+	// pg2-553z3's own strict fallback still stands for every OTHER ambient
+	// variable ($JAVA_HOME here — $PWD itself moved to the check above) once a
+	// real consumer is in scope.
+	ambientAsk := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": `export PATH="$JAVA_HOME/bin:$PATH"; git push --force origin main`})}
 	if got := hookio.Verdict(r.Evaluate(ambientAsk)); got.Decision != hookio.Ask {
 		t.Errorf("ambient-var strict fallback beside a consumer: got %s (%s), want ask (pg2-553z3 unaffected by pg2-7sqk8)", got.Decision, got.Reason)
 	}
@@ -1969,6 +2107,14 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export PATH="$PATH:$(dirname /usr/local/bin/go)/bin"`, true},
 		{"export PATH=\"`dirname /usr/local/bin/go`/bin:$PATH\"", true},
 
+		// pg2-pi7pz (2026-09-17 operator override of pg2-553z3's KEEP STRICT for
+		// this one ambient shape): THE new approvable shape — an ambient
+		// $PWD/${PWD} reference with a literal absolute-shaped suffix. Real
+		// corpus rows (dedicated coverage: TestEnvVars_PWDRootedComponent_Approve).
+		{`export PATH="$PWD/bin:$PATH"`, true},
+		{`export PATH="$PATH:$PWD/bin"`, true},
+		{`export PATH="${PWD}/bin:$PATH"`, true},
+
 		// (c) violated: the verified-safe value beside a real command stays transparent.
 		{`PATH="$PATH:/x" echo hi`, false},
 		{`PATH="$PATH:/x" git push --force origin main`, false},
@@ -2021,12 +2167,24 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`export PATH="<(cat /etc/hosts)/bin:$PATH"`, false},          // process substitution: no static allowlist
 
 		// pg2-qhhil: the narrow middle option MUST NOT widen into the rejected
-		// blanket widen. $PWD/$JAVA_HOME/$TMP are AMBIENT — never assigned by the
+		// blanket widen. $JAVA_HOME/$TMP are AMBIENT — never assigned by the
 		// command's own text — so they stay exactly as unresolvable as before this
-		// bead, coherent with the empty-component rejection above ("$PATH:").
-		{`export PATH="$PWD/bin:$PATH"`, false},
+		// bead, coherent with the empty-component rejection above ("$PATH:"). $PWD
+		// itself moved to the pg2-pi7pz "true" rows above (TestEnvVars_
+		// PWDRootedComponent_Approve has the dedicated, fuller coverage) — the
+		// 2026-09-17 operator override applies to $PWD ONLY, not to these.
 		{`export PATH="$JAVA_HOME/bin:$PATH"`, false},
 		{`export PATH="$TMP:$PATH"`, false},
+		// pg2-pi7pz's own relief MUST NOT widen beyond its narrow gate: a bare,
+		// suffix-less $PWD/${PWD} names the CWD itself (the hazard, not a
+		// subdirectory of it); $PWDX is a DIFFERENT, still-ambient variable
+		// (bash reads the longest identifier); and HOME is out of scope for this
+		// relief (PATH only, per the ruling) even for the otherwise-approvable
+		// suffixed shape.
+		{`export PATH="$PWD:$PATH"`, false},
+		{`export PATH="${PWD}:$PATH"`, false},
+		{`export PATH="$PWDX/bin:$PATH"`, false},
+		{`export HOME="$PWD/fakehome"`, false},
 		// The direct contrast with the new true rows above: SAME value text,
 		// but $bindir is never assigned anywhere in the command (no preceding
 		// leaf), so it is indistinguishable from an ambient variable here.

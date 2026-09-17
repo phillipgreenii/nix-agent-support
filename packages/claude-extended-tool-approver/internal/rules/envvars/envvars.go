@@ -127,13 +127,18 @@ var injectorAskVars = map[string]bool{
 // does not conflict with "MUST NOT be softened to Abstain" — that phrase rules
 // out loosening, not tightening.
 //
-// # OPERATOR RULING 2026-07-30 (pg2-553z3): KEEP STRICT
+// # OPERATOR RULING 2026-07-30 (pg2-553z3): KEEP STRICT — PARTIALLY SUPERSEDED
+// 2026-09-17 for the ambient-$PWD shape ONLY; see the inline callout inside
+// the COHERENCE REASON paragraph below and the standalone "OPERATOR RULING
+// 2026-09-17 (pg2-pi7pz)" section a few paragraphs down for the full
+// provenance. Everything else recorded here STANDS UNCHANGED.
 //
 // Widening preservesCallerValue's component predicate to accept arbitrary
 // `$VAR`-derived components (so `$JAVA_HOME/bin:$PATH`, `$bindir:$PATH`, etc.
-// would also Approve) was CONSIDERED AND REJECTED. Do not re-litigate the
-// blanket widen from prompt volume alone — the objection below holds at any
-// volume.
+// would also Approve) was CONSIDERED AND REJECTED, and — beyond the one named
+// carve-out below — REMAINS REJECTED. Do not re-litigate the blanket widen
+// from prompt volume alone — the objection below holds at any volume, for
+// every ambient `$VAR` except the one this ruling was later overridden for.
 //
 // COHERENCE REASON (the load-bearing one): isStaticAbsolutePath deliberately
 // REJECTS an empty `:`-separated component, because an empty PATH entry means
@@ -141,8 +146,36 @@ var injectorAskVars = map[string]bool{
 // Accepting any `$VAR/...` component on the strength of "it looks like a
 // directory" would auto-approve `$PWD/bin:$PATH`, which is that identical
 // CWD-on-PATH hazard wearing a variable. Blessing one spelling of the hazard
-// while the other keeps asking is incoherent, independent of how many prompts
-// widening would clear.
+// while the other keeps asking was, and for every OTHER ambient `$VAR` still
+// is, incoherent, independent of how many prompts widening would clear.
+// SUPERSEDED FOR `$PWD` SPECIFICALLY BY THE 2026-09-17 RULING BELOW: the
+// operator weighed this exact objection against the operational cost of a
+// decisive Ask stopping autonomous work, and — for `$PWD`/`${PWD}` only, not
+// for `$JAVA_HOME`/`$bindir`/any other ambient name — explicitly accepted the
+// residual risk instead. `$PWD/bin:$PATH` therefore now Approves; every other
+// still-ambient `$VAR/...` component named in this comment keeps asking
+// exactly as this ruling always required.
+//
+// # OPERATOR RULING 2026-09-17 (Phillip, pg2-s3my5, implemented pg2-pi7pz):
+// SUPERSEDES THE ABOVE FOR `$PWD` SPECIFICALLY
+//
+// The coherence objection above is a reason to reject blessing `$PWD`/`${PWD}`
+// on its own merits — it was never, by itself, a permanent bar independent of
+// context. Weighed against the operational cost of a decisive Ask stopping
+// autonomous work entirely (pg2-s3my5's own recorded rationale) on a shape
+// measured at exactly 12 real, currently-asking corpus rows — every one of
+// them `export PATH="<static-prefix>:$PWD/<literal-suffix>:$PATH"`, none a
+// bare, suffix-less `$PWD` — the operator explicitly accepted the residual
+// risk (a pre-staged shadow binary under an attacker-writable `$PWD/bin`
+// resolving through PATH the next time it is consulted) and overrode KEEP
+// STRICT for this one ambient reference. preservesCallerValue's own doc
+// comment below, and pwdRootedSuffix, record the resulting predicate change.
+// This paragraph exists so a reader of the "do not re-litigate" text above
+// does not come away believing `$PWD` is still rejected: the prohibition on
+// every OTHER ambient `$VAR` (`$JAVA_HOME`, `$bindir`, `$TMP`, …) is UNCHANGED,
+// and this override MUST NOT be read as reopening it — see pg2-s3my5's own
+// decision comment and the sibling bead split (pg2-dhugk/pg2-zsv1c/pg2-2ytvo)
+// for why each of those is its own separate, independently-scoped question.
 //
 // MEASURED BASIS (pg2-3arc2, 2026-07-30): post-apply asklog rows whose command
 // contains `PATH=` and were decided by this predicate: ZERO. The 41 pre-apply
@@ -175,8 +208,13 @@ var injectorAskVars = map[string]bool{
 //     IMPLEMENTED — see preservesCallerValue's in-command-assigned branch,
 //     which wires the pg2-wq3ki InCommandVars/ExpandInCommand seam in. The
 //     ambient-variable shapes above ($PWD, $JAVA_HOME, $TMP, ...) are
-//     unaffected: they are never assigned by the command's own text, so the
-//     seam never resolves them and they keep asking.
+//     unaffected BY THIS SEAM: they are never assigned by the command's own
+//     text, so the seam never resolves them. $JAVA_HOME/$TMP/every other
+//     ambient name still keep asking as a result. $PWD itself no longer does
+//     — not because this seam resolves it (it still cannot), but because
+//     pg2-pi7pz (2026-09-17, see the OPERATOR RULING section above) gave it a
+//     SEPARATE, narrower relief of its own (pwdRootedSuffix) that this bullet
+//     predates.
 //   - pg2-kzqw2: a `$(...)`-derived component — the middle option this
 //     ruling's trade analysis fanned out to once the blanket widen was
 //     rejected. OPERATOR RULING 2026-08-17 (via `/unblock-human-beads`,
@@ -257,11 +295,20 @@ var injectorAskVars = map[string]bool{
 //     landed unconditionally for both consumers — see
 //     TestIsHermeticHomeReplacement_QuotedMktempTemplate_NowRelieved for the
 //     explicit HOME-side pin of that (intended, called-out) consequence.
-//   - NOT this bead's scope, per pg2-2ytvo's own text: ambient-$PWD-shaped
-//     components (pg2-553z3's KEEP STRICT stands unchanged for those — this
-//     ruling did not reopen it), the replacement-value-feeding-arbitrary-
-//     shell shape, and components buried inside an opaque nested `bash -c`
-//     payload. Those are pg2-pi7pz / pg2-dhugk / pg2-zsv1c's separate scope.
+//   - pg2-pi7pz (this bead's own explicitly-carved-out separate scope, per
+//     pg2-2ytvo's own text above — NOT reopened by pg2-2ytvo itself — now
+//     IMPLEMENTED): the ambient-$PWD-shaped components pg2-2ytvo's own scope
+//     excluded. See the "OPERATOR RULING 2026-09-17 (Phillip, pg2-s3my5,
+//     implemented pg2-pi7pz)" callout on the KEEP STRICT section above, and
+//     preservesCallerValue's own doc comment, for the predicate change
+//     (pwdRootedSuffix) and its scope. pg2-553z3's KEEP STRICT still stands,
+//     UNCHANGED, for every OTHER ambient `$VAR` ($JAVA_HOME, $TMP, $bindir,
+//     …) — only `$PWD`/`${PWD}` itself was overridden, and only for PATH.
+//   - Still NOT this bead's (pg2-2ytvo's) scope, and NOT pg2-pi7pz's either:
+//     the replacement-value-feeding-arbitrary-shell shape, and components
+//     buried inside an opaque nested `bash -c` payload. Those remain
+//     pg2-dhugk / pg2-zsv1c's own separate, independently-scoped questions,
+//     each not yet landed as of pg2-pi7pz.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -360,24 +407,32 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 
 // preservesCallerValue reports whether an askVar assignment's VALUE is the
 // verified-safe EXTEND shape: it keeps the caller's own value ($NAME / ${NAME}) as
-// one whole `:`-separated component, and every other component is EITHER a static
-// absolute path, OR a reference to a variable THIS SAME COMMAND assigned, earlier,
-// to one (vars — see below), OR a command substitution already certified safe by
-// the static allowlist (pg2-kzqw2 — see componentSafeSubstitution). The first shape
-// is 954 of the 1,118 logged PATH/HOME assignments, with zero adversarial values
+// one whole `:`-separated component, and every other component is one of: a
+// static absolute path; a reference to a variable THIS SAME COMMAND assigned,
+// earlier, to one (vars — see below); a command substitution already certified
+// safe by the static allowlist (pg2-kzqw2 — see componentSafeSubstitution); or,
+// for PATH only, an ambient `$PWD`/`${PWD}` reference with a literal
+// absolute-shaped suffix (pg2-pi7pz — see pwdRootedSuffix). The first shape is
+// 954 of the 1,118 logged PATH/HOME assignments, with zero adversarial values
 // among them (pg2-qfuto).
 //
 // The predicate is deliberately STRICT — a component must be literal-and-absolute,
-// resolve to exactly that through vars, or be a certified-safe substitution — so
-// nothing behind an AMBIENT expansion can smuggle a lookup directory in. It
-// therefore still asks on `$PWD/bin:$PATH`, `$JAVA_HOME/bin:$PATH` and
-// `$(nix build …)/bin:$PATH` (`nix` is not on the static safe-cmd allowlist).
-// Widening it to accept ARBITRARY $VAR-derived components was considered and RULED
-// AGAINST (2026-07-30) — see the "OPERATOR RULING" note on the `askVars` doc
-// comment above for the coherence reason and the measured basis; do not
-// re-litigate the blanket widen here. The in-command-assigned case and the
-// certified-safe-substitution case below are the two surviving middle options that
-// ruling explicitly did NOT kill (pg2-qhhil and pg2-kzqw2 respectively, both BUILD).
+// resolve to exactly that through vars, be a certified-safe substitution, or be
+// the one narrow ambient exception named above — so nothing else behind an
+// AMBIENT expansion can smuggle a lookup directory in. It therefore still asks on
+// `$JAVA_HOME/bin:$PATH` and `$(nix build …)/bin:$PATH` (`nix` is not on the
+// static safe-cmd allowlist), and on a bare, suffix-less `$PWD`/`${PWD}`
+// component (pwdRootedSuffix's own doc has the reason: that shape names the
+// current working directory ITSELF, not merely a subdirectory of it). Widening
+// it to accept ARBITRARY $VAR-derived components beyond the one PWD exception
+// was considered and RULED AGAINST (2026-07-30) and, for every OTHER ambient
+// name, REMAINS rejected — see the "OPERATOR RULING" notes on the `askVars` doc
+// comment above for the coherence reason, the measured basis, and the
+// 2026-09-17 override's own narrow scope; do not re-litigate the blanket widen
+// here. The in-command-assigned case, the certified-safe-substitution case, and
+// the ambient-$PWD case below are the surviving exceptions that ruling
+// explicitly did NOT (or, for $PWD, no longer does) kill — pg2-qhhil,
+// pg2-kzqw2, and pg2-pi7pz respectively.
 //
 // vars is the in-command variable environment for the leaf this assignment
 // belongs to (primarycommit.LeafVars over the caller's own parse, wrapping
@@ -461,8 +516,10 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars, safeSubVars map[strin
 			// PATH="$bindir:$PATH"`. cmdparse.ExpandInCommand resolves it against
 			// vars ALL-OR-NOTHING: an AMBIENT variable (never assigned in this
 			// command's own text — $PWD, $JAVA_HOME, $TMP, …) is simply absent from
-			// vars, so ok is false and this component falls through to the decisive
-			// Ask below, unchanged from before this bead.
+			// vars, so ok is false and this component falls through — to the
+			// pg2-pi7pz $PWD-rooted exception a few lines down for a component that
+			// is itself `$PWD`/`${PWD}` specifically, or to the decisive Ask below
+			// for every other ambient name, unchanged from before this bead.
 			if expanded, ok := cmdparse.ExpandInCommand(text, vars); ok && isStaticAbsolutePath(expanded) {
 				continue
 			}
@@ -479,6 +536,48 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars, safeSubVars map[strin
 			// TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved.
 			if ev.Name == "PATH" {
 				if expanded, ok := cmdparse.ExpandInCommand(text, safeSubVars); ok && isStaticAbsolutePath(expanded) {
+					continue
+				}
+			}
+			// AMBIENT $PWD-ROOTED COMPONENT (pg2-pi7pz), PATH-ONLY: operator
+			// override, 2026-09-17, of pg2-553z3's KEEP STRICT ruling for exactly
+			// this one ambient shape — see the askVars doc comment's OPERATOR
+			// RULING sections above for the full provenance (who, when, why) and
+			// preservesCallerValue's own doc comment for the resulting predicate
+			// change. An ambient `$PWD`/`${PWD}` reference — unlike `$JAVA_HOME`,
+			// `$TMP`, or every other still-asking ambient `$VAR` — is now
+			// affirmatively accepted when immediately followed by a literal
+			// absolute-shaped suffix (`$PWD/bin`, `${PWD}/www/starterview/bin`):
+			// pwdRootedSuffix isolates that suffix and isStaticAbsolutePath
+			// re-verifies it exactly as any other literal component is verified.
+			// Gated to PATH only, mirroring the safeSubVars gate immediately
+			// above: HOME's own EXTEND-shape check reaches this same function with
+			// ev.Name == "HOME", so this branch is simply never reached for it —
+			// pinned by TestPreservesCallerValue_PWDRootedComponent_HOMENotRelieved.
+			//
+			// A bare `$PWD`/`${PWD}` component with NO suffix at all is
+			// deliberately NOT relieved: pwdRootedSuffix reports an empty suffix
+			// for it, and isStaticAbsolutePath's leading-'/' requirement then
+			// refuses that empty string exactly as it already refuses the empty
+			// ':'-component CWD hazard (`PATH="$PATH:"`) — a bare `$PWD` names the
+			// CURRENT WORKING DIRECTORY ITSELF, a STRICTLY WORSE instance of that
+			// same hazard, and no row in the corpus this bead was measured against
+			// (12 real rows, all with a literal suffix) uses that shape.
+			//
+			// A variable this same command bound EARLIER to a $PWD-derived value
+			// (e.g. `d=$PWD/bin; PATH="$d:$PATH"`) is deliberately NOT relieved by
+			// this branch either: such an assignment's value is never itself
+			// literal (ev.Expansion != cmdparse.ExpansionNone, since it contains a
+			// `$`), so cmdparse.InCommandVars never binds it and neither vars nor
+			// safeSubVars above ever carries an entry for it to expand through.
+			// Resolving that one level of indirection would need a NEW derived-vars
+			// primitive symmetric with InCommandTempDirVars/
+			// InCommandSafeSubstitutionVars — narrower than strictly necessary, but
+			// no row in the corpus this bead measured needs it (every one of the 12
+			// is a DIRECT `$PWD`/`${PWD}` reference in the PATH value itself);
+			// relaxable later if measurement calls for it.
+			if ev.Name == "PATH" {
+				if suffix, ok := pwdRootedSuffix(text); ok && isStaticAbsolutePath(suffix) {
 					continue
 				}
 			}
@@ -630,9 +729,11 @@ func componentLiteral(atoms []pathValueAtom) (text string, ok bool) {
 //
 // THE EMPTY-SUBSTITUTION HAZARD is the crux of pg2-kzqw2, and why this is NOT
 // simply "IsSafeSubstitutionBody(sub) implies Approve". Unlike a purely
-// syntactic hazard ($PWD, $JAVA_HOME — never assigned by the command's own
-// text, so they are unresolvable rather than merely unpredictable), a command
-// substitution can resolve to the EMPTY STRING on any given invocation —
+// syntactic hazard ($JAVA_HOME, $TMP — never assigned by the command's own
+// text, so they are unresolvable rather than merely unpredictable; $PWD is
+// pg2-pi7pz's own narrower, separate exception and is deliberately not used
+// as this paragraph's example), a command substitution can resolve to the
+// EMPTY STRING on any given invocation —
 // nothing about being on the static safe-cmd allowlist rules that out.
 // isStaticAbsolutePath already refuses an empty ':' component ON PURPOSE (an
 // empty PATH entry means "current directory" to the shell — the identical CWD
@@ -700,6 +801,46 @@ func isStaticAbsolutePath(component string) bool {
 		}
 	}
 	return true
+}
+
+// pwdRootedSuffix reports whether component is an ambient `$PWD`/`${PWD}`
+// reference (pg2-pi7pz, 2026-09-17 — see preservesCallerValue's own call site
+// for the full provenance and scope) and, if so, the literal text immediately
+// following that reference: "/bin" for `$PWD/bin`, "/www/starterview/bin" for
+// `${PWD}/www/starterview/bin`, and "" for a bare `$PWD`/`${PWD}` with nothing
+// glued after it. The caller re-verifies that suffix with isStaticAbsolutePath
+// — the same check a literal component already passes — which is what
+// excludes the bare, suffix-less form: an empty suffix fails the leading-'/'
+// requirement exactly like the empty ':'-component CWD hazard does.
+//
+// The braced form `${PWD}` is unambiguous (the closing '}' is the reference's
+// own boundary). The bare form `$PWD` needs an explicit boundary check: bash
+// reads the LONGEST valid identifier after '$', so `$PWDX` names variable
+// PWDX, not PWD followed by literal "X" — ok is false for that case, and for
+// any component that does not start with either spelling at all.
+func pwdRootedSuffix(component string) (suffix string, ok bool) {
+	const braced = "${PWD}"
+	const bare = "$PWD"
+	switch {
+	case strings.HasPrefix(component, braced):
+		return component[len(braced):], true
+	case strings.HasPrefix(component, bare):
+		rest := component[len(bare):]
+		if rest != "" && isVarNameContinuationByte(rest[0]) {
+			return "", false
+		}
+		return rest, true
+	default:
+		return "", false
+	}
+}
+
+// isVarNameContinuationByte reports whether b can continue a shell variable
+// identifier after its first character (mirrors cmdparse's own unexported
+// isVarNameByte for the non-first-character case; duplicated here rather than
+// exported across the package boundary for this one call site).
+func isVarNameContinuationByte(b byte) bool {
+	return b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }
 
 // isHermeticEnvReplacement reports whether an askVar's REPLACEMENT value is safe
