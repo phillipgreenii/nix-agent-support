@@ -1599,15 +1599,28 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		{"anti-bypass in-command-var kubectl prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" kubectl delete ns prod`, hookio.NoOpinion},
 		{"anti-bypass in-command-var curl prefixed", `bindir=/tmp/x/bin && PATH="$bindir:$PATH" curl http://evil.example.com`, hookio.NoOpinion},
 		{"anti-bypass in-command-var destructive git compound", `bindir=/tmp/x/bin; export PATH="$bindir:$PATH" && git push --force origin main`, hookio.Reject},
-		// The ambient-variable half MUST still Ask through the full engine too: $PWD
-		// is never assigned by the command's own text, so it stays exactly as
-		// unresolvable as before this bead.
+		// The ambient-variable half MUST still Ask through the full engine too, for
+		// every ambient $VAR OTHER than $PWD itself: $JAVA_HOME/$TMP/etc. are never
+		// assigned by the command's own text, so they stay exactly as unresolvable
+		// as before this bead.
 		//
-		// pg2-7sqk8: trailing `&& git status` added — a standalone `export` here has
-		// no downstream consumer, so mechanism 2 would otherwise relieve it
-		// regardless of $PWD's ambient-ness (see the "preserve-form var-derived
-		// component" row above, which pins exactly that relief for this same value).
-		{"in-command-var ambient PWD stays ask", `export PATH="$PWD/bin:$PATH" && git status`, hookio.Ask},
+		// $PWD itself moved from Ask to Approve here (pg2-pi7pz, 2026-09-17: operator
+		// override of pg2-553z3's 2026-07-30 KEEP STRICT ruling, for the ambient-$PWD
+		// shape specifically — see envvars.go's askVars doc comment's "OPERATOR
+		// RULING 2026-09-17" section for the full provenance). preservesCallerValue's
+		// pwdRootedSuffix exception now treats a $PWD/${PWD} reference with a literal
+		// absolute-shaped suffix as a verified-safe preserve-form component through
+		// the FULL ENGINE too, not just the package-level rule test — so this row no
+		// longer depends on pg2-7sqk8's no-consumer mechanism 2 (the trailing
+		// `&& git status` that used to be needed to keep this row testing the
+		// ambient-ness question, not mechanism 2's own relief, is now moot: the value
+		// is affirmatively safe regardless of a downstream consumer). `git status`'s
+		// own rule independently Approves as well (the "no env approvable" row a few
+		// lines above, line ~1677), so the combined verdict is Approve for two
+		// independent reasons — the safe PATH assignment stays transparent beside a
+		// real command (same anti-bypass property every other relief in this test
+		// obeys), and that real command's own verdict is itself Approve.
+		{"in-command-var ambient PWD stays approve (pg2-pi7pz)", `export PATH="$PWD/bin:$PATH" && git status`, hookio.Approve},
 		// The split must behave IDENTICALLY on an assignment reached only through the
 		// engine's substitution/nested-string recursion — the same evaluateAssignment
 		// runs there, and 14 logged cohort rows carry their PATH assignment inside a
