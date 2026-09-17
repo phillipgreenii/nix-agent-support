@@ -1889,15 +1889,16 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// the full accepted-residual-risk scope (other env vars -- GOFLAGS,
 		// LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS, BASH_ENV --
 		// still pass through unaudited by this relief) AND the NARROWING
-		// (pg2-dhugk's 2026-09-17 20:27 decision): `!(wholeLeaf &&
-		// hasDownstreamConsumer)` keeps an `export`/compound PATH
+		// (pg2-dhugk's 2026-09-17 20:27 decision): `!wholeLeaf ||
+		// !hasDownstreamConsumer` (De Morgan's form of "not both wholeLeaf
+		// and hasDownstreamConsumer") keeps an `export`/compound PATH
 		// replacement with a genuine, separate downstream consumer leaf
 		// (`export PATH=/x && git status`) on the decisive-Ask fallback
 		// below, exactly like mechanism 2's own domain -- this relief is
 		// for the same-leaf (leading/env-prefix, !wholeLeaf) form, or a
 		// truly standalone whole-leaf form with nothing downstream at all,
 		// never for a whole-leaf form with a real later consumer.
-		case ev.Name == "PATH" && !(wholeLeaf && hasDownstreamConsumer) && isStaticAbsoluteOnlyPathReplacement(ev, vars):
+		case ev.Name == "PATH" && (!wholeLeaf || !hasDownstreamConsumer) && isStaticAbsoluteOnlyPathReplacement(ev, vars):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "PATH replacement is static-absolute-only (operator-accepted residual risk: other env vars, e.g. GOFLAGS/LD_PRELOAD/DYLD_INSERT_LIBRARIES/PERL5OPT/NODE_OPTIONS/BASH_ENV, are not audited by this relief -- pg2-dhugk): " + sanitizeReasonName(ev.Name),
