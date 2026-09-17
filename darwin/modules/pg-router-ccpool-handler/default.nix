@@ -63,7 +63,15 @@ in
   options.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = lib.mkOption {
     type = lib.types.nullOr lib.types.package;
     readOnly = true;
-    default = null;
+    # Deliberately NO `default` here: a readOnly option's own `default` (if
+    # any) counts as one of its `evalOptionValue` definitions
+    # (nixpkgs `lib/modules.nix`), so combining `default` with an
+    # UNCONDITIONAL `config`-set value below (this module always sets it,
+    # never behind an `mkIf`) trips "read-only, but it's set multiple
+    # times" even though there is only one real assignment. `config` always
+    # provides a value (`null` or the real derivation) below, so no default
+    # is needed — matches the HM module's own `handlerCommandDir` option,
+    # which has no `default` for the same reason.
     description = ''
       Darwin-scope mirror of the HM module's own
       `phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir`
