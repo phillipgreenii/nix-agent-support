@@ -2,11 +2,14 @@ package asklog
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 type Store struct {
@@ -16,6 +19,12 @@ type Store struct {
 	// (column will be NULL), which is the appropriate default for tests
 	// and for callers that have not opted in to sandbox telemetry.
 	sandboxEnabled *bool
+	// dbPath is set only by NewReadOnlyStore, and only so QueryRows can
+	// re-open a brand-new connection on a torn-read retry (see
+	// isTornReadError). NewStore leaves it empty: the read-write path has
+	// its own locking (busy_timeout, _txlock=immediate) and never needs
+	// this seam.
+	dbPath string
 }
 
 // SetSandboxEnabled records whether Claude Code's bash sandbox is enabled
@@ -214,10 +223,29 @@ func NewStore(dbPath string) (*Store, error) {
 // see rows still sitting in an unmerged WAL file, and racing a full-table
 // scan against a live checkpoint can (rarely) surface SQLite's generic
 // "database disk image is malformed" (11) — a torn-read artifact, not real
-// corruption (`PRAGMA quick_check` on the same file reports ok). That is an
-// acceptable batch-analysis tradeoff for what these subcommands are (manual,
-// occasional replay/report runs, never a live path), and the runbook names
-// the mitigation (read a snapshot copy) for anyone hitting it.
+// corruption (`PRAGMA quick_check` on the same file reports ok).
+//
+// pg2-do92x reconfirmed this directly against the live, actively-growing
+// production corpus (many concurrent Claude Code sessions writing to it) and
+// ruled out the alternative hypothesis that this was specific to
+// `evaluate --misses-only` or to the corpus nearing the 2GiB/int32 boundary:
+// `--misses-only` issues no SQL of its own at all — it is a purely in-memory
+// filter cmd_evaluate.go applies to the slice QueryRows already returned —
+// so there is no separate "--misses-only query path" that could be broken
+// independently of plain `evaluate`. Direct, repeated reproduction against
+// the real corpus (same file, same size, seconds apart) showed the identical
+// `evaluate --misses-only` invocation fail on one attempt and complete
+// cleanly on the very next: the hazard is TIME-dependent (whether a
+// concurrent writer's WAL checkpoint is mid-flight against the exact pages
+// this scan is reading), not flag- or size-dependent.
+//
+// QueryRows now retries a bounded number of times through a BRAND NEW
+// connection (see isTornReadError) when it sees this specific error, which
+// is what makes it safe to treat as recoverable: a fresh immutable
+// connection re-reads the current on-disk state rather than trusting
+// whatever this connection's page cache already saw. The runbook's
+// "read a snapshot copy" mitigation remains the answer for ad-hoc,
+// non-retrying raw `sqlite3` access outside these subcommands.
 //
 // os.Stat is checked first so a missing database produces a clear error
 // instead of SQLite's less legible CANTOPEN.
@@ -226,8 +254,7 @@ func NewReadOnlyStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open db read-only: %w", err)
 	}
 
-	dsn := "file:" + dbPath + "?immutable=1"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", readOnlyDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open db read-only: %w", err)
 	}
@@ -239,7 +266,14 @@ func NewReadOnlyStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open db read-only: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// readOnlyDSN is the immutable=1 DSN shared by NewReadOnlyStore and
+// QueryRows' torn-read retry (which re-opens a fresh connection on the same
+// path — see isTornReadError).
+func readOnlyDSN(dbPath string) string {
+	return "file:" + dbPath + "?immutable=1"
 }
 
 func (s *Store) Close() error {
@@ -311,8 +345,121 @@ func ApprovalSource(permissionMode, promptID, hookDecision *string) string {
 	return "settings"
 }
 
+// tornReadRetries bounds how many times QueryRows will re-open a fresh
+// immutable connection and retry a full-table scan after seeing
+// isTornReadError. It is a knob, not a tuned constant: 3 retries (4 attempts
+// total) at tornReadRetryDelay's default spacing costs at most ~1.5s of
+// added latency for what pg2-do92x's own reproduction showed resolves within
+// a single retry in practice (the very next invocation, seconds later,
+// succeeded outright).
+const tornReadRetries = 3
+
+// tornReadRetryDelay is the pause before each retry, doubling per attempt
+// (100ms, 200ms, 400ms — ~700ms worst case across 3 retries). It gives a
+// concurrent writer's in-flight WAL checkpoint time to finish before the
+// next attempt re-reads the file from scratch through a brand-new
+// connection. A package-level var (not a const) so tests can shrink it —
+// see SetTornReadRetryDelayForTests.
+var tornReadRetryDelay = 100 * time.Millisecond
+
+// SetTornReadRetryDelayForTests points every QueryRows retry AFTERWARDS at
+// the given base delay, and returns the previous value so a caller can
+// restore it. Exists for the same reason SetSynchronousForTests does: a test
+// that deliberately triggers isTornReadError needs the retry window narrow
+// enough to run fast and deterministically, not the production spacing.
+func SetTornReadRetryDelayForTests(d time.Duration) time.Duration {
+	previous := tornReadRetryDelay
+	tornReadRetryDelay = d
+	return previous
+}
+
+// isTornReadError reports whether err is SQLite's generic SQLITE_CORRUPT
+// (11) — "database disk image is malformed" — the torn-read signature
+// documented on NewReadOnlyStore, not a way to distinguish transient from
+// real corruption (SQLite does not surface that distinction; retrying with a
+// bounded budget is what tells them apart in practice, per this function's
+// callers). Checked primarily via the driver's typed error, with a
+// case-insensitive substring fallback: database/sql's Rows.Scan/Err path
+// does not always hand the driver's *sqlite.Error through unwrapped on every
+// version, so a wrapping change upstream degrades this to "retries a little
+// more than necessary" rather than "stops retrying at all".
+func isTornReadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteCorruptCode {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "malformed")
+}
+
+// sqliteCorruptCode is SQLITE_CORRUPT from sqlite3.h. It is a stable,
+// long-documented part of SQLite's public C API (unchanged since SQLite
+// 3.0), so hardcoding it here avoids importing the generated
+// modernc.org/sqlite/lib package just for one constant.
+const sqliteCorruptCode = 11
+
+// reopen closes s.db and replaces it with a brand-new immutable connection
+// to the same dbPath. Retrying a torn read on the SAME connection is not
+// enough to trust: an immutable connection is told the file will never
+// change, so nothing guarantees it re-fetches a page from disk instead of
+// re-serving whatever (possibly torn) copy it already cached. A fresh
+// connection has no such cache. Only ever called on a Store opened by
+// NewReadOnlyStore (dbPath is empty otherwise, and reopen is a no-op then —
+// callers must check that before relying on it).
+func (s *Store) reopen() error {
+	if s.dbPath == "" {
+		return fmt.Errorf("reopen: not a read-only store")
+	}
+	fresh, err := sql.Open("sqlite", readOnlyDSN(s.dbPath))
+	if err != nil {
+		return err
+	}
+	if err := fresh.Ping(); err != nil {
+		_ = fresh.Close()
+		return err
+	}
+	_ = s.db.Close()
+	s.db = fresh
+	return nil
+}
+
 // QueryRows returns non-excluded decision rows, optionally filtered by date.
+//
+// On a read-only Store (dbPath set), a torn-read error (isTornReadError) is
+// retried up to tornReadRetries times, each through a freshly re-opened
+// connection (see reopen) after a short, doubling delay — see
+// tornReadRetryDelay and pg2-do92x's write-up on NewReadOnlyStore for why
+// this is safe to retry rather than a masked real error. A Store with no
+// dbPath (the read-write path, or a read-only Store built directly in a
+// test) gets no retry: reopen would have nothing to reopen against.
 func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		result, err := s.queryRowsOnce(sinceDate)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if !isTornReadError(err) || s.dbPath == "" || attempt >= tornReadRetries {
+			return nil, lastErr
+		}
+		delay := tornReadRetryDelay << attempt
+		time.Sleep(delay)
+		if reopenErr := s.reopen(); reopenErr != nil {
+			// Surface the ORIGINAL query error, not the reopen failure: that
+			// is what a caller is actually debugging (e.g. the file was
+			// removed mid-retry is a much rarer, secondary problem).
+			return nil, lastErr
+		}
+	}
+}
+
+// queryRowsOnce is the single-attempt body QueryRows wraps in its torn-read
+// retry loop: one query, fully drained into a slice, no retry logic of its
+// own.
+func (s *Store) queryRowsOnce(sinceDate string) ([]DecisionRow, error) {
 	query := `SELECT id, session_id, cwd, tool_name, tool_input_json,
 		COALESCE(tool_summary, ''), hook_decision, outcome, excluded, correct_hook_decision,
 		sandbox_enabled,
