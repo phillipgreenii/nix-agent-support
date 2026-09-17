@@ -10,9 +10,9 @@ import (
 
 // TestStubSubcommandsRespondNotImplemented is the acceptance criterion
 // "packages/pg-desk builds and every subcommand stub responds (even if
-// 'not implemented')": every subcommand this packet introduces MUST be
-// reachable on rootCmd and MUST fail with a "not implemented" error rather
-// than silently succeeding or panicking.
+// 'not implemented')": every subcommand THIS PHASE has not yet implemented
+// MUST still be reachable on rootCmd and fail with a "not implemented"
+// error rather than silently succeeding or panicking.
 //
 // "serve" and "import-pg-pr-annotations" are deliberately absent from this
 // list: this docket's packet 7 (Phase 9) replaced serve's stub RunE with a
@@ -27,10 +27,15 @@ import (
 // internal/pipeline), covered by run_test.go and internal/pipeline's own
 // tests instead — only run issue/run thread still return "not
 // implemented" (run_test.go's own TestRunCmdRejectsUnsupportedEntityType).
+//
+// This packet (8) gave open, hide, unhide, wip, feedback, show, status,
+// doctor, heartbeat, and heartbeat-item real implementations too (see each
+// command's own file and *_test.go), so they are removed from this list the
+// same way. Only "ledger" remains a stub: it receives no writes until sync
+// ships (Phase 10) — see docs/behavior/pg-desk/store-schema.md.
 func TestStubSubcommandsRespondNotImplemented(t *testing.T) {
 	names := []string{
-		"open", "hide", "unhide", "wip", "feedback", "show",
-		"status", "doctor", "heartbeat", "heartbeat-item", "ledger",
+		"ledger",
 	}
 
 	for _, name := range names {

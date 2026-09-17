@@ -60,6 +60,20 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	return entity, true, nil
 }
 
+// CountEntities returns the total number of rows in the entity table,
+// across every repo/type. Added for packet 8's `pg-desk status`
+// [docs/behavior/pg-desk/operator-commands.md: "entity and interpretation
+// counts"] — mirrors HasAnyInterpretation's own plain-COUNT pattern
+// (interpretation.go) rather than requiring a caller to page through
+// ListInterpretations-style rows just to count them.
+func (s *Store) CountEntities() (int, error) {
+	var n int
+	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM entity`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count entities: %w", err)
+	}
+	return n, nil
+}
+
 // nullableString maps an empty Go string to a SQL NULL, so optional
 // TEXT columns (e.g. entity.head_sha) round-trip as NULL rather than "".
 func nullableString(v string) any {
