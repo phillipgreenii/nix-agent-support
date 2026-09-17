@@ -133,13 +133,31 @@ func parsePRNumber(ref string) (string, error) {
 // working directory resolves one") is out of scope for this phase, since a
 // config with zero repos fails config.Load's own finalize() validation
 // before any command here would even run.
+//
+// entityID is reconstructed as the FULL "<repo>#<n>" form, not the bare
+// number parsePRNumber extracts — matching what the real gather pipeline
+// actually writes into the entity/interpretation tables:
+// internal/gather/gather.go's Gather takes entityID verbatim from
+// pg-desk run's own CLI argument and passes it straight through to
+// pg-connector's `pr show <entityID>`, and pg-connector's own PR-reference
+// CLI convention requires the qualified owner/repo#N form (confirmed
+// empirically against the live store — pg2-276sg). The writer side is
+// authoritative here since gather/pg-connector's convention is fixed by a
+// dependency this package does not control; this reader-side helper is
+// the one that must match it, regardless of which of the three documented
+// input forms (bare number / OWNER/REPO#N / URL) the caller passed — the
+// owner/repo portion of the OWNER/REPO#N form is still not otherwise
+// consulted (see parsePRNumber's doc comment): resolvePRRef always
+// rebuilds the qualified id from cfg.Repos[0].Remote, never from whatever
+// owner/repo the input itself named.
 func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err error) {
 	if cfg == nil || len(cfg.Repos) == 0 {
 		return "", "", fmt.Errorf("no repository configured")
 	}
-	id, err := parsePRNumber(ref)
+	n, err := parsePRNumber(ref)
 	if err != nil {
 		return "", "", err
 	}
-	return cfg.Repos[0].Remote, id, nil
+	repo = cfg.Repos[0].Remote
+	return repo, repo + "#" + n, nil
 }

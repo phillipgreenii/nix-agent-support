@@ -35,12 +35,15 @@ func TestHideUnhideRoundTrip(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedBareEntity(t, st, "o/r", "42")
+	// Seeded with the qualified "o/r#42" entity id — the real convention
+	// gather/pg-connector write (pg2-276sg) — not the bare "42" a pre-fix
+	// resolvePRRef would have queried with.
+	seedBareEntity(t, st, "o/r", "o/r#42")
 
 	if err := runCmdArgs(t, "hide", []string{"42", "noisy PR"}); err != nil {
 		t.Fatalf("hide: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "42")
+	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
 	if err != nil || !found {
 		t.Fatalf("GetPRAnnotation after hide: found=%v err=%v", found, err)
 	}
@@ -54,7 +57,7 @@ func TestHideUnhideRoundTrip(t *testing.T) {
 	if err := runCmdArgs(t, "unhide", []string{"42"}); err != nil {
 		t.Fatalf("unhide: %v", err)
 	}
-	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "42")
+	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
 	if err != nil || !found {
 		t.Fatalf("GetPRAnnotation after unhide: found=%v err=%v", found, err)
 	}
@@ -81,7 +84,12 @@ func TestHideAcceptsPRURLAndHashForm(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedBareEntity(t, st, "o/r", "7")
+	// Seeded with the qualified id every one of the three input forms
+	// below must resolve to — including "o/r#7" itself and the PR URL,
+	// neither of which carry a different owner/repo (pg2-276sg: the
+	// owner/repo portion of the input is never consulted; resolvePRRef
+	// always rebuilds it from cfg.Repos[0].Remote).
+	seedBareEntity(t, st, "o/r", "o/r#7")
 
 	for _, ref := range []string{"7", "o/r#7", "https://example.test/o/r/pull/7"} {
 		t.Run(ref, func(t *testing.T) {
@@ -99,12 +107,12 @@ func TestWIPOnOffRoundTrip(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedBareEntity(t, st, "o/r", "42")
+	seedBareEntity(t, st, "o/r", "o/r#42")
 
 	if err := runCmdArgs(t, "wip", []string{"on", "42"}); err != nil {
 		t.Fatalf("wip on: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "42")
+	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
 	if err != nil || !found || ann.WIP == nil || !*ann.WIP {
 		t.Fatalf("after wip on: found=%v ann=%+v err=%v", found, ann, err)
 	}
@@ -112,7 +120,7 @@ func TestWIPOnOffRoundTrip(t *testing.T) {
 	if err := runCmdArgs(t, "wip", []string{"off", "42"}); err != nil {
 		t.Fatalf("wip off: %v", err)
 	}
-	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "42")
+	ann, found, err = st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
 	if err != nil || !found || ann.WIP == nil || *ann.WIP {
 		t.Fatalf("after wip off: found=%v ann=%+v err=%v", found, ann, err)
 	}
@@ -136,7 +144,7 @@ func TestHideDoesNotClobberWIP(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedBareEntity(t, st, "o/r", "42")
+	seedBareEntity(t, st, "o/r", "o/r#42")
 
 	if err := runCmdArgs(t, "wip", []string{"on", "42"}); err != nil {
 		t.Fatalf("wip on: %v", err)
@@ -144,7 +152,7 @@ func TestHideDoesNotClobberWIP(t *testing.T) {
 	if err := runCmdArgs(t, "hide", []string{"42"}); err != nil {
 		t.Fatalf("hide: %v", err)
 	}
-	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "42")
+	ann, found, err := st.GetPRAnnotation("o/r", entityTypePR, "o/r#42")
 	if err != nil || !found {
 		t.Fatalf("GetPRAnnotation: found=%v err=%v", found, err)
 	}

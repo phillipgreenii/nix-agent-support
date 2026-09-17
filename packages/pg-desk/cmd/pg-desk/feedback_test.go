@@ -69,7 +69,10 @@ func TestFeedbackListPrintsBaseDispositions(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Actor: "pg-desk", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}, {"c2", dispositionNoAction}})
+	// Seeded with the qualified "o/r#42" entity id — the real convention
+	// gather/pg-connector write (pg2-276sg) — not the bare "42" a pre-fix
+	// resolvePRRef would have queried with.
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}, {"c2", dispositionNoAction}})
 
 	stdout, err := runFeedbackListCmd(t, "42")
 	if err != nil {
@@ -87,13 +90,13 @@ func TestFeedbackSetOverridesSurviveList(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Actor: "pg-desk", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}})
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}})
 
 	if err := runFeedbackSetCmd(t, "42", "c1", dispositionWillFix, ""); err != nil {
 		t.Fatalf("feedback set: %v", err)
 	}
 
-	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "42", "c1")
+	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "o/r#42", "c1")
 	if err != nil || !found {
 		t.Fatalf("GetAnnotation: found=%v err=%v", found, err)
 	}
@@ -120,7 +123,7 @@ func TestFeedbackSetRejectsInvalidDisposition(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Actor: "pg-desk", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}})
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}})
 
 	err := runFeedbackSetCmd(t, "42", "c1", "bogus", "")
 	if err == nil {
@@ -132,7 +135,7 @@ func TestFeedbackSetRejectsUnknownComment(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Actor: "pg-desk", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}})
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}})
 
 	err := runFeedbackSetCmd(t, "42", "unknown-comment", dispositionWillFix, "")
 	if err == nil {
@@ -147,12 +150,12 @@ func TestFeedbackSetExplicitActorOverridesConfig(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Actor: "pg-desk", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}})
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}})
 
 	if err := runFeedbackSetCmd(t, "42", "c1", dispositionWontFix, "operator"); err != nil {
 		t.Fatalf("feedback set: %v", err)
 	}
-	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "42", "c1")
+	ann, found, err := st.GetAnnotation("o/r", entityTypePR, "o/r#42", "c1")
 	if err != nil || !found {
 		t.Fatalf("GetAnnotation: found=%v err=%v", found, err)
 	}
@@ -165,7 +168,7 @@ func TestFeedbackSetRequiresAnActor(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	seedFeedbackPR(t, st, "o/r", "42", [][2]string{{"c1", dispositionOpen}})
+	seedFeedbackPR(t, st, "o/r", "o/r#42", [][2]string{{"c1", dispositionOpen}})
 
 	err := runFeedbackSetCmd(t, "42", "c1", dispositionWillFix, "")
 	if err == nil {

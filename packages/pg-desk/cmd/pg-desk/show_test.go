@@ -34,8 +34,11 @@ func TestShowPrintsStoredInterpretation(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
+	// Seeded with the qualified "o/r#42" entity id — the real convention
+	// gather/pg-connector write (pg2-276sg) — not the bare "42" a pre-fix
+	// resolvePRRef would have queried with.
 	if err := st.UpsertInterpretation(store.Interpretation{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "42",
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
 		AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
@@ -56,14 +59,14 @@ func TestShowJSONIncludesWIP(t *testing.T) {
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
 	if err := st.UpsertInterpretation(store.Interpretation{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "42",
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
 	w := true
 	if err := st.UpsertAnnotation(store.Annotation{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "42",
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		WIP: &w, SetBy: "operator", SetAt: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed annotation: %v", err)
@@ -109,7 +112,7 @@ func TestShowRefreshInvokesThePipeline(t *testing.T) {
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
 	if err := st.UpsertInterpretation(store.Interpretation{
-		Repo: "o/r", EntityType: entityTypePR, EntityID: "42",
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
@@ -133,8 +136,11 @@ func TestShowRefreshInvokesThePipeline(t *testing.T) {
 	if !called {
 		t.Fatal("show --refresh did not invoke the pipeline seam")
 	}
-	if gotType != entityTypePR || gotID != "42" {
-		t.Errorf("pipeline invoked with (%q,%q), want (%q,%q)", gotType, gotID, entityTypePR, "42")
+	// The pipeline must be invoked with the SAME qualified id the store is
+	// later read with (o/r#42), not the bare "42" — otherwise --refresh
+	// would gather/write under one id while show reads back another.
+	if gotType != entityTypePR || gotID != "o/r#42" {
+		t.Errorf("pipeline invoked with (%q,%q), want (%q,%q)", gotType, gotID, entityTypePR, "o/r#42")
 	}
 	if gotChange != gather.ChangeSweep {
 		t.Errorf("pipeline invoked with change=%q, want %q", gotChange, gather.ChangeSweep)
