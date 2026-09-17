@@ -1,6 +1,14 @@
 {
   lib,
   mkGoApp,
+  makeWrapper,
+  # gh is pkgs.gh (auto via callPackage) — the GitHub CLI this binary execs
+  # by name at runtime (`os/exec.LookPath("gh")`, confirmed via Mach-O
+  # strings: "gh auth token: %w", "run gh auth login: %w"). Wrapped onto
+  # THIS binary's own PATH (bead pg2-bygev, superseding pg2-szilb's fix at
+  # packages/pg-router/default.nix) rather than relying on every caller to
+  # carry `gh` on its behalf — see the postInstall comment below.
+  gh,
   ...
 }:
 
@@ -71,11 +79,17 @@ mkGoApp {
   # output to generate a man page from and no subcommands to complete
   # (actors.md's ACTOR-BACKEND; freedom boundary, part 4).
   #
-  # No wrapProgram for `gh`: this backend execs `gh` on PATH at runtime,
-  # carried over unchanged from pg-pr's own github provider, which likewise
-  # ships with no gh wrapping in packages/pg-pr/default.nix — `gh` is
-  # provisioned once, separately, wherever this workspace's home-manager
-  # profile installs it, not per-consumer here.
+  # wrapProgram for `gh`: this backend execs `gh` on PATH at runtime. Earlier
+  # this was left unwrapped, relying on an ambient home-manager profile PATH
+  # to provide `gh` — an assumption that breaks for a non-interactive caller
+  # with its own narrow PATH (e.g. the pg-router-daemon LaunchAgent; bead
+  # pg2-szilb). Wrapping `gh` onto THIS binary's own PATH fixes the
+  # dependency at its actual point of use: any caller gets `gh` for free,
+  # not just one that remembered to carry it (bead pg2-bygev).
+  nativeBuildInputs = [ makeWrapper ];
+  postInstall = ''
+    wrapProgram $out/bin/pg-connector-pr-github --prefix PATH : ${lib.makeBinPath [ gh ]}
+  '';
 
   meta = with lib; {
     description = "pg-connector's pr capability Tier-2 backend for GitHub — a scriptout-only binary with no independent CLI identity";

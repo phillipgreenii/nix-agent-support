@@ -1,6 +1,13 @@
 {
   lib,
   mkGoApp,
+  makeWrapper,
+  # gh is pkgs.gh (auto via callPackage) — the GitHub CLI this binary execs
+  # by name at runtime, same as pg-connector-pr-github.nix. Wrapped onto
+  # THIS binary's own PATH (bead pg2-bygev, superseding pg2-szilb's fix at
+  # packages/pg-router/default.nix) rather than relying on every caller to
+  # carry `gh` on its behalf — see the postInstall comment below.
+  gh,
   ...
 }:
 
@@ -65,14 +72,20 @@ mkGoApp {
   # output to generate a man page from and no subcommands to complete
   # (actors.md's ACTOR-BACKEND; freedom boundary, part 4).
   #
-  # No wrapProgram for `gh`: this backend execs it on PATH at runtime,
-  # carried over unchanged from the ported GitHub Actions client —
-  # provisioned once, separately, wherever this workspace's home-manager
-  # profile installs it, matching pg-connector-pr-github.nix's own choice
-  # not to wrap `gh`. This backend does NOT exec `pg-connector`
+  # wrapProgram for `gh`: this backend execs it on PATH at runtime. Earlier
+  # this was left unwrapped, relying on an ambient home-manager profile PATH
+  # to provide `gh` — an assumption that breaks for a non-interactive caller
+  # with its own narrow PATH (e.g. the pg-router-daemon LaunchAgent; bead
+  # pg2-szilb). Wrapping `gh` onto THIS binary's own PATH fixes the
+  # dependency at its actual point of use, matching pg-connector-pr-github.nix's
+  # own treatment (bead pg2-bygev). This backend does NOT exec `pg-connector`
   # itself: its own PRResolver (resolver.go) resolves a PR id directly
   # against GitHub over the same `gh` gateway, never by shelling back into
   # the Tier-1 umbrella that dispatches it (INV-COMP-1; bug fix).
+  nativeBuildInputs = [ makeWrapper ];
+  postInstall = ''
+    wrapProgram $out/bin/pg-connector-ci-github-actions --prefix PATH : ${lib.makeBinPath [ gh ]}
+  '';
 
   meta = with lib; {
     description = "pg-connector's ci capability Tier-2 backend for GitHub Actions — a scriptout-only binary with no independent CLI identity";
