@@ -493,6 +493,95 @@ func TestPrimaryCommit_SelfCreatedDir(t *testing.T) {
 	}
 }
 
+// TestPrimaryCommit_SelfCreatedDir_WorktreeAdd is pg2-iorh0's widening of
+// TestPrimaryCommit_SelfCreatedDir to the OTHER directory-creating leaf shape
+// creatorTarget now recognizes: `git worktree add [flags] <path> [<commit-ish>]`
+// (production row 364782's own shape). Every row uses `-C` on the commit leaf for the
+// same reason TestPrimaryCommit_SelfCreatedDir's own doc gives — this rule does not
+// itself model a `cd`'s effect on a later leaf's cwd.
+func TestPrimaryCommit_SelfCreatedDir_WorktreeAdd(t *testing.T) {
+	missing := func() *stubResolver { return &stubResolver{canonicalErr: ErrDirNotExist} }
+
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{
+			name:    "POSITIVE: worktree add (path only) && -C into it && commit",
+			command: `git worktree add /scratch/wt && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name:    "POSITIVE: worktree add with a commit-ish start point",
+			command: `git worktree add /scratch/wt main && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name: "POSITIVE: -b <new-branch> value is not mistaken for a second target " +
+				"(production row 364782's own shape)",
+			command: `git worktree add /scratch/wt -b review/pr-1 main && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name:    "POSITIVE: -B <new-branch> value is likewise not a positional",
+			command: `git worktree add -B review/pr-1 /scratch/wt main && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.NoOpinion,
+		},
+		{
+			name: "POSITIVE: --lock --reason <string> value is likewise not a positional",
+			command: `git worktree add --lock --reason "pending review" /scratch/wt && ` +
+				`git -C /scratch/wt commit -q -m seed`,
+			want: hookio.NoOpinion,
+		},
+		{
+			name: "NEGATIVE: ';'/newline separated — the creator's success is no longer " +
+				"required for the commit to run at all (row 364782's actual shape)",
+			command: "git worktree add /scratch/wt -b review/pr-1 main\n" +
+				"git -C /scratch/wt commit -q -m seed",
+			want: hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: worktree add targets a DIFFERENT directory",
+			command: `git worktree add /scratch/other -b review/pr-1 main && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name: "NEGATIVE: a bare '-C' on the worktree-add invocation is not " +
+				"recognized (path would need resolving relative to it, not cwd)",
+			command: `git -C /scratch worktree add wt -b review/pr-1 main && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name: "NEGATIVE: a value-taking flag with nothing after it is not a valid " +
+				"invocation at all",
+			command: `git worktree add /scratch/wt -b && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name:    "NEGATIVE: 'worktree' without 'add' is not a creator",
+			command: `git worktree list && git -C /scratch/wt commit -q -m seed`,
+			want:    hookio.Ask,
+		},
+		{
+			name: "NEGATIVE: an '||' anywhere in the statement disables tracking entirely",
+			command: `git worktree add /scratch/wt -b review/pr-1 main || true && ` +
+				`git -C /scratch/wt commit -q -m seed`,
+			want: hookio.Ask,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := &hookio.HookInput{
+				ToolName: "Bash", ToolInput: mustJSON(tt.command), CWD: "/repo", PermissionMode: "default",
+			}
+			if got := hookio.Verdict(New(missing()).Evaluate(in)).Decision; got != tt.want {
+				t.Errorf("Decision = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestPrimaryCommit_SelfCreatedTempDir covers pg2-70g51's var-opaque shape (pg2-69i0d's
 // rows 427912/428023): a variable bound, earlier in the SAME command, to nothing but
 // the output of `mktemp -d` — unresolvable to a literal path, but PROVABLY not the

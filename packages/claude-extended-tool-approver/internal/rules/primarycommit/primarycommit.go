@@ -572,16 +572,20 @@ func selfCreatedDir(pc cmdparse.ParsedCommand, dir, cwd string, vars map[string]
 
 // creatorTarget reports the directory leaf would create, for the narrow set of
 // commands this function recognizes as directory-creating (pg2-70g51's acceptance
-// criteria): `mkdir` or `git init`. "", false for anything else, INCLUDING a shape this
-// function cannot confidently parse (a multi-target mkdir, a `git init` with an
-// ambiguous flag/positional mix) — the caller's existing fail-safe default (Ask/Reject)
-// is exactly what a command in one of those shapes gets, unchanged.
+// criteria, widened by pg2-iorh0 to add `git worktree add`): `mkdir`, `git init`, or
+// `git worktree add`. "", false for anything else, INCLUDING a shape this function
+// cannot confidently parse (a multi-target mkdir, a `git init`/`git worktree add` with
+// an ambiguous flag/positional mix) — the caller's existing fail-safe default
+// (Ask/Reject) is exactly what a command in one of those shapes gets, unchanged.
 func creatorTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]string) (string, bool) {
 	switch filepath.Base(leaf.Executable) {
 	case "mkdir":
 		return mkdirTarget(leaf, cwd, vars)
 	case "git":
-		return gitInitTarget(leaf, cwd, vars)
+		if target, ok := gitInitTarget(leaf, cwd, vars); ok {
+			return target, ok
+		}
+		return gitWorktreeAddTarget(leaf, cwd, vars)
 	}
 	return "", false
 }
@@ -640,6 +644,66 @@ func gitInitTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]stri
 		return "", false
 	}
 	return resolveTargetArg(target, cwd, vars)
+}
+
+// gitWorktreeAddTarget recognizes `git worktree add [flags] <path> [<commit-ish>]`
+// (pg2-iorh0): unlike gitInitTarget's single trailing positional, git-worktree(1)'s own
+// grammar is `git worktree add [-f] [--detach] [--checkout] [--lock [--reason <string>]]
+// [--orphan] [(-b|-B) <new-branch>] <path> [<commit-ish>]` — an OPTIONAL SECOND
+// positional (the start-point) after `<path>`, and three of its own flags
+// (`-b`/`-B <new-branch>`, `--reason <string>`) consume a SEPARATE following token as
+// their value rather than being self-contained like a boolean flag. Scanning for "the
+// one non-flag argument" the way mkdirTarget/gitInitTarget do would misread a
+// `-b`/`-B`/`--reason` VALUE as an extra positional and refuse the whole shape — exactly
+// the "verify the actual argument grammar, don't assume it matches git init's parsing"
+// hazard this bead's own investigation named. `-b`/`-B` VALUES are recognized only in
+// their SEPARATED spelling (`-b foo`), matching git's own documented synopsis; a glued
+// long-option value (`--reason=foo`) is one self-contained token that already falls
+// through the generic "starts with '-'" branch below with nothing separate to
+// misinterpret, so it needs no special case.
+//
+// EXACTLY ONE or TWO positionals (after removing recognized flags and their values) is
+// accepted; the FIRST is always `<path>` per git's own synopsis, and a second
+// (`<commit-ish>`) is accepted but not itself examined. Anything this cannot confidently
+// parse — an unrecognized value-taking flag, a value-taking flag with nothing after it,
+// zero or more than two positionals — reports ok=false, the same fail-safe default every
+// other creatorTarget case falls back on.
+//
+// Deliberately narrow like gitInitTarget: a `-C` on this SAME invocation reports
+// ok=false too (chdirs non-empty). `git -C <dir> worktree add <path> ...` runs the whole
+// subcommand from <dir>, so `<path>` would need resolving relative to THAT directory
+// rather than the leaf's own cwd/vars — a second, easy-to-get-wrong join this function
+// does not attempt; the caller's existing fail-safe stands for that combination instead.
+func gitWorktreeAddTarget(leaf cmdparse.ParsedCommand, cwd string, vars map[string]string) (string, bool) {
+	chdirs, subcmd, rest := cmdparse.GitInvocation(leaf.Args)
+	if subcmd != "worktree" || len(chdirs) > 0 || len(rest) == 0 || rest[0] != "add" {
+		return "", false
+	}
+	args := rest[1:]
+	var positionals []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "-b", "-B", "--reason":
+			if i+1 >= len(args) {
+				// A value-taking flag with nothing after it: not a shape this
+				// function can confidently parse. It is also not a valid
+				// `git worktree add` invocation at all, so the caller's existing
+				// fail-safe default is exactly right here.
+				return "", false
+			}
+			i++ // skip the value too, so it is never counted as a positional
+		default:
+			if strings.HasPrefix(a, "-") {
+				continue
+			}
+			positionals = append(positionals, a)
+		}
+	}
+	if len(positionals) != 1 && len(positionals) != 2 {
+		return "", false
+	}
+	return resolveTargetArg(positionals[0], cwd, vars)
 }
 
 // resolveTargetArg expands arg against vars (cmdparse.ExpandInCommand, the SAME

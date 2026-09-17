@@ -381,3 +381,91 @@ func TestIntegration_PrimaryCommitSelfCreatedDir(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegration_PrimaryCommitSelfCreatedDir_WorktreeAdd is pg2-iorh0's whole-chain
+// guard for creatorTarget's OTHER widened shape (production row 364782): `git worktree
+// add [flags] <path> [<commit-ish>]` as the creating leaf, alongside the existing
+// `mkdir`/`git init` shapes TestIntegration_PrimaryCommitSelfCreatedDir already covers.
+// Every POSITIVE row is "&&"-chained end to end, so `git worktree add`'s own success is
+// REQUIRED for the commit to ever run — the worktree it creates cannot be the
+// pre-existing canonical clone, whatever path it is. The NEGATIVE row swaps in a
+// newline, reproducing row 364782's own shape (a fresh multi-line script, no "&&" at
+// all): the creator's success is no longer required for the commit leaf to run at all,
+// so the pre-existing fail-safe verdict MUST stand.
+//
+// POSITIVE rows check "not Ask/Reject" rather than the exact NoOpinion the
+// mkdir/git-init positive rows want: `worktree` is itself one of the generic git rule's
+// own "modifying" subcommands (internal/rules/git.go), so — UNLIKE a bare
+// `mkdir`/`git init` leaf, which that rule has no opinion on at all — the `git worktree
+// add` leaf in the SAME expression earns its own Approve from THAT rule, and the
+// expression-level fold then attributes the whole result to it (module "git") rather
+// than falling through to the engine's own exhaustion NoOpinion. That is a different,
+// equally safe "allow" outcome, not a regression: primarycommit's OWN contribution for
+// the commit leaf is still findingNone/NotApplicable either way — it is simply no
+// longer the ONLY rule with something to say about this particular expression.
+func TestIntegration_PrimaryCommitSelfCreatedDir_WorktreeAdd(t *testing.T) {
+	canonical, worktree := nestedWorktreeFixture(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
+		cmd.Env = hermeticEnviron(t)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
+		}
+	}
+	// Mirror TestIntegration_PrimaryCommitSelfCreatedDir: the path existed as a linked
+	// worktree and has since been cleaned up, so it is genuinely absent on disk —
+	// EvaluateHook only JUDGES the command TEXT against the CURRENT real filesystem
+	// state (it never actually runs `git worktree add`), so this removal is what makes
+	// resolver.go's ErrDirNotExist/findingDirMissing branch fire for every row below,
+	// exactly as TestIntegration_PrimaryCommitMissingDirNeverApproves's own fixture does.
+	git("worktree", "remove", "--force", worktree)
+
+	positive := []string{
+		"git worktree add " + worktree + " -b review/pg2-iorh0 main && cd " + worktree + " && git commit -q -m seed --allow-empty",
+		"git worktree add " + worktree + " -b review/pg2-iorh0 main && git -C " + worktree + " commit -q -m seed --allow-empty",
+		// The optional <commit-ish> positional after <path>, with -b BEFORE the
+		// path instead of after it — creatorTarget's own parsing must not assume
+		// a fixed flag/positional ordering either.
+		"git worktree add -b review/pg2-iorh0 " + worktree + " main && git -C " + worktree + " commit -q -m seed --allow-empty",
+	}
+	for _, mode := range []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""} {
+		for _, cmd := range positive {
+			t.Run("positive "+mode+" "+cmd, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				got := eng.EvaluateHook(&hookio.HookInput{
+					ToolName: "Bash", CWD: canonical,
+					ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+				})
+				if got.Decision == hookio.Ask || got.Decision == hookio.Reject {
+					t.Errorf("%q in %q mode: got %s (%s: %s), want allow (Approve or NoOpinion) — a `git worktree add`-created path MUST NOT read as a commit on the canonical clone", cmd, mode, got.Decision, got.Module, got.Reason)
+				}
+			})
+		}
+	}
+
+	negative := []string{
+		// row 364782's OWN shape: newline-separated, no "&&" anywhere — the
+		// worktree-add leaf's own success is no longer REQUIRED for the commit
+		// leaf to ever run.
+		"git worktree add " + worktree + " -b review/pg2-iorh0-4 main\ngit -C " + worktree + " commit -q -m seed --allow-empty",
+		// worktree add targets a DIFFERENT directory than the one committed into.
+		"git worktree add " + canonical + "/.worktrees/other -b review/pg2-iorh0-5 main && git -C " + worktree + " commit -q -m seed --allow-empty",
+		// a bare `-C` on the worktree-add invocation itself is not recognized.
+		"git -C " + canonical + " worktree add .worktrees/feat -b review/pg2-iorh0-6 main && git -C " + worktree + " commit -q -m seed --allow-empty",
+	}
+	for _, mode := range []string{"bypassPermissions", "auto", "dontAsk", "default", "plan", "acceptEdits", ""} {
+		for _, cmd := range negative {
+			t.Run("negative "+mode+" "+cmd, func(t *testing.T) {
+				eng := buildFullEngine(canonical, canonical)
+				got := eng.EvaluateHook(&hookio.HookInput{
+					ToolName: "Bash", CWD: canonical,
+					ToolInput: makeBashJSON(cmd), PermissionMode: mode,
+				})
+				if got.Decision == hookio.Approve || got.Decision == hookio.NoOpinion {
+					t.Errorf("%q in %q mode: got %s (%s: %s); an un-'&&'-connected (or mismatched) `git worktree add` MUST NOT reach Approve or an empty verdict", cmd, mode, got.Decision, got.Module, got.Reason)
+				}
+			})
+		}
+	}
+}
