@@ -65,6 +65,28 @@ let
   # plist runs under the primary user, so resolve via system.primaryUser.
   primaryUser = config.system.primaryUser or null;
   stateHome = if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pg-router";
+
+  # The primary user's nix-darwin/home-manager profile bin dir (bead
+  # pg2-gt3ju). A launchd UserAgent's process starts from launchd's own bare
+  # default PATH (`/usr/bin:/bin:/usr/sbin:/sbin` — confirmed live via
+  # `launchctl print`), which never includes this profile — unlike an
+  # interactive login shell, which always has it. pg-router's own package
+  # wrapper (packages/pg-router/default.nix) already threads ccpool/bd/pg-pr/
+  # jq/pg-connector/pg-connector-*'s own bin dirs onto PATH (bead pg2-sh024),
+  # but deliberately does NOT and MUST NOT wrap in `gh` there: per
+  # packages/pg-connector/pg-connector-pr-github.nix's own comment and the
+  # pg2-n75tk boundary ("Core must not know how another tool is configured"),
+  # `gh` is provisioned once, generically, by this machine's home-manager
+  # profile — exactly where an interactive shell already finds it — not
+  # per-consumer inside pg-router's or pg-connector's own wrapProgram. This
+  # gives the daemon's own process the SAME profile bin dir an interactive
+  # shell has, so the nested exec chain (pg-router -> pg-router-source-pg-
+  # connector -> pg-connector -> pg-connector-pr-github -> `gh`, each hop an
+  # ambient-$PATH exec inheriting its parent's env unmodified) can resolve
+  # `gh` the same way it resolves any other profile-provisioned CLI a future
+  # backend might need — naming no specific tool here, only the profile
+  # location itself.
+  hmProfileBin = if primaryUser != null then "/etc/profiles/per-user/${primaryUser}/bin" else null;
 in
 {
   config = lib.mkMerge [
@@ -84,6 +106,9 @@ in
       phillipgreenii.system.launchdServices.userAgents.pg-router-daemon = {
         label = "com.phillipg.pg-router-daemon";
         script = ''
+          ${lib.optionalString (
+            hmProfileBin != null
+          ) ''export PATH=${lib.escapeShellArg hmProfileBin}:"$PATH"''}
           export PG_ROUTER_REPO_ROOT=${lib.escapeShellArg daemonCfg.repoRoot}
           ${lib.optionalString (
             daemonCfg.beadsPrefix != null
