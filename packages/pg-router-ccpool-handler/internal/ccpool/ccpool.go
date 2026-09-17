@@ -2,6 +2,13 @@
 // mechanics flow through Runner. The Phase-1 implementation (cli.go) shells out
 // to the `ccpool` CLI; a future in-process implementation wrapping ccpool's
 // session.Service is a drop-in replacement behind this same interface.
+//
+// This package is the per-dispatch half of this module's INTF-CCH-CCPOOL
+// boundary crossing (docs/behavior/interfaces.md): starting, observing, and
+// reaping a ccpool-backed handler session's own agent session. The other
+// half — the once-per-process-lifetime preShutdown sweep across every
+// prefix-matching session — lives in
+// cmd/pg-router-ccpool-handler/preshutdown.go's teardownAllSessions.
 package ccpool
 
 import (

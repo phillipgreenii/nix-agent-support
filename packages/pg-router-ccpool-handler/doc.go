@@ -13,6 +13,13 @@
 // `go mod tidy`-surviving dependency rather than a go.mod-only declaration —
 // packages/pg-router MUST NOT import this module back (docs/behavior/
 // invariants.md's INV-CCH-1).
+//
+// This module's own `pg-router-ccpool-handler-go-tests` flake check gates
+// tests/coverage-thresholds.txt with tests/coverage-gate.sh, a SEPARATE
+// ratchet from packages/pg-router/tests/coverage-thresholds.txt's own check:
+// the module boundary is also the coverage-gate boundary, so a bar activated
+// on one side never silently moves the other side's (docs/behavior/
+// invariants.md's INV-CCH-4).
 package pgrouterccpoolhandler
 
 import (

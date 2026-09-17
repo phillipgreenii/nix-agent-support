@@ -37,6 +37,9 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 
+	// This realizes INV-CCH-2's own duplicate-tolerance obligation (docs/
+	// behavior/invariants.md — a handler session MUST tolerate a duplicate
+	// event, matching INTF-HANDLER's obligations on every implementer).
 	// INV-EVT-2: a crash-window redelivery of the same dispatched item mints a
 	// FRESH per-attempt ExternalID (Role.ExternalID's own stamp), so ExternalID
 	// cannot be the correlation key that catches the duplicate — but the ccpool

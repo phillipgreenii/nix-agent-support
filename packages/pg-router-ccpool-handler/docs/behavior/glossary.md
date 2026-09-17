@@ -3,8 +3,10 @@
 Vocabulary for this module's realization of `INTF-HANDLER`/`INTF-SOURCE`
 (`packages/pg-router/docs/behavior/interfaces.md`). Terms the core itself defines — event, binding,
 handler session, role, wiring — are not restated here; see
-`packages/pg-router/docs/behavior/glossary.md`. Nothing below exists in the module's code yet (see
-[README](README.md)'s Realization gaps) — this vocabulary names what Task 5.2 onward moves in.
+`packages/pg-router/docs/behavior/glossary.md`. Task 5.2/5.3 (folded together, commit `c6b016fb`)
+built every term below into real code (`internal/budget`, `internal/watchdog`, `internal/prompt`,
+`internal/complete`, the `internal/executor` ccpool/command split); see [README](README.md)'s
+Realization gaps for the build's one remaining residual.
 
 ## Handler-side vocabulary
 

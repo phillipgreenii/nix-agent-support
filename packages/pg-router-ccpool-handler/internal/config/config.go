@@ -66,6 +66,11 @@ type Config struct {
 	// configuration, never a name compiled into this module's own contract
 	// surface (GOAL-MIN-1's Floor). Empty (the default) adds no extra grant
 	// to the built-in AllowedTools default; see defaultAllowedTools below.
+	// This also realizes this module's own INV-CCH-5 (docs/behavior/
+	// invariants.md): pg-pr's name is configuration on THIS side, never
+	// written into packages/pg-router's own contract surface (its --help
+	// text, config schema, or wire messages) — dispatch.go/query.go's wire
+	// replies carry no backing-tool literal.
 	PRTool string
 	// SessionPrefix names the ccpool --name label prefix (Role.DisplayName).
 	SessionPrefix string

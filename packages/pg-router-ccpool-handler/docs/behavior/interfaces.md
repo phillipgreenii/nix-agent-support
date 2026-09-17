@@ -1,9 +1,9 @@
 # Interfaces — pg-router-ccpool-handler
 
 This module has two kinds of interaction: the two interfaces it **realizes** as pg-router's
-counterparty, and the boundary crossings it makes into its own backing tools. Nothing below is
-built yet (see [README](README.md)'s Realization gaps); this file states the contract this
-module's implementation is checked against once Task 5.2 onward populates it.
+counterparty, and the boundary crossings it makes into its own backing tools. Task 5.2/5.3 (folded
+together, commit `c6b016fb`) built this module's implementation against the contract below; see
+[README](README.md)'s Realization gaps for what has not yet caught up.
 
 ## Realized (this module is the implementer, pg-router's core is the counterparty)
 

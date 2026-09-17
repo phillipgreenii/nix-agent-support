@@ -102,6 +102,12 @@ func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
 // Run meters the session until ctx is cancelled (the bead-poll won the race) or
 // the budget hard stop fires. Returns ctx.Err() on cancellation (no action), or
 // ErrBudgetExceeded after running the terminal sequence at 100%.
+//
+// The escalation levels below are this module's own INV-CCH-3 half (docs/
+// behavior/invariants.md): each is surfaced only on this module's own
+// logs/metrics — w.emit below, into eventlog — never reported to the core
+// except through the opaque completion-outcome string
+// cmd/pg-router-ccpool-handler/dispatch.go's writeReply produces.
 func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 	start := w.now()
 	highest := budget.None

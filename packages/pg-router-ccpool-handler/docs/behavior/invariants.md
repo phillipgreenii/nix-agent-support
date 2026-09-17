@@ -1,7 +1,7 @@
 # Invariants — pg-router-ccpool-handler
 
-Rules this module's implementation MUST hold, once populated (see [README](README.md)'s
-Realization gaps — none of the code these rules govern exists yet). A rule pg-router's own core
+Rules this module's implementation MUST hold (see [README](README.md)'s Realization gaps for the
+residual the build has not yet caught up to). A rule pg-router's own core
 already states (event shape, at-least-once delivery, the offer/decline machinery) is not restated
 here — see `packages/pg-router/docs/behavior/invariants.md`. These are the rules specific to this
 module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.

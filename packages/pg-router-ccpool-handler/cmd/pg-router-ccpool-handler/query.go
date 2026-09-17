@@ -46,6 +46,10 @@ type queryRequest struct {
 //     pre-flight (precheck — bd reachable, beads-store prefix matches;
 //     preflight.go), then answers with the REAL `bd ready` results, mapped
 //     to wire events under the configured emitType.
+//
+// The --query-config-present branch is this module's own INTF-CCH-BEADS
+// query-surface half (docs/behavior/interfaces.md) — this module's
+// beads-backed source querying bd for events.
 func runQuery(args []string) int {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

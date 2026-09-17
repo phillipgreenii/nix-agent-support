@@ -29,6 +29,10 @@ func DoneSignal(c roles.Completion, status string, seenClaimed bool) bool {
 //   - add-human: add the `human` label, never unclaim (a dead worker may hold a
 //     half-built worktree; blind retry is unsafe).
 //   - unclaim:   status=open, assignee cleared, so the next pass retries.
+//
+// This is the completion-policy write-back half of this module's own
+// INTF-CCH-BEADS boundary crossing (docs/behavior/interfaces.md) — a handler
+// session's completion policy writing a result back to bd.
 func OnFailure(ctx context.Context, br beads.Runner, action roles.FailureAction, beadID string) error {
 	if action == roles.AddHuman {
 		return beads.AddHuman(ctx, br, beadID)

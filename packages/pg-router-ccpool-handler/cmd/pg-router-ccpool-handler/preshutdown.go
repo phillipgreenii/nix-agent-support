@@ -104,6 +104,11 @@ func servePreShutdown(cc ccpool.Runner, sessionPrefix string, stdin io.Reader, s
 // can still `ccpool attach` after the pass. Sessions outside the prefix are
 // left untouched. Returns the number actually closed.
 //
+// This is the once-per-process-lifetime sweep half of this module's
+// INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not
+// scoped to one dispatch, unlike internal/ccpool's own per-dispatch
+// start/observe/reap half.
+//
 // Ported verbatim from packages/pg-router's own (now-deleted)
 // Orchestrator.teardownAll — this module's own local re-implementation, not
 // an import (Go's internal-package visibility rule; docs/adr/0065's

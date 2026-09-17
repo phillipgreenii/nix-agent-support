@@ -3,6 +3,13 @@
 // carry the env scrub (the bash's top-level `unset BEADS_DIR WORKSPACE_ROOT`),
 // so pg-router's own bd resolves the monorepo store from Dir, ignoring any ambient
 // BEADS_DIR/WORKSPACE_ROOT inherited from a parent shell.
+//
+// This package is this module's own INTF-CCH-BEADS boundary crossing (docs/
+// behavior/interfaces.md): the query surface (cmd/pg-router-ccpool-handler/
+// query.go's queryBeadsReady, via Ready below) a beads-backed source queries
+// for events, and the write path (Unclaim/AddHuman/Comment/AddLabel/
+// RemoveLabel below) a handler session's completion policy
+// (internal/complete, internal/watchdog) uses to write a result back to bd.
 package beads
 
 import (

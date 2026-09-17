@@ -147,6 +147,13 @@ func runDispatch(args []string) int {
 	// string [object] the core stores"); JSON-encoding it into a string is
 	// this module's own minimal fix to stay wire-legal without losing any
 	// information the core never interpreted anyway.
+	//
+	// This is also this module's own INV-CCH-3 obligation (docs/behavior/
+	// invariants.md): a post-accept outcome — retryable/resource-limit/
+	// critical, mapped by ccpool.go's waitFailureResult into the Unclaimed/
+	// Escalated verbs result.Fields() carries here — crosses back to the core
+	// as nothing but this one opaque completion-outcome string, never as a
+	// distinguishable failure class.
 	outcomeJSON, err := json.Marshal(result.Fields())
 	if err != nil {
 		writeErrorReply(os.Stdout, "encode outcome: "+err.Error())

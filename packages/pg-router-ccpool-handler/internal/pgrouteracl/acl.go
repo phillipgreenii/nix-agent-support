@@ -7,6 +7,12 @@
 // The seam is network-free, so its rows are only as current as pg-pr's last sync.
 // The ACL therefore reads each row's freshness (last_synced_at + stale) and
 // REFUSES to act on a row past its bound — see staleForAction / actionablePRs.
+//
+// This package holds this module's own INTF-CCH-PGPR boundary crossing (docs/
+// behavior/interfaces.md) into pg-pr — but see docs/behavior/README.md's
+// Realization gaps: as of the Task 5.2/5.3 move (ADR 0065's "Move list"),
+// nothing in cmd/pg-router-ccpool-handler wires Reconcile/ReadPRList into a
+// subcommand yet, so this crossing does not fire in production today.
 package pgrouteracl
 
 import (
