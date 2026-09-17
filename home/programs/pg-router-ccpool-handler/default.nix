@@ -77,6 +77,9 @@ let
               authorshipGuard
               promptBody
               ;
+            budget = {
+              inherit (roleCfg.ccpool.budget) tokens cost time;
+            };
             isolation = {
               Type = roleCfg.ccpool.isolation.type;
               Path = roleCfg.ccpool.isolation.path;
@@ -163,6 +166,55 @@ let
                 type = lib.types.str;
                 default = "";
                 description = "The task prompt template source (`roleFile.CCPool.PromptBody`).";
+              };
+              budget = lib.mkOption {
+                type = lib.types.submodule {
+                  options = {
+                    tokens = lib.mkOption {
+                      type = lib.types.int;
+                      default = 0;
+                      description = ''
+                        Token-count ceiling for this role's ccpool watchdog
+                        (`roleFile.CCPool.Budget.Tokens` /
+                        `budget.Budget.Tokens`). `<= 0` means unlimited (no
+                        token-based watchdog dimension).
+                      '';
+                    };
+                    cost = lib.mkOption {
+                      type = lib.types.int;
+                      default = 0;
+                      description = ''
+                        Estimated-cost ceiling in cents for this role's
+                        ccpool watchdog (`roleFile.CCPool.Budget.Cost` /
+                        `budget.Budget.Cost`). `<= 0` means unlimited (no
+                        cost-based watchdog dimension).
+                      '';
+                    };
+                    time = lib.mkOption {
+                      type = lib.types.str;
+                      default = "";
+                      description = ''
+                        Wall-clock time ceiling for this role's ccpool
+                        watchdog, as a `time.ParseDuration` string (e.g.
+                        `"25m"`) (`roleFile.CCPool.Budget.Time` /
+                        `budget.Budget.Time`). `""` (the default) or `"0s"`
+                        means unlimited (no time-based watchdog dimension) —
+                        the old `[role.ccpool.budget]` schema's own way to
+                        deliberately request no watchdog for a role (e.g.
+                        "feedback").
+                      '';
+                    };
+                  };
+                };
+                default = { };
+                description = ''
+                  This role's ccpool watchdog budget
+                  (`roleFile.CCPool.Budget` / `roles.CCPoolConfig.Budget`'s
+                  Tokens/Cost/Time dimensions — Thresholds/Prices stay
+                  pool-wide and are not settable per role here). Every field
+                  left at its default renders the unlimited zero value: no
+                  watchdog runs for this role.
+                '';
               };
               isolation = lib.mkOption {
                 type = lib.types.submodule {

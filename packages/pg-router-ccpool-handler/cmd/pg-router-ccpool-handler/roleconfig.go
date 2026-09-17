@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -44,7 +46,23 @@ type roleFile struct {
 		OnDispatchFail  roles.DispatchFailAction `json:"onDispatchFail"`
 		AuthorshipGuard bool                     `json:"authorshipGuard"`
 		PromptBody      string                   `json:"promptBody"`
-		Isolation       roles.IsolationConfig    `json:"isolation"`
+		// Budget carries this role's own Tokens/Cost/Time ceiling
+		// (roles.CCPoolConfig.Budget's own shape, minus Thresholds/Prices —
+		// those stay pool-wide, see overlayBudgetThresholds below; the OLD
+		// TOML schema's per-role [role.ccpool.budget] had this same
+		// three-key shape). Time is a time.ParseDuration string ("25m"), not
+		// raw nanoseconds, for the same human-friendly reason
+		// packages/pg-router's own TOML `duration` type parses "25m"/"30m"
+		// strings rather than requiring nanosecond integers. Absent/zero
+		// means unlimited (budget.Limit(0).Unlimited() == true; Time <= 0
+		// means no time bound) — matching the old schema's own explicit
+		// `budget.time = "0s"` meaning "deliberately unlimited".
+		Budget struct {
+			Tokens int64  `json:"tokens"`
+			Cost   int64  `json:"cost"`
+			Time   string `json:"time"`
+		} `json:"budget"`
+		Isolation roles.IsolationConfig `json:"isolation"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -76,10 +94,26 @@ func loadRole(path string) (roles.Role, error) {
 		if err != nil {
 			return roles.Role{}, fmt.Errorf("role config %s: parse promptBody: %w", path, err)
 		}
+		// budget.time is a "25m"-style duration string (see roleFile's own
+		// doc comment above); "" (absent) means no time bound, matching
+		// budget.Budget's own zero value rather than erroring on
+		// time.ParseDuration("").
+		var budgetTime time.Duration
+		if rf.CCPool.Budget.Time != "" {
+			budgetTime, err = time.ParseDuration(rf.CCPool.Budget.Time)
+			if err != nil {
+				return roles.Role{}, fmt.Errorf("role config %s: parse budget.time %q: %w", path, rf.CCPool.Budget.Time, err)
+			}
+		}
 		r.CCPool = &roles.CCPoolConfig{
 			Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,
 			Completion: rf.CCPool.Completion, OnFailure: rf.CCPool.OnFailure, OnDispatchFail: rf.CCPool.OnDispatchFail,
 			AuthorshipGuard: rf.CCPool.AuthorshipGuard, PromptBody: rf.CCPool.PromptBody, Prompt: tmpl,
+			Budget: budget.Budget{
+				Tokens: budget.Limit(rf.CCPool.Budget.Tokens),
+				Cost:   budget.Limit(rf.CCPool.Budget.Cost),
+				Time:   budgetTime,
+			},
 			Isolation: rf.CCPool.Isolation,
 		}
 	case "command":
@@ -123,4 +157,24 @@ func loadConfig(path string) (config.Config, error) {
 		return config.Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
 	return c, nil
+}
+
+// overlayBudgetThresholds sets a ccpool role's budget escalation Thresholds
+// from cfg's pool-wide Config.WorkerBudget() — Thresholds (Reminder/Cancel/
+// Hard fractions) are pool-wide only: roleFile.CCPool.Budget carries no
+// thresholds field of its own (see its doc comment above), so every ccpool
+// role's watchdog escalates against the SAME percentages, while
+// Tokens/Cost/Time (loadRole's own per-role decode) is the one per-role
+// override. A no-op for a non-ccpool role (role.CCPool == nil).
+//
+// This is load-bearing, not cosmetic: without it, a role whose roleFile sets
+// any finite Tokens/Cost/Time would evaluate against a Thresholds{0,0,0}
+// zero value — Hard == 0 makes budget.Budget.Evaluate return Hard on its
+// very first tick (pct >= 0 is always true) — an instant false-positive
+// hard-stop rather than the working watchdog this bead exists to restore.
+func overlayBudgetThresholds(role roles.Role, cfg config.Config) {
+	if role.CCPool == nil {
+		return
+	}
+	role.CCPool.Budget.Thresholds = cfg.WorkerBudget().Thresholds
 }

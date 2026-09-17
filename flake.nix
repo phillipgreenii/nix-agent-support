@@ -2482,8 +2482,16 @@
               # shape exactly (including its untagged, Go-field-cased
               # `Isolation.{Type,Path}` -- roles.IsolationConfig carries no
               # json tags, see roleFileFor's own doc comment in that
-              # default.nix). Also proves an empty `roles` attrset still
-              # resolves to a harmless empty directory, and that
+              # default.nix). Also proves (pg2-r8al1) that the "feedback"
+              # role's `ccpool.budget.{tokens,cost,time}` renders into the
+              # same `roleFile.CCPool.Budget` shape
+              # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` now
+              # decodes — before pg2-r8al1, neither the Go `roleFile.CCPool`
+              # struct nor this nix option carried a `budget` field at all,
+              # so a role's watchdog budget could never be populated from
+              # `--role-config`/this nix module. Also proves an empty
+              # `roles` attrset still resolves to a harmless empty directory,
+              # and that
               # darwin/modules/pg-router-ccpool-handler/default.nix re-
               # exposes the HM module's own `handlerCommandDir` output
               # verbatim at darwin scope.
@@ -2552,6 +2560,11 @@
                           onFailure = "unclaim";
                           onDispatchFail = "leave";
                           promptBody = "feedback prompt";
+                          budget = {
+                            tokens = 5000;
+                            cost = 250;
+                            time = "25m";
+                          };
                         };
                       };
                       worker = {
@@ -2692,6 +2705,12 @@
                         [ "$(jq -r .type "$handlerCommandDir/feedback.json")" = ccpool ]
                         [ "$(jq -r .ccpool.actor "$handlerCommandDir/feedback.json")" = feedback-actor ]
                         [ "$(jq -r .ccpool.completion "$handlerCommandDir/feedback.json")" = close-only ]
+                        # budget.{tokens,cost,time} renders into the same
+                        # roleFile.CCPool.Budget shape loadRole decodes
+                        # (pg2-r8al1 acceptance criterion 2).
+                        [ "$(jq -r .ccpool.budget.tokens "$handlerCommandDir/feedback.json")" = 5000 ]
+                        [ "$(jq -r .ccpool.budget.cost "$handlerCommandDir/feedback.json")" = 250 ]
+                        [ "$(jq -r .ccpool.budget.time "$handlerCommandDir/feedback.json")" = 25m ]
                         # Untouched isolation default renders as "" (the Go
                         # side's own "worktree" fallback for an empty Type),
                         # via the untagged, Go-field-cased Isolation.Type key.

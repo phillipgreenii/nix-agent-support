@@ -130,6 +130,7 @@ func runDispatch(args []string) int {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
 		return conformance.ExitError
 	}
+	overlayBudgetThresholds(role, cfg)
 
 	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload)}
 	deps := buildDeps(cfg)
