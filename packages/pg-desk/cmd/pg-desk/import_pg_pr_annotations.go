@@ -12,15 +12,9 @@ import (
 )
 
 // importPgPrEntityType is the pg-desk entity_type recorded for every
-// PR-level annotation row this command writes. Mirrors the design doc's
-// `pg-desk run pr <id>` subcommand shape
-// (docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md
-// line 621): entity_type "pr", entity_id the bare PR number as a decimal
-// string, repo carried separately (the annotation table is already keyed
-// by repo — see internal/store/annotation.go). Packet 8's
-// hide/unhide/wip/feedback-set commands MUST key PR-level annotation rows
-// the same way, or their rows and this command's migrated ones will not
-// join.
+// PR-level annotation row this command writes; matches entityTypePR
+// (desk.go), the one entity type every other command in this package
+// operates on.
 const importPgPrEntityType = "pr"
 
 // importPgPrSetBy is the set_by value recorded for every annotation row
@@ -105,6 +99,14 @@ func init() {
 // (comment_id "") per pull_request row. No other pull_request column is
 // read (this packet's Contract).
 //
+// EntityID is written in the same qualified "<repo>#<n>" form
+// resolvePRRef (desk.go) reconstructs for every hide/unhide/wip/feedback
+// write and show read, not a bare decimal number (pg2-tlwh2): before
+// pg2-276sg's fix this bare form was accidentally consistent with those
+// commands' own (then-buggy) bare-number writes, but afterward a bare-key
+// row from this import tool would silently stop round-tripping with the
+// qualified keys every other write path now uses.
+//
 // It is idempotent by construction: UpsertAnnotation is an
 // INSERT ... ON CONFLICT DO UPDATE keyed by (repo, entity_type, entity_id,
 // comment_id), so running this twice against an unchanged source
@@ -146,7 +148,7 @@ func importPgPrAnnotations(sourcePath string, desk *store.Store) (int, error) {
 		a := store.Annotation{
 			Repo:         repo,
 			EntityType:   importPgPrEntityType,
-			EntityID:     strconv.Itoa(number),
+			EntityID:     repo + "#" + strconv.Itoa(number),
 			Hidden:       &hidden,
 			HiddenReason: hiddenReason,
 			WIP:          &wipFlag,

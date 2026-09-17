@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -101,9 +102,10 @@ func annotationsEqual(a, b store.Annotation) bool {
 // TestImportPgPrAnnotationsRoundTrip is the acceptance criterion "fixture
 // pg-pr store.db round-trips into annotation correctly": the three pinned
 // columns (user_hidden, user_hidden_reason, wip) land in pg-desk's
-// annotation table as a PR-level row keyed by (repo, "pr", <number>),
-// attributed to this command, and no other pull_request column leaks
-// through.
+// annotation table as a PR-level row keyed by (repo, "pr", "<repo>#<n>") —
+// the same qualified entity id resolvePRRef reconstructs for every
+// hide/unhide/wip/feedback write (pg2-tlwh2), not a bare number — attributed
+// to this command, and no other pull_request column leaks through.
 func TestImportPgPrAnnotationsRoundTrip(t *testing.T) {
 	const fixedNow = "2026-09-16T00:00:00Z"
 	origNow := importPgPrNow
@@ -138,13 +140,26 @@ func TestImportPgPrAnnotationsRoundTrip(t *testing.T) {
 		{3, false, "", false},
 	}
 	for _, c := range cases {
-		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, strconv.Itoa(c.number))
+		wantEntityID := repo + "#" + strconv.Itoa(c.number)
+		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, wantEntityID)
 		if err != nil {
 			t.Fatalf("GetPRAnnotation(#%d): %v", c.number, err)
 		}
 		if !found {
 			t.Fatalf("GetPRAnnotation(#%d): not found", c.number)
 		}
+		if a.EntityID != wantEntityID {
+			t.Errorf("#%d: entity_id = %q, want qualified form %q", c.number, a.EntityID, wantEntityID)
+		}
+
+		// Negative check: the pre-fix bare-number key MUST NOT resolve —
+		// proves the row is keyed by the qualified id, not both/either.
+		if _, bareFound, err := desk.GetPRAnnotation(repo, importPgPrEntityType, strconv.Itoa(c.number)); err != nil {
+			t.Fatalf("GetPRAnnotation(bare #%d): %v", c.number, err)
+		} else if bareFound {
+			t.Errorf("#%d: bare-number entity_id %q unexpectedly resolved; row must be keyed by the qualified form only", c.number, strconv.Itoa(c.number))
+		}
+
 		if a.Hidden == nil || *a.Hidden != c.wantHidden {
 			t.Errorf("#%d: hidden = %v, want %v", c.number, a.Hidden, c.wantHidden)
 		}
@@ -160,6 +175,57 @@ func TestImportPgPrAnnotationsRoundTrip(t *testing.T) {
 		if a.SetAt != fixedNow {
 			t.Errorf("#%d: set_at = %q, want %q", c.number, a.SetAt, fixedNow)
 		}
+	}
+}
+
+// TestImportPgPrAnnotationsRoundTripsThroughHide is the acceptance
+// criterion "a PR annotation written by the import tool round-trips
+// through hide/wip/feedback after pg2-276sg's fix (same qualified-id
+// convention on both sides)" (pg2-tlwh2): the row this import tool writes
+// must be the SAME row the real `hide` CLI command (via resolvePRRef)
+// reads and updates — not a second, orphaned row under a different key.
+// Before this fix, importPgPrAnnotations wrote a bare-number entity id
+// while resolvePRRef always queries the qualified "<repo>#<n>" id, so
+// hide's read of the existing annotation would find nothing and silently
+// clobber the wip flag this import tool had set; this test would have
+// caught that by asserting wip survives the hide call.
+func TestImportPgPrAnnotationsRoundTripsThroughHide(t *testing.T) {
+	origNow := importPgPrNow
+	importPgPrNow = func() string { return "2026-09-16T00:00:00Z" }
+	t.Cleanup(func() { importPgPrNow = origNow })
+
+	const repo = "o/r"
+	sourcePath := newFixturePgPrStore(t, []fixturePR{
+		{repo: repo, number: 42, hidden: false, hiddenReason: "", wip: true},
+	})
+
+	st, openFresh := openTestStore(t)
+	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: repo}}}
+	withOpenSeams(t, cfg, openFresh)
+	// hide's own "does the entity exist at all" resolution check
+	// (setHiddenAnnotation) needs an entity row independent of the
+	// annotation row this import tool writes.
+	seedBareEntity(t, st, repo, repo+"#42")
+
+	if _, err := importPgPrAnnotations(sourcePath, st); err != nil {
+		t.Fatalf("importPgPrAnnotations: %v", err)
+	}
+
+	// hide via the real CLI path, which resolves "42" through
+	// resolvePRRef to the qualified "o/r#42" id.
+	if err := runCmdArgs(t, "hide", []string{"42", "reason"}); err != nil {
+		t.Fatalf("hide: %v", err)
+	}
+
+	ann, found, err := st.GetPRAnnotation(repo, entityTypePR, repo+"#42")
+	if err != nil || !found {
+		t.Fatalf("GetPRAnnotation after hide: found=%v err=%v", found, err)
+	}
+	if ann.Hidden == nil || !*ann.Hidden {
+		t.Fatalf("hidden after hide = %v, want true", ann.Hidden)
+	}
+	if ann.WIP == nil || !*ann.WIP {
+		t.Fatalf("wip after hide = %v, want true (preserved from import, same row)", ann.WIP)
 	}
 }
 
@@ -187,7 +253,7 @@ func TestImportPgPrAnnotationsIdempotent(t *testing.T) {
 	}
 	first := map[int]store.Annotation{}
 	for _, n := range numbers {
-		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, strconv.Itoa(n))
+		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, repo+"#"+strconv.Itoa(n))
 		if err != nil || !found {
 			t.Fatalf("first run: GetPRAnnotation(#%d): found=%v err=%v", n, found, err)
 		}
@@ -202,7 +268,7 @@ func TestImportPgPrAnnotationsIdempotent(t *testing.T) {
 		t.Fatalf("second run copied %d row(s), want %d (same as first run)", secondCopied, firstCopied)
 	}
 	for _, n := range numbers {
-		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, strconv.Itoa(n))
+		a, found, err := desk.GetPRAnnotation(repo, importPgPrEntityType, repo+"#"+strconv.Itoa(n))
 		if err != nil || !found {
 			t.Fatalf("second run: GetPRAnnotation(#%d): found=%v err=%v", n, found, err)
 		}
