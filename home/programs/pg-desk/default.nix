@@ -36,11 +36,14 @@ let
     chrome_bin = cfg.open.chromeBin;
   };
 
-  # The complete rendered document: every section-7.8 config key EXCEPT
-  # sync.mode (Phase 10) [Binding decisions], each included only when this
-  # module was actually given something for it — mirrors
-  # home/programs/pg-connector's own "omit rather than render null/empty"
-  # convention.
+  # The complete rendered document: every section-7.8 config key, each
+  # included only when this module was actually given something for it —
+  # mirrors home/programs/pg-connector's own "omit rather than render
+  # null/empty" convention. sync.mode is the one exception to "only when
+  # given something": it is a mandatory enum with its own default ("off",
+  # matching packages/pg-desk/internal/sync's own fallback when the key is
+  # absent), so it is never null/empty and is rendered unconditionally
+  # below.
   renderedConfig = {
     self_login = cfg.selfLogin;
   }
@@ -68,6 +71,9 @@ let
     agent_tracker_backend = cfg.agentTrackerBackend;
   }
   // lib.optionalAttrs (cfg.actor != null) { inherit (cfg) actor; }
+  // {
+    sync = { inherit (cfg.sync) mode; };
+  }
   // lib.optionalAttrs (cfg.heartbeatPeriod != null) { heartbeat_period = cfg.heartbeatPeriod; }
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
   // lib.optionalAttrs (renderedServe != { }) { serve = renderedServe; }
@@ -77,13 +83,16 @@ in
   # Renders pg-desk's config.yaml from the docket design's section 7.8 key
   # table (docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md
   # lines 997-1011; packages/pg-desk/internal/config/config.go's own doc
-  # comment lists the same 21 keys) — every key EXCEPT `sync.mode`, added in
-  # Phase 10 [Binding decisions]. Mirrors home/programs/pg-connector's own
-  # config-rendering shape (typed options -> `pkgs.formats.yaml
-  # {}`.generate -> xdg.configFile), one repo/tool over.
+  # comment lists the same 21 keys) — all 21 keys, including `sync.mode`
+  # (the Go side's stub landed in Phase 10 [Binding decisions]; this option
+  # was added in the Phase 11 cutover flip, pg2-2j5ac.36.1). Mirrors
+  # home/programs/pg-connector's own config-rendering shape (typed options
+  # -> `pkgs.formats.yaml {}`.generate -> xdg.configFile), one repo/tool
+  # over.
   #
   # No ZR-specific identifiers appear here — every value is config, and
-  # `phillipg-nix-ziprecruiter` (packet 11) supplies its own [Out of scope].
+  # `phillipg-nix-ziprecruiter` (packet 11) supplies its own deployment
+  # values, including the Phase 11 cutover's `sync.mode = "apply"`.
   options.phillipgreenii.programs.pg-desk = {
     enable = lib.mkEnableOption "pg-desk (operator triage desk for PR/issue work surfaced through pg-connector)";
     package = lib.mkPackageOption pkgs "pg-desk" { };
@@ -257,6 +266,26 @@ in
       type = lib.types.nullOr lib.types.str;
       default = null;
       description = "config.yaml's actor — the identity pg-desk attributes its own writes to.";
+    };
+
+    sync = {
+      mode = lib.mkOption {
+        type = lib.types.enum [
+          "off"
+          "plan"
+          "apply"
+        ];
+        default = "off";
+        description = ''
+          config.yaml's sync.mode (design section 7.5, D17). `off` runs no
+          sync. `plan` runs the full adoption/rule logic and records every
+          intended bead write without calling `pg-connector issue` — the
+          parity check for sync. `apply` performs the writes; switched on
+          only at the phase 11 cutover flip. Matches
+          packages/pg-desk/internal/sync's own fallback to "off" when this
+          key is absent from config.yaml.
+        '';
+      };
     };
 
     heartbeatPeriod = lib.mkOption {
