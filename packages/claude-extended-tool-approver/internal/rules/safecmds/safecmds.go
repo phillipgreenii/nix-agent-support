@@ -1194,6 +1194,24 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 				}
 				continue
 			}
+			// pg2-8oaug: cand may instead be a `$(readlink -f <path>)` /
+			// `$(realpath <path>)` command substitution — ExpandInCommand never
+			// reaches this shape at all (its own doc lists `$(…)` among the
+			// constructs it unconditionally declines), so this is a SEPARATE
+			// resolution attempt, not a wider case of the one just above. See
+			// resolveReadlinkRealpathSubstitution's doc for why this hook-time
+			// resolution was chosen over porting envvars.go's pg2-kzqw2
+			// allowlist-only relief.
+			if resolved, resolvedOK := resolveReadlinkRealpathSubstitution(cand, pe); resolvedOK {
+				// resolved is already an absolute, cleaned, symlink-resolved path
+				// (patheval.PathEvaluator.ResolvePath's contract), so it is judged
+				// by the same zone check a resolved literal gets above, minus the
+				// looksLikePath gate that text does not need.
+				if !pe.Evaluate(resolved).CanRead() {
+					return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
+				}
+				continue
+			}
 			return "has a dynamically-expanded path arg " + cand, hookio.RefusalCategoryDynamicPathRead
 		}
 		if looksLikePath(cand) {
@@ -1203,6 +1221,123 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 		}
 	}
 	return "", hookio.RefusalCategoryUnspecified
+}
+
+// resolveReadlinkRealpathSubstitution reports whether cand — an argument
+// readPathIssue already found to be dynamically expanded — is EXACTLY one
+// `$(readlink -f <path>)` / `$(realpath <path>)` command substitution over a
+// LITERAL path operand, and if so returns pe's own clean+symlink-resolved
+// form of that operand (patheval.PathEvaluator.ResolvePath) for the caller to
+// zone-check.
+//
+// pg2-8oaug (root cause: pg2-z9qw1) offered two designs and left the choice
+// to the implementer:
+//
+//   - (a) port envvars.go's pg2-kzqw2 "substitution safety" relief
+//     (componentSafeSubstitution) into readPathIssue: accept the outer arg
+//     once its body is on the static cmdparse.IsSafeSubstitutionBody
+//     allowlist AND its own inner literal operand is separately in a
+//     readable zone.
+//   - (b) resolve the substitution at hook time for the narrow
+//     readlink -f/realpath case and zone-check the RESOLVED result, the way
+//     ExpandInCommand's resolved literal already is a few lines above.
+//
+// This implements (b). readPathIssue's question is "is the file diff/cat/…
+// will actually open readable", and for readlink -f/realpath that file is
+// the substitution's OUTPUT, not its literal operand — a symlink whose own
+// path sits in a readable zone can still point anywhere, so (a)'s "operand
+// is in a readable zone" guarantee does not carry over to the resolved
+// target the outer command reads. (b) answers the real question directly,
+// with the identical pe.Evaluate(...).CanRead() zone check every other
+// resolved literal in this function already gets, and reuses
+// patheval.PathEvaluator.ResolvePath — the same clean+symlink-resolve
+// primitive this package already relies on for its own reference paths —
+// rather than calling filepath.EvalSymlinks directly and re-deriving
+// cwd-relative/`~`/env-var handling patheval already owns.
+//
+// Deliberately narrow, matching readlinkRealpathOperand's own scope: only a
+// substitution that is the WHOLE of cand (no literal prefix or suffix
+// alongside it, mirrored from cmdparse's identical whole-value requirement in
+// its computeIsFreshTempDirAssignment) can resolve here. Anything else —
+// more than one substitution, a process substitution, a body that is not
+// exactly one recognized readlink/realpath invocation, or an operand this
+// package cannot itself resolve (broken symlink, filesystem root reached
+// with no existing ancestor) — reports ok=false and leaves the caller on its
+// existing fail-closed refusal.
+func resolveReadlinkRealpathSubstitution(cand string, pe *patheval.PathEvaluator) (resolved string, ok bool) {
+	subs := cmdparse.EnumerateSubstitutions(cand)
+	if len(subs) != 1 || !subs[0].IsCommandSubstitution() {
+		return "", false
+	}
+	var wrapped string
+	switch subs[0].Kind {
+	case cmdparse.SubstCommand:
+		wrapped = "$(" + subs[0].Body + ")"
+	case cmdparse.SubstBacktick:
+		wrapped = "`" + subs[0].Body + "`"
+	default:
+		return "", false
+	}
+	if cand != wrapped {
+		// A literal prefix/suffix survived alongside the substitution — out of
+		// scope for this narrow relief.
+		return "", false
+	}
+	operand, ok := readlinkRealpathOperand(subs[0].Body)
+	if !ok {
+		return "", false
+	}
+	resolvedPath := pe.ResolvePath(operand)
+	if resolvedPath == "" {
+		// Unresolvable (unexpanded variable inside operand, broken symlink, or
+		// the filesystem root reached with no existing ancestor) — fail closed,
+		// same direction ExpandInCommand's own ok=false takes.
+		return "", false
+	}
+	return resolvedPath, true
+}
+
+// readlinkRealpathOperand returns the single literal path operand of body —
+// a substitution BODY as cmdparse.EnumerateSubstitutions returns it — when
+// body is EXACTLY a `readlink -f <path>` or `realpath <path>` invocation, and
+// ok=false otherwise.
+//
+// Deliberately narrow to the canonicalizing spellings: bare `readlink`
+// (no `-f`) only dereferences ONE symlink hop and can return a relative or
+// even non-path string, semantics patheval.PathEvaluator.ResolvePath's
+// clean-then-fully-resolve does not reproduce, so it is NOT admitted here.
+// `realpath` has no such bare/canonicalizing split — every spelling this
+// package trusts elsewhere (cmdparse's safeCmdSubstitutions,
+// internal/rules/safecmds' alwaysSafe) is unconditional — so a bare single
+// operand is enough. Anything else — an unrecognized executable, more than
+// one positional argument, an unrecognized flag, or an operand that is
+// ITSELF still dynamically expanded (so there is no literal text to resolve)
+// — declines.
+func readlinkRealpathOperand(body string) (path string, ok bool) {
+	leaves := cmdparse.Parse(body)
+	if len(leaves) != 1 {
+		return "", false
+	}
+	leaf := leaves[0]
+	var operand string
+	switch filepath.Base(leaf.Executable) {
+	case "readlink":
+		if len(leaf.Args) != 2 || leaf.Args[0] != "-f" {
+			return "", false
+		}
+		operand = leaf.Args[1]
+	case "realpath":
+		if len(leaf.Args) != 1 {
+			return "", false
+		}
+		operand = leaf.Args[0]
+	default:
+		return "", false
+	}
+	if argHasDynamicExpansion(operand) {
+		return "", false
+	}
+	return operand, true
 }
 
 // hasUnsafeWritePath returns (true, path) if any path-like arg is not in a writable zone.

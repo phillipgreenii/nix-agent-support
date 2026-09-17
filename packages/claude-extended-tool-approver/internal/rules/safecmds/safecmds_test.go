@@ -2,6 +2,8 @@ package safecmds
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -2331,6 +2333,115 @@ func TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected(t *testing.T) {
 		if got.Decision != hookio.Approve {
 			t.Errorf("cmd %q: got %s (%s), want approve (safeCmdSubstitutions member, out of scope, unchanged)", cmd, got.Decision, got.Reason)
 		}
+	}
+}
+
+// TestSafecmds_Pg2_8oaug_ReadlinkRealpathSubstitutionApproves is pg2-8oaug's
+// fix (root cause: pg2-z9qw1): `diff $(readlink -f <path>) <other-path>` and
+// the `realpath`/backtick spellings now resolve rather than abstaining.
+//
+// Before this fix, readPathIssue only ever tried cmdparse.ExpandInCommand for
+// a dynamically-expanded argument, and that seam explicitly declines EVERY
+// `$(...)`/backtick shape (see its own doc) — so a diff argument shaped
+// `$(readlink -f <marketplace-symlink>)` tripped argHasDynamicExpansion,
+// never resolved, and the whole compound abstained with
+// RefusalCategoryDynamicPathRead despite the historical corpus being 86/86
+// approved (pg2-z9qw1).
+func TestSafecmds_Pg2_8oaug_ReadlinkRealpathSubstitutionApproves(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{
+			"the bead's target compound: readlink -f, plus the trailing freshness-check echo",
+			`diff $(readlink -f /home/user/project/marketplace-link) /home/user/project/repo-source-file.txt && echo DIFF_EXIT=$?`,
+		},
+		{
+			"realpath spelling",
+			`diff $(realpath /home/user/project/marketplace-link) /home/user/project/repo-source-file.txt`,
+		},
+		{
+			"backtick spelling",
+			"diff `readlink -f /home/user/project/marketplace-link` /home/user/project/repo-source-file.txt",
+		},
+		{
+			"the resolvable operand may be either diff positional, not just the first",
+			`diff /home/user/project/repo-source-file.txt $(readlink -f /home/user/project/marketplace-link)`,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve (readlink -f/realpath substitution now resolves)", tt.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_Pg2_8oaug_OtherSubstitutionCommandStillAbstains is the required
+// companion: this relief is deliberately narrow to the readlink -f/realpath
+// shape (pg2-8oaug's option (b)), NOT a blanket "any $(...) substitution
+// cmdparse.IsSafeSubstitutionBody would clear" widening (that was option (a),
+// not implemented here) — a diff argument built from a DIFFERENT command
+// substitution must keep abstaining exactly as before, even one
+// (`id -u`) that IS unconditionally on cmdparse's own safeCmdSubstitutions
+// allowlist. Only readlink/realpath answer the specific question
+// readPathIssue asks (what FILE will diff actually open); nothing else does.
+func TestSafecmds_Pg2_8oaug_OtherSubstitutionCommandStillAbstains(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"safe-cmd-substitution member, but not readlink/realpath", `diff $(id -u) /home/user/project/repo-source-file.txt && echo DIFF_EXIT=$?`},
+		{"not on the safe-substitution allowlist at all", `diff $(uptime) /home/user/project/repo-source-file.txt && echo DIFF_EXIT=$?`},
+		{"readlink without -f is a different, one-hop-only shape, deliberately not admitted", `diff $(readlink /home/user/project/marketplace-link) /home/user/project/repo-source-file.txt`},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (only readlink -f/realpath are relieved, not every safe-cmd substitution)", tt.cmd, got.Decision, got.Reason)
+			}
+			if got.RefusalCategory != hookio.RefusalCategoryDynamicPathRead {
+				t.Errorf("cmd %q: RefusalCategory = %v (%s), want RefusalCategoryDynamicPathRead", tt.cmd, got.RefusalCategory, got.Reason)
+			}
+		})
+	}
+}
+
+// TestSafecmds_Pg2_8oaug_ResolvesRealSymlinkTarget proves the fix answers the
+// question readPathIssue actually needs answered — is the FILE diff will open
+// readable — rather than merely whether the readlink/realpath OPERAND's own
+// (unresolved) path sits in a readable zone. A symlink whose own path is
+// inside the project root but whose TARGET resolves OUTSIDE any readable zone
+// must still abstain: a relief that only checked the operand's literal text
+// (pg2-8oaug's option (a), the envvars.go-precedent allowlist relief, applied
+// without its own separate resolution step) would have wrongly approved this.
+func TestSafecmds_Pg2_8oaug_ResolvesRealSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "marketplace-link")
+	if err := os.Symlink("/etc/shadow", link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	other := filepath.Join(dir, "repo-source-file.txt")
+	if err := os.WriteFile(other, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	pe := patheval.New(dir)
+	r := New(pe)
+	cmd := "diff $(readlink -f " + link + ") " + other + " && echo DIFF_EXIT=$?"
+	input := &hookio.HookInput{ToolName: "Bash", CWD: dir, ToolInput: mustJSON(map[string]string{"command": cmd})}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("cmd %q: got %s (%s), want abstain — the symlink's own path is in-zone but its resolved target (/etc/shadow) is not", cmd, got.Decision, got.Reason)
 	}
 }
 
