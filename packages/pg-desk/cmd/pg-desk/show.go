@@ -189,10 +189,15 @@ func writeShowJSON(w io.Writer, p showPayload) error {
 }
 
 func renderShow(w io.Writer, p showPayload) error {
+	// p.EntityID already carries the full qualified "owner/repo#N" form
+	// (resolvePRRef in desk.go always rebuilds it as repo+"#"+n), so it is
+	// printed here as-is — prepending p.Repo+"#" on top of it would
+	// double-print the repo prefix (pg2-5mnbo), unlike writeShowJSON which
+	// already serializes EntityID verbatim and was never affected.
 	if _, err := fmt.Fprintf(
 		w,
-		"%s#%s\townership=%s\tcategory=%s\tpanel=%s\tready_to_promote=%v\tdegraded=%v\tas_of=%s\thidden=%v\twip=%v\n",
-		p.Repo, p.EntityID, orDash(p.Ownership), orDash(p.Category), orDash(p.Panel),
+		"%s\townership=%s\tcategory=%s\tpanel=%s\tready_to_promote=%v\tdegraded=%v\tas_of=%s\thidden=%v\twip=%v\n",
+		p.EntityID, orDash(p.Ownership), orDash(p.Category), orDash(p.Panel),
 		p.ReadyToPromote, p.Degraded, orDash(p.AsOf), p.Hidden, p.WIP,
 	); err != nil {
 		return err

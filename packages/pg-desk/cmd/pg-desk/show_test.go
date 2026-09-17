@@ -165,6 +165,49 @@ func TestShowJSONIncludesWIP(t *testing.T) {
 	}
 }
 
+// TestShowPlainTextEntityIDNotDoubled is pg2-5mnbo's regression test: the
+// plain-text formatter must print entity_id exactly once, matching the
+// --json form, rather than prepending "repo#" onto an EntityID that already
+// carries the full qualified "owner/repo#N" form (resolvePRRef in desk.go
+// always rebuilds it that way). The existing show tests above all use the
+// single-slash "o/r" remote and never assert on the exact plain-text
+// prefix, so they passed even with the doubling bug present.
+func TestShowPlainTextEntityIDNotDoubled(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "owner/repo"}}}
+	withOpenSeams(t, cfg, openFresh)
+	if err := st.UpsertInterpretation(store.Interpretation{
+		Repo: "owner/repo", EntityType: entityTypePR, EntityID: "owner/repo#105204",
+		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
+		AsOf: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed interpretation: %v", err)
+	}
+
+	stdout, err := runShowCmd(t, "105204", showCmdFlags{})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if strings.Contains(stdout, "owner/repo#owner/repo#105204") {
+		t.Fatalf("plain-text output double-prints the repo prefix: %s", stdout)
+	}
+	if !strings.HasPrefix(stdout, "owner/repo#105204\t") {
+		t.Fatalf("plain-text output does not start with the qualified entity_id exactly once: %s", stdout)
+	}
+
+	jsonOut, err := runShowCmd(t, "105204", showCmdFlags{jsonOut: true})
+	if err != nil {
+		t.Fatalf("show --json: %v", err)
+	}
+	var payload showPayload
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("decode show --json: %v", err)
+	}
+	if !strings.HasPrefix(stdout, payload.EntityID+"\t") {
+		t.Errorf("plain-text entity_id prefix %q does not match --json entity_id %q", stdout, payload.EntityID)
+	}
+}
+
 func TestShowUnresolvedPRFails(t *testing.T) {
 	_, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
