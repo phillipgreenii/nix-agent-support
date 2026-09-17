@@ -54,6 +54,82 @@ func TestShowPrintsStoredInterpretation(t *testing.T) {
 	}
 }
 
+// TestShowPrintsPlannedSyncRowsInPlanMode is docket pg2-2j5ac.34.1's own
+// acceptance criterion: `pg-desk show <pr>` prints that PR's planned sync
+// writes when sync.mode is "plan" (design section 7.5, 7.7).
+func TestShowPrintsPlannedSyncRowsInPlanMode(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
+	cfg.Sync.Mode = "plan"
+	withOpenSeams(t, cfg, openFresh)
+
+	if err := st.UpsertInterpretation(store.Interpretation{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
+		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
+		AsOf: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed interpretation: %v", err)
+	}
+	if err := st.UpsertLedger(store.LedgerEntry{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42", Kind: "anchor",
+		BeadID: "", LastSyncedContentHash: "deadbeefhash", LastSyncedAt: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed planned ledger row: %v", err)
+	}
+
+	stdout, err := runShowCmd(t, "42", showCmdFlags{})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if !strings.Contains(stdout, "planned_sync_rows:") {
+		t.Fatalf("stdout missing planned_sync_rows section: %s", stdout)
+	}
+	if !strings.Contains(stdout, "anchor") || !strings.Contains(stdout, "deadbeefhash") {
+		t.Errorf("stdout missing the planned anchor row's kind/content_hash: %s", stdout)
+	}
+
+	jsonOut, err := runShowCmd(t, "42", showCmdFlags{jsonOut: true})
+	if err != nil {
+		t.Fatalf("show --json: %v", err)
+	}
+	var payload showPayload
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("decode show --json: %v", err)
+	}
+	if len(payload.PlannedSyncRows) != 1 || payload.PlannedSyncRows[0].Kind != "anchor" {
+		t.Fatalf("payload.PlannedSyncRows = %+v, want one anchor row", payload.PlannedSyncRows)
+	}
+}
+
+// TestShowOmitsPlannedSyncRowsOutsidePlanMode proves the section/field is
+// absent in off/apply mode even when a ledger row happens to exist.
+func TestShowOmitsPlannedSyncRowsOutsidePlanMode(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}} // Sync.Mode unset => off
+	withOpenSeams(t, cfg, openFresh)
+
+	if err := st.UpsertInterpretation(store.Interpretation{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
+		Ownership: "mine", AsOf: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed interpretation: %v", err)
+	}
+	if err := st.UpsertLedger(store.LedgerEntry{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42", Kind: "anchor",
+		BeadID: "", LastSyncedContentHash: "deadbeefhash", LastSyncedAt: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed planned ledger row: %v", err)
+	}
+
+	stdout, err := runShowCmd(t, "42", showCmdFlags{})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if strings.Contains(stdout, "planned_sync_rows:") {
+		t.Fatalf("off mode printed a planned_sync_rows section: %s", stdout)
+	}
+}
+
 func TestShowJSONIncludesWIP(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
