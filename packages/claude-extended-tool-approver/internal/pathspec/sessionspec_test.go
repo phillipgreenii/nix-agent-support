@@ -119,7 +119,16 @@ func TestSessionKind_ProjectRoot_NarrowFabricatedRootGrants(t *testing.T) {
 		t.Fatalf("test setup invalid: ProjectRootGrantsZone() = false, want true for a narrow fabricated root")
 	}
 
-	target := filepath.Join(narrow, "file.go")
+	// Built from pe.ProjectRoot() (already symlink-resolved), not the raw
+	// narrow fixture value: on macOS, t.TempDir() returns an unresolved path
+	// (e.g. /var/folders/...) that differs from its own realpath
+	// (/private/var/folders/...), and patheval.New always stores the
+	// resolved form as ProjectRoot(). ResolveAccess's own doc comment
+	// requires its abs argument to already be symlink-resolved (the
+	// contract every real caller satisfies via pe.ResolvePath before
+	// calling it) — mirroring the same resolve-before-use pattern
+	// workspace_test.go's scratchOutsideTemp already applies.
+	target := filepath.Join(pe.ProjectRoot(), "file.go")
 	pa := ResolveAccess(sessionKinds(pe), target)
 
 	if pa.Write.Result != Permitted {
@@ -146,7 +155,10 @@ func TestSessionKind_WorkspaceRoot_UngatedByFabricatedRootGuard(t *testing.T) {
 		t.Fatalf("test setup invalid: expected ProjectRootGrantsZone() = false for this scenario")
 	}
 
-	target := filepath.Join(home, "dotfile")
+	// Built from pe.WorkspaceRoot() (already symlink-resolved), not the raw
+	// home fixture value — see the same macOS realpath-mismatch note in
+	// TestSessionKind_ProjectRoot_NarrowFabricatedRootGrants above.
+	target := filepath.Join(pe.WorkspaceRoot(), "dotfile")
 	pa := ResolveAccess(sessionKinds(pe), target)
 
 	if pa.Write.Result != Permitted {

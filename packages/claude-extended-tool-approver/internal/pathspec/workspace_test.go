@@ -3,6 +3,7 @@ package pathspec
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -165,11 +166,26 @@ func TestGoKind(t *testing.T) {
 	for _, rel := range []string{"gocache", "gocache/aa", "modcache/x@v1"} {
 		wantAccess(t, []Kind{goKind}, filepath.Join(root, rel), Permitted, "go")
 	}
-	// Default derivation without the env vars: $XDG_CACHE_HOME/go-build.
+	// Default derivation without GOCACHE: goKind.Roots' XDG_CACHE_HOME
+	// branch is deliberately gated to non-darwin (runtime.GOOS !=
+	// "darwin") because real `go env GOCACHE` on darwin ignores
+	// XDG_CACHE_HOME entirely and always derives $HOME/Library/Caches/
+	// go-build (verified empirically: `XDG_CACHE_HOME=/tmp/x go env
+	// GOCACHE` on darwin still prints .../Library/Caches/go-build) — so
+	// this assertion must be OS-aware rather than assuming XDG_CACHE_HOME
+	// is honored everywhere.
 	t.Setenv("GOCACHE", "")
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg"))
-	wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg", "go-build"), Permitted, "go")
-	wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg"), Unknown, "")
+	if runtime.GOOS == "darwin" {
+		home := filepath.Join(root, "home")
+		mkdirs(t, home, "Library/Caches/go-build")
+		t.Setenv("HOME", home)
+		wantAccess(t, []Kind{goKind}, filepath.Join(home, "Library", "Caches", "go-build"), Permitted, "go")
+		wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg", "go-build"), Unknown, "")
+	} else {
+		wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg", "go-build"), Permitted, "go")
+		wantAccess(t, []Kind{goKind}, filepath.Join(root, "xdg"), Unknown, "")
+	}
 }
 
 // TestGoKindModCacheZoneConflict pins the documented interaction: the
