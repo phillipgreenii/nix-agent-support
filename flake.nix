@@ -2494,7 +2494,16 @@
               # and that
               # darwin/modules/pg-router-ccpool-handler/default.nix re-
               # exposes the HM module's own `handlerCommandDir` output
-              # verbatim at darwin scope.
+              # verbatim at darwin scope. Extended for pg2-qsred (home-
+              # manager module had no launch-config surface at all --
+              # real dispatch failed on empty WorktreeDir): also proves the
+              # new `launchConfig`/`launchConfigFile` option renders a real
+              # repoRoot/worktreeDir plus a couple of overridden scalars
+              # correctly, that every other field matches
+              # `internal/config.Default()`'s own values when left
+              # untouched, and that `launchConfigFile` resolves to `null`
+              # (never throws "used but not defined") when the module is
+              # disabled, since `repoRoot`/`worktreeDir` carry no default.
               test-pg-router-ccpool-handler-module =
                 let
                   hmAssertionSubmodule = lib.types.submodule {
@@ -2587,6 +2596,50 @@
                     roles = { };
                   };
                   emptyHandlerCommandDir = noRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+
+                  # launchConfig / launchConfigFile (this bead, pg2-qsred):
+                  # disabled -- launchConfigFile must resolve to `null`
+                  # rather than throwing "used but not defined", even though
+                  # `launchConfig.repoRoot`/`worktreeDir` have no default and
+                  # are left completely unset here (acceptance criterion:
+                  # importing this module without enabling it stays inert).
+                  disabledModule = evalHM { enable = false; };
+
+                  # launchConfig with real-shaped override values (a
+                  # repoRoot/worktreeDir, plus a couple of non-default
+                  # scalars) -- proves the rendered JSON both carries the
+                  # overrides and decodes correctly against the real Go
+                  # `loadConfig`/`internal/config.Config` (checked directly
+                  # against that decode struct for this bead, not just by
+                  # name).
+                  withLaunchConfig = evalHM {
+                    enable = true;
+                    roles = { };
+                    launchConfig = {
+                      repoRoot = "/tmp/pg2-qsred-repo";
+                      worktreeDir = "/tmp/pg2-qsred-repo/.worktrees";
+                      permissionMode = "plan";
+                      prTool = "pg-pr";
+                    };
+                  };
+                  launchConfigFile =
+                    withLaunchConfig.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
+
+                  # launchConfig with every OTHER field left at its default --
+                  # proves those defaults render into the JSON and match
+                  # `internal/config.Default()`'s own values exactly (only
+                  # repoRoot/worktreeDir are set, since those two have no
+                  # default of their own).
+                  defaultLaunchConfig = evalHM {
+                    enable = true;
+                    roles = { };
+                    launchConfig = {
+                      repoRoot = "/tmp/pg2-qsred-repo-default";
+                      worktreeDir = "/tmp/pg2-qsred-repo-default/.worktrees";
+                    };
+                  };
+                  defaultLaunchConfigFile =
+                    defaultLaunchConfig.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
                   # darwin-side eval: stub the options
                   # darwin/modules/pg-router-ccpool-handler/default.nix
@@ -2695,7 +2748,12 @@
                     pkgs.runCommand "test-pg-router-ccpool-handler-module-render"
                       {
                         nativeBuildInputs = [ pkgs.jq ];
-                        inherit handlerCommandDir emptyHandlerCommandDir;
+                        inherit
+                          handlerCommandDir
+                          emptyHandlerCommandDir
+                          launchConfigFile
+                          defaultLaunchConfigFile
+                          ;
                       }
                       ''
                         set -euo pipefail
@@ -2721,6 +2779,45 @@
                         [ "$(jq -c .command.argv "$handlerCommandDir/worker.json")" = '["worker-bin","--flag"]' ]
                         jq -e 'has("ccpool") | not' "$handlerCommandDir/worker.json" >/dev/null
                         [ "$(ls -1 "$emptyHandlerCommandDir" | wc -l)" -eq 0 ]
+
+                        # launchConfigFile (this bead, pg2-qsred): the
+                        # overrides render, and everything left untouched
+                        # matches internal/config.Default() -- field names
+                        # are the exact lowerCamelCase keys
+                        # cmd/pg-router-ccpool-handler/roleconfig.go's
+                        # loadConfig decodes directly into
+                        # internal/config.Config (no wrapper struct, unlike
+                        # roleFile above).
+                        [ "$(jq -r .repoRoot "$launchConfigFile")" = /tmp/pg2-qsred-repo ]
+                        [ "$(jq -r .worktreeDir "$launchConfigFile")" = /tmp/pg2-qsred-repo/.worktrees ]
+                        [ "$(jq -r .permissionMode "$launchConfigFile")" = plan ]
+                        [ "$(jq -r .prTool "$launchConfigFile")" = pg-pr ]
+                        [ "$(jq -r .beadsPrefix "$launchConfigFile")" = zr ]
+                        [ "$(jq -r .autonomous "$launchConfigFile")" = true ]
+                        [ "$(jq -r .effort "$launchConfigFile")" = max ]
+                        [ "$(jq -r .sessionPrefix "$launchConfigFile")" = pg-router- ]
+                        # confirmIngest/budgetTime render as NANOSECOND
+                        # integers, not "25m"-style duration strings --
+                        # internal/config.Config's time.Duration fields have
+                        # no second parse pass the way
+                        # roleFile.CCPool.Budget.Time gets in loadRole
+                        # (confirmed empirically for this bead: a duration
+                        # STRING here fails Config's own decode).
+                        [ "$(jq -r .confirmIngest "$launchConfigFile")" = 90000000000 ]
+                        [ "$(jq -r .budgetTime "$launchConfigFile")" = 1500000000000 ]
+                        [ "$(jq -r .reminderPct "$launchConfigFile")" = 0.725 ]
+                        [ "$(jq -r .cancelPct "$launchConfigFile")" = 0.9 ]
+                        [ "$(jq -r .hardPct "$launchConfigFile")" = 1.0 ]
+
+                        # defaultLaunchConfigFile: every field but repoRoot/
+                        # worktreeDir matches internal/config.Default()'s own
+                        # values exactly.
+                        [ "$(jq -r .permissionMode "$defaultLaunchConfigFile")" = dontAsk ]
+                        [ "$(jq -r .prTool "$defaultLaunchConfigFile")" = "" ]
+                        [ "$(jq -r .model "$defaultLaunchConfigFile")" = "" ]
+                        [ "$(jq -r .selfLogin "$defaultLaunchConfigFile")" = "" ]
+                        [ "$(jq -r .budgetTokens "$defaultLaunchConfigFile")" -eq 0 ]
+                        [ "$(jq -r .budgetCost "$defaultLaunchConfigFile")" -eq 0 ]
                         touch $out
                       '';
                 in
@@ -2731,6 +2828,11 @@
                   == handlerCommandDir;
                 assert
                   darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
+                # launchConfigFile (this bead, pg2-qsred): disabled resolves
+                # to null rather than throwing -- proves the module stays
+                # inert (repoRoot/worktreeDir never forced) for a consumer
+                # that imports it without enabling it.
+                assert disabledModule.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile == null;
                 renderCheck;
 
               # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's

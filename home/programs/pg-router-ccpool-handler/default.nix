@@ -110,6 +110,63 @@ let
     }) cfg.roles
   );
 
+  # defaultAllowedTools (this bead, pg2-qsred): mirrors
+  # internal/config.baseAllowedTools's own literal value exactly.
+  # internal/config.Default() computes its AllowedTools field ONCE, at
+  # PRTool == "" -- it does NOT dynamically recompute when a later JSON
+  # overlay sets a nonempty PRTool -- so this nix default deliberately does
+  # the same (no dynamic Bash(<prTool>:*) append here either); see
+  # launchConfig.allowedTools's own doc comment below.
+  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)";
+
+  # launchConfigFile (this bead, pg2-qsred: home-manager module has no
+  # launch-config surface, so real dispatch fails on empty WorktreeDir).
+  # Renders `launchConfig` into the on-disk JSON shape
+  # cmd/pg-router-ccpool-handler/roleconfig.go's `loadConfig` decodes
+  # DIRECTLY into `internal/config.Config` (`json.Unmarshal(data, &c)` where
+  # `c := config.Default()`) -- unlike `roleFile` above, there is NO wrapper
+  # struct here. `internal/config.Config` carries no `json:"..."` tags of its
+  # own, so `encoding/json`'s case-insensitive fallback matches these
+  # lowerCamelCase keys onto Config's own PascalCase fields -- confirmed
+  # against `loadConfig` and its own test fixtures
+  # (`cmd/pg-router-ccpool-handler/roleconfig_test.go`'s
+  # `{"permissionMode":"yolo"}`/`{"permissionMode":"plan"}`) and against this
+  # bead's own live probe. `confirmIngest`/`budgetTime` render as NANOSECOND
+  # integers, not `"25m"`-style duration strings: `Config`'s `time.Duration`
+  # fields have no second parse pass the way `roleFile.CCPool.Budget.Time`
+  # gets in `loadRole` -- a duration STRING here fails decode ("cannot
+  # unmarshal string into Go struct field Config.MaxWait of type
+  # time.Duration"), confirmed empirically for this bead. `maxWait`/
+  # `pollInterval`/`reminderMsg`/`wrapUpMsg` are deliberately not exposed
+  # here (no deployment need identified yet); omitting them from the
+  # rendered JSON leaves `config.Default()`'s own values in effect for those
+  # fields, since `loadConfig` overlays this JSON onto `Default()`, not the
+  # reverse.
+  launchConfigFile = pkgs.writeText "pg-router-ccpool-handler-launch-config.json" (
+    builtins.toJSON {
+      inherit (cfg.launchConfig)
+        repoRoot
+        worktreeDir
+        beadsPrefix
+        permissionMode
+        allowedTools
+        autonomous
+        effort
+        model
+        prTool
+        sessionPrefix
+        selfLogin
+        ;
+      confirmIngest = cfg.launchConfig.confirmIngestSeconds * 1000000000;
+      budgetTokens = cfg.launchConfig.budget.tokens;
+      budgetCost = cfg.launchConfig.budget.cost;
+      budgetTime = cfg.launchConfig.budget.timeSeconds * 1000000000;
+      reminderPct = cfg.launchConfig.budget.reminderPct;
+      cancelPct = cfg.launchConfig.budget.cancelPct;
+      hardPct = cfg.launchConfig.budget.hardPct;
+    }
+  );
+
   roleSubmodule = lib.types.submodule {
     options = {
       type = lib.mkOption {
@@ -373,6 +430,221 @@ in
       '';
     };
 
+    # launchConfig / launchConfigFile (this bead, pg2-qsred): the
+    # --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG launch/prompt/isolation config
+    # `internal/config.Config` decodes -- decoupled from
+    # register/periodicDrain/daemon/roles above the same way `roles` is: a
+    # deployment wanting only this rendered file (to hand to a consuming
+    # flake's own PG_ROUTER_CCPOOL_HANDLER_CONFIG export) needs no other
+    # submodule enabled, only `enable` itself (see `launchConfigFile`'s own
+    # doc comment for why it is gated on `enable`, unlike `handlerCommandDir`
+    # above).
+    launchConfig = {
+      repoRoot = lib.mkOption {
+        type = lib.types.str;
+        description = ''
+          RepoRoot in the launch config -- the repo a dispatched session's
+          WORKSPACE_ROOT derives from (worktree/none isolation) or runs
+          directly against. No default -- deployment-specific (mirrors
+          `home/programs/pg-router`'s own `periodicDrain.repoRoot`/
+          `daemon.repoRoot`, and this module's own `register` options'
+          `socket`/`id` convention above).
+        '';
+      };
+      worktreeDir = lib.mkOption {
+        type = lib.types.str;
+        description = ''
+          WorktreeDir in the launch config -- the parent directory fresh
+          per-item git worktrees are created under (worktree isolation, the
+          default). `internal/config.Default()` hardcodes this to `""` with
+          no fallback: every real dispatch using worktree isolation fails
+          with `mkdir worktree dir: mkdir : no such file or directory` until
+          a deployment supplies this (the bug this bead, pg2-qsred, fixes).
+          No default -- deployment-specific.
+        '';
+      };
+      beadsPrefix = lib.mkOption {
+        type = lib.types.str;
+        default = "zr";
+        description = ''
+          BeadsPrefix in the launch config -- the expected bd issue-store
+          prefix, checked by this module's own precheck. Matches
+          `internal/config.Default()`'s own value.
+        '';
+      };
+      permissionMode = lib.mkOption {
+        type = lib.types.enum [
+          ""
+          "default"
+          "acceptEdits"
+          "plan"
+          "auto"
+          "dontAsk"
+          "bypassPermissions"
+        ];
+        default = "dontAsk";
+        description = ''
+          PermissionMode in the launch config -- forwarded verbatim to
+          `ccpool new --permission-mode`, and the exact enum
+          `internal/config.Config.Validate()` accepts
+          (`validPermissionModes`). Matches `internal/config.Default()`'s own
+          value.
+        '';
+      };
+      allowedTools = lib.mkOption {
+        type = lib.types.str;
+        default = defaultAllowedTools;
+        description = ''
+          AllowedTools in the launch config -- forwarded verbatim to
+          `ccpool new --allowed-tools`. Defaults to
+          `internal/config.baseAllowedTools`'s own literal value (mirrored
+          above as this module's own `defaultAllowedTools`), matching
+          `internal/config.Default()`'s own value exactly: Default() computes
+          this ONCE, with PRTool == "", so setting `prTool` below WITHOUT
+          also overriding this field will NOT automatically grant
+          `Bash(<prTool>:*)` -- the real Go `Default()` this mirrors has the
+          identical gap. A deployment that wants that grant must set both.
+        '';
+      };
+      autonomous = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Autonomous in the launch config -- forwarded verbatim to
+          `ccpool new`. Matches `internal/config.Default()`'s own value.
+        '';
+      };
+      effort = lib.mkOption {
+        type = lib.types.str;
+        default = "max";
+        description = ''
+          Effort in the launch config -- forwarded verbatim to `ccpool new`.
+          Matches `internal/config.Default()`'s own value.
+        '';
+      };
+      model = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = ''
+          Model in the launch config -- forwarded verbatim to `ccpool new`.
+          `""` (the default, matching `internal/config.Default()`) omits the
+          flag.
+        '';
+      };
+      prTool = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = ''
+          PRTool in the launch config -- the external PR-management tool
+          this module's ACL/preflight shell out to. `""` (the default,
+          matching `internal/config.Default()`) adds no extra grant to
+          `allowedTools`'s own default (see that option's own doc comment).
+        '';
+      };
+      sessionPrefix = lib.mkOption {
+        type = lib.types.str;
+        default = "pg-router-";
+        description = ''
+          SessionPrefix in the launch config -- the ccpool `--name` label
+          prefix. Matches `internal/config.Default()`'s own value.
+        '';
+      };
+      selfLogin = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = ''
+          SelfLogin in the launch config -- the GitHub login the worker
+          safety preamble asserts authorship against. `""` is
+          `internal/config.Default()`'s own (implicit, zero-value) default --
+          empty until a deployment sets it explicitly.
+        '';
+      };
+      confirmIngestSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 90;
+        description = ''
+          ConfirmIngest in the launch config, in SECONDS -- rendered into the
+          JSON's `confirmIngest` key as nanoseconds
+          (`confirmIngestSeconds * 1e9`), because `internal/config.Config`
+          carries no json tags and no custom `UnmarshalJSON`: its
+          `time.Duration` fields decode via `encoding/json`'s plain int64
+          handling, which requires a JSON NUMBER of nanoseconds, NOT a
+          `"25m"`-style duration string (unlike this module's OWN
+          `roles.*.ccpool.budget.time` above, which IS a string -- that
+          decode path is a second, manual `time.ParseDuration` pass in
+          `loadRole` that `loadConfig` has no equivalent of; confirmed
+          empirically for this bead, pg2-qsred). Default 90 matches
+          `internal/config.Default()`'s own `90 * time.Second`.
+        '';
+      };
+      budget = {
+        tokens = lib.mkOption {
+          type = lib.types.int;
+          default = 0;
+          description = ''
+            BudgetTokens in the launch config. `<= 0` means unlimited.
+            Matches `internal/config.Default()`'s own value (unlimited until
+            ccpool N3).
+          '';
+        };
+        cost = lib.mkOption {
+          type = lib.types.int;
+          default = 0;
+          description = ''
+            BudgetCost in the launch config, in CENTS. `<= 0` means
+            unlimited. Matches `internal/config.Default()`'s own value.
+          '';
+        };
+        timeSeconds = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 1500;
+          description = ''
+            BudgetTime in the launch config, in SECONDS -- rendered as
+            nanoseconds the same way `confirmIngestSeconds` above is (see
+            that option's doc comment for why). Default 1500 (25 minutes)
+            matches `internal/config.Default()`'s own `25 * time.Minute`.
+          '';
+        };
+        reminderPct = lib.mkOption {
+          type = lib.types.float;
+          default = 0.725;
+          description = "ReminderPct in the launch config. Matches `internal/config.Default()`'s own value.";
+        };
+        cancelPct = lib.mkOption {
+          type = lib.types.float;
+          default = 0.90;
+          description = "CancelPct in the launch config. Matches `internal/config.Default()`'s own value.";
+        };
+        hardPct = lib.mkOption {
+          type = lib.types.float;
+          default = 1.00;
+          description = "HardPct in the launch config. Matches `internal/config.Default()`'s own value.";
+        };
+      };
+    };
+
+    launchConfigFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      readOnly = true;
+      # Deliberately NO `default` here -- same "readOnly + unconditional
+      # config assignment" reasoning as `handlerCommandDir` above (a
+      # `default` here would count as a second `evalOptionValue` definition
+      # alongside the always-provided `config` value below).
+      description = ''
+        Read-only output: the rendered `launchConfig` JSON file, suitable for
+        `--config`/`PG_ROUTER_CCPOOL_HANDLER_CONFIG`
+        (`cmd/pg-router-ccpool-handler/roleconfig.go`'s `loadConfig`, which
+        decodes it DIRECTLY into `internal/config.Config` -- see that
+        struct's own field docs and `launchConfig` above). `null` when
+        `enable` is false: `repoRoot`/`worktreeDir` above have no default, so
+        unconditionally forcing this file's content regardless of `enable`
+        would throw "used but not defined" for any consumer that merely
+        imports this module without enabling it -- gating on `enable` instead
+        keeps that import safe, matching the capability-model's "feature
+        aggregate MUST be inert" invariant.
+      '';
+    };
+
     periodicDrain = {
       enable = lib.mkEnableOption ''
         a systemd --user timer that periodically re-runs
@@ -418,6 +690,11 @@ in
       # `handlerCommandDir` option should not need this module's own
       # register/systemd machinery enabled too.
       phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = handlerCommandDir;
+      # launchConfigFile (this bead, pg2-qsred): `null` when disabled -- see
+      # that option's own doc comment for why (repoRoot/worktreeDir have no
+      # default, so this branch must stay unforced while disabled).
+      phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile =
+        if cfg.enable then launchConfigFile else null;
     }
     (lib.mkIf cfg.enable {
       home.packages = [ cfg.package ];
