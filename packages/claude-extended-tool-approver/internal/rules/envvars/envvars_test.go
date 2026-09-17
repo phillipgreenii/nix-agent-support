@@ -1675,6 +1675,90 @@ func TestEnvVars_HomeTempDir_TransparentBesideCommand(t *testing.T) {
 	}
 }
 
+// TestEnvVars_NestedShellDashC_HomeTempDir_Approve pins pg2-zsv1c's new
+// nested-payload recursion: a `bash -c` / `sh -c` leaf whose ENTIRE script is
+// itself assignment-only, with a HOME replacement grounded in a `mktemp -d`
+// fresh temp dir BOUND INSIDE THAT SAME NESTED SCRIPT, is judged by the
+// identical rule TestEnvVars_HomeTempDir_Approve already pins for the
+// top-level case — cmdparse.UnwrapShellDashCChain/InCommandTempDirVars now
+// applied one level down rather than stopping at the opaque `-c` argument.
+func TestEnvVars_NestedShellDashC_HomeTempDir_Approve(t *testing.T) {
+	commands := []string{
+		`bash -c 'HOME=$(mktemp -d)'`,
+		`sh -c 'T=$(mktemp -d); HOME="$T"'`,
+		`bash -c 'T=$(mktemp -d); export HOME="$T/h"'`,
+		// a PREFIX assignment on the bash -c leaf itself reaches the nested
+		// script's own process environment (NestedShellDashCTempDirVars).
+		`T=$(mktemp -d) bash -c 'HOME="$T/h"'`,
+		// chained nested wrapper (bash -c 'bash -c "..."') unwraps fully too.
+		`bash -c 'bash -c "HOME=$(mktemp -d)"'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_NestedShellDashC_AmbientPath_StillAsks is
+// TestEnvVars_NestedShellDashC_HomeTempDir_Approve's still-asking sibling
+// (pg2-zsv1c's own acceptance criteria requires both): a PATH extension
+// inside an otherwise-identical self-contained nested payload, referencing a
+// component NOTHING in this seam's scope (neither the nested script's own
+// earlier leaves nor the bash -c leaf's own prefix assignments) can prove
+// safe, must keep the decisive Ask — the recursion must not become a
+// blanket relief for every nested PATH/HOME assignment. PATH (not HOME) is
+// used here so the unclassified-fallback verdict is Ask rather than HOME's
+// own Reject fallback (pg2-sir2l; see TestEnvVars_HomeTempDir_HomeStillRejects).
+// Each command carries a trailing bare-name `true` (pg2-7sqk8, matching
+// TestEnvVars_HomeTempDir_Ask's own convention) so the assignment has a
+// downstream consumer within the SAME nested script and mechanism 2's
+// separate "never consumed, so inert" relief does not mask the value
+// question this test exists to pin.
+func TestEnvVars_NestedShellDashC_AmbientPath_StillAsks(t *testing.T) {
+	commands := []string{
+		`bash -c 'PATH="$AMBIENT:$PATH"; true'`,
+		`sh -c 'PATH=/tmp/not-static-absolute-nor-known; true'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_NestedShellDashC_RealCommandPresent_Transparent re-asserts the
+// masking guard this recursion adds beyond the plain wholeLeaf check
+// (envvars.go's own NESTED bash -c / sh -c PAYLOAD RECURSION comment): when
+// the nested script carries a REAL command alongside its safe HOME
+// assignment, the Approve MUST NOT be held — surfacing it would auto-approve
+// the whole leaf and silently skip every other rule's judgement of that real
+// command (mirrors TestEnvVars_HomeTempDir_TransparentBesideCommand for the
+// top-level case).
+func TestEnvVars_NestedShellDashC_RealCommandPresent_Transparent(t *testing.T) {
+	commands := []string{
+		`bash -c 'T=$(mktemp -d); HOME="$T"; rm -rf /'`,
+		`sh -c 'HOME=$(mktemp -d); git push --force origin main'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (transparent, must not pre-empt later rules)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // TestEnvVars_HomeTempDir_Ask pins the required regressions: this relief MUST
 // NOT widen beyond "grounded in a `mktemp -d` DIRECTORY, this same command" (or,
 // per pg2-sir2l, the rm+mkdir/bare-mkdir widening — none of these rows carry

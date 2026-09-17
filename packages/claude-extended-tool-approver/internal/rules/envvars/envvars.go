@@ -1753,6 +1753,81 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			result = hookio.MostRestrictive(result, sub)
 		}
+		// NESTED bash -c / sh -c PAYLOAD RECURSION (pg2-zsv1c). A leaf that is
+		// ITSELF a `bash -c <script>` / `sh -c <script>` invocation can carry
+		// its OWN PATH/HOME assignment inside <script> — e.g.
+		// `bash -c 'T=$(mktemp -d); HOME="$T"'` — invisible to the loop above,
+		// which only ever inspects pc's OWN EnvVars (the leaf's PREFIX
+		// assignments, never text buried inside an argument): cmdparse.Parse
+		// never even produces a candidate leaf for it until this seam
+		// recurses into the payload explicitly (cmdparse.UnwrapShellDashCChain,
+		// generalizing nix.go's own inner-command unwrap loop).
+		//
+		// Deliberately SELF-CONTAINED: the vars a later INNER leaf may consult
+		// are exactly the ones EARLIER INNER leaves establish (the identical
+		// cmdparse.InCommandVars/InCommandTempDirVars rules, scanned over
+		// innerLeaves alone), overlaid onto whatever pc's OWN prefix
+		// assignments hand the spawned process's environment
+		// (cmdparse.NestedShellDashCVars/NestedShellDashCTempDirVars — see
+		// their own docs for why a PREFIX assignment, and only a prefix
+		// assignment, crosses that process boundary). An EARLIER, PLAIN
+		// (non-prefix) assignment from an OUTER leaf of the ENCLOSING
+		// expression is deliberately NOT threaded in: `WT=/x; bash -c
+		// '...$WT...'` never sees WT at all (no export, no prefix — the
+		// binding never reaches the child process), so admitting it here
+		// would be a confidently WRONG value, not merely a missing one.
+		// Resolving THAT cross-scope shape (e.g. a value textually
+		// substituted by the OUTER shell before nix.go's own `-c`/`--command`
+		// unwrap ever sees it) needs the shared engine recursion boundary
+		// (hookio.Evaluator.EvaluateStructure) to thread outer vars through —
+		// a materially larger, separate change this bead's own text flags as
+		// out of scope for this pass (see pg2-zsv1c's bead body).
+		//
+		// A nested Approve is held aside as THIS RULE's own decisive verdict
+		// ONLY when the ENTIRE nested payload — every inner leaf, not merely
+		// the one carrying the sensitive assignment — is itself
+		// assignment-only (assignmentIsWholeLeaf): the same "no command left
+		// to pre-empt" guarantee the outer wholeLeaf gate already enforces,
+		// generalized to the whole nested unit. Without that whole-payload
+		// gate, holding an Approve for e.g. `bash -c 'export PATH=...; rm -rf
+		// /'` merely because ITS PATH assignment is safe would auto-approve
+		// the ENTIRE command and silently skip every other rule's judgement
+		// of `rm -rf /` — exactly the masking condition 3 of the Rule
+		// contract exists to prevent, now extended one level down. A nested
+		// Ask/Reject carries no such risk and is always folded into `result`
+		// the same way an outer one is.
+		if innerLeaves, _, ok := cmdparse.UnwrapShellDashCChain(pc); ok {
+			nestedVars := cmdparse.NestedShellDashCVars(pc)
+			nestedTempDirVars := cmdparse.NestedShellDashCTempDirVars(pc)
+			innerAllAssignmentOnly := true
+			for _, inner := range innerLeaves {
+				if !assignmentIsWholeLeaf(inner) {
+					innerAllAssignmentOnly = false
+					break
+				}
+			}
+			for j, inner := range innerLeaves {
+				innerWholeLeaf := assignmentIsWholeLeaf(inner)
+				innerVars := cmdparse.OverlayVars(nestedVars, cmdparse.InCommandVars(innerLeaves, j))
+				innerTempDirVars := cmdparse.OverlayVars(nestedTempDirVars, cmdparse.InCommandTempDirVars(innerLeaves, j))
+				var innerHasDownstreamConsumer bool
+				if innerWholeLeaf {
+					innerHasDownstreamConsumer = downstreamConsumerExists(innerLeaves, j)
+				}
+				for _, ev := range inner.EnvVars {
+					sub, subRefused := r.evaluateAssignment(ev, input, innerVars, innerTempDirVars, inner.EnvCleared, innerWholeLeaf, innerHasDownstreamConsumer, inner.Executable, innerLeaves, j)
+					refused = refused || subRefused
+					if sub.Decision == hookio.Approve {
+						if innerAllAssignmentOnly && held == nil {
+							approved := sub
+							held = &approved
+						}
+						continue
+					}
+					result = hookio.MostRestrictive(result, sub)
+				}
+			}
+		}
 	}
 	if result.Decision == hookio.NoOpinion && held != nil && !refused {
 		// The held Approve is surfaced only when NOTHING on this leaf was refused.
