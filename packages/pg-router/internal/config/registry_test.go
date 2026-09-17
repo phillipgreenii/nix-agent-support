@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,5 +329,90 @@ argv = ["x"]
 	}
 	if len(c.SerializeTypes) != 0 {
 		t.Fatalf("SerializeTypes = %v, want empty (key absent)", c.SerializeTypes)
+	}
+}
+
+// --- role-name charset/path-safety hardening (this bead, pg2-ymb3v) ---
+//
+// buildRole joins role.Name directly into a filesystem path when
+// HandlerCommandDir is configured (filepath.Join(dir, role.Name+".json")),
+// so a name containing "/" or ".." is rejected at config-DECODE time,
+// independent of whether HandlerCommandDir is ever set for this deployment
+// — the same "reject the footgun regardless of whether today's config uses
+// the feature" posture buildRole already takes for other required fields.
+
+// TestLoad_roleNameWithSlashIsError proves a role name containing "/" is
+// rejected at config-decode time (acceptance criterion c).
+func TestLoad_roleNameWithSlashIsError(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "feedback/worker"
+binds = ["e"]
+`)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a role name containing '/' must be rejected at config-decode time")
+	}
+	if !strings.Contains(err.Error(), "feedback/worker") {
+		t.Errorf("err = %q, want it to name the offending role %q", err, "feedback/worker")
+	}
+}
+
+// TestLoad_roleNameWithDotDotIsError proves a role name containing ".." is
+// rejected too (path-traversal, not just a bad subdirectory reference).
+func TestLoad_roleNameWithDotDotIsError(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "../escape"
+binds = ["e"]
+`)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a role name containing '..' must be rejected at config-decode time")
+	}
+}
+
+// TestLoad_roleNameOrdinaryIsAccepted is the negative control: an ordinary
+// role name (the feedback/worker/review shape the bead's own motivating
+// example uses) must NOT be rejected by the new charset check.
+func TestLoad_roleNameOrdinaryIsAccepted(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "feedback-worker"
+binds = ["e"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.Roles) != 1 || c.Roles[0].Name != "feedback-worker" {
+		t.Fatalf("Roles = %+v, want one role named feedback-worker", c.Roles)
 	}
 }

@@ -108,11 +108,21 @@ func (OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, i
 	}
 }
 
-// CommandFor resolves the argv PREFIX (before "dispatch" is appended) to
-// invoke for role's own registered handler participant — a deployment
-// concern (see this package's doc comment), never authored in roles.Role or
-// resolved by this package on its own initiative.
-type CommandFor func(role roles.Role) ([]string, error)
+// CommandFor resolves the FULL argv — including subcommand — to invoke for
+// role's own registered handler participant: a deployment concern (see this
+// package's doc comment), never authored in roles.Role or resolved by this
+// package on its own initiative.
+//
+// subcommand ("dispatch"/"postStartup"/"preShutdown") is passed IN rather
+// than appended by this package's own callers (this bead, pg2-ymb3v,
+// widening the prior func(role roles.Role) signature): a participant's own
+// CLI (e.g. pg-router-ccpool-handler/cmd's main.go) expects the subcommand
+// as its FIRST argument, with any flags (e.g. --role-config) after it — so
+// a CommandFor that differentiates roles via extra trailing tokens (a
+// per-role --role-config path) needs to know where "dispatch" belongs in
+// the argv it returns, not have it appended after those tokens where the
+// participant's own arg parser would reject it as an unknown subcommand.
+type CommandFor func(role roles.Role, subcommand string) ([]string, error)
 
 // Client is the production HandlerClient.
 type Client struct {
@@ -177,7 +187,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 	if c.Command == nil {
 		return Reply{}, errors.New("wireclient: no CommandFor configured")
 	}
-	argv, err := c.Command(role)
+	argv, err := c.Command(role, "dispatch")
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: resolve command for role %q: %w", role.Name, err)
 	}
@@ -205,7 +215,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		return Reply{}, fmt.Errorf("wireclient: encode dispatch request: %w", err)
 	}
 
-	stdout, code, err := c.runner().Run(ctx, append(argv, "dispatch"), body)
+	stdout, code, err := c.runner().Run(ctx, argv, body)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -280,7 +290,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 	if c.Command == nil {
 		return Reply{}, errors.New("wireclient: no CommandFor configured")
 	}
-	argv, err := c.Command(role)
+	argv, err := c.Command(role, subcommand)
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: resolve command for role %q: %w", role.Name, err)
 	}
@@ -296,7 +306,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 		return Reply{}, fmt.Errorf("wireclient: encode %s request: %w", subcommand, err)
 	}
 
-	stdout, code, err := c.runner().Run(ctx, append(argv, subcommand), body)
+	stdout, code, err := c.runner().Run(ctx, argv, body)
 	if err != nil {
 		return Reply{}, err
 	}

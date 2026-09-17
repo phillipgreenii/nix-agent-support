@@ -121,6 +121,24 @@ type Config struct {
 	// is an accepted shape, not a defect this seam needs to solve).
 	HandlerCommand string
 
+	// HandlerCommandDir (PG_ROUTER_HANDLER_COMMAND_DIR), when set, is a
+	// directory of per-role JSON files (<role.Name>.json, the same roleFile
+	// shape packages/pg-router-ccpool-handler/cmd's roleconfig.go already
+	// decodes) that lets differently-configured roles sharing ONE
+	// HandlerCommand binary (e.g. feedback/worker/review, each with its own
+	// ccpool actor/prompt) each dispatch through their OWN participant
+	// config, closing the gap HandlerCommand's own doc comment above
+	// accepted as a shape ("every enabled role resolves to the SAME command
+	// today") — this bead, pg2-ymb3v. cmd/pg-router/run.go's
+	// handlerCommandFor resolves [HandlerCommand, subcommand,
+	// "--role-config", filepath.Join(HandlerCommandDir, role.Name+".json")]
+	// when this is set, and falls back to today's [HandlerCommand,
+	// subcommand] unchanged when it is not — so an existing single-role
+	// deployment setting only PG_ROUTER_HANDLER_COMMAND is unaffected.
+	// Env-only, no [pool] TOML key, mirroring HandlerCommand's own env-only
+	// wiring.
+	HandlerCommandDir string
+
 	// Autonomous, when true, passes `--autonomous` to `ccpool new` so workers'
 	// AskUserQuestion is structurally blocked (no human to answer). Default true.
 	// Can be disabled via PG_ROUTER_AUTONOMOUS=false for operator debugging.
@@ -348,6 +366,7 @@ func Load() (Config, error) {
 	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", defaultAllowedTools(c.PRTool))
 	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
 	c.HandlerCommand = envStr("PG_ROUTER_HANDLER_COMMAND", c.HandlerCommand)
+	c.HandlerCommandDir = envStr("PG_ROUTER_HANDLER_COMMAND_DIR", c.HandlerCommandDir)
 	c.BudgetTokens = int64(envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
 	c.BudgetCost = int64(envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
 	c.BudgetTime = envSecs("PG_ROUTER_BUDGET_TIME", c.BudgetTime)

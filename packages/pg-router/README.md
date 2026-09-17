@@ -214,6 +214,14 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
   enabled role's registered handler participant (e.g. `pg-router-ccpool-handler`). No default —
   GOAL-MIN-1's Floor keeps this binary's own contract surface from naming a concrete tool; an
   unconfigured deployment gets a clear per-dispatch error instead of a hardcoded participant name.
+- `PG_ROUTER_HANDLER_COMMAND_DIR` — a directory of per-role JSON files (`<role.Name>.json`) that
+  lets differently-configured roles sharing one `PG_ROUTER_HANDLER_COMMAND` binary (e.g.
+  `feedback`/`worker`/`review`, each with its own ccpool actor/prompt) dispatch through their own
+  participant config instead of all sharing the same one. When set, the resolved argv threads
+  `--role-config <dir>/<role.Name>.json` onto the handler command; unset (the default), every
+  enabled role resolves to the plain `PG_ROUTER_HANDLER_COMMAND` argv, unchanged from before this
+  variable existed. A deployment with more than one role ENABLED and only
+  `PG_ROUTER_HANDLER_COMMAND` set logs a boot-time WARN naming the ambiguity.
 - `PG_ROUTER_LOG_DIR` — override the event-log directory (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_LOG_DIR` — override the event-log/state directory: gates, `events.jsonl`, the discovery record (default: the standard path below)

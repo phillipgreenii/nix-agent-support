@@ -52,16 +52,52 @@ const idleDrainTick = 500 * time.Millisecond
 // cfg.HandlerCommand (PG_ROUTER_HANDLER_COMMAND) carries no baked-in default
 // — see its own doc comment (internal/config/config.go) for why: GOAL-MIN-1's
 // Floor forbids this binary's own contract surface from naming a concrete
-// tool. Every enabled role resolves to the SAME command today; per-role
-// differentiation (DEC-WIRE-3 already anticipates roles sharing one handler
-// process) is left to a later change — this seam's signature (a func of
-// role, not a constant) already allows that without a further rewrite.
+// tool.
+//
+// Per-role differentiation (this bead, pg2-ymb3v, closing the gap DEC-WIRE-3
+// already anticipated as an accepted shape — "every enabled role resolves to
+// the SAME command"): when cfg.HandlerCommandDir is also set, the resolved
+// argv threads a per-role --role-config path
+// (filepath.Join(cfg.HandlerCommandDir, role.Name+".json")) onto the
+// handler command, so differently-configured roles sharing one
+// HandlerCommand binary (e.g. feedback/worker/review, each with its own
+// ccpool actor/prompt) each dispatch through their OWN participant config.
+// subcommand is placed as argv[1] — RIGHT AFTER the command, before any
+// flags — because the participant's own CLI (e.g.
+// pg-router-ccpool-handler/cmd's main.go) parses its first argument as the
+// subcommand; wireclient.CommandFor's own doc comment explains why this
+// package no longer appends it itself. Falling back to today's
+// [cfg.HandlerCommand, subcommand] when HandlerCommandDir is unset keeps an
+// existing single-role deployment byte-for-byte unchanged.
 func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
-	return func(role roles.Role) ([]string, error) {
+	return func(role roles.Role, subcommand string) ([]string, error) {
 		if cfg.HandlerCommand == "" {
 			return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
 		}
-		return []string{cfg.HandlerCommand}, nil
+		if cfg.HandlerCommandDir != "" {
+			return []string{cfg.HandlerCommand, subcommand, "--role-config", filepath.Join(cfg.HandlerCommandDir, role.Name+".json")}, nil
+		}
+		return []string{cfg.HandlerCommand, subcommand}, nil
+	}
+}
+
+// warnHandlerCommandAmbiguity logs a boot-time WARN (this bead, pg2-ymb3v)
+// for the silent-misconfiguration shape its own design flagged: more than
+// one role ENABLED while only cfg.HandlerCommand (not cfg.HandlerCommandDir)
+// is set. handlerCommandFor's fallback branch then resolves every one of
+// those roles to the IDENTICAL argv, with no signal that a deployment
+// needing per-role differentiation is silently dispatching every role
+// through whichever single participant config that one shared command
+// happens to point at. A single-enabled-role deployment is unaffected
+// (sharing one command with no sibling role to confuse it with is not a
+// misconfiguration), which is why this checks countEnabledRoles, not
+// len(cfg.Roles).
+func warnHandlerCommandAmbiguity(cfg config.Config) {
+	if cfg.HandlerCommand == "" || cfg.HandlerCommandDir != "" {
+		return
+	}
+	if n := countEnabledRoles(cfg.Roles); n > 1 {
+		slog.Warn("multiple roles enabled but only PG_ROUTER_HANDLER_COMMAND is set; every role will dispatch through the identical handler command with no per-role differentiation — set PG_ROUTER_HANDLER_COMMAND_DIR", "enabledRoles", n)
 	}
 }
 
@@ -219,6 +255,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (a few lines down, same iteration) hasn't happened yet at the moment
 	// NewListener itself runs.
 	o.Registry = svc.Registry()
+	// warnHandlerCommandAmbiguity (this bead, pg2-ymb3v): fires alongside the
+	// per-role registration loop immediately below, the natural point this
+	// run already knows both cfg.Roles' enabled count and the
+	// HandlerCommand/HandlerCommandDir configuration it is warning about.
+	warnHandlerCommandAmbiguity(cfg)
 	// Registration happens AFTER Listen (svc must exist) but is otherwise
 	// independent of Accept: an in-process participant never dials the
 	// socket, so there is no handshake to wait on. Task 2.1: register every

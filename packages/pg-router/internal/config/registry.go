@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -334,6 +335,18 @@ func (r *Registry) decodeGlobalBudget(path string, c *Config) error {
 func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c Config) (roles.Role, error) {
 	if rt.Name == "" {
 		return roles.Role{}, fmt.Errorf("name is required")
+	}
+	// Charset/path-safety hardening (this bead, pg2-ymb3v), independent of
+	// HandlerCommandDir: cmd/pg-router/run.go's handlerCommandFor joins
+	// role.Name directly into a filesystem path
+	// (filepath.Join(cfg.HandlerCommandDir, role.Name+".json")), so a name
+	// containing "/" breaks that join (a role subdirectory that was never
+	// declared) and one containing ".." can path-traverse out of
+	// HandlerCommandDir entirely. Role names are TOML-authored only (no
+	// wire-level role field carries one), so this is a config footgun to
+	// reject at decode time, not an attacker-exploitable input.
+	if strings.Contains(rt.Name, "/") || strings.Contains(rt.Name, "..") {
+		return roles.Role{}, fmt.Errorf("name %q must not contain '/' or '..' (joined into a filesystem path under PG_ROUTER_HANDLER_COMMAND_DIR)", rt.Name)
 	}
 	if len(rt.Binds) == 0 {
 		return roles.Role{}, fmt.Errorf("binds is required (the event type(s) this role consumes)")

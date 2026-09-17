@@ -27,14 +27,26 @@ func (f *fakeRunner) Run(_ context.Context, argv []string, stdin []byte) ([]byte
 	return f.stdout, f.exitCode, f.err
 }
 
+// fixedCommand returns a CommandFor test double that appends the subcommand
+// it is called with onto a fixed prefix — mirroring handlerCommandFor's own
+// fallback-branch shape ([cfg.HandlerCommand, subcommand]) so existing
+// argv-shape assertions below stay meaningful now that CommandFor resolves
+// the subcommand's POSITION itself (pg2-ymb3v) rather than having it
+// appended by wireclient's own call sites.
 func fixedCommand(argv ...string) CommandFor {
-	return func(roles.Role) ([]string, error) { return argv, nil }
+	return func(_ roles.Role, subcommand string) ([]string, error) {
+		full := make([]string, 0, len(argv)+1)
+		full = append(full, argv...)
+		full = append(full, subcommand)
+		return full, nil
+	}
 }
 
 // TestDispatch_sendsSchemaLegalRequestAndAppendsSubcommand locks the exact
 // request shape (packages/pg-router/schemas/handler.dispatch.schema.json)
-// and confirms "dispatch" is appended to the resolved command argv
-// (DEC-WIRE-1: "invokes a participant as `<command> <subcommand>`").
+// and confirms "dispatch" lands as the LAST token of the resolved command
+// argv (DEC-WIRE-1: "invokes a participant as `<command> <subcommand>`") —
+// fixedCommand's own doc comment above is what actually appends it now.
 func TestDispatch_sendsSchemaLegalRequestAndAppendsSubcommand(t *testing.T) {
 	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"dsp-x","outcome":"delivered"}`), exitCode: 0}
 	c := &Client{Runner: run, Command: fixedCommand("pg-router-ccpool-handler", "--role-config", "/rc.json")}
@@ -172,6 +184,74 @@ func TestDispatch_noCommandForIsError(t *testing.T) {
 	_, err := c.Dispatch(context.Background(), roles.Role{Name: "r"}, eventqueue.Event{ID: "e", Type: "t"})
 	if err == nil {
 		t.Fatal("expected an error with no CommandFor configured")
+	}
+}
+
+// TestDispatch_passesSubcommandToCommandFor proves Dispatch hands "dispatch"
+// to CommandFor as a PARAMETER rather than appending it itself after the
+// call (pg2-ymb3v's widened seam) — a CommandFor implementation can
+// therefore place extra tokens (e.g. a per-role --role-config path) AFTER
+// the subcommand, which the retired append-at-the-end shape could never do
+// without landing those tokens before the subcommand and getting rejected
+// by the participant's own CLI as an unknown subcommand.
+func TestDispatch_passesSubcommandToCommandFor(t *testing.T) {
+	var gotSubcommand string
+	cmd := func(role roles.Role, subcommand string) ([]string, error) {
+		gotSubcommand = subcommand
+		return []string{"h", subcommand, "--role-config", role.Name + ".json"}, nil
+	}
+	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"dsp-x","outcome":"delivered"}`), exitCode: 0}
+	c := &Client{Runner: run, Command: cmd}
+	if _, err := c.Dispatch(context.Background(), roles.Role{Name: "worker"}, eventqueue.Event{ID: "e", Type: "t"}); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if gotSubcommand != "dispatch" {
+		t.Errorf("subcommand passed to CommandFor = %q, want %q", gotSubcommand, "dispatch")
+	}
+	want := []string{"h", "dispatch", "--role-config", "worker.json"}
+	if len(run.gotArgv) != len(want) {
+		t.Fatalf("argv = %v, want %v", run.gotArgv, want)
+	}
+	for i, a := range want {
+		if run.gotArgv[i] != a {
+			t.Fatalf("argv = %v, want %v (subcommand MUST be argv[1], before any flags)", run.gotArgv, want)
+		}
+	}
+}
+
+// TestPostStartup_passesSubcommandToCommandFor / TestPreShutdown_... lock the
+// other two of the three CommandFor call sites (Dispatch above is the
+// third): both go through lifecycleCall, which must pass its own literal
+// subcommand name through unmodified.
+func TestPostStartup_passesSubcommandToCommandFor(t *testing.T) {
+	var gotSubcommand string
+	cmd := func(_ roles.Role, subcommand string) ([]string, error) {
+		gotSubcommand = subcommand
+		return []string{"h", subcommand}, nil
+	}
+	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"x"}`), exitCode: 0}
+	c := &Client{Runner: run, Command: cmd}
+	if _, err := c.PostStartup(context.Background(), roles.Role{Name: "r"}); err != nil {
+		t.Fatalf("PostStartup: %v", err)
+	}
+	if gotSubcommand != "postStartup" {
+		t.Errorf("subcommand passed to CommandFor = %q, want %q", gotSubcommand, "postStartup")
+	}
+}
+
+func TestPreShutdown_passesSubcommandToCommandFor(t *testing.T) {
+	var gotSubcommand string
+	cmd := func(_ roles.Role, subcommand string) ([]string, error) {
+		gotSubcommand = subcommand
+		return []string{"h", subcommand}, nil
+	}
+	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","id":"x"}`), exitCode: 0}
+	c := &Client{Runner: run, Command: cmd}
+	if _, err := c.PreShutdown(context.Background(), roles.Role{Name: "r"}); err != nil {
+		t.Fatalf("PreShutdown: %v", err)
+	}
+	if gotSubcommand != "preShutdown" {
+		t.Errorf("subcommand passed to CommandFor = %q, want %q", gotSubcommand, "preShutdown")
 	}
 }
 

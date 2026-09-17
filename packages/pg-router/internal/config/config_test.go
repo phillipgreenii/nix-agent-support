@@ -555,6 +555,30 @@ func TestLoad_handlerCommandEnvOverride(t *testing.T) {
 	}
 }
 
+// TestDefault_handlerCommandDirIsEmpty mirrors TestDefault_handlerCommandIsEmpty:
+// HandlerCommandDir carries no baked-in default either.
+func TestDefault_handlerCommandDirIsEmpty(t *testing.T) {
+	if got := Default().HandlerCommandDir; got != "" {
+		t.Errorf("Default().HandlerCommandDir = %q, want empty", got)
+	}
+}
+
+// TestLoad_handlerCommandDirEnvOverride proves PG_ROUTER_HANDLER_COMMAND_DIR
+// folds into Config.HandlerCommandDir (this bead, pg2-ymb3v) — the per-role
+// JSON directory cmd/pg-router/run.go's handlerCommandFor consults to
+// differentiate roles sharing one HandlerCommand.
+func TestLoad_handlerCommandDirEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_HANDLER_COMMAND_DIR", "/etc/pg-router/roles")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HandlerCommandDir != "/etc/pg-router/roles" {
+		t.Errorf("HandlerCommandDir = %q, want /etc/pg-router/roles (PG_ROUTER_HANDLER_COMMAND_DIR overlay)", c.HandlerCommandDir)
+	}
+}
+
 // PermissionMode validation MOVED to the new module's own config validation
 // (packages/pg-router-ccpool-handler/internal/config), docket pg2-oju6w Task
 // 5.7 — pg-router itself no longer rejects an invalid PermissionMode value at
