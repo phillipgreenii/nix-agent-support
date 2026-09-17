@@ -17,13 +17,13 @@ flowchart LR
     ST --> SV["serve and open"]
 ```
 
-An `issue` or `thread` event is designed to additionally re-run stage 2 for every PR the store
-already links to it, so that sync never signals from facts older than the last gather of that PR.
-As of Phase 10 this rule still has nothing to act on: `run issue` for the beads backend's reverse
-(bead -> linked PR) resolution is this docket's sibling packet, `run issue` for Jira and `run
-thread` are Phase 13, and the cross-reference links that would give either kind of event a linked
-PR are also Phase 13 — see [`gather.md`](gather.md), [`interpret.md`](interpret.md), and
-[`sync.md`](sync.md).
+An `issue` or `thread` event is designed to additionally re-run stage 2 for the PR it links to, so
+that sync never signals from facts older than the last gather of that PR. As of Phase 10, `run
+issue` for the beads backend implements this: it resolves the triggering bead to its linked PR
+(see [`run-issue.md`](run-issue.md)) and re-runs interpret for it, without a fresh gather and
+without re-running sync. `run issue` for Jira and `run thread` are still Phase 13, as is the
+cross-reference step that would give either kind of event a linked PR — see
+[`gather.md`](gather.md), [`interpret.md`](interpret.md), and [`sync.md`](sync.md).
 
 ## Exit codes
 
@@ -42,7 +42,7 @@ prints the three-stage timeline (gather, interpret, sync).
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
-`run issue` for the beads backend's reverse (bead -> linked PR) resolution is this docket's
-sibling packet, not this one. `run issue` for Jira and `run thread` are Phase 13, as is the
-cross-reference step that would give either kind of event a linked PR to re-interpret. `repos[]`
-supports exactly one repository this phase; multi-repository `run` is out of scope.
+`run issue` for Jira and `run thread` are Phase 13, as is the cross-reference step that would give
+either kind of event a linked PR to re-interpret (`run issue` for the beads backend is
+[`run-issue.md`](run-issue.md), not this doc). `repos[]` supports exactly one repository this
+phase; multi-repository `run` is out of scope.

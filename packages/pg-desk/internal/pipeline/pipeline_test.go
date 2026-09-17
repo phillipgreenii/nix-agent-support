@@ -373,3 +373,168 @@ func TestPipelineRun_RemovedKnownIDRecordsClosure(t *testing.T) {
 		t.Fatalf("expected a structured JSON ok log line for a recorded closure, got: %s", out.String())
 	}
 }
+
+// --- RunInterpretOnly: docket pg2-2j5ac.34.2's own interpret-only re-run
+// path (cmd/pg-desk/run.go's "issue" case, Phase 10, beads backend) -------
+
+// countingGatherer wraps a gatherer and counts Gather calls, so a test can
+// assert RunInterpretOnly never invokes gather again — this packet's own
+// acceptance criterion ("proven by a wire-double gather-invocation-count
+// assertion staying at zero for this path").
+type countingGatherer struct {
+	inner gatherer
+	calls int
+}
+
+func (g *countingGatherer) Gather(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+	g.calls++
+	return g.inner.Gather(ctx, entityType, entityID, change)
+}
+
+// seedInterpretOnlyEntity writes the entity row RunInterpretOnly re-reads
+// (Store.GetEntity) without ever gathering.
+func seedInterpretOnlyEntity(t *testing.T, p *Pipeline, entityID string, facts gather.Facts) {
+	t.Helper()
+	factsJSON, err := json.Marshal(facts)
+	if err != nil {
+		t.Fatalf("marshal facts fixture: %v", err)
+	}
+	if err := p.store.UpsertEntity(store.Entity{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: entityID,
+		Facts: string(factsJSON), AsOf: facts.AsOf, HeadSHA: facts.HeadSHA, ContentHash: "fixture",
+	}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+}
+
+// TestPipelineRunInterpretOnly_Success proves the core contract: a fresh
+// interpretation is persisted from the already-stored facts, gather is
+// never invoked, the sync stage is never invoked, and a prior sync_error
+// on the row survives untouched (this path never runs sync, so it must
+// not silently erase what an earlier sync run recorded).
+func TestPipelineRunInterpretOnly_Success(t *testing.T) {
+	var out bytes.Buffer
+	cg := &countingGatherer{inner: gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		t.Fatal("gather was invoked by RunInterpretOnly")
+		return gather.Facts{}, nil
+	})}
+	p := newTestPipeline(t, cg, &out)
+	syncCalled := false
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		syncCalled = true
+		return nil
+	})
+
+	facts := minimalFacts(t, map[string]any{"author": "me", "title": "fix: x", "repo": "acme/widgets", "number": 20})
+	seedInterpretOnlyEntity(t, p, "20", facts)
+	// Seed a prior sync_error on the row (as an earlier "pr"-triggered Run
+	// call's sync stage would have) — RunInterpretOnly must preserve it.
+	if err := p.store.UpsertInterpretation(store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: "20",
+		SyncError: "sync: pg-connector issue create: exit 1: boom", AsOf: "2026-09-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed prior interpretation: %v", err)
+	}
+
+	if err := p.RunInterpretOnly(context.Background(), "pr", "20", gather.ChangeChanged); err != nil {
+		t.Fatalf("RunInterpretOnly: %v", err)
+	}
+
+	if cg.calls != 0 {
+		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
+	}
+	if syncCalled {
+		t.Fatal("sync stage was invoked by RunInterpretOnly")
+	}
+
+	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "20")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if interp.Ownership == "" {
+		t.Fatalf("interpretation row looks unpopulated: %+v", interp)
+	}
+	if interp.SyncError != "sync: pg-connector issue create: exit 1: boom" {
+		t.Fatalf("interpretation.SyncError = %q, want the prior value preserved", interp.SyncError)
+	}
+	if !strings.Contains(out.String(), `"outcome":"ok"`) || !strings.Contains(out.String(), `"change":"changed"`) {
+		t.Fatalf("expected a structured JSON ok log line naming the change kind, got: %s", out.String())
+	}
+}
+
+// TestPipelineRunInterpretOnly_NeverGathered proves an entity with no
+// stored facts (never gathered) is a clear, non-panicking error rather
+// than a nil-Facts crash.
+func TestPipelineRunInterpretOnly_NeverGathered(t *testing.T) {
+	var out bytes.Buffer
+	cg := &countingGatherer{inner: gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return gather.Facts{}, nil
+	})}
+	p := newTestPipeline(t, cg, &out)
+
+	err := p.RunInterpretOnly(context.Background(), "pr", "no-such-entity", gather.ChangeChanged)
+	if err == nil {
+		t.Fatal("RunInterpretOnly: expected an error for an entity with no stored facts")
+	}
+	if !strings.Contains(err.Error(), "never gathered") {
+		t.Fatalf("RunInterpretOnly error = %v, want it to name the missing-facts case", err)
+	}
+	if cg.calls != 0 {
+		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
+	}
+}
+
+// TestPipelineRunInterpretOnly_InvalidChangeKind proves a malformed
+// --change value is rejected clearly, never a panic, and never reaches
+// the store.
+func TestPipelineRunInterpretOnly_InvalidChangeKind(t *testing.T) {
+	var out bytes.Buffer
+	cg := &countingGatherer{inner: gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return gather.Facts{}, nil
+	})}
+	p := newTestPipeline(t, cg, &out)
+
+	err := p.RunInterpretOnly(context.Background(), "pr", "21", gather.ChangeKind("bogus"))
+	if err == nil {
+		t.Fatal("RunInterpretOnly: expected an error for an invalid change kind")
+	}
+	if !strings.Contains(err.Error(), "not one of added/changed/removed/sweep") {
+		t.Fatalf("RunInterpretOnly error = %v, want it to name the valid change kinds", err)
+	}
+	if cg.calls != 0 {
+		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
+	}
+}
+
+// TestPipelineRunInterpretOnly_Degraded proves Facts.Degraded (carried
+// over from the original gather run's stored facts) still propagates to
+// the re-interpreted row's Degraded flag and the "degraded" log outcome.
+func TestPipelineRunInterpretOnly_Degraded(t *testing.T) {
+	var out bytes.Buffer
+	cg := &countingGatherer{inner: gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return gather.Facts{}, nil
+	})}
+	p := newTestPipeline(t, cg, &out)
+
+	facts := minimalFacts(t, map[string]any{"author": "me", "title": "x"})
+	facts.Degraded = "ci list"
+	seedInterpretOnlyEntity(t, p, "22", facts)
+
+	if err := p.RunInterpretOnly(context.Background(), "pr", "22", gather.ChangeSweep); err != nil {
+		t.Fatalf("RunInterpretOnly: %v", err)
+	}
+
+	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "22")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if !interp.Degraded {
+		t.Fatalf("interpretation.Degraded = false, want true (Facts.Degraded was %q)", facts.Degraded)
+	}
+	if !strings.Contains(out.String(), `"outcome":"degraded"`) {
+		t.Fatalf("expected a structured JSON degraded log line, got: %s", out.String())
+	}
+	if cg.calls != 0 {
+		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
+	}
+}

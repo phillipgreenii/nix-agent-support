@@ -37,8 +37,8 @@ anchor or review request is adopted by its `repo`/`pr_number` metadata; a pre-ex
 adopted by its exact title; a merge-request bead titled `<repo>#<n>: ...` with no `repo`/
 `pr_number` metadata yet is adopted by its title prefix, and gains both metadata keys on its first
 `apply` run (never in `plan`, which calls no `pg-connector issue` write at all). This is the SAME
-bead-shape classifier this docket's sibling "run issue for the beads backend" packet uses for its
-own reverse (bead -> linked PR) lookup — one parser, not two.
+bead-shape classifier [`run-issue.md`](run-issue.md)'s own reverse (bead -> linked PR) lookup
+uses — one parser, not two.
 
 ## Bead shapes
 
@@ -92,7 +92,7 @@ line or stream.
 ## Out of scope (Phase 10)
 
 - The bead-shape classifier's OTHER consumer — reverse (bead -> linked PR) resolution for `pg-desk
-run issue` against the beads backend — is this docket's sibling packet, not this one.
+run issue` against the beads backend — is [`run-issue.md`](run-issue.md), not this doc.
 - Jira/Slack sync, the cross-reference step, and layered urgency are Phase 13.
 - `daemon.enable` is this docket's last packet.
 - The store-wide sweep that re-verifies every ledger row whose entity has left every gathered

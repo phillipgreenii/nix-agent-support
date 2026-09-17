@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -28,14 +29,27 @@ var runConfigLoad = func(ctx context.Context) (*config.Config, error) { return c
 
 var runStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
+// runResolveBeadPR is the "issue" case's own injectable seam — mirroring
+// runConfigLoad/runStoreOpen's identical convention — so tests can inject
+// a fixture bead-to-PR resolution without a real pg-connector subprocess
+// on $PATH. Production wraps beadref.Resolver.ResolvePR (Phase 10, docket
+// pg2-2j5ac.34): given a beads-tracker issue-type entity's id, resolve the
+// (repo, entityID) of the PR it is about, by the SAME title/metadata keys
+// the sync stage's forward direction uses [design: 7.2, 7.5].
+var runResolveBeadPR = func(ctx context.Context, cfg *config.Config, beadID string) (repo, entityID string, err error) {
+	return beadref.NewResolver(cfg).ResolvePR(ctx, beadID)
+}
+
 // runCmd implements `pg-desk run <type> <id> --change
 // added|changed|removed|sweep`: the three-stage gather/interpret/store
-// pipeline for one entity (internal/pipeline), for <type>=pr only in this
-// phase. run issue/run thread are explicitly stubbed here [Binding
-// decisions]: an issue event's real behavior (re-running stage 2 only for
-// every linked PR, design section 7.2) is Phase 10 for the beads backend
-// and Phase 13 for Jira/threads — internal/pipeline is never invoked for
-// those types.
+// pipeline for one entity (internal/pipeline), for <type>=pr; and, for
+// <type>=issue (Phase 10, the beads backend), a bead-to-PR resolution
+// (internal/beadref) followed by an interpret-ONLY re-run
+// (pipeline.Pipeline.RunInterpretOnly) for the resolved PR — never a
+// second gather, and never the sync stage [design: 7.2, 6.1; Binding
+// decisions]. run thread remains stubbed [Binding decisions]: a
+// thread-triggered re-run (design section 7.2) is Phase 13 for
+// Jira/threads — internal/pipeline is never invoked for that type.
 var runCmd = &cobra.Command{
 	Use:   "run <type> <id>",
 	Short: "Run the gather/interpret/store pipeline once for one entity",
@@ -43,12 +57,10 @@ var runCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		entityType, entityID := args[0], args[1]
 		switch entityType {
-		case "issue":
-			return fmt.Errorf("run issue: not implemented, see Phase 10")
+		case "issue", "pr":
+			// implemented below
 		case "thread":
 			return fmt.Errorf("run thread: not implemented, see Phase 13")
-		case "pr":
-			// implemented below
 		default:
 			return fmt.Errorf("run: unknown entity type %q (want pr, issue, or thread)", entityType)
 		}
@@ -64,6 +76,15 @@ var runCmd = &cobra.Command{
 		defer func() { _ = st.Close() }()
 
 		p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()))
+
+		if entityType == "issue" {
+			_, prEntityID, err := runResolveBeadPR(cmd.Context(), cfg, entityID)
+			if err != nil {
+				return fmt.Errorf("run issue: resolve bead %s to PR: %w", entityID, err)
+			}
+			return p.RunInterpretOnly(cmd.Context(), entityTypePR, prEntityID, gather.ChangeKind(runF.change))
+		}
+
 		return p.Run(cmd.Context(), entityType, entityID, gather.ChangeKind(runF.change))
 	},
 }

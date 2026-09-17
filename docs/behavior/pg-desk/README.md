@@ -29,9 +29,9 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
 qualifier every time:**
 
-- **`run issue` for the beads backend's reverse (bead -> linked PR) resolution** is this docket's
-  sibling packet, not `sync.md`. **`run issue` for Jira and `run thread`** are Phase 13, together
-  with the cross-reference step that would give either kind of event a linked PR to re-interpret.
+- **`run issue` for Jira and `run thread`** are Phase 13, together with the cross-reference step
+  that would give either kind of event a linked PR to re-interpret. `run issue` for the beads
+  backend (see [`run-issue.md`](run-issue.md)) is implemented as of Phase 10.
 - **The cross-reference step** (ticket keys and URLs found in PR/Jira/thread text, and the `xref`
   table it populates) is Phase 13. The table exists in this phase's schema ladder and stays
   unpopulated until then.
@@ -45,19 +45,20 @@ back here — not the full list.
 
 ## The docs
 
-| Doc                                                          | Covers                                                    |
-| ------------------------------------------------------------ | --------------------------------------------------------- |
-| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, and its six tables  |
-| [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`     |
-| [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation         |
-| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)  |
-| [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape          |
-| [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                |
-| [`open.md`](open.md)                                         | `pg-desk open`                                            |
-| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                             |
-| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                    |
-| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `doctor`, `heartbeat`, `heartbeat-item` |
-| [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                           |
+| Doc                                                          | Covers                                                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, and its six tables                                |
+| [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`                                   |
+| [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation                                       |
+| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)                                |
+| [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape                                        |
+| [`run-issue.md`](run-issue.md)                               | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run |
+| [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                              |
+| [`open.md`](open.md)                                         | `pg-desk open`                                                                          |
+| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                           |
+| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                  |
+| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `doctor`, `heartbeat`, `heartbeat-item`                               |
+| [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                         |
 
 ## Telemetry declaration (D24)
 
@@ -72,13 +73,15 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   keeping the existing scrape target from going red, not a dashboard-grade surface.
 - **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
   timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
-  into that same line rather than a separate stream (see [`sync.md`](sync.md)); `serve` logs to
-  the path its launchd module configures. Every other command logs only ordinary CLI report/error
-  text, with no structured-JSON contract of its own.
+  into that same line rather than a separate stream (see [`sync.md`](sync.md)); `run issue`'s
+  interpret-only re-run folds into that same structured line too, logged against the resolved
+  PR's own entity id (see [`run-issue.md`](run-issue.md)); `serve` logs to the path its launchd
+  module configures. Every other command logs only ordinary CLI report/error text, with no
+  structured-JSON contract of its own.
 
 ## Status
 
-Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface, plus Phase 10's `sync` (all
-three modes), are implemented at `packages/pg-desk`. `daemon.enable`, the ZR-side query/role
-wiring, and the beads-backend reverse-resolution `run issue` path are this docket's remaining
+Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface, Phase 10's `sync` (all
+three modes), and Phase 10's beads-backend `run issue` bead -> PR resolution are implemented at
+`packages/pg-desk`. `daemon.enable` and the ZR-side query/role wiring are this docket's remaining
 packets.

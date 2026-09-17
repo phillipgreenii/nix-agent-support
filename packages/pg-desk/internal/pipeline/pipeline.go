@@ -242,6 +242,95 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 	return nil
 }
 
+// RunInterpretOnly re-runs stage 2 (interpret) only, for an entity whose
+// facts were already gathered by an earlier "pr"-triggered Run call —
+// cmd/pg-desk/run.go's "issue" case (Phase 10, docket pg2-2j5ac.34): an
+// issue event re-runs interpretation for the PR it links to, WITHOUT
+// invoking gather again (internal/gather.Gatherer.Gather rejects any
+// entityType other than "pr" outright, and this path's entityID is
+// resolved from the triggering bead before this method is ever called —
+// see packages/pg-desk/internal/beadref) and WITHOUT invoking the sync
+// stage [Binding decisions: "the sync stage is NOT re-invoked by this
+// path either"]. change is carried only for this call's own structured
+// log line [design 7.9] and is never branched on [Binding decisions:
+// "added/changed/removed/sweep all resolve the SAME triggering bead's
+// linked PR the same way"].
+//
+// Returns a non-nil error (never a panic) when change is not one of the
+// four valid kinds, when the entity has never been gathered (no stored
+// facts to re-interpret), or on an interpret/store failure — matching
+// Run's own exit-code contract (see the package doc comment): nil on
+// success or a degraded-but-completed run, non-nil otherwise, never
+// os.Exit, never a raw pg-connector code.
+func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
+	runStart := p.clock.Now()
+
+	switch change {
+	case gather.ChangeAdded, gather.ChangeChanged, gather.ChangeRemoved, gather.ChangeSweep:
+	default:
+		err := fmt.Errorf("pipeline: interpret-only %s %s: change kind %q is not one of added/changed/removed/sweep", entityType, entityID, change)
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return err
+	}
+
+	entity, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
+	if err != nil {
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
+	}
+	if !found {
+		noEntityErr := fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID)
+		p.logRun(entityType, entityID, change, "error", "", noEntityErr, runStart)
+		return noEntityErr
+	}
+
+	var facts gather.Facts
+	if err := json.Unmarshal([]byte(entity.Facts), &facts); err != nil {
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
+	}
+
+	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
+	if err != nil {
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
+	}
+
+	// Preserve any sync_error a prior sync-stage run already recorded on
+	// this row: this path never invokes sync (see doc comment above), so
+	// it must not silently erase it. Zero value ("") when no
+	// interpretation row exists yet, or none was ever recorded — same
+	// effect as a fresh row.
+	prior, _, err := p.store.GetInterpretation(p.repo(), entityType, entityID)
+	if err != nil {
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return fmt.Errorf("pipeline: interpret-only get prior interpretation %s %s: %w", entityType, entityID, err)
+	}
+
+	interpRow, err := p.persist(entityType, entityID, facts, interp)
+	if err != nil {
+		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
+	}
+	if prior.SyncError != "" {
+		interpRow.SyncError = prior.SyncError
+		if err := p.store.UpsertInterpretation(interpRow); err != nil {
+			p.logRun(entityType, entityID, change, "error", "", err, runStart)
+			return fmt.Errorf("pipeline: interpret-only restore sync_error %s %s: %w", entityType, entityID, err)
+		}
+	}
+
+	outcome := "ok"
+	if interp.Degraded != "" {
+		outcome = "degraded"
+	}
+	p.logRun(entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
+	if p.verbose {
+		p.printTimeline([]stageEvent{{Stage: "interpret", DurationMs: p.clock.Now().Sub(runStart).Milliseconds()}})
+	}
+	return nil
+}
+
 // entityTypePR is the one entity type the sync stage runs for — mirrors
 // cmd/pg-desk/desk.go's own entityTypePR constant (this package does not
 // import cmd/pg-desk, so it is repeated here rather than shared).
