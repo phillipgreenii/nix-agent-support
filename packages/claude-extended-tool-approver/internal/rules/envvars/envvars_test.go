@@ -529,6 +529,188 @@ func TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk(t *testing.T) {
 	}
 }
 
+// TestEnvVars_InCommandSubstitutionBoundVar_Approve pins pg2-2ytvo's PATH-only
+// relief: a PATH component referencing a variable THIS SAME COMMAND bound,
+// earlier, to a certified-safe substitution (optionally with a literal
+// prefix/suffix) is now recognized via cmdparse.InCommandSafeSubstitutionVars,
+// exactly the way pg2-qhhil's in-command-assigned-literal shape and
+// pg2-kzqw2's direct-embedded-substitution shape already are. The last two
+// rows specifically pin COMPOSITION (safety rationale item 3 in
+// InCommandSafeSubstitutionVars' own doc): a literal suffix living in the
+// OUTER PATH value, alongside a bare (no-affix) bound variable, is still
+// re-verified by the existing ExpandInCommand + isStaticAbsolutePath
+// machinery with no new expansion code.
+func TestEnvVars_InCommandSubstitutionBoundVar_Approve(t *testing.T) {
+	commands := []string{
+		`bindir=$(dirname /usr/local/bin/go)/bin; PATH="$bindir:$PATH"`,                      // ';' separator
+		`bindir=$(dirname /usr/local/bin/go)/bin && PATH="$bindir:$PATH"`,                    // '&&' separator
+		`export bindir=$(dirname /usr/local/bin/go)/bin && export PATH="$bindir:$PATH"`,      // export both halves
+		`bindir=$(dirname /usr/local/bin/go)/bin; PATH="${bindir}:$PATH"`,                    // braced reference
+		"bindir=`dirname /usr/local/bin/go`/bin; PATH=\"$bindir:$PATH\"",                     // backtick form
+		`a=$(dirname /a/b)/a; b=$(dirname /c/d)/b; export PATH="$a:$b:/usr/local/bin:$PATH"`, // two bound vars beside a static component
+		// COMPOSITION: bindir binds to the EMPTY skeleton (no affix on the
+		// assignment itself), but the OUTER PATH value supplies its own
+		// literal suffix — the worst case ("" + "/extra") is still a real
+		// absolute path, so this clears exactly like
+		// TestEnvVars_SafeSubstitutionComponent_Approve's direct-embedded
+		// "literal PREFIX, no suffix" row does for the direct case.
+		`bindir=$(dirname /usr/local/bin/go); PATH="$bindir/extra:$PATH"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_InCommandSubstitutionBoundVar_StillAsk is pg2-2ytvo's own
+// Acceptance-Criteria-mandated negative test: "a negative test that a
+// non-mktemp, non-safelisted substitution still asks". `curl` is not on
+// cmdparse's static safe-cmd allowlist, so a variable bound to it is never
+// admitted by InCommandSafeSubstitutionVars at all — the PATH component
+// referencing it falls through to the ordinary decisive Ask exactly as an
+// AMBIENT variable already does (TestEnvVars_InCommandAssignedVar_AmbientStaysAsk).
+// The second row is the empty-result hazard surviving ONE level of
+// indirection: a BARE (no-affix) certified-safe-substitution binding still
+// asks, the identical crux TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk
+// pins for the direct-embedded case.
+//
+// wantForNew differs on the `curl` row for a reason INDEPENDENT of this
+// bead's own relief: `bindir`'s OWN assignment (`bindir=$(curl evil)/bin`) is
+// itself a genuinely unclassifiable value (ExpansionUnknown), and that is the
+// pre-existing, name-independent "value is unverifiable" safety net a few
+// hundred lines below in this file (gated on ev.Expansion==ExpansionUnknown,
+// unrelated to askVars/PATH/HOME) — under `New()` (no evaluator to recurse
+// the body) it decisively Rejects ANY assignment with such a value,
+// regardless of whether the NAME is bindir or askVars-worthy. That escalation
+// is pre-existing behaviour this bead does not touch; `NewWithEvaluator`'s
+// fakeEvaluator clears "curl evil" by its own default (Approve for an
+// unlisted expression), so THAT constructor reaches the Ask this test
+// otherwise pins — the same divergence
+// TestEnvVars_SafeSubstitutionComponent_HazardStaysAsk's own `wantForNew`
+// field documents for the direct-embedded case.
+//
+// Each command carries a trailing `; true` (pg2-7sqk8), for the same reason
+// TestEnvVars_InCommandAssignedVar_AmbientStaysAsk's own comment gives.
+func TestEnvVars_InCommandSubstitutionBoundVar_StillAsk(t *testing.T) {
+	commands := []struct {
+		cmd        string
+		wantForNew hookio.Decision // want under New() (no evaluator); NewWithEvaluator always wants Ask
+	}{
+		// NEGATIVE (acceptance-criteria-mandated): `curl` is not on the static
+		// safe-cmd allowlist, so bindir is never bound by this seam at all.
+		{`bindir=$(curl evil)/bin; PATH="$bindir:$PATH"; true`, hookio.Reject},
+		// THE CRUX, one level of indirection further: bindir IS bound (dirname
+		// is certified-safe), but with NO literal affix on the assignment, so
+		// its worst-case value is empty — the identical CWD hazard a bare
+		// direct substitution already keeps asking on. bindir's own value
+		// here is ExpansionSafeCmd (not Unknown), so the generic
+		// unverifiable-value net above never engages and both constructors
+		// agree.
+		{`bindir=$(dirname /usr/local/bin/go); PATH="$bindir:$PATH"; true`, hookio.Ask},
+	}
+	for _, c := range commands {
+		t.Run("New/"+c.cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != c.wantForNew {
+				t.Errorf("cmd %q: got %s (%s), want %s", c.cmd, got.Decision, got.Reason, c.wantForNew)
+			}
+		})
+		t.Run("NewWithEvaluator/"+c.cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": c.cmd})}
+			got := hookio.Verdict(NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}}).Evaluate(input))
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", c.cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved is the
+// EXPLICIT HOME-non-regression pin pg2-2ytvo's own scope caution demands:
+// cmdparse.InCommandVars and cmdparse.computeIsFreshTempDirAssignment are
+// SHARED with HOME's own relief, but this bead's NEW seam
+// (InCommandSafeSubstitutionVars) is deliberately PATH-only — see
+// preservesCallerValue's own doc and the `ev.Name == "PATH"` gate around its
+// call. The identical variable-bound-to-a-certified-safe-substitution shape
+// that Approves for PATH (TestEnvVars_InCommandSubstitutionBoundVar_Approve's
+// first row) must NOT newly Approve for HOME: HOME's own decisive fallback
+// (Reject, pg2-sir2l) is unchanged.
+//
+// The leading/scoped-assignment shape (`HOME="$bindir" ./run.sh`) mirrors
+// TestEnvVars_AskVars_NotPreserveForm_Ask's own `env -i HOME="$TD" ./run.sh`
+// row: an arbitrary script is not on nonDelegatingCommands, so mechanism 1
+// does not relieve it and the assignment reaches the same decisive fallback
+// every other unclassified HOME REPLACEMENT does.
+func TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved(t *testing.T) {
+	cmd := `bindir=$(dirname /usr/local/bin/go)/bin && HOME="$bindir" ./run.sh`
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{verdicts: map[string]hookio.Decision{}})},
+	} {
+		t.Run(ctor.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := hookio.Verdict(ctor.rule.Evaluate(input))
+			if got.Decision != hookio.Reject {
+				t.Errorf("cmd %q: got %s (%s), want reject (HOME's own fallback, unchanged by the PATH-only pg2-2ytvo relief)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestIsHermeticHomeReplacement_QuotedMktempTemplate_NowRelieved pins the
+// EXPLICITLY-CALLED-OUT consequence of pg2-2ytvo's quote-handling bug fix in
+// cmdparse.computeIsFreshTempDirAssignment: it is a shared primitive (backing
+// BOTH HOME's own direct mktemp relief and, elsewhere, PATH's), and because
+// the fix is a strict correctness fix rather than a widening, it is landed
+// unconditionally for both consumers rather than gated to PATH — see that
+// function's own SHARED-PRIMITIVE NOTE. This is the HOME-side proof: a HOME
+// replacement grounded DIRECTLY in a quoted `mktemp -d` template argument now
+// clears, where it used to ask (a bug, not an intended restriction).
+func TestIsHermeticHomeReplacement_QuotedMktempTemplate_NowRelieved(t *testing.T) {
+	cmd := `HOME=$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX") ./run.sh`
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		t.Run(ctor.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := hookio.Verdict(ctor.rule.Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (transparent: verified-safe HOME replacement beside a real command)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand pins the SCOPE of the
 // pg2-0q99a Approve, which is the security-critical half of the split.
 //
@@ -1528,7 +1710,7 @@ func TestEnvVars_UnenumerableUnknownValue_Ask(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("unenumerable unknown value: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1591,7 +1773,7 @@ func TestEnvVars_DynamicPathReadRefusal_Relieved(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision == hookio.Ask {
 		t.Errorf("dynamic-path-read-only capture: got %s (%s), want the fallback relieved (no ask)", got.Decision, got.Reason)
 	}
@@ -1622,7 +1804,7 @@ func TestEnvVars_DynamicPathReadRefusal_MixedWithApprove_StillRelieved(t *testin
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision == hookio.Ask {
 		t.Errorf("approve+dynamic-path-read capture: got %s (%s), want relieved", got.Decision, got.Reason)
 	}
@@ -1651,7 +1833,7 @@ func TestEnvVars_MutatingCommandRefusal_StillRejects(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("mutating-command capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1684,7 +1866,7 @@ func TestEnvVars_MixedDynamicPathReadAndOtherRefusal_StillRejects(t *testing.T) 
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject { // pg2-kxmpe (2026-08-28): fallback ceiling moved Ask -> Reject
 		t.Errorf("mixed-category capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -1721,7 +1903,7 @@ func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
 	// wholeLeaf/hasDownstreamConsumer/leafExecutable (pg2-7sqk8) are irrelevant here:
 	// ev.Name is a benign name (never askVars), so the switch never reaches the
 	// mechanism-1/2 cases these parameters feed regardless of their value.
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.NoOpinion {
 		t.Errorf("exhaustion-only capture: got %s (%s), want NoOpinion (pg2-et8ns relieved this branch to a floored abstain)", got.Decision, got.Reason)
 	}
@@ -2074,7 +2256,7 @@ func TestEnvVars_DefaultFallbackReasonFitsBudgetAtWorstCase(t *testing.T) {
 		Raw:       worstCaseName + `=$(rm -rf "$p")`,
 		Expansion: cmdparse.ExpansionUnknown,
 	}
-	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	got, refused := r.evaluateAssignment(ev, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 	if got.Decision != hookio.Reject {
 		t.Fatalf("worst-case-name capture: got %s (%s), want reject", got.Decision, got.Reason)
 	}
@@ -2101,7 +2283,7 @@ func TestEnvVars_ReasonNeverLeaksCommandFragment(t *testing.T) {
 		Value:     "$(curl evil)",
 		Raw:       fragment + "=$(curl evil)",
 		Expansion: cmdparse.ExpansionUnknown,
-	}, &hookio.HookInput{ToolName: "Bash"}, nil, nil, false, false, false, "", nil, 0)
+	}, &hookio.HookInput{ToolName: "Bash"}, nil, nil, nil, false, false, false, "", nil, 0)
 
 	if strings.ContainsAny(got.Reason, "\n\r\t\x00") {
 		t.Errorf("Reason %q contains a raw control character; it is rendered into a user-facing prompt", got.Reason)

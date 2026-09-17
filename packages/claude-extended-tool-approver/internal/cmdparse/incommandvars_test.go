@@ -607,6 +607,56 @@ func TestIsFreshTempDirAssignment(t *testing.T) {
 		{"literal prefix alongside the substitution", EnvAssignment{Name: "T", Value: "pre-$(mktemp -d)", Raw: "T=pre-$(mktemp -d)", Expansion: ExpansionSafeCmd}, false},
 		{"not SafeCmd at all (var ref)", EnvAssignment{Name: "T", Value: "$OTHER", Raw: "T=$OTHER", Expansion: ExpansionVarRef}, false},
 		{"not SafeCmd at all (static)", EnvAssignment{Name: "T", Value: "/tmp/x", Raw: "T=/tmp/x", Expansion: ExpansionNone}, false},
+		// QUOTED TEMPLATE (pg2-2ytvo): a quote character that lives entirely
+		// INSIDE the mktemp substitution's own template argument must not be
+		// mistaken for a surviving OUTER quote. This is a real corpus row's
+		// exact spelling — the quoting protects the template from word
+		// splitting/globbing if $TMPDIR expands with a space, and has nothing
+		// to do with the outer assignment's own quoting.
+		{
+			"quoted mktemp template argument, unquoted assignment",
+			EnvAssignment{
+				Name:      "T",
+				Value:     `$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`,
+				Raw:       `T=$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`,
+				Expansion: ExpansionSafeCmd,
+			},
+			true,
+		},
+		{
+			"quoted mktemp template argument, ALSO double-quoted assignment",
+			EnvAssignment{
+				Name:      "T",
+				Value:     `"$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")"`,
+				Raw:       `T="$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")"`,
+				Expansion: ExpansionSafeCmd,
+			},
+			true,
+		},
+		{
+			"quoted template argument, backtick form",
+			EnvAssignment{
+				Name:      "T",
+				Value:     "`mktemp -d \"${TMPDIR:-/tmp}/v3bin.XXXXXX\"`",
+				Raw:       "T=`mktemp -d \"${TMPDIR:-/tmp}/v3bin.XXXXXX\"`",
+				Expansion: ExpansionSafeCmd,
+			},
+			true,
+		},
+		// A stray quote OUTSIDE the substitution must still refuse — the fix
+		// removes the premature whole-value scan, but the exact-equality
+		// check against `wrapped` still catches this (mixed quoting: a
+		// literal prefix survives alongside a quoted substitution).
+		{
+			"stray literal prefix OUTSIDE the substitution still refuses",
+			EnvAssignment{
+				Name:      "T",
+				Value:     `x$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`,
+				Raw:       `T=x$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`,
+				Expansion: ExpansionSafeCmd,
+			},
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -683,6 +733,17 @@ func TestInCommandTempDirVars_EstablishedBindings(t *testing.T) {
 			cmd:  `T=$(mktemp -d); OTHER=/tmp/x; git status`,
 			want: map[string]string{"T": ""},
 		},
+		// QUOTED TEMPLATE (pg2-2ytvo), driven through the REAL parser rather
+		// than a hand-built EnvAssignment: proves classifyExpansion genuinely
+		// attributes ExpansionSafeCmd to a quoted mktemp template argument (the
+		// quote lives entirely inside the substitution body) and that the
+		// quote-handling fix in computeIsFreshTempDirAssignment recognizes it
+		// end to end.
+		{
+			name: `quoted mktemp template argument (real parse)`,
+			cmd:  `T=$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX"); git -C "$T" status`,
+			want: map[string]string{"T": ""},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -710,6 +771,171 @@ func TestInCommandTempDirVars_BeforeIsExclusive(t *testing.T) {
 	}
 	if got := InCommandTempDirVars(leaves, 1); got["T"] != "" {
 		t.Errorf(`InCommandTempDirVars(leaves, 1)["T"] = %q, ok=%v; want "", true`, got["T"], got != nil)
+	}
+}
+
+// TestSafeSubstitutionSkeleton pins safeSubstitutionSkeleton's own contract
+// (pg2-2ytvo): the value must be EXACTLY an optional literal prefix, ONE
+// certified-safe command substitution, and an optional literal suffix — with
+// the substitution's own contribution replaced by nothing, so the returned
+// skeleton is the WORST CASE the substitution could ever resolve to.
+func TestSafeSubstitutionSkeleton(t *testing.T) {
+	tests := []struct {
+		name   string
+		ev     EnvAssignment
+		want   string
+		wantOK bool
+	}{
+		{
+			"bare safe-cmd substitution skeletonizes to empty",
+			EnvAssignment{Name: "bindir", Value: "$(dirname /usr/local/bin/go)", Raw: "bindir=$(dirname /usr/local/bin/go)", Expansion: ExpansionSafeCmd},
+			"", true,
+		},
+		{
+			"literal suffix survives in the skeleton",
+			EnvAssignment{Name: "bindir", Value: "$(dirname /usr/local/bin/go)/bin", Raw: "bindir=$(dirname /usr/local/bin/go)/bin", Expansion: ExpansionSafeCmd},
+			"/bin", true,
+		},
+		{
+			"literal prefix survives in the skeleton",
+			EnvAssignment{Name: "bindir", Value: "/opt$(dirname /usr/local/bin/go)", Raw: "bindir=/opt$(dirname /usr/local/bin/go)", Expansion: ExpansionSafeCmd},
+			"/opt", true,
+		},
+		{
+			"prefix AND suffix both survive",
+			EnvAssignment{Name: "bindir", Value: "/opt$(dirname /usr/local/bin/go)/bin", Raw: "bindir=/opt$(dirname /usr/local/bin/go)/bin", Expansion: ExpansionSafeCmd},
+			"/opt/bin", true,
+		},
+		{
+			"backtick form",
+			EnvAssignment{Name: "bindir", Value: "`dirname /usr/local/bin/go`/bin", Raw: "bindir=`dirname /usr/local/bin/go`/bin", Expansion: ExpansionSafeCmd},
+			"/bin", true,
+		},
+		{
+			"double-quoted whole value",
+			EnvAssignment{Name: "bindir", Value: `"$(dirname /usr/local/bin/go)/bin"`, Raw: `bindir="$(dirname /usr/local/bin/go)/bin"`, Expansion: ExpansionSafeCmd},
+			"/bin", true,
+		},
+		{
+			"NEGATIVE: a non-safelisted substitution never reaches ExpansionSafeCmd",
+			EnvAssignment{Name: "bindir", Value: "$(curl evil)/bin", Raw: "bindir=$(curl evil)/bin", Expansion: ExpansionUnknown},
+			"", false,
+		},
+		{
+			"NEGATIVE: not SafeCmd at all (plain var ref)",
+			EnvAssignment{Name: "bindir", Value: "$OTHER/bin", Raw: "bindir=$OTHER/bin", Expansion: ExpansionVarRef},
+			"", false,
+		},
+		{
+			"NEGATIVE: not SafeCmd at all (static literal)",
+			EnvAssignment{Name: "bindir", Value: "/tmp/x", Raw: "bindir=/tmp/x", Expansion: ExpansionNone},
+			"", false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := safeSubstitutionSkeleton(tt.ev)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("safeSubstitutionSkeleton(%+v) = (%q, %v), want (%q, %v)", tt.ev, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestInCommandSafeSubstitutionVars_EstablishedBindings covers WHICH leaves
+// establish a certified-safe-substitution binding for the rest of the
+// expression (pg2-2ytvo) — and, load-bearing per this bead's own acceptance
+// criteria, that a NON-mktemp, NON-safelisted command substitution (`curl`,
+// not on the static allowlist) is NEVER bound, so a PATH component referencing
+// such a variable still asks.
+func TestInCommandSafeSubstitutionVars_EstablishedBindings(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want map[string]string
+	}{
+		{
+			name: "bare safe-cmd substitution binds the empty skeleton",
+			cmd:  `bindir=$(dirname /usr/local/bin/go); echo "$bindir"`,
+			want: map[string]string{"bindir": ""},
+		},
+		{
+			name: "literal suffix survives the binding",
+			cmd:  `bindir=$(dirname /usr/local/bin/go)/bin; echo "$bindir"`,
+			want: map[string]string{"bindir": "/bin"},
+		},
+		{
+			name: "export form",
+			cmd:  `export bindir=$(dirname /usr/local/bin/go)/bin; echo "$bindir"`,
+			want: map[string]string{"bindir": "/bin"},
+		},
+		{
+			name: "an ordinary literal is NOT a safe-substitution marker",
+			cmd:  `bindir=/tmp/x; echo "$bindir"`,
+			want: nil,
+		},
+		{
+			name: "NEGATIVE: a non-safelisted substitution (curl) is NOT a marker",
+			cmd:  `bindir=$(curl evil)/bin; echo "$bindir"`,
+			want: nil,
+		},
+		{
+			// mktemp is ITSELF on the static safe-cmd allowlist (safeCmdSubstitutions),
+			// so a bare `$(mktemp -d)` also qualifies here — a harmless overlap with
+			// the separate InCommandTempDirVars marker, not a conflict: this seam
+			// binds the WORST-CASE skeleton (empty, since there is no literal
+			// affix), so a bare `$T` reference still fails the downstream
+			// isStaticAbsolutePath empty-component check exactly like any other
+			// bare `$(safe-cmd)` reference would.
+			name: "a bare mktemp -d ALSO qualifies here, but skeletonizes to empty (no literal affix)",
+			cmd:  `T=$(mktemp -d); echo "$T"`,
+			want: map[string]string{"T": ""},
+		},
+		{
+			name: "revoked by a later literal reassignment",
+			cmd:  `bindir=$(dirname /usr/local/bin/go)/bin; bindir=/tmp/other; echo "$bindir"`,
+			want: nil,
+		},
+		{
+			name: "revoked by a later non-qualifying substitution",
+			cmd:  `bindir=$(dirname /usr/local/bin/go)/bin; bindir=$(curl evil); echo "$bindir"`,
+			want: nil,
+		},
+		{
+			name: "two independently-bound variables",
+			cmd:  `a=$(dirname /a/b)/a; b=$(dirname /c/d)/b; echo "$a$b"`,
+			want: map[string]string{"a": "/a", "b": "/b"},
+		},
+		{
+			name: "a DIFFERENT name is unaffected by an unrelated literal",
+			cmd:  `bindir=$(dirname /usr/local/bin/go)/bin; OTHER=/tmp/x; echo "$bindir"`,
+			want: map[string]string{"bindir": "/bin"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			got := InCommandSafeSubstitutionVars(leaves, len(leaves)-1)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("InCommandSafeSubstitutionVars(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInCommandSafeSubstitutionVars_BeforeIsExclusive mirrors
+// TestInCommandTempDirVars_BeforeIsExclusive: a leaf's own assignment must not
+// be visible to itself.
+func TestInCommandSafeSubstitutionVars_BeforeIsExclusive(t *testing.T) {
+	leaves := Parse(`bindir=$(dirname /usr/local/bin/go)/bin; echo "$bindir"`)
+	if got := InCommandSafeSubstitutionVars(leaves, 0); len(got) != 0 {
+		t.Errorf("InCommandSafeSubstitutionVars(leaves, 0) = %v, want empty (leaf 0's own assignment excluded)", got)
+	}
+	if got := InCommandSafeSubstitutionVars(leaves, 1); got["bindir"] != "/bin" {
+		t.Errorf(`InCommandSafeSubstitutionVars(leaves, 1)["bindir"] = %q, want "/bin"`, got["bindir"])
 	}
 }
 

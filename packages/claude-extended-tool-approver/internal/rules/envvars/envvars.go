@@ -214,6 +214,54 @@ var injectorAskVars = map[string]bool{
 //     IMPLEMENTED — see isHermeticEnvReplacement and
 //     isHermeticHomeReplacement, and evaluateAssignment's askVars case,
 //     which tries preservesCallerValue first and these two second.
+//
+// # OPERATOR RULING 2026-09-17 (pg2-s3my5): PATH — approve all identified
+// still-asking PATH rows, SUPERSEDING pg2-qhhil for PATH specifically
+//
+// pg2-qhhil above closed WITHOUT building the general case (arbitrary
+// in-command command-substitution-derived PATH components), gated on
+// prompt volume that had not yet materialized. The 2026-09-17 ruling
+// removes that volume gate for PATH's own remaining still-asking rows, but
+// — as pg2-qhhil's own text always required — a widen still needs an
+// actual, argued safety design, not a blanket accept. pg2-2ytvo is that
+// design, and it is deliberately narrower than "any $(...) whatsoever":
+//
+//   - pg2-2ytvo (this bead): a component referencing a variable THIS SAME
+//     COMMAND bound, earlier, to a certified-safe substitution — optionally
+//     with a literal prefix/suffix (`bindir=$(dirname /usr/local/bin/go)/bin;
+//     PATH="$bindir:$PATH"`) — is now recognized, via the NEW
+//     cmdparse.InCommandSafeSubstitutionVars seam (see that seam's own doc
+//     for the full safety rationale: the SAME IsSafeSubstitutionBody trust
+//     boundary pg2-kzqw2's direct-embedded relief already uses, extended one
+//     level of indirection, with the identical empty-result hazard handled
+//     by binding the assignment's worst-case-safe literal skeleton rather
+//     than its unknown resolved value). Wired into preservesCallerValue
+//     below, gated to PATH ONLY (`ev.Name == "PATH"`) — deliberately NOT
+//     folded into cmdparse.InCommandVars itself, because that seam is
+//     SHARED with HOME's own EXTEND-shape check and with primarycommit's
+//     `git -C` resolution; see InCommandSafeSubstitutionVars' own SCOPE
+//     note for why a shared primitive was not widened. HOME's own relief is
+//     unaffected — pinned by
+//     TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved.
+//   - Also landed by this bead, as its own explicitly-called-out line item
+//     rather than an implicit side effect: a QUOTE-HANDLING bug fix in
+//     cmdparse.computeIsFreshTempDirAssignment, which used to refuse ANY
+//     quote character anywhere in an assignment's value — including one
+//     that lives entirely INSIDE a `mktemp -d` substitution's own template
+//     argument (`T=$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`, a real
+//     corpus row) — even though that has nothing to do with the outer
+//     assignment's own quoting. This IS a shared primitive
+//     (IsFreshTempDirAssignment/InCommandTempDirVars back BOTH HOME's direct
+//     mktemp relief and, in pg2-e1rc7's separate scope, PATH's own), but the
+//     fix is a strict correctness fix rather than a widening, so it is
+//     landed unconditionally for both consumers — see
+//     TestIsHermeticHomeReplacement_QuotedMktempTemplate_NowRelieved for the
+//     explicit HOME-side pin of that (intended, called-out) consequence.
+//   - NOT this bead's scope, per pg2-2ytvo's own text: ambient-$PWD-shaped
+//     components (pg2-553z3's KEEP STRICT stands unchanged for those — this
+//     ruling did not reopen it), the replacement-value-feeding-arbitrary-
+//     shell shape, and components buried inside an opaque nested `bash -c`
+//     payload. Those are pg2-pi7pz / pg2-dhugk / pg2-zsv1c's separate scope.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -336,6 +384,15 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // cmdparse.InCommandVars) — nil is the ordinary case (no qualifying in-command
 // assignment exists) and reproduces the pre-pg2-qhhil predicate exactly.
 //
+// safeSubVars is the SIBLING in-command environment for a variable bound,
+// earlier in this SAME command, to a certified-safe substitution
+// (cmdparse.InCommandSafeSubstitutionVars, pg2-2ytvo) — nil is likewise the
+// ordinary case. It is consulted ONLY when ev.Name == "PATH" (see the callout
+// below and InCommandSafeSubstitutionVars' own SCOPE note): this relief is
+// PATH-only by deliberate design, so HOME's own call into this function passes
+// safeSubVars through unused and its verdict is byte-for-byte what it was
+// before this bead.
+//
 // What it can NOT distinguish, knowingly: a hostile static prepend
 // (`PATH="/tmp/evil/bin:$PATH"`) from a legitimate one (`/nix/store/…/bin`). That
 // is inherent to any value-aware split — the caller's PATH is still intact and the
@@ -345,8 +402,12 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // substitution component (`$(dirname /usr/local/bin/go)/bin`) carry the identical
 // trade: each is exactly as inspectable as writing the path literally, no more and
 // no less — except for the substitution's own EMPTY-RESULT hazard, which
-// componentSafeSubstitution handles explicitly (see its doc).
-func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) bool {
+// componentSafeSubstitution handles explicitly (see its doc). An in-command
+// variable bound to a certified-safe substitution (safeSubVars, pg2-2ytvo) carries
+// the SAME trade one level of indirection further, with the identical
+// empty-result hazard handled at BINDING time by
+// cmdparse.InCommandSafeSubstitutionVars rather than here.
+func preservesCallerValue(ev cmdparse.EnvAssignment, vars, safeSubVars map[string]string) bool {
 	// The bash append form NAME+=VALUE (normalized to NAME by cmdparse) IS
 	// semantically a preserve, but it deliberately does NOT approve: no logged row
 	// uses it, and excluding it keeps the Approve as narrow as possible.
@@ -404,6 +465,22 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars map[string]string) boo
 			// Ask below, unchanged from before this bead.
 			if expanded, ok := cmdparse.ExpandInCommand(text, vars); ok && isStaticAbsolutePath(expanded) {
 				continue
+			}
+			// GENERAL COMMAND-SUBSTITUTION-BOUND PATH COMPONENT (pg2-2ytvo),
+			// PATH-ONLY: a variable this same command bound, earlier, to a
+			// certified-safe substitution (cmdparse.InCommandSafeSubstitutionVars —
+			// see that seam's own doc for the full safety rationale, including how
+			// it handles the empty-substitution-result hazard at BINDING time by
+			// storing the assignment's worst-case-safe literal skeleton rather than
+			// its unknown resolved value). Deliberately gated to PATH: HOME's own
+			// EXTEND-shape check reaches this same function, and safeSubVars is
+			// nil for that call (see evaluateAssignment), so this branch is simply
+			// never reached for HOME — pinned by
+			// TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved.
+			if ev.Name == "PATH" {
+				if expanded, ok := cmdparse.ExpandInCommand(text, safeSubVars); ok && isStaticAbsolutePath(expanded) {
+					continue
+				}
 			}
 			return false
 		}
@@ -1242,6 +1319,19 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// seam per the operator ruling). Same base/local fallback reasoning as vars
 		// above.
 		tempDirVars := primarycommit.LeafTempDirVars(input.InCommandTempDirVars, parsed, i)
+		// A THIRD sibling scan, for PATH's own pg2-2ytvo relief: which of the
+		// same earlier leaves' names are bound to a certified-safe SUBSTITUTION
+		// (cmdparse.InCommandSafeSubstitutionVars — see that seam's own doc for
+		// the safety rationale). Deliberately computed from `parsed` ALONE, with
+		// NO outer-scope overlay: unlike vars/tempDirVars above, there is no
+		// hookio.HookInput field threading an outer recursion scope's safe-sub
+		// bindings in, so a leaf reached only via engine recursion (a nested
+		// substitution body) simply sees no OUTER safe-sub bindings — narrower
+		// than strictly necessary (an under-relief, never an over-approval), and
+		// deliberately so: this seam is new and PATH-only (see the askVars doc
+		// comment's 2026-09-17 ruling section), so it does not yet warrant
+		// widening the shared engine/hookio plumbing every other rule also reads.
+		safeSubVars := cmdparse.InCommandSafeSubstitutionVars(parsed, i)
 		// rootLeaves/at (pg2-sir2l): the SAME expression-root recovery mechanism 2
 		// (below) already needed, now computed UNCONDITIONALLY — the rm+mkdir/
 		// bare-mkdir freshness widening (isHermeticHomeReplacement's new third
@@ -1260,7 +1350,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			hasDownstreamConsumer = downstreamConsumerExists(rootLeaves, at)
 		}
 		for _, ev := range pc.EnvVars {
-			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, pc.EnvCleared, wholeLeaf, hasDownstreamConsumer, pc.Executable, rootLeaves, at)
+			sub, subRefused := r.evaluateAssignment(ev, input, vars, tempDirVars, safeSubVars, pc.EnvCleared, wholeLeaf, hasDownstreamConsumer, pc.Executable, rootLeaves, at)
 			refused = refused || subRefused
 			if sub.Decision == hookio.Approve {
 				if wholeLeaf && held == nil {
@@ -1338,6 +1428,13 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // `env -i`/`env --ignore-environment`); both are pg2-d71my's REPLACEMENT-form
 // relief inputs, independent of each other and of vars/preservesCallerValue.
 //
+// safeSubVars is the THIRD sibling in-command environment, for a variable bound
+// to a certified-safe substitution (cmdparse.InCommandSafeSubstitutionVars,
+// pg2-2ytvo) — nil is likewise the ordinary case. It is forwarded to
+// preservesCallerValue unchanged and consulted ONLY for PATH (see that
+// function's own doc); HOME's call reproduces the pre-pg2-2ytvo behaviour
+// exactly regardless of what safeSubVars holds.
+//
 // wholeLeaf/hasDownstreamConsumer/leafExecutable are pg2-7sqk8's consumption-scoped
 // relief inputs (mechanisms 1 and 2 — see that section's own doc above). wholeLeaf
 // is the caller's own assignmentIsWholeLeaf(pc) for the leaf this assignment
@@ -1354,7 +1451,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // hasDownstreamConsumer's own computation already uses, forwarded here so
 // isHermeticHomeReplacement's rm+mkdir/bare-mkdir widening can scan EARLIER
 // leaves of the same root expression for a qualifying freshness idiom.
-func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars map[string]string, envCleared, wholeLeaf, hasDownstreamConsumer bool, leafExecutable string, rootLeaves []cmdparse.ParsedCommand, at int) (result hookio.RuleResult, refused bool) {
+func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookInput, vars, tempDirVars, safeSubVars map[string]string, envCleared, wholeLeaf, hasDownstreamConsumer bool, leafExecutable string, rootLeaves []cmdparse.ParsedCommand, at int) (result hookio.RuleResult, refused bool) {
 	name := r.Name()
 
 	// Base verdict from the variable NAME.
@@ -1397,7 +1494,7 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// recursion. Whether the Approve is actually surfaced is scoped by
 		// the caller (see Evaluate / the Rule contract).
 		switch {
-		case preservesCallerValue(ev, vars):
+		case preservesCallerValue(ev, vars, safeSubVars):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "sensitive env var preserves the caller's value and adds only static absolute paths: " + sanitizeReasonName(ev.Name),

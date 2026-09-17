@@ -724,9 +724,6 @@ func computeIsFreshTempDirAssignment(ev EnvAssignment) bool {
 	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
 		value = value[1 : len(value)-1]
 	}
-	if strings.ContainsAny(value, "\"'\\") {
-		return false
-	}
 	subs := EnumerateSubstitutions(value)
 	if len(subs) != 1 || !subs[0].IsCommandSubstitution() {
 		return false
@@ -744,6 +741,40 @@ func computeIsFreshTempDirAssignment(ev EnvAssignment) bool {
 		// A literal prefix/suffix survived alongside the substitution — not the
 		// narrow "value is nothing but the mktemp call" shape this predicate
 		// covers.
+		//
+		// QUOTE-HANDLING FIX (pg2-2ytvo): this exact-equality check is now the
+		// ONLY quote-related screen here, and it is deliberately the right one.
+		// The predicate used to ALSO run `strings.ContainsAny(value, "\"'\\")`
+		// on the WHOLE value before ever locating the substitution — which
+		// refused any assignment whose mktemp TEMPLATE ARGUMENT was itself
+		// quoted (`T=$(mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX")`, a real
+		// corpus row), even though those quote characters live entirely
+		// INSIDE the substitution's own body and never touch the outer
+		// assignment's quoting at all — the identical "a substitution's body
+		// is opaque to a structural scan of the OUTER text" principle
+		// envvars' splitPathValueComponents already applies to a literal ':'
+		// inside a substitution body (pg2-kzqw2). Deleting that premature
+		// scan does NOT weaken the "nothing but the mktemp call" requirement:
+		// `wrapped` is reconstructed as exactly "$(" + Body + ")" (or the
+		// backtick form) with NOTHING else, so value can equal wrapped only
+		// when there is truly no literal prefix/suffix — including no stray
+		// quote/backslash character — anywhere OUTSIDE the substitution's own
+		// delimiters. Pinned by
+		// TestIsFreshTempDirAssignment/TestInCommandTempDirVars_EstablishedBindings's
+		// "quoted mktemp template" cases.
+		//
+		// SHARED-PRIMITIVE NOTE: this function backs BOTH
+		// IsFreshTempDirAssignment (HOME's own direct `HOME=$(mktemp -d ...)`
+		// relief, isHermeticHomeReplacement in internal/rules/envvars) and
+		// InCommandTempDirVars below (the in-command-bound-variable case,
+		// consulted by HOME today and, in a sibling bead's separate scope, by
+		// PATH). Because this is a BUG FIX to an existing predicate rather than
+		// a new widening, it is deliberately landed HERE, unconditionally, for
+		// both consumers — recorded as its own explicit line item (not an
+		// implicit side effect) and pinned by
+		// TestIsHermeticHomeReplacement_QuotedMktempTemplate_NowRelieved in
+		// internal/rules/envvars/envvars_test.go, which shows HOME's own
+		// quoted-template case newly clearing where it used to ask.
 		return false
 	}
 	return isMktempDirSubstitution(subs[0].Body)
@@ -790,4 +821,169 @@ func InCommandTempDirVars(leaves []ParsedCommand, before int) map[string]string 
 		}
 	}
 	return vars
+}
+
+// SAFE-SUBSTITUTION IN-COMMAND RESOLUTION (pg2-2ytvo)
+//
+// InCommandVars refuses to bind ANY name whose value is not a literal scalar
+// (literalAssignedValue's own doc: "A `$(…)` value is NOT derived, not even
+// for a git read command whose output looks computable"). That is right for
+// InCommandVars' own callers, where an unknown runtime output could name
+// anything at all. It is UNNECESSARILY STRICT for exactly one narrower
+// question envvars' PATH relief already answers for a substitution embedded
+// DIRECTLY in a PATH value (internal/rules/envvars' componentSafeSubstitution,
+// pg2-kzqw2): a command substitution whose BODY is already certified safe
+// under the static allowlist (IsSafeSubstitutionBody) is acceptable WITHOUT
+// knowing what it resolves to, because the allowlist is the trust boundary —
+// not the resolved text.
+//
+// This section extends that SAME trust boundary one level of indirection
+// further: a variable THIS SAME COMMAND assigned, earlier, to a
+// certified-safe substitution (optionally with a literal prefix/suffix, e.g.
+// `bindir=$(dirname /usr/local/bin/go)/bin`) is exactly as inspectable, for a
+// PATH component that merely references it (`PATH="$bindir:$PATH"`), as a
+// substitution embedded directly in the PATH value would be.
+//
+// SAFETY RATIONALE (stated once here, reused by every binding this seam
+// produces rather than re-derived per caller):
+//
+//  1. TRUST BOUNDARY: only a substitution body already certified by
+//     IsSafeSubstitutionBody is ever bound — the identical static allowlist
+//     already accepted for the direct-embedded case. This is not a new KIND
+//     of trust, only a new PLACE the same trust is applied.
+//  2. THE EMPTY-RESULT HAZARD (componentSafeSubstitution's own crux) is
+//     inherited unchanged: a command substitution can resolve to the EMPTY
+//     STRING on any given invocation, and an empty PATH component means "the
+//     current directory" to the shell — the exact CWD hazard
+//     isStaticAbsolutePath's leading-'/' requirement exists to catch. So the
+//     bound value is NOT a sentinel (unlike InCommandTempDirVars' ""
+//     marker, which is safe only because `mktemp -d` itself can never
+//     return empty) but the assignment's own LITERAL SKELETON — its literal
+//     prefix and suffix with the substitution's own contribution zeroed out
+//     (safeSubstitutionSkeleton, below). A bare `bindir=$(safe-cmd)` with no
+//     affix binds bindir to "", so a PATH component that is exactly
+//     `$bindir` still fails isStaticAbsolutePath's leading-'/' check
+//     downstream, exactly as `PATH="$PATH:"` already does — being
+//     certified-safe does not make an empty result a safe PATH entry.
+//     `bindir=$(safe-cmd)/bin` instead binds "/bin", a real absolute path
+//     WHATEVER the substitution actually returns, so it clears.
+//  3. COMPOSITION: because the bound value is a worst-case-safe skeleton
+//     rather than an opaque sentinel, the EXISTING ExpandInCommand +
+//     isStaticAbsolutePath composition preservesCallerValue already uses for
+//     the plain InCommandVars middle option (pg2-qhhil) needs NO change to
+//     consume it: `PATH="$bindir/y:$PATH"` expands to skeleton+"/y" and is
+//     re-verified by the caller's own isStaticAbsolutePath check exactly as a
+//     literal binding would be. No new expansion machinery and no new
+//     caller-side trust — only a new SOURCE of literal-safe bindings.
+//
+// SCOPE: deliberately NOT wired into cmdparse.InCommandVars itself, and
+// deliberately a SEPARATE map from it. InCommandVars is a SHARED primitive —
+// internal/rules/envvars' preservesCallerValue calls it (via
+// primarycommit.LeafVars) for BOTH PATH's AND HOME's own EXTEND-shape check,
+// and internal/rules/primarycommit's dirresolve.go calls it for `git -C`.
+// Folding this relief into InCommandVars' own literal-value acceptance would
+// therefore silently widen every one of those callers at once — precisely
+// the blast radius pg2-2ytvo's own scope caution forbids ("when in doubt,
+// add a PATH-only wrapper/gate rather than changing the shared primitive
+// unconditionally"). This IS that wrapper: a NEW, INDEPENDENT sibling
+// function that internal/rules/envvars consults ONLY for PATH (gated by
+// `ev.Name == "PATH"` in preservesCallerValue), exactly mirroring how
+// InCommandTempDirVars is already a sibling of InCommandVars rather than a
+// widening of it. HOME's own preservesCallerValue call, and primarycommit's
+// git -C resolution, never see this map at all — not merely "gated off", but
+// never constructed for them in the first place. See
+// internal/rules/envvars/envvars_test.go's
+// TestPreservesCallerValue_SafeSubstitutionVar_HOMENotRelieved for the
+// explicit non-regression pin this scoping is checked against.
+//
+// leaves/before follow InCommandVars' own contract exactly: a single Parse
+// call's leaves, in source order, `before` exclusive. nil when nothing
+// qualifies.
+func InCommandSafeSubstitutionVars(leaves []ParsedCommand, before int) map[string]string {
+	if before > len(leaves) {
+		before = len(leaves)
+	}
+	var targetScope []int
+	knownScope := before >= 0 && before < len(leaves)
+	if knownScope {
+		targetScope = leaves[before].SubshellScope
+	}
+	var vars map[string]string
+	for i := 0; i < before; i++ {
+		if knownScope && !scopeVisible(leaves[i].SubshellScope, targetScope) {
+			continue
+		}
+		writes, readValues := shellVarWrites(leaves, i)
+		for _, ev := range writes {
+			if ev.Name == "" {
+				continue
+			}
+			if readValues {
+				if skeleton, ok := safeSubstitutionSkeleton(ev); ok {
+					if vars == nil {
+						vars = map[string]string{}
+					}
+					vars[ev.Name] = skeleton
+					continue
+				}
+			}
+			// REVOCATION, mirroring InCommandVars/InCommandTempDirVars: a name
+			// this loop already bound must not keep that binding after the
+			// command reassigns it to something that does not itself qualify.
+			// `delete` on a nil map is a no-op.
+			delete(vars, ev.Name)
+		}
+	}
+	return vars
+}
+
+// safeSubstitutionSkeleton reports ev's value's LITERAL SKELETON when the
+// value is EXACTLY an optional literal prefix, ONE top-level COMMAND
+// substitution (never a process substitution — IsCommandSubstitution excludes
+// `<(...)`/`>(...)`, which no static allowlist governs) whose body
+// IsSafeSubstitutionBody already certifies, and an optional literal suffix —
+// envvars' componentSafeSubstitution shape (pg2-kzqw2), reused here at
+// ASSIGNMENT granularity rather than at PATH-COMPONENT granularity. The
+// skeleton is the prefix and suffix concatenated with the substitution's own
+// contribution replaced by nothing — the WORST CASE the substitution could
+// ever return.
+//
+// ev.Expansion == ExpansionSafeCmd already guarantees (classifyExpansion's
+// kind(), shellparse.go) that the census found EXACTLY one command
+// substitution and ZERO parameter/arithmetic expansions anywhere in the
+// value, and that IsSafeSubstitutionBody(body) is already true for it — so
+// this function does not re-derive any of that; it only needs to LOCATE the
+// substitution's exact text within the value (via LiteralAssignmentValueText
+// + EnumerateSubstitutions, the identical recipe preservesCallerValue's own
+// splitPathValueComponents already uses for the direct-embedded case) and
+// remove it. A value this function refuses (mixed quoting, more than one
+// substitution, a process substitution) simply does not qualify for this
+// relief — the caller's REVOCATION handles that exactly like any other
+// non-qualifying reassignment.
+func safeSubstitutionSkeleton(ev EnvAssignment) (string, bool) {
+	if ev.Expansion != ExpansionSafeCmd {
+		return "", false
+	}
+	value, ok := LiteralAssignmentValueText(ev.Value)
+	if !ok {
+		return "", false
+	}
+	subs := EnumerateSubstitutions(value)
+	if len(subs) != 1 || !subs[0].IsCommandSubstitution() {
+		return "", false
+	}
+	var wrapped string
+	switch subs[0].Kind {
+	case SubstCommand:
+		wrapped = "$(" + subs[0].Body + ")"
+	case SubstBacktick:
+		wrapped = "`" + subs[0].Body + "`"
+	default:
+		return "", false
+	}
+	idx := strings.Index(value, wrapped)
+	if idx < 0 {
+		return "", false
+	}
+	return value[:idx] + value[idx+len(wrapped):], true
 }
