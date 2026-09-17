@@ -28,6 +28,13 @@
   pg-connector-issue-beads,
   pg-connector-issue-jira,
   pg-connector-scm-git,
+  # gh is pkgs.gh (auto via callPackage, same as jq above) — the GitHub CLI
+  # that pg-connector-pr-github/pg-connector-ci-github-actions themselves
+  # exec by name (`os/exec.LookPath("gh")`, confirmed via Mach-O strings:
+  # "gh auth token: %w", "run gh auth login: %w"). Re-added by bead
+  # pg2-szilb; see the wrapProgram comment below for why this is NOT the
+  # same thing pg2-n75tk removed.
+  gh,
 }:
 
 mkGoApp {
@@ -124,15 +131,34 @@ mkGoApp {
   #             tick still failed, including the GitHub-backed sources
   #             (pr-mine/pr-team/pr-sweep need pg-connector-pr-github), not
   #             just the bd-backed ones pg2-sh024 already fixed.
+  #   gh     -> a FOURTH-level exec dependency (bead pg2-szilb), one layer
+  #             deeper than the pg-connector-pr-github/-ci-github-actions
+  #             entries directly above: those two Tier-2 backend binaries
+  #             themselves shell out to the `gh` CLI by name (confirmed via
+  #             Mach-O strings: "gh auth token: %w", "run gh auth login: %w",
+  #             GH_TOKEN/GH_HOST/GH_REPO, os/exec.LookPath), and — same as
+  #             every entry above — that nested exec inherits THIS wrapper's
+  #             PATH. Live evidence (2026-09-17, post pg2-z3ys3 apply): with
+  #             pg-connector-pr-github/-ci-github-actions already on the live
+  #             daemon's PATH but `gh` still absent, every pr-mine/pr-team/
+  #             pr-sweep producer tick failed with exit status 1, and
+  #             `command -v gh` under the daemon's captured PATH resolved to
+  #             nothing.
   #
-  # `gh` was removed here (pg2-n75tk): it existed solely to back the typed
-  # `github-issues` source, which is gone — the boundary principle (Core must
-  # not know how another tool is configured) now applies to it exactly as it
-  # already did to `jira-issues`. A deployment that wants a `command` source
-  # invoking `gh`, a Jira CLI, or anything else MUST supply that command
-  # itself, from its own wrapper/PATH — naming any such tool here would put
-  # tool-specific knowledge back into this upstream flake. Check 5 MUST NOT be
-  # weakened, special-cased, or exempted to accommodate a gap.
+  # This is NOT the same thing pg2-n75tk removed. pg2-n75tk dropped `gh` when
+  # it backed only the typed `github-issues` SOURCE — a Core-configured
+  # integration that the boundary principle (Core must not know how another
+  # tool is configured) correctly disallows, same as `jira-issues`. `gh` here
+  # is a transitive runtime dependency of a Tier-2 backend binary this
+  # wrapper ALREADY names explicitly two bullets up (pg-connector-pr-github/
+  # -ci-github-actions) — structurally identical to why `pg-connector`'s own
+  # Tier-2 backends had to be added by pg2-sh024's fix. Naming `gh` here
+  # carries no tool-specific CONFIGURATION knowledge; it just satisfies an
+  # already-named binary's own hardcoded exec. A deployment's own `command`-
+  # type source invoking `gh`, a Jira CLI, or anything else still MUST supply
+  # that command itself, from its own wrapper/PATH — that boundary is
+  # unchanged. Check 5 MUST NOT be weakened, special-cased, or exempted to
+  # accommodate a gap.
   postInstall = ''
     wrapProgram $out/bin/pg-router --prefix PATH : ${
       lib.makeBinPath [
@@ -146,6 +172,7 @@ mkGoApp {
         pg-connector-issue-beads
         pg-connector-issue-jira
         pg-connector-scm-git
+        gh
       ]
     }
   '';
