@@ -36,15 +36,16 @@ Capture `number`, `state`, `author`. If no argument was provided and
 `pg-pr` cannot auto-detect a PR for the current branch, ask the user
 for a PR identifier.
 
-### Step 2: Sync state
+### Step 2: Refresh state
 
 ```bash
-pg-pr sync --pr <NUMBER> --repo <OWNER/NAME>
+pg-desk show <NUMBER> --refresh
 ```
 
-This refreshes the `merge-request` bead for the PR. If the PR is now
-`merged` / `closed`, the sync will mark the bead accordingly. STOP if
-the PR is no longer open.
+This re-runs pg-desk's gather+interpret pipeline for the PR (D20) and
+prints its refreshed interpretation (ownership, category, panel, gate
+state, degraded flag). STOP if step 1's captured `state` is no longer
+`open`.
 
 ### Step 3: Gather comments
 

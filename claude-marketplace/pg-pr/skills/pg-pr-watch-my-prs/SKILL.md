@@ -15,16 +15,17 @@ Passively keeps the user's PR state in sync with bd.
 
 ## Workflow
 
-1. Refresh merge-request beads from upstream:
-
-   ```bash
-   pg-pr sync
-   ```
-
-2. List open merge-request beads:
+1. List open merge-request beads:
 
    ```bash
    bd list --type=merge-request --status=open
+   ```
+
+2. Refresh pg-desk's interpretation for each one (D20; replaces the old
+   bead-writing manual re-check verb):
+
+   ```bash
+   pg-desk show <n> --refresh
    ```
 
 3. List ready work:

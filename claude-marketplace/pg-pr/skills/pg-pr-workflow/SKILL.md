@@ -19,7 +19,8 @@ Prefer `pg-pr` over ad-hoc `gh` invocations for anything PR-related:
   wrapped in `{protocolVersion, schemaVersion, result}`; pipe through
   `jq '.result'` rather than reading the bare payload `pg-pr` used to print.
 - Worktree: `pg-pr worktree add|remove|list <n>`
-- Sync: `pg-pr sync` (refreshes merge-request beads)
+- Refresh (per-PR interpretation): `pg-desk show <n> --refresh` (D20; replaces the old
+  bead-writing manual re-check verb)
 - Create/update: `pg-pr pr create`, `pg-pr pr update <n>`
 - Lifecycle: `pg-pr pr ready <n>`, `pg-pr pr draft <n>`, `pg-pr pr wip on|off <n>`
 - Visibility: `pg-pr pr hide <n> [reason]`, `pg-pr pr unhide <n>`
