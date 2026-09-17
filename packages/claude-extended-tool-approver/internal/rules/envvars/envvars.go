@@ -1694,27 +1694,44 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// seam per the operator ruling). Same base/local fallback reasoning as vars
 		// above.
 		tempDirVars := primarycommit.LeafTempDirVars(input.InCommandTempDirVars, parsed, i)
+		// rootLeaves/at (pg2-sir2l; moved ahead of safeSubVars by pg2-dsg2e): the
+		// root expression's leaves and this leaf's position within them
+		// (envvarsRootScope; see its own doc) — computed UNCONDITIONALLY.
+		// Originally needed for the rm+mkdir/bare-mkdir freshness widening
+		// (isHermeticHomeReplacement's third branch, via
+		// isFreshlyEmptiedDirRelief) for EVERY leaf's HOME assignment, not only a
+		// wholeLeaf one: a leading/scoped `HOME="$D" cmd` must qualify too, since
+		// the freshness proof is about an EARLIER leaf in the same "&&" chain,
+		// independent of whether THIS leaf is the whole leaf. Now ALSO the input
+		// safeSubVars below needs, which is why this moved ahead of it.
+		rootLeaves, at := envvarsRootScope(input, parsed, i)
 		// A THIRD sibling scan, for PATH's own pg2-2ytvo relief: which of the
 		// same earlier leaves' names are bound to a certified-safe SUBSTITUTION
 		// (cmdparse.InCommandSafeSubstitutionVars — see that seam's own doc for
-		// the safety rationale). Deliberately computed from `parsed` ALONE, with
-		// NO outer-scope overlay: unlike vars/tempDirVars above, there is no
-		// hookio.HookInput field threading an outer recursion scope's safe-sub
-		// bindings in, so a leaf reached only via engine recursion (a nested
-		// substitution body) simply sees no OUTER safe-sub bindings — narrower
-		// than strictly necessary (an under-relief, never an over-approval), and
-		// deliberately so: this seam is new and PATH-only (see the askVars doc
-		// comment's 2026-09-17 ruling section), so it does not yet warrant
-		// widening the shared engine/hookio plumbing every other rule also reads.
-		safeSubVars := cmdparse.InCommandSafeSubstitutionVars(parsed, i)
-		// rootLeaves/at (pg2-sir2l): the SAME expression-root recovery mechanism 2
-		// (below) already needed, now computed UNCONDITIONALLY — the rm+mkdir/
-		// bare-mkdir freshness widening (isHermeticHomeReplacement's new third
-		// branch, via isFreshlyEmptiedDirRelief) needs it for EVERY leaf's HOME
-		// assignment, not only a wholeLeaf one: a leading/scoped `HOME="$D" cmd`
-		// must qualify too, since the freshness proof is about an EARLIER leaf in
-		// the same "&&" chain, independent of whether THIS leaf is the whole leaf.
-		rootLeaves, at := envvarsRootScope(input, parsed, i)
+		// the safety rationale).
+		//
+		// pg2-dsg2e: this reads rootLeaves/at, NOT parsed/i — using parsed/i was
+		// the bug. Under the real engine, `parsed` (hookio.LeavesOf(input)) is
+		// input.ParsedLeaf — the SINGLE leaf being dispatched via engine.go's
+		// syntheticInput (EvaluateExpression's per-leaf loop, engine.go ~647-659)
+		// — so `parsed` has length 1 and i==0 always;
+		// InCommandSafeSubstitutionVars(parsed, 0) could then never see an
+		// earlier SIBLING leaf's binding (e.g.
+		// `bindir=$(dirname ...); PATH="$bindir/extra:$PATH"`), which is exactly
+		// this seam's motivating shape — so the pg2-2ytvo relief never fired for
+		// ordinary top-level multi-leaf dispatch. vars/tempDirVars above don't
+		// have this gap because input.InCommandVars/InCommandTempDirVars are
+		// separate HookInput fields the engine threads with the outer-scope map
+		// already merged in (see LeafVars/LeafTempDirVars); this seam has no
+		// analogous HookInput field, so rootLeaves/at — the SAME root-expression
+		// recovery envvarsRootScope already gives downstreamConsumerExists below
+		// — is the fix: it recovers the true root leaves and this leaf's true
+		// position via hookio.RootLeavesOf(input) (input.ParsedRoot), so an
+		// earlier sibling leaf's safe-sub binding is visible again. A
+		// direct/test caller with no RootExpression at all still gets `parsed,
+		// i` unchanged (envvarsRootScope's own no-op fallback), so this is
+		// additive there, not a narrowing.
+		safeSubVars := cmdparse.InCommandSafeSubstitutionVars(rootLeaves, at)
 		// pg2-7sqk8 mechanism 2: computed ONCE per leaf, not per assignment — it
 		// depends only on the leaf's own position in the root expression, never on
 		// which variable's value is being judged, and only wholeLeaf leaves can ever
