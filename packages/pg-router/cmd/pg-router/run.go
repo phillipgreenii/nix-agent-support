@@ -670,18 +670,34 @@ type preparedRun struct {
 // nothing past this point may call Validate() again.
 func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	// Fan the default slog logger out to the OTLP bridge (design section 5.2):
-	// stderr output is kept (existingStderrHandler == whatever main()'s
-	// telemetry.Init call left as the default) and every record from this
-	// point on — including the "starting" line immediately below and every
-	// WARN/ERROR the rest of this run emits — is ALSO pushed over OTLP once
-	// Init installed a real LoggerProvider (a no-op elsewhere, so this is
-	// cheap and safe to do unconditionally). Applied here, shared by both
-	// run and run-until-idle, rather than only inside runRun: the design's
-	// "daemon mode" scoping is stated for the METRICS exporter specifically
-	// (section 4), not for logs (section 5), and run-until-idle's periodic
-	// drain pass emits the same class of operational WARN/ERROR lines a
-	// long-running run does.
-	slog.SetDefault(slog.New(telemetry.Fanout(slog.Default().Handler(), telemetry.NewSlogHandler())))
+	// stderr output is kept and every record from this point on — including
+	// the "starting" line immediately below and every WARN/ERROR the rest of
+	// this run emits — is ALSO pushed over OTLP once Init installed a real
+	// LoggerProvider (a no-op elsewhere, so this is cheap and safe to do
+	// unconditionally). Applied here, shared by both run and run-until-idle,
+	// rather than only inside runRun: the design's "daemon mode" scoping is
+	// stated for the METRICS exporter specifically (section 4), not for logs
+	// (section 5), and run-until-idle's periodic drain pass emits the same
+	// class of operational WARN/ERROR lines a long-running run does.
+	//
+	// The stderr side MUST be a freshly-constructed slog.TextHandler, never
+	// slog.Default().Handler(): before any SetDefault call, that accessor
+	// returns slog's internal defaultHandler shim, which delegates through
+	// the legacy log package's own Output — and per Go's log/slog
+	// interoperability (log.Logger writing through an slog.handlerWriter),
+	// wrapping THAT shim in a Fanout and then calling slog.SetDefault(...)
+	// with it creates a self-referential cycle: the shim calls back into the
+	// very slog.Default() it is now part of, deadlocking on the legacy log
+	// package's own non-reentrant mutex on the SECOND recursive entry
+	// (reproduced live: run/run-until-idle hung forever the moment
+	// config.Load()'s first slog.Info call fired, confirmed via a SIGQUIT
+	// goroutine dump). pg-pr's own internal/sync/daemon.go sidesteps this
+	// the same way (NewTextHandler/NewJSONHandler build a handler directly,
+	// never touch slog.Default()) — mirrored here rather than rediscovered.
+	slog.SetDefault(slog.New(telemetry.Fanout(
+		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
+		telemetry.NewSlogHandler(),
+	)))
 
 	cfg, err := config.Load()
 	if err != nil {
