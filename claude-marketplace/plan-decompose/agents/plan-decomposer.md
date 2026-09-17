@@ -52,8 +52,14 @@ it by searching disk is both slower and redundant.
   the gap instead.
 - Draft each packet's content into a scratch file with the Write tool, and make fix-loop
   revisions to it with the Edit tool — never a full-content Bash heredoc rewrite of the whole
-  packet. Hand the resulting file to the binding's `create-packet`/`write-metadata` calls;
-  Bash stays for this plugin's helper scripts and your own mechanical pre-filter checks.
+  packet. `create-packet` runs EXACTLY ONCE per packet (SKILL.md step 3, first pass) and is
+  what stamps `pd_curated_rev` to the docket's `pd_rev` — that stamp is WRITE-ONCE. A
+  fix-loop revision found by step 5, 6, or 7 AFTER a packet already exists updates that
+  packet's EXISTING content only (the beads binding's `bd update <packet> --body-file <file>`)
+  — it MUST NOT call `create-packet` again for that packet and MUST NOT call `write-metadata`
+  to touch `pd_curated_rev`: a fix-loop pass is not a curation revision, and only mode
+  `reconcile` ever re-stamps it. Bash stays for this plugin's helper scripts and your own
+  mechanical pre-filter checks.
 - Gaps found by the pre-check HALT the run with a gap report to your dispatcher (and to the
   tracking bead via `write-report` when one was named). Sizing NEVER halts — split, or stamp
   a metadata deviation and proceed.

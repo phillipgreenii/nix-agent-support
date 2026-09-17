@@ -81,7 +81,7 @@ Keys use underscores (`pd_`), never hyphens. Values compare as strings.
 | `pd_phase`                                                | docket | `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `released:partial` / `reconciling:<rev>` / `failed:<phase>` — written at EVERY transition. `released:partial` is a DISTINCT literal from `released`, not a sub-case of it: it marks a release whose decomposition report's not-decomposed list (tracked live since step 3/5) was non-empty AT RELEASE — this docket's OWN scope is fully covered, but it deliberately left named design elements to a later decomposition. See mode `decompose` step 1 (routing) and step 10 (which literal gets written). |
 | `pd_source`                                               | docket | Design-source identifier (path or issue id) for dedup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `pd_model`, `pd_budget`                                   | packet | Deviation ONLY; absent = docket policy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id). `pd_curated_rev` is WRITE-ONCE per packet: `create-packet` (mode `decompose` step 3) stamps it to the docket's `pd_rev` AT THAT MOMENT and nothing else in `decompose` ever rewrites it — a step 5/6/7 fix-loop pass revising an already-created packet's content is a content-only edit, never a re-stamp. The ONLY thing that changes `pd_curated_rev` again is mode `reconcile` (its own step 3), and only because `pd_rev` itself bumped.                                                                                                                       |
 | `pd_stale`                                                | packet | Set by a stamp-mismatch release or by RECONCILE on a claimed packet; cleared by re-curation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Sizing resolution:** packet metadata → docket metadata → the fallback defaults. The
@@ -211,7 +211,13 @@ deduplication.
    every transition from here on.
 3. **Curate** each packet per the anatomy, packets created HELD — but run step 1's RESUME
    dedup check FIRST, on every entry into this step, not only a first pass: a slice already
-   covered by an existing child is not re-created. Record the PLANNED ORDERING
+   covered by an existing child is not re-created. `create-packet` runs EXACTLY ONCE per
+   packet and stamps `pd_curated_rev` to the docket's CURRENT `pd_rev` (read once, not
+   re-read per packet) — that stamp is WRITE-ONCE (see the metadata-keys table). A RE-ENTRY
+   into this step from step 5's, step 6's, or step 7's loop-back revises an ALREADY-CREATED
+   packet's CONTENT only (the beads binding's `bd update <packet> --body-file <file>`, never
+   `create-packet` again) and MUST NOT touch `pd_curated_rev` or call `write-metadata` on it —
+   a fix-loop pass is not a curation revision. Record the PLANNED ORDERING
    (blocked-by pairs implied by Consumes/Produces) in the decomposition-report draft as you
    go — the draft is your working state (in-context or a scratch file); it becomes durable
    only via `write-report`, and the abort path writes its current content. Boundary rule:
@@ -248,14 +254,16 @@ deduplication.
    citation parts widened to include Acceptance criteria) — that widening is this list's
    conceptual sixth item, not a new clause of its own. A block found byte-identical across ALL
    packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
-   blocking). Failures loop to step 3.
+   blocking). Failures loop to step 3 (content-only; `pd_curated_rev` is write-once — see
+   step 3).
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet
    content ONLY; output `executable: yes|no` + `missing:` list, plus any assumption the
    reader had to make about a sibling packet's Consumes/Produces shape that is not pinned by
    the design or a predecessor's Produces. Dispatch one round's cold-reads as multiple Agent
    tool_use blocks in a SINGLE turn — never one dispatch-and-wait per turn. Any packet EDITED
    after its cold-read MUST be cold-read again AND re-sized — an editor holding the full
-   design cannot certify self-containment.
+   design cannot certify self-containment. This edit is content-only, per step 3;
+   `pd_curated_rev` is write-once and stays untouched.
 7. **Semantic post-check** (one mid-model fresh-eyes agent, read-only; the one role that
    reads the full design AND all packets): (a) coverage both directions — every design
    element lands in a packet or is recorded via `write-report` as deliberately not
@@ -274,7 +282,9 @@ deduplication.
    SCOPES to the packets the prior round's findings touched plus their direct planned-ordering
    neighbors — mirroring reconcile step 4 — never the full design and full packet set again.
    State the round's total prompt byte-length in the decomposition report (step 10) so a
-   non-scoped round is visible immediately. Findings loop to step 3. All findings get fixed
+   non-scoped round is visible immediately. Findings loop to step 3 (content-only, per step 3
+   — `pd_curated_rev` is write-once and is NOT re-stamped per round, however many rounds
+   run). All findings get fixed
    regardless of severity; whether a further round is dispatched, and what happens at the cap,
    is governed by step 8's rule.
 

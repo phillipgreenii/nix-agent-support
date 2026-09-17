@@ -113,6 +113,18 @@ hazard this note already flags applies to phase and trigger beads too — phase 
 is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at creation, never by
 the parent's own labels.
 
+**Revising an already-created packet's content** (core skill mode `decompose` steps 5-7's
+loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`): `create-packet` runs once per
+packet. A fix-loop pass that edits a packet already created uses `bd update <packet-id>
+--body-file <fixed-content-file>` — content only. It MUST NOT call `create-packet` again (that
+would create a duplicate packet) and MUST NOT pair the content update with
+`--set-metadata pd_curated_rev=...` or any other `write-metadata` touch to `pd_curated_rev`:
+that stamp is written once, at the packet's original `create-packet` call, pinned to the
+docket's `pd_rev` at that moment, and stays untouched by every later `decompose` fix-loop pass
+no matter how many rounds run. Only mode `reconcile`'s own step 3 (`bd update <packet-id>
+--set-metadata pd_curated_rev=<new-pd_rev>`) ever changes it again, and only because `pd_rev`
+itself bumped.
+
 ## `wire-ordering`
 
 `bd dep add <blocked> --blocked-by <blocker>`, then a `bd dep list <blocked>` read-back on
