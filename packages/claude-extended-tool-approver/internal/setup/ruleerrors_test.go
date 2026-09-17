@@ -122,6 +122,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"curl":               true,
 		"ssh":                true,
 		"vault":              true,
+		"pn-workspace":       true,
 		"safe-commands":      true,
 		"kubectl":            true,
 		"build-tools":        true,

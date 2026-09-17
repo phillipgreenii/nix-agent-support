@@ -24,6 +24,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
@@ -246,6 +247,14 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		curl.New(cfg.Curl),
 		sshrule.New(cfg.Ssh),
 		vaultrule.New(cfg.Vault),
+		// pn-workspace approves the routine, non-destructive `pn workspace`
+		// subcommand family per operator ruling (Phillip, 2026-09-17, bead
+		// pg2-4zyqf/pg2-vlpe1). Unlike curl/ssh/vault immediately above, it takes
+		// no consumer config — the base allowlist is fixed and applies
+		// uniformly. Ordering relative to safe-commands/build-tools does not
+		// matter (neither recognizes "pn" as a basename at all today), but it is
+		// placed alongside its command-aware-classifier siblings for readability.
+		pnworkspace.New(),
 		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
 		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
 		// through the I13 structural entry point (EvaluateStructure) rather than
