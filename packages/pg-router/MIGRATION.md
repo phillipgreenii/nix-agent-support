@@ -460,6 +460,29 @@ for the exact JSON shape. There is no automatic TOML-to-JSON converter shipped f
 translate each `[[role]]` block's `type`/`[role.ccpool]`/`[role.command]` fields into the
 equivalent JSON `roleFile` by hand (field names are unchanged, only the container format is).
 
+### Multi-role dispatch differentiation: `PG_ROUTER_HANDLER_COMMAND_DIR` + the nix `roles` option
+
+Bead `pg2-ymb3v` closed a gap left open by the move above: with only `PG_ROUTER_HANDLER_COMMAND`
+set, every enabled role resolved to the byte-for-byte identical handler argv — a deployment with
+more than one differently-configured role (e.g. `feedback`/`worker`/`review`, each with its own
+ccpool actor/prompt/completion policy) had no way to tell them apart, silently. Setting
+`PG_ROUTER_HANDLER_COMMAND_DIR` to a directory of `<role.Name>.json` files (this package's own
+`roleFile` shape — see the section above) fixes this: the resolved argv threads
+`--role-config <dir>/<role.Name>.json` onto the handler command, so each role dispatches through
+its own participant config. `PG_ROUTER_HANDLER_COMMAND` alone is unaffected — a single-role
+deployment that never sets `PG_ROUTER_HANDLER_COMMAND_DIR` keeps its existing behavior unchanged.
+
+For a nix-managed deployment (bead `pg2-pteab`), hand-authoring these JSON files is unnecessary:
+`home/programs/pg-router-ccpool-handler`'s new `roles` option (attrset keyed by role name,
+shaped like `roleFile`) renders one `pkgs.writeText` per role and joins them into one directory,
+exposed as that module's own `handlerCommandDir` output. Point
+`home/programs/pg-router`'s `daemon`/`periodicDrain.handlerCommandDir` option at it (interpolated
+to a string, e.g. `"${config.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}"`)
+to wire the two modules together — `handlerCommand`/`handlerCommandDir` are otherwise independent
+plain-string options on `pg-router`'s own module, not auto-derived from the ccpool-handler module.
+The darwin LaunchAgent mirrors (`darwin/modules/pg-router`, `darwin/modules/pg-router-ccpool-handler`)
+follow the same shape.
+
 ### Breaking: the core ships with no built-in role/query set
 
 Before this change, an operator relying on zero-config defaults (no `.pg-router/config.toml`) saw

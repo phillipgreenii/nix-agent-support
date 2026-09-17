@@ -2274,6 +2274,20 @@
                                         type = lib.types.lines;
                                         default = "";
                                       };
+                                      # handlerCommand/handlerCommandDir stubs
+                                      # (this bead, pg2-pteab): non-null
+                                      # defaults, unlike the mkIf'd options
+                                      # above, so darwinWithDaemon's script
+                                      # exercises the threading below without
+                                      # evalDarwin needing a third parameter.
+                                      handlerCommand = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = "pg-router-ccpool-handler";
+                                      };
+                                      handlerCommandDir = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = "/nix/store/fake-roles-dir";
+                                      };
                                       gates = {
                                         operatorPausedPath = lib.mkOption {
                                           type = lib.types.nullOr lib.types.str;
@@ -2325,6 +2339,8 @@
                       enable = true;
                       repoRoot = "/repo";
                       configText = baseConfigText;
+                      handlerCommand = "pg-router-ccpool-handler";
+                      handlerCommandDir = "/nix/store/fake-roles-dir";
                       gates = {
                         operatorPausedPath = "/state/gates/operator-paused";
                         cicdDownPath = "/state/gates/cicd-down";
@@ -2361,6 +2377,13 @@
                 # Gate env vars present on the daemon unit when configured.
                 assert lib.elem "PG_ROUTER_OPERATOR_PAUSED=/state/gates/operator-paused" daemonService.Environment;
                 assert lib.elem "PG_ROUTER_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
+                # handlerCommand/handlerCommandDir (this bead, pg2-pteab):
+                # present on the daemon unit when configured, absent from
+                # the drain unit (drainOnly's own periodicDrain never sets
+                # them, so they stay at their `null` default).
+                assert lib.elem "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler" daemonService.Environment;
+                assert lib.elem "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir" daemonService.Environment;
+                assert !(lib.any (v: lib.hasPrefix "PG_ROUTER_HANDLER_COMMAND" v) drainService.Environment);
                 # Mutual-exclusion assertion fires when both are enabled.
                 assert firedAssertion != null;
                 # darwin LaunchAgent mirrors the daemon (pa-monitor pattern),
@@ -2368,8 +2391,263 @@
                 assert darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents ? pg-router-daemon;
                 assert lib.hasInfix "pg-router run"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # handlerCommand/handlerCommandDir mirror into the darwin
+                # LaunchAgent script too (this bead, pg2-pteab) — sourced
+                # from the stub submodule's own non-null defaults above.
+                assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
+
+              # test-pg-router-ccpool-handler-module (this bead, pg2-pteab):
+              # eval-level coverage for the NEW nix-layer wiring of the
+              # Go-level PG_ROUTER_HANDLER_COMMAND_DIR support bead pg2-ymb3v
+              # landed — before this bead, neither
+              # home/programs/pg-router-ccpool-handler/default.nix's `roles`
+              # option nor `handlerCommandDir` output existed at all. Proves
+              # (acceptance criterion 1): `roles` populated for 2
+              # differently-configured roles (a "ccpool" one and a "command"
+              # one -- deliberately different `type`s, not just different
+              # field values, so a wrong-block-entirely bug is caught too)
+              # renders 2 distinct `<role.Name>.json` files under one
+              # `handlerCommandDir`, matching
+              # cmd/pg-router-ccpool-handler/roleconfig.go's `roleFile`
+              # shape exactly (including its untagged, Go-field-cased
+              # `Isolation.{Type,Path}` -- roles.IsolationConfig carries no
+              # json tags, see roleFileFor's own doc comment in that
+              # default.nix). Also proves an empty `roles` attrset still
+              # resolves to a harmless empty directory, and that
+              # darwin/modules/pg-router-ccpool-handler/default.nix re-
+              # exposes the HM module's own `handlerCommandDir` output
+              # verbatim at darwin scope.
+              test-pg-router-ccpool-handler-module =
+                let
+                  hmAssertionSubmodule = lib.types.submodule {
+                    options = {
+                      assertion = lib.mkOption { type = lib.types.bool; };
+                      message = lib.mkOption { type = lib.types.str; };
+                    };
+                  };
+
+                  # HM-side eval: stub exactly what
+                  # home/programs/pg-router-ccpool-handler/default.nix
+                  # reads/writes -- home.packages,
+                  # systemd.user.{services,timers}, assertions (mirroring
+                  # test-pg-router-module's own evalHM). This module's
+                  # `assertions` list (which reads
+                  # `config.phillipgreenii.programs.ccpool.enable`) is never
+                  # forced by this check below, so that option needs no
+                  # stub here.
+                  evalHM =
+                    ccpoolHandler:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pg-router-ccpool-handler/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              systemd.user.services = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              systemd.user.timers = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf hmAssertionSubmodule;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.pg-router-ccpool-handler = ccpoolHandler; }
+                      ];
+                    }).config;
+
+                  # Two differently-configured roles (acceptance criterion
+                  # 1): "feedback" is a ccpool role, "worker" is a command
+                  # role.
+                  twoRoles = evalHM {
+                    enable = true;
+                    roles = {
+                      feedback = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "feedback-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "feedback prompt";
+                        };
+                      };
+                      worker = {
+                        type = "command";
+                        command = {
+                          argv = [
+                            "worker-bin"
+                            "--flag"
+                          ];
+                        };
+                      };
+                    };
+                  };
+                  handlerCommandDir = twoRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+
+                  # Zero roles: handlerCommandDir must still resolve (an
+                  # empty directory), never throw.
+                  noRoles = evalHM {
+                    enable = true;
+                    roles = { };
+                  };
+                  emptyHandlerCommandDir = noRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+
+                  # darwin-side eval: stub the options
+                  # darwin/modules/pg-router-ccpool-handler/default.nix
+                  # reads/writes -- phillipgreenii.system.launchdServices.
+                  # userAgents (real option) and a minimal home-manager.users
+                  # stub carrying the module's own `enable`/`handlerCommandDir`/
+                  # `daemon.{enable,socket,id,self,token}` fields it actually
+                  # reads.
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.lines;
+                        default = "";
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                    };
+                  };
+
+                  evalDarwin =
+                    hmModuleCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-router-ccpool-handler/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.system.launchdServices.userAgents = lib.mkOption {
+                                type = lib.types.attrsOf userAgentSubmodule;
+                                default = { };
+                              };
+                              home-manager.users = lib.mkOption {
+                                type = lib.types.attrsOf (
+                                  lib.types.submodule {
+                                    options.phillipgreenii.programs.pg-router-ccpool-handler = {
+                                      enable = lib.mkOption {
+                                        type = lib.types.bool;
+                                        default = false;
+                                      };
+                                      handlerCommandDir = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.package;
+                                        default = null;
+                                      };
+                                      daemon = {
+                                        enable = lib.mkOption {
+                                          type = lib.types.bool;
+                                          default = false;
+                                        };
+                                        socket = lib.mkOption {
+                                          type = lib.types.str;
+                                          default = "/tmp/sock";
+                                        };
+                                        id = lib.mkOption {
+                                          type = lib.types.str;
+                                          default = "id";
+                                        };
+                                        self = lib.mkOption {
+                                          type = lib.types.str;
+                                          default = "healthy";
+                                        };
+                                        token = lib.mkOption {
+                                          type = lib.types.nullOr lib.types.str;
+                                          default = null;
+                                        };
+                                      };
+                                    };
+                                  }
+                                );
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { home-manager.users.tester.phillipgreenii.programs.pg-router-ccpool-handler = hmModuleCfg; }
+                      ];
+                    }).config;
+
+                  darwinWithHandlerDir = evalDarwin {
+                    enable = true;
+                    inherit handlerCommandDir;
+                  };
+                  darwinWithoutRoles = evalDarwin { enable = false; };
+
+                  # File-content verification is done at BUILD time via a
+                  # runCommand + jq (code-file-standards' "Structured Data
+                  # Files MUST use jq" rule), not via builtins.readFile at
+                  # eval time -- matches test-pg-router-coverage-gate's own
+                  # runCommand-based pattern elsewhere in this file.
+                  renderCheck =
+                    pkgs.runCommand "test-pg-router-ccpool-handler-module-render"
+                      {
+                        nativeBuildInputs = [ pkgs.jq ];
+                        inherit handlerCommandDir emptyHandlerCommandDir;
+                      }
+                      ''
+                        set -euo pipefail
+                        test -f "$handlerCommandDir/feedback.json"
+                        test -f "$handlerCommandDir/worker.json"
+                        [ "$(jq -r .name "$handlerCommandDir/feedback.json")" = feedback ]
+                        [ "$(jq -r .type "$handlerCommandDir/feedback.json")" = ccpool ]
+                        [ "$(jq -r .ccpool.actor "$handlerCommandDir/feedback.json")" = feedback-actor ]
+                        [ "$(jq -r .ccpool.completion "$handlerCommandDir/feedback.json")" = close-only ]
+                        # Untouched isolation default renders as "" (the Go
+                        # side's own "worktree" fallback for an empty Type),
+                        # via the untagged, Go-field-cased Isolation.Type key.
+                        [ "$(jq -r .ccpool.isolation.Type "$handlerCommandDir/feedback.json")" = "" ]
+                        jq -e 'has("command") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -r .name "$handlerCommandDir/worker.json")" = worker ]
+                        [ "$(jq -r .type "$handlerCommandDir/worker.json")" = command ]
+                        [ "$(jq -c .command.argv "$handlerCommandDir/worker.json")" = '["worker-bin","--flag"]' ]
+                        jq -e 'has("ccpool") | not' "$handlerCommandDir/worker.json" >/dev/null
+                        [ "$(ls -1 "$emptyHandlerCommandDir" | wc -l)" -eq 0 ]
+                        touch $out
+                      '';
+                in
+                # darwin scope re-exposes the HM module's own
+                # handlerCommandDir output verbatim.
+                assert
+                  darwinWithHandlerDir.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir
+                  == handlerCommandDir;
+                assert
+                  darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
+                renderCheck;
 
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's

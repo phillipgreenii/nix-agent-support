@@ -45,6 +45,180 @@ let
       ]
     );
 
+  # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
+  # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` decodes
+  # (`--role-config <dir>/<role.Name>.json`, this bead pg2-pteab, wiring the
+  # now-landed Go-level PG_ROUTER_HANDLER_COMMAND_DIR support -- pg2-ymb3v).
+  # Field names below are NOT freely chosen: `name`/`type`/the `ccpool`
+  # sub-fields/the `command` sub-field are exactly `roleFile`'s own
+  # `encoding/json` tags, and `isolation`'s OWN sub-fields (`Type`/`Path`) are
+  # capitalized because `roles.IsolationConfig` (packages/pg-router-ccpool-
+  # handler/internal/roles/roles.go) carries no json tags at all -- Go's
+  # encoding/json then falls back to the literal exported field name. Only
+  # the block matching `roleCfg.type` is emitted (mirroring `roleFile.CCPool`/
+  # `.Command`'s own `omitempty` pointers), so a "command" role's JSON never
+  # carries a stray `ccpool` key and vice versa.
+  roleFileFor =
+    name: roleCfg:
+    pkgs.writeText "${name}.json" (
+      builtins.toJSON (
+        {
+          inherit name;
+          inherit (roleCfg) type;
+        }
+        // lib.optionalAttrs (roleCfg.type == "ccpool") {
+          ccpool = {
+            inherit (roleCfg.ccpool)
+              actor
+              skillMD
+              completion
+              onFailure
+              onDispatchFail
+              authorshipGuard
+              promptBody
+              ;
+            isolation = {
+              Type = roleCfg.ccpool.isolation.type;
+              Path = roleCfg.ccpool.isolation.path;
+            };
+          };
+        }
+        // lib.optionalAttrs (roleCfg.type == "command") {
+          command = {
+            inherit (roleCfg.command) argv;
+          };
+        }
+      )
+    );
+
+  # handlerCommandDir joins every `roles` entry's rendered JSON file into one
+  # directory (`pkgs.linkFarm`), the shape `PG_ROUTER_HANDLER_COMMAND_DIR`
+  # (`home/programs/pg-router`'s own `daemon`/`periodicDrain.handlerCommandDir`
+  # options) expects: one `<role.Name>.json` per enabled role, resolvable by
+  # `filepath.Join(cfg.HandlerCommandDir, role.Name+".json")`
+  # (cmd/pg-router/run.go's `handlerCommandFor`). An empty `roles` attrset
+  # still resolves cleanly to an empty directory -- never a missing/`null`
+  # output -- so a deployment that leaves `roles` unset gets a harmless,
+  # empty `handlerCommandDir` rather than an eval failure.
+  handlerCommandDir = pkgs.linkFarm "pg-router-ccpool-handler-roles" (
+    lib.mapAttrsToList (name: roleCfg: {
+      name = "${name}.json";
+      path = roleFileFor name roleCfg;
+    }) cfg.roles
+  );
+
+  roleSubmodule = lib.types.submodule {
+    options = {
+      type = lib.mkOption {
+        type = lib.types.enum [
+          "ccpool"
+          "command"
+        ];
+        description = ''
+          This role's kind (`roleFile.Type`) -- "ccpool" dispatches a
+          ccpool/claude session (`ccpool` below is required), "command" runs
+          a bare command (`command` below is required).
+        '';
+      };
+      ccpool = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.submodule {
+            options = {
+              actor = lib.mkOption {
+                type = lib.types.str;
+                description = "ccpool `--actor` (`roleFile.CCPool.Actor`).";
+              };
+              skillMD = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "ccpool `--skill` markdown path (`roleFile.CCPool.SkillMD`).";
+              };
+              completion = lib.mkOption {
+                type = lib.types.enum [
+                  "close-only"
+                  "close-or-handback"
+                ];
+                description = "Bead-done semantics (`roleFile.CCPool.Completion` / `roles.Completion`).";
+              };
+              onFailure = lib.mkOption {
+                type = lib.types.enum [
+                  "unclaim"
+                  "add-human"
+                ];
+                description = "What to do to the bead on a flagged dispatch (`roleFile.CCPool.OnFailure` / `roles.FailureAction`).";
+              };
+              onDispatchFail = lib.mkOption {
+                type = lib.types.enum [
+                  "unclaim"
+                  "leave"
+                ];
+                description = "What to do when the nudge could not be sent (`roleFile.CCPool.OnDispatchFail` / `roles.DispatchFailAction`).";
+              };
+              authorshipGuard = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "`roleFile.CCPool.AuthorshipGuard`.";
+              };
+              promptBody = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "The task prompt template source (`roleFile.CCPool.PromptBody`).";
+              };
+              isolation = lib.mkOption {
+                type = lib.types.submodule {
+                  options = {
+                    type = lib.mkOption {
+                      type = lib.types.enum [
+                        ""
+                        "worktree"
+                        "none"
+                        "path"
+                        "workforest"
+                      ];
+                      default = "";
+                      description = ''
+                        How this ccpool role's WORKSPACE_ROOT is prepared
+                        (`roles.IsolationConfig.Type`); `""` means "worktree"
+                        (the long-standing default).
+                      '';
+                    };
+                    path = lib.mkOption {
+                      type = lib.types.str;
+                      default = "";
+                      description = "Fixed directory to create-or-reuse; only meaningful when `type` == \"path\" (`roles.IsolationConfig.Path`).";
+                    };
+                  };
+                };
+                default = { };
+                description = "`roleFile.CCPool.Isolation`.";
+              };
+            };
+          }
+        );
+        default = null;
+        description = ''
+          This role's ccpool launch/behavior config -- required (non-null)
+          iff `type` == "ccpool" (`roleFile.CCPool`).
+        '';
+      };
+      command = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.submodule {
+            options.argv = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              description = "The argv this command role dispatches (`roleFile.Command.Argv`).";
+            };
+          }
+        );
+        default = null;
+        description = ''
+          This role's bare-command argv -- required (non-null) iff `type` ==
+          "command" (`roleFile.Command`).
+        '';
+      };
+    };
+  };
+
   registerOptions = {
     socket = lib.mkOption {
       type = lib.types.str;
@@ -108,6 +282,45 @@ in
     '';
     package = lib.mkPackageOption pkgs "pg-router-ccpool-handler" { };
 
+    # roles / handlerCommandDir (this bead, pg2-pteab): decoupled from
+    # register/periodicDrain/daemon above -- those are the heartbeat/health
+    # mechanism (see the module-level doc comment); this is real per-role
+    # dispatch config, rendered declaratively instead of hand-authored JSON
+    # files. Populated independently of periodicDrain/daemon.enable, so a
+    # deployment that only wants the rendered directory (e.g. to hand to
+    # `home/programs/pg-router`'s own `handlerCommandDir` option) without
+    # this module's own register LaunchAgent/systemd unit still gets it.
+    roles = lib.mkOption {
+      type = lib.types.attrsOf roleSubmodule;
+      default = { };
+      description = ''
+        Per-role dispatch config, keyed by role name -- shaped like
+        `cmd/pg-router-ccpool-handler/roleconfig.go`'s `roleFile` (the
+        `--role-config`/`PG_ROUTER_CCPOOL_HANDLER_ROLE` JSON shape). Each
+        entry renders to its own `pkgs.writeText "<name>.json"`, joined into
+        one directory exposed as `handlerCommandDir` below. Populate 2+
+        differently-configured roles (e.g. `feedback`/`worker`/`review`, each
+        with its own ccpool actor/prompt/completion policy) to let
+        `home/programs/pg-router`'s `daemon`/`periodicDrain.handlerCommandDir`
+        differentiate dispatch per role instead of every role sharing the
+        identical handler command (`PG_ROUTER_HANDLER_COMMAND_DIR`; closes the
+        gap bead `pg2-ymb3v` fixed at the Go level).
+      '';
+    };
+
+    handlerCommandDir = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      description = ''
+        Read-only output: the directory of per-role JSON files rendered from
+        `roles` above (one `<role.Name>.json` per entry), suitable for
+        `home/programs/pg-router`'s `daemon`/
+        `periodicDrain.handlerCommandDir` option
+        (`PG_ROUTER_HANDLER_COMMAND_DIR`). Resolves to an empty directory when
+        `roles` is empty.
+      '';
+    };
+
     periodicDrain = {
       enable = lib.mkEnableOption ''
         a systemd --user timer that periodically re-runs
@@ -144,80 +357,91 @@ in
     // registerOptions;
   };
 
-  config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package ];
+  config = lib.mkMerge [
+    {
+      # handlerCommandDir (this bead, pg2-pteab): a pure function of `roles`
+      # alone, set UNCONDITIONALLY (not gated on cfg.enable, unlike
+      # everything below) -- a consumer that only wants the rendered
+      # directory to hand to `home/programs/pg-router`'s own
+      # `handlerCommandDir` option should not need this module's own
+      # register/systemd machinery enabled too.
+      phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = handlerCommandDir;
+    }
+    (lib.mkIf cfg.enable {
+      home.packages = [ cfg.package ];
 
-    assertions = [
-      {
-        assertion = !(cfg.periodicDrain.enable && cfg.daemon.enable);
-        message = ''
-          phillipgreenii.programs.pg-router-ccpool-handler: periodicDrain.enable
-          and daemon.enable cannot both be true -- pick one registration
-          strategy per deployment.
-        '';
-      }
-      {
-        # Mirrors home/programs/pg-router's own tc-24qs assertion (its
-        # "Runtime-depends on `ccpool` ... being on PATH" enable-doc line was
-        # never enforced there either, for the SAME underlying dependency --
-        # see that module's own comment) -- applied HERE directly rather
-        # than by relocation, because this module is the one that actually
-        # shells out to `ccpool` now, since Task 5.2/5.3 physically moved
-        # internal/ccpool into this package. Without
-        # phillipgreenii.programs.ccpool.enable, the ccpool-plugin's
-        # SessionStart hook never registers and a ccpool-kind dispatch would
-        # silently hang for its full Wait timeout (tc-24qs).
-        assertion = config.phillipgreenii.programs.ccpool.enable;
-        message = ''
-          phillipgreenii.programs.pg-router-ccpool-handler.enable requires
-          phillipgreenii.programs.ccpool.enable = true -- this module's
-          ccpool role kind shells out to the `ccpool` binary on PATH
-          (internal/ccpool/cli.go), and only the ccpool module renders
-          claude.plugin_dir into ccpool's own config.toml (tc-24qs).
-        '';
-      }
-    ];
+      assertions = [
+        {
+          assertion = !(cfg.periodicDrain.enable && cfg.daemon.enable);
+          message = ''
+            phillipgreenii.programs.pg-router-ccpool-handler: periodicDrain.enable
+            and daemon.enable cannot both be true -- pick one registration
+            strategy per deployment.
+          '';
+        }
+        {
+          # Mirrors home/programs/pg-router's own tc-24qs assertion (its
+          # "Runtime-depends on `ccpool` ... being on PATH" enable-doc line was
+          # never enforced there either, for the SAME underlying dependency --
+          # see that module's own comment) -- applied HERE directly rather
+          # than by relocation, because this module is the one that actually
+          # shells out to `ccpool` now, since Task 5.2/5.3 physically moved
+          # internal/ccpool into this package. Without
+          # phillipgreenii.programs.ccpool.enable, the ccpool-plugin's
+          # SessionStart hook never registers and a ccpool-kind dispatch would
+          # silently hang for its full Wait timeout (tc-24qs).
+          assertion = config.phillipgreenii.programs.ccpool.enable;
+          message = ''
+            phillipgreenii.programs.pg-router-ccpool-handler.enable requires
+            phillipgreenii.programs.ccpool.enable = true -- this module's
+            ccpool role kind shells out to the `ccpool` binary on PATH
+            (internal/ccpool/cli.go), and only the ccpool module renders
+            claude.plugin_dir into ccpool's own config.toml (tc-24qs).
+          '';
+        }
+      ];
 
-    systemd.user = {
-      services = {
-        pg-router-ccpool-handler-drain = lib.mkIf cfg.periodicDrain.enable {
-          Unit.Description = "pg-router-ccpool-handler: one register pass against a running pg-router core";
-          Service = {
-            Type = "oneshot";
-            ExecStart = mkRegisterExec {
-              socket = cfg.periodicDrain.socket;
-              token = cfg.periodicDrain.token;
-              id = cfg.periodicDrain.id;
-              self = cfg.periodicDrain.self;
+      systemd.user = {
+        services = {
+          pg-router-ccpool-handler-drain = lib.mkIf cfg.periodicDrain.enable {
+            Unit.Description = "pg-router-ccpool-handler: one register pass against a running pg-router core";
+            Service = {
+              Type = "oneshot";
+              ExecStart = mkRegisterExec {
+                socket = cfg.periodicDrain.socket;
+                token = cfg.periodicDrain.token;
+                id = cfg.periodicDrain.id;
+                self = cfg.periodicDrain.self;
+              };
+            };
+          };
+
+          pg-router-ccpool-handler-daemon = lib.mkIf cfg.daemon.enable {
+            Unit.Description = "pg-router-ccpool-handler: boot-time registration against a running pg-router core";
+            Install.WantedBy = [ "default.target" ];
+            Service = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              ExecStart = mkRegisterExec {
+                socket = cfg.daemon.socket;
+                token = cfg.daemon.token;
+                id = cfg.daemon.id;
+                self = cfg.daemon.self;
+              };
             };
           };
         };
 
-        pg-router-ccpool-handler-daemon = lib.mkIf cfg.daemon.enable {
-          Unit.Description = "pg-router-ccpool-handler: boot-time registration against a running pg-router core";
-          Install.WantedBy = [ "default.target" ];
-          Service = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-            ExecStart = mkRegisterExec {
-              socket = cfg.daemon.socket;
-              token = cfg.daemon.token;
-              id = cfg.daemon.id;
-              self = cfg.daemon.self;
-            };
+        timers.pg-router-ccpool-handler-drain = lib.mkIf cfg.periodicDrain.enable {
+          Unit.Description = "Run pg-router-ccpool-handler register periodically";
+          Install.WantedBy = [ "timers.target" ];
+          Timer = {
+            OnUnitActiveSec = cfg.periodicDrain.interval;
+            OnBootSec = cfg.periodicDrain.interval;
+            Persistent = true;
           };
         };
       };
-
-      timers.pg-router-ccpool-handler-drain = lib.mkIf cfg.periodicDrain.enable {
-        Unit.Description = "Run pg-router-ccpool-handler register periodically";
-        Install.WantedBy = [ "timers.target" ];
-        Timer = {
-          OnUnitActiveSec = cfg.periodicDrain.interval;
-          OnBootSec = cfg.periodicDrain.interval;
-          Persistent = true;
-        };
-      };
-    };
-  };
+    })
+  ];
 }

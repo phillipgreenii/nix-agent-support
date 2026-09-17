@@ -273,10 +273,10 @@ turnkey deployment modes on top of the `package`/`enable` options — enabling b
 assertion failure, since they are independent pg-router cores that would race on the same
 `PG_ROUTER_LOG_DIR` (`events.jsonl`, the discovery record, the push-ingest socket):
 
-| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                                                        |
-| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`                                |
-| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `gates.{operatorPausedPath,cicdDownPath}` |
+| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                                                                                               |
+| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`                                |
+| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`, `gates.{operatorPausedPath,cicdDownPath}` |
 
 Both submodules render `configText` into the Nix store and point `PG_ROUTER_CONFIG` at it — fully
 declarative, no machine-local `.pg-router/config.toml` bootstrap step. `daemon`'s
@@ -284,6 +284,17 @@ declarative, no machine-local `.pg-router/config.toml` bootstrap step. `daemon`'
 that unit only; left `null` (the default), the gate paths fall back to `Config.Load()`'s own
 default (`<PG_ROUTER_LOG_DIR>/gates/{operator-paused,cicd-down}`) — see `MIGRATION.md`'s gates-default-on
 hazard note.
+
+`handlerCommand`/`handlerCommandDir` (plain strings, both `null` by default) set
+`PG_ROUTER_HANDLER_COMMAND`/`PG_ROUTER_HANDLER_COMMAND_DIR` for that unit — see this file's own
+env-var table above for their runtime contract. `handlerCommandDir` is typically pointed at
+`phillipgreenii.programs.pg-router-ccpool-handler`'s own `handlerCommandDir` output (that sibling
+home-manager module's new `roles` option — keyed by role name, shaped like
+`cmd/pg-router-ccpool-handler/roleconfig.go`'s `roleFile` — renders one JSON file per role and
+joins them into that directory); interpolate it to a string
+(`"${config.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir}"`), since this
+option takes a plain string, not a package. See `MIGRATION.md`'s "Multi-role dispatch
+differentiation" section for the full worked contract.
 
 `systemd.user.services`/`systemd.user.timers` are a **darwin no-op** (darwin has no systemd), so
 `darwin/modules/pg-router/default.nix` mirrors any home-manager user's `daemon.enable` into a

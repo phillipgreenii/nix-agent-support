@@ -22,6 +22,8 @@ let
       configFileName,
       operatorPausedPath ? null,
       cicdDownPath ? null,
+      handlerCommand ? null,
+      handlerCommandDir ? null,
     }:
     [
       "PG_ROUTER_REPO_ROOT=${repoRoot}"
@@ -31,7 +33,14 @@ let
       "PG_ROUTER_CONFIG=${pkgs.writeText configFileName configText}"
     ]
     ++ lib.optional (operatorPausedPath != null) "PG_ROUTER_OPERATOR_PAUSED=${operatorPausedPath}"
-    ++ lib.optional (cicdDownPath != null) "PG_ROUTER_CICD_DOWN=${cicdDownPath}";
+    ++ lib.optional (cicdDownPath != null) "PG_ROUTER_CICD_DOWN=${cicdDownPath}"
+    # handlerCommand/handlerCommandDir (this bead, pg2-pteab): threads the
+    # now-landed Go-level PG_ROUTER_HANDLER_COMMAND[_DIR] support
+    # (internal/config/config.go, bead pg2-ymb3v) into this systemd unit's
+    # own Environment, following the same optional-var pattern as
+    # operatorPausedPath/cicdDownPath above.
+    ++ lib.optional (handlerCommand != null) "PG_ROUTER_HANDLER_COMMAND=${handlerCommand}"
+    ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}";
 in
 {
   options.phillipgreenii.programs.pg-router = {
@@ -86,6 +95,34 @@ in
           bootstrap step is needed.
         '';
       };
+      handlerCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          PG_ROUTER_HANDLER_COMMAND override: the argv prefix invoked, over
+          the wire, for every enabled role's registered handler participant
+          (e.g. `pg-router-ccpool-handler`). `null` leaves it unset — an
+          unconfigured deployment gets a clear per-dispatch error instead of
+          a hardcoded participant name (GOAL-MIN-1's Floor).
+        '';
+      };
+      handlerCommandDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          PG_ROUTER_HANDLER_COMMAND_DIR override: a directory of per-role
+          JSON files (`<role.Name>.json`) letting differently-configured
+          roles sharing one `handlerCommand` binary (e.g.
+          feedback/worker/review) dispatch through their own participant
+          config — typically
+          `phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir`
+          (interpolated to a string, e.g. `"${cfg.handlerCommandDir}"`, since
+          this option is a plain string like `handlerCommand` above, not a
+          package). `null` leaves it unset — every enabled role then resolves
+          to the plain `handlerCommand` argv, unchanged from before this
+          option existed.
+        '';
+      };
     };
 
     daemon = {
@@ -115,6 +152,16 @@ in
       configText = lib.mkOption {
         type = lib.types.lines;
         description = "The pg-router `config.toml` content — see `periodicDrain.configText`.";
+      };
+      handlerCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "PG_ROUTER_HANDLER_COMMAND override for the daemon core — see `periodicDrain.handlerCommand`.";
+      };
+      handlerCommandDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "PG_ROUTER_HANDLER_COMMAND_DIR override for the daemon core — see `periodicDrain.handlerCommandDir`.";
       };
       gates = {
         operatorPausedPath = lib.mkOption {
@@ -202,6 +249,8 @@ in
                 beadsPrefix = cfg.periodicDrain.beadsPrefix;
                 configText = cfg.periodicDrain.configText;
                 configFileName = "pg-router-drain-config.toml";
+                handlerCommand = cfg.periodicDrain.handlerCommand;
+                handlerCommandDir = cfg.periodicDrain.handlerCommandDir;
               };
             };
           };
@@ -219,6 +268,8 @@ in
                 configFileName = "pg-router-daemon-config.toml";
                 operatorPausedPath = cfg.daemon.gates.operatorPausedPath;
                 cicdDownPath = cfg.daemon.gates.cicdDownPath;
+                handlerCommand = cfg.daemon.handlerCommand;
+                handlerCommandDir = cfg.daemon.handlerCommandDir;
               };
             };
           };

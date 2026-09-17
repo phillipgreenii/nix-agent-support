@@ -68,6 +68,12 @@ in
           ${lib.optionalString (
             daemonCfg.gates.cicdDownPath != null
           ) "export PG_ROUTER_CICD_DOWN=${lib.escapeShellArg daemonCfg.gates.cicdDownPath}"}
+          ${lib.optionalString (
+            daemonCfg.handlerCommand != null
+          ) "export PG_ROUTER_HANDLER_COMMAND=${lib.escapeShellArg daemonCfg.handlerCommand}"}
+          ${lib.optionalString (
+            daemonCfg.handlerCommandDir != null
+          ) "export PG_ROUTER_HANDLER_COMMAND_DIR=${lib.escapeShellArg daemonCfg.handlerCommandDir}"}
           exec ${pkg}/bin/pg-router run
         '';
         runAtLoad = true;
