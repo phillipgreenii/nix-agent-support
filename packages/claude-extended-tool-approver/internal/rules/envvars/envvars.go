@@ -2291,6 +2291,21 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 			exhaustionOnly = len(subs) > 0
 			refusalIsOnlyDynamicPathRead = len(subs) > 0
 			for _, sub := range subs {
+				// pg2-jnfei: the ECHOED-TEXT CONTENT-DIGEST shape, checked FIRST and
+				// WITHOUT recursing through r.exprEval — see
+				// cmdparse.ContentDigestOfEchoedTextShape's own doc for the exact
+				// shape and its safety argument. A match here is treated exactly
+				// like a genuine subResult.Decision == hookio.Approve: it leaves
+				// clearedByRecursion/exhaustionOnly/refusalIsOnlyDynamicPathRead
+				// UNTOUCHED (their seed-then-narrow AND-fold already defaults to
+				// "cleared" until something narrows it) and appends nothing to
+				// subResults (an Approve is MostRestrictive's identity element, so
+				// omitting it folds in nothing whether or not this substitution is
+				// the ONLY one). This is a pure WIDENING: a body this predicate does
+				// NOT recognize falls through to the existing recursion unchanged.
+				if cmdparse.ContentDigestOfEchoedTextShape(sub.Body) {
+					continue
+				}
 				stack := []hookio.StackFrame{{RuleName: name, Command: "env-value", Expression: ev.Raw}}
 				// TEXT RE-ENTRY DECISION (pg2-30wro's adjacent audit item, ADR 0039 I13).
 				// sub.Body is a VERBATIM SOURCE SLICE straight out of

@@ -1392,3 +1392,121 @@ func FuzzShellParseSeam(f *testing.F) {
 		}
 	})
 }
+
+// TestContentDigestOfEchoedTextShape (pg2-jnfei) pins the narrow admission of
+// `echo`/`printf`, piped through EXACTLY ONE stdin-only checksum utility and
+// optionally truncated by a bare `head -c <N>` / `cut -c<range>`, as a
+// verifiable-safe shape for envvars.go's whole-value substitution recursion —
+// see ContentDigestOfEchoedTextShape's own doc (shellparse.go) for the full
+// rationale and this bead's corpus finding (37 of 782 rows still denied by
+// envvars' unverifiable-value floor after pg2-x05rh's Shape 2 landed; the
+// `positive` rows below are real corpus shapes, sub-in-a-literal for the
+// original `$VAR` references, which do not change any of these verdicts).
+func TestContentDigestOfEchoedTextShape(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		// --- real corpus shapes (pg2-jnfei's own investigation, 2026-09-17) ---
+		{
+			"echo -n, shasum -a 1, head -c 8 (corpus row 125496 shape)",
+			`echo -n "sorted-text" | shasum -a 1 | head -c 8`, true,
+		},
+		{
+			"printf %s (single arg), shasum -a 1, head -c 8 (row 127047 shape)",
+			`printf '%s' "build-test-validate" | shasum -a 1 | head -c 8`, true,
+		},
+		{
+			"echo (no -n), sha1sum, head -c 8 (row 127973 shape)",
+			`echo "build-test-validate" | sha1sum | head -c 8`, true,
+		},
+		{
+			"printf %s two-arg form, sha256sum, cut -c1-8 (row 302274 shape)",
+			`printf '%s' "$k" | sha256sum | cut -c1-8`, true,
+		},
+		{
+			"printf %s two-arg form, shasum -a 256, cut -c1-16 (row 425609 shape)",
+			`printf '%s' "$label" | shasum -a 256 | cut -c1-16`, true,
+		},
+		{
+			"bare checksum leaf, no truncator stage at all",
+			`echo -n "x" | sha1sum`, true,
+		},
+		{
+			"md5sum and cksum are also admitted (same STDIN-only argument)",
+			`echo "x" | md5sum`, true,
+		},
+
+		// --- negative controls: every one of these stays refused exactly as
+		//     it was before this bead — the widening must not reach past the
+		//     named shape. ---
+		{
+			"a checksum utility given a FILE operand is a content READ, refused",
+			`echo "x" | sha1sum /etc/passwd`, false,
+		},
+		{
+			"an unrecognized checksum flag is refused rather than enumerated",
+			`echo "x" | shasum -c`, false,
+		},
+		{
+			"a source stage that is not echo/printf stays the general DECLINED pipeline case",
+			`cat /tmp/x | sha1sum`, false,
+		},
+		{
+			"an unclaimed digest tool is not in checksumUtilities and stays refused",
+			`echo "x" | b2sum`, false,
+		},
+		{
+			"a head spelling other than -c <N> is refused",
+			`echo "x" | sha1sum | head -1`, false,
+		},
+		{
+			"a live-expansion byte count on head -c is refused to guess",
+			`echo "x" | sha1sum | head -c "$N"`, false,
+		},
+		{
+			"a live-expansion range on cut -c is refused to guess",
+			`echo "x" | sha1sum | cut -c$RANGE`, false,
+		},
+		{
+			"a three-stage pipeline (extra massaging stage) is refused unchanged",
+			`echo "x" | tr ',' '\n' | sha1sum`, false,
+		},
+		{
+			"a four-stage pipeline (source, checksum, truncate, extra) is refused",
+			`echo "x" | sha1sum | head -c 8 | tr -d '\n'`, false,
+		},
+		{
+			"a nested substitution anywhere refuses the whole shape",
+			`printf '%s' "$(id -u)" | sha1sum`, false,
+		},
+		{
+			"&&-composition is refused (not this pipe-only shape)",
+			`echo "x" && sha1sum`, false,
+		},
+		{
+			"a backgrounded pipeline is refused",
+			`echo "x" | sha1sum &`, false,
+		},
+		{
+			"a negated pipeline is refused",
+			`! echo "x" | sha1sum`, false,
+		},
+		{
+			"a subshell-wrapped source stage is refused",
+			`(echo "x") | sha1sum`, false,
+		},
+		{
+			"a discard redirect on the source stage is refused (unmeasured, unlike Shape 2's pgrep tolerance)",
+			`echo "x" 2>/dev/null | sha1sum`, false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ContentDigestOfEchoedTextShape(tt.body); got != tt.want {
+				t.Errorf("ContentDigestOfEchoedTextShape(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}

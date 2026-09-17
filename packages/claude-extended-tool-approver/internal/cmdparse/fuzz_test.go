@@ -2,6 +2,7 @@ package cmdparse
 
 import (
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"unicode"
@@ -911,6 +912,119 @@ func FuzzJobPollPidSourceShapeStaysWithinNamedShape(f *testing.F) {
 		case len(headLeaf.Args) == 2 && headLeaf.Args[0] == "-n" && headLeaf.Args[1] == "1":
 		default:
 			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but head's args are %q, want -1/-n 1/-n1", body, clearance, headLeaf.Args)
+		}
+	})
+}
+
+// FuzzContentDigestOfEchoedTextShapeStaysWithinNamedShape (pg2-jnfei) is the
+// fuzz/coherence invariant this widening owes, per parser.go's "DECLINED:
+// admitting a pipeline whose every stage is allowlisted" doc comment above
+// IsSafeSubstitutionBody: "adopting [shape-gated approval] ... requires its
+// own fuzz invariant and its own replay, i.e. its own bead" — the same
+// pricing FuzzJobPollPidSourceShapeStaysWithinNamedShape already discharges
+// for pg2-x05rh's Shape 2; this is that invariant for pg2-jnfei's own shape.
+//
+// THE INVARIANT: whenever ContentDigestOfEchoedTextShape reports true for a
+// body, that body MUST BE, STRUCTURALLY, exactly the named shape — a 2-or-3
+// stage pipeline whose first stage is a bare `echo`/`printf` call, whose
+// second stage is a bare call to a member of checksumUtilities carrying zero
+// non-flag operands (or exactly `-a <digits>`), and whose optional third
+// stage is a bare `head -c <digits>` or `cut -c<digit-range>` call. Anything
+// else reaching true through this predicate is exactly the "shape-gated
+// approval wrongly reports a shape as admissible" hazard that doc comment
+// prices — this is the check that catches it.
+//
+// The re-derivation is DELIBERATELY INDEPENDENT of
+// ContentDigestOfEchoedTextShape's own internals: it re-parses body through
+// ParseShell, the general-purpose seam entry point every OTHER caller in
+// this module uses, rather than calling the classifier's own per-stage
+// helpers — mirroring FuzzJobPollPidSourceShapeStaysWithinNamedShape's own
+// discipline, so a bug shared between the classifier and its own check
+// cannot silently cancel out.
+func FuzzContentDigestOfEchoedTextShapeStaysWithinNamedShape(f *testing.F) {
+	for _, seed := range []string{
+		// shapes that SHOULD reach true — the bead's own corpus rows and the
+		// variants they generalize to.
+		`echo -n "x" | sha1sum | head -c 8`,
+		`printf '%s' "x" | shasum -a 1 | head -c 8`,
+		`echo "x" | sha256sum | cut -c1-8`,
+		`printf '%s' "x" | shasum -a 256 | cut -c1-16`,
+		`echo "x" | md5sum`,
+		`echo "x" | cksum`,
+		// adversarial near-misses that must NOT be admitted — each probes a
+		// different structural check this invariant pins.
+		`echo "x" | sha1sum /etc/passwd`,
+		`echo "x" | shasum -c`,
+		`cat /tmp/x | sha1sum`,
+		`echo "x" | b2sum`,
+		`echo "x" | sha1sum | head -1`,
+		`echo "x" | sha1sum | head -c "$N"`,
+		`echo "x" | sha1sum | cut -c$RANGE`,
+		`echo "x" | tr ',' '\n' | sha1sum`,
+		`echo "x" | sha1sum | head -c 8 | tr -d '\n'`,
+		`printf '%s' "$(id -u)" | sha1sum`,
+		`echo "x" && sha1sum`,
+		`echo "x" | sha1sum &`,
+		`! echo "x" | sha1sum`,
+		`(echo "x") | sha1sum`,
+		`echo "x" 2>/dev/null | sha1sum`,
+		`X=1 echo x | sha1sum`,
+		`echo x; sha1sum`,
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 512 {
+			return
+		}
+		if !ContentDigestOfEchoedTextShape(body) {
+			return
+		}
+		leaves := ParseShell(body).Leaves
+		if len(leaves) < 2 || len(leaves) > 3 {
+			t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but ParseShell found %d leaves, want 2 or 3", body, len(leaves))
+		}
+		ordered := make([]ParsedCommand, len(leaves))
+		copy(ordered, leaves)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i].PipelineIndex < ordered[j].PipelineIndex })
+		pid := ordered[0].PipelineID
+		for _, lf := range ordered {
+			if lf.PipelineID != pid {
+				t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but its leaves are not one pipeline", body)
+			}
+		}
+		source := ordered[0]
+		if source.Executable != "echo" && source.Executable != "printf" {
+			t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the source stage is %q, not echo/printf", body, source.Executable)
+		}
+		checksum := ordered[1]
+		if !checksumUtilities[checksum.Executable] {
+			t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the checksum stage is %q, not a member of checksumUtilities", body, checksum.Executable)
+		}
+		switch len(checksum.Args) {
+		case 0:
+		case 2:
+			if checksum.Args[0] != "-a" || !isDigitToken(checksum.Args[1]) {
+				t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the checksum stage's args are %q, want [] or [-a <digits>]", body, checksum.Args)
+			}
+		default:
+			t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the checksum stage carries %d args, want 0 or 2", body, len(checksum.Args))
+		}
+		if len(ordered) == 2 {
+			return
+		}
+		trunc := ordered[2]
+		switch trunc.Executable {
+		case "head":
+			if len(trunc.Args) != 2 || trunc.Args[0] != "-c" || !isDigitToken(trunc.Args[1]) {
+				t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the head stage's args are %q, want [-c <digits>]", body, trunc.Args)
+			}
+		case "cut":
+			if len(trunc.Args) != 1 || !strings.HasPrefix(trunc.Args[0], "-c") || !isDigitRangeToken(trunc.Args[0][len("-c"):]) {
+				t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the cut stage's args are %q, want [-c<digit-range>]", body, trunc.Args)
+			}
+		default:
+			t.Fatalf("ContentDigestOfEchoedTextShape(%q) = true, but the third stage is %q, not head/cut", body, trunc.Executable)
 		}
 	})
 }

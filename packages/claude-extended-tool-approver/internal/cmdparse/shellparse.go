@@ -2687,6 +2687,320 @@ func redirectClearanceForJobPollPidSource(redirs []hooktypes.Redirection) Substi
 }
 
 // ============================================================================
+// pg2-jnfei: the ECHOED-TEXT CONTENT-DIGEST pipeline classifier.
+//
+// pg2-x05rh's follow-up (pg2-jnfei) re-ran the corpus query "unverifiable
+// value, approved" against the full 782-row live cohort still denied by
+// envvars.go's ExpansionUnknown default: Reject and clustered the DENIED rows
+// by composition shape, exactly as pg2-x05rh's own doc instructed rather than
+// assuming the bead body's suggested candidate. The `gh pr checks --json |
+// python3 -c "…"` idiom that bead names as "the strongest single recurring
+// candidate" measured at only 3 of 782 rows (one PR-poll loop, PR #104236) —
+// and admitting it would mean trusting an ARBITRARY python3 -c SOURCE BODY, a
+// Turing-complete surface with no bounded argv grammar the way pgrep's
+// `-f <pattern>` has one, so no narrow structural predicate can vouch for it
+// the way jobPollPidSourceShape vouches for pgrep|head. The MEASURED
+// highest-value shape instead is this one: a caller-supplied string, printed
+// by `echo`/`printf`, piped through EXACTLY ONE checksum utility and
+// optionally truncated — 37 of 782 rows, e.g.:
+//
+//	sig=$(echo -n "$sorted" | shasum -a 1 | head -c 8)
+//	sig=$(printf '%s' "build-test-validate" | shasum -a 1 | head -c 8)
+//	h=$(printf '%s' "$k" | sha256sum | cut -c1-8)
+//	hash=$(printf '%s' "$label" | shasum -a 256 | cut -c1-16)
+//
+// a short, deterministic CONTENT-SIGNATURE hash used to fingerprint a file
+// list, a CI job name, or a cache key — never a secret, never a path.
+//
+// WHY THIS LIVES HERE, CONSULTED FROM envvars.go, RATHER THAN VIA
+// ClassifySubstitutionBody. Shape 2 (jobPollPidSourceShape, above) widens the
+// STATIC SUBSTITUTION-BODY FLOOR that foldSubstitutionScan (internal/engine)
+// consults for a substitution NESTED inside another leaf's own argv (e.g.
+// `ps -p $(pgrep … | head -1)`). This shape's corpus rows are different: the
+// substitution IS THE ENTIRE ASSIGNMENT VALUE (`sig=$(echo … | shasum … |
+// head …)`), so envvars.go's OWN ExpansionUnknown handling recurses the body
+// through the FULL ENGINE (r.exprEval.EvaluateExpression, pg2-gkd5e) as a
+// TOP-LEVEL EXPRESSION — never through ClassifySubstitutionBody at all, since
+// none of echo/printf/the checksum utility/head/cut takes a NESTED
+// substitution as an argument. The floor that denies it today is
+// internal/engine's withExpressionProvenance: `echo`/`printf` are already
+// genuinely Approved by safe-commands (alwaysSafe), but the checksum utility
+// is UNCLAIMED by every rule module (grepped: it appears nowhere in any rule
+// package's allowlist), so the leaf-level fold's manufactured NoOpinion
+// carries ProvenanceExhaustion, and withExpressionProvenance withdraws that
+// exhaustion for any 2-or-3-leaf composition — landing back on envvars.go's
+// own default: Reject exactly like an unmodelled command would. Widening
+// withExpressionProvenance itself (engine.go) would touch the shared floor
+// EVERY expression evaluation in this tool goes through; widening it only
+// here, inside envvars.go's own recursion loop, keeps the change scoped to
+// the ENV-VARS COHORT this bead is about, matching its own title.
+//
+// SAFETY ARGUMENT. Every stage is a PURE, STDIN-ONLY, SIDE-EFFECT-FREE
+// transform of text already visible in the substitution body itself (a
+// literal or a same-command variable reference) or on the pipe:
+//
+//  1. `echo`/`printf` is UNCONDITIONALLY trusted already (safecmds'
+//     alwaysSafe, no argv screening at all) — this shape adds no new trust in
+//     either, and does not restrict what text they print: hashing a value
+//     discloses nothing beyond what was already going to be on the pipe.
+//  2. The checksum utility (sha1sum/shasum/sha256sum/md5sum/cksum) is
+//     admitted ONLY with ZERO non-flag operands (shasum's own `-a <bits>`
+//     digest-width selector is the one flag tolerated) — i.e. it can only
+//     ever hash STDIN, never open a FILE. That distinction matters: a
+//     checksum utility given a PATH operand (`sha1sum /etc/shadow`) is a
+//     CONTENT READER exactly like `base64`/`cat` and would need the SAME
+//     zone-checked admission those get (safecmds' safeReadCmds) — a
+//     DIFFERENT, unmeasured widening this shape does not claim and
+//     deliberately excludes by refusing any leaf carrying an operand.
+//  3. The optional truncator (`head -c <N>` / `cut -c<range>`) only ever
+//     shortens that same deterministic digest to its first N bytes — no
+//     operand of its own beyond a literal byte count, so there is nothing
+//     for a path/secret check to adjudicate either.
+//
+// No stage names a filesystem path, contacts a remote, or executes anything
+// found on the pipe as code (unlike the DECLINED `curl | sh` composition
+// withExpressionProvenance's own doc names) — so admitting the WHOLE 2-or-3
+// stage pipeline is sound even though its middle stage is individually
+// unclaimed by any rule.
+//
+// DELIBERATELY NOT RECOGNIZED, staying refused exactly as before:
+//
+//   - A checksum utility given ANY non-flag operand (a file to hash) — a
+//     content READ, its own bead with its own zone-check argument, not this
+//     one.
+//   - Any additional pipeline stage beyond these two/three fixed positions —
+//     pg2-jnfei's own corpus carries `tr`/`sort`/`sed`/`paste` massaging
+//     stages ahead of the hash too (e.g. `echo "$x" | tr ',' '\n' | sort |
+//     paste -sd, | shasum -a 1 | head -c 8`), but each additional stage's
+//     trust is its own, individually-measured widening — bundling them in
+//     would make this predicate unable to tell "N trusted stages" from "N
+//     stages, one of which is untrusted," the same reason
+//     jobPollPidSourceShape's own stage count is fixed rather than
+//     open-ended.
+//   - Any checksum-utility flag other than shasum's bare `-a <digest-width>`
+//     — an unrecognized flag is refused rather than enumerated, in case a
+//     future flag on some spelling names an output file.
+//   - A `head`/`cut` spelling other than the two measured forms (`head -c
+//     <N>` as two tokens; `cut -c<range>` glued) — corpus-measured only,
+//     narrower than either tool's full flag grammar.
+//   - Any nested `$(...)`/backtick/arithmetic substitution anywhere in the
+//     whole expression (containsSubstitution) — that sub-value needs its OWN
+//     recursion to clear first; this predicate only ever vouches for a
+//     STATIC pipeline shape, never for what a nested substitution might
+//     produce.
+//   - `&&`/`||`/a subshell wrapping any stage — refused by the per-stage
+//     CallExpr-only check each leaf helper below applies (mirroring
+//     jobPollPidSourceShape's own).
+//   - `&` (background) / `!` (negation) on the WHOLE pipeline — refused by
+//     ContentDigestOfEchoedTextShape's OWN top-level check on
+//     file.Stmts[0], not by a per-stage check. MEASURED (this bead,
+//     2026-09-17): those two flags live on the OUTER *syntax.Stmt wrapping
+//     the whole `a | b | c` BinaryCmd tree, never repeated onto the
+//     per-stage Stmts flattenPipe produces — so a per-stage
+//     `st.Negated || st.Background` check, the shape jobPollPidSourceShape's
+//     own pgrepPidSourceLeafClearance/headFirstLineLeafClearance apply, is a
+//     NO-OP for this class of input and does not actually gate it (confirmed
+//     directly: `ClassifySubstitutionBody("pgrep -f 'x' | head -1 &")` and
+//     its `!`-negated sibling both measure SubstitutionDelegated on this
+//     tree today, despite being named as adversarial "must NOT be admitted"
+//     seeds in that shape's own fuzz test — an existing, out-of-scope gap
+//     this bead's own investigation surfaced but does not fix). This
+//     predicate does not repeat that gap: see the top-level check in
+//     ContentDigestOfEchoedTextShape itself.
+//
+// See TestContentDigestOfEchoedTextShape (shellparse_test.go) for the pinned
+// corpus rows and negative controls, and
+// FuzzContentDigestOfEchoedTextShapeStaysWithinNamedShape (fuzz_test.go) for
+// the coherence invariant this widening owes, per the same ADR 0039/0040
+// pricing jobPollPidSourceShape's own doc cites.
+// ============================================================================
+
+// checksumUtilities is the fixed set of STDIN-hashing programs this shape
+// admits — every one of them prints a deterministic digest of its input and
+// carries no write-flag on any spelling (verified against GNU coreutils and
+// macOS/BSD man pages, the same verification standard pg2-x05rh's own pgrep
+// admission cites).
+var checksumUtilities = map[string]bool{
+	"sha1sum": true, "shasum": true, "sha256sum": true,
+	"md5sum": true, "cksum": true,
+}
+
+// ContentDigestOfEchoedTextShape reports whether text is EXACTLY the narrow
+// echoed-text content-digest pipeline shape pg2-jnfei's own corpus
+// investigation names as the highest-value shape in the still-denied cohort
+// — `echo`/`printf`, piped through EXACTLY ONE stdin-only checksum utility,
+// optionally truncated by a bare `head -c <N>` or `cut -c<range>` — matching
+// jobPollPidSourceShape's own true/false contract: false means "not this
+// shape at all," so a caller checking this FIRST cannot change any EXISTING
+// verdict for a body it does not recognize; it only ever WIDENS for bodies it
+// positively recognizes. See the doc block above for the full shape and its
+// safety argument, and envvars.go's own call site for why this is consulted
+// directly rather than via ClassifySubstitutionBody.
+func ContentDigestOfEchoedTextShape(text string) bool {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(text), "command")
+	parserPool.Put(p)
+	if err != nil || file == nil || len(file.Stmts) != 1 {
+		return false
+	}
+	// Negated/Background/Coprocess/Disown live on the OUTER *syntax.Stmt that
+	// WRAPS the whole `a | b | c` BinaryCmd tree — `a | b &` backgrounds the
+	// entire pipeline, and `! a | b` negates its combined exit status; the
+	// flag is never repeated onto the INDIVIDUAL per-stage Stmts flattenPipe
+	// below produces. MEASURED directly against jobPollPidSourceShape's own
+	// landed per-stage check (pgrepPidSourceLeafClearance/
+	// headFirstLineLeafClearance's `st.Negated || st.Background || …`): it is
+	// a no-op for exactly this reason — `ClassifySubstitutionBody("pgrep -f
+	// 'x' | head -1 &")` and the `!`-negated form both measure
+	// SubstitutionDelegated, not Refused, on this tree today, despite being
+	// named as adversarial "must NOT be admitted" seeds in that shape's own
+	// fuzz test. This check is placed HERE, on file.Stmts[0] itself, before
+	// any flattening, so it cannot suffer the same gap.
+	if file.Stmts[0].Negated || file.Stmts[0].Background || file.Stmts[0].Coprocess || file.Stmts[0].Disown {
+		return false
+	}
+	if containsSubstitution(file) {
+		return false
+	}
+	var stages []*syntax.Stmt
+	flattenPipe(file.Stmts[0], &stages)
+	if len(stages) < 2 || len(stages) > 3 {
+		return false
+	}
+	if !echoOrPrintfSourceLeaf(text, stages[0]) {
+		return false
+	}
+	if !checksumOfStdinLeaf(text, stages[1]) {
+		return false
+	}
+	if len(stages) == 2 {
+		return true
+	}
+	return digestTruncatorLeaf(text, stages[2])
+}
+
+// echoOrPrintfSourceLeaf classifies st as the shape's SOURCE stage: a bare
+// `echo` or `printf` call, any argv (their text is not restricted — see the
+// shape's own doc, point 1). No redirect tolerance: the corpus rows this
+// shape targets never carry one on this stage, so none is claimed.
+func echoOrPrintfSourceLeaf(text string, st *syntax.Stmt) bool {
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 {
+		return false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc {
+		return false
+	}
+	return leaf.Executable == "echo" || leaf.Executable == "printf"
+}
+
+// checksumOfStdinLeaf classifies st as the shape's CHECKSUM stage: a member
+// of checksumUtilities invoked with ZERO non-flag operands — i.e. it can only
+// ever hash stdin, never open a file (see the shape's own doc, point 2) — or
+// shasum's own literal `-a <digest-width>` selector. No redirect tolerance,
+// for the same reason as the source stage.
+func checksumOfStdinLeaf(text string, st *syntax.Stmt) bool {
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 {
+		return false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc || !checksumUtilities[leaf.Executable] {
+		return false
+	}
+	switch len(leaf.Args) {
+	case 0:
+		return true
+	case 2:
+		return leaf.Args[0] == "-a" && isDigitToken(leaf.Args[1]) && !leaf.ArgIsLiveExpansion(1)
+	default:
+		return false
+	}
+}
+
+// digestTruncatorLeaf classifies st as the shape's OPTIONAL TRUNCATOR stage:
+// EXACTLY a bare `head -c <N>` (two tokens) or a glued `cut -c<range>` — the
+// two spellings pg2-jnfei's own corpus measured (see the shape's own doc,
+// point 3, and its "DELIBERATELY NOT RECOGNIZED" list for why no other
+// spelling of either tool is admitted). No redirect tolerance.
+func digestTruncatorLeaf(text string, st *syntax.Stmt) bool {
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 {
+		return false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc {
+		return false
+	}
+	switch leaf.Executable {
+	case "head":
+		return len(leaf.Args) == 2 && leaf.Args[0] == "-c" &&
+			isDigitToken(leaf.Args[1]) && !leaf.ArgIsLiveExpansion(1)
+	case "cut":
+		if len(leaf.Args) != 1 || !strings.HasPrefix(leaf.Args[0], "-c") || leaf.ArgIsLiveExpansion(0) {
+			return false
+		}
+		return isDigitRangeToken(leaf.Args[0][len("-c"):])
+	default:
+		return false
+	}
+}
+
+// isDigitToken reports whether s is one or more ASCII digits and nothing
+// else — a literal byte/digest-width count, never a live expansion (callers
+// pair this with ArgIsLiveExpansion for belt-and-suspenders, exactly as
+// pgrepPidSourceLeafClearance's own pattern/live-expansion pair does above).
+func isDigitToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isDigitRangeToken reports whether s is EITHER a single digit run (`8`) or
+// two digit runs joined by exactly one hyphen (`1-16`) — `cut -c`'s LIST
+// grammar narrowed to the one shape pg2-jnfei's corpus carries (a range
+// starting at the glued `-c` prefix), never `cut`'s full comma-separated
+// LIST grammar.
+func isDigitRangeToken(s string) bool {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) == 2 {
+		return isDigitToken(parts[0]) && isDigitToken(parts[1])
+	}
+	return isDigitToken(s)
+}
+
+// ============================================================================
 // The env-assignment VALUE classifier, over the seam (ADR 0039 step 5's
 // `classifyExpansion` item, brought forward by the pg2-hed0a P0).
 //

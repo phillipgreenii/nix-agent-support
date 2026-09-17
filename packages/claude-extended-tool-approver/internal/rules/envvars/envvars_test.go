@@ -2567,6 +2567,62 @@ func TestEnvVars_ExhaustionOnlyBranch_Pinned(t *testing.T) {
 	}
 }
 
+// TestEnvVars_ContentDigestOfEchoedTextShape_BypassesRecursion (pg2-jnfei):
+// pg2-x05rh's own follow-up bead. A substitution body matching
+// cmdparse.ContentDigestOfEchoedTextShape must clear WITHOUT ever reaching
+// r.exprEval — proven by configuring the fake evaluator to REJECT the exact
+// body text and confirming the assignment does NOT escalate anyway (a
+// NoOpinion result can then only be explained by the new shape-check
+// short-circuiting the loop, never by the fake's own verdict). A near-miss
+// (the checksum tool given a FILE operand — the shape's own "content READ"
+// exclusion, see ContentDigestOfEchoedTextShape's doc) is NOT covered by the
+// new predicate and must still escalate exactly as before.
+func TestEnvVars_ContentDigestOfEchoedTextShape_BypassesRecursion(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want hookio.Decision
+	}{
+		{
+			"corpus shape (echo -n, shasum -a 1, head -c 8) clears despite a Reject-configured evaluator",
+			`sig=$(echo -n "x" | shasum -a 1 | head -c 8) cmd`,
+			hookio.NoOpinion,
+		},
+		{
+			"corpus shape (printf, sha256sum, cut -c1-8) clears despite a Reject-configured evaluator",
+			`h=$(printf '%s' "x" | sha256sum | cut -c1-8) cmd`,
+			hookio.NoOpinion,
+		},
+		{
+			"near-miss: a FILE operand on the checksum tool is a content READ, not this shape -- still escalates",
+			`sig=$(echo -n "x" | sha1sum /etc/passwd) cmd`,
+			hookio.Reject,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Every substitution body any of this test's commands could
+			// enumerate is configured to REJECT, so a "want" of NoOpinion
+			// below can only be reached by the new shape-check bypassing
+			// r.exprEval entirely, never by the fake's own default verdict.
+			fe := &fakeEvaluator{verdicts: map[string]hookio.Decision{
+				`echo -n "x" | shasum -a 1 | head -c 8`:   hookio.Reject,
+				`printf '%s' "x" | sha256sum | cut -c1-8`: hookio.Reject,
+				`echo -n "x" | sha1sum /etc/passwd`:       hookio.Reject,
+			}}
+			r := NewWithEvaluator(fe)
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": tt.cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s (%s), want %s", tt.cmd, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 // TestEnvVars_ApproveOnlyForVerifiedPreserveForm is the successor to the former
 // TestEnvVars_NeverApprove, which asserted "the rule NEVER returns Approve".
 // pg2-0q99a deliberately RETIRES that blanket property — it was the reason 984
