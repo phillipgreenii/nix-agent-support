@@ -9,6 +9,11 @@
   # jq is pkgs.jq (auto via callPackage) — a plain nixpkgs runtime dep, so unlike
   # `bd` it needs no explicit pass at the callPackage site in flake.nix.
   jq,
+  # pg-connector resolves automatically via callPackage against
+  # `final.pg-connector` (defined earlier in the same flake.nix overlay,
+  # mirroring pg-desk's own local-replace comment) — no explicit pass needed
+  # at the callPackage site, same as jq above.
+  pg-connector,
 }:
 
 mkGoApp {
@@ -79,6 +84,18 @@ mkGoApp {
   #             bundling it does not reintroduce "Core knows how another tool is
   #             configured" — it is exactly as generic as `sh`, which every
   #             `command`-type pipeline already assumes.
+  #   pg-connector -> the bare `pg-connector` binary that the
+  #             pg-router-source-pg-connector adapter execs as a subprocess
+  #             (ambient $PATH, no compile-time dependency — see that
+  #             package's own default.nix) for the `command`-type sources
+  #             backing worker/review/feedback/issue-beads-work. That
+  #             adapter is itself spawned as a subprocess of pg-router and
+  #             inherits pg-router's PATH, so pg-connector's bin dir must be
+  #             on THIS wrapper's PATH for the nested exec to resolve (bead
+  #             pg2-sh024: the live daemon's own process PATH, captured via
+  #             `ps eww`, had ccpool/bd/pg-pr/jq but no pg-connector bin
+  #             dir, so every producer tick for those sources failed with
+  #             "exec: pg-connector: executable file not found in $PATH").
   #
   # `gh` was removed here (pg2-n75tk): it existed solely to back the typed
   # `github-issues` source, which is gone — the boundary principle (Core must
@@ -95,6 +112,7 @@ mkGoApp {
         bd
         pg-pr
         jq
+        pg-connector
       ]
     }
   '';
