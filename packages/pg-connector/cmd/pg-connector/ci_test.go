@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -15,6 +17,14 @@ import (
 // order) and points $PG_PR_CONFIG at it. connector.ci is list-valued
 // (INV-REG-1), so this always writes a YAML list even for a single
 // backend, mirroring writeConfigFor's own convention for connector.pr.
+//
+// Phase 14 (bead pg2-2j5ac.42.3): "ci list" now reads/writes this docket's
+// umbrella entity cache on every call (default-on, no opt-out configured
+// here), which resolves under $XDG_STATE_HOME/pg-connector/cache/ —
+// isolated to this test's own temp dir so a test never touches the real
+// ~/.local/state/pg-connector/cache/ on whatever machine runs `go test`
+// [code-file-standards' unit-test-isolation rule], mirroring pr_test.go's
+// own writeConfigFor.
 func writeCiConfigFor(t *testing.T, backends ...string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -28,6 +38,7 @@ func writeCiConfigFor(t *testing.T, backends ...string) {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
+	t.Setenv("XDG_STATE_HOME", dir)
 }
 
 func TestRun_CiList_Success_SingleBackend(t *testing.T) {
@@ -148,6 +159,119 @@ func TestFanOutCIList_NoBackends_RunsAndSourcesAreEmptyArraysNotNull(t *testing.
 	}
 	if got := string(raw); got != `{"runs":[],"sources":[]}` {
 		t.Fatalf("json = %s, want runs/sources to marshal as [] not null", got)
+	}
+}
+
+// TestRun_CiListCacheFallback_LiveSuccessThenServedStaleOnUnavailable covers
+// this packet's own Validation items (a) and (b) together, driven through
+// the real CLI entry point exactly like
+// TestPrShowCacheFallback_ServesStaleOnBackendUnavailable (pr_test.go) does
+// for "pr show": a live "ci list" success (a) Puts that backend's returned
+// run list into its own cache keyed by pr_id, and a SUBSEQUENT call against
+// the same backend now answering unavailable for the SAME pr_id (b) is
+// served from that cache with every run's stale: true and the ORIGINAL live
+// as_of, reported degraded with a fallback reason — never succeeded (this
+// docket's own Binding decision, matching fanOutPRList/fanOutIssueList's
+// own fallback rows). A solo fallback-only backend's own exit code is 3
+// (no OTHER healthy source), matching the unmodified fan-out exit-code
+// scheme (INV-EXIT-1) computed from its still-degraded row.
+func TestRun_CiListCacheFallback_LiveSuccessThenServedStaleOnUnavailable(t *testing.T) {
+	liveAsOf := time.Now().UTC().Format(time.RFC3339)
+	writeOpAwareFakeBackend(t, "backend-ci-cache-fallback", map[string]string{
+		"list_runs": fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":[{"id":"run-1","name":"build","status":"completed","conclusion":"success","url":"u","provider":"github-actions","head_sha":"deadbeef","repo":"o/r","pr_id":"pr-1","as_of":%q,"stale":false}]}`, liveAsOf),
+	}, `{"protocolVersion":1,"schemaVersions":{"ci":1},"ops":["capabilities","list_runs"]}`)
+	writeCiConfigFor(t, "backend-ci-cache-fallback")
+
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
+	if code != 0 {
+		t.Fatalf("live list exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var outcome ciListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Runs) != 1 || outcome.Runs[0].Stale {
+		t.Fatalf("live outcome.Runs = %+v, want exactly one non-stale run", outcome.Runs)
+	}
+
+	// Re-point the same registered backend name at a script now answering
+	// unavailable for "list_runs" (the SAME pr_id).
+	writeOpAwareFakeBackend(t, "backend-ci-cache-fallback", map[string]string{
+		"list_runs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
+	}, `{"protocolVersion":1,"schemaVersions":{"ci":1},"ops":["capabilities","list_runs"]}`)
+
+	stdout2, _, code2 := executePr(t, []string{"ci", "list", "pr-1"})
+	if code2 != 3 {
+		t.Fatalf("cache-fallback list exit code = %d, want 3 (fallback-served row is still degraded, no other healthy source); stdout=%s", code2, stdout2)
+	}
+	var outcome2 ciListOutcome
+	if err := json.Unmarshal([]byte(stdout2), &outcome2); err != nil {
+		t.Fatalf("decode outcome 2: %v (stdout=%s)", err, stdout2)
+	}
+	if len(outcome2.Runs) != 1 || !outcome2.Runs[0].Stale {
+		t.Fatalf("cache-fallback outcome.Runs = %+v, want exactly one stale-stamped run", outcome2.Runs)
+	}
+	if outcome2.Runs[0].AsOf != liveAsOf {
+		t.Fatalf("cache-fallback outcome.Runs[0].AsOf = %q, want the ORIGINAL live as_of %q", outcome2.Runs[0].AsOf, liveAsOf)
+	}
+	if outcome2.Runs[0].ID != "run-1" || outcome2.Runs[0].PRID != "pr-1" {
+		t.Fatalf("cache-fallback outcome.Runs[0] = %+v", outcome2.Runs[0])
+	}
+	if len(outcome2.Sources) != 1 || outcome2.Sources[0].Status != SourceDegraded || outcome2.Sources[0].Reason == "" {
+		t.Fatalf("cache-fallback outcome.Sources = %+v, want a degraded row with a reason noting the fallback", outcome2.Sources)
+	}
+	if outcome2.Sources[0].Reason != cacheFallbackReason {
+		t.Fatalf("cache-fallback outcome.Sources[0].Reason = %q, want %q", outcome2.Sources[0].Reason, cacheFallbackReason)
+	}
+}
+
+// TestRun_CiListCacheFallback_OptedOutTypeUnaffected covers this packet's
+// Validation item (c): with connector.ci's own type opted out of caching
+// via state: cache_disabled_types, a backend answering unavailable reports
+// today's unmodified SourceDegraded/no-runs behavior even though a matching
+// cache entry exists — proving the opt-out check actually gates the
+// fallback path itself, not merely the write that would have populated it.
+func TestRun_CiListCacheFallback_OptedOutTypeUnaffected(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-ci-cache-optout", map[string]string{
+		"list_runs": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
+	}, `{"protocolVersion":1,"schemaVersions":{"ci":1},"ops":["capabilities","list_runs"]}`)
+
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	cfgContent := "connector:\n  ci:\n    - backend-ci-cache-optout\nstate:\n  cache_disabled_types: \"ci\"\n"
+	if err := os.WriteFile(cfg, []byte(cfgContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	// Seed a cache entry that WOULD be served if caching were enabled, to
+	// prove the opt-out is actually checked rather than there simply being
+	// nothing cached to serve.
+	seedCache(t, CacheKey{Type: "ci", Backend: "backend-ci-cache-optout"}, &Cache{Entries: map[string]CacheEntry{
+		"pr-1": {
+			Content:    json.RawMessage(`[{"id":"run-1","pr_id":"pr-1","as_of":"2026-01-01T00:00:00Z","stale":false}]`),
+			AsOf:       time.Now(),
+			LastAccess: time.Now(),
+		},
+	}})
+
+	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3 (total failure, no fallback attempted); stdout=%s", code, stdout)
+	}
+	var outcome ciListOutcome
+	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
+		t.Fatalf("decode outcome: %v (stdout=%s)", err, stdout)
+	}
+	if len(outcome.Runs) != 0 {
+		t.Fatalf("outcome.Runs = %+v, want zero runs (opt-out must skip the cache entirely)", outcome.Runs)
+	}
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Status != SourceDegraded {
+		t.Fatalf("outcome.Sources = %+v, want a single degraded row", outcome.Sources)
+	}
+	if outcome.Sources[0].Reason == cacheFallbackReason {
+		t.Fatalf("outcome.Sources[0].Reason = %q, want the raw unavailable reason, not the fallback reason", outcome.Sources[0].Reason)
 	}
 }
 

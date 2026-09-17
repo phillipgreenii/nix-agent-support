@@ -106,8 +106,13 @@ type CIRun struct {
 	// pg-connector-ci-github-actions (cmd/pg-connector-ci-github-actions)
 	// briefly added a real cache for this purpose (bead pg2-4aoeg) but bead
 	// pg2-2j5ac.28.7 deleted it outright (statelessness, D3) — this
-	// backend's ListRuns now always reports Stale false again, with real
-	// stale-fallback for every ci-capable backend deferred to phase 14's
-	// entity cache.
+	// backend's ListRuns always reports Stale false again, so a live
+	// answer never claims staleness it did not observe. Real
+	// stale-fallback for every ci-capable backend now exists (phase 14,
+	// bead pg2-2j5ac.42.3): cmd/pg-connector's own fanOutCIList serves a
+	// backend answering unavailable from the umbrella's on-disk entity
+	// cache instead, overwriting Stale true and AsOf to the cached as-of
+	// time on the runs it returns — D3 stands (no backend gained a store;
+	// only the umbrella did).
 	Stale bool `json:"stale"`
 }

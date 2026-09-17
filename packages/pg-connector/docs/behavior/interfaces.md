@@ -221,6 +221,23 @@ instead of failing outright, per the design of record's section 5.6:
   `unauthenticated`, `unknown_op`, `version_mismatch`, `invalid_argument`, `query_not_recognized`
   all keep their existing, unmodified handling) — the backend, not the umbrella, stays the sole
   computer of its own staleness for every read this fallback path does NOT serve.
+- **`ci list`** (`fanOutCIList`, `ci.go`, bead `pg2-2j5ac.42.3`) applies the same fallback to its
+  own pre-existing, PR-keyed `list_runs` fan-out — the one cache entry in this whole docket whose
+  content is a LIST rather than one entity: each backend's cache is keyed by `pr_id`, not by each
+  run's own id (a per-run key would let some of one PR's runs be served stale while others are
+  silently dropped, which the design's "a backend answering unavailable" checkpoint language does
+  not describe), so one within-max-age cache hit for that `pr_id` restores that backend's ENTIRE
+  last-known run list — every run's `stale` becomes `true` and `as_of` becomes the cached as-of
+  time — under a `degraded` `sources[]` row (never `succeeded`, matching `list`'s own fallback rows
+  above) with a reason noting the fallback. A cache miss, an opted-out type/backend, or an expired
+  entry falls through to today's unmodified `unavailable`/no-runs behavior for that backend
+  unchanged. A live success writes that backend's whole returned run list into its own cache keyed
+  by `pr_id`, so it stays current for the next unavailable window — the umbrella caching its own
+  copy of what a stateless backend already returned does not weaken D3 (statelessness): no backend
+  gains a store, only the umbrella does. `schema.CIRun.Stale`'s own doc comment now states this
+  restoration is landed, replacing the "deferred to phase 14's entity cache" language it carried
+  since bead `pg2-2j5ac.28.7` deleted `pg-connector-ci-github-actions`'s own backend-local run-list
+  cache under D3.
 
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 
@@ -401,6 +418,19 @@ sequenceDiagram
   failure on this path is swallowed as best-effort (never turning a successful live read into a
   reported failure) and so surfaces nowhere at all, by this packet's own Binding decision. Feeds
   the observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.42.3).** The `ci list` stale-fallback wiring above (`ci.go`'s
+  `ciCacheFallback`/`putCIListCache`) emits nothing over OpenTelemetry or Prometheus and writes no
+  structured logs of its own — pg-connector still has no telemetry emitter anywhere in this module
+  (unchanged from every telemetry note above). This packet's only observable surface is the wire
+  response's own per-run `stale`/`as_of` fields and the fan-out `sources[]` row's `reason` string
+  noting a cache-served `ci list` fallback, both already covered by this same section's own
+  wire-envelope description above; neither is a metric/trace a caller can aggregate without
+  parsing the response body itself. A `cacheEnabled` capabilities-call failure fails open
+  silently, exactly as bead `pg2-2j5ac.42.1`'s own telemetry note above already describes; every
+  other cache-write/read failure on this path is swallowed as best-effort (never turning a
+  successful live read into a reported failure) and so surfaces nowhere at all, matching bead
+  `pg2-2j5ac.42.2`'s own identical binding decision for `show`/`list`/`changes`. Feeds the
+  observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`

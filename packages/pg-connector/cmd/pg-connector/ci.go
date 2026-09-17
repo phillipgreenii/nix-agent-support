@@ -39,6 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -70,6 +71,33 @@ func (o ciListOutcome) exitCode() int {
 // so each backend's own registered config block (registry.go's
 // BackendConfig) travels on the outgoing request the same way every other
 // Tier-1 verb's dispatch path already attaches it.
+//
+// Phase 14 (bead pg2-2j5ac.42.3) restores the stale-fallback behavior
+// pg-connector-ci-github-actions lost in phase 7 (its own backend-local
+// run-list cache was removed under statelessness, D3) — now generically, in
+// the umbrella, using this docket's own entity cache engine (cache.go).
+// This is the one cache entry in this whole docket whose Content is a
+// LIST rather than one entity: "ci list" is a fan-out keyed by PR id, not
+// per-run id (a per-run key would let some of one PR's runs be served
+// stale while others are silently dropped — this fan-out's own
+// stale-fallback checkpoint is phrased in terms of a whole "backend
+// answering unavailable"), so each cache entry is keyed by prID and its
+// Content is the JSON-marshaled []schema.CIRun a live list_runs call
+// returned for that PR. On a backend answering scriptout.ErrUnavailable,
+// a within-max-age cache hit for prID is decoded straight back into
+// []schema.CIRun (schema.CIRun is a typed struct, so this is a plain
+// json.Unmarshal plus a field-level Stale/AsOf overwrite, not the generic
+// decode-into-map/re-marshal technique cache_dispatch.go's markStale uses
+// for opaque json.RawMessage bodies) and appended to out.Runs, with that
+// backend's own sources[] row reported degraded (never succeeded — this
+// docket's own Binding decision, matching fanOutPRList/fanOutIssueList's
+// own fallback rows) and a reason noting the fallback. A cache miss,
+// opted-out type/backend, or cacheEnabled itself erroring closed (it
+// should not, per cacheEnabled's own fail-open contract, but this falls
+// through defensively either way) leaves today's unmodified
+// SourceDegraded/no-runs behavior in place. A live success instead writes
+// that backend's returned run list into its own cache keyed by prID, so
+// it stays current for the next unavailable window.
 func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID string) ciListOutcome {
 	// Runs and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
@@ -91,6 +119,13 @@ func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID st
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
 				continue
 			}
+			if errors.Is(err, scriptout.ErrUnavailable) {
+				if runs, ok := ciCacheFallback(ctx, reg, b, prID); ok {
+					out.Runs = append(out.Runs, runs...)
+					out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Count: len(runs), Reason: cacheFallbackReason})
+					continue
+				}
+			}
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
@@ -101,8 +136,114 @@ func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID st
 		}
 		out.Runs = append(out.Runs, runs...)
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(runs)})
+		putCIListCache(ctx, reg, b, prID, runs)
 	}
 	return out
+}
+
+// ciCacheFallback checks whether caching applies to ("ci", backend) and, on
+// a within-max-age, non-tombstoned cache hit for prID, returns that cached
+// run list with every run's Stale set to true and AsOf overwritten to the
+// cached as-of time — ok=true. Any other outcome (opted out, cacheEnabled
+// erroring, a cache-load error, a decode failure, or a plain miss) is
+// (nil, false), and the caller falls through to reporting the real error
+// unchanged, exactly like cache_dispatch.go's tryCacheFallback/
+// cacheFallbackEntities own (nil, false) convention.
+func ciCacheFallback(ctx context.Context, reg *Registry, backend, prID string) ([]schema.CIRun, bool) {
+	enabled, err := cacheEnabled(ctx, reg, "ci", backend)
+	if err != nil || !enabled {
+		return nil, false
+	}
+	if err := ensureCacheDirExists(); err != nil {
+		return nil, false
+	}
+	key := CacheKey{Type: "ci", Backend: backend}
+	c, err := loadCache(key)
+	if err != nil {
+		return nil, false
+	}
+	now := time.Now()
+	content, asOf, ok := c.Get(prID, resolveCacheMaxAge(reg), now)
+	if !ok {
+		return nil, false
+	}
+	var runs []schema.CIRun
+	if err := json.Unmarshal(content, &runs); err != nil {
+		return nil, false
+	}
+	asOfStr := asOf.UTC().Format(time.RFC3339)
+	for i := range runs {
+		runs[i].Stale = true
+		runs[i].AsOf = asOfStr
+	}
+	c.MarkAccessed(prID, now)
+	if saveErr := saveCache(key, c); saveErr != nil {
+		// Best-effort persistence of the MarkAccessed bump, mirroring
+		// tryCacheFallback's own tolerance — the runs already decoded
+		// above are served regardless.
+		_ = saveErr
+	}
+	return runs, true
+}
+
+// putCIListCache writes a live "ci list" success's returned run list into
+// ("ci", backend)'s cache keyed by prID: the whole slice is marshaled as
+// ONE CacheEntry's Content (this is the one place in this docket a single
+// cache entry's content is a list rather than one entity — cache.go's
+// Cache.Entries is keyed by an arbitrary string id, and prID is exactly
+// that). Evicted with a noConsumersTracked consumersPassed
+// (cache_dispatch.go) since ci has no ledger/consumer-cursor concept at
+// all — a run-list-unavailable answer is never a "run removed," so ci's
+// own fan-out never calls Remove and only the size-cap/no-tombstone-ever
+// eviction path ever applies here. Errors are swallowed throughout: a
+// cache-write problem MUST NOT turn an already-succeeded live read into a
+// reported failure, matching this docket's existing best-effort
+// Put/Evict/saveCache tolerance elsewhere (cache_dispatch.go's
+// putEntityCache).
+func putCIListCache(ctx context.Context, reg *Registry, backend, prID string, runs []schema.CIRun) {
+	enabled, err := cacheEnabled(ctx, reg, "ci", backend)
+	if err != nil || !enabled {
+		return
+	}
+	content, err := json.Marshal(runs)
+	if err != nil {
+		return
+	}
+	if err := ensureCacheDirExists(); err != nil {
+		return
+	}
+	key := CacheKey{Type: "ci", Backend: backend}
+	c, err := loadCache(key)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	c.Put(prID, content, ciListAsOf(runs), now)
+	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
+	_ = saveCache(key, c)
+}
+
+// ciListAsOf derives the single as-of time stored for one Put call's
+// CacheEntry from the live-fetched runs it is caching, mirroring
+// putLiveEntity's own convention of trusting the ENTITY's own reported
+// as_of field rather than the umbrella's write-time clock (this docket's
+// design: a cache entry's as-of time is the moment the cached data was
+// itself known-fresh, not the moment it happened to be persisted). Returns
+// the first run's own parseable AsOf; falls back to time.Now() when runs
+// is empty or every run's AsOf is empty/unparseable (a backend not
+// populating AsOf on a live answer, which pkg/schema/ci.go's own doc
+// comment says MUST pair with Stale true — this fallback keeps caching a
+// degenerate list from crashing rather than claiming a false precision).
+func ciListAsOf(runs []schema.CIRun) time.Time {
+	for _, r := range runs {
+		if r.AsOf == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, r.AsOf); err == nil {
+			return t
+		}
+	}
+	return time.Now()
 }
 
 func newCiCmd() *cobra.Command {
