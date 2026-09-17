@@ -99,6 +99,29 @@ var alwaysSafe = map[string]bool{
 	// cmdparse layer instead of living here — see commandRunnerPrefixes), it
 	// never runs an inner command, so an unconditional Approve is safe.
 	"bgcheck": true,
+	// session-mode / wtdone (pg2-hel4i): this repo's own worktree/session-
+	// lifecycle CLIs (packages/session-mode, packages/wtdone). Neither basename
+	// was recognized by any rule module, so every invocation fell through to
+	// the "Unknown command" default at the end of this Evaluate loop and
+	// abstained via chain exhaustion (not a deliberate floor) despite a
+	// 132/132 historical approval rate, all approval_source=auto (pg2-qhdpy).
+	// The two have a real mutation-surface difference, so — unlike
+	// integrate-branch-support/bgcheck above — this is NOT a "zero mutation
+	// surface" entry for both:
+	//   - session-mode (see packages/session-mode/session-mode/session-mode.md)
+	//     only starts/refreshes/reads a local status-line state file
+	//     (start/set-status/show) — pure local state, no filesystem access
+	//     outside that one record, the same class as bgcheck.
+	//   - wtdone (see packages/wtdone/wtdone/wtdone.md) is honestly NOT
+	//     trivial: it removes a git worktree from disk and runs a non-force
+	//     `git branch -d` (never `-D`). It is safe-listed anyway because both
+	//     effects are liveness-guarded (it refuses outright if a process is
+	//     still anchored inside the worktree via `lsof`) and bounded to what
+	//     a plain, non-force branch delete allows — the same "agent-initiated,
+	//     low-risk, and reversible enough" bar claudetools.go's EnterWorktree
+	//     comment states for its own real-side-effect entry, not the stronger
+	//     "no mutation surface at all" claim made for integrate-branch-support.
+	"session-mode": true, "wtdone": true,
 }
 
 // browsingCmds list/stat filesystem entries but don't read file contents.

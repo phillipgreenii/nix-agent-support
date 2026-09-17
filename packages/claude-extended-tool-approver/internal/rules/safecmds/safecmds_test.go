@@ -2717,3 +2717,39 @@ func TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting(t *test
 		})
 	}
 }
+
+// TestSafecmds_SessionModeAndWtdone_Approve pins session-mode's and wtdone's
+// membership in the alwaysSafe set (pg2-hel4i): both basenames previously fell
+// through to the "Unknown command" default and abstained via chain
+// exhaustion despite a 132/132 historical approval rate (pg2-qhdpy). Every
+// args shape below Approves because alwaysSafe short-circuits before any
+// argument inspection — including the compound corpus shape from the
+// original bead's recipe, which chains a `cd` (also alwaysSafe) into wtdone.
+func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{"session-mode set-status finished", `session-mode set-status finished`},
+		{"session-mode start mode --force", `session-mode start drain-beads --force`},
+		{
+			"compound cd + wtdone corpus shape",
+			`cd "$CC" && wtdone "$FB" --cc "$CC"; echo "EXIT=$?"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve (session-mode/wtdone are alwaysSafe)", tt.command, got.Decision, got.Reason)
+			}
+		})
+	}
+}
