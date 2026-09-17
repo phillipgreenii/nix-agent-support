@@ -66,6 +66,24 @@
       inputs.flake-utils.follows = "flake-utils";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # mobilecombackup — CONSUMER half (tc-5lxy.11) of the producer/consumer
+    # Claude-marketplace pattern (nix-repo-base/docs/claude-marketplaces.md).
+    # mobilecombackup (tc-5lxy.10) built packages.mobilecombackup-marketplace
+    # via nix-repo-base's lib.mkClaudeMarketplaceBuilders; this repo registers
+    # it below via marketplaces.nixProvided. git+ssh (not the bare `github:`
+    # fetcher) mirrors how homelab/nix/flake.nix declares its own
+    # nix-agent-support input for a sibling repo in this estate.
+    #
+    # OPERATOR RULING (2026-08-16, tc-5lxy.11 notes): registrant is
+    # nix-agent-support, not the homelab machine flake -- accepting the
+    # self-containment tension with this repo's CLAUDE.md "Key Principles"
+    # ("Self-Contained... don't add dependencies on other custom flakes").
+    # That tradeoff is deliberate and MUST NOT be "fixed" by moving this
+    # input to homelab instead.
+    mobilecombackup = {
+      url = "git+ssh://git@github.com/phillipgreenii/mobilecombackup.git";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -3760,6 +3778,76 @@
                 assert lib.any (p: p.name == "wayfinder-beads" && p.defaultEnabled) mkt.passthru.plugins;
                 pkgs.runCommand "wayfinder-beads-pairing-ok" { } "touch $out";
 
+              # Durable eval test (tc-5lxy.11) for the mobilecombackup marketplace
+              # REGISTRATION -- modeled on test-wayfinder-beads-pairing above (resolves
+              # the REAL derivation off an input rather than a mock), combined with
+              # test-claude-marketplaces' evalCfg approach (exercises the REAL
+              # home/programs/claude-marketplaces/default.nix module rather than
+              # asserting on the drv's passthru alone). test-claude-marketplaces
+              # itself MUST NOT be extended for this: it evaluates only mockMarketplace
+              # and can never observe this flake's own `marketplaces.nixProvided`
+              # assignment below, so a criterion pointed at it would be vacuous.
+              test-mobilecombackup-marketplace-registration =
+                let
+                  mbPkgs = inputs.mobilecombackup.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                  mkt = mbPkgs.mobilecombackup-marketplace or null;
+
+                  evalCfg =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/claude-marketplaces/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Same minimal stubs test-claude-marketplaces uses for the
+                            # config surface this module reads/contributes to.
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              phillipgreenii.programs.claude-code.settings = {
+                                extraKnownMarketplaces = lib.mkOption {
+                                  type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                  default = { };
+                                };
+                                enabledPlugins = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.bool;
+                                  default = { };
+                                };
+                                plugins = lib.mkOption {
+                                  type = lib.types.listOf lib.types.str;
+                                  default = [ ];
+                                };
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.file = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  registered = evalCfg {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      marketplaces.nixProvided = [ mkt ];
+                    };
+                  };
+                  settings = registered.phillipgreenii.programs.claude-code.settings;
+                in
+                assert mkt != null;
+                assert settings.extraKnownMarketplaces ? ${mkt.passthru.marketplaceName};
+                assert settings.extraKnownMarketplaces.${mkt.passthru.marketplaceName}.source.source == "directory";
+                assert lib.all (p: settings.enabledPlugins ? ${p.key}) mkt.passthru.plugins;
+                pkgs.runCommand "mobilecombackup-marketplace-registration-ok" { } "touch $out";
+
               # Durable eval test (pg2-sikj3) for the integrate-branch-support enable
               # DEFAULT: the CLI (the detector the integrate-branch plugin's dispatcher
               # invokes as a bare PATH command) must ship exactly when the integrate-branch
@@ -5759,11 +5847,33 @@
                     let
                       p = inputs.phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { };
                       own = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+                      # mobilecombackup (tc-5lxy.11, CONSUMER half): builds all 4 of the
+                      # systems this repo builds, but guard anyway -- same graceful
+                      # empty no-op rationale as repo-base/own above, and it protects
+                      # against a future systems-list divergence in either flake.
+                      mb = inputs.mobilecombackup.packages.${pkgs.stdenv.hostPlatform.system} or { };
                     in
                     (lib.optional (p ? phillipg-nix-repo-base-marketplace) p.phillipg-nix-repo-base-marketplace)
                     ++ (lib.optional (
                       own ? phillipgreenii-nix-agent-support-marketplace
-                    ) own.phillipgreenii-nix-agent-support-marketplace);
+                    ) own.phillipgreenii-nix-agent-support-marketplace)
+                    ++ (lib.optional (mb ? mobilecombackup-marketplace) mb.mobilecombackup-marketplace);
+
+                  # mobilecombackup's plugin ships with plugin.json defaultEnabled = true
+                  # (its producer bead, tc-5lxy.10, required an EXPLICIT value so
+                  # tc-5lxy.18's post-apply verification has something to observe --
+                  # that requirement is not itself an operator ruling that this plugin
+                  # should be globally on in every session). No operator ruling was
+                  # found scoping THIS registration's enablement default (tc-5lxy.11's
+                  # own acceptance criteria says so explicitly), so per that bead's
+                  # documented default -- defaultEnabled=false, the safer/least-surprise
+                  # choice -- override it off here. A machine wanting mobilecombackup's
+                  # commands can flip it back on with its own
+                  # `marketplaces.overrides."mobilecombackup@mobilecombackup-marketplace-local"
+                  # = true;`. No existing consumer sets `marketplaces.overrides` today
+                  # (grepped homelab + this repo), so this establishes the pattern
+                  # rather than following one.
+                  marketplaces.overrides."mobilecombackup@mobilecombackup-marketplace-local" = false;
 
                   # `mattpocock-skills` is declared HERE, not in a machine flake, because
                   # it is one half of a MATCHED PAIR with this repo's `wayfinder-beads`
