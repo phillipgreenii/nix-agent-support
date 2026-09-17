@@ -297,6 +297,33 @@ func TestParseRunLikeArgs_collectsRepeatedSelectorFlags(t *testing.T) {
 	}
 }
 
+// --metrics-addr is registered ONLY for routeRun (routeResult.metricsAddr's
+// own doc comment): run defines it and parses its value into
+// routeResult.metricsAddr; run-until-idle defines no such flag, so passing
+// it there is an unknown-flag usage error, not a silently-ignored one.
+func TestParseRunLikeArgs_metricsAddrOnlyOnRun(t *testing.T) {
+	r := parseRunLikeArgs(routeRun, []string{"--metrics-addr", "127.0.0.1:9820"})
+	if r.kind != routeRun {
+		t.Fatalf("kind = %v, want routeRun", r.kind)
+	}
+	if r.metricsAddr != "127.0.0.1:9820" {
+		t.Errorf("metricsAddr = %q, want 127.0.0.1:9820", r.metricsAddr)
+	}
+
+	if got := parseRunLikeArgs(routeRunUntilIdle, []string{"--metrics-addr", "127.0.0.1:9820"}).kind; got != routeUsageErr {
+		t.Errorf("run-until-idle --metrics-addr should be routeUsageErr (unknown flag), got %v", got)
+	}
+}
+
+// Omitting --metrics-addr on run leaves routeResult.metricsAddr at its zero
+// value, matching every other opt-in listener's "disabled by default" posture.
+func TestParseRunLikeArgs_metricsAddrDefaultsEmpty(t *testing.T) {
+	r := parseRunLikeArgs(routeRun, nil)
+	if r.metricsAddr != "" {
+		t.Errorf("metricsAddr = %q, want \"\" when --metrics-addr is omitted", r.metricsAddr)
+	}
+}
+
 // route() itself reaches the same selector flags through the full dispatch
 // for both run and run-until-idle.
 func TestRoute_runAndRunUntilIdleAcceptSelectorFlags(t *testing.T) {

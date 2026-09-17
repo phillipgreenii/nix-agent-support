@@ -18,7 +18,7 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 
 | Command                                 | Description                                                                                                                                                                                                                                                                          |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run`                                   | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown                                                                                                                                                         |
+| `run [--metrics-addr <host:port>]`      | boot the core and run indefinitely, producing + dispatching on a fixed poll interval, until SIGINT/SIGTERM requests shutdown. `--metrics-addr` opts into an OTel Prometheus `/metrics` endpoint (disabled by default) — see [Observability](#observability)                          |
 | `run-until-idle`                        | boot the core, discover once, drain the queue to idle, then exit                                                                                                                                                                                                                     |
 | `run-query [--json] query:<name>`       | smoke-test one named source's query once, read-only, and print the matches it would emit (text, or one JSON object with `--json`)                                                                                                                                                    |
 | `run-role [--json] <role> <json>`       | dispatch one caller-supplied event through a role, then tear down (smoke test; `--json` reports the outcome as one JSON object). `<json>` is a full event blob, the same shape `push-inject <json>` takes — there is no bead-id shorthand any more                                   |
@@ -248,12 +248,40 @@ the role's prompt in `config.toml` instead; pg-router warns if any are still set
 
 ## Observability
 
-The budget watchdog writes a structured per-run event stream as JSONL (one JSON
+### Metrics
+
+`internal/metrics` builds the full OTel metric catalog (queue depth, failure rate,
+unconsumed-expired, unknown-type-rejected, throughput, backlog, liveness, dispatch
+latency, source failures, deduped) against an injected `metric.MeterProvider` — the
+core stays unaware of any concrete monitoring backend. `run`'s own `--metrics-addr
+<host:port>` flag (or `PG_ROUTER_METRICS_ADDR`; the flag wins) opts a **daemon-mode**
+run into a real backend: `cmd/pg-router/metrics_http.go`'s `startMetricsServer` builds
+an OTel `go.opentelemetry.io/otel/exporters/prometheus` bridge on its own
+`prometheus.Registry` and serves it at `/metrics` on that address. Omitted (the
+default), no listener opens and the package's own read-back `ManualReader` default
+stands unchanged. `run-until-idle` defines no such flag — a drain-and-exit pass has
+nothing long-lived to scrape.
+
+### Logs
+
+`internal/telemetry` (`Init`/`NewSlogHandler`/`Fanout`) is a deliberate small
+duplication of `packages/pg-pr/internal/telemetry`'s own OTLP-log shape — an
+`internal/` package cannot be imported across the pg-pr/pg-router module boundary, so
+the proven pattern is copied rather than shared, LOG half only (pg-router emits no
+spans). `main()` calls `telemetry.Init(ctx, "pg-router", version)` unconditionally
+for every subcommand (a no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset — the common
+case for a one-shot operator invocation); `run`/`run-until-idle`'s shared `prepareRun`
+then fans the default `slog` logger out to both stderr (unchanged) and the OTLP
+bridge, so every `WARN`/`ERROR` operational line reaches Loki as
+`{service_name="pg-router"}` once the daemon's OTLP endpoint is configured.
+
+The budget watchdog ALSO writes a structured per-run event stream as JSONL (one JSON
 object per line) conforming to the phillipgreenii JSONL logging standard: every
 record carries `time` (RFC3339Nano, UTC), `level` (lowercase
 `debug`/`info`/`warn`/`error`), and `msg`, plus an event-type `kind` field
 (`reminder` → `info`, `cancel` → `warn`, `hard_stop` → `error`). This is
-pg-router's own event log, not the Claude transcript.
+pg-router's own dispatch-outcome ledger, not the Claude transcript, and it is a
+DIFFERENT signal from the OTLP operational logs above — see the relabel note below.
 
 The log is written to the standard path
 `${XDG_STATE_HOME}/pg-router/events.jsonl` (no `/log` subdirectory), which matches
@@ -261,10 +289,15 @@ the default `logSources` glob `${env:XDG_STATE_HOME}/pg-router/*.jsonl`.
 
 Collection into Loki is pull-based: the darwin module
 `darwin/modules/pg-router/default.nix` registers
-`phillipgreenii.observability.logSources.pg-router` (guarded on `obs.enable`, so it
-is a no-op on machines without the observability stack). No OTel code lives in
-the binary and no `path` override is needed because the file already sits at the
-default glob.
+`phillipgreenii.observability.logSources.pg-router-events` (`serviceName =
+"pg-router-events"`; guarded on `obs.enable`, so it is a no-op on machines without the
+observability stack) — relabeled from the plain `pg-router` name so it no longer
+collides with the OTLP log push's own `service_name="pg-router"` (above). The glob and
+`events.jsonl` file are unchanged; only the Loki label moved. That same darwin module
+also calls `obs.mkEmitterEnv { serviceName = "pg-router"; protocol = "grpc"; }`
+(mirroring `pa-monitor`'s own darwin module) and merges the result into the daemon
+LaunchAgent's `EnvironmentVariables`, wiring `OTEL_EXPORTER_OTLP_ENDPOINT`/
+`OTEL_SERVICE_NAME` for the logs half above.
 
 ## Deployment (`home/programs/pg-router`, `darwin/modules/pg-router`)
 

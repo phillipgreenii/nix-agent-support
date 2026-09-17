@@ -1,47 +1,73 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+
+	"github.com/phillipgreenii/pg-router/internal/telemetry"
 )
 
 var version = "dev"
 
 func main() {
+	os.Exit(run())
+}
+
+// run holds everything main() used to do directly, so that
+// telemetry.Init's shutdown (below) is guaranteed to flush before the
+// process exits. A deferred call in main() itself would never run: every
+// branch below ends by returning an exit code that main() feeds straight
+// to os.Exit, and os.Exit bypasses deferred functions outright — so the
+// flush has to live inside a function main() calls and returns FROM,
+// not inside main() itself.
+func run() int {
+	// Telemetry (design section 5): called unconditionally, for every
+	// subcommand, mirroring packages/pg-pr/cmd/pg-pr/main.go's own
+	// Init call. Init never returns an error in practice — a missing
+	// OTEL_EXPORTER_OTLP_ENDPOINT installs a no-op LoggerProvider (the
+	// common case for a one-shot operator invocation with no OTLP env set),
+	// and a bad endpoint logs one stderr warning and continues.
+	shutdown, _ := telemetry.Init(context.Background(), "pg-router", version)
+	defer func() { _ = shutdown(context.Background()) }()
+
 	r := route(os.Args)
 	switch r.kind {
 	case routeVersion:
 		fmt.Println(version)
+		return exitOK
 	case routeHelp:
 		fmt.Println(helpText)
+		return exitOK
 	case routeUsageErr:
 		printUsageErr(r.msg)
-		os.Exit(exitUsage)
+		return exitUsage
 	case routeRun:
-		os.Exit(runRun(r.only, r.disable))
+		return runRun(r.only, r.disable, r.metricsAddr)
 	case routeRunUntilIdle:
-		os.Exit(runRunUntilIdle(r.only, r.disable))
+		return runRunUntilIdle(r.only, r.disable)
 	case routeRunRole:
-		os.Exit(runRunRole(r.role, r.eventJSON, r.json))
+		return runRunRole(r.role, r.eventJSON, r.json)
 	case routeRunQuery:
-		os.Exit(runRunQuery(r.query, r.json))
+		return runRunQuery(r.query, r.json)
 	case routeConfig:
-		os.Exit(runConfig(r.configMode, r.json))
+		return runConfig(r.configMode, r.json)
 	case routeIngestEvent:
-		os.Exit(runIngestEvent(r.rest))
+		return runIngestEvent(r.rest)
 	case routePushInject:
-		os.Exit(runPushInject(r.rest))
+		return runPushInject(r.rest)
 	case routeStatus:
-		os.Exit(runStatus(r.rest))
+		return runStatus(r.rest)
 	case routeTUI:
-		os.Exit(runTUI(r.rest))
+		return runTUI(r.rest)
 	case routeSelfStatus:
-		os.Exit(runSelfStatus(r.rest))
+		return runSelfStatus(r.rest)
 	case routePause:
-		os.Exit(runPause(r.gate))
+		return runPause(r.gate)
 	case routeResume:
-		os.Exit(runResume(r.gate, r.allGates))
+		return runResume(r.gate, r.allGates)
 	}
+	return exitOK
 }
 
 // printUsageErr writes a usage diagnostic and the short usage line to stderr.

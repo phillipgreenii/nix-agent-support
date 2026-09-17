@@ -221,6 +221,18 @@ type Config struct {
 	// key. cmd/pg-router's bootCore threads the resulting map into
 	// internal/core.Options.MonitorSubsets via monitorSubsetResolverFrom.
 	MonitorSubsets map[string][]string
+
+	// MetricsAddr is the listen address (host:port) for the OTel Prometheus
+	// /metrics direct-scrape HTTP endpoint (design decision D2), from
+	// PG_ROUTER_METRICS_ADDR. Empty (the default, and Default()'s own
+	// default) leaves it disabled — no listener is opened and
+	// resolveMeterProvider's existing package-default provider stands
+	// unchanged (cmd/pg-router/run.go). Like MonitorSubsets above, it is a
+	// deployment/runtime concern, not a [pool] TOML key: cmd/pg-router's
+	// `run --metrics-addr` flag OVERRIDES this env-sourced value, the same
+	// "CLI flag > PG_ROUTER_* env > built-in default" precedence
+	// PG_ROUTER_TUI_INTERVAL already documents (args.go).
+	MetricsAddr string
 }
 
 // Meter returns the Config's MeterProvider, defaulting to the OTel no-op
@@ -373,6 +385,7 @@ func Load() (Config, error) {
 	c.ConfirmIngest = envSecs("PG_ROUTER_CONFIRM_INGEST", c.ConfirmIngest)
 	c.LogDir = envStr("PG_ROUTER_LOG_DIR", c.LogDir)
 	c.ActivityRingSize = envInt("PG_ROUTER_ACTIVITY_RING", c.ActivityRingSize)
+	c.MetricsAddr = envStr("PG_ROUTER_METRICS_ADDR", c.MetricsAddr)
 
 	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
 	// Contributes [pool].budget only; absent/empty file = no change. The path is

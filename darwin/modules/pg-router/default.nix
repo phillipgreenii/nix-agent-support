@@ -15,7 +15,32 @@ let
   # ${XDG_STATE_HOME}/pg-router/events.jsonl, which the default `path` glob
   # (${env:XDG_STATE_HOME}/pg-router/*.jsonl) already matches — so no overrides are
   # needed. Guarded on obs.enable so it is a no-op on machines without the stack.
+  #
+  # Relabeled to `pg-router-events` (observability design decision D3): the
+  # NEW OTLP log push this module now also wires (emitterEnv below) claims
+  # the plain `pg-router` service_name for pg-router's own operational
+  # WARN/ERROR slog lines, so this pre-existing registration — which only
+  # ever carried the dispatch-outcome ledger (events.jsonl), a narrower
+  # signal — moves to its own label rather than colliding with it. The
+  # glob/path is UNCHANGED: events.jsonl itself is untouched as a file,
+  # only its Loki label moves.
   obs = config.phillipgreenii.observability;
+
+  # OTel OTLP log-export env for the daemon (design section 5.4), mirroring
+  # pa-monitor's/ollama's own darwin module precedent for
+  # `obs.mkEmitterEnv` exactly: resolved here (darwin scope, where the
+  # observability surface is declared) and merged into the LaunchAgent's
+  # EnvironmentVariables below. `obs ? mkEmitterEnv` guards against a
+  # narrower eval fixture (this repo's own flake.nix checks) that stubs
+  # `logSources` but declares no such helper.
+  emitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "pg-router";
+        protocol = "grpc";
+      }
+    else
+      { };
 
   # Read pg-router.daemon.enable across all HM users; the LaunchAgent gets
   # registered once at system scope when any user opted in — mirrors
@@ -44,7 +69,9 @@ in
 {
   config = lib.mkMerge [
     (lib.mkIf (obs.enable or false) {
-      phillipgreenii.observability.logSources.pg-router = { };
+      phillipgreenii.observability.logSources.pg-router-events = {
+        serviceName = "pg-router-events";
+      };
     })
 
     # LaunchAgent registration via the canonical helper (ADR 0049, amended by
@@ -81,6 +108,11 @@ in
         serviceConfig = {
           StandardErrorPath = "${stateHome}/pg-router/launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router/launchd-stdout.log";
+          # OTLP log-export env (design section 5.4, D6) — empty when
+          # obs.enable is false or the helper is absent (emitterEnv's own
+          # guard above), so this is a no-op merge on a machine without the
+          # observability stack.
+          EnvironmentVariables = emitterEnv;
         };
       };
     })

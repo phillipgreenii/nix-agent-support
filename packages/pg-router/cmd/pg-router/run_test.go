@@ -728,6 +728,32 @@ func TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil(t *testing.T) {
 	}
 }
 
+// TestResolveMetricsAddr_precedence proves runRun's --metrics-addr
+// resolution: the flag occurrence wins over PG_ROUTER_METRICS_ADDR
+// (cfg.MetricsAddr), which wins over "" (disabled) — the same
+// CLI-flag-over-env-over-default precedence PG_ROUTER_TUI_INTERVAL already
+// documents.
+func TestResolveMetricsAddr_precedence(t *testing.T) {
+	cases := []struct {
+		name     string
+		flagAddr string
+		cfgAddr  string
+		wantAddr string
+	}{
+		{"flag wins over env", "127.0.0.1:9001", "127.0.0.1:9820", "127.0.0.1:9001"},
+		{"env used when flag empty", "", "127.0.0.1:9820", "127.0.0.1:9820"},
+		{"disabled when both empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveMetricsAddr(tc.flagAddr, config.Config{MetricsAddr: tc.cfgAddr})
+			if got != tc.wantAddr {
+				t.Errorf("resolveMetricsAddr(%q, {MetricsAddr: %q}) = %q, want %q", tc.flagAddr, tc.cfgAddr, got, tc.wantAddr)
+			}
+		})
+	}
+}
+
 // TestBootCore_ThreadsMonitorSubsetsIntoCoreOptions proves Task 3.6-prereq's
 // second acceptance criterion end to end: Config.MonitorSubsets (resolved
 // from config, BEFORE any mon.read caller ever calls register) actually

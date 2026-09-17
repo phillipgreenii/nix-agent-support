@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/telemetry"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
@@ -668,6 +669,20 @@ type preparedRun struct {
 // re-Validate against the run-scoped subset would produce false findings —
 // nothing past this point may call Validate() again.
 func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
+	// Fan the default slog logger out to the OTLP bridge (design section 5.2):
+	// stderr output is kept (existingStderrHandler == whatever main()'s
+	// telemetry.Init call left as the default) and every record from this
+	// point on — including the "starting" line immediately below and every
+	// WARN/ERROR the rest of this run emits — is ALSO pushed over OTLP once
+	// Init installed a real LoggerProvider (a no-op elsewhere, so this is
+	// cheap and safe to do unconditionally). Applied here, shared by both
+	// run and run-until-idle, rather than only inside runRun: the design's
+	// "daemon mode" scoping is stated for the METRICS exporter specifically
+	// (section 4), not for logs (section 5), and run-until-idle's periodic
+	// drain pass emits the same class of operational WARN/ERROR lines a
+	// long-running run does.
+	slog.SetDefault(slog.New(telemetry.Fanout(slog.Default().Handler(), telemetry.NewSlogHandler())))
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
@@ -1063,6 +1078,19 @@ func runRunUntilIdle(only, disable []string) int {
 	return exitOK
 }
 
+// resolveMetricsAddr decides the --metrics-addr this invocation actually
+// uses: the flag occurrence, else cfg.MetricsAddr (PG_ROUTER_METRICS_ADDR),
+// else "" (disabled) — CLI flag > env > built-in default, the same
+// precedence PG_ROUTER_TUI_INTERVAL already documents in args.go. Split out
+// as a pure function (no I/O) so the precedence itself is unit-testable
+// without booting a real metrics HTTP listener.
+func resolveMetricsAddr(flagAddr string, cfg config.Config) string {
+	if flagAddr != "" {
+		return flagAddr
+	}
+	return cfg.MetricsAddr
+}
+
 // runRun implements `pg-router run`: boot the core and run indefinitely,
 // producing and dispatching on cfg.PollInterval, until SIGINT/SIGTERM requests
 // an orderly shutdown (INV-LIFE-1's daemon mode). It stays reachable to push
@@ -1071,8 +1099,16 @@ func runRunUntilIdle(only, disable []string) int {
 // push arriving mid-tick is picked up on the next dispatch.
 //
 // only/disable are this invocation's --only/--disable flag occurrences
-// (STORY-OP-3, DEC-CLI-1); see runRunUntilIdle's doc comment.
-func runRun(only, disable []string) int {
+// (STORY-OP-3, DEC-CLI-1); see runRunUntilIdle's doc comment. metricsAddr is
+// this invocation's --metrics-addr occurrence (design section 4): empty
+// (the default) leaves resolveMeterProvider's existing package-default
+// ManualReader provider in place, unchanged; a non-empty value starts the
+// OTel Prometheus /metrics HTTP endpoint (metrics_http.go's
+// startMetricsServer) and binds ITS MeterProvider onto pr.cfg BEFORE
+// bootCore runs, so resolveMeterProvider's cfg.MeterProvider-set branch —
+// the "deployment-bound-backend" case its own doc comment already
+// anticipated — resolves to it.
+func runRun(only, disable []string, metricsAddr string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -1082,7 +1118,23 @@ func runRun(only, disable []string) int {
 	}
 	defer pr.cleanup()
 
-	svc, q, _, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
+	if metricsAddr = resolveMetricsAddr(metricsAddr, pr.cfg); metricsAddr != "" {
+		metricsMP, metricsShutdown, err := startMetricsServer(metricsAddr, nil)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "run: metrics server:", err)
+			return exitGeneric
+		}
+		pr.cfg.MeterProvider = metricsMP
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsShutdown(shutdownCtx); err != nil {
+				slog.Warn("run: metrics server shutdown failed", "err", err)
+			}
+		}()
+	}
+
+	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric
@@ -1097,6 +1149,17 @@ func runRun(only, disable []string) int {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
 			slog.Warn("core accept loop exited with an error", "err", err)
+		}
+	}()
+	// Force a final metrics snapshot/export before exit (mirrors
+	// runRunUntilIdle's own identical defer): without this, a
+	// --metrics-addr-configured Prometheus exporter's periodic collection
+	// tick might never land before shutdown, and the package-default
+	// ManualReader has nothing to flush regardless (a safe no-op either way
+	// — see metrics.Flush's own doc comment).
+	defer func() {
+		if err := metrics.Flush(context.Background(), mp); err != nil {
+			slog.Warn("run: metrics flush failed", "err", err)
 		}
 	}()
 

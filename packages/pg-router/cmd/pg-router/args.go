@@ -9,7 +9,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -21,8 +21,13 @@ pass, and drains the queue to idle before exiting. Bare "pg-router" (no subcomma
 prints usage and exits non-zero — an explicit subcommand is REQUIRED.
 
 Subcommands:
-  run                     boot the core and run indefinitely, producing + dispatching on a
-                          fixed poll interval, until SIGINT/SIGTERM requests shutdown
+  run [--metrics-addr <host:port>]
+                          boot the core and run indefinitely, producing + dispatching on a
+                          fixed poll interval, until SIGINT/SIGTERM requests shutdown.
+                          --metrics-addr opts into an OTel Prometheus /metrics HTTP endpoint
+                          serving the metric catalog (internal/metrics); omitted (the
+                          default), no listener is opened. run-until-idle defines no such
+                          flag — a drain-and-exit pass has nothing long-lived to scrape.
   run-until-idle          boot the core, discover once, drain the queue to idle, then exit
   run-query [--json] query:<name>
                           smoke-test one named source's query once, read-only, and print the
@@ -137,6 +142,9 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
                            the resolved location (falls back to INFO); the explicit opt-out for
                            a deployment that intentionally runs on built-in roles (default false)
   PG_ROUTER_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
+  PG_ROUTER_METRICS_ADDR     listen address (host:port) for run's OTel Prometheus /metrics
+                           endpoint (default disabled); run's --metrics-addr flag > this env
+                           var > disabled, the same precedence PG_ROUTER_TUI_INTERVAL uses
   PG_ROUTER_TUI_INTERVAL     tui's poll interval; floor-clamped to 250ms (default 1s). CLI flag >
                            PG_ROUTER_TUI_INTERVAL env > built-in default; a value that fails to
                            parse as a duration is a usage error naming the bad value.
@@ -230,6 +238,15 @@ type routeResult struct {
 	// field only says whether the flag was given, not anything about the
 	// output shape's versioning.
 	json bool
+	// metricsAddr is routeRun's own --metrics-addr occurrence (an OTel
+	// Prometheus /metrics direct-scrape endpoint): empty when omitted, the
+	// default of "disabled" every other opt-in listener in this codebase
+	// uses. Unlike only/disable it is NOT shared with routeRunUntilIdle:
+	// --metrics-addr is daemon-mode-only (a drain-and-exit pass has nothing
+	// long-lived to scrape), so parseRunLikeArgs registers the flag only
+	// when kind == routeRun — passing it to run-until-idle is therefore an
+	// unknown-flag usage error, not a silently-ignored one.
+	metricsAddr string
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -317,21 +334,29 @@ func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves; suppress flag's defaults
 	only, disable := registerSelectorFlags(fs)
+	// --metrics-addr is registered ONLY for routeRun (see routeResult.metricsAddr's
+	// own doc comment): run-until-idle defines no such flag, so passing it
+	// there falls through to the same "unknown flag" usage error every other
+	// unrecognized dash-prefixed token gets below.
+	var metricsAddr string
+	if kind == routeRun {
+		fs.StringVar(&metricsAddr, "metrics-addr", "", "listen address (host:port) for the OTel Prometheus /metrics endpoint; disabled by default")
+	}
 	pos, err := parseInterspersed(fs, args)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
 		return routeResult{kind: routeHelp}
 	case err != nil:
-		// The only flags this subcommand defines are --only/--disable, so an
-		// unrecognized dash-prefixed token is still the offender. Report it in
-		// the same "unknown flag: X" phrasing as the top-level route (the
-		// stdlib's "flag provided but not defined: -x" single-dashes the flag
-		// and reads differently).
+		// The only flags this subcommand defines are --only/--disable (plus
+		// --metrics-addr for routeRun), so an unrecognized dash-prefixed token
+		// is still the offender. Report it in the same "unknown flag: X"
+		// phrasing as the top-level route (the stdlib's "flag provided but not
+		// defined: -x" single-dashes the flag and reads differently).
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + firstFlag(args)}
 	case len(pos) > 0:
 		return routeResult{kind: routeUsageErr, msg: "unexpected argument: " + pos[0]}
 	}
-	return routeResult{kind: kind, only: only.values, disable: disable.values}
+	return routeResult{kind: kind, only: only.values, disable: disable.values, metricsAddr: metricsAddr}
 }
 
 // parseRunRoleArgs validates `run-role [--json] <role> <json>`. Pure: it

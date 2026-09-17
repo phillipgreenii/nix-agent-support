@@ -728,6 +728,28 @@ func TestLoad_activityRingSizeEnvOverride(t *testing.T) {
 	}
 }
 
+// Default() carries no opinion on the metrics listen address (empty means
+// disabled — no listener is opened); PG_ROUTER_METRICS_ADDR overlays it
+// (design decision D2), the same nil/zero-means-package-default idiom
+// ActivityRingSize above already uses.
+func TestDefault_metricsAddrIsUnset(t *testing.T) {
+	if Default().MetricsAddr != "" {
+		t.Errorf("MetricsAddr default = %q, want \"\" (disabled)", Default().MetricsAddr)
+	}
+}
+
+func TestLoad_metricsAddrEnvOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_METRICS_ADDR", "127.0.0.1:9820")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MetricsAddr != "127.0.0.1:9820" {
+		t.Errorf("MetricsAddr = %q, want 127.0.0.1:9820 (PG_ROUTER_METRICS_ADDR overlay)", c.MetricsAddr)
+	}
+}
+
 func TestLoad_badIntFallsBackToDefault(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PG_ROUTER_MAX_WAIT", "notanint")
