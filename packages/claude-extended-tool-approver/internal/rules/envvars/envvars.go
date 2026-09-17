@@ -327,7 +327,10 @@ var askVars = map[string]bool{
 //     rule has no opinion to offer);
 //  2. the VALUE satisfies ONE of three mutually-independent predicates:
 //     preservesCallerValue (it demonstrably preserves the caller's own value and
-//     adds only static absolute path components — pg2-0q99a/pg2-qhhil), or
+//     adds only static absolute path components, a variable this same command
+//     assigned earlier to one, a variable this same command bound earlier to a
+//     `mktemp -d` fresh temp dir, or a certified-safe substitution —
+//     pg2-0q99a/pg2-qhhil/pg2-e1rc7/pg2-kzqw2), or
 //     isHermeticEnvReplacement (a static, reasonable REPLACEMENT under `env -i` —
 //     pg2-d71my), or, for HOME only, isHermeticHomeReplacement (a REPLACEMENT
 //     grounded in a directory this command proves is fresh: a `mktemp -d` fresh
@@ -409,35 +412,57 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // verified-safe EXTEND shape: it keeps the caller's own value ($NAME / ${NAME}) as
 // one whole `:`-separated component, and every other component is one of: a
 // static absolute path; a reference to a variable THIS SAME COMMAND assigned,
-// earlier, to one (vars — see below); a command substitution already certified
-// safe by the static allowlist (pg2-kzqw2 — see componentSafeSubstitution); or,
-// for PATH only, an ambient `$PWD`/`${PWD}` reference with a literal
-// absolute-shaped suffix (pg2-pi7pz — see pwdRootedSuffix). The first shape is
-// 954 of the 1,118 logged PATH/HOME assignments, with zero adversarial values
-// among them (pg2-qfuto).
+// earlier, to one (vars — see below); a reference to a variable THIS SAME
+// COMMAND bound, earlier, to a `mktemp -d` fresh temporary directory
+// (tempDirVars — see below, pg2-e1rc7); a reference to a variable THIS SAME
+// COMMAND bound, earlier, to a certified-safe substitution (safeSubVars — see
+// below, pg2-2ytvo); a command substitution already certified safe by the
+// static allowlist (pg2-kzqw2 — see componentSafeSubstitution); or, for PATH
+// only, an ambient `$PWD`/`${PWD}` reference with a literal absolute-shaped
+// suffix (pg2-pi7pz — see pwdRootedSuffix). The first shape is 954 of the
+// 1,118 logged PATH/HOME assignments, with zero adversarial values among them
+// (pg2-qfuto).
 //
 // The predicate is deliberately STRICT — a component must be literal-and-absolute,
-// resolve to exactly that through vars, be a certified-safe substitution, or be
-// the one narrow ambient exception named above — so nothing else behind an
-// AMBIENT expansion can smuggle a lookup directory in. It therefore still asks on
-// `$JAVA_HOME/bin:$PATH` and `$(nix build …)/bin:$PATH` (`nix` is not on the
-// static safe-cmd allowlist), and on a bare, suffix-less `$PWD`/`${PWD}`
-// component (pwdRootedSuffix's own doc has the reason: that shape names the
-// current working directory ITSELF, not merely a subdirectory of it). Widening
-// it to accept ARBITRARY $VAR-derived components beyond the one PWD exception
-// was considered and RULED AGAINST (2026-07-30) and, for every OTHER ambient
-// name, REMAINS rejected — see the "OPERATOR RULING" notes on the `askVars` doc
-// comment above for the coherence reason, the measured basis, and the
-// 2026-09-17 override's own narrow scope; do not re-litigate the blanket widen
-// here. The in-command-assigned case, the certified-safe-substitution case, and
-// the ambient-$PWD case below are the surviving exceptions that ruling
-// explicitly did NOT (or, for $PWD, no longer does) kill — pg2-qhhil,
-// pg2-kzqw2, and pg2-pi7pz respectively.
+// resolve to exactly that through vars, be grounded in a fresh temp dir through
+// tempDirVars, be a certified-safe substitution, or be the one narrow ambient
+// exception named above — so nothing else behind an AMBIENT expansion can
+// smuggle a lookup directory in. It therefore still asks on `$JAVA_HOME/bin:$PATH`
+// and `$(nix build …)/bin:$PATH` (`nix` is not on the static safe-cmd allowlist),
+// and on a bare, suffix-less `$PWD`/`${PWD}` component (pwdRootedSuffix's own doc
+// has the reason: that shape names the current working directory ITSELF, not
+// merely a subdirectory of it). Widening it to accept ARBITRARY $VAR-derived
+// components beyond the one PWD exception was considered and RULED AGAINST
+// (2026-07-30) and, for every OTHER ambient name, REMAINS rejected — see the
+// "OPERATOR RULING" notes on the `askVars` doc comment above for the coherence
+// reason, the measured basis, and the 2026-09-17 override's own narrow scope; do
+// not re-litigate the blanket widen here. The in-command-assigned case, the
+// fresh-temp-dir case, the certified-safe-substitution case, and the ambient-$PWD
+// case below are the surviving exceptions that ruling explicitly did NOT (or, for
+// $PWD, no longer does) kill — pg2-qhhil, pg2-e1rc7, pg2-kzqw2, and pg2-pi7pz
+// respectively.
 //
 // vars is the in-command variable environment for the leaf this assignment
 // belongs to (primarycommit.LeafVars over the caller's own parse, wrapping
 // cmdparse.InCommandVars) — nil is the ordinary case (no qualifying in-command
 // assignment exists) and reproduces the pre-pg2-qhhil predicate exactly.
+//
+// tempDirVars is the sibling in-command environment for the fresh-temp-dir marker
+// (primarycommit.LeafTempDirVars, wrapping cmdparse.InCommandTempDirVars) — the
+// IDENTICAL seam isHermeticHomeReplacement already uses for HOME's own
+// `mktemp -d` REPLACEMENT relief (pg2-d71my), now also consulted here for PATH's
+// EXTEND shape (pg2-e1rc7: measured real-corpus rows extend PATH with a
+// `mktemp -d`-bound scratch/stub bin dir — `STUB_DIR=$(mktemp -d); export
+// PATH="$STUB_DIR:$PATH"` — and a command downstream consumes the change, so
+// mechanism 2 (pg2-7sqk8) does not relieve it). nil is the ordinary case and
+// reproduces the pre-pg2-e1rc7 predicate exactly. A qualifying component MUST
+// start with the variable reference itself (`strings.HasPrefix(text, "$")`) — a
+// literal PREFIX before it is refused, because this predicate has no way to
+// confirm that prefix is itself absolute once the tempdir var's own (unknown,
+// sentinel-valued) contribution is spliced in; a literal SUFFIX after it
+// (`$T/h`) is fine, exactly mirroring isHermeticHomeReplacement's own "$T/h"
+// shape, since mktemp -d's contract guarantees $T ITSELF resolves to a
+// non-empty absolute path regardless of what nobody here can read back.
 //
 // safeSubVars is the SIBLING in-command environment for a variable bound,
 // earlier in this SAME command, to a certified-safe substitution
@@ -453,16 +478,18 @@ func assignmentIsWholeLeaf(pc cmdparse.ParsedCommand) bool {
 // is inherent to any value-aware split — the caller's PATH is still intact and the
 // directory is one the user already controls — and it is the same guarantee a
 // settings.json `Bash(export PATH:*)` entry already grants. An in-command-assigned
-// component (`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`) and a certified-safe
+// component (`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`), a fresh-temp-dir component
+// (`STUB_DIR=$(mktemp -d); PATH="$STUB_DIR:$PATH"`), and a certified-safe
 // substitution component (`$(dirname /usr/local/bin/go)/bin`) carry the identical
-// trade: each is exactly as inspectable as writing the path literally, no more and
-// no less — except for the substitution's own EMPTY-RESULT hazard, which
-// componentSafeSubstitution handles explicitly (see its doc). An in-command
-// variable bound to a certified-safe substitution (safeSubVars, pg2-2ytvo) carries
-// the SAME trade one level of indirection further, with the identical
-// empty-result hazard handled at BINDING time by
-// cmdparse.InCommandSafeSubstitutionVars rather than here.
-func preservesCallerValue(ev cmdparse.EnvAssignment, vars, safeSubVars map[string]string) bool {
+// trade: each is exactly as inspectable/groundable as writing the path literally,
+// no more and no less — except for the substitution's own EMPTY-RESULT hazard,
+// which componentSafeSubstitution handles explicitly (see its doc), and the fresh
+// temp dir's own guaranteed-non-empty contract, which mktemp -d itself provides
+// (see IsFreshTempDirAssignment's doc). An in-command variable bound to a
+// certified-safe substitution (safeSubVars, pg2-2ytvo) carries the SAME trade one
+// level of indirection further, with the identical empty-result hazard handled at
+// BINDING time by cmdparse.InCommandSafeSubstitutionVars rather than here.
+func preservesCallerValue(ev cmdparse.EnvAssignment, vars, tempDirVars, safeSubVars map[string]string) bool {
 	// The bash append form NAME+=VALUE (normalized to NAME by cmdparse) IS
 	// semantically a preserve, but it deliberately does NOT approve: no logged row
 	// uses it, and excluding it keeps the Approve as narrow as possible.
@@ -522,6 +549,34 @@ func preservesCallerValue(ev cmdparse.EnvAssignment, vars, safeSubVars map[strin
 			// for every other ambient name, unchanged from before this bead.
 			if expanded, ok := cmdparse.ExpandInCommand(text, vars); ok && isStaticAbsolutePath(expanded) {
 				continue
+			}
+			// FRESH-TEMP-DIR MIDDLE OPTION (pg2-e1rc7): the component did not
+			// resolve through a LITERAL in-command variable above, but it may
+			// instead be a variable THIS SAME COMMAND bound, earlier, to a
+			// `mktemp -d` fresh temporary directory — e.g. `STUB_DIR=$(mktemp
+			// -d); PATH="$STUB_DIR:$PATH"` — the identical InCommandTempDirVars
+			// seam isHermeticHomeReplacement already uses for HOME's own
+			// mktemp-d REPLACEMENT relief (pg2-d71my), now also read here for
+			// PATH's EXTEND shape. Required to LEAD the component (a literal
+			// prefix before the var is refused): mktemp -d's own contract
+			// guarantees the var itself resolves to a non-empty absolute path,
+			// but nothing here can vouch for arbitrary literal text placed
+			// BEFORE it once that (unknown) contribution is spliced in. A
+			// literal SUFFIX after it (`$T/h`) is fine, mirroring
+			// isHermeticHomeReplacement's identical shape. Only `ok` is
+			// consulted, never the resolved text, for the same reason
+			// isHermeticHomeReplacement ignores it: tempDirVars maps each
+			// qualifying name to the empty-string SENTINEL
+			// (InCommandTempDirVars' own doc), so the expansion is
+			// deliberately NOT the real path and isStaticAbsolutePath must not
+			// be re-applied to it. Unlike safeSubVars/pwdRootedSuffix below, this
+			// check is deliberately NOT gated to PATH: it reuses the identical
+			// seam isHermeticHomeReplacement already consults for HOME's own
+			// REPLACEMENT form, so HOME's EXTEND form is equally eligible here.
+			if strings.HasPrefix(text, "$") {
+				if _, ok := cmdparse.ExpandInCommand(text, tempDirVars); ok {
+					continue
+				}
 			}
 			// GENERAL COMMAND-SUBSTITUTION-BOUND PATH COMPONENT (pg2-2ytvo),
 			// PATH-ONLY: a variable this same command bound, earlier, to a
@@ -1635,7 +1690,7 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// recursion. Whether the Approve is actually surfaced is scoped by
 		// the caller (see Evaluate / the Rule contract).
 		switch {
-		case preservesCallerValue(ev, vars, safeSubVars):
+		case preservesCallerValue(ev, vars, tempDirVars, safeSubVars):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "sensitive env var preserves the caller's value and adds only static absolute paths: " + sanitizeReasonName(ev.Name),

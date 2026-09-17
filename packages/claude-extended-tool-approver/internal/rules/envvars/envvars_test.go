@@ -347,9 +347,13 @@ func TestEnvVars_InCommandAssignedVar_AmbientStaysAsk(t *testing.T) {
 		`PATH="$bindir:$PATH"; true`,
 		// A DIFFERENT name was assigned; $bindir itself was not.
 		`other=/tmp/x/bin; PATH="$bindir:$PATH"; true`,
-		// The in-command literal binding is REVOKED by a later non-literal
-		// reassignment of the SAME name (cmdparse.InCommandVars' revocation rule).
-		`bindir=/tmp/x/bin; bindir=$(mktemp -d); PATH="$bindir:$PATH"; true`,
+		// The in-command literal binding is REVOKED by a later reassignment of the
+		// SAME name to something that is NEITHER a literal NOR a fresh temp dir
+		// (cmdparse.InCommandVars'/InCommandTempDirVars' shared revocation rule) —
+		// unlike TestEnvVars_FreshTempDirComponent_Approve's own revocation case,
+		// where the LATER reassignment genuinely IS a `mktemp -d` and the var
+		// correctly resolves through pg2-e1rc7's relief instead.
+		`bindir=/tmp/x/bin; bindir=$(date +%s); PATH="$bindir:$PATH"; true`,
 	}
 	for _, ctor := range []struct {
 		name string
@@ -488,6 +492,126 @@ func TestPreservesCallerValue_PWDRootedComponent_HOMENotRelieved(t *testing.T) {
 			got := hookio.Verdict(ctor.rule.Evaluate(input))
 			if got.Decision != hookio.Reject {
 				t.Errorf("cmd %q: got %s (%s), want reject (HOME's own fallback, unchanged by the PATH-only pg2-pi7pz relief)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_FreshTempDirComponent_Approve pins pg2-e1rc7's relief: a PATH
+// component naming a variable this SAME COMMAND bound, earlier, to a
+// `mktemp -d` fresh temp dir is exactly as groundable as the literal spelling
+// TestEnvVars_InCommandAssignedVar_Approve pins — reusing the IDENTICAL
+// InCommandTempDirVars seam isHermeticHomeReplacement already wires in for
+// HOME's own mktemp-d REPLACEMENT relief (pg2-d71my), now also consulted for
+// PATH's EXTEND shape. These are the corpus's own measured shapes (pg2-e1rc7,
+// 2026-09-17: real asklog rows building a scratch/stub bin dir from a fresh
+// temp dir and prepending it onto PATH, e.g. `STUB_DIR=$(mktemp -d); export
+// PATH="$STUB_DIR:$PATH"`).
+//
+// Every case here is a DIRECT (non-engine) call, matching
+// TestEnvVars_InCommandAssignedVar_Approve's own convention.
+//
+// The path-template row deliberately uses an UNQUOTED template
+// (`mktemp -d /tmp/v3bin.XXXXXX`): IsFreshTempDirAssignment's own refusal of
+// any quote character anywhere in the assignment's value (cmdparse's
+// pre-existing, shared helper — see computeIsFreshTempDirAssignment) means a
+// QUOTED template (`mktemp -d "${TMPDIR:-/tmp}/v3bin.XXXXXX"`, the exact
+// spelling one sampled real corpus row uses) is not recognized as a fresh
+// temp dir at all, so that row is NOT relieved by this bead — widening
+// IsFreshTempDirAssignment's own quote handling is a separate, cmdparse-level
+// change this bead does not make (it would also change HOME's own relief,
+// unreviewed).
+func TestEnvVars_FreshTempDirComponent_Approve(t *testing.T) {
+	commands := []string{
+		`STUB_DIR=$(mktemp -d); PATH="$STUB_DIR:$PATH"`,           // bare component, the dominant real idiom
+		`T=$(mktemp -d); PATH="$T/bin:$PATH"`,                     // literal SUFFIX after the var
+		`T=$(mktemp -d); export PATH="$PATH:$T/bin"`,              // append side
+		`TB=$(mktemp -d /tmp/v3bin.XXXXXX); PATH="$TB/bin:$PATH"`, // mktemp -d WITH an unquoted path template
+		"T=`mktemp -d`; PATH=\"$T:$PATH\"",                        // backtick form
+		// Revocation-then-REBIND to a genuine fresh temp dir: the FINAL binding is
+		// what matters (bash semantics), and it correctly resolves through this
+		// relief — the direct contrast with
+		// TestEnvVars_InCommandAssignedVar_AmbientStaysAsk's "revoked to something
+		// that is NEITHER a literal NOR a fresh temp dir" case.
+		`bindir=/tmp/x/bin; bindir=$(mktemp -d); PATH="$bindir:$PATH"`,
+	}
+	for _, ctor := range []struct {
+		name string
+		rule *Rule
+	}{
+		{"New", New()},
+		{"NewWithEvaluator", NewWithEvaluator(&fakeEvaluator{})},
+	} {
+		for _, cmd := range commands {
+			t.Run(ctor.name+"/"+cmd, func(t *testing.T) {
+				input := &hookio.HookInput{
+					ToolName:  "Bash",
+					ToolInput: mustJSON(map[string]string{"command": cmd}),
+				}
+				got := hookio.Verdict(ctor.rule.Evaluate(input))
+				if got.Decision != hookio.Approve {
+					t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+				}
+			})
+		}
+	}
+}
+
+// TestEnvVars_FreshTempDirComponent_BesideConsumer_StillApproves proves
+// pg2-e1rc7's relief is a VALUE-based clearance (like preservesCallerValue's
+// other two middle options), not a consumption-scoped one (mechanism 1/2,
+// pg2-7sqk8): it fires beside a REAL downstream consumer, matching the exact
+// shape the real asklog rows have (a scratch PATH extension immediately
+// followed by the command that actually uses it) — mechanism 2 alone could
+// never have relieved these, since a real consumer is always in scope.
+func TestEnvVars_FreshTempDirComponent_BesideConsumer_StillApproves(t *testing.T) {
+	r := New()
+	commands := []string{
+		`STUB_DIR=$(mktemp -d); export PATH="$STUB_DIR:$PATH"; git push --force origin main`,
+		`STUB_DIR=$(mktemp -d); export PATH="$STUB_DIR:$PATH" && git push --force origin main`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_FreshTempDirComponent_LeadingPrefixStillAsks pins the relief's
+// own narrow gate: a LITERAL PREFIX before the var reference is refused, since
+// nothing here can vouch that the prefix concatenated with the (unknown)
+// fresh-dir contribution is itself absolute — unlike a trailing literal
+// SUFFIX (`$T/bin`, pinned Approve above), which inherits its absoluteness
+// from mktemp -d's own guaranteed-non-empty-absolute contract.
+//
+// An absolute-LOOKING prefix (`/opt$T`) is deliberately NOT exercised here,
+// even though it also has a literal prefix: `mktemp` sits on the general
+// safe-cmd allowlist (cmdparse's safeCmdSubstitutions), so `T=$(mktemp -d)` is
+// SEPARATELY a certified-safe-substitution binding (safeSubVars, pg2-2ytvo)
+// whose skeleton is "" (bare assignment, no affix) — and pg2-2ytvo's own
+// ExpandInCommand+isStaticAbsolutePath composition legitimately clears
+// `/opt$T` on ITS OWN terms, independent of this bead: mktemp -d's contract
+// guarantees the substitution's real value is non-empty and absolute, so a
+// reference-site prefix that is ITSELF absolute keeps the whole component
+// absolute no matter what the substitution actually resolves to. That is a
+// pre-existing, independently-sound relief this bead does not touch and must
+// not re-litigate here — only a NON-absolute prefix (`prefix$T`) isolates
+// THIS relief's own must-LEAD gate.
+func TestEnvVars_FreshTempDirComponent_LeadingPrefixStillAsks(t *testing.T) {
+	r := New()
+	commands := []string{
+		`T=$(mktemp -d); PATH="prefix$T:$PATH"; true`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
 			}
 		})
 	}
@@ -2088,6 +2212,15 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`bindir=/tmp/x/bin; PATH="$bindir:$PATH"`, true},
 		{`TEST_DIR=/tmp/bats-run; PATH="$TEST_DIR/bin:$PATH"`, true},
 
+		// pg2-e1rc7: THE new approvable shape — a component naming a variable this
+		// SAME COMMAND bound, earlier, to a `mktemp -d` fresh temp dir. Mirrors
+		// isHermeticHomeReplacement's identical seam, now also read for PATH's
+		// EXTEND shape (measured real-corpus idiom: a scratch/stub bin dir built
+		// from a fresh temp dir and prepended onto PATH).
+		{`STUB_DIR=$(mktemp -d); PATH="$STUB_DIR:$PATH"`, true},
+		{`T=$(mktemp -d); PATH="$T/bin:$PATH"`, true},
+		{`TB=$(mktemp -d /tmp/v3bin.XXXXXX); PATH="$TB/bin:$PATH"`, true},
+
 		// pg2-d71my: THE two new approvable shapes, per the 2026-08-17 ruling.
 		// isHermeticEnvReplacement — a static, reasonable REPLACEMENT under a
 		// hermetic `env -i`, where there is no caller value left to preserve.
@@ -2191,10 +2324,27 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`PATH="$bindir:$PATH"`, false},
 		// A DIFFERENT name was bound; $bindir itself was not.
 		{`other=/tmp/x/bin; PATH="$bindir:$PATH"`, false},
-		// The in-command literal binding is REVOKED by a later non-literal
-		// reassignment of the SAME name (cmdparse.InCommandVars' revocation rule) —
+		// The in-command literal binding is REVOKED by a later reassignment of the
+		// SAME name to something that is NEITHER a literal NOR a fresh temp dir
+		// (cmdparse.InCommandVars'/InCommandTempDirVars' shared revocation rule) —
 		// the seam's existing fail-safe behaviour must carry through this wiring.
-		{`bindir=/tmp/x/bin; bindir=$(mktemp -d); PATH="$bindir:$PATH"`, false},
+		// (Reassigning to a genuine `mktemp -d` instead correctly DOES approve now —
+		// see TestEnvVars_FreshTempDirComponent_Approve's own revocation-then-rebind
+		// case.)
+		{`bindir=/tmp/x/bin; bindir=$(date +%s); PATH="$bindir:$PATH"`, false},
+
+		// pg2-e1rc7: the new fresh-temp-dir middle option MUST NOT widen beyond its
+		// own narrow gate.
+		// Ambient: never assigned anywhere in this command, so it is indistinguishable
+		// from any other unresolvable variable — exactly the pg2-qhhil contrast above.
+		{`PATH="$STUB_DIR:$PATH"`, false},
+		// A literal PREFIX before the var is refused: nothing here can vouch that
+		// "prefix" + <unknown fresh dir> is itself absolute.
+		{`T=$(mktemp -d); PATH="prefix$T:$PATH"`, false},
+		// `mktemp` WITHOUT `-d` creates a FILE, not a directory — not a hermetic dir
+		// for a PATH entry any more than it is for HOME (see the existing
+		// `HOME=$(mktemp)` row above).
+		{`T=$(mktemp); PATH="$T:$PATH"`, false},
 
 		// pg2-5jj3m: ENV was demoted from Reject to a decisive Ask. The demotion must
 		// NOT have moved it into the value-aware Approve band — no value shape, not even
