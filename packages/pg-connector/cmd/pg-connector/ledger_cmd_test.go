@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -101,16 +102,26 @@ func TestRun_LedgerShow_ConsumerFilterNarrowsPositionsNotWhichLedgersMatch(t *te
 	}
 }
 
-// TestRun_LedgerClear_RemovesFileAndShowAfterwardShowsNothing covers
-// "ledger clear --type pr --backend pg-connector-pr-github removes that
-// key's on-disk ledger file and ledger show afterward shows nothing for
-// it."
-func TestRun_LedgerClear_RemovesFileAndShowAfterwardShowsNothing(t *testing.T) {
+// TestLedgerClear_RemovesFileAndShowAfterwardShowsNothing covers "ledger
+// clear --type pr --backend pg-connector-pr-github removes that key's
+// on-disk ledger file and ledger show afterward shows nothing for it,"
+// AND (phase 14, bead pg2-2j5ac.42.4) that the same call also drops the
+// matching CacheKey's own on-disk cache file, reporting it in the
+// result's ClearedCache field. Renamed from
+// TestRun_LedgerClear_RemovesFileAndShowAfterwardShowsNothing so this
+// packet's own validation command (`-run 'TestCache|TestLedgerClear'`)
+// selects it; no existing assertion was removed, only extended.
+func TestLedgerClear_RemovesFileAndShowAfterwardShowsNothing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
 
 	key := LedgerKey{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine"}
 	seedLedger(t, key, &Ledger{Entries: map[string]LedgerEntry{}, Version: 1, Consumers: map[string]ConsumerState{}})
+
+	cacheKey := CacheKey{Type: "pr", Backend: "pg-connector-pr-github"}
+	seedCache(t, cacheKey, &Cache{Entries: map[string]CacheEntry{
+		"o/r#1": {Content: []byte(`{"id":"o/r#1"}`), AsOf: time.Now().UTC()},
+	}})
 
 	stdout, _, code := executePr(t, []string{"ledger", "clear", "--type", "pr", "--backend", "pg-connector-pr-github"})
 	if code != 0 {
@@ -120,6 +131,9 @@ func TestRun_LedgerClear_RemovesFileAndShowAfterwardShowsNothing(t *testing.T) {
 	if len(cleared.Cleared) != 1 || cleared.Cleared[0].Backend != "pg-connector-pr-github" {
 		t.Fatalf("Cleared = %+v, want the one matching key", cleared.Cleared)
 	}
+	if len(cleared.ClearedCache) != 1 || cleared.ClearedCache[0].Type != "pr" || cleared.ClearedCache[0].Backend != "pg-connector-pr-github" {
+		t.Fatalf("ClearedCache = %+v, want the one matching cache key", cleared.ClearedCache)
+	}
 
 	stdout2, _, code2 := executePr(t, []string{"ledger", "show", "--type", "pr", "--backend", "pg-connector-pr-github"})
 	if code2 != 0 {
@@ -128,6 +142,52 @@ func TestRun_LedgerClear_RemovesFileAndShowAfterwardShowsNothing(t *testing.T) {
 	rows := decodeLedgerShowRows(t, stdout2)
 	if len(rows) != 0 {
 		t.Fatalf("rows after clear = %+v, want empty", rows)
+	}
+
+	cacheKeysAfter, err := ListCacheKeys()
+	if err != nil {
+		t.Fatalf("ListCacheKeys: %v", err)
+	}
+	if len(cacheKeysAfter) != 0 {
+		t.Fatalf("cache keys after clear = %+v, want none left", cacheKeysAfter)
+	}
+}
+
+// TestLedgerClear_UnconditionalEvenWhenTypeOptedOutOfCaching proves
+// ledger clear's cache-dropping extension is UNCONDITIONAL: it does not
+// consult cacheEnabled/opt-outs before dropping a matching cache file, so
+// a since-opted-out type's stale cache still gets cleared [design: docket
+// design field, "Binding decisions"].
+func TestLedgerClear_UnconditionalEvenWhenTypeOptedOutOfCaching(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	key := LedgerKey{Type: "pr", Backend: "b", Query: "mine"}
+	seedLedger(t, key, &Ledger{Entries: map[string]LedgerEntry{}, Version: 1, Consumers: map[string]ConsumerState{}})
+
+	cacheKey := CacheKey{Type: "pr", Backend: "b"}
+	seedCache(t, cacheKey, &Cache{Entries: map[string]CacheEntry{
+		"o/r#1": {Content: []byte(`{"id":"o/r#1"}`), AsOf: time.Now().UTC()},
+	}})
+
+	// Opt "pr" out of caching entirely via the same state: key
+	// cacheEnabled consults.
+	reg, err := parseRegistry([]byte("connector:\n  pr:\n    - b\nstate:\n  cache_disabled_types: pr\n"), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	enabled, err := cacheEnabled(context.Background(), reg, "pr", "b")
+	if err != nil || enabled {
+		t.Fatalf("cacheEnabled = (%v, %v), want (false, nil) — precondition for this test", enabled, err)
+	}
+
+	stdout, _, code := executePr(t, []string{"ledger", "clear", "--type", "pr", "--backend", "b"})
+	if code != 0 {
+		t.Fatalf("clear: exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	cleared := decodeLedgerClearResult(t, stdout)
+	if len(cleared.ClearedCache) != 1 {
+		t.Fatalf("ClearedCache = %+v, want the opted-out type's stale cache cleared anyway", cleared.ClearedCache)
 	}
 }
 

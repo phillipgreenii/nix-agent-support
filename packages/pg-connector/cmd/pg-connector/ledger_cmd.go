@@ -167,15 +167,24 @@ type ledgerClearRow struct {
 	Query   string `json:"query"`
 }
 
+// ledgerClearResult reports both sets of keys "ledger clear" actually
+// removed: the matching ledger files (Cleared, unchanged since phase 8)
+// AND, as of phase 14 (bead pg2-2j5ac.42.4), every matching cache key
+// dropped alongside them (ClearedCache) — a second, distinct field
+// rather than folding CacheKey's two fields into ledgerClearRow/
+// LedgerKey's three-field shape, which cannot represent a two-field
+// CacheKey without a schema lie [design: docket design field, "Contract",
+// "Produces"].
 type ledgerClearResult struct {
-	Cleared []ledgerClearRow `json:"cleared"`
+	Cleared      []ledgerClearRow `json:"cleared"`
+	ClearedCache []cacheClearRow  `json:"cleared_cache"`
 }
 
 func newLedgerClearCmd() *cobra.Command {
 	var typ, backend, query string
 	cmd := &cobra.Command{
 		Use:   "clear",
-		Short: "Delete the on-disk ledger file(s) matching the given filters entirely",
+		Short: "Delete the on-disk ledger file(s) matching the given filters entirely, and every matching cache file alongside them",
 		Args:  cobra.NoArgs,
 	}
 	cmd.Flags().StringVar(&typ, "type", "", "filter to this entity type")
@@ -194,19 +203,46 @@ func newLedgerClearCmd() *cobra.Command {
 			}
 			result.Cleared = append(result.Cleared, ledgerClearRow(k))
 		}
+
+		// ledger clear's extended behavior (bead pg2-2j5ac.42.4): also
+		// drop every CacheKey whose (Type, Backend) matches the SAME
+		// --type/--backend filter — query is ignored for the cache side,
+		// since CacheKey has no query dimension at all. This is
+		// UNCONDITIONAL: it does not check cacheEnabled/opt-outs first,
+		// since "drop the on-disk state matching this filter" is an
+		// operator-issued reset regardless of whether caching is
+		// currently opted in for that type/backend [design: docket design
+		// field, "Binding decisions"].
+		cacheKeys, err := ListCacheKeys()
+		if err != nil {
+			return err
+		}
+		matchedCache := filterCacheKeys(cacheKeys, typ, backend)
+		result.ClearedCache = make([]cacheClearRow, 0, len(matchedCache))
+		for _, k := range matchedCache {
+			if err := deleteCache(k); err != nil {
+				return err
+			}
+			result.ClearedCache = append(result.ClearedCache, cacheClearRow(k))
+		}
+
 		return writeFanOutResult(cmd, result, 0, func() string { return humanizeLedgerClearResult(result) })
 	}
 	return cmd
 }
 
 func humanizeLedgerClearResult(result ledgerClearResult) string {
-	if len(result.Cleared) == 0 {
-		return "ledger clear: (no matching ledgers)"
+	if len(result.Cleared) == 0 && len(result.ClearedCache) == 0 {
+		return "ledger clear: (no matching ledgers or caches)"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "cleared (%d):\n", len(result.Cleared))
+	fmt.Fprintf(&b, "cleared ledgers (%d):\n", len(result.Cleared))
 	for _, c := range result.Cleared {
 		fmt.Fprintf(&b, "  %s/%s/%s\n", c.Type, c.Backend, c.Query)
+	}
+	fmt.Fprintf(&b, "cleared caches (%d):\n", len(result.ClearedCache))
+	for _, c := range result.ClearedCache {
+		fmt.Fprintf(&b, "  %s/%s\n", c.Type, c.Backend)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

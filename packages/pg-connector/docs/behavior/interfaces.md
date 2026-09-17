@@ -147,7 +147,7 @@ degraded-outcome accounting) unless EVERY registered backend of the type answers
 the umbrella fails the whole call as its own `invalid_argument` CLI-level failure (`INV-ERR-3`).
 `changes` (below) reuses this exact classification unchanged.
 
-### `changes` / `ledger show` / `ledger clear` — the delta ledger's CLI surface
+### `changes` / `ledger show` / `ledger clear` / `cache show` / `cache clear` — the delta ledger's and entity cache's CLI surface
 
 `changes` (`pr` and `issue` only, wired as a subcommand of each type's own verb group exactly like
 `list` — see this repo's `changes.go` header comment for why `thread`, named alongside `pr`/`issue`
@@ -179,6 +179,23 @@ source, entity}]}` — `change` is one of `added`/`changed`/`removed`. As of pha
   exit `0`. `show` prints each matching ledger's cursor, entity-index size, version, and
   consumer-position(s) (`--consumer` narrows which consumer's position is printed, without
   narrowing which ledgers match); `clear` deletes the matching ledger file(s) entirely.
+- `pg-connector cache show [--type] [--backend]` and `pg-connector cache clear [--type] [--backend]`
+  (phase 14, bead `pg2-2j5ac.42.4`) are the same PARTIAL-filter inspection/reset pair as
+  `ledger show`/`ledger clear`, applied to the umbrella entity cache (`cache.go`) instead of the
+  delta ledger: a `CacheKey` has no `Query` field (one cache file per `(type, backend)` only), so
+  neither verb accepts `--query`. Neither ever dispatches to a backend either — both always exit
+  `0`, and an empty filter match is an empty result list, never an error. `cache show` prints each
+  matching key's live and tombstoned entry counts, reported separately; `cache clear` deletes the
+  matching cache file(s) entirely and reports exactly which keys were cleared.
+- `pg-connector ledger clear`'s deletion, as of the same phase-14 bead, ALSO drops every `CacheKey`
+  whose `(Type, Backend)` matches the same `--type`/`--backend` filter (`--query` has no cache-side
+  equivalent and is ignored for that half of the call) — an operator running `ledger clear --type pr`
+  resets both the delta ledger AND the entity cache for every `pr` backend in one call. This is
+  UNCONDITIONAL: it does not consult `cacheEnabled`'s opt-out checks first, since "drop the on-disk
+  state matching this filter" is an operator-issued reset regardless of whether caching is
+  currently opted in for that type/backend. `ledger clear`'s own response now reports both sets of
+  cleared keys distinctly (`cleared` for ledger keys, `cleared_cache` for cache keys) rather than
+  merging the narrower `CacheKey` shape into the three-field ledger-key rows.
 
 ### Stale fallback — serving `show`/`list`/`changes` from the umbrella entity cache
 
@@ -306,9 +323,10 @@ detect`); invoke a **fan-out** op across every backend registered for a capabili
   `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`), across every backend
   registered under the top-level `attention.sources`/`search.sources` keys (`attention list`,
   `search <query>`), or across every backend registered for **any** entity-type capability
-  (`config validate`); inspect or reset the on-disk delta ledger directly, with no backend dispatch
-  at all (`ledger show`, `ledger clear` — see "`changes`/`ledger show`/`ledger clear`" below); and
-  choose the CLI's own presentation mode (`--output json|human`, a persistent flag inherited by
+  (`config validate`); inspect or reset the on-disk delta ledger or the umbrella entity cache
+  directly, with no backend dispatch at all (`ledger show`, `ledger clear`, `cache show`,
+  `cache clear` — see "`changes`/`ledger show`/`ledger clear`/`cache show`/`cache clear`" below);
+  and choose the CLI's own presentation mode (`--output json|human`, a persistent flag inherited by
   every verb group).
 - **Registry resolution.** Every `pr`/`issue`/`ci`/`scm` verb resolves its target backend(s) from
   the `connector.<type>` registry (`INV-REG-1`) before dispatching — `attention list`/`search`
@@ -430,6 +448,16 @@ sequenceDiagram
   other cache-write/read failure on this path is swallowed as best-effort (never turning a
   successful live read into a reported failure) and so surfaces nowhere at all, matching bead
   `pg2-2j5ac.42.2`'s own identical binding decision for `show`/`list`/`changes`. Feeds the
+  observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.42.4).** The `cache show`/`cache clear` verb group
+  (`cache_cmd.go`) and `ledger clear`'s extended cache-dropping behavior (`ledger_cmd.go`) emit
+  nothing over OpenTelemetry or Prometheus and write no structured logs of their own —
+  pg-connector still has no telemetry emitter anywhere in this module (unchanged from every
+  telemetry note above). Like `ledger show`/`ledger clear` before them (bead `pg2-2j5ac.30.2`'s
+  own telemetry note above), neither verb ever dispatches to a backend, so a `cache show`/
+  `cache clear`/`ledger clear` failure surfaces only as a plain CLI error — there is no
+  `sources[]` row or fan-out exit code for it to attach to. Nothing here writes to stderr beyond
+  the ordinary error propagation every other verb in this catalog already has. Feeds the
   observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
