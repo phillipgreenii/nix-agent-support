@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -134,6 +136,23 @@ func runDispatch(args []string) int {
 
 	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload)}
 	deps := buildDeps(cfg)
+	// Stamp a fresh per-attempt ExternalID here — the call the old monolithic
+	// internal/orchestrator made before invoking the ccpool executor
+	// in-process, and which the Phase 5 participant extraction (docket
+	// pg2-oju6w) never replaced (pg2-nmpvs): executor.Deps.ExternalID's own
+	// doc comment says "resolved ONCE by the orchestrator", and this dispatch
+	// subcommand IS that orchestrator now. Role.ExternalID's own doc comment
+	// ("the stamp makes it unique per attempt") is why this is stamped fresh
+	// per call rather than cached on cfg/role — a redelivered/retried dispatch
+	// of the same (role, bead) must not reuse a prior attempt's id (the
+	// "reuse existing session" path in internal/executor/ccpool.go's
+	// absorbDuplicate re-derives its own id from the EXISTING session's own
+	// ExternalID instead, so it never reads this fresh stamp). The clock is
+	// deps.Now — the SAME seam ccpoolRun's own wait/watchdog logic reads
+	// (internal/executor/executor.go) — rather than an independent time.Now()
+	// call, so a caller that fakes Deps.Now for a deterministic test gets one
+	// consistent clock, not two.
+	deps.ExternalID = stampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
 	result, err := executor.For(role.Type).Dispatch(context.Background(), dctx, deps)
 	if err != nil {
 		writeErrorReply(os.Stdout, err.Error())
@@ -166,6 +185,33 @@ func runDispatch(args []string) int {
 		"outcome":       string(outcomeJSON),
 	})
 	return conformance.ExitOK
+}
+
+// externalIDStampLayout is the per-attempt ccpool ExternalID's timestamp
+// layout. This module's own internal/dtest.TestStamp fixture
+// ("20260616T010203") already reserves the second-precision "20060102T150405"
+// layout as this codebase's stamp-generation convention (matching
+// internal/ccpool/cli_test.go's "pg-router-worker-zr-1-20260616T010203"
+// fixture) — reused here rather than inventing an unrelated format — with
+// nanosecond precision appended so two attempts stamped within the same
+// wall-clock second still mint distinct ids; a bare second-resolution stamp
+// cannot promise that on its own.
+const externalIDStampLayout = "20060102T150405.000000000"
+
+// stampExternalID builds role's per-attempt ccpool ExternalID
+// (roles.Role.ExternalID's own documented <prefix><name>-<beadid>-<stamp>
+// shape), stamping it fresh from now on every call (pg2-nmpvs). now nil
+// (buildDeps never sets Deps.Now in production) defaults to time.Now,
+// mirroring executor.Deps.Now's own "clock seam; nil ⇒ time.Now" doc
+// comment — Deps' own clock() method implementing that default is
+// unexported, so this package (main) cannot call it directly and
+// re-implements the same nil-check here instead of inventing a second,
+// independent clock seam.
+func stampExternalID(role roles.Role, prefix, beadID string, now func() time.Time) string {
+	if now == nil {
+		now = time.Now
+	}
+	return role.ExternalID(prefix, beadID, now().UTC().Format(externalIDStampLayout))
 }
 
 // buildDeps wires the executor.Deps seam bag for production use from cfg:
