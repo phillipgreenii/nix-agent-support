@@ -151,6 +151,68 @@ func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// bead pg2-8o2cg: BD_JSON_ENVELOPE must never depend on the ambient
+// environment — see runner.go's withBDJSONEnvelope/envBDJSONEnvelope doc
+// comments for the confirmed, reproduced root cause (a LaunchAgent's
+// environment never carries it, so this backend's own decodeBDEnvelope,
+// which has no bare-shape fallback, silently degraded to
+// "backend unavailable").
+// ----------------------------------------------------------------------
+
+// TestCLIRunner_Command_DefaultEnv_SetsBDJSONEnvelope is the regression
+// test for the reported defect: when r.Env is unset (the production
+// default via NewCLIRunner), command() must not leave cmd.Env nil — a nil
+// Env makes the exec'd bd child inherit whatever ambient environment this
+// process happens to have, which is exactly the bug. BD_JSON_ENVELOPE=1
+// must be present exactly once regardless of what the real os.Environ()
+// contains.
+func TestCLIRunner_Command_DefaultEnv_SetsBDJSONEnvelope(t *testing.T) {
+	r := &CLIRunner{Dir: "/some/workspace"}
+	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	if cmd.Env == nil {
+		t.Fatal("cmd.Env is nil: the exec'd bd child would inherit the ambient environment, which is the pg2-8o2cg defect")
+	}
+	count := 0
+	for _, kv := range cmd.Env {
+		if kv == "BD_JSON_ENVELOPE=1" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("cmd.Env contains BD_JSON_ENVELOPE=1 %d times, want exactly 1 (env=%v)", count, cmd.Env)
+	}
+}
+
+// TestCLIRunner_Command_DefaultEnv_OverridesConflictingAmbientValue proves
+// withBDJSONEnvelope REPLACES a pre-existing entry rather than merely
+// appending after it — an append-only fix would leave the effective value
+// up to getenv's own first-match-wins scan order if the ambient
+// environment ever carried a conflicting BD_JSON_ENVELOPE value.
+func TestCLIRunner_Command_DefaultEnv_OverridesConflictingAmbientValue(t *testing.T) {
+	t.Setenv("BD_JSON_ENVELOPE", "0")
+	r := &CLIRunner{Dir: "/some/workspace"}
+	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "BD_JSON_ENVELOPE=") && kv != "BD_JSON_ENVELOPE=1" {
+			t.Fatalf("cmd.Env carries a non-1 BD_JSON_ENVELOPE entry: %q (env=%v)", kv, cmd.Env)
+		}
+	}
+}
+
+// TestCLIRunner_Command_ExplicitEnv_NotAugmented locks in that an
+// explicit r.Env (the test-isolation seam every other CLIRunner test in
+// this file relies on, and the one production round-trip test in
+// realbd_test.go) is used exactly as given — command() injects the
+// default envelope pin only when r.Env is nil.
+func TestCLIRunner_Command_ExplicitEnv_NotAugmented(t *testing.T) {
+	r := &CLIRunner{Dir: "/some/workspace", Env: []string{"FOO=bar"}}
+	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	if len(cmd.Env) != 1 || cmd.Env[0] != "FOO=bar" {
+		t.Fatalf("cmd.Env = %v, want exactly the explicit override [FOO=bar]", cmd.Env)
+	}
+}
+
 // TestCLIRunner_Run_CapsStderr is the regression test for bead pg2-332z8
 // #26: before TruncateForFold, Run folded bd's ENTIRE captured stderr into
 // the returned error with no bound — a runaway or unexpectedly verbose bd

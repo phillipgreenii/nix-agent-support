@@ -141,7 +141,13 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 // cleanBDEnv strips BEADS_DIR/WORKSPACE_ROOT so the disposable workspace
 // created above cannot accidentally bind to this machine's real beads
 // workspace or shared dolt server — mirroring
-// packages/pg-pr/pkg/beads/contract_test.go's buildCleanEnv.
+// packages/pg-pr/pkg/beads/contract_test.go's buildCleanEnv. It also pins
+// BD_JSON_ENVELOPE=1 explicitly (via withBDJSONEnvelope) rather than
+// trusting the test-runner's own ambient environment to carry it — the
+// exact ambient-dependence bead pg2-8o2cg reports for production — so
+// this contract test stays green even when run somewhere that doesn't
+// export it (e.g. a stripped CI shell), not only in an interactive dev
+// shell where home-manager already exports it.
 func cleanBDEnv() []string {
 	out := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
@@ -155,5 +161,5 @@ func cleanBDEnv() []string {
 		}
 		out = append(out, kv)
 	}
-	return out
+	return withBDJSONEnvelope(out)
 }

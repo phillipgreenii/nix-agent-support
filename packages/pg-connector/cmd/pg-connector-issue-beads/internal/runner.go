@@ -78,6 +78,41 @@ const EnvWorkspaceDir = "PG_CONNECTOR_ISSUE_BEADS_DIR"
 // backend separately.
 const envBeadsDir = "BEADS_DIR"
 
+// envBDJSONEnvelope is the flag this backend's own bd.go/decodeBDEnvelope
+// strictly requires: unlike the sibling bd-shelling clients in this repo
+// (packages/pg-router-ccpool-handler/internal/beads and
+// packages/pg-pr/pkg/beads, both deliberately tolerant of the legacy bare
+// array/object shape too), decodeBDEnvelope here has NO bare-shape
+// fallback — a bare `bd --json` response fails to unmarshal into its
+// {"data":...} envelope struct outright. Bead pg2-8o2cg: this backend is
+// exec'd several process layers under a ZR LaunchAgent
+// (com.phillipg.pg-router-daemon -> pg-router -> pg-router-source-pg-connector
+// -> pg-connector -> this binary), whose environment never carries
+// BD_JSON_ENVELOPE=1 (that var is exported only via home-manager's
+// interactive-shell hm-session-vars.sh — see home/programs/beads's own
+// "Stopgap until BD_JSON_ENVELOPE becomes the bd default" comment) — so
+// relying on the ambient/inherited environment for it is the confirmed,
+// reproduced root cause. Pin it explicitly instead, mirroring
+// packages/pb/internal/bd.bdEnv()'s identical "pin the envelope rather
+// than rely on ambient" rationale for the exact same flag.
+const envBDJSONEnvelope = "BD_JSON_ENVELOPE=1"
+
+// withBDJSONEnvelope returns base with envBDJSONEnvelope set exactly
+// once: any pre-existing BD_JSON_ENVELOPE=... entry is dropped first, not
+// merely appended after, so the exec'd bd process can never see two
+// conflicting entries whose effective value would otherwise depend on
+// getenv's own first-match-wins scan order.
+func withBDJSONEnvelope(base []string) []string {
+	out := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		if strings.HasPrefix(kv, "BD_JSON_ENVELOPE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, envBDJSONEnvelope)
+}
+
 // ErrWorkspaceNotConfigured is returned when neither EnvWorkspaceDir nor
 // bd's own $BEADS_DIR is set. Refusing outright here — rather than falling
 // back to the exec'd process's inherited cwd, the actual defect bead
@@ -113,10 +148,16 @@ type CLIRunner struct {
 	// themselves via ResolveWorkspaceDir on every call rather than
 	// defaulting to the inherited cwd.
 	Dir string
-	// Env overrides the env block for the exec'd `bd` process. If nil, the
-	// process env is used. Tests use this to point a disposable per-test bd
-	// workspace without leaking BEADS_DIR/WORKSPACE_ROOT from the outer
-	// environment.
+	// Env overrides the env block for the exec'd `bd` process. If nil (the
+	// production default via NewCLIRunner), command() below uses the
+	// process env with BD_JSON_ENVELOPE=1 pinned on top (see
+	// withBDJSONEnvelope; bead pg2-8o2cg) rather than the ambient
+	// environment verbatim — a bare nil Env would otherwise leave whether
+	// this backend's own bd calls parse at all up to whatever launchd/cron/
+	// shell context happened to exec this process. Tests set this
+	// explicitly to point a disposable per-test bd workspace without
+	// leaking BEADS_DIR/WORKSPACE_ROOT from the outer environment; an
+	// explicit Env is used exactly as given, with no envelope injection.
 	Env []string
 	// Getenv resolves EnvWorkspaceDir/BEADS_DIR when Dir is unset. Optional
 	// — nil means os.Getenv. This is deliberately separate from Env (which
@@ -160,6 +201,13 @@ func (r *CLIRunner) command(ctx context.Context, dir string, args []string) *exe
 	cmd.Dir = dir
 	if r.Env != nil {
 		cmd.Env = r.Env
+	} else {
+		// bead pg2-8o2cg: do not leave cmd.Env nil here — a nil Env makes
+		// the exec'd bd process inherit whatever ambient environment this
+		// backend's own process happens to have (a LaunchAgent's, in the
+		// reported case), which never carries BD_JSON_ENVELOPE=1. Pin it
+		// explicitly on top of the real process env instead.
+		cmd.Env = withBDJSONEnvelope(os.Environ())
 	}
 	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
 	// even though ctx already carries a deadline (a `bd` blocked on a
