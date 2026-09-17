@@ -14,6 +14,20 @@
   # mirroring pg-desk's own local-replace comment) — no explicit pass needed
   # at the callPackage site, same as jq above.
   pg-connector,
+  # pg-connector's own Tier-2 backend binaries (bead pg2-sh024's follow-up:
+  # even with `pg-connector` itself on PATH, pg-connector in turn execs one
+  # of these, by name, as a SECOND nested subprocess — ambient $PATH plugin
+  # discovery per ADR 0062 — whenever a `command`-type source actually
+  # queries it. That second-level exec inherits pg-router's PATH exactly as
+  # `pg-connector` itself does, so every backend pg-connector can dispatch to
+  # must also be on THIS wrapper's PATH. Each resolves automatically via
+  # callPackage against the matching `final.pg-connector-*` overlay entry,
+  # same as `pg-connector` above.
+  pg-connector-pr-github,
+  pg-connector-ci-github-actions,
+  pg-connector-issue-beads,
+  pg-connector-issue-jira,
+  pg-connector-scm-git,
 }:
 
 mkGoApp {
@@ -96,6 +110,20 @@ mkGoApp {
   #             `ps eww`, had ccpool/bd/pg-pr/jq but no pg-connector bin
   #             dir, so every producer tick for those sources failed with
   #             "exec: pg-connector: executable file not found in $PATH").
+  #   pg-connector-pr-github/-ci-github-actions/-issue-beads/-issue-jira/
+  #   -scm-git -> pg-connector's own Tier-2 backend binaries (ADR 0062),
+  #             which `pg-connector` itself execs by name (again ambient
+  #             $PATH plugin discovery, again inheriting THIS wrapper's
+  #             PATH) once a query actually reaches it. Even with the
+  #             pg2-sh024 fix above landed and applied, the live daemon's
+  #             PATH still lacked every one of these — confirmed live via
+  #             `env -i PATH=<daemon PATH> pg-connector issue list ...`
+  #             reproducing `{"status":"degraded","reason":"scriptout:
+  #             pg-connector-issue-beads: exec: \"pg-connector-issue-beads\":
+  #             executable file not found in $PATH"}` — so EVERY producer
+  #             tick still failed, including the GitHub-backed sources
+  #             (pr-mine/pr-team/pr-sweep need pg-connector-pr-github), not
+  #             just the bd-backed ones pg2-sh024 already fixed.
   #
   # `gh` was removed here (pg2-n75tk): it existed solely to back the typed
   # `github-issues` source, which is gone — the boundary principle (Core must
@@ -113,6 +141,11 @@ mkGoApp {
         pg-pr
         jq
         pg-connector
+        pg-connector-pr-github
+        pg-connector-ci-github-actions
+        pg-connector-issue-beads
+        pg-connector-issue-jira
+        pg-connector-scm-git
       ]
     }
   '';
