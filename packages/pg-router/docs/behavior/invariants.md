@@ -391,3 +391,9 @@ sequenceDiagram
   make **every** new kind a core change while the goal still read as satisfied. A downstream
   deployment set states the same requirement from its own side and cites this goal rather than
   restating it.
+
+  The Scope's Floor bullet's adjacent tool-naming clause carries one permanent, named exception
+  (`claude`/`bd`/`ccpool`); that exception is about **naming** a fixed executor stack directly in
+  the contract surface, not about **where** its behavior is realized, so it does not loosen this
+  goal's behind-an-interface requirement — a participant implementation still belongs in a
+  downstream deployment set, exception or not.
