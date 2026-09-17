@@ -2101,6 +2101,19 @@ type EnvAssignment struct {
 	Expansion ExpansionKind
 }
 
+// LoopVarBinding names a for/select loop's iteration variable together with
+// EVERY literal value its word list can bind it to — pg2-jk1t5, extending the
+// pg2-yeli3 in-command-literal seam to a for-loop's own iteration variable,
+// which cmdparse never modeled at all before this bead. Values holds one
+// entry per word in the loop's `in` list, in source order (duplicates kept,
+// since a duplicate word is a real possible binding); it is populated only
+// when shellparse.go's lowerLoop proved every word literal — see that
+// function's doc for exactly which shapes qualify.
+type LoopVarBinding struct {
+	Name   string
+	Values []string
+}
+
 type ParsedCommand struct {
 	Executable string
 	Args       []string
@@ -2200,6 +2213,34 @@ type ParsedCommand struct {
 	// The zero value (nil) is top-level, matching PipelineID's zero-value
 	// convention of meaning "no special scoping applies".
 	SubshellScope []int
+	// LoopVars is the chain of ENCLOSING for/select loop iteration-variable
+	// bindings whose Do body this leaf was lowered from, OUTERMOST to
+	// INNERMOST (pg2-jk1t5) — empty for a leaf lowered outside any loop, or
+	// inside a loop whose word list could not be proven literal (see
+	// shellparse.go's lowerLoop doc for exactly which shapes qualify: a
+	// C-style loop, `for x; do …`, or any word carrying a live expansion or
+	// non-literal text all leave this nil, exactly as if this bead did not
+	// exist).
+	//
+	// Like SubshellScope it is stamped ONCE, at leaf-emission time
+	// (appendLeaf), from an IMMUTABLE COPY of the walk's current loop-var
+	// stack — never the live slice — because that stack is mutated
+	// (grown/shrunk) throughout the rest of the walk.
+	//
+	// A name that recurs (a nested loop reusing the outer loop's own
+	// variable name) is intentionally kept as TWO entries rather than
+	// collapsed: the INNER (later) entry is the one whose scope is actually
+	// open at this leaf, so a consumer folding this chain into a lookup map
+	// (InCommandLoopVars) MUST let a later entry overwrite an earlier one of
+	// the same name — the same "nearer wins" rule OverlayVars already
+	// applies for subshell/base-vs-local merges.
+	//
+	// UNLIKE SubshellScope, this is NOT a scoping-visibility path consulted
+	// by InCommandVars' earlier-leaf walk: a loop's iteration variable is
+	// never WRITTEN by a sibling leaf, so the seam that reads it
+	// (InCommandLoopVars) is a direct accessor on THIS leaf, not a scan over
+	// earlier ones.
+	LoopVars []LoopVarBinding
 	// Substitutions are this leaf's OWN top-level command/process substitutions
 	// — found in its args and redirection targets, but NEVER in a leading
 	// assignment's value (that is the static classifyExpansion path, pg2-gkd5e;

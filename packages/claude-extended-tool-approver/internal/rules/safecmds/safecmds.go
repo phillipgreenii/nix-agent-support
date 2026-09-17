@@ -336,7 +336,10 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// the sibling rules' own placement and keep the leaf-index bookkeeping in one
 		// place; the cost of an unused overlay on a leaf that never reaches
 		// readPathIssue is one cheap map-shaped no-op.
-		vars := primarycommit.LeafVars(input.InCommandVars, parsed, i)
+		vars := cmdparse.MergeInCommandVars(
+			primarycommit.LeafVars(input.InCommandVars, parsed, i),
+			cmdparse.InCommandLoopVars(parsed, i),
+		)
 		if alwaysSafe[basename] || lspServices[basename] {
 			continue
 		}
@@ -1137,22 +1140,30 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 //
 // The variable's value is NOT unknowable here: it is assigned, as a literal, by an
 // EARLIER LEAF of this SAME command string. vars is that in-command environment —
-// primarycommit.LeafVars(input.InCommandVars, parsed, i) at the call site, the
-// identical pg2-wq3ki InCommandVars/ExpandInCommand seam pg2-qhhil wired into
-// envvars' preservesCallerValue and pg2-eqacu wired into primarycommit's own
-// inspectCommit. Before returning the Abstain below, a candidate that trips
-// argHasDynamicExpansion is first offered to cmdparse.ExpandInCommand(cand, vars):
-// on ok=true the RESOLVED literal is routed through the EXACT SAME zone check
-// (looksLikePath + pe.Evaluate(...).CanRead()) a literally-spelled path argument
-// already gets a few lines below — so a resolved-but-dangerous literal (`V=/etc/
-// shadow; cat $V`) is caught exactly as `cat /etc/shadow` would be, and the
-// zero-toward-allow invariant this whole function protects is unweakened.
+// cmdparse.MergeInCommandVars(primarycommit.LeafVars(input.InCommandVars, parsed,
+// i), cmdparse.InCommandLoopVars(parsed, i)) at the call site, the identical
+// pg2-wq3ki InCommandVars/ExpandInCommand seam pg2-qhhil wired into envvars'
+// preservesCallerValue and pg2-eqacu wired into primarycommit's own inspectCommit
+// — WIDENED by pg2-jk1t5 to also fold in a for-loop's own iteration-variable
+// binding(s), which is why vars is now MULTI-VALUED (map[string][]string) rather
+// than a single literal per name: a for-loop body executes once per word in its
+// list, and this seam cannot know statically which iteration produced the leaf
+// being judged, so it must examine ALL of them. Before returning the Abstain
+// below, a candidate that trips argHasDynamicExpansion is first offered to
+// cmdparse.ExpandInCommandMulti(cand, vars): on ok=true EVERY resolved literal is
+// routed through the EXACT SAME zone check (looksLikePath + pe.Evaluate(...).
+// CanRead()) a literally-spelled path argument already gets a few lines below, and
+// ALL of them must pass — so a resolved-but-dangerous literal (`V=/etc/shadow; cat
+// $V`, or a for-loop variant of the same shape) is caught exactly as `cat
+// /etc/shadow` would be, and the zero-toward-allow invariant this whole function
+// protects is unweakened.
 //
-// ExpandInCommand's contract is what keeps this narrow and safe: it is
+// ExpandInCommandMulti's contract is what keeps this narrow and safe: it is
 // ALL-OR-NOTHING (an ambient variable, an unresolvable name, a `$(...)`, a later
 // non-literal reassignment that REVOKES an earlier literal binding — see
-// cmdparse.InCommandVars' own doc for the revocation rule) and returns ok=false for
-// every one of them, falling straight through to the unchanged
+// cmdparse.InCommandVars' own doc for the revocation rule, or a for-loop word list
+// that itself carries a live expansion — see shellparse.go's lowerLoop) and returns
+// ok=false for every one of them, falling straight through to the unchanged
 // "has a dynamically-expanded path arg" refusal below. Nothing here widens WHICH
 // values can resolve — only WHETHER a value this seam already proves literal gets
 // tested instead of blindly refused. The PROGRAM-operand narrowing above (the
@@ -1169,7 +1180,7 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 // KNOWN, not merely unresolvable text, which is a substantive finding this
 // category deliberately excludes — see the category's own doc for why that
 // distinction is load-bearing for envvars' relief.
-func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool, vars map[string]string) (string, hookio.RefusalCategory) {
+func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, programLive bool, vars map[string][]string) (string, hookio.RefusalCategory) {
 	for _, a := range args {
 		// pg2-wxbr9: route through pathCandidate so a glued flag's VALUE (not
 		// just a bare positional) is tested — see pathCandidate's doc. `program`
@@ -1206,13 +1217,20 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 			// contract — see this function's doc). An ambient variable, an
 			// unknown name, or a revoked/non-literal binding all report ok=false
 			// and fall straight through to the unchanged refusal.
-			if resolved, resolvedOK := cmdparse.ExpandInCommand(cand, vars); resolvedOK {
-				// resolved is now judged by the IDENTICAL test a literally-spelled
-				// argument gets below — same predicate, same PathEvaluator, same
-				// verdict a literal `resolved` would have produced.
-				if looksLikePath(resolved) {
-					if !pe.Evaluate(resolved).CanRead() {
-						return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
+			if resolvedList, resolvedOK := cmdparse.ExpandInCommandMulti(cand, vars); resolvedOK {
+				// pg2-jk1t5: cand may resolve to MORE THAN ONE literal text — a
+				// for-loop iteration variable's word list executes the body once
+				// per word, and this seam cannot know statically which iteration
+				// produced the leaf being judged, so EVERY resolved candidate is
+				// judged by the IDENTICAL test a literally-spelled argument gets
+				// below, and ALL of them must pass before the argument clears.
+				// A single-valued binding (the pre-pg2-jk1t5 shape) is exactly
+				// one candidate here, so this is behaviour-preserving for it.
+				for _, resolved := range resolvedList {
+					if looksLikePath(resolved) {
+						if !pe.Evaluate(resolved).CanRead() {
+							return "references unknown path " + resolved, hookio.RefusalCategoryUnspecified
+						}
 					}
 				}
 				continue

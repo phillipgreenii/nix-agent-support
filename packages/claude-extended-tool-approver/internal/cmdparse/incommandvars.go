@@ -557,6 +557,142 @@ func ExpandInCommand(word string, vars map[string]string) (string, bool) {
 	return b.String(), true
 }
 
+// InCommandLoopVars returns the MULTI-VALUED literal bindings that the
+// for/select loop(s) enclosing leaf `at`'s own Do body established for it
+// (pg2-jk1t5) — the loop-scoped counterpart to InCommandVars' single-valued,
+// earlier-leaf-write scan.
+//
+// It is DELIBERATELY NOT a scan over earlier leaves the way InCommandVars is:
+// a loop's iteration variable is never WRITTEN by any sibling leaf, it is a
+// property of the loop clause ENCLOSING this leaf, so the answer is read
+// directly off leaves[at].LoopVars — the chain shellparse.go's lowerLoop and
+// its *syntax.ForClause call site stamp at lowering time, outermost to
+// innermost. A name that recurs (a nested loop reusing the outer loop's own
+// variable name) is folded with the INNER — later — entry winning, mirroring
+// OverlayVars' "nearer wins" rule.
+//
+// nil when `at` is out of range or the leaf carries no loop binding at all
+// (not inside a loop, or inside one whose word list could not be proven
+// literal — see lowerLoop's own doc for exactly which shapes qualify), which
+// leaves every caller's verdict exactly as it was.
+func InCommandLoopVars(leaves []ParsedCommand, at int) map[string][]string {
+	if at < 0 || at >= len(leaves) {
+		return nil
+	}
+	bindings := leaves[at].LoopVars
+	if len(bindings) == 0 {
+		return nil
+	}
+	vars := make(map[string][]string, len(bindings))
+	for _, b := range bindings {
+		vars[b.Name] = b.Values
+	}
+	return vars
+}
+
+// MergeInCommandVars combines a single-valued literal environment (base —
+// InCommandVars' or primarycommit.LeafVars' own return) with a multi-valued
+// one (loopVars — InCommandLoopVars' own return) into the shape
+// ExpandInCommandMulti consumes. loopVars wins on a name both define: a
+// loop's own iteration variable is always NEARER than an outer plain
+// assignment of the same name — the identical "nearer wins" rule OverlayVars
+// already applies for subshell-vs-outer scoping. nil when both are empty,
+// matching every other "nothing to add" fast path in this file.
+func MergeInCommandVars(base map[string]string, loopVars map[string][]string) map[string][]string {
+	if len(base) == 0 && len(loopVars) == 0 {
+		return nil
+	}
+	merged := make(map[string][]string, len(base)+len(loopVars))
+	for k, v := range base {
+		merged[k] = []string{v}
+	}
+	for k, v := range loopVars {
+		merged[k] = v
+	}
+	return merged
+}
+
+// maxExpandInCommandMultiCandidates bounds ExpandInCommandMulti's cartesian
+// product. A for-loop's iteration variable is the only production source of
+// a multi-valued binding (pg2-jk1t5) and its word list is ordinarily a
+// handful of items, so this is not expected to bind in practice — it exists
+// only so a pathological input (several nested loops, or a hand-built test/
+// caller) cannot make this seam do unbounded work. Exceeding it returns
+// ok=false, the SAME direction as every other "cannot resolve" branch in
+// this function: the caller falls back to its existing refusal, never to a
+// silently truncated or unsound answer.
+const maxExpandInCommandMultiCandidates = 4096
+
+// ExpandInCommandMulti is ExpandInCommand's MULTI-VALUED sibling (pg2-jk1t5):
+// vars may bind a name to MORE THAN ONE literal value — the shape a
+// for-loop's iteration variable produces (InCommandLoopVars), where the loop
+// body executes once per word and this seam cannot know statically which
+// iteration produced the leaf being judged. It returns EVERY literal string
+// word could expand to — one per combination of each referenced
+// multi-valued name's values — under the SAME all-or-nothing contract
+// ExpandInCommand documents: anything this function cannot resolve — an
+// unknown name, a `$(…)`, a backtick, a glob, a leading `~`, `${NAME:-x}`,
+// `$1`, `$@`, a name whose value set is empty, or a combination count over
+// maxExpandInCommandMultiCandidates — returns ok=false and leaves the caller
+// on its existing fail-safe path. A name bound to exactly one value behaves
+// identically to ExpandInCommand's single-valued map (MergeInCommandVars is
+// the seam that puts a single-valued binding into this shape).
+//
+// The caller (safecmds.readPathIssue) MUST zone-check EVERY returned
+// candidate and require ALL of them to pass before treating the argument as
+// resolved-safe — this function only resolves the possible LITERAL TEXTS, it
+// makes no safety judgement of its own.
+func ExpandInCommandMulti(word string, vars map[string][]string) ([]string, bool) {
+	if !strings.Contains(word, "$") {
+		if !isLiteralWordText(word) {
+			return nil, false
+		}
+		return []string{word}, true
+	}
+	if len(vars) == 0 {
+		return nil, false
+	}
+	candidates := []string{""}
+	for i := 0; i < len(word); i++ {
+		switch b := word[i]; {
+		case b == '$':
+			name, end, ok := plainVarRef(word, i)
+			if !ok {
+				return nil, false
+			}
+			values, known := vars[name]
+			if !known || len(values) == 0 {
+				return nil, false
+			}
+			for _, v := range values {
+				if !isLiteralWordText(v) {
+					return nil, false
+				}
+			}
+			next := make([]string, 0, len(candidates)*len(values))
+			for _, cand := range candidates {
+				for _, v := range values {
+					next = append(next, cand+v)
+				}
+			}
+			if len(next) > maxExpandInCommandMultiCandidates {
+				return nil, false
+			}
+			candidates = next
+			i = end - 1
+		case b == '`' || b == '*' || b == '?':
+			return nil, false
+		case b == '~' && i == 0:
+			return nil, false
+		default:
+			for j, cand := range candidates {
+				candidates[j] = cand + string(b)
+			}
+		}
+	}
+	return candidates, true
+}
+
 // plainVarRef reads the parameter reference starting at s[at] (which MUST be '$') and
 // returns its NAME and the offset just past it. Only the two forms whose value is the
 // variable and nothing else are accepted: `$NAME` and `${NAME}`. Every other `$`

@@ -992,3 +992,183 @@ func TestOverlayVars(t *testing.T) {
 		}
 	})
 }
+
+// leafWithExecutable finds the first leaf whose Executable matches exec, for
+// tests below that need the loop BODY leaf's index rather than assuming it is
+// first or last — the for-loop's own word-list data leaf can land on either
+// side of it depending on emission order.
+func leafWithExecutable(t *testing.T, leaves []ParsedCommand, exec string) int {
+	t.Helper()
+	for i, leaf := range leaves {
+		if leaf.Executable == exec {
+			return i
+		}
+	}
+	t.Fatalf("no leaf with Executable %q: %s", exec, dumpLeaves(leaves))
+	return -1
+}
+
+// TestInCommandLoopVars_GomuOverlayShape pins pg2-jk1t5's fix at the cmdparse
+// level: a for-loop whose word list is every-word-literal attaches its
+// iteration variable's NAME and its literal word SET to the leaves lowered
+// from the loop's Do body, and InCommandLoopVars exposes that as a
+// MULTI-VALUED binding — this is the exact gomu_overlay shape pg2-2ti41
+// measured always-abstaining (`for f in gate-post gate-base; do … cat
+// "$SP/runs/$f.meta" … done`).
+func TestInCommandLoopVars_GomuOverlayShape(t *testing.T) {
+	leaves := Parse(`for f in gate-post gate-base; do cat "$SP/runs/$f.meta"; done`)
+	i := leafWithExecutable(t, leaves, "cat")
+	if got := leaves[i].LoopVars; len(got) != 1 || got[0].Name != "f" ||
+		!reflect.DeepEqual(got[0].Values, []string{"gate-post", "gate-base"}) {
+		t.Fatalf("leaf %d LoopVars = %+v, want [{f [gate-post gate-base]}]: %s", i, got, dumpLeaves(leaves))
+	}
+	want := map[string][]string{"f": {"gate-post", "gate-base"}}
+	if got := InCommandLoopVars(leaves, i); !reflect.DeepEqual(got, want) {
+		t.Errorf("InCommandLoopVars(leaves, %d) = %v, want %v", i, got, want)
+	}
+	// A leaf OUTSIDE the loop's body — here, the word-list data leaf itself —
+	// carries no binding: LoopVars is stamped only on leaves lowered from the
+	// Do body, never on the loop clause's own data leaf.
+	for j, leaf := range leaves {
+		if j == i {
+			continue
+		}
+		if len(leaf.LoopVars) != 0 {
+			t.Errorf("leaf %d (%q) unexpectedly carries LoopVars %+v", j, leaf.Raw, leaf.LoopVars)
+		}
+	}
+}
+
+// TestInCommandLoopVars_NonLiteralWordList pins the REQUIRED negative: a
+// for-loop word list that itself contains a live shell expansion must NOT be
+// treated as literal — the loop var is simply never bound, falling back to
+// today's (pre-pg2-jk1t5) behaviour exactly as if this bead did not exist.
+func TestInCommandLoopVars_NonLiteralWordList(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"command substitution word", `for f in $(seq 1 2); do cat "$f"; done`},
+		{"one literal, one live word", `for f in gate-post $(echo gate-base); do cat "$f"; done`},
+		{"glob word", `for f in *.md; do cat "$f"; done`},
+		{"parameter-expansion word", `for f in "$OTHER"; do cat "$f"; done`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			leaves := Parse(tt.cmd)
+			i := leafWithExecutable(t, leaves, "cat")
+			if got := leaves[i].LoopVars; len(got) != 0 {
+				t.Errorf("leaf %d LoopVars = %+v, want none (non-literal word list): %s", i, got, dumpLeaves(leaves))
+			}
+			if got := InCommandLoopVars(leaves, i); got != nil {
+				t.Errorf("InCommandLoopVars(leaves, %d) = %v, want nil", i, got)
+			}
+		})
+	}
+}
+
+// TestInCommandLoopVars_OutOfRange mirrors InCommandVars' own degenerate-case
+// coverage: an out-of-range index answers nil rather than panicking.
+func TestInCommandLoopVars_OutOfRange(t *testing.T) {
+	leaves := Parse(`for f in a b; do cat "$f"; done`)
+	if got := InCommandLoopVars(leaves, -1); got != nil {
+		t.Errorf("InCommandLoopVars(leaves, -1) = %v, want nil", got)
+	}
+	if got := InCommandLoopVars(leaves, len(leaves)); got != nil {
+		t.Errorf("InCommandLoopVars(leaves, len(leaves)) = %v, want nil", got)
+	}
+}
+
+// TestExpandInCommandMulti mirrors TestExpandInCommand for the multi-valued
+// sibling (pg2-jk1t5): a name bound to several values multiplies out every
+// combination, and the SAME all-or-nothing contract holds — anything this
+// function cannot resolve returns ok=false.
+func TestExpandInCommandMulti(t *testing.T) {
+	vars := map[string][]string{
+		"F":  {"gate-post", "gate-base"},
+		"SP": {"/tmp/sp"},
+	}
+	tests := []struct {
+		word string
+		want []string
+		ok   bool
+	}{
+		{word: "/abs/literal", want: []string{"/abs/literal"}, ok: true},
+		{word: "$SP/runs/$F.meta", want: []string{"/tmp/sp/runs/gate-post.meta", "/tmp/sp/runs/gate-base.meta"}, ok: true},
+		{word: "$F", want: []string{"gate-post", "gate-base"}, ok: true},
+		{word: "${F}", want: []string{"gate-post", "gate-base"}, ok: true},
+		// Unknown names: ABSENT from the environment, never empty.
+		{word: "$OTHER", ok: false},
+		// Constructs whose value is not a lookup this seam performed.
+		{word: "${F:-x}", ok: false},
+		{word: "$(pwd)", ok: false},
+		{word: "`pwd`", ok: false},
+		{word: "$F/*", ok: false},
+		{word: "~/$F", ok: false},
+	}
+	for _, tt := range tests {
+		got, ok := ExpandInCommandMulti(tt.word, vars)
+		if ok != tt.ok {
+			t.Errorf("ExpandInCommandMulti(%q) ok = %v, want %v (got %v)", tt.word, ok, tt.ok, got)
+			continue
+		}
+		if ok && !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("ExpandInCommandMulti(%q) = %v, want %v", tt.word, got, tt.want)
+		}
+	}
+}
+
+// TestExpandInCommandMulti_NoEnvironment mirrors TestExpandInCommand_NoEnvironment.
+func TestExpandInCommandMulti_NoEnvironment(t *testing.T) {
+	for _, word := range []string{"$F", "${F}", "$F/x", "$(pwd)", "`pwd`"} {
+		if got, ok := ExpandInCommandMulti(word, nil); ok {
+			t.Errorf("ExpandInCommandMulti(%q, nil) = %v, true; want refusal", word, got)
+		}
+	}
+	if got, ok := ExpandInCommandMulti("/abs/literal", nil); !ok || len(got) != 1 || got[0] != "/abs/literal" {
+		t.Errorf("ExpandInCommandMulti(literal, nil) = %v, %v; want the word unchanged", got, ok)
+	}
+}
+
+// TestExpandInCommandMulti_CombinationCap pins the fail-closed overflow
+// guard: a combination count over maxExpandInCommandMultiCandidates reports
+// ok=false rather than doing unbounded work or silently truncating.
+func TestExpandInCommandMulti_CombinationCap(t *testing.T) {
+	values := make([]string, maxExpandInCommandMultiCandidates+1)
+	for i := range values {
+		values[i] = "v"
+	}
+	vars := map[string][]string{"F": values}
+	if _, ok := ExpandInCommandMulti("$F", vars); ok {
+		t.Errorf("ExpandInCommandMulti with %d candidates: ok = true, want false (cap exceeded)", len(values))
+	}
+}
+
+// TestMergeInCommandVars mirrors TestOverlayVars for the shape
+// ExpandInCommandMulti consumes: a single-valued base name becomes a
+// one-element slice, and a multi-valued loop binding on the SAME name wins —
+// a loop's own iteration variable is always nearer than an outer plain
+// assignment of that name.
+func TestMergeInCommandVars(t *testing.T) {
+	t.Run("both empty returns nil", func(t *testing.T) {
+		if got := MergeInCommandVars(nil, nil); got != nil {
+			t.Errorf("MergeInCommandVars(nil, nil) = %v, want nil", got)
+		}
+	})
+	t.Run("single-valued base becomes a one-element slice", func(t *testing.T) {
+		got := MergeInCommandVars(map[string]string{"SP": "/tmp/sp"}, nil)
+		want := map[string][]string{"SP": {"/tmp/sp"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("MergeInCommandVars(base, nil) = %v, want %v", got, want)
+		}
+	})
+	t.Run("loop var wins on a shared name; a base-only name survives", func(t *testing.T) {
+		base := map[string]string{"SP": "outer-value", "SHARED": "outer-value"}
+		loopVars := map[string][]string{"SHARED": {"a", "b"}, "F": {"a", "b"}}
+		got := MergeInCommandVars(base, loopVars)
+		want := map[string][]string{"SP": {"outer-value"}, "SHARED": {"a", "b"}, "F": {"a", "b"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("MergeInCommandVars(base, loopVars) = %v, want %v", got, want)
+		}
+	})
+}

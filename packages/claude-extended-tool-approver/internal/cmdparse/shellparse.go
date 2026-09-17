@@ -378,6 +378,14 @@ type lowering struct {
 	// holding onto it directly would see LATER pushes/pops alias into its own
 	// value.
 	scopePath []int
+	// loopVarStack is the walk's CURRENT chain of open for/select loop
+	// iteration-variable bindings, outermost to innermost (pg2-jk1t5),
+	// mirroring scopePath: the *syntax.ForClause case pushes onto it before
+	// lowering the loop's Do body and pops it back off after, so only leaves
+	// lowered from THAT body carry it. appendLeaf stamps every leaf with an
+	// IMMUTABLE COPY of this slice, for the identical aliasing reason
+	// scopePath's own doc gives.
+	loopVarStack []LoopVarBinding
 }
 
 // sourceSpan is a half-open byte range [lo, hi) into the lowering's source.
@@ -414,6 +422,9 @@ func (lw *lowering) spanOf(from, to syntax.Pos) sourceSpan {
 // empty (a top-level leaf), matching SubshellScope's documented zero value.
 func (lw *lowering) appendLeaf(leaf ParsedCommand, span sourceSpan) {
 	leaf.SubshellScope = append([]int(nil), lw.scopePath...)
+	if len(lw.loopVarStack) > 0 {
+		leaf.LoopVars = append([]LoopVarBinding(nil), lw.loopVarStack...)
+	}
 	lw.leaves = append(lw.leaves, leaf)
 	lw.spans = append(lw.spans, span)
 }
@@ -839,8 +850,21 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.ForClause:
-		lw.lowerLoop(cmd.Loop)
+		// pg2-jk1t5: capture the loop's own iteration variable, when the
+		// word list can be proven literal, and make it visible to every
+		// leaf lowered from the Do body — pushed before, and popped right
+		// back off after, lowering that body, exactly mirroring the
+		// *syntax.Subshell case's scopePath push/pop above: the binding is
+		// open only while this ONE loop's body is being lowered, not for
+		// leaves before or after it.
+		name, values, ok := lw.lowerLoop(cmd.Loop)
+		if ok {
+			lw.loopVarStack = append(lw.loopVarStack, LoopVarBinding{Name: name, Values: values})
+		}
 		lw.lowerStmtList(cmd.Do, pid, idx)
+		if ok {
+			lw.loopVarStack = lw.loopVarStack[:len(lw.loopVarStack)-1]
+		}
 		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	case *syntax.CaseClause:
@@ -899,26 +923,70 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 	}
 }
 
-// lowerLoop lowers a for/select loop's iteration clause.
-func (lw *lowering) lowerLoop(loop syntax.Loop) {
-	wi, ok := loop.(*syntax.WordIter)
-	if !ok {
+// lowerLoop lowers a for/select loop's iteration clause, and reports whether
+// its word list can be proven LITERAL -- pg2-jk1t5, extending the pg2-yeli3
+// in-command-literal seam to a for-loop's OWN iteration variable, which
+// cmdparse never modeled at all before this bead (a zero-hit grep for
+// LoopVar/IterVar/ForVar/wi.Name across internal/cmdparse/*.go confirmed it,
+// and is why `cat "$SP/runs/$f.meta"` inside `for f in gate-post gate-base;
+// do ... done` could never resolve `$f` the way a plain `SP=literal`
+// assignment already resolves `$SP`).
+//
+// ok is false -- and name/values are the zero value -- whenever the word
+// list is NOT a source of trustworthy literal text: a C-style loop (no word
+// list at all), `for x; do ...` (iterates "$@", no word list either), or
+// ANY word carrying a live shell expansion (wordHasLiveExpansion) or text
+// isLiteralWordText rejects (a glob, a surviving `$`/backtick, a leading
+// `~` -- `for f in *.md; do ...` is exactly this shape, since `*`
+// disqualifies it even though the parser attaches no ParamExp/CmdSubst node
+// to it). The caller MUST NOT attach a binding when ok is false, leaving
+// $VAR inside the body exactly as unresolved as it was before this bead.
+//
+// values are UNQUOTED (cmdparse's unquote, the same token spelling every
+// other literal-value seam in this file uses -- see literalAssignedValue's
+// doc for why a true literal EXPANSION is deliberately not used instead),
+// one per word in `in` order, duplicates kept.
+func (lw *lowering) lowerLoop(loop syntax.Loop) (name string, values []string, ok bool) {
+	wi, isWordIter := loop.(*syntax.WordIter)
+	if !isWordIter {
 		// *CStyleLoop — `for ((i=0;i<10;i++))`. It has no word list, exactly as the
 		// outgoing forWordList returned "" for the C-style header.
-		return
+		return "", nil, false
 	}
 	if !wi.InPos.IsValid() || len(wi.Items) == 0 {
 		// `for x; do …` iterates "$@" and has no word list either.
-		return
+		return "", nil, false
 	}
 	// The word list reaches a leaf of its own (pg2-qkecz hole B). It carries ONLY
 	// Raw: it is data, so it has no executable and must never be judged as a
 	// command, but its text can hold a live `$( )` that genuinely executes.
+	// This emission is UNCONDITIONAL -- every word, live or literal, still
+	// reaches it -- so I14 coverage never depends on the literal-ness this
+	// function goes on to compute below.
 	nodes := make([]syntax.Node, len(wi.Items))
+	literal := true
+	values = make([]string, 0, len(wi.Items))
 	for i, it := range wi.Items {
 		nodes[i] = it
+		if !literal {
+			continue
+		}
+		if wordHasLiveExpansion(it) {
+			literal = false
+			continue
+		}
+		v := unquote(lw.node(it))
+		if !isLiteralWordText(v) {
+			literal = false
+			continue
+		}
+		values = append(values, v)
 	}
 	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End(), nodes)
+	if !literal || wi.Name == nil {
+		return "", nil, false
+	}
+	return wi.Name.Value, values, true
 }
 
 // lowerDecl lowers an assignment builtin — `export`, `declare`, `local`,

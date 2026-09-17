@@ -2753,3 +2753,77 @@ func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
 		})
 	}
 }
+
+// TestSafecmds_ForLoopVar_GomuOverlayShape_Approve is pg2-jk1t5's end-to-end
+// fix: the gomu_overlay compound (pg2-2ti41, 112/112 historically-approved
+// rows measured always-abstaining) must now APPROVE. `SP` is set the same
+// way TestSafecmds_InCommandLiteralRelief_Approve simulates an earlier
+// leaf's plain assignment (via InCommandVars directly, exactly as the real
+// engine would synthesize it — see TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf
+// for why the assignment cannot be included as literal text in ToolInput
+// here); `f` is the for-loop's OWN iteration variable, which this bead is
+// what makes resolvable at all.
+func TestSafecmds_ForLoopVar_GomuOverlayShape_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:      "Bash",
+		CWD:           "/home/user/project",
+		ToolInput:     mustJSON(map[string]string{"command": `for f in gate-post gate-base; do cat "$SP/runs/$f.meta"; done`}),
+		InCommandVars: map[string]string{"SP": "/home/user/project"},
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.Approve {
+		t.Errorf("gomu_overlay for-loop compound: got %s (%s), want approve (the loop var must resolve like a plain assignment)", got.Decision, got.Reason)
+	}
+}
+
+// TestSafecmds_ForLoopVar_UnsafeZone_Abstains is the SECURITY-PRESERVING
+// companion the bead explicitly requires: a for-loop variable that resolves
+// to a path OUTSIDE a readable zone must keep abstaining/denying exactly as
+// the literal spelling would (TestSafecmds_InCommandLiteralRelief_ResolvedDangerousLiteralStillAbstains's
+// single-assignment case) — this bead's relief is the per-argument zone
+// check running on EVERY value of the loop's word list, never a blanket
+// "read-only verb" allowlist that would let `for f in /etc/shadow …; do cat
+// "$f"; done`-shaped commands through unchecked.
+func TestSafecmds_ForLoopVar_UnsafeZone_Abstains(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:  "Bash",
+		CWD:       "/home/user/project",
+		ToolInput: mustJSON(map[string]string{"command": `for f in /etc/shadow /etc/passwd; do cat "$f"; done`}),
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("unsafe-zone for-loop variant: got %s (%s), want abstain — the per-argument zone check MUST still run for every value of the loop's word list", got.Decision, got.Reason)
+	}
+	if !strings.Contains(got.Reason, "references unknown path /etc/shadow") {
+		t.Errorf("reason %q does not name the unreadable zone", got.Reason)
+	}
+}
+
+// TestSafecmds_ForLoopVar_NonLiteralWordList_Abstains is the bead's other
+// REQUIRED negative: a for-loop whose word list itself contains a shell
+// expansion is NOT a source of trustworthy literal text, so the loop
+// variable must stay unresolved and the command must fall back to today's
+// (pre-pg2-jk1t5) "has a dynamically-expanded path arg" refusal — exactly as
+// if this bead did not exist. `SP` resolves (proving the OTHER half of the
+// argument is not what is blocking approval); `f` must not.
+func TestSafecmds_ForLoopVar_NonLiteralWordList_Abstains(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	input := &hookio.HookInput{
+		ToolName:      "Bash",
+		CWD:           "/home/user/project",
+		ToolInput:     mustJSON(map[string]string{"command": `for f in $(echo gate-post); do cat "$SP/runs/$f.meta"; done`}),
+		InCommandVars: map[string]string{"SP": "/home/user/project"},
+	}
+	got := hookio.Verdict(r.Evaluate(input))
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("non-literal for-loop word list: got %s (%s), want abstain (the loop var must NOT be treated as resolvable)", got.Decision, got.Reason)
+	}
+	if !strings.Contains(got.Reason, "has a dynamically-expanded path arg") {
+		t.Errorf("reason %q does not name the dynamic-expansion refusal", got.Reason)
+	}
+}
