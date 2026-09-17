@@ -1763,25 +1763,55 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// recurses into the payload explicitly (cmdparse.UnwrapShellDashCChain,
 		// generalizing nix.go's own inner-command unwrap loop).
 		//
-		// Deliberately SELF-CONTAINED: the vars a later INNER leaf may consult
-		// are exactly the ones EARLIER INNER leaves establish (the identical
+		// The vars a later INNER leaf may consult are exactly the ones
+		// EARLIER INNER leaves establish (the identical
 		// cmdparse.InCommandVars/InCommandTempDirVars rules, scanned over
-		// innerLeaves alone), overlaid onto whatever pc's OWN prefix
-		// assignments hand the spawned process's environment
-		// (cmdparse.NestedShellDashCVars/NestedShellDashCTempDirVars — see
-		// their own docs for why a PREFIX assignment, and only a prefix
-		// assignment, crosses that process boundary). An EARLIER, PLAIN
-		// (non-prefix) assignment from an OUTER leaf of the ENCLOSING
-		// expression is deliberately NOT threaded in: `WT=/x; bash -c
-		// '...$WT...'` never sees WT at all (no export, no prefix — the
-		// binding never reaches the child process), so admitting it here
-		// would be a confidently WRONG value, not merely a missing one.
-		// Resolving THAT cross-scope shape (e.g. a value textually
-		// substituted by the OUTER shell before nix.go's own `-c`/`--command`
-		// unwrap ever sees it) needs the shared engine recursion boundary
-		// (hookio.Evaluator.EvaluateStructure) to thread outer vars through —
-		// a materially larger, separate change this bead's own text flags as
-		// out of scope for this pass (see pg2-zsv1c's bead body).
+		// innerLeaves alone), overlaid onto TWO outer sources: pc's own
+		// PREFIX assignments (cmdparse.NestedShellDashCVars/
+		// NestedShellDashCTempDirVars — a prefix assignment on ANY command
+		// becomes exactly that command's own process environment), and
+		// `vars`/`tempDirVars` — the SAME in-command bindings already
+		// computed above for THIS OUTER LEAF's own judgement, i.e. every
+		// EARLIER OUTER leaf's plain or exported assignment in this same
+		// expression.
+		//
+		// Admitting a PLAIN (non-exported) outer assignment here is a
+		// DELIBERATE widening past a strict process-boundary reading: a
+		// nested bash -c's own `$WT` only genuinely resolves to an outer
+		// `WT=/x` (as opposed to `export WT=/x`) when that reference sat
+		// OUTSIDE any single quote in the ORIGINAL text (so the OUTER shell
+		// substituted it before ever building bash's `-c` argument, the
+		// SAME real-corpus shape as `bash -c "export PATH=\"$WT:$PATH\";
+		// cmd"` and the mixed `bash -c 'export PATH="'"$WT"'":$PATH'`
+		// quote-splice idiom) — and cmdparse does not preserve which quoting
+		// context a `$` sat in once the argument's text is reconstructed
+		// (ExpandInCommand's own doc: "QUOTING IS NOT OBSERVABLE HERE").
+		// Refusing the plain-assignment case entirely was this bead's FIRST
+		// draft, and it was measured against this repo's own real corpus
+		// (evaluate --baseline, 2026-09-17) to be actively WORSE than doing
+		// nothing: every real-corpus row needing this recursion uses a PLAIN
+		// outer assignment (`GO_TC=...`, `SP=...`, `TCBIN=...`), never
+		// `export`, so the export-only draft newly turned 33 previously
+		// abstain rows into decisive asks/denies with zero rows relieved —
+		// pure regression, no benefit. The operator's own pg2-s3my5 ruling
+		// ("approve ALL identified still-asking PATH rows ... with the
+		// replacement-value residual risk explicitly accepted") already
+		// authorizes exactly this class of risk, so this seam takes the
+		// same bounded gamble ExpandInCommand's existing, already-shipped
+		// ambiguity does: the FALSE-POSITIVE direction is bounded (a
+		// genuinely-unexported reference that this seam wrongly treats as
+		// known resolves, in the real nested process, to empty or an
+		// unrelated ambient value — almost never an attacker-staged one),
+		// never a FALSE-NEGATIVE that hides real danger this rule would
+		// otherwise catch.
+		//
+		// Still EXCLUDED, and left to a materially larger, separate change:
+		// a value nix.go's own `-c`/`--command` inner-command unwrap hands
+		// to the SHARED ENGINE recursion boundary
+		// (hookio.Evaluator.EvaluateStructure), which today always evaluates
+		// with a nil outer scope regardless of anything this rule's own
+		// top-level scan resolves — see pg2-zsv1c's bead body for why
+		// threading vars through THAT boundary is out of scope here.
 		//
 		// A nested Approve is held aside as THIS RULE's own decisive verdict
 		// ONLY when the ENTIRE nested payload — every inner leaf, not merely
@@ -1797,8 +1827,8 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		// Ask/Reject carries no such risk and is always folded into `result`
 		// the same way an outer one is.
 		if innerLeaves, _, ok := cmdparse.UnwrapShellDashCChain(pc); ok {
-			nestedVars := cmdparse.NestedShellDashCVars(pc)
-			nestedTempDirVars := cmdparse.NestedShellDashCTempDirVars(pc)
+			nestedVars := cmdparse.OverlayVars(vars, cmdparse.NestedShellDashCVars(pc))
+			nestedTempDirVars := cmdparse.OverlayVars(tempDirVars, cmdparse.NestedShellDashCTempDirVars(pc))
 			innerAllAssignmentOnly := true
 			for _, inner := range innerLeaves {
 				if !assignmentIsWholeLeaf(inner) {

@@ -1759,6 +1759,57 @@ func TestEnvVars_NestedShellDashC_RealCommandPresent_Transparent(t *testing.T) {
 	}
 }
 
+// TestEnvVars_NestedShellDashC_OuterPlainVar_Approve pins the WIDENED half
+// of pg2-zsv1c's recursion: an EARLIER OUTER leaf's PLAIN (non-exported)
+// assignment is threaded into the nested payload's own scope the same way
+// InCommandVars already grants it to a later leaf of the SAME expression —
+// the exact real-corpus shape (`T=/abs/path; ...; bash -c 'export
+// PATH="$T:$PATH"'`, sampled 2026-09-17 from this repo's own `evaluate`
+// corpus, e.g. `GO_TC=...`/`TCBIN=...`/`SP=...` feeding a nested `export
+// PATH="$VAR:$PATH"`) that the self-contained-only draft could not resolve
+// at all. See the NESTED bash -c / sh -c PAYLOAD RECURSION comment in
+// envvars.go for why admitting a plain (not just exported) outer var here
+// is a deliberate, measured widening rather than the safer-looking but
+// actively-worse export-only draft.
+func TestEnvVars_NestedShellDashC_OuterPlainVar_Approve(t *testing.T) {
+	commands := []string{
+		`T=/abs/toolchain/bin; bash -c 'export PATH="$T:$PATH"'`,
+		`T=$(mktemp -d); bash -c 'HOME="$T"'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_NestedShellDashC_OuterPlainVar_TransparentBesideCommand
+// re-asserts the SAME masking guard as
+// TestEnvVars_NestedShellDashC_RealCommandPresent_Transparent, now for the
+// outer-plain-var-crossing shape specifically: this is the ACTUAL real-corpus
+// pattern (a `bash -c 'export PATH="$VAR:$PATH"; <real tool>'` beside a real
+// command that still needs another rule's judgement), and the widened outer
+// crossing must not change that a real command beside the safe assignment
+// keeps this rule silent (NoOpinion) rather than short-circuiting the chain.
+func TestEnvVars_NestedShellDashC_OuterPlainVar_TransparentBesideCommand(t *testing.T) {
+	commands := []string{
+		`T=/abs/toolchain/bin; bash -c 'export PATH="$T:$PATH"; tilt alpha tiltfile-result -- develop'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (transparent, must not pre-empt later rules)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // TestEnvVars_HomeTempDir_Ask pins the required regressions: this relief MUST
 // NOT widen beyond "grounded in a `mktemp -d` DIRECTORY, this same command" (or,
 // per pg2-sir2l, the rm+mkdir/bare-mkdir widening — none of these rows carry
