@@ -309,6 +309,29 @@ var injectorAskVars = map[string]bool{
 //     buried inside an opaque nested `bash -c` payload. Those remain
 //     pg2-dhugk / pg2-zsv1c's own separate, independently-scoped questions,
 //     each not yet landed as of pg2-pi7pz.
+//
+// # OPERATOR RULING 2026-09-17 (pg2-dhugk, decided at the SAME sitting as
+// pg2-s3my5): PATH — approve the REPLACEMENT-value-feeding-arbitrary-shell
+// shape too, WITHOUT requiring `env -i`
+//
+// The replacement-value shape pg2-2ytvo's own bullet above flagged as NOT
+// its scope is THIS bead's scope: `PATH="$NEWPATH" cmd` (or a bare literal
+// `PATH=/a:/b:/c cmd`), where the replacement value is itself entirely
+// static/absolute, either written down directly or bound to a variable
+// earlier in the SAME command — but the invocation does NOT run under
+// `env -i`, so isHermeticEnvReplacement's existing REPLACEMENT relief
+// (pg2-d71my) cannot apply; that relief's whole safety argument is that
+// `env -i` leaves no caller environment to leak past, a proof this shape
+// does not offer. The operator reviewed and explicitly ACCEPTED a
+// narrower guarantee for PATH specifically as its own residual-risk trade —
+// see isStaticAbsoluteOnlyPathReplacement's own doc for the full
+// accepted-risk scope (in short: every OTHER ambient env var — GOFLAGS,
+// LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS, BASH_ENV — still
+// passes through unaudited by this relief). Scoped to PATH only, never
+// HOME — HOME's own replacement relief stays isHermeticHomeReplacement's
+// freshness-proof shape, untouched by this bead. See pg2-q97no for a
+// possible future mitigation of the residual gap; that bead does NOT gate
+// this one.
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -318,24 +341,28 @@ var askVars = map[string]bool{
 // per-(var,value) sub-verdict most-restrictive-wins.
 //
 // Approve CONTRACT (pg2-0q99a — this replaced a former "NEVER returns Approve"
-// invariant; pg2-d71my widened condition 2's alternatives, not its shape). The
-// rule returns Approve for EXACTLY ONE shape, and all three conditions must
-// hold:
+// invariant; pg2-d71my and pg2-dhugk each widened condition 2's alternatives,
+// not its shape). The rule returns Approve for EXACTLY ONE shape, and all
+// three conditions must hold:
 //
 //  1. the NAME is an askVar (PATH/HOME) — never an injector, never an
 //     injectorAskVar, never a benign name (a benign assignment stays Abstain: the
 //     rule has no opinion to offer);
-//  2. the VALUE satisfies ONE of three mutually-independent predicates:
+//  2. the VALUE satisfies ONE of four mutually-independent predicates:
 //     preservesCallerValue (it demonstrably preserves the caller's own value and
 //     adds only static absolute path components, a variable this same command
 //     assigned earlier to one, a variable this same command bound earlier to a
 //     `mktemp -d` fresh temp dir, or a certified-safe substitution —
 //     pg2-0q99a/pg2-qhhil/pg2-e1rc7/pg2-kzqw2), or
 //     isHermeticEnvReplacement (a static, reasonable REPLACEMENT under `env -i` —
-//     pg2-d71my), or, for HOME only, isHermeticHomeReplacement (a REPLACEMENT
-//     grounded in a directory this command proves is fresh: a `mktemp -d` fresh
-//     temp dir — pg2-d71my — or an earlier "&&"-chained `rm -rf && mkdir -p` /
-//     bare `mkdir` on the same directory — pg2-sir2l); and
+//     pg2-d71my), or, for PATH only, isStaticAbsoluteOnlyPathReplacement (a
+//     static-absolute-only REPLACEMENT WITHOUT requiring `env -i` — a narrower,
+//     operator-accepted-residual-risk relief; see that function's own doc for
+//     the full residual-risk scope — pg2-dhugk), or, for HOME only,
+//     isHermeticHomeReplacement (a REPLACEMENT grounded in a directory this
+//     command proves is fresh: a `mktemp -d` fresh temp dir — pg2-d71my — or an
+//     earlier "&&"-chained `rm -rf && mkdir -p` / bare `mkdir` on the same
+//     directory — pg2-sir2l); and
 //  3. the assignment IS the whole leaf (assignmentIsWholeLeaf) — a command-less
 //     leaf or one of the `export`/`env`/`command` assignment builtins.
 //
@@ -932,6 +959,95 @@ func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
 		return false
 	}
 	for _, component := range strings.Split(value, ":") {
+		if !isStaticAbsolutePath(component) {
+			return false
+		}
+	}
+	return true
+}
+
+// ==================== pg2-dhugk: PATH-ONLY, NO-`env -i`-REQUIRED STATIC-REPLACEMENT RELIEF ====================
+
+// isStaticAbsoluteOnlyPathReplacement reports whether ev's PATH REPLACEMENT
+// value — after resolving any reference to a variable THIS SAME COMMAND
+// bound, earlier, to a literal value (cmdparse.ExpandInCommand over vars —
+// the identical in-command dataflow seam pg2-qhhil wired in, reused here
+// rather than re-derived) — is composed ENTIRELY of static absolute
+// `:`-separated components, using the identical isStaticAbsolutePath
+// denylist isHermeticEnvReplacement already applies to every component of
+// ITS OWN (env -i-gated) replacement value.
+//
+// Deliberately its OWN, separately-named predicate rather than a widening of
+// isHermeticEnvReplacement itself: the two grant Approve on the SAME
+// value-shape test but under two DIFFERENT, non-overlapping preconditions —
+// isHermeticEnvReplacement requires the leaf to run under `env -i` (no
+// caller environment survives at all); this predicate requires none of
+// that, and is gated to PATH ONLY by the caller (`ev.Name == "PATH"`, see
+// evaluateAssignment's askVars case) — HOME's own replacement relief stays
+// isHermeticHomeReplacement's freshness-proof shape, entirely untouched by
+// this bead.
+//
+// vars is the SAME in-command variable environment preservesCallerValue's
+// own in-command-assigned middle option already consults
+// (primarycommit.LeafVars over cmdparse.InCommandVars) — nil is the
+// ordinary case (no qualifying earlier assignment): ExpandInCommand's own
+// no-`$`-in-word fast path still resolves a purely literal value with vars
+// nil, so a bare `PATH=/usr/bin:/bin` replacement is unaffected by whether
+// any in-command variable exists at all.
+//
+// # OPERATOR RULING 2026-09-17 (pg2-dhugk, decided at the same sitting as
+// pg2-s3my5's broader PATH-ask ruling)
+//
+// The corpus's motivating shape (pg2-s3my5's own triage, via pg2-e1rc7):
+//
+//	NEWPATH="/Users/…/bin:/run/current-system/sw/bin:…:/sbin"
+//	PATH="$NEWPATH" go test -race -timeout 150s ./internal/sync/
+//
+// REPLACES PATH outright (not the EXTEND shape preservesCallerValue
+// recognizes) with a value that is itself entirely static/absolute, built
+// earlier in the SAME command — but the invocation does not run under
+// `env -i`, so isHermeticEnvReplacement's existing REPLACEMENT relief could
+// not apply. The operator reviewed this gap and explicitly ACCEPTED the
+// narrower guarantee below AS ITS OWN residual-risk trade, rather than
+// requiring the value to also clear the environment via `env -i` to
+// qualify.
+//
+// # ACCEPTED RESIDUAL RISK — a future reader MUST NOT "fix" this by
+// re-requiring env -i
+//
+// Because `env -i` is NOT required here, this relief does NOT close vectors
+// that redirect execution via OTHER env vars, entirely independent of PATH
+// resolution — the caller's full ambient environment (everything except
+// PATH's own value) passes through UNAUDITED. Concretely, at minimum:
+//
+//   - GOFLAGS=-toolexec=/evil — `go build`/`go test` shells out to an
+//     arbitrary binary as the compiler/linker driver;
+//   - LD_PRELOAD / DYLD_INSERT_LIBRARIES — the dynamic-linker preload
+//     hijack (this file's own injectorVars family DOES decisively reject
+//     either when the SAME leaf sets it explicitly — that switch case runs
+//     before this one is ever reached — but an already-exported ambient
+//     value from EARLIER shell state is invisible to this rule entirely;
+//     `env -i` is the only mechanism in this file that would have cleared
+//     it, and it is not required here);
+//   - PERL5OPT, NODE_OPTIONS, BASH_ENV — interpreter-level code-injection
+//     vectors for perl / node / bash respectively.
+//
+// This predicate audits PATH's OWN value alone, nothing else in the ambient
+// environment — do not assume env -i-equivalent safety from an Approve
+// through this path. See pg2-q97no (brainstorm: an 'executable' value-kind
+// check against a trusted-path allowlist) for a possible future mitigation
+// of this specific gap; that bead does NOT gate this relief, and this
+// relief does NOT wait on it.
+func isStaticAbsoluteOnlyPathReplacement(ev cmdparse.EnvAssignment, vars map[string]string) bool {
+	value, ok := cmdparse.LiteralAssignmentValueText(ev.Value)
+	if !ok {
+		return false
+	}
+	expanded, ok := cmdparse.ExpandInCommand(value, vars)
+	if !ok || expanded == "" {
+		return false
+	}
+	for _, component := range strings.Split(expanded, ":") {
 		if !isStaticAbsolutePath(component) {
 			return false
 		}
@@ -1679,8 +1795,11 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// earlier, to one (pg2-qhhil's narrow middle option) — is affirmatively
 		// safe. pg2-d71my adds TWO further, narrower REPLACEMENT-form reliefs
 		// (isHermeticEnvReplacement, isHermeticHomeReplacement — see their own
-		// docs) per the operator's 2026-08-17 ruling. Everything else — every
-		// other REPLACEMENT, and every value with a component we cannot classify
+		// docs) per the operator's 2026-08-17 ruling, and pg2-dhugk adds a
+		// THIRD, PATH-only REPLACEMENT relief (isStaticAbsoluteOnlyPathReplacement
+		// — see its own doc for the accepted-residual-risk scope) per the
+		// operator's 2026-09-17 ruling. Everything else — every other
+		// REPLACEMENT, and every value with a component we cannot classify
 		// — keeps the decisive Ask. This is a pure NAME/VALUE/in-command-text
 		// decision and must stay independent of r.exprEval, so the verdict is
 		// identical with New() and NewWithEvaluator(): vars/tempDirVars are
@@ -1700,6 +1819,17 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "sensitive env var is a static replacement under a hermetic env -i invocation: " + sanitizeReasonName(ev.Name),
+				Module:   name,
+			}
+		// pg2-dhugk: PATH-only REPLACEMENT relief that does NOT require
+		// `env -i` -- see isStaticAbsoluteOnlyPathReplacement's own doc for
+		// the full accepted-residual-risk scope (other env vars -- GOFLAGS,
+		// LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS, BASH_ENV --
+		// still pass through unaudited by this relief).
+		case ev.Name == "PATH" && isStaticAbsoluteOnlyPathReplacement(ev, vars):
+			result = hookio.RuleResult{
+				Decision: hookio.Approve,
+				Reason:   "PATH replacement is static-absolute-only (operator-accepted residual risk: other env vars, e.g. GOFLAGS/LD_PRELOAD/DYLD_INSERT_LIBRARIES/PERL5OPT/NODE_OPTIONS/BASH_ENV, are not audited by this relief -- pg2-dhugk): " + sanitizeReasonName(ev.Name),
 				Module:   name,
 			}
 		case ev.Name == "HOME" && isHermeticHomeReplacement(ev, tempDirVars, rootLeaves, at):
