@@ -15,8 +15,9 @@ even though Phase 9 supports exactly one (see "Out of scope" below).
   by gather.
 - **`interpretation`** — ownership, enrichment, urgency, category, feedback dispositions,
   approvals, gate state, match reasons, panel placement, `ready_to_promote`, `degraded`, and
-  `sync_error`. Written by interpret; the `sync_error` field is written by sync once sync exists
-  (Phase 10) — nothing writes it in Phase 9.
+  `sync_error`. Written by interpret; the `sync_error` field is written by sync (Phase 10, see
+  [`sync.md`](sync.md)) only on a sync failure for that entity, via the SAME writer, never a
+  separate column or table.
 - **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the
   link, first-seen and last-confirmed times). Written by interpret's cross-reference step. This
   table's schema exists in Phase 9's ladder; it stays unpopulated until that step ships (Phase
@@ -27,8 +28,12 @@ even though Phase 9 supports exactly one (see "Out of scope" below).
   pipeline. Human and agent annotations therefore survive every pipeline run by construction: no
   pipeline stage writes this table.
 - **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash and time, and the
-  last-reviewed head SHA. Written by sync. Phase 9 ships only this table's schema, as part of the
-  version ladder; sync itself is out of scope (see below), so nothing writes a row here yet.
+  last-reviewed head SHA. Written by sync (Phase 10, [`sync.md`](sync.md)): a `plan`-mode row
+  carries an empty `bead_id` (nothing was actually created) and a content hash of the fields the
+  write WOULD set; an `apply`-mode row carries the real `bead_id` and a content hash of the fields
+  the write DID set — the same hash for the same input regardless of mode, which is what makes the
+  plan/apply parity check mechanical. `last_reviewed_head_sha` is meaningful only for the
+  `review-request` kind row.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
   migrations, `heartbeat`, and `run`.
 
@@ -43,9 +48,9 @@ The store emits nothing over OpenTelemetry or Prometheus on its own (D24) and wr
 its own — a store-open or migration failure is logged by whichever command tried to open it
 (structured JSON on stderr for `run`; plain CLI error text otherwise).
 
-## Out of scope (Phase 9)
+## Out of scope (Phase 9, narrowed by Phase 10)
 
 The `xref` table exists in the schema ladder but stays unpopulated until the cross-reference step
-ships (Phase 13). The `ledger` table likewise exists but receives no writes until sync ships
-(Phase 10). `repos[]` support for more than one repository is out of scope this phase; the schema
-is additive-ready for it, but no packet in this phase exercises a second repository.
+ships (Phase 13). The `ledger` table is now populated by sync (Phase 10). `repos[]` support for
+more than one repository is out of scope this phase; the schema is additive-ready for it, but no
+packet in this phase exercises a second repository.

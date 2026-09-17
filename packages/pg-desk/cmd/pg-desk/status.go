@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // statusRunPgConnectorLedgerShow execs `pg-connector ledger show` and
@@ -26,10 +28,10 @@ var statusRunPgConnectorLedgerShow = func(ctx context.Context) (string, error) {
 }
 
 // statusCmd implements `pg-desk status`
-// [docs/behavior/pg-desk/operator-commands.md]. sync.mode's planned-rows
-// section has nothing to show this phase (sync.mode is not yet a
-// configuration key at all — see that doc's "Out of scope") so it is never
-// rendered.
+// [docs/behavior/pg-desk/operator-commands.md]. Prints the planned-sync-rows
+// section (design section 7.5/7.7) only when sync.mode is "plan" — off and
+// apply never render it (off has nothing to plan; apply's ledger rows all
+// carry a real bead_id, so there is nothing "planned" left to report).
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Print the store path, schema version, and health summary",
@@ -95,12 +97,54 @@ func runStatus(cmd *cobra.Command) error {
 	fmt.Fprintf(w, "last_run: %s\n", orDash(lastRun))
 	fmt.Fprintf(w, "last_sweep: %s\n", orDash(lastSweep))
 
+	// Planned sync rows by kind (design section 7.5/7.7): a config-load
+	// failure here degrades to skipping this section rather than failing
+	// status entirely — status's own exit-code contract is "1 when the
+	// store cannot be opened" only; config resolution is doctor's check.
+	if cfg, cfgErr := deskConfigLoad(cmd.Context()); cfgErr == nil && cfg.Sync.Mode == sync.ModePlan {
+		if err := printPlannedSyncRows(w, st); err != nil {
+			return fmt.Errorf("status: %w", err)
+		}
+	}
+
 	ledgerOut, ledgerErr := statusRunPgConnectorLedgerShow(cmd.Context())
 	if ledgerErr != nil {
 		fmt.Fprintf(w, "pg-connector ledger show: unavailable (%v)\n", ledgerErr)
 	} else {
 		io.WriteString(w, "pg-connector ledger show:\n")
 		io.WriteString(w, ledgerOut)
+	}
+	return nil
+}
+
+// plannedSyncKinds is the fixed, ordered kind list `pg-desk status` prints
+// counts for — the three bead shapes design section 7.5 pins
+// (internal/sync's KindAnchor/KindFeedbackCycle/KindReviewRequest,
+// repeated as literals here rather than importing them, since this file
+// only needs the string values, not the sync package's own types).
+var plannedSyncKinds = []string{"anchor", "feedback-cycle", "review-request"}
+
+// printPlannedSyncRows prints "planned sync rows by kind" [design 7.7]: a
+// ledger row is "planned" (design section 7.5's own plan-mode bookkeeping)
+// when it carries no real bead_id yet — see internal/sync's own package
+// doc comment ("Planned rows and the ledger's existing columns") for why
+// an empty bead_id is that signal.
+func printPlannedSyncRows(w io.Writer, st *store.Store) error {
+	rows, err := st.ListLedger()
+	if err != nil {
+		return fmt.Errorf("list ledger: %w", err)
+	}
+	counts := make(map[string]int, len(plannedSyncKinds))
+	for _, row := range rows {
+		if row.BeadID == "" {
+			counts[row.Kind]++
+		}
+	}
+	fmt.Fprintln(w, "planned_sync_rows:")
+	kinds := append([]string{}, plannedSyncKinds...)
+	sort.Strings(kinds)
+	for _, k := range kinds {
+		fmt.Fprintf(w, "  %s: %d\n", k, counts[k])
 	}
 	return nil
 }

@@ -1,12 +1,15 @@
 // Package pipeline implements pg-desk's run pipeline (docket pg2-2j5ac.32,
-// Phase 9, packet 6): the gather -> interpret -> store wiring for one
-// entity, `pg-desk run`'s own exit-code contract, and structured JSON
-// logging [design doc "7.9 Failure handling and logging"].
+// Phase 9, packet 6; sync stage wired by docket pg2-2j5ac.34, Phase 10):
+// the gather -> interpret -> store -> sync wiring for one entity, `pg-desk
+// run`'s own exit-code contract, and structured JSON logging [design doc
+// "7.9 Failure handling and logging"].
 //
 // This packet implements the PR-type pipeline only: an issue or thread
 // event additionally re-running stage 2 only (design section 7.2) is
 // Phase 10 (beads backend) / Phase 13 (Jira, threads) — cmd/pg-desk/run.go
 // stubs those types at the CLI layer before this package is ever reached.
+// The sync stage below runs only for entityType == "pr" for the same
+// reason.
 //
 // # Exit codes [Binding decisions]
 //
@@ -32,13 +35,15 @@
 // Store.UpsertAnnotation (internal/store/annotation.go's own doc comment:
 // "no pipeline stage ... calls UpsertAnnotation").
 //
-// # sync_error is never written here
+// # sync_error
 //
-// sync_error is a Phase-10-only, sync-only column (internal/store's own
-// Interpretation doc comment, and this packet's Binding decisions,
-// corrected during this docket's semantic post-check round 1). A store
-// error in this package's own code path is the exit-1 case above; it
-// never touches sync_error.
+// sync_error is a sync-only column (internal/store's own Interpretation
+// doc comment) — no OTHER stage in this package's own code ever writes it.
+// A store error in gather/interpret/persist's own code path is still the
+// exit-1 case above; only a failure from the sync stage itself (below) sets
+// sync_error, and it does so via the SAME existing UpsertInterpretation
+// writer persist already uses, never a new store method, and never as a
+// Run-level error — see the sync stage's own doc comment below for why.
 package pipeline
 
 import (
@@ -55,6 +60,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // gatherer is the subset of *gather.Gatherer's API this package depends
@@ -68,14 +74,23 @@ type gatherer interface {
 	Gather(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error)
 }
 
-// Pipeline wires gather -> interpret -> store for one entity per Run
-// call. Not safe for concurrent Run calls on the same entity — mirrors
+// syncer is the subset of *sync.Syncer's API this package depends on,
+// defined locally for the same reason gatherer is: tests inject a fake
+// implementation without needing a real pg-connector subprocess on $PATH.
+// *sync.Syncer satisfies this interface by construction.
+type syncer interface {
+	Sync(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error
+}
+
+// Pipeline wires gather -> interpret -> store -> sync for one entity per
+// Run call. Not safe for concurrent Run calls on the same entity — mirrors
 // gather.Gatherer's own "not safe for concurrent Gather calls" contract,
 // since Pipeline holds exactly one Gatherer.
 type Pipeline struct {
 	cfg      *config.Config
 	store    *store.Store
 	gatherer gatherer
+	syncer   syncer
 	clock    interpret.Clock
 	verbose  bool
 	out      io.Writer
@@ -117,6 +132,7 @@ func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 		cfg:      cfg,
 		store:    st,
 		gatherer: gather.NewGatherer(cfg),
+		syncer:   sync.New(cfg, st),
 		clock:    interpret.SystemClock{},
 		out:      os.Stderr,
 	}
@@ -187,11 +203,32 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 	}
 
 	stageStart = p.clock.Now()
-	err = p.persist(entityType, entityID, facts, interp)
+	interpRow, err := p.persist(entityType, entityID, facts, interp)
 	timeline = append(timeline, stageEvent{Stage: "store", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: store %s %s: %w", entityType, entityID, err)
+	}
+
+	// Sync stage (docket pg2-2j5ac.34, Phase 10) — entityType == "pr" only
+	// (see the package doc comment), and only once the entity/interpretation
+	// rows above are durably persisted, since a sync failure records itself
+	// ON that same interpretation row (sync_error) rather than failing this
+	// Run call. This mirrors the design's own exit-code contract: "Sync
+	// failures are recorded on the interpretation row (sync_error) ...
+	// never a raw pg-connector exit code" [design 7.9] — never returned as
+	// a Run error, never os.Exit(9), never a raw pg-connector exit code.
+	if entityType == entityTypePR {
+		if syncErr := p.syncer.Sync(ctx, p.repo(), entityID, change, facts, interp); syncErr != nil {
+			interpRow.SyncError = syncErr.Error()
+			if upsertErr := p.store.UpsertInterpretation(interpRow); upsertErr != nil {
+				// A failure to even RECORD the sync error is a genuine store
+				// error (this package's own exit-1 case), unlike the sync
+				// failure itself.
+				p.logRun(entityType, entityID, change, "error", "", upsertErr, runStart)
+				return fmt.Errorf("pipeline: record sync_error %s %s: %w", entityType, entityID, upsertErr)
+			}
+		}
 	}
 
 	outcome := "ok"
@@ -205,6 +242,11 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 	return nil
 }
 
+// entityTypePR is the one entity type the sync stage runs for — mirrors
+// cmd/pg-desk/desk.go's own entityTypePR constant (this package does not
+// import cmd/pg-desk, so it is repeated here rather than shared).
+const entityTypePR = "pr"
+
 // repo returns the single Phase-9 configured repository's remote, or ""
 // if none is configured — mirrors internal/gather's own
 // g.cfg.Repos[0]... convention (Phase 9 supports exactly one repo).
@@ -216,14 +258,16 @@ func (p *Pipeline) repo() string {
 }
 
 // persist writes facts and interp to the entity and interpretation
-// tables. Never touches the annotation table — see the package doc
-// comment.
-func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) error {
+// tables, returning the interpretation row it wrote so the sync stage
+// (Run, above) can update its sync_error field via the SAME writer, on the
+// SAME row, rather than reconstructing it or adding a new store method.
+// Never touches the annotation table — see the package doc comment.
+func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, interp interpret.Interpretation) (store.Interpretation, error) {
 	repo := p.repo()
 
 	factsJSON, err := json.Marshal(facts)
 	if err != nil {
-		return fmt.Errorf("marshal facts: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal facts: %w", err)
 	}
 	// entity.as_of prefers the data's own as-of (from pg-connector, via
 	// gather); it falls back to the interpretation's clock-stamped as-of
@@ -248,31 +292,31 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 		ContentHash: contentHash(factsJSON),
 		HeadSHA:     facts.HeadSHA,
 	}); err != nil {
-		return fmt.Errorf("upsert entity: %w", err)
+		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
 	}
 
 	enrichmentJSON, err := json.Marshal(interp.Enrichment)
 	if err != nil {
-		return fmt.Errorf("marshal enrichment: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal enrichment: %w", err)
 	}
 	urgencyJSON, err := json.Marshal(interp.Urgency)
 	if err != nil {
-		return fmt.Errorf("marshal urgency: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal urgency: %w", err)
 	}
 	dispositionsJSON, err := json.Marshal(interp.Dispositions)
 	if err != nil {
-		return fmt.Errorf("marshal dispositions: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal dispositions: %w", err)
 	}
 	approvalsJSON, err := json.Marshal(interp.Approvals)
 	if err != nil {
-		return fmt.Errorf("marshal approvals: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal approvals: %w", err)
 	}
 	matchReasonsJSON, err := json.Marshal(interp.MatchReasons)
 	if err != nil {
-		return fmt.Errorf("marshal match reasons: %w", err)
+		return store.Interpretation{}, fmt.Errorf("marshal match reasons: %w", err)
 	}
 
-	if err := p.store.UpsertInterpretation(store.Interpretation{
+	interpRow := store.Interpretation{
 		Repo:           repo,
 		EntityType:     entityType,
 		EntityID:       entityID,
@@ -287,12 +331,13 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, inte
 		Panel:          interp.Panel,
 		ReadyToPromote: interp.ReadyToPromote,
 		Degraded:       interp.Degraded != "",
-		SyncError:      "", // never written by this packet — see package doc
+		SyncError:      "", // set by the sync stage (Run, above) only on a sync failure
 		AsOf:           interp.AsOf,
-	}); err != nil {
-		return fmt.Errorf("upsert interpretation: %w", err)
 	}
-	return nil
+	if err := p.store.UpsertInterpretation(interpRow); err != nil {
+		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
+	}
+	return interpRow, nil
 }
 
 // contentHash is this packet's own deterministic content-hash algorithm

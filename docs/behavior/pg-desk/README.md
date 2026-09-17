@@ -19,26 +19,24 @@ rule that behavior docs are the source of truth for the pg-pr/pg-router system a
 design's own packet-shaping instruction. Every later packet in this docket implements against
 this set and MUST NOT contradict it without a docket design amendment.
 
-## Scope (Phase 9)
+## Scope (Phase 9, widened by Phase 10)
 
-In scope: `store` and its schema, `gather`, `interpret`, the `run` pipeline, `serve` (behind the
-soak option only), `open`, `hide`/`unhide`/`wip`, `feedback list`/`feedback set`, `show`,
-`status`, `doctor`, `heartbeat`/`heartbeat-item`, and `import-pg-pr-annotations`.
+In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes — added by Phase
+10, docket pg2-2j5ac.34), the `run` pipeline, `serve` (behind the soak option only), `open`,
+`hide`/`unhide`/`wip`, `feedback list`/`feedback set`, `show`, `status`, `doctor`,
+`heartbeat`/`heartbeat-item`, and `import-pg-pr-annotations`.
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
 qualifier every time:**
 
-- **Sync** (the stage that turns an interpretation into an agent-facing bead write) is out of
-  scope beyond the `ledger` table's own schema in the store's version ladder. The full
-  implementation, all three modes (`off`/`plan`/`apply`), is Phase 10.
+- **`run issue` for the beads backend's reverse (bead -> linked PR) resolution** is this docket's
+  sibling packet, not `sync.md`. **`run issue` for Jira and `run thread`** are Phase 13, together
+  with the cross-reference step that would give either kind of event a linked PR to re-interpret.
 - **The cross-reference step** (ticket keys and URLs found in PR/Jira/thread text, and the `xref`
   table it populates) is Phase 13. The table exists in this phase's schema ladder and stays
   unpopulated until then.
 - **Layered urgency** (project health, Jira priority) is Phase 13; this phase runs base urgency
   only (labels, keywords, checks rollup, bugfix commits).
-- **`run issue` for the beads backend** is Phase 10; **`run issue` for Jira and `run thread`** are
-  Phase 13, together with the cross-reference step that would give either kind of event a linked
-  PR to re-interpret.
 - **Multi-repository support.** `repos[]` supports exactly one repository in this phase; every
   command below resolves against that one configured (or cwd-resolved) repository.
 
@@ -52,6 +50,7 @@ back here — not the full list.
 | [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, and its six tables  |
 | [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`     |
 | [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation         |
+| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)  |
 | [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape          |
 | [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                |
 | [`open.md`](open.md)                                         | `pg-desk open`                                            |
@@ -66,16 +65,20 @@ Every component this docket introduces MUST state what it emits over OpenTelemet
 what it logs, so the observability review (`pg2-7kizi`) can decide what the dashboard can show
 before Phase 12 deletes the Ops board. The short version, detailed per doc above:
 
-- **OpenTelemetry:** nothing, anywhere in this set, in Phase 9. Export is a later observability
-  item, alongside pr-pool's own metrics sink.
+- **OpenTelemetry:** nothing, anywhere in this set, through Phase 10. Export is a later
+  observability item, alongside pg-router's own metrics sink (the design's `pr-pool` naming
+  predates the pg-router rename, bead `pg2-myc6y`).
 - **Prometheus:** only `serve` exposes anything — a minimal `/metrics` whose sole purpose is
   keeping the existing scrape target from going red, not a dashboard-grade surface.
-- **Logs:** `run` logs structured JSON to stderr (pr-pool captures it) and adds a three-stage
-  timeline under `--verbose`; `serve` logs to the path its launchd module configures. Every other
-  command logs only ordinary CLI report/error text, with no structured-JSON contract of its own.
+- **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
+  timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
+  into that same line rather than a separate stream (see [`sync.md`](sync.md)); `serve` logs to
+  the path its launchd module configures. Every other command logs only ordinary CLI report/error
+  text, with no structured-JSON contract of its own.
 
 ## Status
 
-No code exists yet at `packages/pg-desk` as of this packet — that lands starting with this
-docket's second packet. Every behavior this set describes is, by construction, ahead of its own
-implementation until the packet that builds it lands; that is expected, not a defect.
+Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface, plus Phase 10's `sync` (all
+three modes), are implemented at `packages/pg-desk`. `daemon.enable`, the ZR-side query/role
+wiring, and the beads-backend reverse-resolution `run issue` path are this docket's remaining
+packets.

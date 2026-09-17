@@ -9,6 +9,8 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // showRefresh runs the pipeline for one entity before show renders it —
@@ -70,6 +72,37 @@ type showPayload struct {
 	Hidden         bool   `json:"hidden"`
 	HiddenReason   string `json:"hidden_reason,omitempty"`
 	WIP            bool   `json:"wip"`
+	// PlannedSyncRows carries this PR's own planned (not-yet-applied) sync
+	// writes, populated only when sync.mode is "plan" [design 7.5, 7.7].
+	// nil (omitted from JSON) in off/apply mode, or when plan mode has
+	// nothing planned for this PR yet.
+	PlannedSyncRows []plannedSyncRow `json:"planned_sync_rows,omitempty"`
+}
+
+// plannedSyncRow is one kind's planned ledger row, rendered for
+// `pg-desk show`'s planned-sync-writes surface — see internal/sync's own
+// package doc comment ("Planned rows and the ledger's existing columns")
+// for why an empty bead_id is the "this is planned, not applied" signal.
+type plannedSyncRow struct {
+	Kind        string `json:"kind"`
+	ContentHash string `json:"content_hash"`
+}
+
+// plannedSyncRowsFor reads this PR's own ledger rows (the three kinds
+// design section 7.5 pins) and returns the ones with no real bead_id yet —
+// this PR's own planned sync writes.
+func plannedSyncRowsFor(st *store.Store, repo, entityID string) ([]plannedSyncRow, error) {
+	var out []plannedSyncRow
+	for _, kind := range []string{"anchor", "feedback-cycle", "review-request"} {
+		entry, found, err := st.GetLedger(repo, entityTypePR, entityID, kind)
+		if err != nil {
+			return nil, fmt.Errorf("get ledger %s: %w", kind, err)
+		}
+		if found && entry.BeadID == "" {
+			out = append(out, plannedSyncRow{Kind: kind, ContentHash: entry.LastSyncedContentHash})
+		}
+	}
+	return out, nil
 }
 
 func runShow(cmd *cobra.Command, ref string) error {
@@ -132,6 +165,14 @@ func runShow(cmd *cobra.Command, ref string) error {
 		WIP:            wip,
 	}
 
+	if cfg.Sync.Mode == sync.ModePlan {
+		planned, plannedErr := plannedSyncRowsFor(st, repo, id)
+		if plannedErr != nil {
+			return fmt.Errorf("show: %w", plannedErr)
+		}
+		payload.PlannedSyncRows = planned
+	}
+
 	if resolveJSONOutput(showFlags.jsonOut) {
 		return writeShowJSON(cmd.OutOrStdout(), payload)
 	}
@@ -148,11 +189,24 @@ func writeShowJSON(w io.Writer, p showPayload) error {
 }
 
 func renderShow(w io.Writer, p showPayload) error {
-	_, err := fmt.Fprintf(
+	if _, err := fmt.Fprintf(
 		w,
 		"%s#%s\townership=%s\tcategory=%s\tpanel=%s\tready_to_promote=%v\tdegraded=%v\tas_of=%s\thidden=%v\twip=%v\n",
 		p.Repo, p.EntityID, orDash(p.Ownership), orDash(p.Category), orDash(p.Panel),
 		p.ReadyToPromote, p.Degraded, orDash(p.AsOf), p.Hidden, p.WIP,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if len(p.PlannedSyncRows) == 0 {
+		return nil
+	}
+	if _, err := io.WriteString(w, "planned_sync_rows:\n"); err != nil {
+		return err
+	}
+	for _, row := range p.PlannedSyncRows {
+		if _, err := fmt.Fprintf(w, "  %s: content_hash=%s\n", row.Kind, row.ContentHash); err != nil {
+			return err
+		}
+	}
+	return nil
 }

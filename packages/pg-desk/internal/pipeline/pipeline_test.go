@@ -26,6 +26,16 @@ func (f gatherFunc) Gather(ctx context.Context, entityType, entityID string, cha
 	return f(ctx, entityType, entityID, change)
 }
 
+// syncerFunc adapts a plain function to the syncer interface (mirrors
+// gatherFunc, above) — this suite's own fake sync stage, so
+// TestPipelineRun_SyncFailureSetsSyncError can inject a failure without a
+// real pg-connector subprocess.
+type syncerFunc func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error
+
+func (f syncerFunc) Sync(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+	return f(ctx, repo, entityID, change, facts, interp)
+}
+
 // testCfg is a minimal single-repo Config, matching Phase 9's "exactly
 // one repository" scope.
 func testCfg() *config.Config {
@@ -263,6 +273,66 @@ func TestPipelineRun_RemovedUnknownIDIsNoop(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"outcome":"noop"`) {
 		t.Fatalf("expected a structured JSON noop log line, got: %s", out.String())
+	}
+}
+
+// TestPipelineRun_SyncFailureSetsSyncError is docket pg2-2j5ac.34's own
+// acceptance criterion: a sync stage failure sets Interpretation.SyncError
+// on that entity's row (via the existing UpsertInterpretation) rather than
+// failing the whole Run invocation — never a Run error, never exit 9,
+// never a raw pg-connector exit code.
+func TestPipelineRun_SyncFailureSetsSyncError(t *testing.T) {
+	facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "repo": "acme/widgets", "number": 10})
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return facts, nil
+	}), &out)
+	wantSyncErr := errors.New("sync: pg-connector issue create: exit 1: boom")
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		return wantSyncErr
+	})
+
+	if err := p.Run(context.Background(), "pr", "10", gather.ChangeAdded); err != nil {
+		t.Fatalf("Run: expected nil (a sync failure must not fail Run), got %v", err)
+	}
+
+	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "10")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if interp.SyncError != wantSyncErr.Error() {
+		t.Fatalf("interpretation.SyncError = %q, want %q", interp.SyncError, wantSyncErr.Error())
+	}
+	// The rest of the persisted row must survive the second UpsertInterpretation
+	// call untouched (same row, only SyncError changed).
+	if interp.Ownership == "" {
+		t.Fatalf("interpretation row lost its other fields on the sync_error update: %+v", interp)
+	}
+	if strings.Contains(out.String(), `"outcome":"error"`) {
+		t.Fatalf("a sync failure must not log a run-level error outcome, got: %s", out.String())
+	}
+}
+
+// TestPipelineRun_SyncSkippedForNonPREntityType proves the sync stage
+// never runs for a non-"pr" entityType (this packet's own Contract: "sync
+// stage ... when entityType == pr").
+func TestPipelineRun_SyncSkippedForNonPREntityType(t *testing.T) {
+	facts := minimalFacts(t, map[string]any{"author": "me", "title": "x"})
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return facts, nil
+	}), &out)
+	called := false
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		called = true
+		return nil
+	})
+
+	if err := p.Run(context.Background(), "issue", "11", gather.ChangeAdded); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if called {
+		t.Fatal("sync stage was invoked for a non-pr entityType")
 	}
 }
 

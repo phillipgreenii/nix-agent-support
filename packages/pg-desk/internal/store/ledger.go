@@ -47,6 +47,42 @@ func (s *Store) UpsertLedger(l LedgerEntry) error {
 	return nil
 }
 
+// ListLedger returns every ledger row, ordered by (repo, entity_type,
+// entity_id, kind) for a deterministic result — mirrors
+// interpretation.go's own ListInterpretations exactly. Added by docket
+// pg2-2j5ac.34 (Phase 10, sync) for `pg-desk status`'s "planned sync rows
+// by kind" surface [design 7.7]: a per-PR read (GetLedger, by repo/type/id/
+// kind) cannot answer an aggregate "how many planned rows exist" question,
+// and status's own scope is the whole store, not one PR.
+func (s *Store) ListLedger() ([]LedgerEntry, error) {
+	rows, err := s.sql.Query(
+		`SELECT repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha
+		 FROM ledger ORDER BY repo, entity_type, entity_id, kind`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list ledger: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []LedgerEntry
+	for rows.Next() {
+		var entry LedgerEntry
+		var lastSyncedContentHash, lastSyncedAt, lastReviewedHeadSHA sql.NullString
+		if err := rows.Scan(&entry.Repo, &entry.EntityType, &entry.EntityID, &entry.Kind, &entry.BeadID,
+			&lastSyncedContentHash, &lastSyncedAt, &lastReviewedHeadSHA); err != nil {
+			return nil, fmt.Errorf("store: scan ledger row: %w", err)
+		}
+		entry.LastSyncedContentHash = lastSyncedContentHash.String
+		entry.LastSyncedAt = lastSyncedAt.String
+		entry.LastReviewedHeadSHA = lastReviewedHeadSHA.String
+		out = append(out, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list ledger: %w", err)
+	}
+	return out, nil
+}
+
 // GetLedger returns the ledger row for
 // (repo, entityType, entityID, kind), or found=false if no such row exists.
 func (s *Store) GetLedger(repo, entityType, entityID, kind string) (entry LedgerEntry, found bool, err error) {
