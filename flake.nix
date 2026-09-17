@@ -233,6 +233,15 @@
           pg-router-ccpool-handler = final.callPackage ./packages/pg-router-ccpool-handler {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-desk: docket pg2-2j5ac.32 (Phase 9)'s operator triage desk,
+          # wired into nix outputs by this docket's packet 10 (packets 2-9
+          # landed the Go code alone). Pattern B (local `replace =>
+          # ../pg-connector`, mirrors pg-router's own local replace above):
+          # `pg-connector` resolves automatically via callPackage against
+          # `final.pg-connector`, defined earlier in this same overlay.
+          pg-desk = final.callPackage ./packages/pg-desk {
+            inherit (goBuilders) mkGoApp;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
@@ -1970,6 +1979,62 @@
                     touch $out
                   '';
 
+              # pg-desk composition-rule smoke test (docket pg2-2j5ac.32,
+              # Phase 9, packet 10): proves the nix WRAPPER -- not ambient
+              # PATH -- is what supplies pg-connector to the built pg-desk
+              # binary (D10: packages/pg-desk execs no binary other than
+              # pg-connector and the operator-configured browser, directly
+              # or transitively). Complements
+              # cmd/pg-desk/composition_test.go's chokepoint test (a
+              # source-level, PRE-WRAP scan) with a POST-WRAP negative
+              # control, mirroring this repo's own CLAUDE.md "pg-router
+              # config testing trap" note: run the unwrapped
+              # `.<name>-wrapped` binary under `env -i` and confirm it
+              # fails without the wrapper's PATH injection.
+              #
+              # The "wrapped" half does NOT reuse packages.pg-desk's own
+              # wrapper as-is: that wrapper's `wrapProgram --prefix PATH :`
+              # PREPENDS the REAL pg-connector's bin dir ahead of anything
+              # else on PATH (verified: `PATH='<real-pg-connector-bin>'$PATH`
+              # in the generated script), so it always wins over anything
+              # placed in the inherited PATH — and a REAL pg-connector's
+              # `pr show` against no registered backend cannot answer this
+              # smoke test's call. Instead this check builds a SEPARATE
+              # wrapped copy of the SAME unwrapped `.pg-desk-wrapped`
+              # binary, using the identical wrapProgram mechanism but
+              # pointed at a STUB pg-connector — proving the wrapping
+              # MECHANISM (PATH injection resolves "pg-connector" from the
+              # wrapper, never ambient PATH), independent of pg-connector's
+              # own runtime behavior.
+              test-pg-desk-composition-rule =
+                let
+                  stubPgConnector = pkgs.writeShellScriptBin "pg-connector" ''
+                    if [ "$1" = "pr" ] && [ "$2" = "show" ]; then
+                      printf '%s\n' '{"result":{"repo":"phillipgreenii/example-repo","number":1,"state":"open","merged":false,"head_sha":"deadbeef","as_of":"2026-09-16T00:00:00Z"}}'
+                      exit 0
+                    fi
+                    exit 1
+                  '';
+                in
+                pkgs.runCommand "test-pg-desk-composition-rule"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.makeWrapper
+                    ];
+                  }
+                  ''
+                    cp ${pkgs.pg-desk}/bin/.pg-desk-wrapped $TMPDIR/pg-desk-stub-wrapped
+                    chmod +w $TMPDIR/pg-desk-stub-wrapped
+                    wrapProgram $TMPDIR/pg-desk-stub-wrapped --prefix PATH : ${stubPgConnector}/bin
+
+                    export PG_DESK_STUB_WRAPPED=$TMPDIR/pg-desk-stub-wrapped
+                    export PG_DESK_UNWRAPPED=${pkgs.pg-desk}/bin/.pg-desk-wrapped
+
+                    bats ${./packages/pg-desk/tests/composition-rule.bats}
+                    touch $out
+                  '';
+
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
               # ../claude-transcript), so root the fileset at packages/ and pass
@@ -2648,6 +2713,132 @@
                 assert
                   darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
                 renderCheck;
+
+              # test-pg-desk-module (docket pg2-2j5ac.32, Phase 9, packet
+              # 10): proves the new darwin (services.pg-desk-serve) and
+              # home (programs.pg-desk) modules evaluate standalone — no
+              # ZR/consumer values required [Validation: "confirm they
+              # evaluate without a consumer yet"] — mirroring
+              # test-pg-router-module's own evalModules technique one repo
+              # over.
+              test-pg-desk-module =
+                let
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.lines;
+                        default = "";
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                    };
+                  };
+
+                  evalDarwin =
+                    servesCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-desk-serve/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.system.launchdServices.userAgents = lib.mkOption {
+                                type = lib.types.attrsOf userAgentSubmodule;
+                                default = { };
+                              };
+                              system.primaryUser = lib.mkOption {
+                                type = lib.types.nullOr lib.types.str;
+                                default = "tester";
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.services.pg-desk-serve = servesCfg; }
+                      ];
+                    }).config;
+
+                  evalHM =
+                    pgDeskCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pg-desk/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.pg-desk = pgDeskCfg; }
+                      ];
+                    }).config;
+
+                  darwinDisabled = evalDarwin { enable = false; };
+                  darwinEnabledNoSoak = evalDarwin { enable = true; };
+                  darwinEnabledSoak = evalDarwin {
+                    enable = true;
+                    soak = {
+                      enable = true;
+                      port = 9819;
+                    };
+                  };
+
+                  hmDisabled = evalHM { enable = false; };
+                  hmEnabled = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                  };
+                in
+                # Darwin module: no consumer input required to evaluate
+                # (default enable = false, no launchd entry registered).
+                assert darwinDisabled.phillipgreenii.system.launchdServices.userAgents == { };
+                # Enabled with soak OFF: no `--port` flag on the launchd
+                # ExecStart script.
+                assert darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents ? pg-desk-serve;
+                assert
+                  !lib.hasInfix "--port" darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # Enabled with soak ON (D27 default 9819): the `--port`
+                # override IS present, and the darwin module never touches
+                # serve.addr's own rendered config value [Binding
+                # decisions: "these are two distinct options ... do not
+                # collapse them into one"].
+                assert lib.hasInfix "--port 9819"
+                  darwinEnabledSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # Home module: no consumer input required to evaluate
+                # (default enable = false, nothing installed/rendered).
+                assert hmDisabled.home.packages == [ ];
+                assert hmDisabled.xdg.configFile == { };
+                # Enabled: the package is installed and the config file is
+                # rendered.
+                assert lib.elem pkgs.pg-desk hmEnabled.home.packages;
+                assert hmEnabled.xdg.configFile ? "pg-desk/config.yaml";
+                pkgs.runCommand "test-pg-desk-module-ok" { } "touch $out";
 
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's
@@ -4812,6 +5003,7 @@
               pg-ccaudit
               pg-router-source-pg-connector
               integrate-branch-support
+              pg-desk
               ;
             # The two agent-activity-api wrappers, re-exported for the same
             # reason codeburn is: they are overlay-only attrs, so without this
