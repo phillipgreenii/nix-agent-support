@@ -194,13 +194,16 @@ func TestEnvVars_BASH_ENV_StaysReject(t *testing.T) {
 // HOME's OWN unclassified fallback from Ask to Reject; PATH's is unchanged.
 //
 // pg2-dhugk: every row's value was `/x`/`/custom/bin` — a bare, static
-// absolute PATH REPLACEMENT — until this bead added
-// isStaticAbsoluteOnlyPathReplacement, which now Approves EXACTLY that shape
-// (see TestEnvVars_StaticAbsoluteOnlyPathReplacement_Approve). Swapped to a
-// RELATIVE component (`relative/bin`) so these rows keep testing what they
-// were written for — an unclassifiable value with no matching relief at
-// all — rather than accidentally re-testing the new relief under a
-// mechanism-1/2 negative-case name.
+// absolute PATH REPLACEMENT — until commit 2db053bc's first (too-broad)
+// landing of isStaticAbsoluteOnlyPathReplacement briefly Approved EXACTLY
+// that shape regardless of leaf position. The 2026-09-17 20:27 narrowing
+// decision requires the value to be variable-derived (see
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_Approve), so a bare literal
+// like `/x` no longer qualifies at all — these rows were nonetheless kept on
+// a RELATIVE component (`relative/bin`) rather than reverted to `/x`, so
+// they keep testing what they were written for — an unclassifiable value
+// with no matching relief at all — independent of either version of the new
+// relief's exact scope.
 func TestEnvVars_AskVars_Ask(t *testing.T) {
 	r := New()
 	commands := []string{
@@ -1141,13 +1144,17 @@ func TestEnvVars_LeadingScopedAssignment_NonDelegatingCommand_Relieved(t *testin
 // unchanged.
 //
 // pg2-dhugk: the value was `/x` (a bare static-absolute PATH REPLACEMENT)
-// until this bead added isStaticAbsoluteOnlyPathReplacement, which matches
-// that shape regardless of delegation and — since none of these rows is the
-// whole leaf — is silently discarded by the Rule contract's condition 3
-// exactly like the pg2-0q99a preserve-form Approve already is beside a real
-// command (TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand), landing
-// on Abstain rather than Ask. Swapped to `relative/bin` so these rows keep
-// testing mechanism 1 in ISOLATION, as written, rather than the new relief.
+// until commit 2db053bc's first (too-broad) landing of
+// isStaticAbsoluteOnlyPathReplacement briefly matched that shape regardless
+// of delegation, landing on Abstain rather than Ask for these rows too. The
+// 2026-09-17 20:27 narrowing decision requires the value to be
+// variable-derived, so a bare literal like `/x` no longer matches at all —
+// these rows were nonetheless kept on `relative/bin` rather than reverted to
+// `/x`, so they keep testing mechanism 1 in ISOLATION, as written,
+// independent of either version of the new relief's exact scope (see
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_BareLiteralStillAsks for the
+// row pinning the CURRENT, narrowed behavior of a bare literal beside a
+// delegating command directly).
 func TestEnvVars_LeadingScopedAssignment_DelegatingCommand_StillAsks(t *testing.T) {
 	r := New()
 	commands := []string{
@@ -1234,17 +1241,19 @@ func TestEnvVars_PersistentAssignment_NoConsumer_Relieved(t *testing.T) {
 // TestEnvVars_PersistentAssignment_ConsumerFound_HomeStillRejects (pg2-sir2l:
 // HOME's own unclassified fallback is Reject, not Ask; PATH's is unchanged).
 //
-// pg2-dhugk: the value was a bare static-absolute `/x` until this bead added
-// isStaticAbsoluteOnlyPathReplacement, which Approves EXACTLY that shape
-// regardless of any downstream consumer — the SAME "value-based relief
-// ignores mechanism 2 entirely" property preservesCallerValue/
-// isHermeticEnvReplacement/isHermeticHomeReplacement already have (see
-// TestEnvVars_ExistingValueReliefs_UnaffectedWhenConsumerFound, and
-// TestEnvVars_StaticAbsoluteOnlyPathReplacement_ApprovesDespiteDownstreamConsumer
-// for this bead's own instance of it). Swapped to an ambient, unresolvable
-// `$CLEANPATH` reference so these rows keep testing mechanism 2 in
-// ISOLATION — a value no relief (old or new) can clear — rather than the new
-// relief.
+// pg2-dhugk: the value was a bare static-absolute `/x` until commit
+// 2db053bc's first (too-broad) landing of isStaticAbsoluteOnlyPathReplacement
+// briefly Approved EXACTLY that shape regardless of any downstream consumer —
+// the SAME "value-based relief ignores mechanism 2 entirely" property
+// preservesCallerValue/isHermeticEnvReplacement/isHermeticHomeReplacement
+// already have (see TestEnvVars_ExistingValueReliefs_UnaffectedWhenConsumerFound).
+// The 2026-09-17 20:27 narrowing decision deliberately does NOT extend that
+// property to this predicate — see
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_SeparateLeafConsumerStillAsks,
+// which pins the corrected, opposite behavior. Swapped to an ambient,
+// unresolvable `$CLEANPATH` reference here so these rows keep testing
+// mechanism 2 in ISOLATION — a value no relief (old, new, or narrowed) can
+// clear — rather than any value-based relief.
 func TestEnvVars_PersistentAssignment_ConsumerFound_StillAsks(t *testing.T) {
 	r := New()
 	commands := []string{
