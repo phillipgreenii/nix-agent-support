@@ -28,6 +28,10 @@ var approvedTools = map[string]bool{
 	// external side effects; EnterWorktree does create a git worktree on disk,
 	// but it is agent-initiated, low-risk, and reversible, so it is auto-approved
 	// alongside the rest (pg2-9cist; comment corrected in pg2-zu6xj).
+	// SubagentHandback is included for the same reason: a fixed-shape
+	// handoff/status receipt from a dispatched subagent back to its caller, with
+	// no command or argument surface to evaluate (pg2-96jyd, from pg2-vxpvl's
+	// identification: 88/88 historical rows approved).
 	"Monitor":          true,
 	"StructuredOutput": true,
 	"ScheduleWakeup":   true,
@@ -39,6 +43,7 @@ var approvedTools = map[string]bool{
 	"Workflow":         true,
 	"ReportFindings":   true,
 	"ListAgents":       true,
+	"SubagentHandback": true,
 	// BashOutput retrieves output from a background Bash shell — read-only, no
 	// filesystem or external side effects — so it is auto-approved (hook-support
 	// parity; BashOutputEvaluator). KillShell is deliberately NOT here: it is

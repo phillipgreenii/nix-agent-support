@@ -21,6 +21,7 @@ func TestClaudeTools_ApprovedTools(t *testing.T) {
 		// First-party agent-control / read-only tools (pg2-9cist)
 		"Monitor", "StructuredOutput", "ScheduleWakeup", "TaskStop", "SendMessage",
 		"EnterWorktree", "TaskList", "Workflow", "TaskGet", "ReportFindings", "ListAgents",
+		"SubagentHandback",
 		// BashOutput is read-only (retrieves background-shell output) — approved.
 		"BashOutput",
 	}
