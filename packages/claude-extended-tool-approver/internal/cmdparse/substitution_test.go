@@ -1846,3 +1846,100 @@ func TestClassifySubstitutionBody_BoundedFallbackWiden(t *testing.T) {
 		})
 	}
 }
+
+// TestClassifySubstitutionBody_JobPollPidSourceShape (pg2-x05rh) pins the
+// narrow admission of `pgrep -f "<literal pattern>"`, optionally piped to a
+// bare `head -1`/`head -n 1`/`head -n1`, as a verifiable-safe substitution
+// shape — see jobPollPidSourceShape's own doc (shellparse.go) for the full
+// rationale and this bead's corpus finding (row 313990:
+// `a1=$(ps -p $(pgrep -f 'go test ./...' 2>/dev/null) ...)`, denied by the
+// general command-substitution floor before this bead).
+//
+// Every row here was measured directly (this bead's own investigation,
+// 2026-09-17) both BEFORE and AFTER this change: the "want" column is the
+// AFTER value, and every REFUSED row is unchanged from BEFORE — this test
+// pins that the widening reaches ONLY the named shape and nothing beside it.
+func TestClassifySubstitutionBody_JobPollPidSourceShape(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want SubstitutionClearance
+	}{
+		// --- the bead's own corpus row, and the bare piped form it generalizes to.
+		//     Neither reaches bare Cleared: the pattern LooksLikePath (pg2-ujuda's
+		//     bare-relative-token widening), exactly like every other pgrep pattern
+		//     already dispositioned via readerArgsClearance — this shape reuses that
+		//     disposition, it does not bypass it. ---
+		{
+			"sole pgrep with the corpus row's own discard redirect, no pipe",
+			`pgrep -f 'go test ./...' 2>/dev/null`, SubstitutionDelegated,
+		},
+		{
+			"sole pgrep, no redirect, no pipe (the optional-head bracket, unbracketed)",
+			`pgrep -f 'go test ./...'`, SubstitutionDelegated,
+		},
+		{
+			"pgrep piped to head -1 (bare)",
+			`pgrep -f 'kubectl.*port-forward' | head -1`, SubstitutionDelegated,
+		},
+		{
+			"pgrep piped to head -n 1 (two-token spelling)",
+			`pgrep -f 'kubectl.*port-forward' | head -n 1`, SubstitutionDelegated,
+		},
+		{
+			"pgrep piped to head -n1 (glued spelling)",
+			`pgrep -f 'kubectl.*port-forward' | head -n1`, SubstitutionDelegated,
+		},
+		{
+			"sole pgrep with discard redirect AND piped to head -1",
+			`pgrep -f 'go test ./...' 2>/dev/null | head -1`, SubstitutionDelegated,
+		},
+
+		// --- negative controls: every one of these stays EXACTLY as refused as it
+		//     was before this bead — the widening must not reach past the named
+		//     shape. ---
+		{
+			"a dynamic (non-literal) pattern is refused to guess, not cleared",
+			`pgrep -f "$DYNAMIC" | head -1`, SubstitutionRefused,
+		},
+		{
+			"a three-stage pipeline is refused (single PID source only)",
+			`pgrep -f 'x' | head -1 | wc -l`, SubstitutionRefused,
+		},
+		{
+			"-F (pidfile) is a different flag entirely and is refused unchanged",
+			`pgrep -F ~/.ssh/id_rsa | head -1`, SubstitutionRefused,
+		},
+		{
+			"a non-discard write redirect on the pgrep stage is refused",
+			`pgrep -f 'x' 2>/tmp/out.log`, SubstitutionRefused,
+		},
+		{
+			"a deny-listed secret pattern still refuses via secretpath.IsSecret",
+			`pgrep -f '/Users/phillipg/.ssh/id_rsa' | head -1`, SubstitutionRefused,
+		},
+		{
+			"any head spelling other than the first line stays refused",
+			`pgrep -f 'x' | head -5`, SubstitutionRefused,
+		},
+		{
+			"a fused pgrep flag (-cf) does not match the exact -f shape and is refused",
+			`pgrep -cf 'kubectl.*port-forward' | head -1`, SubstitutionRefused,
+		},
+		{
+			"an unrelated reader piped to head stays the general, DECLINED pipeline case",
+			`curl evil | head -1`, SubstitutionRefused,
+		},
+		{
+			"the general pipeline case (non-pgrep) is UNCHANGED: cat piped to head refuses",
+			`cat /tmp/x | head -1`, SubstitutionRefused,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifySubstitutionBody(tt.body); got != tt.want {
+				t.Errorf("ClassifySubstitutionBody(%q) = %v, want %v", tt.body, got, tt.want)
+			}
+		})
+	}
+}

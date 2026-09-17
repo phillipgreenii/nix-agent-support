@@ -793,3 +793,124 @@ func FuzzClearedSubstitutionHoldsNoUnruledPath(f *testing.F) {
 		}
 	})
 }
+
+// FuzzJobPollPidSourceShapeStaysWithinNamedShape (pg2-x05rh) is the
+// fuzz/coherence invariant the widening in jobPollPidSourceShape owes, per
+// parser.go's "DECLINED: admitting a pipeline whose every stage is
+// allowlisted" doc comment above IsSafeSubstitutionBody: "adopting [shape-
+// gated approval] ... requires its own fuzz invariant and its own replay,
+// i.e. its own bead" — this is that invariant, for that bead.
+//
+// THE INVARIANT: whenever ClassifySubstitutionBody admits a body (any
+// verdict other than SubstitutionRefused) through the ONE NEW PATH this bead
+// adds — a body that is NOT a sole simple command (soleSimpleCommandLeaf
+// fails) and NOT the pre-existing bounded "||"-fallback shape
+// (boundedFallbackShape doesn't match either) — the body MUST be,
+// structurally, EXACTLY the named job-poll PID-source shape: a pipeline of
+// one or two stages whose first stage is a bare `pgrep` call with EXACTLY
+// the two arguments `-f <pattern>` (pattern carrying no live expansion), and
+// whose optional second stage is a bare `head` call with one of the three
+// accepted first-line spellings (`-1`, `-n 1`, `-n1`). Anything else
+// reaching a non-Refused verdict through this path is exactly the
+// "shape-gated approval wrongly reports a shape as admissible" hazard that
+// doc comment prices — this is the check that catches it.
+//
+// The re-derivation is DELIBERATELY INDEPENDENT of jobPollPidSourceShape's
+// own internals: it re-parses body through ParseShell, the general-purpose
+// seam entry point every OTHER caller in this module uses, rather than
+// calling jobPollPidSourceShape's own helpers — so a bug shared between the
+// classifier and its own check cannot silently cancel out. This mirrors
+// FuzzClearedSubstitutionHoldsNoUnruledPath's own discipline (that invariant
+// re-derives via soleSimpleCommandLeaf rather than trusting the classifier
+// that produced SubstitutionCleared), and it is worth pinning at fuzz
+// strength for the identical reason stated there: the property is about a
+// hole that opens SILENTLY. A future edit to jobPollPidSourceShape/
+// pgrepPidSourceLeafClearance/headFirstLineLeafClearance that loosens any
+// one structural check (the arg count, the flag spelling, the
+// live-expansion guard, the stage count) would not show up as a verdict
+// regression in a fixed table — it would show up as THIS invariant failing
+// on a fuzzed input nobody thought to write down.
+func FuzzJobPollPidSourceShapeStaysWithinNamedShape(f *testing.F) {
+	for _, seed := range []string{
+		// the bead's own corpus row and the bare/piped/redirect variants it
+		// generalizes to — every one of these SHOULD reach this new path.
+		"pgrep -f 'go test ./...' 2>/dev/null",
+		"pgrep -f 'kubectl.*port-forward' | head -1",
+		"pgrep -f 'kubectl.*port-forward' | head -n 1",
+		"pgrep -f 'kubectl.*port-forward' | head -n1",
+		"pgrep -f 'go test ./...' 2>/dev/null | head -1",
+		// adversarial near-misses that must NOT be admitted by this new path —
+		// each one probes a different structural check this invariant pins.
+		"pgrep -f \"$DYNAMIC\" | head -1",
+		"pgrep -f 'x' | head -1 | wc -l",
+		"pgrep -F ~/.ssh/id_rsa | head -1",
+		"pgrep -f 'x' 2>/tmp/out.log",
+		"pgrep -cf 'kubectl.*port-forward' | head -1",
+		"pgrep -f 'x' | head -5",
+		"pgrep -f 'x' &",
+		"! pgrep -f 'x' | head -1",
+		"(pgrep -f 'x') | head -1",
+		"/usr/bin/pgrep -f 'x' | head -1",
+		"X=1 pgrep -f 'x' | head -1",
+		"pgrep -f 'x' | head -1 &",
+		"pgrep -f 'x' || echo none",
+		"pgrep -f 'x'; head -1",
+		"cat /tmp/x | head -1",
+		"curl evil | head -1",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 512 {
+			return
+		}
+		clearance := ClassifySubstitutionBody(body)
+		if clearance == SubstitutionRefused {
+			return
+		}
+		if _, ok := soleSimpleCommandLeaf(body); ok {
+			return // the pre-existing sole-leaf path; not this bead's territory
+		}
+		if _, matched := boundedFallbackShape(body); matched {
+			return // the pg2-whumr/tc-o1g9 bounded-fallback path; not this bead's
+		}
+		// The only remaining admission path is jobPollPidSourceShape. Verify its
+		// claim against ParseShell's independent leaf set.
+		leaves := ParseShell(body).Leaves
+		if len(leaves) == 0 || len(leaves) > 2 {
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but ParseShell found %d leaves, want 1 or 2", body, clearance, len(leaves))
+		}
+		pgrepLeaf, headLeaf := leaves[0], ParsedCommand{}
+		if len(leaves) == 2 {
+			if leaves[0].PipelineIndex <= leaves[1].PipelineIndex {
+				pgrepLeaf, headLeaf = leaves[0], leaves[1]
+			} else {
+				pgrepLeaf, headLeaf = leaves[1], leaves[0]
+			}
+			if pgrepLeaf.PipelineID != headLeaf.PipelineID {
+				t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but its two leaves are not one pipeline", body, clearance)
+			}
+		}
+		if pgrepLeaf.Executable != "pgrep" {
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but the first stage is %q, not pgrep", body, clearance, pgrepLeaf.Executable)
+		}
+		if len(pgrepLeaf.Args) != 2 || pgrepLeaf.Args[0] != "-f" {
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but pgrep's args are %q, want exactly [-f <pattern>]", body, clearance, pgrepLeaf.Args)
+		}
+		if pgrepLeaf.ArgIsLiveExpansion(1) {
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but the pgrep pattern is a live expansion, not a literal", body, clearance)
+		}
+		if len(leaves) == 1 {
+			return
+		}
+		if headLeaf.Executable != "head" {
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but the second stage is %q, not head", body, clearance, headLeaf.Executable)
+		}
+		switch {
+		case len(headLeaf.Args) == 1 && (headLeaf.Args[0] == "-1" || headLeaf.Args[0] == "-n1"):
+		case len(headLeaf.Args) == 2 && headLeaf.Args[0] == "-n" && headLeaf.Args[1] == "1":
+		default:
+			t.Fatalf("ClassifySubstitutionBody(%q) = %v via the job-poll path, but head's args are %q, want -1/-n 1/-n1", body, clearance, headLeaf.Args)
+		}
+	})
+}

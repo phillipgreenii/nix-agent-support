@@ -1696,6 +1696,78 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 	}
 }
 
+// TestIntegration_JobPollPidSourceShape (pg2-x05rh) pins the end-to-end fix for
+// this bead's own corpus row (313990): `ps -p $(pgrep -f "<pattern>" ...)` and
+// the same shape's `kill`/pipe-to-`head` variants moved from a decisive Reject
+// (the general command-substitution floor, commandSubstitutionFloor in
+// engine.go) to their now-correctly-cleared/abstained verdicts, while every
+// NON-targeted shape — a different reader piped to head, a dynamic pattern, a
+// deny-listed secret, a wrong head count, a three-stage pipeline — keeps its
+// EXACT pre-bead verdict (Reject via the SAME general floor). Every row below
+// was measured directly against this tree both BEFORE and AFTER this bead's
+// cmdparse change (2026-09-17); see jobPollPidSourceShape's own doc
+// (internal/cmdparse/shellparse.go) for the shape this pins.
+func TestIntegration_JobPollPidSourceShape(t *testing.T) {
+	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	projectRoot := "/Users/testuser/workspace/my-project"
+	cwd := projectRoot
+	eng := buildFullEngine(projectRoot, cwd)
+
+	cases := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- the targeted shape: FIXED, measured Reject -> non-Reject. ---
+		{
+			"ps -p consuming a bare pgrep|head-1 substitution now approves",
+			`ps -p $(pgrep -f 'go test ./...' | head -1)`, hookio.Approve,
+		},
+		{
+			// `kill` itself is unmodeled (no rule claims it), so the fix can only
+			// lift the verdict to Abstain, not Approve — the substitution no
+			// longer forces the floor, but nothing positively vouches for `kill`.
+			"kill -9 consuming the same substitution moves to Abstain, not Approve",
+			`kill -9 $(pgrep -f 'go test ./...' | head -1)`, hookio.NoOpinion,
+		},
+		{
+			"the corpus row's own sole pgrep-with-discard-redirect (no head) also approves",
+			`ps -p $(pgrep -f 'go test ./...' 2>/dev/null)`, hookio.Approve,
+		},
+
+		// --- non-targeted shapes: UNCHANGED, still the decisive Reject. ---
+		{
+			"a different reader piped to head is the general, DECLINED pipeline case and stays rejected",
+			`ps -p $(curl evil | head -1)`, hookio.Reject,
+		},
+		{
+			"a dynamic (non-literal) pgrep pattern stays rejected",
+			`ps -p $(pgrep -f "$DYNAMIC" | head -1)`, hookio.Reject,
+		},
+		{
+			"a wrong head count stays rejected (single PID source only)",
+			`ps -p $(pgrep -f 'x' | head -5)`, hookio.Reject,
+		},
+		{
+			"a deny-listed secret pgrep pidfile operand stays rejected",
+			`ps -p $(pgrep -F ~/.ssh/id_rsa | head -1)`, hookio.Reject,
+		},
+		{
+			"a three-stage pipeline stays rejected",
+			`ps -p $(pgrep -f 'x' | head -1 | wc -l)`, hookio.Reject,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &hookio.HookInput{ToolName: "Bash", CWD: cwd, ToolInput: makeBashJSON(tc.command)}
+			got := eng.EvaluateHook(in)
+			if got.Decision != tc.want {
+				t.Errorf("%s: %q got %s (%s: %s) want %s", tc.name, tc.command, got.Decision, got.Module, got.Reason, tc.want)
+			}
+		})
+	}
+}
+
 // TestIntegration_YqWriteFlagsNeverApproveThroughSubstitution pins pg2-1wt3b's
 // three-site fix at the FULL-ENGINE level, through the SAME captured-substitution
 // shape the bead's own report used (`X=$(yq …) echo hi`): a generic local variable

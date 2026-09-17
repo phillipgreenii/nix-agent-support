@@ -38,6 +38,7 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
 )
 
 // ShellParse is the seam's result. It is a FIRST-CLASS value rather than an
@@ -2399,6 +2400,222 @@ func isLiteralOnlyWord(w *syntax.Word) bool {
 		}
 	}
 	return true
+}
+
+// ============================================================================
+// pg2-x05rh: the PGREP JOB-POLL PID-SOURCE pipeline classifier.
+//
+// soleSimpleCommandLeaf's SOLE-SIMPLE-COMMAND shape (see IsSafeSubstitutionBody's
+// own "DECLINED: admitting a pipeline whose every stage is allowlisted" doc,
+// parser.go) refuses `pgrep -f "<pattern>" | head -1` outright — it is TWO
+// leaves joined by `|`, never reaching soleSimpleCommandLeaf's own leaf
+// inspection at all — and even the UNPIPED `pgrep -f "<pattern>" 2>/dev/null`
+// is refused too, for an unrelated reason: the general redirectClearance
+// (parser.go) refuses ANY write-direction redirect unconditionally, and a
+// discard-to-/dev/null is exactly that shape. MEASURED live against this
+// bead's own corpus row 313990:
+//
+//	a1=$(ps -p $(pgrep -f 'go test ./...' 2>/dev/null) >/dev/null 2>&1 && echo alive || echo gone)
+//
+// denied by envvars' env-value floor (commandSubstitutionFloor, via
+// engine.foldSubstitutionScan) even though `ps`, `pgrep` and `head` are each
+// ALREADY individually trusted — the floor fires on the NESTED
+// `$(pgrep ... 2>/dev/null)` substitution, not on anything `ps`/`a1` do.
+//
+// This is the operator-approved, NARROWLY-SCOPED admission for that ONE named
+// shape (pg2-x05rh's Shape 2): `pgrep -f "<literal pattern>"`, tolerating a
+// discard-only redirect, optionally piped to a bare `head -1`/`head -n 1`/
+// `head -n1` — the job-poll PID-source idiom that feeds `ps -p $(...)` or an
+// equivalent kill/job-poll consumer. It is DELIBERATELY NOT a general
+// admission of "any pipeline whose every stage is allowlisted" onto
+// IsSafeSubstitutionBody — parser.go's own "DECLINED" doc comment above
+// IsSafeSubstitutionBody already priced and declined that wider move, citing
+// ADR 0039's "shape-gated approval" pricing and ADR 0040's "a pipeline is not
+// one command" — this widening is exactly the "requires its own fuzz
+// invariant and its own replay, i.e. its own bead" case that doc comment
+// reserves, narrowed to the ONE shape this bead's corpus investigation
+// actually measured (785 corpus rows currently denied by envvars' unverifiable-
+// value floor; essentially none are a literal `git -C "$VAR"` shape — see
+// this bead's own body for the corpus finding that redirected Shape 1 — and
+// row 313990 above is the pgrep/ps-p job-poll idiom this classifier admits).
+//
+// Modeled as its OWN entry point (jobPollPidSourceShape below), consulted
+// FIRST by ClassifySubstitutionBody — ahead of soleSimpleCommandLeaf's own
+// ok/not-ok branching — because this shape spans BOTH branches: the unpiped
+// form reaches soleSimpleCommandLeaf successfully (ok=true) and is refused
+// only later, by the general redirectClearance; the piped form never reaches
+// soleSimpleCommandLeaf at all (ok=false, the branch boundedFallbackShape
+// occupies). A single predicate checked ahead of both, returning
+// matched=false for every other input, cannot change either branch's
+// existing behavior for anything but the one shape it recognizes —
+// FuzzJobPollPidSourceNeverWidensBeyondNamedShape (fuzz_test.go) pins that as
+// a fuzz invariant, and TestClassifySubstitutionBody_JobPollPidSourceShape
+// (substitution_test.go) pins the concrete corpus row.
+//
+// FOLLOWS boundedFallbackShape's readerLeafClearance discipline rather than
+// duplicating a looser one: each stage's own command+argv is folded through
+// the IDENTICAL classifySubstitutionCommand union every other caller of that
+// function goes through, so a deny-listed secret pgrep pattern
+// (`-f ~/.ssh/id_rsa`) still refuses via secretpath.IsSecret, and pgrep's
+// existing corpus-measured admission (parser.go's `"pgrep": true` on
+// fileReaderSubstitutions) is reused, never re-derived.
+//
+// The redirect tolerance is its OWN function
+// (redirectClearanceForJobPollPidSource below), NOT a reuse of
+// redirectClearanceForBoundedFallback — that function's own doc scopes it
+// "ONLY for boundedFallbackShape's reader/test leaf", a DELIBERATE choice so
+// that widening one bounded shape's redirect tolerance never silently widens
+// a different, separately-approved one. Same underlying primitive
+// (hooktypes.IsSafeRedirectTarget), independently invoked, independently
+// removable.
+//
+// DELIBERATELY NOT RECOGNIZED, and left refused exactly as before:
+//
+//   - Any pgrep flag other than a bare `-f <literal>` (e.g. `-u user`, `-a`,
+//     `-x`, `-F pidfile`) — extending the recognized flag vocabulary is its
+//     own addition with its own corpus measurement, not something this
+//     shape-matcher grants implicitly.
+//   - A `head` spelling other than `-1`/`-n 1`/`-n1` (e.g. `-2`, `-c 10`) —
+//     the shape is a SINGLE PID source, and any other head invocation could
+//     admit more than one line's worth of untrusted downstream input.
+//   - A pattern that is not a property of the command TEXT (a `$VAR`
+//     reference, a nested `$(...)`) — see ParsedCommand.ArgIsLiveExpansion's
+//     own fail-closed doc; "refuse to guess" here for the same reason
+//     dirresolve.go's unresolvableToken refuses to guess a `-C` path derived
+//     at run time rather than written down.
+//   - A pipeline of more than two stages, or any stage other than pgrep/head.
+//   - `&&`/`||` composition of any kind — that is boundedFallbackShape's own
+//     territory, unrelated to this pipe-only shape.
+// ============================================================================
+
+// jobPollPidSourceShape reports whether text is EXACTLY the narrow job-poll
+// PID-source shape pg2-x05rh names — `pgrep -f "<literal pattern>"`
+// optionally piped to a bare `head -1`/`head -n 1`/`head -n1` — and if so its
+// combined SubstitutionClearance. The second return is a MATCH flag, exactly
+// like boundedFallbackShape's: false means "not this shape at all", so the
+// caller falls through to its EXISTING logic unchanged — this function only
+// ever WIDENS from that baseline for bodies it positively recognizes.
+func jobPollPidSourceShape(text string) (SubstitutionClearance, bool) {
+	p, _ := parserPool.Get().(*syntax.Parser)
+	file, err := p.Parse(strings.NewReader(text), "command")
+	parserPool.Put(p)
+	if err != nil || file == nil || len(file.Stmts) != 1 {
+		return SubstitutionRefused, false
+	}
+	if containsSubstitution(file) {
+		return SubstitutionRefused, false
+	}
+	var stages []*syntax.Stmt
+	flattenPipe(file.Stmts[0], &stages)
+	if len(stages) == 0 || len(stages) > 2 {
+		return SubstitutionRefused, false
+	}
+	pgrepClearance, ok := pgrepPidSourceLeafClearance(text, stages[0])
+	if !ok {
+		return SubstitutionRefused, false
+	}
+	if len(stages) == 1 {
+		return pgrepClearance, true
+	}
+	headClearance, ok := headFirstLineLeafClearance(text, stages[1])
+	if !ok {
+		return SubstitutionRefused, false
+	}
+	return minClearance(pgrepClearance, headClearance), true
+}
+
+// pgrepPidSourceLeafClearance classifies st as the shape's PGREP stage:
+// EXACTLY `pgrep -f <literal pattern>`, tolerating the same class of
+// discard-only write redirect (`2>/dev/null`) the corpus row motivating this
+// bead carries. Applies the IDENTICAL classifySubstitutionCommand union every
+// other pgrep substitution already goes through (parser.go's
+// fileReaderSubstitutions["pgrep"]/readerArgsClearance) — this function adds
+// no new trust in pgrep itself, only in the SHAPE around it.
+func pgrepPidSourceLeafClearance(text string, st *syntax.Stmt) (SubstitutionClearance, bool) {
+	if st.Negated || st.Background || st.Coprocess || st.Disown {
+		return SubstitutionRefused, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 {
+		return SubstitutionRefused, false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return SubstitutionRefused, false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc {
+		return SubstitutionRefused, false
+	}
+	if leaf.Executable != "pgrep" || len(leaf.Args) != 2 || leaf.Args[0] != "-f" {
+		return SubstitutionRefused, false
+	}
+	if leaf.ArgIsLiveExpansion(1) {
+		// The pattern is not a property of the command TEXT — refuse to guess,
+		// exactly as dirresolve.go's unresolvableToken refuses to guess a `-C`
+		// path derived at run time rather than written down.
+		return SubstitutionRefused, false
+	}
+	tokens := append([]string{leaf.Executable}, leaf.Args...)
+	return minClearance(classifySubstitutionCommand(tokens), redirectClearanceForJobPollPidSource(leaf.Redirections)), true
+}
+
+// headFirstLineLeafClearance classifies st as the shape's OPTIONAL HEAD
+// stage: EXACTLY a bare `head -1` / `head -n 1` / `head -n1`, truncating the
+// PGREP stage's output to its first line and naming no path of its own — no
+// redirect tolerance here, since the corpus shape motivating this bead never
+// carries one on this stage.
+func headFirstLineLeafClearance(text string, st *syntax.Stmt) (SubstitutionClearance, bool) {
+	if st.Negated || st.Background || st.Coprocess || st.Disown || len(st.Redirs) > 0 {
+		return SubstitutionRefused, false
+	}
+	call, ok := st.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 {
+		return SubstitutionRefused, false
+	}
+	lw := &lowering{src: text, pipeSeq: -1}
+	lw.lowerCall(st, call, 0, 0, 0)
+	if len(lw.leaves) != 1 || len(lw.dataLeaves) != 0 {
+		return SubstitutionRefused, false
+	}
+	leaf := lw.leaves[0]
+	if leaf.HasHeredoc || leaf.Executable != "head" {
+		return SubstitutionRefused, false
+	}
+	switch {
+	case len(leaf.Args) == 1 && (leaf.Args[0] == "-1" || leaf.Args[0] == "-n1"):
+	case len(leaf.Args) == 2 && leaf.Args[0] == "-n" && leaf.Args[1] == "1":
+	default:
+		return SubstitutionRefused, false
+	}
+	tokens := append([]string{leaf.Executable}, leaf.Args...)
+	return minClearance(classifySubstitutionCommand(tokens), redirectClearance(leaf.Redirections)), true
+}
+
+// redirectClearanceForJobPollPidSource is redirectClearance's UNION, ADAPTED
+// ONLY for jobPollPidSourceShape's PGREP stage (pg2-x05rh) — the sibling
+// exception to redirectClearanceForBoundedFallback's (tc-o1g9), independently
+// declared rather than shared, so that either bounded shape's redirect
+// tolerance can be revisited without touching the other's. See that
+// function's own doc for the shared underlying reasoning (a discard-only
+// write to a device hooktypes.IsSafeRedirectTarget already vouches for writes
+// nothing anywhere observable); this copy exists so pg2-x05rh's own
+// admission stays independently auditable and independently removable.
+func redirectClearanceForJobPollPidSource(redirs []hooktypes.Redirection) SubstitutionClearance {
+	clearance := SubstitutionCleared
+	for _, rd := range redirs {
+		if rd.Kind.IsWrite() && hooktypes.IsSafeRedirectTarget(rd.Path) {
+			continue
+		}
+		if rd.Kind.IsWrite() || secretpath.IsSecret(rd.Path) {
+			return SubstitutionRefused
+		}
+		if LooksLikePath(rd.Path) {
+			clearance = SubstitutionDelegated
+		}
+	}
+	return clearance
 }
 
 // ============================================================================

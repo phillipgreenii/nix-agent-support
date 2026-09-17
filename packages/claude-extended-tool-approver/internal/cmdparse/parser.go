@@ -1224,6 +1224,15 @@ func IsSafeSubstitutionBody(cmdStr string) bool {
 // REFUSES from one whose only open question belongs to another model. See
 // SubstitutionClearance and THE pg2-zpct4 RECONCILIATION.
 func ClassifySubstitutionBody(cmdStr string) SubstitutionClearance {
+	// pg2-x05rh: checked AHEAD of the ok/not-ok branching below because the
+	// job-poll PID-source shape spans BOTH branches — see
+	// jobPollPidSourceShape's own doc (shellparse.go) for why. matched=false
+	// for every other body, so this cannot change any EXISTING verdict; it
+	// only ever WIDENS from the existing fallback for the one shape it
+	// positively recognizes.
+	if clearance, matched := jobPollPidSourceShape(cmdStr); matched {
+		return clearance
+	}
 	leaf, ok := soleSimpleCommandLeaf(cmdStr)
 	if !ok {
 		// tc-o1g9: a body that is not a SOLE simple command may still be the
