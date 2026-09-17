@@ -36,9 +36,9 @@ that, `serve` emits nothing over OpenTelemetry in Phase 9 (D24); real OpenTeleme
 later observability item the observability review (`pg2-7kizi`) decides. `serve` logs to the path
 its launchd module configures, defaulting to `~/Library/Logs/pg-desk-serve.log`.
 
-## Out of scope (Phase 9)
+## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
-`sync_error` is always empty this phase, because sync does not run yet (see
-[`pipeline-run.md`](pipeline-run.md)). Any payload field this dashboard could eventually carry
-from cross-referencing is Phase 13.
+`sync_error` is populated once sync runs and fails for a PR (Phase 10, see
+[`sync.md`](sync.md)) — it is no longer unconditionally empty. Any payload field this dashboard
+could eventually carry from cross-referencing is Phase 13.
