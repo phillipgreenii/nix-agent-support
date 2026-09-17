@@ -315,23 +315,34 @@ var injectorAskVars = map[string]bool{
 // shape too, WITHOUT requiring `env -i`
 //
 // The replacement-value shape pg2-2ytvo's own bullet above flagged as NOT
-// its scope is THIS bead's scope: `PATH="$NEWPATH" cmd` (or a bare literal
-// `PATH=/a:/b:/c cmd`), where the replacement value is itself entirely
-// static/absolute, either written down directly or bound to a variable
-// earlier in the SAME command — but the invocation does NOT run under
-// `env -i`, so isHermeticEnvReplacement's existing REPLACEMENT relief
-// (pg2-d71my) cannot apply; that relief's whole safety argument is that
-// `env -i` leaves no caller environment to leak past, a proof this shape
-// does not offer. The operator reviewed and explicitly ACCEPTED a
-// narrower guarantee for PATH specifically as its own residual-risk trade —
-// see isStaticAbsoluteOnlyPathReplacement's own doc for the full
-// accepted-risk scope (in short: every OTHER ambient env var — GOFLAGS,
-// LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS, BASH_ENV — still
-// passes through unaudited by this relief). Scoped to PATH only, never
-// HOME — HOME's own replacement relief stays isHermeticHomeReplacement's
-// freshness-proof shape, untouched by this bead. See pg2-q97no for a
-// possible future mitigation of the residual gap; that bead does NOT gate
-// this one.
+// its scope is THIS bead's scope: `PATH="$NEWPATH" cmd`, where the
+// replacement value is itself entirely static/absolute, bound to a
+// same-command variable earlier in the SAME command — but the invocation
+// does NOT run under `env -i`, so isHermeticEnvReplacement's existing
+// REPLACEMENT relief (pg2-d71my) cannot apply; that relief's whole safety
+// argument is that `env -i` leaves no caller environment to leak past, a
+// proof this shape does not offer. The operator reviewed and explicitly
+// ACCEPTED a narrower guarantee for PATH specifically as its own
+// residual-risk trade — see isStaticAbsoluteOnlyPathReplacement's own doc
+// for the full accepted-risk scope (in short: every OTHER ambient env var —
+// GOFLAGS, LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS,
+// BASH_ENV — still passes through unaudited by this relief). Scoped to
+// PATH only, never HOME — HOME's own replacement relief stays
+// isHermeticHomeReplacement's freshness-proof shape, untouched by this
+// bead. See pg2-q97no for a possible future mitigation of the residual
+// gap; that bead does NOT gate this one.
+//
+// NARROWED 2026-09-17 20:27 (via /unblock-human-beads, correcting this
+// bead's own first landing at commit 2db053bc): a BARE, hand-typed literal
+// (`PATH=/a:/b:/c cmd`, no same-command variable involved at all) does NOT
+// qualify for this relief — the first landing applied unconditionally to
+// any static-absolute value regardless of provenance, which regressed
+// long-standing TestIntegration_EnvVarGuard/
+// TestIntegration_EnvVarGuard_ReplacementFormDependence rows (a literal
+// replacement beside a delegating command, or an `export`/compound
+// replacement with a genuine downstream consumer, must keep asking — see
+// isStaticAbsoluteOnlyPathReplacement's own "NARROWING" doc section for the
+// full corrected two-condition gate).
 var askVars = map[string]bool{
 	"PATH": true,
 	"HOME": true,
@@ -989,11 +1000,54 @@ func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
 //
 // vars is the SAME in-command variable environment preservesCallerValue's
 // own in-command-assigned middle option already consults
-// (primarycommit.LeafVars over cmdparse.InCommandVars) — nil is the
-// ordinary case (no qualifying earlier assignment): ExpandInCommand's own
-// no-`$`-in-word fast path still resolves a purely literal value with vars
-// nil, so a bare `PATH=/usr/bin:/bin` replacement is unaffected by whether
-// any in-command variable exists at all.
+// (primarycommit.LeafVars over cmdparse.InCommandVars).
+//
+// # NARROWING (pg2-dhugk, decision recorded 2026-09-17 20:27 via
+// /unblock-human-beads, correcting this predicate's first landing at commit
+// 2db053bc, which scoped TOO BROADLY)
+//
+// The first implementation applied unconditionally to every REPLACEMENT
+// shape (bare literal or var-derived, beside a real command or not), which
+// regressed TestIntegration_EnvVarGuard_ReplacementFormDependence (from
+// pg2-7sqk8/pg2-sir2l — an `export`/compound PATH replacement with a genuine
+// downstream consumer, e.g. `export PATH=/x && git status`, must keep
+// asking: in that shape the LATER leaf's own bare-name lookup is genuinely
+// subject to the hijacked PATH, a real risk even for a static/absolute
+// replacement value) and several long-standing TestIntegration_EnvVarGuard
+// rows (a bare LITERAL replacement beside a command that itself delegates —
+// `PATH=/x git status`, `env PATH=/x git status`, a nix-shell-wrapped
+// `PATH=/usr/bin:/bin bats t.bats` — must also keep asking: a short,
+// hand-typed literal replacement beside a command CETA cannot prove is
+// side-effect-free is exactly as unverifiable as it always was).
+//
+// TWO conditions now gate this relief, BOTH required:
+//
+//  1. The value must be VARIABLE-DERIVED, not a bare literal: the raw
+//     (pre-expansion) assignment text must itself contain a `$` reference
+//     to a variable THIS SAME COMMAND bound earlier — exactly the bead's
+//     own motivating corpus shape (`NEWPATH="…"; … PATH="$NEWPATH"`).
+//     `ExpandInCommand`'s own no-`$`-in-word fast path would otherwise
+//     resolve a purely literal value unconditionally (vars nil or not), so
+//     this check is applied explicitly, on the UNEXPANDED text, before
+//     calling it — see the `strings.Contains(value, "$")` guard below. A
+//     hand-typed literal (`PATH=/x`, `PATH=/usr/bin:/bin` with no preceding
+//     binding) no longer qualifies: it falls through to whichever
+//     pre-existing mechanism (1/2/the decisive default) already governed
+//     that shape before this bead, unchanged.
+//  2. When the assignment IS the whole leaf (`wholeLeaf`), there must be NO
+//     downstream consumer (`!hasDownstreamConsumer`) — gated by the caller
+//     (evaluateAssignment), mirroring mechanism 2's own domain exactly:
+//     `export`/compound forms with a real, later bare-name consumer keep
+//     the decisive Ask regardless of how the value was constructed. This
+//     condition has no effect when `!wholeLeaf` (a leading/env-prefix form
+//     beside a real command on the SAME leaf, hasDownstreamConsumer is not
+//     computed there and defaults false) — exactly the domain condition 1
+//     alone is meant to relieve.
+//
+// Together: a bare/hand-typed literal replacement NEVER qualifies (for any
+// leaf shape), and a var-derived replacement qualifies ONLY beside a real
+// command on the SAME leaf, or fully standalone with nothing downstream —
+// never for an `export`/compound form with a genuine later consumer.
 //
 // # OPERATOR RULING 2026-09-17 (pg2-dhugk, decided at the same sitting as
 // pg2-s3my5's broader PATH-ask ruling)
@@ -1041,6 +1095,15 @@ func isHermeticEnvReplacement(ev cmdparse.EnvAssignment) bool {
 func isStaticAbsoluteOnlyPathReplacement(ev cmdparse.EnvAssignment, vars map[string]string) bool {
 	value, ok := cmdparse.LiteralAssignmentValueText(ev.Value)
 	if !ok {
+		return false
+	}
+	// NARROWING condition 1 (see doc comment above): a bare/hand-typed literal
+	// (no `$` reference at all in the UNEXPANDED text) never qualifies for this
+	// relief, however static/absolute it looks — only a value that actually
+	// resolves a same-command variable binding does. Checked on the raw text
+	// BEFORE ExpandInCommand, whose own no-`$`-in-word fast path would otherwise
+	// resolve a pure literal unconditionally regardless of this gate.
+	if !strings.Contains(value, "$") {
 		return false
 	}
 	expanded, ok := cmdparse.ExpandInCommand(value, vars)
@@ -1825,8 +1888,16 @@ func (r *Rule) evaluateAssignment(ev cmdparse.EnvAssignment, input *hookio.HookI
 		// `env -i` -- see isStaticAbsoluteOnlyPathReplacement's own doc for
 		// the full accepted-residual-risk scope (other env vars -- GOFLAGS,
 		// LD_PRELOAD/DYLD_INSERT_LIBRARIES, PERL5OPT, NODE_OPTIONS, BASH_ENV --
-		// still pass through unaudited by this relief).
-		case ev.Name == "PATH" && isStaticAbsoluteOnlyPathReplacement(ev, vars):
+		// still pass through unaudited by this relief) AND the NARROWING
+		// (pg2-dhugk's 2026-09-17 20:27 decision): `!(wholeLeaf &&
+		// hasDownstreamConsumer)` keeps an `export`/compound PATH
+		// replacement with a genuine, separate downstream consumer leaf
+		// (`export PATH=/x && git status`) on the decisive-Ask fallback
+		// below, exactly like mechanism 2's own domain -- this relief is
+		// for the same-leaf (leading/env-prefix, !wholeLeaf) form, or a
+		// truly standalone whole-leaf form with nothing downstream at all,
+		// never for a whole-leaf form with a real later consumer.
+		case ev.Name == "PATH" && !(wholeLeaf && hasDownstreamConsumer) && isStaticAbsoluteOnlyPathReplacement(ev, vars):
 			result = hookio.RuleResult{
 				Decision: hookio.Approve,
 				Reason:   "PATH replacement is static-absolute-only (operator-accepted residual risk: other env vars, e.g. GOFLAGS/LD_PRELOAD/DYLD_INSERT_LIBRARIES/PERL5OPT/NODE_OPTIONS/BASH_ENV, are not audited by this relief -- pg2-dhugk): " + sanitizeReasonName(ev.Name),

