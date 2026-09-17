@@ -150,7 +150,11 @@ func (r *Rule) evaluateExec(execStr string, input *hookio.HookInput) (hookio.Rul
 	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 	// hookio.FromRecursion states the translation in one place.
-	return hookio.FromRecursion(r.exprEval.EvaluateStructure(execStr, leaves, stack, input))
+	// outerVars/outerTempDirVars nil,nil (pg2-zsv1c widening): assume's --exec
+	// payload is a flag VALUE, not a leaf nested inside an enclosing expression
+	// this rule already has InCommandVars/InCommandTempDirVars for — see
+	// hookio.Evaluator.EvaluateStructure's own doc for the one exception (nix.go).
+	return hookio.FromRecursion(r.exprEval.EvaluateStructure(execStr, leaves, stack, input, nil, nil))
 }
 
 // structuralExecCommand derives assume's --exec payload as PARSED STRUCTURE

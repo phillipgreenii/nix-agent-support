@@ -419,7 +419,12 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				// REFUSAL's RuleResult is forwarded WITH ErrRefused, so a downstream
 				// consumer still sees WHY the inner command was not clearable instead
 				// of an indistinguishable exhaustion.
-				result, err := hookio.FromRecursion(r.exprEval.EvaluateStructure(scriptText, innerParsed, stack, &scoped))
+				//
+				// outerVars/outerTempDirVars nil,nil (pg2-zsv1c widening): the xargs sh -c
+				// script is not lexically nested inside an enclosing expression this rule
+				// already has InCommandVars/InCommandTempDirVars for — see
+				// hookio.Evaluator.EvaluateStructure's own doc for the one exception (nix.go).
+				result, err := hookio.FromRecursion(r.exprEval.EvaluateStructure(scriptText, innerParsed, stack, &scoped, nil, nil))
 				if err != nil {
 					return result, err
 				}

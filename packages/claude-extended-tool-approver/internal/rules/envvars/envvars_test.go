@@ -43,7 +43,7 @@ func (f *fakeEvaluator) EvaluateExpression(expr string, _ []hookio.StackFrame, _
 // method (pg2-m1i6r). No envvars test exercises structural delegation yet —
 // the envvars rule itself is not migrated by that bead — so this simply
 // reuses the same expr-keyed lookup EvaluateExpression already provides.
-func (f *fakeEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
+func (f *fakeEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, _ []hookio.StackFrame, _ *hookio.HookInput, _, _ map[string]string) hookio.RuleResult {
 	return f.EvaluateExpression(source, nil, nil)
 }
 

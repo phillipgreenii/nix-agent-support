@@ -53,7 +53,7 @@ func TestEvaluateStructure_MatchesTextEntryPoint(t *testing.T) {
 			if sp.Unparseable {
 				t.Fatalf("test fixture %q must parse cleanly", expr)
 			}
-			got := e.EvaluateStructure(expr, sp.Leaves, nil, origin)
+			got := e.EvaluateStructure(expr, sp.Leaves, nil, origin, nil, nil)
 
 			if got.Decision != want.Decision || got.Reason != want.Reason || got.Module != want.Module || got.Provenance != want.Provenance {
 				t.Errorf("EvaluateStructure(%q) = %+v, want %+v (EvaluateExpression's own verdict for identical text)",
@@ -78,7 +78,7 @@ func TestEvaluateStructure_CycleDetection(t *testing.T) {
 	}
 
 	repeating := cmdparse.ParseShell("echo hello")
-	got := e.EvaluateStructure("echo hello", repeating.Leaves, stack, origin)
+	got := e.EvaluateStructure("echo hello", repeating.Leaves, stack, origin, nil, nil)
 	if got.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (cycle detected)", got.Decision)
 	}
@@ -88,7 +88,7 @@ func TestEvaluateStructure_CycleDetection(t *testing.T) {
 
 	// Control: a non-repeating source is unaffected by the ancestor frame.
 	unique := cmdparse.ParseShell("echo unique")
-	gotOK := e.EvaluateStructure("echo unique", unique.Leaves, stack, origin)
+	gotOK := e.EvaluateStructure("echo unique", unique.Leaves, stack, origin, nil, nil)
 	if gotOK.Decision != hookio.Approve {
 		t.Errorf("Decision = %v, want Approve (no cycle, distinct source text)", gotOK.Decision)
 	}
@@ -132,7 +132,7 @@ func TestEvaluateStructure_FoldMatchesFromRecursion(t *testing.T) {
 		}
 
 		wantResult, wantErr := hookio.FromRecursion(e.EvaluateExpression(expr, nil, origin))
-		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin))
+		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin, nil, nil))
 
 		if !errors.Is(gotErr, hookio.ErrNotApplicable) || !errors.Is(wantErr, hookio.ErrNotApplicable) {
 			t.Fatalf("err = %v / want %v, both want ErrNotApplicable (exhaustion)", gotErr, wantErr)
@@ -156,7 +156,7 @@ func TestEvaluateStructure_FoldMatchesFromRecursion(t *testing.T) {
 		}
 
 		wantResult, wantErr := hookio.FromRecursion(e.EvaluateExpression(expr, nil, origin))
-		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin))
+		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin, nil, nil))
 
 		if gotErr != nil || wantErr != nil {
 			t.Fatalf("err = %v / want %v, both want nil (a decisive Ask is forwarded verbatim, not translated)", gotErr, wantErr)
@@ -186,7 +186,7 @@ func TestEvaluateStructure_FoldMatchesFromRecursion(t *testing.T) {
 		}
 
 		wantResult, wantErr := hookio.FromRecursion(e.EvaluateExpression(expr, nil, origin))
-		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin))
+		gotResult, gotErr := hookio.FromRecursion(e.EvaluateStructure(expr, sp.Leaves, nil, origin, nil, nil))
 
 		if !errors.Is(gotErr, hookio.ErrRefused) || !errors.Is(wantErr, hookio.ErrRefused) {
 			t.Fatalf("err = %v / want %v, both want ErrRefused (composition no rule audits as a unit)", gotErr, wantErr)
@@ -212,14 +212,14 @@ func TestEvaluateStructure_EmptyLeavesFailsClosed(t *testing.T) {
 
 	// nil leaves MUST land on the defensive floor rather than panicking or,
 	// worse, evaluating an empty command as vacuously approved.
-	gotNil := e.EvaluateStructure("echo hello", nil, nil, origin)
+	gotNil := e.EvaluateStructure("echo hello", nil, nil, origin, nil, nil)
 	if gotNil.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (nil leaves must fail closed, not panic)", gotNil.Decision)
 	}
 
 	// An explicitly empty (non-nil) slice is the same case in substance —
 	// zero leaves either way — and MUST land on the identical floor.
-	gotEmpty := e.EvaluateStructure("echo hello", []cmdparse.ParsedCommand{}, nil, origin)
+	gotEmpty := e.EvaluateStructure("echo hello", []cmdparse.ParsedCommand{}, nil, origin, nil, nil)
 	if gotEmpty.Decision != hookio.NoOpinion {
 		t.Errorf("Decision = %v, want Abstain (empty leaves must fail closed, not panic)", gotEmpty.Decision)
 	}

@@ -42,7 +42,7 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 // over (e.g. that a passthrough-stripped multi-leaf script still resolves
 // leaf-by-leaf) rather than on a reconstructed text label that the real
 // production EvaluateStructure never builds.
-func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput, _, _ map[string]string) hookio.RuleResult {
 	if len(leaves) == 0 {
 		return m.EvaluateExpression(source, stack, origin)
 	}
@@ -171,7 +171,7 @@ func (c *capturingEvaluator) EvaluateExpression(expr string, stack []hookio.Stac
 // EvaluateExpression, so this captures `source`/`leaves` too — used by
 // TestDockerRule_GosuNestedShC_StructuralDelegation to assert on the STRUCTURE
 // handed over, which a text-only capture cannot observe.
-func (c *capturingEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (c *capturingEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput, _, _ map[string]string) hookio.RuleResult {
 	c.lastOrigin = origin
 	c.lastSource = source
 	c.lastLeaves = leaves

@@ -61,7 +61,7 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 	return m.defaultResult
 }
 
-func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput, _, _ map[string]string) hookio.RuleResult {
 	return m.EvaluateExpression(source, stack, origin)
 }
 

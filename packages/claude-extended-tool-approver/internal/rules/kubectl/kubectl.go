@@ -286,7 +286,11 @@ func (r *Rule) evaluateExec(args []string, input *hookio.HookInput) (hookio.Rule
 	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 	// hookio.FromRecursion states the translation in one place.
-	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, stack, &scoped))
+	//
+	// outerVars/outerTempDirVars nil,nil (pg2-zsv1c widening): the exec target runs
+	// inside the POD's own scope, not the outer host command's — see
+	// hookio.Evaluator.EvaluateStructure's own doc for the one exception (nix.go).
+	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, stack, &scoped, nil, nil))
 }
 
 // innerAfterDoubleDash returns the args after the first `--`, or nil if none.

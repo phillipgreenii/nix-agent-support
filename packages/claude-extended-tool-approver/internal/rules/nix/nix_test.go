@@ -2,6 +2,7 @@ package nix
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -271,7 +272,7 @@ func (m *mockEvaluator) EvaluateExpression(expr string, stack []hookio.StackFram
 // fixtures' inner commands carry a shell metacharacter, so re-quoting them
 // for the multi-arg case (innerCommandStructure's quoteJoin) round-trips to
 // the exact same Executable/Args the old bare-string join produced.
-func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+func (m *mockEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput, _, _ map[string]string) hookio.RuleResult {
 	if len(leaves) != 1 {
 		return m.defaultResult
 	}
@@ -352,11 +353,20 @@ func TestNixRule_DevelopCommand(t *testing.T) {
 // EvaluateStructure call, so a test can inspect the STRUCTURE nix.go
 // actually derived rather than trusting any text it may also have
 // produced.
+//
+// gotOuterVars/gotOuterTempDirVars (pg2-zsv1c) additionally record the two
+// widened outerVars/outerTempDirVars parameters, so a test can assert that
+// nix.go forwards its OWN leaf's input.InCommandVars/input.InCommandTempDirVars
+// through unchanged, rather than passing nil,nil like every other rule's call
+// site — see hookio.Evaluator.EvaluateStructure's own doc for why nix.go alone
+// has an enclosing scope to offer here.
 type captureEvaluator struct {
-	gotSource string
-	gotLeaves []cmdparse.ParsedCommand
-	sawCall   bool
-	result    hookio.RuleResult
+	gotSource           string
+	gotLeaves           []cmdparse.ParsedCommand
+	gotOuterVars        map[string]string
+	gotOuterTempDirVars map[string]string
+	sawCall             bool
+	result              hookio.RuleResult
 }
 
 func (c *captureEvaluator) EvaluateExpression(_ string, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
@@ -366,10 +376,12 @@ func (c *captureEvaluator) EvaluateExpression(_ string, _ []hookio.StackFrame, _
 	return hookio.RuleResult{Decision: hookio.Reject, Reason: "captureEvaluator: EvaluateExpression was called; nix.go must use EvaluateStructure"}
 }
 
-func (c *captureEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, _ []hookio.StackFrame, _ *hookio.HookInput) hookio.RuleResult {
+func (c *captureEvaluator) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, _ []hookio.StackFrame, _ *hookio.HookInput, outerVars, outerTempDirVars map[string]string) hookio.RuleResult {
 	c.sawCall = true
 	c.gotSource = source
 	c.gotLeaves = leaves
+	c.gotOuterVars = outerVars
+	c.gotOuterTempDirVars = outerTempDirVars
 	return c.result
 }
 
@@ -520,5 +532,58 @@ func TestNixRule_NestedBashDashC_MatchesCommandFlag(t *testing.T) {
 	}
 	if len(leafSets) == 2 && !slices.Equal(leafSets[0][0].Args, leafSets[1][0].Args) {
 		t.Errorf("-c and --command produced different leaves: %+v vs %+v", leafSets[0][0], leafSets[1][0])
+	}
+}
+
+// TestNixRule_ForwardsOuterVarsToStructuralDelegate is pg2-zsv1c's AC3
+// regression test: nix.go's own leaf position is the ONE case
+// hookio.Evaluator.EvaluateStructure's widened outerVars/outerTempDirVars
+// parameters are meant to carry a real value through, rather than nil,nil —
+// see that method's own doc (and engine.go's EvaluateStructure/evaluateParsed)
+// for the full rationale. This pins the CONTRACT at nix.go's own boundary: the
+// exact input.InCommandVars/input.InCommandTempDirVars maps the engine already
+// computed for THIS leaf (simulated here, since this test drives r.Evaluate
+// directly rather than through the full engine) must reach
+// EvaluateStructure's outerVars/outerTempDirVars unchanged, for every one of
+// nix.go's three delegation sites: `nix develop -c`, `nix shell --command`,
+// and `nix-shell --run`.
+func TestNixRule_ForwardsOuterVarsToStructuralDelegate(t *testing.T) {
+	outerVars := map[string]string{"SP": "/tmp/scratch-fbxdw"}
+	outerTempDirVars := map[string]string{"SP": ""}
+
+	// The mock ignores leaf CONTENT entirely (it always returns a fixed
+	// Approve), so these commands are deliberately plain — this test pins the
+	// PLUMBING (does the right map reach EvaluateStructure at all), not the
+	// envvars rule's own tempdir-resolution semantics, which the real-corpus
+	// row shape (`SP=$(mktemp -d) && nix shell ... --command bash -c 'export
+	// PATH="$SP/bin:$PATH"; ...'`) exercises end-to-end via the full engine
+	// elsewhere.
+	commands := []string{
+		`nix develop -c bash -c "echo hello"`,
+		`nix shell nixpkgs#hello --command bash -c "echo hello"`,
+		`nix-shell --run "echo hello"`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			mock := &captureEvaluator{result: hookio.RuleResult{Decision: hookio.Approve}}
+			r := NewWithEvaluator(mock)
+			input := &hookio.HookInput{
+				ToolName:             "Bash",
+				ToolInput:            mustJSON(map[string]string{"command": cmd}),
+				CWD:                  "/tmp/project",
+				InCommandVars:        outerVars,
+				InCommandTempDirVars: outerTempDirVars,
+			}
+			hookio.Verdict(r.Evaluate(input))
+			if !mock.sawCall {
+				t.Fatalf("EvaluateStructure was never called")
+			}
+			if !maps.Equal(mock.gotOuterVars, outerVars) {
+				t.Errorf("outerVars = %+v, want %+v (input.InCommandVars forwarded unchanged)", mock.gotOuterVars, outerVars)
+			}
+			if !maps.Equal(mock.gotOuterTempDirVars, outerTempDirVars) {
+				t.Errorf("outerTempDirVars = %+v, want %+v (input.InCommandTempDirVars forwarded unchanged)", mock.gotOuterTempDirVars, outerTempDirVars)
+			}
+		})
 	}
 }

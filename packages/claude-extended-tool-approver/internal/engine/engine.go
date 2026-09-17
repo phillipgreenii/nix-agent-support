@@ -391,7 +391,27 @@ func (e *Engine) EvaluateExpression(expr string, stack []hookio.StackFrame, orig
 // heredocFloor already do for their own "cannot evaluate this" branches.
 // Nothing asserts a type here any more: leaves is concretely
 // []cmdparse.ParsedCommand, so the only defensive check left is emptiness.
-func (e *Engine) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput) hookio.RuleResult {
+//
+// outerVars/outerTempDirVars (pg2-zsv1c) widen this entry point onto the SAME
+// tc-5h6e overlay evaluateParsed already applies for EvaluateExpression's
+// foldSubstitutionScan recursion — passed straight through to evaluateParsed
+// unchanged, so each of `leaves`' own leaves sees them as the FARTHER scope,
+// overlaid (cmdparse.OverlayVars) beneath that leaf's own nearer bindings
+// exactly as evaluateParsed's own doc describes. Most callers of THIS entry
+// point have no enclosing scope to offer and correctly pass nil,nil — a
+// structural delegate call is not, in general, a substitution lexically
+// nested inside its caller's expression the way foldSubstitutionScan's body
+// is. nix.go's nix/nix-shell -c/--command branches are the deliberate
+// exception (pg2-zsv1c's operator decision): the leaf they delegate FROM is
+// itself nested inside an enclosing top-level command whose earlier siblings
+// the engine already computed into `origin.InCommandVars`/
+// `origin.InCommandTempDirVars` before dispatching to nix.go in the first
+// place, and nix.go forwards those two fields here as outerVars/
+// outerTempDirVars so a PATH/HOME assignment inside the extracted inner
+// script that references an outer name (e.g. `SP=$(mktemp -d)` several
+// leaves before the `nix shell ... --command` invocation) resolves exactly
+// as if it had been written directly in the outer command.
+func (e *Engine) EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []hookio.StackFrame, origin *hookio.HookInput, outerVars, outerTempDirVars map[string]string) hookio.RuleResult {
 	normalized := normalizeExpression(source)
 	if cyc, hit := detectCycle(normalized, stack); hit {
 		return cyc
@@ -403,10 +423,7 @@ func (e *Engine) EvaluateStructure(source string, leaves []cmdparse.ParsedComman
 			Module:   "engine",
 		}
 	}
-	// outerVars/outerTempDirVars nil for the same reason as EvaluateExpression's own
-	// entry point above: no caller of this structural delegate is a substitution
-	// lexically nested inside an enclosing expression either.
-	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: leaves}, normalized, stack, origin, nil, nil)
+	return e.evaluateParsed(source, cmdparse.ShellParse{Leaves: leaves}, normalized, stack, origin, outerVars, outerTempDirVars)
 }
 
 // detectCycle is EvaluateExpression's cycle check, factored out so
@@ -454,15 +471,20 @@ func detectCycle(normalized string, stack []hookio.StackFrame) (hookio.RuleResul
 // caller needs it themselves (for stack frames / cycle checks) and computing
 // it twice would be redundant.
 //
-// outerVars/outerTempDirVars (bead tc-5h6e) are the in-command environment ESTABLISHED
-// OUTSIDE sp — visible to sp's leaves not because anything IN sp assigned it, but
-// because sp is lexically nested inside an enclosing expression that already had. The
-// two top-level entry points (EvaluateExpression/EvaluateStructure) always pass nil,nil:
-// a fresh Bash-tool call or a structural-delegate call has no enclosing scope.
-// foldSubstitutionScan is the one caller that passes a real value — see its own doc for
-// why a command-substitution or arithmetic-expansion BODY is a different case from those
-// two entry points (it runs IN the same shell as its enclosing leaf, so the leaf's own
-// visible bindings genuinely apply inside it too).
+// outerVars/outerTempDirVars (bead tc-5h6e; widened onto EvaluateStructure by
+// pg2-zsv1c) are the in-command environment ESTABLISHED OUTSIDE sp — visible to
+// sp's leaves not because anything IN sp assigned it, but because sp is lexically
+// nested inside an enclosing expression that already had. EvaluateExpression's own
+// entry point above always passes nil,nil: a fresh Bash-tool call has no enclosing
+// scope. EvaluateStructure passes nil,nil for the same reason from every caller
+// EXCEPT nix.go's nix/nix-shell -c/--command branches, which forward the
+// InCommandVars/InCommandTempDirVars the engine already computed for nix.go's OWN
+// leaf position — see EvaluateStructure's own doc for why that leaf genuinely does
+// have an enclosing scope to offer. foldSubstitutionScan is the other caller that
+// passes a real value — see its own doc for why a command-substitution or
+// arithmetic-expansion BODY is a different case again (it runs IN the same shell as
+// its enclosing leaf, so the leaf's own visible bindings genuinely apply inside it
+// too).
 //
 // Per leaf i, the value actually handed to a rule (via syntheticInput.InCommandVars) is
 // cmdparse.OverlayVars(outerVars, cmdparse.InCommandVars(parsed, i)) — outerVars as the

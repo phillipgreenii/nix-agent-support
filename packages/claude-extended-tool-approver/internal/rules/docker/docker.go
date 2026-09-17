@@ -188,7 +188,12 @@ func (r *Rule) evaluateRun(pc cmdparse.ParsedCommand, input *hookio.HookInput) (
 	// re-enters this same function fresh, again bounded by the finite input.
 	// No unbounded loop is reachable through this path, so there is nothing
 	// for a stack frame to usefully guard here.
-	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, nil, scopedInput))
+	//
+	// outerVars/outerTempDirVars nil,nil (pg2-zsv1c widening): docker's inner
+	// command runs inside the CONTAINER's own scope, not the outer host
+	// command's — see hookio.Evaluator.EvaluateStructure's own doc for the one
+	// exception (nix.go).
+	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, nil, scopedInput, nil, nil))
 }
 
 func (r *Rule) evaluateExec(pc cmdparse.ParsedCommand, input *hookio.HookInput) (hookio.RuleResult, error) {
@@ -223,7 +228,10 @@ func (r *Rule) evaluateExec(pc cmdparse.ParsedCommand, input *hookio.HookInput) 
 	// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 	// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 	// hookio.FromRecursion states the translation in one place.
-	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, nil, scopedInput))
+	//
+	// outerVars/outerTempDirVars nil,nil: same reasoning as evaluateRun's
+	// identical call above (pg2-zsv1c widening).
+	return hookio.FromRecursion(r.exprEval.EvaluateStructure(source, leaves, nil, scopedInput, nil, nil))
 }
 
 // withContainerEval returns a clone of input with PathEval set to a

@@ -765,5 +765,19 @@ type Evaluator interface {
 	// identically regardless of which entry point produced the inner
 	// verdict — a rule migrating from EvaluateExpression to this method
 	// changes no downstream handling of the result.
-	EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []StackFrame, origin *HookInput) RuleResult
+	//
+	// outerVars/outerTempDirVars (pg2-zsv1c, widening tc-5h6e's EvaluateExpression
+	// parameter of the same name onto this entry point) are the in-command
+	// environment ESTABLISHED OUTSIDE `leaves` that the caller's own leaf
+	// position already sees — e.g. nix.go's nix/nix-shell -c/--command branches,
+	// which extract an inner script from a leaf the engine had already computed
+	// `origin.InCommandVars`/`origin.InCommandTempDirVars` for, and pass those
+	// straight through so a PATH/HOME assignment INSIDE the delegated leaves that
+	// references a name bound OUTSIDE them (e.g. an outer `SP=$(mktemp -d)`) is
+	// still resolvable. nil,nil is the correct value for every caller with no such
+	// enclosing scope to offer (assume, docker, kubectl, safecmds today) — see
+	// engine.EvaluateStructure's own doc for how these two maps are overlaid onto
+	// each delegated leaf's own bindings, mirroring EvaluateExpression's identical
+	// contract for its own outerVars/outerTempDirVars parameters.
+	EvaluateStructure(source string, leaves []cmdparse.ParsedCommand, stack []StackFrame, origin *HookInput, outerVars, outerTempDirVars map[string]string) RuleResult
 }

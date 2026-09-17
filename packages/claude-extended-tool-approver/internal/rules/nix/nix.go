@@ -188,7 +188,18 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleR
 			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 			// hookio.FromRecursion states the translation in one place.
-			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input))
+			//
+			// pg2-zsv1c: input.InCommandVars/input.InCommandTempDirVars, NOT nil,nil — this
+			// leaf (the `nix develop -c ...` invocation itself) is one leaf of the OUTER
+			// top-level command, and the engine already computed these two maps for THIS
+			// leaf's position before dispatching to this rule (hookio.HookInput's own doc).
+			// Forwarding them as EvaluateStructure's outerVars/outerTempDirVars lets a
+			// PATH/HOME assignment inside the extracted inner script resolve a name an
+			// EARLIER sibling of the outer command bound (e.g. `SP=$(mktemp -d) && nix
+			// develop -c bash -c 'export PATH="$SP/bin:$PATH"; ...'`), exactly as if it had
+			// been written directly in the outer command — see
+			// hookio.Evaluator.EvaluateStructure's own doc for the full rationale.
+			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input, input.InCommandVars, input.InCommandTempDirVars))
 		}
 		// No inner command: approve develop as usual
 		return hookio.RuleResult{
@@ -212,7 +223,10 @@ func (r *Rule) evaluateNix(args []string, input *hookio.HookInput) (hookio.RuleR
 			// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 			// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 			// hookio.FromRecursion states the translation in one place.
-			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input))
+			//
+			// pg2-zsv1c: input.InCommandVars/input.InCommandTempDirVars, NOT nil,nil — see
+			// the `nix develop` branch above's identical comment for the full rationale.
+			return hookio.FromRecursion(r.exprEval.EvaluateStructure(innerSource, leaves, stack, input, input.InCommandVars, input.InCommandTempDirVars))
 		}
 		// No -c flag: just entering a shell with packages available — approve
 		return hookio.RuleResult{
@@ -337,7 +351,12 @@ func (r *Rule) evaluateNixShell(args []string, input *hookio.HookInput) (hookio.
 		// chain's loop-exhaustion verdict, and returning it as this rule's own verdict
 		// would STOP the outer chain where the pre-ADR forwarded Abstain continued it.
 		// hookio.FromRecursion states the translation in one place.
-		return hookio.FromRecursion(r.exprEval.EvaluateStructure(runStr, leaves, stack, input))
+		//
+		// pg2-zsv1c: input.InCommandVars/input.InCommandTempDirVars, NOT nil,nil — same
+		// rationale as evaluateNix's `nix develop`/`nix shell` branches (this leaf is
+		// itself one leaf of the outer top-level command, and the engine already
+		// computed these two maps for this leaf's position).
+		return hookio.FromRecursion(r.exprEval.EvaluateStructure(runStr, leaves, stack, input, input.InCommandVars, input.InCommandTempDirVars))
 	}
 	// nix-shell without --run: just entering a shell — approve
 	return hookio.RuleResult{
