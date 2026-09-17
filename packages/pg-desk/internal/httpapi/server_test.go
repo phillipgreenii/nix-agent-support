@@ -32,7 +32,10 @@ func setClock(t *testing.T, fixed time.Time) {
 // decisions: "503 for every route").
 func TestReadyGate503BeforeFirstInterpretation(t *testing.T) {
 	s := store.OpenForTest(t)
-	handler := NewHandler(s, testConfig())
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
 
 	for _, path := range []string{"/api/v1/dashboard", "/metrics"} {
 		t.Run(path, func(t *testing.T) {
@@ -58,7 +61,10 @@ func TestDashboard200AfterFirstInterpretation(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
 
-	handler := NewHandler(s, testConfig())
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
 	if rr.Code != http.StatusOK {
@@ -180,28 +186,81 @@ func TestHiddenArrayExcludesFromPanel(t *testing.T) {
 	}
 }
 
-// TestMetricsSmoke is the acceptance criterion "/metrics exposes what D24
-// requires, nothing more": once ready, GET /metrics returns 200, a
-// Prometheus-text content type, and valid exposition text.
+// TestMetricsSmoke is the acceptance criterion "pg-desk serve exposes the
+// full §8 catalog on its existing /metrics route": once ready, GET
+// /metrics returns 200, a Prometheus-text content type, and every catalog
+// member's name appears in the exposition text.
 func TestMetricsSmoke(t *testing.T) {
 	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
 		Panel: PanelMineActNow, AsOf: "2026-09-16T12:00:00Z",
 	})
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
+	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
 
-	handler := NewHandler(s, testConfig())
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Fatalf("Content-Type = %q, want a text/plain prefix", ct)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "# TYPE pg_desk_up gauge") || !strings.Contains(body, "pg_desk_up 1") {
-		t.Fatalf("body does not look like valid Prometheus exposition text: %q", body)
+	// The payload is fresh (30s old against a 120s stale-after bound), so
+	// pg_desk_dashboard_stale MUST read 0 here — the acceptance criterion's
+	// own explicit polarity check (0 = fresh, 1 = stale; the opposite of a
+	// presence-style gauge).
+	for _, want := range []string{
+		"# TYPE pg_desk_liveness gauge",
+		"pg_desk_liveness 1",
+		"# TYPE pg_desk_dashboard_age_seconds gauge",
+		"pg_desk_dashboard_age_seconds 30",
+		"# TYPE pg_desk_dashboard_stale gauge",
+		"pg_desk_dashboard_stale 0",
+		"# TYPE pg_desk_dropped gauge",
+		"pg_desk_dropped 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q; full body:\n%s", want, body)
+		}
+	}
+	// pg_desk_up (the old stub) MUST be gone — the whole point of this
+	// docket is replacing it.
+	if strings.Contains(body, "pg_desk_up") {
+		t.Fatalf("body still contains the retired pg_desk_up stub:\n%s", body)
+	}
+}
+
+// TestMetricsSmoke_StalePolarity is the same acceptance criterion's other
+// half: once the payload is stale, pg_desk_dashboard_stale MUST flip to 1.
+func TestMetricsSmoke_StalePolarity(t *testing.T) {
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineActNow, AsOf: "2026-09-16T12:00:00Z",
+	})
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
+	// 121s past a 60s heartbeat period (120s stale-after bound): stale.
+	setClock(t, time.Date(2026, 9, 16, 12, 2, 1, 0, time.UTC))
+
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "pg_desk_dashboard_stale 1") {
+		t.Fatalf("body missing %q (payload is stale); full body:\n%s", "pg_desk_dashboard_stale 1", body)
 	}
 }
 

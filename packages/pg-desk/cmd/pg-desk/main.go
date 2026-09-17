@@ -16,11 +16,15 @@
 // operator-configured browser opener, directly or transitively — enforced
 // by composition_test.go's chokepoint test.
 //
-// Telemetry (D24): nothing over OpenTelemetry/Prometheus in Phase 9 — see
-// docs/behavior/pg-desk/README.md's "Telemetry declaration" section, already
-// landed by this docket's first packet. main.go therefore does not wire a
-// telemetry.Init the way packages/pg-pr/cmd/pg-pr/main.go does; that stays
-// out of scope until an observability item calls for it.
+// Telemetry: D24's original "nothing over OpenTelemetry/Prometheus in
+// Phase 9" declaration was resolved by the observability review
+// (pg2-7kizi) — see docs/behavior/pg-desk/README.md's "Telemetry
+// declaration" section for the current state. `serve` now wires a real
+// Prometheus metrics catalog and telemetry.Init for OTLP log export
+// (serve.go), but main.go itself still does not, unlike
+// packages/pg-pr/cmd/pg-pr/main.go's global Init: telemetry is scoped to
+// `serve` only, since `run`/`run issue` already log structured JSON and
+// stay untouched.
 package main
 
 import (

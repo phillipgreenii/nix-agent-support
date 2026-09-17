@@ -30,11 +30,19 @@ at startup, and `0` on a clean shutdown. No other exit code is assigned to it in
 
 ## Telemetry and logs
 
-`serve` exposes a minimal `/metrics` endpoint whose sole purpose is keeping the existing
-Prometheus scrape target from going red — it is not a dashboard-grade metrics surface. Beyond
-that, `serve` emits nothing over OpenTelemetry in Phase 9 (D24); real OpenTelemetry export is a
-later observability item the observability review (`pg2-7kizi`) decides. `serve` logs to the path
-its launchd module configures, defaulting to `~/Library/Logs/pg-desk-serve.log`.
+`serve` exposes a real Prometheus metrics catalog on `/metrics` (same route, same
+503-until-ready gate as `/api/v1/dashboard`): `pg_desk_liveness` (1 while `serve` answers a
+scrape), `pg_desk_dashboard_age_seconds` and `pg_desk_dashboard_stale` (promoted from the
+dashboard payload's own `age_seconds`/`stale` fields — `stale` is `0 = fresh`, `1 = stale`, the
+opposite polarity from a presence-style gauge), `pg_desk_dropped` (promoted from
+`dropped_count`, a point-in-time gauge, matching this payload's own field), and
+`pg_desk_sync_errors_total` (a counter, by repo — registered and exposed but with no live call
+site wired here, since `serve` never itself runs sync). `serve`'s WARN/ERROR-level operational
+log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
+(`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
+`serve` still logs to the path its launchd module configures, defaulting to
+`~/Library/Logs/pg-desk-serve.log`. This resolves the observability review's (`pg2-7kizi`) `serve`
+half.
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 

@@ -66,11 +66,15 @@ Every component this docket introduces MUST state what it emits over OpenTelemet
 what it logs, so the observability review (`pg2-7kizi`) can decide what the dashboard can show
 before Phase 12 deletes the Ops board. The short version, detailed per doc above:
 
-- **OpenTelemetry:** nothing, anywhere in this set, through Phase 10. Export is a later
-  observability item, alongside pg-router's own metrics sink (the design's `pr-pool` naming
-  predates the pg-router rename, bead `pg2-myc6y`).
-- **Prometheus:** only `serve` exposes anything — a minimal `/metrics` whose sole purpose is
-  keeping the existing scrape target from going red, not a dashboard-grade surface.
+- **OpenTelemetry:** `serve`'s WARN/ERROR-level operational log lines export over OTLP as
+  `{service_name="pg-desk-serve"}` (`internal/telemetry`, mirroring `pg-pr`'s own
+  `Init`/`NewSlogHandler`/`Fanout` pattern) — resolved by the observability review (`pg2-7kizi`)
+  and implemented against this doc. Every other command in this set still emits nothing over
+  OpenTelemetry.
+- **Prometheus:** only `serve` exposes anything, now a real catalog on the same `/metrics` route
+  (`pg_desk_liveness`, `pg_desk_dashboard_age_seconds`, `pg_desk_dashboard_stale`,
+  `pg_desk_dropped`, `pg_desk_sync_errors_total`), replacing the earlier minimal
+  scrape-keeps-green stub — see [`serve.md`](serve.md)'s "Telemetry and logs".
 - **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
   timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
   into that same line rather than a separate stream (see [`sync.md`](sync.md)); `run issue`'s

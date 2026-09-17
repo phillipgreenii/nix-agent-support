@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/httpapi"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/telemetry"
 )
 
 // shutdownGrace bounds how long a SIGINT/SIGTERM shutdown waits for
@@ -45,6 +46,13 @@ var (
 // (Objective; docs/behavior/pg-desk/serve.md). It reads the store only,
 // gates every route behind httpapi.NewHandler's 503-until-first-
 // interpretation check, and logs to serve.log (or the default above).
+//
+// serve is the ONLY pg-desk subcommand that wires telemetry.Init: its
+// WARN/ERROR-level operational log lines export over OTLP as
+// {service_name="pg-desk-serve"} once OTEL_EXPORTER_OTLP_ENDPOINT is
+// configured (darwin/modules/pg-desk-serve's obs.mkEmitterEnv call).
+// `run`/`run issue` already log structured JSON to stderr and are
+// deliberately untouched by this docket.
 //
 // SIGHUP config reload (design doc section 7.7: "reloads its config on
 // SIGHUP") is NOT wired by this packet: it is untested by this packet's own
@@ -88,7 +96,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("serve: open log file: %w", err)
 	}
 	defer func() { _ = logFile.Close() }()
-	logger := log.New(logFile, "", log.LstdFlags|log.LUTC)
+
+	// Telemetry (design section 9): best-effort — a missing/unreachable
+	// OTLP endpoint installs a no-op LoggerProvider and never blocks
+	// startup. Scoped to serve only; run/run issue keep their existing
+	// unstructured logging untouched (see serveCmd's own doc comment).
+	shutdown, _ := telemetry.Init(cmd.Context(), "pg-desk-serve", Version)
+	defer func() {
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancelShutdown()
+		_ = shutdown(shutdownCtx)
+	}()
+	logger := slog.New(telemetry.Fanout(slog.NewTextHandler(logFile, nil), telemetry.NewSlogHandler()))
 
 	st, err := store.Open(store.DefaultPath())
 	if err != nil {
@@ -96,7 +115,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	handler := httpapi.NewHandler(st, cfg)
+	handler, err := httpapi.NewHandler(st, cfg)
+	if err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
 	srv := &http.Server{Addr: addr, Handler: handler} //nolint:gosec // addr/port are operator-supplied, never network-untrusted input
 
 	// main.go wires SIGINT/SIGTERM into cmd.Context() via
@@ -108,22 +130,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// request would never actually end the process (design section 7.9:
 	// "exit 0 ... on a clean shutdown").
 	serveErr := make(chan error, 1)
-	logger.Printf("pg-desk serve listening on %s", addr)
+	logger.Info("pg-desk serve listening", "addr", addr)
 	go func() { serveErr <- srv.ListenAndServe() }()
 
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Printf("serve: %v", err)
+			logger.Error("serve: listen failed", "error", err)
 			return fmt.Errorf("serve: %w", err)
 		}
 		return nil
 	case <-cmd.Context().Done():
-		logger.Printf("pg-desk serve shutting down (%v)", cmd.Context().Err())
+		logger.Info("pg-desk serve shutting down", "reason", cmd.Context().Err())
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Printf("serve: shutdown: %v", err)
+			logger.Error("serve: shutdown failed", "error", err)
 			return fmt.Errorf("serve: shutdown: %w", err)
 		}
 		return nil

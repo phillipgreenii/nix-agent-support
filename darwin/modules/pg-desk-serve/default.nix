@@ -7,6 +7,25 @@
 let
   cfg = config.phillipgreenii.services.pg-desk-serve;
 
+  # OTel emitter env for serve (design section 9, D6): resolved here
+  # (darwin scope, where the observability surface — declared in
+  # phillipgreenii-nix-support-apps — lives) and merged into the
+  # LaunchAgent's EnvironmentVariables, mirroring pa-monitor's own
+  # obs.mkEmitterEnv call pattern and pg-router's darwin module (D6). Guarded
+  # defensively (`obs ? mkEmitterEnv`) the same way pa-monitor's own module
+  # is: this repo does not declare phillipgreenii-nix-support-apps as a
+  # flake input, so the option only exists once a consuming machine flake
+  # imports both.
+  obs = config.phillipgreenii.observability;
+  emitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "pg-desk-serve";
+        protocol = "grpc";
+      }
+    else
+      { };
+
   # XDG_STATE_HOME default for macOS user agents, matching every other
   # generic services.* launchd module in this repo (darwin/modules/pa-monitor,
   # darwin/modules/pg-router).
@@ -67,6 +86,7 @@ in
       runAtLoad = true;
       keepAlive = true;
       serviceConfig = {
+        EnvironmentVariables = emitterEnv;
         StandardOutPath = "${stateHome}/pg-desk/launchd-stdout.log";
         StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
       };

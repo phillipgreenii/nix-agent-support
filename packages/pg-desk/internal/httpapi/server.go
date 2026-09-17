@@ -1,8 +1,9 @@
 // Package httpapi implements pg-desk serve's HTTP surface: the
-// GET /api/v1/dashboard triage payload and a minimal GET /metrics endpoint.
-// Both are served behind the SAME 503-until-first-interpretation gate (this
-// docket's packet 7 Binding decisions: "503 for every route until the
-// interpretation table has ≥1 row").
+// GET /api/v1/dashboard triage payload and the GET /metrics real Prometheus
+// metrics catalog (design doc section 8; see the sibling internal/metrics
+// package). Both are served behind the SAME 503-until-first-interpretation
+// gate (this docket's packet 7 Binding decisions: "503 for every route
+// until the interpretation table has ≥1 row").
 //
 // Ported skeleton: the serve-time freshness-stamping pattern of pg-pr's
 // packages/pg-pr/internal/httpapi/dashboard.go, and the five-panel/root-field
@@ -376,12 +377,19 @@ func isStale(asOf, now time.Time, boundSeconds int) bool {
 
 // NewHandler returns the pg-desk serve HTTP handler: GET /api/v1/dashboard
 // and GET /metrics, both gated behind the same 503-until-first-interpretation
-// check.
-func NewHandler(st *store.Store, cfg *config.Config) http.Handler {
+// check. It returns an error only if constructing the OTel metrics catalog
+// (newMetricsHandler, in metrics_handler.go) fails — in practice this
+// cannot happen with a fresh registry and a fixed, valid instrument set,
+// but the constructor is fallible so we propagate rather than panic.
+func NewHandler(st *store.Store, cfg *config.Config) (http.Handler, error) {
+	metricsHandler, err := newMetricsHandler(st, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("httpapi: new handler: %w", err)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/dashboard", dashboardHandler(st, cfg))
-	mux.Handle("/metrics", metricsHandler())
-	return readyGate(st, mux)
+	mux.Handle("/metrics", metricsHandler)
+	return readyGate(st, mux), nil
 }
 
 // readyGate implements the Binding decisions section's "503 for every route
@@ -411,26 +419,5 @@ func dashboardHandler(st *store.Store, cfg *config.Config) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(payload)
-	})
-}
-
-// metricsHandler serves the minimal Prometheus exposition text this phase
-// commits to (docs/behavior/pg-desk/serve.md's "Telemetry and logs": "a
-// minimal /metrics endpoint whose sole purpose is keeping the existing
-// Prometheus scrape target from going red — it is not a dashboard-grade
-// metrics surface"; docs/behavior/pg-desk/README.md's D24 declaration:
-// "only serve exposes anything ... not a dashboard-grade surface"). It is
-// hand-written rather than built on github.com/prometheus/client_golang: that
-// library is pg-pr's own /metrics dependency, and pulling it in here to
-// expose one gauge would be designing a metrics surface, which D24
-// deliberately does not authorize for Phase 9.
-func metricsHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		_, _ = w.Write([]byte(
-			"# HELP pg_desk_up Whether pg-desk serve answered this scrape (always 1 when reached; the route itself is 503-gated until the first interpretation).\n" +
-				"# TYPE pg_desk_up gauge\n" +
-				"pg_desk_up 1\n",
-		))
 	})
 }
