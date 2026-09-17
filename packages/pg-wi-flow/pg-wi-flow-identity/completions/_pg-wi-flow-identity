@@ -1,0 +1,5 @@
+#compdef pg-wi-flow-identity
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]'

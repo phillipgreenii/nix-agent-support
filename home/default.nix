@@ -47,5 +47,6 @@
     ./programs/pg-disk-reclaimer
     ./programs/wtnew
     ./programs/wtdone
+    ./programs/pg-wi-flow
   ];
 }

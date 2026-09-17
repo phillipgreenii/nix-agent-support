@@ -397,6 +397,25 @@
               pkgs = final;
               inherit bashBuilders;
             }).session-mode.script;
+          # pg-wi-flow (bead tc-q25wo): the ceta identity input processor
+          # (pg-wi-flow-identity) plus the pg-wi-flow CLI's actor-composition
+          # library (lib/actor.bash, no package of its own -- not a script,
+          # nothing wraps it yet). Same rationale as bg-tools above (more
+          # than one component, so `result.packages` is symlinkJoin-ed rather
+          # than taken as a single `.script`): this bead only scaffolds the
+          # framework's first two pieces, not the full CLI, so more scripts
+          # land here as later Phase-1 rows build out claim/write verbs.
+          pg-wi-flow =
+            let
+              result = import ./packages/pg-wi-flow {
+                pkgs = final;
+                inherit bashBuilders;
+              };
+            in
+            final.symlinkJoin {
+              name = "pg-wi-flow-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
+              paths = result.packages;
+            };
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -5124,6 +5143,13 @@
             # Same one-line idiom as bg-tools above: without this the suite
             # ran in no gate at all.
             // (import ./packages/session-mode {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
+            # test-pg-wi-flow-actor / test-pg-wi-flow-identity (bead
+            # tc-q25wo). Same one-line idiom as session-mode/bg-tools above:
+            # without this the suite ran in no gate at all.
+            // (import ./packages/pg-wi-flow {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
