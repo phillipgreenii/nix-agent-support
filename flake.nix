@@ -2733,6 +2733,45 @@
                   darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
                 renderCheck;
 
+              # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's
+              # `imports` list is an explicit ENUMERATION, not auto-discovery of
+              # home/programs/* — so a new module scaffolded under home/programs/ (like
+              # pg-router-ccpool-handler was, by docket pg2-oju6w's Phase 5) can sit there
+              # fully implemented and tested in isolation (as test-pg-router-ccpool-handler-
+              # module above does) while its options are UNREACHABLE from any real consumer,
+              # because homeModules.default never imports it. This mechanical check catches
+              # that class of gap for every current and future home/programs/* module,
+              # without needing to eval the whole aggregate as a real home-manager profile
+              # (this repo is a library flake with no homeConfigurations of its own — nothing
+              # else here would ever exercise home/default.nix's import completeness).
+              test-home-default-imports-complete =
+                let
+                  homeSrc = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./home/default.nix
+                      ./home/programs
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-home-default-imports-complete" { } ''
+                  cd ${homeSrc}
+                  missing=""
+                  for dir in home/programs/*/; do
+                    name="$(basename "$dir")"
+                    if [ -f "$dir/default.nix" ] && ! grep -qF "./programs/$name" home/default.nix; then
+                      missing="$missing $name"
+                    fi
+                  done
+                  if [ -n "$missing" ]; then
+                    echo "FAIL: home/default.nix does not import:$missing" >&2
+                    echo "Every home/programs/<name>/default.nix must be listed in home/default.nix's imports (it is an explicit enumerated list, not auto-discovery)." >&2
+                    exit 1
+                  fi
+                  echo "ok: every home/programs/*/default.nix is imported by home/default.nix"
+                  touch $out
+                '';
+
               # test-pg-desk-module (docket pg2-2j5ac.32, Phase 9, packet
               # 10): proves the new darwin (services.pg-desk-serve) and
               # home (programs.pg-desk) modules evaluate standalone — no
