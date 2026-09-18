@@ -33,10 +33,15 @@ type fakeGH struct {
 	// searchFn/rateLimit/rateLimitErr back the List (bead pg2-2j5ac.28.1)
 	// seam. rateLimit defaults to a comfortably-above-reserve value (via
 	// rateLimitOrDefault below) so existing tests that never set it don't
-	// need to know about rate-limit protection at all.
-	searchFn     func(ctx context.Context, query string) ([]api.PR, error)
-	rateLimit    int
-	rateLimitErr error
+	// need to know about rate-limit protection at all. searchFn backs
+	// ghProvider.SearchPRs — List's own ids_only path, Search, and
+	// ListAttention (unchanged by bead pg2-aehpr's batched-query
+	// rewrite). searchEnrichedFn backs ghProvider.SearchPRsEnriched —
+	// List's own non-ids_only path only (bead pg2-aehpr).
+	searchFn         func(ctx context.Context, query string) ([]api.PR, error)
+	searchEnrichedFn func(ctx context.Context, query string) ([]api.PR, error)
+	rateLimit        int
+	rateLimitErr     error
 
 	// files/commits/filesErr/commitsErr back the Files/Commits (bead
 	// pg2-2j5ac.28.2) seam.
@@ -50,18 +55,6 @@ type fakeGH struct {
 	viewerLogin         string
 	viewerLoginErr      error
 	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
-
-	// reviewThreadCount/reviewThreadCountErr back List's own supplemental
-	// ReviewThreadCount fetch (bead pg2-2j5ac.30.7). reviewThreadCountFn
-	// lets a test observe the exact repo/number the call was made with
-	// (schema.PR does not surface ReviewThreadCount today -- see this
-	// packet's own "does not wire into Backend.List's cursor emission"
-	// scope note -- so asserting via the returned schema.PR is not an
-	// option; the call itself, plus the direct mergeSupplementalFields
-	// unit test, are what prove the threading).
-	reviewThreadCount    int
-	reviewThreadCountErr error
-	reviewThreadCountFn  func(ctx context.Context, repo string, number int) (int, error)
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {
@@ -95,6 +88,13 @@ func (f *fakeGH) CheckAuth(ctx context.Context) error {
 func (f *fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
 	if f.searchFn != nil {
 		return f.searchFn(ctx, query)
+	}
+	return nil, nil
+}
+
+func (f *fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+	if f.searchEnrichedFn != nil {
+		return f.searchEnrichedFn(ctx, query)
 	}
 	return nil, nil
 }
@@ -144,16 +144,6 @@ func (f *fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int)
 		return f.reviewsWithCommitFn(ctx, repo, number)
 	}
 	return nil, nil
-}
-
-func (f *fakeGH) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
-	if f.reviewThreadCountFn != nil {
-		return f.reviewThreadCountFn(ctx, repo, number)
-	}
-	if f.reviewThreadCountErr != nil {
-		return 0, f.reviewThreadCountErr
-	}
-	return f.reviewThreadCount, nil
 }
 
 func newTestBackend(t *testing.T, gh *fakeGH) *Backend {
@@ -346,19 +336,16 @@ func TestParsePRID_RejectsMalformed(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
-// List (bead pg2-2j5ac.28.1)
+// List (bead pg2-2j5ac.28.1; batched-query rewrite bead pg2-aehpr)
 // ----------------------------------------------------------------------
 
 func TestBackend_List_SingleExpr(t *testing.T) {
 	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			if query != "is:open author:@me" {
 				t.Fatalf("query = %q", query)
 			}
-			return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{HeadSHA: "deadbeef", ChecksRollup: "success"}, nil
+			return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open", HeadSHA: "deadbeef", ChecksRollup: "success"}}, nil
 		},
 	}
 	b := newTestBackend(t, gh)
@@ -370,39 +357,33 @@ func TestBackend_List_SingleExpr(t *testing.T) {
 	if len(got.Entities) != 1 || got.Entities[0].ID != "owner/repo#1" {
 		t.Fatalf("Entities = %+v", got.Entities)
 	}
-	// HeadSHA/ChecksRollup come from the supplemental per-PR GetPR fetch
-	// (bead pg2-2j5ac.30.6), not from SearchPRs' own field set.
+	// HeadSHA/ChecksRollup now come straight off SearchPRsEnriched's own
+	// already-enriched result (bead pg2-aehpr) -- there is no more
+	// supplemental per-PR fetch to merge them in from.
 	if got.Entities[0].HeadSHA != "deadbeef" || got.Entities[0].ChecksRollup != "success" {
-		t.Fatalf("Entities[0] = %+v, want the supplemental fetch's HeadSHA/ChecksRollup merged in", got.Entities[0])
+		t.Fatalf("Entities[0] = %+v, want HeadSHA/ChecksRollup carried straight through from SearchPRsEnriched", got.Entities[0])
 	}
 	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "owner/repo#1" {
 		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
 	}
-	// Cursor is no longer always null (bead pg2-2j5ac.30.3 wired a real
-	// fingerprint cursor into this non-ids_only path); this test's own
-	// concern is Entities/PresentIDs, so it only checks Cursor decodes
-	// rather than duplicating TestBackend_List_NilCursor_ReturnsRealFingerprintCursor's
-	// full assertion.
-	if got.Cursor == nil {
-		t.Fatal("Cursor = nil, want a real fingerprint cursor")
-	}
-	if _, err := github.DecodeCursor(got.Cursor); err != nil {
-		t.Fatalf("DecodeCursor(got.Cursor): %v", err)
+	// Cursor is always nil now (bead pg2-aehpr, design doc section 6: "the
+	// FingerprintCursor/cursor mechanism becomes vestigial") --
+	// TestBackend_List_CursorAlwaysNil is this behavior's own dedicated
+	// test; this test's concern is just Entities/PresentIDs.
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %s, want nil", got.Cursor)
 	}
 }
 
 func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	calls := 0
 	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			calls++
 			if query == "is:open author:@me" {
 				return []api.PR{{Repo: "owner/repo", Number: 1}, {Repo: "owner/repo", Number: 2}}, nil
 			}
 			return []api.PR{{Repo: "owner/repo", Number: 2}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{}, nil
 		},
 	}
 	b := newTestBackend(t, gh)
@@ -419,20 +400,25 @@ func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	}
 }
 
+// TestBackend_List_IDsOnly_OmitsEntities proves ids_only stays on the
+// cheaper, unenriched ghProvider.SearchPRs (design doc section 6's own
+// "the ids_only=true path is unchanged" MUST-cover point) rather than
+// ever calling SearchPRsEnriched — present_ids never needs anything
+// beyond identity, so paying for the enriched query's extra nested
+// fields here would be pure waste.
 func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	gh := &fakeGH{
 		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
 		},
-		// ids_only must skip the supplemental per-PR enrichment fetch
-		// entirely (bead pg2-2j5ac.30.6) -- present_ids never needs
-		// HeadSHA/ChecksRollup/ReviewCount/ReviewThreadCount, so paying
-		// for N extra gh calls here would be pure waste.
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			t.Fatal("SearchPRsEnriched must not be called when ids_only is true")
+			return nil, nil
+		},
 		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
 			t.Fatal("GetPR must not be called when ids_only is true")
 			return nil, nil
 		},
-		reviewThreadCountErr: errors.New("ReviewThreadCount must not be called when ids_only is true"),
 	}
 	b := newTestBackend(t, gh)
 
@@ -446,18 +432,13 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	if len(got.PresentIDs) != 1 {
 		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
 	}
-	// ids_only skips the supplemental fetches ComputeFingerprint needs
-	// (asserted above via the fatal getPRFn/reviewThreadCountErr), so
-	// there is no live snapshot to fingerprint -- Cursor stays nil here,
-	// matching this method's own doc comment (bead pg2-2j5ac.30.3 wires
-	// cursor handling into the non-ids_only path only).
 	if got.Cursor != nil {
 		t.Fatalf("Cursor = %s, want nil when ids_only is true", got.Cursor)
 	}
 }
 
 func TestBackend_List_SearchError_Classified(t *testing.T) {
-	gh := &fakeGH{searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+	gh := &fakeGH{searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
 		return nil, github.ErrGHAuthInvalid
 	}}
 	b := newTestBackend(t, gh)
@@ -473,11 +454,11 @@ func TestBackend_List_SearchError_Classified(t *testing.T) {
 // remainder below the reserve answers unavailable BEFORE any search is
 // even attempted.
 func TestBackend_List_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
-	searchCalled := false
+	searchEnrichedCalled := false
 	gh := &fakeGH{
 		rateLimit: 500,
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			searchCalled = true
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			searchEnrichedCalled = true
 			return nil, nil
 		},
 	}
@@ -488,19 +469,16 @@ func TestBackend_List_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
 	}
-	if searchCalled {
-		t.Fatal("SearchPRs must not be called once the rate-limit check fails")
+	if searchEnrichedCalled {
+		t.Fatal("SearchPRsEnriched must not be called once the rate-limit check fails")
 	}
 }
 
 func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 	gh := &fakeGH{
 		rateLimit: 2000,
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{}, nil
 		},
 	}
 	b := newTestBackend(t, gh)
@@ -515,226 +493,30 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 	}
 }
 
-// TestBackend_List_NilCursor_ReturnsRealFingerprintCursor proves a nil
-// incoming cursor (a first/full fetch) now makes List answer a real,
-// version-tagged fingerprint cursor instead of always emitting null
-// (bead pg2-2j5ac.30.3, wiring internal/github's DecodeCursor/
-// EncodeCursor/RefreshCursor codec into this method now that
-// pg2-2j5ac.30.6/.30.7 have landed every field ComputeFingerprint needs).
-// The returned cursor decodes cleanly and its ByPR entry for the one
-// matched PR equals github.ComputeFingerprint of that PR's own snapshot
-// -- proving the round-trip uses the SAME composition the codec's own
-// unit tests pin, not a reimplementation.
-func TestBackend_List_NilCursor_ReturnsRealFingerprintCursor(t *testing.T) {
-	// mergeSupplementalFields (see its own doc comment/test below) copies
-	// only HeadSHA/ChecksRollup/ReviewCount/ReviewThreadCount from the
-	// GetPR/ReviewThreadCount supplemental fetch -- UpdatedAt/State/Draft/
-	// CommentCount stay the cheaper SearchPRs result's own values, so
-	// this test sets each field on the side List actually reads it from.
-	full := &api.PR{
-		HeadSHA:      "deadbeef",
-		ChecksRollup: "success",
-		ReviewCount:  2,
-	}
+// TestBackend_List_CursorAlwaysNil proves the FingerprintCursor mechanism
+// is now vestigial (bead pg2-aehpr, design doc section 6): List always
+// answers Cursor: nil, regardless of what the caller passed as its own
+// incoming cursor, since every call already fetches every field fresh
+// via SearchPRsEnriched's own batched query -- there is no more per-PR
+// "did this change" decision for a cursor to inform. Deleting
+// internal/github's DecodeCursor/EncodeCursor/RefreshCursor codec
+// (fingerprint.go) itself is a separate, later cleanup (bead pg2-c0vs3),
+// not part of this bead.
+func TestBackend_List_CursorAlwaysNil(t *testing.T) {
 	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			return []api.PR{{
-				Repo: "owner/repo", Number: 1,
-				UpdatedAt: "2026-09-01T00:00:00Z", State: "open", Draft: false,
-				CommentCount: 3,
-			}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return full, nil
-		},
-		reviewThreadCount: 4,
-	}
-	b := newTestBackend(t, gh)
-
-	got, err := b.List(context.Background(), []string{"is:open"}, false, nil)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if got.Cursor == nil {
-		t.Fatal("Cursor = nil, want a real fingerprint cursor on a full fetch")
-	}
-	cur, err := github.DecodeCursor(got.Cursor)
-	if err != nil || cur == nil {
-		t.Fatalf("DecodeCursor(got.Cursor) = (%v, %v), want a decodable cursor", cur, err)
-	}
-	want := github.ComputeFingerprint(github.GitHubPRSnapshot{
-		ID: "owner/repo#1", UpdatedAt: "2026-09-01T00:00:00Z", HeadOID: "deadbeef",
-		StatusRollup: "success", State: "open", IsDraft: false,
-		ReviewCount: 2, CommentCount: 3, ReviewThreadCount: 4,
-	})
-	if cur.ByPR["owner/repo#1"] != want {
-		t.Fatalf("cur.ByPR[owner/repo#1] = %q, want %q", cur.ByPR["owner/repo#1"], want)
-	}
-}
-
-// TestBackend_List_ValidPriorCursor_Refreshes proves a valid, previously
-// -stored cursor is actually decoded and threaded through RefreshCursor
-// (not ignored): feeding a cursor whose stored fingerprint for the one
-// matched PR already matches its current live fingerprint still yields a
-// response cursor whose ByPR entry reflects that same (unchanged)
-// fingerprint -- proving DecodeCursor's output genuinely reached
-// RefreshCursor rather than being silently discarded like the pre-
-// pg2-2j5ac.30.3 behavior this test replaces.
-func TestBackend_List_ValidPriorCursor_Refreshes(t *testing.T) {
-	full := &api.PR{
-		HeadSHA:      "deadbeef",
-		ChecksRollup: "success",
-		ReviewCount:  2,
-	}
-	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			return []api.PR{{
-				Repo: "owner/repo", Number: 1,
-				UpdatedAt: "2026-09-01T00:00:00Z", State: "open", Draft: false,
-				CommentCount: 3,
-			}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return full, nil
-		},
-		reviewThreadCount: 4,
-	}
-	b := newTestBackend(t, gh)
-
-	fp := github.ComputeFingerprint(github.GitHubPRSnapshot{
-		ID: "owner/repo#1", UpdatedAt: "2026-09-01T00:00:00Z", HeadOID: "deadbeef",
-		StatusRollup: "success", State: "open", IsDraft: false,
-		ReviewCount: 2, CommentCount: 3, ReviewThreadCount: 4,
-	})
-	prevCursor := json.RawMessage(`{"v":1,"fp":{"owner/repo#1":"` + fp + `"}}`)
-
-	got, err := b.List(context.Background(), []string{"is:open"}, false, prevCursor)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	cur, err := github.DecodeCursor(got.Cursor)
-	if err != nil || cur == nil {
-		t.Fatalf("DecodeCursor(got.Cursor) = (%v, %v), want a decodable cursor", cur, err)
-	}
-	if cur.ByPR["owner/repo#1"] != fp {
-		t.Fatalf("cur.ByPR[owner/repo#1] = %q, want %q (the incoming cursor's own fingerprint, unchanged)", cur.ByPR["owner/repo#1"], fp)
-	}
-}
-
-// TestBackend_List_SupplementalFetchError_Classified proves a failure in
-// the supplemental per-matched-PR GetPR fetch (bead pg2-2j5ac.30.6) is
-// classified the same way a SearchPRs failure already is -- List fails
-// the whole call rather than silently omitting the enrichment, matching
-// ListAttention's own existing all-or-nothing semantics for the same
-// per-candidate GetPR fan-out shape.
-func TestBackend_List_SupplementalFetchError_Classified(t *testing.T) {
-	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
 			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
 		},
-		getPRErr: github.ErrGHAuthInvalid,
 	}
 	b := newTestBackend(t, gh)
 
-	_, err := b.List(context.Background(), []string{"is:open"}, false, nil)
-	if !errors.Is(err, scriptout.ErrUnauthenticated) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
-	}
-}
-
-// TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount is a
-// direct, IO-free unit test of List's own merge step (bead
-// pg2-2j5ac.30.6, extended by pg2-2j5ac.30.7's reviewThreadCount
-// parameter): the fields gh search prs' own --json field list cannot
-// carry come from full/reviewThreadCount, while everything else --
-// including fields full ALSO happens to carry, like Title -- stays m's
-// own, cheaper-search-call value untouched ("list" is an enumeration op,
-// not a full re-fetch of every field).
-func TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount(t *testing.T) {
-	m := api.PR{Repo: "owner/repo", Number: 1, Title: "from search", State: "open"}
-	full := api.PR{HeadSHA: "deadbeef", ChecksRollup: "success", ReviewCount: 3, Title: "from view (must be ignored)"}
-	got := mergeSupplementalFields(m, full, 5)
-	if got.HeadSHA != "deadbeef" {
-		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, "deadbeef")
-	}
-	if got.ChecksRollup != "success" {
-		t.Fatalf("ChecksRollup = %q, want %q", got.ChecksRollup, "success")
-	}
-	if got.ReviewCount != 3 {
-		t.Fatalf("ReviewCount = %d, want 3", got.ReviewCount)
-	}
-	if got.ReviewThreadCount != 5 {
-		t.Fatalf("ReviewThreadCount = %d, want 5", got.ReviewThreadCount)
-	}
-	if got.Title != "from search" {
-		t.Fatalf("Title = %q, want the search result's own title preserved", got.Title)
-	}
-	if got.Repo != "owner/repo" || got.Number != 1 {
-		t.Fatalf("Repo/Number = %q/%d, want the search result's own identity preserved", got.Repo, got.Number)
-	}
-}
-
-// TestBackend_List_CallsReviewThreadCountPerMatchedPR proves List's
-// supplemental-fetch step (bead pg2-2j5ac.30.7) calls
-// ghProvider.ReviewThreadCount for each matched PR, with the correct
-// repo/number, alongside the existing GetPR supplemental fetch --
-// schema.PR does not surface ReviewThreadCount itself (this packet
-// deliberately does not wire the field into Backend.List's output; that
-// remains pg2-2j5ac.30.3's job), so the call itself is what this test
-// observes. TestMergeSupplementalFields_CopiesHeadSHAChecksRollupReviewCount
-// is the direct, IO-free proof that the fetched value actually reaches
-// api.PR.ReviewThreadCount via the merge step.
-func TestBackend_List_CallsReviewThreadCountPerMatchedPR(t *testing.T) {
-	var got []string
-	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			return []api.PR{{Repo: "owner/repo", Number: 1, Title: "a", State: "open"}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{HeadSHA: "deadbeef", ChecksRollup: "success"}, nil
-		},
-		reviewThreadCountFn: func(ctx context.Context, repo string, number int) (int, error) {
-			got = append(got, formatPRID(repo, number))
-			return 7, nil
-		},
-	}
-	b := newTestBackend(t, gh)
-
-	result, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	incoming := json.RawMessage(`{"v":1,"fp":{"owner/repo#1":"deadbeef00000000"}}`)
+	got, err := b.List(context.Background(), []string{"is:open"}, false, incoming)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(result.Entities) != 1 {
-		t.Fatalf("Entities = %+v", result.Entities)
-	}
-	if len(got) != 1 || got[0] != "owner/repo#1" {
-		t.Fatalf("ReviewThreadCount calls = %+v, want exactly one call for owner/repo#1", got)
-	}
-}
-
-// TestBackend_List_ReviewThreadCountFetchError_Classified mirrors
-// TestBackend_List_SupplementalFetchError_Classified for the new
-// supplemental fetch (bead pg2-2j5ac.30.7): a transient/failed
-// ReviewThreadCount call degrades EXACTLY like a failed GetPR
-// supplemental fetch already does -- List fails the whole call rather
-// than silently omitting the field or crashing, per this packet's own
-// binding decision to read and reuse GetPR's existing failure handling
-// rather than inventing a different one.
-func TestBackend_List_ReviewThreadCountFetchError_Classified(t *testing.T) {
-	gh := &fakeGH{
-		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
-		},
-		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
-			return &api.PR{}, nil
-		},
-		reviewThreadCountErr: github.ErrGHAuthInvalid,
-	}
-	b := newTestBackend(t, gh)
-
-	_, err := b.List(context.Background(), []string{"is:open"}, false, nil)
-	if !errors.Is(err, scriptout.ErrUnauthenticated) {
-		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	if got.Cursor != nil {
+		t.Fatalf("Cursor = %s, want nil", got.Cursor)
 	}
 }
 

@@ -40,8 +40,19 @@ type ghProvider interface {
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
 	CheckAuth(ctx context.Context) error
 	// SearchPRs runs one GitHub search-syntax query (design's
-	// "implement List" note) and returns every matched PR.
+	// "implement List" note) and returns every matched PR. Still used by
+	// List's own ids_only path (unchanged by bead pg2-aehpr's batched-query
+	// rewrite — see List's own doc comment), by Search, and by
+	// ListAttention.
 	SearchPRs(ctx context.Context, query string) ([]api.PR, error)
+	// SearchPRsEnriched runs one batched `gh api graphql` query per call
+	// (bead pg2-aehpr, design doc "pg-connector-pr-github: replace N+1
+	// GraphQL fetch with one batched query per search string") and
+	// returns every matched PR already fully enriched with
+	// HeadSHA/ChecksRollup — List's own non-ids_only path uses this
+	// instead of the old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
+	// fan-out.
+	SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error)
 	// RateLimitRemaining reads the GraphQL API's current rate-limit
 	// remainder (design's "Rate protection" bullet).
 	RateLimitRemaining(ctx context.Context) (int, error)
@@ -53,12 +64,6 @@ type ghProvider interface {
 	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
 	ViewerLogin(ctx context.Context) (string, error)
 	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
-	// ReviewThreadCount reads a single PR's reviewThreads.totalCount via a
-	// dedicated raw-GraphQL call (bead pg2-2j5ac.30.7) — List's own
-	// supplemental-fetch source for the one fingerprint-needed field
-	// neither gh search prs --json nor gh pr view --json can carry (see
-	// internal/github/github.go's reviewThreadCountQuery doc comment).
-	ReviewThreadCount(ctx context.Context, repo string, number int) (int, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
@@ -182,51 +187,47 @@ func rateReservePoints(config json.RawMessage) int {
 // scriptout.ConfigFromContext) — falling below it answers unavailable
 // rather than a partial/misleading result set, since a caller cannot
 // otherwise tell "genuinely zero matches" apart from "GitHub throttled
-// this call partway through." Truncated is always false: SearchPRs
-// itself does not report a partial/truncated flag of its own (gh search
-// prs' own --limit is fixed at 100 per call by SearchPRs, not exposed
-// as a per-query knob here) [freedom boundary].
+// this call partway through." Truncated is always false: both
+// SearchPRs and SearchPRsEnriched fully paginate their own results
+// internally, so there is never a partial page to report [freedom
+// boundary].
 //
 // "list" is an enumeration/matching op, not a full-detail read (see
 // schema.PRListResult's own doc comment), so a caller wanting a matched
 // PR's full comment/review detail calls "show" on its id [freedom
 // boundary].
 //
-// cursor (bead pg2-2j5ac.30.6, widening pr.Provider.List's own signature)
-// is now honored (bead pg2-2j5ac.30.3): internal/github's
-// DecodeCursor/EncodeCursor/RefreshCursor codec (fingerprint.go) turns it
-// into a real, version-tagged fingerprint cursor instead of always
-// answering Cursor: nil, now that the entity-mapping step below computes
-// every field that composite fingerprint needs (bead pg2-2j5ac.30.6's
-// supplemental GetPR fetch plus pg2-2j5ac.30.7's ReviewThreadCount
-// fetch). Per this packet's own Contract ("every other part of that list
-// implementation — entity mapping, present_ids, truncated — is
-// unchanged"), only cursor handling changes here: Entities/PresentIDs/
-// Truncated are computed exactly as before, unfiltered by
-// RefreshCursor's own changedIDs return value — this method does not
-// prune Entities to the changed subset (Ledger.Refresh's own doc comment
-// notes a cursor-scoped refresh MAY do that, not MUST; narrowing
-// Entities is left to a future packet, not assumed here).
+// idsOnly's own search step deliberately stays on ghProvider.SearchPRs
+// (the cheaper, unenriched `gh search prs` call) rather than
+// SearchPRsEnriched below — PresentIDs never needs anything beyond
+// identity, matching the design doc's own "the ids_only=true path is
+// unchanged" MUST-cover point (design doc "pg-connector-pr-github:
+// replace N+1 GraphQL fetch with one batched query per search string",
+// section 6) — this mirrors the interface's own "MAY still choose to
+// populate Entities anyway (harmless, just wasted work) but need not"
+// freedom boundary now that there IS a non-trivial cost to skip.
 //
-// Once the matched-and-deduped set is known, and only when idsOnly is
-// false (PresentIDs never needs anything below — skipping this step
-// for an ids_only caller avoids N wasted gh calls, matching the
-// interface's own "MAY still choose to populate Entities anyway
-// (harmless, just wasted work) but need not" freedom boundary now that
-// there IS a non-trivial cost to skip), this runs two supplemental
-// per-matched-PR fetches: GetPR, filling in the three fields gh search
-// prs' own --json field list cannot carry at all — head OID, checks
-// rollup, review count (searchPRFields' own doc comment has the verified
-// gh-search-prs field-list gap) — and ReviewThreadCount (bead
-// pg2-2j5ac.30.7), the 8th and final fingerprint field neither gh search
-// prs nor gh pr view can carry via --json at all (internal/github/
-// github.go's reviewThreadCountQuery doc comment). Both run inside the
-// SAME parallelMap helper ListAttention's own per-candidate GetPR fan-out
-// below already uses for an identical N+1 shape (bead pg2-zutee). A
-// supplemental-fetch failure for any one matched PR — from either call —
-// fails the whole List call, matching ListAttention's own existing
-// all-or-nothing error semantics for this same fan-out shape — not a new
-// risk profile.
+// The non-ids_only path (bead pg2-aehpr) instead calls
+// ghProvider.SearchPRsEnriched once per query string: that method's own
+// batched GraphQL query already returns every matched PR fully enriched
+// (HeadSHA/ChecksRollup nested on every returned node), replacing what
+// used to be a per-matched-PR GetPR + ReviewThreadCount fan-out entirely
+// — see SearchPRsEnriched's own doc comment in internal/github/github.go
+// for the full N+1-elimination rationale.
+//
+// cursor is accepted for pr.Provider.List's own interface conformance
+// but is no longer read: List always answers Cursor: nil now (bead
+// pg2-aehpr) — the FingerprintCursor mechanism (internal/github's
+// DecodeCursor/EncodeCursor/RefreshCursor codec, fingerprint.go) is now
+// vestigial, since SearchPRsEnriched already fetches every field fresh
+// on every call, leaving no more per-PR "did this change" decision for a
+// cursor to inform. This matches pr.Provider.List's own doc comment,
+// which already sanctioned exactly this: "A backend that does not
+// support incremental listing MUST simply ignore whatever it is handed
+// and MUST always answer with PRListResult.Cursor nil." fingerprint.go/
+// fingerprint_test.go are deliberately left in place, unused by this
+// method — deleting them outright is a separate, later cleanup (bead
+// pg2-c0vs3), not part of this change.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
@@ -238,10 +239,30 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		))
 	}
 
+	if idsOnly {
+		seen := make(map[string]bool)
+		ids := make([]string, 0)
+		for _, q := range query {
+			prs, err := b.gh.SearchPRs(ctx, q)
+			if err != nil {
+				return nil, classifyGHError(err)
+			}
+			for i := range prs {
+				id := formatPRID(prs[i].Repo, prs[i].Number)
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: false}, nil
+	}
+
 	seen := make(map[string]bool)
 	matched := make([]api.PR, 0)
 	for _, q := range query {
-		prs, err := b.gh.SearchPRs(ctx, q)
+		prs, err := b.gh.SearchPRsEnriched(ctx, q)
 		if err != nil {
 			return nil, classifyGHError(err)
 		}
@@ -257,89 +278,16 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	}
 
 	ids := make([]string, 0, len(matched))
-	for _, m := range matched {
-		ids = append(ids, formatPRID(m.Repo, m.Number))
-	}
-	result := &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: false}
-	if idsOnly {
-		return result, nil
-	}
-
-	enriched, err := parallelMap(ctx, matched, func(ctx context.Context, m api.PR) (api.PR, error) {
-		full, err := b.gh.GetPR(ctx, m.Repo, m.Number)
-		if err != nil {
-			return api.PR{}, err
-		}
-		threadCount, err := b.gh.ReviewThreadCount(ctx, m.Repo, m.Number)
-		if err != nil {
-			return api.PR{}, err
-		}
-		return mergeSupplementalFields(m, *full, threadCount), nil
-	})
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-
-	entities := make([]schema.PR, 0, len(enriched))
-	snapshots := make([]github.GitHubPRSnapshot, 0, len(enriched))
+	entities := make([]schema.PR, 0, len(matched))
 	asOf := time.Now().UTC()
-	for i := range enriched {
-		ghPR := enriched[i]
+	for i := range matched {
+		ghPR := matched[i]
 		id := formatPRID(ghPR.Repo, ghPR.Number)
+		ids = append(ids, id)
 		entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
-		snapshots = append(snapshots, github.GitHubPRSnapshot{
-			ID:                id,
-			UpdatedAt:         ghPR.UpdatedAt,
-			HeadOID:           ghPR.HeadSHA,
-			StatusRollup:      ghPR.ChecksRollup,
-			State:             ghPR.State,
-			IsDraft:           ghPR.Draft,
-			ReviewCount:       ghPR.ReviewCount,
-			CommentCount:      ghPR.CommentCount,
-			ReviewThreadCount: ghPR.ReviewThreadCount,
-		})
 	}
-	result.Entities = entities
 
-	// prevCursor decodes the incoming opaque blob (nil on a first/full
-	// fetch, or an undecodable/wrong-version one — DecodeCursor's own
-	// contract treats both as "no cursor", never an error). RefreshCursor
-	// then computes this call's next cursor from the live snapshot;
-	// changedIDs is intentionally discarded here (see this method's own
-	// doc comment above: entity mapping/present_ids/truncated stay
-	// unchanged by this packet, so nothing narrows Entities to the
-	// changed subset yet).
-	prevCursor, _ := github.DecodeCursor(cursor)
-	_, nextCursor := github.RefreshCursor(prevCursor, snapshots)
-	encoded, err := github.EncodeCursor(nextCursor)
-	if err != nil {
-		return nil, fmt.Errorf("pg-connector-pr-github: encode fingerprint cursor: %w", err)
-	}
-	result.Cursor = encoded
-	return result, nil
-}
-
-// mergeSupplementalFields copies the three fields gh search prs' own
-// --json field list cannot carry (bead pg2-2j5ac.30.6: head OID, checks
-// rollup, review count — searchPRFields' own doc comment) from full (a
-// per-PR GetPR-equivalent fetch), plus reviewThreadCount (bead
-// pg2-2j5ac.30.7 — the 8th and final fingerprint field, fetched via its
-// own dedicated raw-GraphQL call since neither gh search prs nor gh pr
-// view can carry it via --json at all), onto m (one of SearchPRs' own
-// matched results) — leaving every other field of m untouched. m's own
-// Title/State/Author/UpdatedAt/CommentCount/… already came from the
-// cheaper search call and are not overwritten by full's own (possibly
-// differently-formatted, but not more authoritative for this op's
-// purposes) copies of those same fields: "list" is an enumeration op,
-// not a full re-fetch of every field [freedom boundary]. A pure
-// function so List's own supplemental-fetch merge step is unit-testable
-// without spawning a fake ghProvider fan-out.
-func mergeSupplementalFields(m, full api.PR, reviewThreadCount int) api.PR {
-	m.HeadSHA = full.HeadSHA
-	m.ChecksRollup = full.ChecksRollup
-	m.ReviewCount = full.ReviewCount
-	m.ReviewThreadCount = reviewThreadCount
-	return m
+	return &schema.PRListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}, nil
 }
 
 // Search implements the search capability's search.Provider via the same

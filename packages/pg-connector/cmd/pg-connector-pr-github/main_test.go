@@ -35,6 +35,10 @@ func (fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
 	return nil, nil
 }
 
+func (fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+	return nil, nil
+}
+
 func (fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
 	return 5000, nil
 }
@@ -53,10 +57,6 @@ func (fakeGH) ViewerLogin(ctx context.Context) (string, error) {
 
 func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
 	return nil, nil
-}
-
-func (fakeGH) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
-	return 0, nil
 }
 
 func newTestBackend(t *testing.T) *internal.Backend {

@@ -864,6 +864,276 @@ func TestSearchPRs_PropagatesGHError(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------
+// SearchPRsEnriched tests (bead pg2-aehpr: batched-query replacement for
+// List's own old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
+// fan-out — design doc "pg-connector-pr-github: replace N+1 GraphQL fetch
+// with one batched query per search string", section 6/7).
+//
+// sequencedGH (below newFakeGH's own single-response-per-key map cannot
+// serve this suite's pagination tests: every call this method issues is
+// `gh api graphql ...`, so newFakeGH's own "first two args" keying scheme
+// would answer every page identically) replays a FIXED SEQUENCE of
+// responses/errors in call order instead, letting a pagination test hand
+// back a different page on each successive call.
+// ----------------------------------------------------------------------
+
+// sequencedGH is a ghRunner double that replays a fixed sequence of
+// responses in call order.
+type sequencedGH struct {
+	responses [][]byte
+	errs      []error
+	calls     [][]string
+}
+
+func (s *sequencedGH) Run(_ context.Context, args ...string) ([]byte, error) {
+	i := len(s.calls)
+	s.calls = append(s.calls, append([]string(nil), args...))
+	if i < len(s.errs) && s.errs[i] != nil {
+		return nil, s.errs[i]
+	}
+	if i < len(s.responses) {
+		return s.responses[i], nil
+	}
+	return []byte("{}"), nil
+}
+
+func (s *sequencedGH) RunStdin(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
+	return s.Run(ctx, args...)
+}
+
+const sampleBatchedSearchPage = `{
+  "data": {
+    "search": {
+      "pageInfo": {"hasNextPage": false, "endCursor": ""},
+      "nodes": [
+        {
+          "number": 7,
+          "title": "fix: bug",
+          "url": "https://github.com/owner/repo/pull/7",
+          "state": "OPEN",
+          "body": "fixes a thing",
+          "isDraft": false,
+          "updatedAt": "2026-09-14T10:00:00Z",
+          "author": {"login": "octocat"},
+          "repository": {"nameWithOwner": "owner/repo"},
+          "labels": {"nodes": [{"name": "bug"}, {"name": "p1"}]},
+          "comments": {"totalCount": 5},
+          "headRefOid": "deadbeef",
+          "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+        }
+      ]
+    }
+  }
+}`
+
+func TestSearchPRsEnriched_ParsesAndConverts(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(sampleBatchedSearchPage)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d: %+v", len(prs), prs)
+	}
+	pr := prs[0]
+	if pr.Repo != "owner/repo" || pr.Number != 7 || pr.Title != "fix: bug" || pr.Author != "octocat" {
+		t.Fatalf("unexpected PR: %+v", pr)
+	}
+	if pr.State != "open" {
+		t.Fatalf("State = %q, want lowercased %q", pr.State, "open")
+	}
+	if pr.HeadSHA != "deadbeef" {
+		t.Fatalf("HeadSHA = %q, want %q", pr.HeadSHA, "deadbeef")
+	}
+	if pr.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want %q", pr.ChecksRollup, "success")
+	}
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Fatalf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.CommentCount != 5 {
+		t.Fatalf("CommentCount = %d, want 5", pr.CommentCount)
+	}
+	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
+		t.Fatalf("Labels = %v", pr.Labels)
+	}
+	if pr.Body != "fixes a thing" {
+		t.Fatalf("Body = %q, want %q", pr.Body, "fixes a thing")
+	}
+	if pr.Draft {
+		t.Fatal("Draft = true, want false (fixture's own isDraft: false)")
+	}
+}
+
+// TestSearchPRsEnriched_InjectsIsPRQualifier proves this method prepends
+// "is:pr " to the caller's own query before sending it as the search()
+// connection's $q variable: talking to GitHub's raw type: ISSUE search
+// connection directly (rather than through gh's own `search prs`
+// subcommand, which does this same narrowing internally) would otherwise
+// silently start matching plain issues too.
+func TestSearchPRsEnriched_InjectsIsPRQualifier(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`)}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me"); err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	if !strings.Contains(joined, "q=is:pr is:open author:@me") {
+		t.Fatalf("expected the $q variable to be prefixed with \"is:pr \": %v", gh.calls[0])
+	}
+}
+
+// TestSearchPRsEnriched_QueryRequestsExpectedFields pins the query text
+// this method sends against silent regression — the design doc's own
+// MUST-cover fields (headRefOid/statusCheckRollup for HeadSHA/
+// ChecksRollup, the labels(first: 20) bound, the search() connection's
+// own pagination args).
+func TestSearchPRsEnriched_QueryRequestsExpectedFields(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`)}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{
+		"search(query: $q, type: ISSUE, first: 100, after: $after)",
+		"labels(first: 20)",
+		"statusCheckRollup",
+		"headRefOid",
+		"repository { nameWithOwner }",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected the query to contain %q: %v", want, gh.calls[0])
+		}
+	}
+}
+
+// TestSearchPRsEnriched_PaginatesPastFirstPage is the design doc's own
+// MUST-cover pagination test: a synthetic two-page fixture (a live repo
+// with >100 simultaneously open matches is not a reliable thing to
+// depend on for a test) proves this method fetches every page — not just
+// the first 100 — and threads the previous page's own endCursor into the
+// next call's "after" variable, while the FIRST call carries no "after"
+// at all (a first/full fetch has no prior cursor).
+func TestSearchPRsEnriched_PaginatesPastFirstPage(t *testing.T) {
+	page1 := `{"data":{"search":{"pageInfo":{"hasNextPage":true,"endCursor":"CURSOR1"},"nodes":[
+	  {"number":1,"url":"https://github.com/owner/repo/pull/1","state":"OPEN","repository":{"nameWithOwner":"owner/repo"},"headRefOid":"sha1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}
+	]}}}`
+	page2 := `{"data":{"search":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+	  {"number":2,"url":"https://github.com/owner/repo/pull/2","state":"OPEN","repository":{"nameWithOwner":"owner/repo"},"headRefOid":"sha2","commits":{"nodes":[]}}
+	]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page1), []byte(page2)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("expected 2 PRs across 2 pages, got %d: %+v", len(prs), prs)
+	}
+	if prs[0].Number != 1 || prs[1].Number != 2 {
+		t.Fatalf("unexpected PR order/identity: %+v", prs)
+	}
+	if len(gh.calls) != 2 {
+		t.Fatalf("expected exactly 2 gh api graphql calls (one per page), got %d", len(gh.calls))
+	}
+	if joined := strings.Join(gh.calls[0], " "); strings.Contains(joined, "after=") {
+		t.Fatalf("the first call must not carry an \"after\" cursor: %v", gh.calls[0])
+	}
+	if joined := strings.Join(gh.calls[1], " "); !strings.Contains(joined, "after=CURSOR1") {
+		t.Fatalf("the second call must carry the first page's own endCursor as \"after\": %v", gh.calls[1])
+	}
+}
+
+// TestSearchPRsEnriched_NoChecks_MapsToNone covers the "zero check runs"
+// edge case the design doc's own verify-first note flags: a commit with
+// no checks at all decodes statusCheckRollup as JSON null (or, here, an
+// empty commits connection), which MUST map to "none", not a Go zero
+// value silently masquerading as some other state.
+func TestSearchPRsEnriched_NoChecks_MapsToNone(t *testing.T) {
+	page := `{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[
+	  {"number":1,"url":"https://github.com/o/r/pull/1","state":"OPEN","repository":{"nameWithOwner":"o/r"},"commits":{"nodes":[]}}
+	]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 || prs[0].ChecksRollup != "none" {
+		t.Fatalf("prs = %+v, want exactly 1 PR with ChecksRollup \"none\"", prs)
+	}
+}
+
+// TestSearchPRsEnriched_SkipsNonPRNodes proves a search() result node
+// whose inline `... on PullRequest` fragment did not match (Number stays
+// 0) is skipped rather than emitted as a bogus zero-identity PR.
+func TestSearchPRsEnriched_SkipsNonPRNodes(t *testing.T) {
+	page := `{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[{}]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Fatalf("prs = %+v, want none (the non-PR node must be skipped)", prs)
+	}
+}
+
+func TestSearchPRsEnriched_PropagatesGHError(t *testing.T) {
+	gh := &sequencedGH{errs: []error{errors.New("boom")}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestSearchPRsEnriched_MalformedJSON(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte("not json")}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+// TestStatusStateToChecksRollup is a table-driven unit test of the
+// design doc's own recommended StatusState -> ChecksRollup mapping —
+// all six real GraphQL StatusState outcomes (EXPECTED/ERROR included,
+// not just the four values today's checksRollupFromContexts fold
+// produces) plus the "no rollup at all" empty-string case.
+func TestStatusStateToChecksRollup(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty (no statusCheckRollup / no commits)", "", "none"},
+		{"pending", "PENDING", "pending"},
+		{"expected (not yet started)", "EXPECTED", "pending"},
+		{"success", "SUCCESS", "success"},
+		{"failure", "FAILURE", "failure"},
+		{"error", "ERROR", "failure"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := statusStateToChecksRollup(c.in); got != c.want {
+				t.Fatalf("statusStateToChecksRollup(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestRateLimitRemaining_ParsesRemainder(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":1234}}}`)

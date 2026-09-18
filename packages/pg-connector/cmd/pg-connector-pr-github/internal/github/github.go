@@ -665,6 +665,259 @@ func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error
 	return out, nil
 }
 
+// searchBatchedQuery is the batched GraphQL query SearchPRsEnriched issues
+// once per configured search string (bead pg2-aehpr, design doc
+// "pg-connector-pr-github: replace N+1 GraphQL fetch with one batched
+// query per search string", section 6): every matched PR's
+// HeadSHA/ChecksRollup — the two fields List's own now-removed
+// per-matched-PR GetPR fan-out used to fetch separately — are nested
+// directly on the search result, so one call per query string replaces
+// what used to be 1 (search) + 2*N (GetPR, ReviewThreadCount) calls.
+//
+// reviews{totalCount}/reviewThreads{totalCount} are deliberately NOT
+// requested: the design doc traced every consumer of the old fan-out's
+// ReviewCount/ReviewThreadCount fields and found none once
+// FingerprintCursor (List's own cursor emission) stops being computed —
+// see List's own doc comment in provider.go. Adding them back here would
+// be dead weight dressed up as fidelity to the old shape.
+//
+// repository{nameWithOwner} is included even though the design doc's own
+// query snippet omits it: this backend's id convention (formatPRID,
+// "<owner>/<repo>#<number>") and api.PR.Repo both need the matched PR's
+// owning repo — GitHub's search() connection can span multiple repos in
+// one query — and the design's field audit covered wire-load-bearing PR
+// content fields, not this pre-existing id-construction plumbing (the old
+// ghSearchPR.toAPI path already read the identical field).
+//
+// labels(first: 20) has no pagination of its own (unlike the outer
+// search(first: 100) connection, which SearchPRsEnriched below DOES
+// paginate) — this backend assumes no single matched PR carries more
+// than 20 labels, the design doc's own explicitly-sanctioned alternative
+// to implementing a second, nested pagination loop (design doc section 6,
+// "either add pagination for labels too, or explicitly size the constant
+// to a bound ... and document that assumption inline"). A PR with more
+// than 20 labels would silently lose the excess ones; this is a known,
+// documented limitation, not an oversight.
+const searchBatchedQuery = `
+query($q: String!, $after: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      ... on PullRequest {
+        number title url state body isDraft updatedAt
+        author { login }
+        repository { nameWithOwner }
+        labels(first: 20) { nodes { name } }
+        comments { totalCount }
+        headRefOid
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}
+`
+
+// ghBatchedSearchNode is one `... on PullRequest` node in
+// searchBatchedQuery's own response shape. A node whose fragment did not
+// match (i.e. the matched issue-typed search() result was not actually a
+// PullRequest) decodes with every field at its zero value — Number stays
+// 0, which SearchPRsEnriched treats as "not a PR" and skips, matching the
+// gh CLI's own defensive posture elsewhere in this file.
+type ghBatchedSearchNode struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	State     string `json:"state"`
+	Body      string `json:"body"`
+	IsDraft   bool   `json:"isDraft"`
+	UpdatedAt string `json:"updatedAt"`
+	Author    struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+	Labels struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
+	Comments struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"comments"`
+	HeadRefOid string `json:"headRefOid"`
+	Commits    struct {
+		Nodes []struct {
+			Commit struct {
+				// StatusCheckRollup decodes to its zero value (State == "")
+				// both when the sub-object is genuinely absent AND when
+				// GitHub returns it as JSON null (verified empirically per
+				// the design doc: "the 'zero check runs' edge case is
+				// real ... statusCheckRollup itself comes back null ...
+				// when a commit has no checks at all") — encoding/json
+				// leaves a non-pointer field at its zero value on a JSON
+				// null rather than erroring, so both cases fold to the same
+				// "no rollup" state statusStateToChecksRollup below maps to
+				// "none".
+				StatusCheckRollup struct {
+					State string `json:"state"`
+				} `json:"statusCheckRollup"`
+			} `json:"commit"`
+		} `json:"nodes"`
+	} `json:"commits"`
+}
+
+// ghBatchedSearchResponse is searchBatchedQuery's own full response
+// envelope.
+type ghBatchedSearchResponse struct {
+	Data struct {
+		Search struct {
+			PageInfo struct {
+				HasNextPage bool   `json:"hasNextPage"`
+				EndCursor   string `json:"endCursor"`
+			} `json:"pageInfo"`
+			Nodes []ghBatchedSearchNode `json:"nodes"`
+		} `json:"search"`
+	} `json:"data"`
+}
+
+// statusStateToChecksRollup maps GraphQL's Commit.statusCheckRollup.state
+// (schema enum StatusState: EXPECTED | ERROR | FAILURE | PENDING | SUCCESS,
+// verified live against the real schema per the design doc's own
+// "verify, do not assume" note) onto schema.PR.ChecksRollup's existing
+// four-value set ("none" | "pending" | "failure" | "success") — the
+// design doc's own recommended mapping, chosen to mirror
+// checksRollupFromContexts' existing StatusContext.State handling one
+// level down: a check that hasn't started yet (EXPECTED) is not yet a
+// failure, so it folds to "pending" alongside PENDING; ERROR folds to
+// "failure" alongside FAILURE. state == "" covers both "statusCheckRollup
+// itself was JSON null" (no check runs on the head commit at all) and "no
+// commits connection returned" (SearchPRsEnriched never populates a
+// commits node in that case) — both fold to "none".
+func statusStateToChecksRollup(state string) string {
+	switch state {
+	case "":
+		return "none"
+	case "PENDING", "EXPECTED":
+		return "pending"
+	case "SUCCESS":
+		return "success"
+	case "FAILURE", "ERROR":
+		return "failure"
+	default:
+		// An unrecognized/future StatusState value: treat as pending
+		// rather than silently reporting success or masking a real
+		// failure — mirrors checksRollupFromContexts' own "unrecognized
+		// value" fallback.
+		return "pending"
+	}
+}
+
+func (n ghBatchedSearchNode) toAPI() api.PR {
+	out := api.PR{
+		Repo:         n.Repository.NameWithOwner,
+		Number:       n.Number,
+		Title:        n.Title,
+		State:        strings.ToLower(n.State),
+		Author:       n.Author.Login,
+		URL:          n.URL,
+		Draft:        n.IsDraft,
+		Body:         n.Body,
+		UpdatedAt:    n.UpdatedAt,
+		CommentCount: n.Comments.TotalCount,
+		HeadSHA:      n.HeadRefOid,
+		ChecksRollup: statusStateToChecksRollup(n.headCommitStatusState()),
+	}
+	for _, l := range n.Labels.Nodes {
+		out.Labels = append(out.Labels, l.Name)
+	}
+	return out
+}
+
+// headCommitStatusState returns the head commit's own
+// statusCheckRollup.state, or "" when the commits connection returned no
+// node at all (a PR with no commits — not expected in practice, but
+// decoded defensively rather than panicking on an empty slice).
+func (n ghBatchedSearchNode) headCommitStatusState() string {
+	if len(n.Commits.Nodes) == 0 {
+		return ""
+	}
+	return n.Commits.Nodes[0].Commit.StatusCheckRollup.State
+}
+
+// SearchPRsEnriched runs searchBatchedQuery once per call for query,
+// returning every matched PR already fully enriched with
+// HeadSHA/ChecksRollup — List's own replacement (bead pg2-aehpr) for the
+// old SearchPRs + per-matched-PR GetPR/ReviewThreadCount fan-out (see
+// provider.go's List doc comment). SearchPRs itself (immediately above)
+// is UNCHANGED and stays in use by List's own ids_only path, by Search(),
+// and by ListAttention() — none of which this design touches (design doc
+// section 6: "The ids_only=true path is unchanged", and Search/
+// ListAttention are never mentioned in scope at all).
+//
+// query is GitHub's own bare search-syntax string (the same shape
+// SearchPRs' own doc comment describes) — this method prepends "is:pr "
+// unconditionally before sending it as the $q variable: gh's own `search
+// prs` subcommand (SearchPRs' underlying CLI call) implicitly narrows
+// GitHub's ISSUE-typed search() connection to pull requests only; talking
+// to that same search(type: ISSUE) connection directly via raw GraphQL
+// means this method must add that same qualifier itself, or it would
+// silently start matching plain issues too — a correctness point the
+// design doc's own query snippet does not spell out but the underlying
+// API contract requires. A query that already contains "is:pr" is
+// harmless to double up (GitHub's search qualifiers are idempotent).
+//
+// Internally paginates past GitHub's 100-result-per-page search() bound
+// (design doc section 6's own MUST-cover pagination point) so callers
+// always see one query string's complete match set in a single return,
+// with no truncated:true signal needed — a genuine improvement over the
+// old SearchPRs' fixed --limit 100 (which silently capped at 100 with no
+// truncation signal of its own).
+func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+	searchQuery := "is:pr " + query
+	var out []api.PR
+	after := ""
+	for {
+		args := []string{
+			"api", "graphql",
+			"-F", "query=" + searchBatchedQuery,
+			"-f", "q=" + searchQuery,
+		}
+		if after != "" {
+			args = append(args, "-f", "after="+after)
+		}
+		raw, err := p.gh.Run(ctx, args...)
+		if err != nil {
+			return nil, err
+		}
+		var resp ghBatchedSearchResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("github: parse batched search graphql response: %w", err)
+		}
+		for _, n := range resp.Data.Search.Nodes {
+			if n.Number == 0 {
+				// The matched search() node's inline PullRequest fragment
+				// did not match (see ghBatchedSearchNode's own doc
+				// comment) — skip rather than emit a bogus zero-identity
+				// PR. Not expected once "is:pr " is always prepended
+				// above, but defensive rather than assumed.
+				continue
+			}
+			out = append(out, n.toAPI())
+		}
+		if !resp.Data.Search.PageInfo.HasNextPage {
+			break
+		}
+		after = resp.Data.Search.PageInfo.EndCursor
+		if after == "" {
+			// Defensive: hasNextPage true but no cursor to advance with —
+			// stop rather than re-request the same page forever.
+			break
+		}
+	}
+	return out, nil
+}
+
 // rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {
 // remaining } }'`'s own stdout — the standard GitHub GraphQL response
 // envelope, {"data": {"rateLimit": {"remaining": N}}}.
@@ -1537,17 +1790,25 @@ func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number in
 
 // reviewThreadCountQuery fetches a PR's inline code-review comment thread
 // count (GraphQL's own PullRequest.reviewThreads.totalCount — distinct
-// from CommentCount's issue-level comments) — the 8th and final raw field
-// a future GitHub fingerprint cursor needs (bead pg2-2j5ac.30.7). Neither
-// `gh search prs --json` nor `gh pr view --json` support a reviewThreads
-// field (verified live 2026-09-15: both error "Unknown JSON field" and
-// list their full supported field sets, neither containing reviewThreads),
-// so this mirrors pg-pr's own proven mechanism for this exact field
-// (packages/pg-pr/pkg/provider/vcs/github/fingerprint.go's fingerprintQuery
-// requests the identical `reviewThreads { totalCount }` sub-selection with
-// no pagination args), narrowed here to a single PR via the same
-// repository/pullRequest node shape reviewsWithCommitQuery above already
-// uses.
+// from CommentCount's issue-level comments) — originally the 8th and
+// final raw field List's own FingerprintCursor composition needed (bead
+// pg2-2j5ac.30.7). Neither `gh search prs --json` nor `gh pr view --json`
+// support a reviewThreads field (verified live 2026-09-15: both error
+// "Unknown JSON field" and list their full supported field sets, neither
+// containing reviewThreads), so this mirrors pg-pr's own proven mechanism
+// for this exact field (packages/pg-pr/pkg/provider/vcs/github/
+// fingerprint.go's fingerprintQuery requests the identical
+// `reviewThreads { totalCount }` sub-selection with no pagination args),
+// narrowed here to a single PR via the same repository/pullRequest node
+// shape reviewsWithCommitQuery above already uses.
+//
+// No longer called by internal/provider.go's List (bead pg2-aehpr:
+// List's per-matched-PR GetPR/ReviewThreadCount fan-out was replaced by
+// SearchPRsEnriched's own single batched query, which does not request
+// reviewThreads at all — see SearchPRsEnriched's own doc comment on why
+// not). Kept, untouched and still tested, as a general-purpose read with
+// no current caller — the same treatment this file's package doc comment
+// already gives its twelve carried-over write methods.
 const reviewThreadCountQuery = `
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -1559,13 +1820,15 @@ query($owner: String!, $name: String!, $number: Int!) {
 `
 
 // ReviewThreadCount runs reviewThreadCountQuery for repo/number and returns
-// reviewThreads.totalCount — List's own supplemental-fetch source for the
-// one fingerprint field (bead pg2-2j5ac.30.6's own mergeSupplementalFields
-// extension left uncovered) that neither gh search prs nor gh pr view can
-// carry. Mirrors ReviewsWithCommit's own error handling exactly: a `gh`
+// reviewThreads.totalCount — originally List's own supplemental-fetch
+// source for the one fingerprint field (bead pg2-2j5ac.30.6's own
+// mergeSupplementalFields extension left uncovered) that neither gh
+// search prs nor gh pr view can carry; no longer called by List as of
+// bead pg2-aehpr (see reviewThreadCountQuery's own doc comment above).
+// Mirrors ReviewsWithCommit's own error handling exactly: a `gh`
 // failure (transient GraphQL error, auth failure, …) is returned unwrapped
-// so provider.go's List call site classifies and fails the whole call the
-// same way a failed GetPR supplemental fetch already does — see
+// so a caller can classify and fail the whole call the same way a failed
+// GetPR supplemental fetch already does — see
 // provider.go's List doc comment on that all-or-nothing semantics.
 func (p *Provider) ReviewThreadCount(ctx context.Context, repo string, number int) (int, error) {
 	if err := validateRepo(repo); err != nil {
