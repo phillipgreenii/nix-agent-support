@@ -21,6 +21,19 @@
 // finding recorded in this packet's own closeout, not silently invented
 // around.
 //
+// UPDATE (calendar, bead pg2-o2dmu.3): newChangesCmd gained its THIRD
+// caller, newCalendarChangesCmd (below) — connector.calendar (registry.go)
+// and schema.CalendarEvent/CalendarListResult (pkg/schema/calendar.go) now
+// both exist, built by this docket's own first code-producing packet
+// (pg2-o2dmu.1), so calendar has exactly what pr/issue already had when
+// this file was first written. This does not change the paragraph above
+// or make it stale: the thread finding is unrelated and remains accurate
+// today — thread still has no CLI surface, no schema.Thread type, and no
+// connector.thread registry entry anywhere in this module, so it still
+// gets no newThreadChangesCmd. newChangesCmd's own algorithm (steps 1-6
+// above) is unchanged by calendar's addition — calendar reuses it
+// completely, exactly like pr/issue.
+//
 // Algorithm (per backend, one independent Ledger per (type, backend,
 // query) — ledger.go's LedgerKey):
 //
@@ -538,13 +551,17 @@ func changesWireFor(results []changesBackendResult) changesWire {
 	return w
 }
 
-// newPrChangesCmd/newIssueChangesCmd are the two new<Type>ChangesCmd()
-// constructors this packet's own Contract names, each attached from that
-// type's own new<Type>Cmd() (pr.go's newPrCmd, issue.go's newIssueCmd) —
-// see this file's own header comment for why there is no
-// newThreadChangesCmd.
-func newPrChangesCmd() *cobra.Command    { return newChangesCmd("pr") }
-func newIssueChangesCmd() *cobra.Command { return newChangesCmd("issue") }
+// newPrChangesCmd/newIssueChangesCmd/newCalendarChangesCmd are the three
+// new<Type>ChangesCmd() constructors this file's callers name, each
+// attached from that type's own new<Type>Cmd() (pr.go's newPrCmd,
+// issue.go's newIssueCmd, calendar.go's newCalendarCmd) — see this file's
+// own header comment (including its calendar UPDATE note) for why there
+// is no newThreadChangesCmd. newCalendarChangesCmd is this docket's own
+// pg2-o2dmu.3 packet's addition; it calls newChangesCmd unchanged, exactly
+// like its two siblings.
+func newPrChangesCmd() *cobra.Command       { return newChangesCmd("pr") }
+func newIssueChangesCmd() *cobra.Command    { return newChangesCmd("issue") }
+func newCalendarChangesCmd() *cobra.Command { return newChangesCmd("calendar") }
 
 // humanizeChangesOutcome formats a "changes" fan-out outcome for human
 // display, mirroring humanizePRListOutcome's own shape. Each sources[]

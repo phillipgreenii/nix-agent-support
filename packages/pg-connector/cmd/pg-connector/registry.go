@@ -450,12 +450,15 @@ func sourcesList(key string, sources []string) ([]string, error) {
 
 // entityTypes enumerates every connector.<type> key this docket's design
 // names, so a fan-out can walk "every registered backend regardless of
-// capability." This docket now populates all five — pr, issue, ci, scm,
-// and thread — via their own Tier-2 backends, and the registry stays
-// generic over the full set. "thread" was appended by bead pg2-2j5ac.40.3
-// (Phase 13's Thread v1 schema + claude -p backend packet) — list-valued
-// like pr/issue/ci, never single-valued like scm.
-var entityTypes = []string{"pr", "issue", "ci", "scm", "thread"}
+// capability." This docket now populates all six — pr, issue, ci, scm,
+// thread, and calendar — via their own Tier-2 backends, and the registry
+// stays generic over the full set. "thread" was appended by bead
+// pg2-2j5ac.40.3 (Phase 13's Thread v1 schema + claude -p backend packet);
+// "calendar" was appended by this docket's own CLI verb group packet
+// (pg2-o2dmu.3) — both list-valued like pr/issue/ci, never single-valued
+// like scm (matching pg2-2j5ac.40.3's own precedent, same file, same
+// list).
+var entityTypes = []string{"pr", "issue", "ci", "scm", "thread", "calendar"}
 
 // AllBackends returns every backend binary name registered under any
 // connector.<type> entry, across both list-valued and single-valued types.

@@ -102,6 +102,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCiCmd())
 	root.AddCommand(newIssueCmd())
 	root.AddCommand(newScmCmd())
+	root.AddCommand(newCalendarCmd())
 	root.AddCommand(newAttentionCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newLedgerCmd())
