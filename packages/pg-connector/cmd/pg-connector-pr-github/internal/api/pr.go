@@ -123,23 +123,25 @@ type PR struct {
 	// NOT carry (verified 2026-09-15: gh search prs --json only supports
 	// assignees, author, authorAssociation, body, closedAt, commentsCount,
 	// createdAt, id, isDraft, isLocked, isPullRequest, labels, number,
-	// repository, state, title, updatedAt, url — no reviews field). List's
-	// own supplemental per-matched-PR GetPR fetch (provider.go's
-	// mergeSupplementalFields) fills this in from the SAME widened
-	// prListFields call that already carries HeadSHA/ChecksRollup for
-	// List — see prListFields' own doc comment.
+	// repository, state, title, updatedAt, url — no reviews field).
+	// Populated only via GetPR's own widened prListFields call (used by
+	// Show/ListAttention); List no longer populates this field as of bead
+	// pg2-aehpr — its own SearchPRsEnriched query does not request
+	// reviews{totalCount} at all (see that method's own doc comment for
+	// why not), so a List-returned entity now always carries this at its
+	// zero value.
 	ReviewCount int `json:"review_count,omitempty"`
 	// ReviewThreadCount is the PR's inline code-review comment thread count
 	// (GraphQL's PullRequest.reviewThreads.totalCount — distinct from
-	// CommentCount's issue-level comments) — the 8th and final raw field a
-	// future GitHub fingerprint cursor needs (bead pg2-2j5ac.30.7). Neither
-	// gh search prs' nor gh pr view's own --json field lists carry this
-	// field (verified 2026-09-15 against the real gh binary: both error
-	// "Unknown JSON field"), so List's own supplemental per-matched-PR
-	// fetch (provider.go's mergeSupplementalFields) fills this in via a
-	// dedicated raw-GraphQL call (internal/github.Provider.ReviewThreadCount),
-	// mirroring pg-pr's own proven mechanism for this exact field
-	// (packages/pg-pr/pkg/provider/vcs/github/fingerprint.go).
+	// CommentCount's issue-level comments) — originally the 8th and final
+	// raw field a future GitHub fingerprint cursor needed (bead
+	// pg2-2j5ac.30.7), via internal/github.Provider.ReviewThreadCount's own
+	// dedicated raw-GraphQL call, mirroring pg-pr's own proven mechanism
+	// for this exact field (packages/pg-pr/pkg/provider/vcs/github/
+	// fingerprint.go). List stopped populating this field as of bead
+	// pg2-aehpr (its FingerprintCursor consumer became vestigial), and no
+	// other code path in this module ever populated it — it is now always
+	// this field's zero value everywhere.
 	ReviewThreadCount int `json:"review_thread_count,omitempty"`
 }
 
