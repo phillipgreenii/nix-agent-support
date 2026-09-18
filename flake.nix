@@ -5943,6 +5943,7 @@
                 pkgs.go
                 pkgs.git
                 pkgs.gh
+                pkgs.pa-monitor
                 (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
               ];
               text = ''
