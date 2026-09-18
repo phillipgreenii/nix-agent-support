@@ -501,11 +501,11 @@
         "phillipgreenii-nix-base": "phillipgreenii-nix-base"
       },
       "locked": {
-        "lastModified": 1789576611,
-        "narHash": "sha256-Z9+bpmgAJqqhFy3QMJV/3n1lZ5qXLYKam+qvlsSa0pE=",
+        "lastModified": 1789665447,
+        "narHash": "sha256-had03f5l1Fx8Y+pdemjLclDD8/+rMkN4hO6bc8syQ0Q=",
         "ref": "refs/heads/main",
-        "rev": "a758b2aad9d1c6b3e88cf1635e377613ace92e6a",
-        "revCount": 640,
+        "rev": "7d3a52c18e2bf053e8a86d24202c67eed8a5468a",
+        "revCount": 652,
         "type": "git",
         "url": "ssh://git@github.com/phillipgreenii/mobilecombackup.git"
       },
@@ -651,11 +651,11 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1789495077,
-        "narHash": "sha256-vNulc9TI5TNdFZjLroZGIFT0iPTnxCp1gHnshJPGQ84=",
+        "lastModified": 1789596381,
+        "narHash": "sha256-zuAM9prfY0SqnOvvljFj7oR3sXyy86uVg2CcJQUlYec=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "23a42993445549c479e5b15509763433776ee07a",
+        "rev": "df0c453c411a5ff3d8386cb9c5b78cd20781e872",
         "type": "github"
       },
       "original": {
