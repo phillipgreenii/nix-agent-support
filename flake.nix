@@ -198,6 +198,20 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-calendar-osx-bridge: the calendar capability's
+          # first Tier-2 backend (docket pg2-o2dmu) — another mkGoApp call
+          # over the SAME packages/pg-connector module (shared src +
+          # gomod2nixToml) as every sibling backend entry above, building
+          # the standalone scriptout-only binary from
+          # packages/pg-connector/pg-connector-calendar-osx-bridge.nix. Its
+          # Tier-2 implementation talks only to osx-bridge-api's already-
+          # landed local Unix-domain socket [landed: pg2-p9ap3, pg2-tk57n],
+          # never EventKit/go-eventkit directly.
+          pg-connector-calendar-osx-bridge =
+            final.callPackage ./packages/pg-connector/pg-connector-calendar-osx-bridge.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -5268,6 +5282,7 @@
               pg-connector-issue-jira
               pg-connector-scm-git
               pg-connector-thread-slack
+              pg-connector-calendar-osx-bridge
               pg-ccaudit
               pg-router-source-pg-connector
               integrate-branch-support

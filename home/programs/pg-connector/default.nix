@@ -25,6 +25,13 @@ let
     # empty-list-omission pattern above -- registry.go's
     # validateBackendList rejects an explicit `connector.thread: []`.
     thread = if cfg.connector.thread == [ ] then null else cfg.connector.thread;
+    # calendar (docket pg2-o2dmu): mirrors thread's identical
+    # empty-list-omission pattern -- registry.go's validateBackendList
+    # rejects an explicit `connector.calendar: []` the same way. Default
+    # stays [ ] in THIS repo's module (public flake, no ZR-specific
+    # calendar names hardcoded here) -- the real registration lives in the
+    # consuming machine flake (phillipg-nix-ziprecruiter).
+    calendar = if cfg.connector.calendar == [ ] then null else cfg.connector.calendar;
   };
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
@@ -141,6 +148,19 @@ in
             type = lib.types.listOf lib.types.str;
             default = [ ];
             description = "Registered `thread` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+          };
+          # calendar (docket pg2-o2dmu): a WHOLLY NEW capability, mirroring
+          # thread's exact shape (list-of-str, default [ ]) rather than
+          # scm's single-valued one. Without this field, a machine config
+          # setting `connector.calendar = [ "pg-connector-calendar-osx-bridge" ]`
+          # is a hard Nix eval error ("option does not exist"). Default
+          # MUST stay [ ] here (this repo is a public flake) -- the real
+          # registration plus real calendars/important_people values live
+          # in the consuming machine flake (phillipg-nix-ziprecruiter).
+          calendar = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `calendar` capability backends (bare binary names, resolved on PATH), in fan-out order.";
           };
         };
       };
@@ -322,7 +342,11 @@ in
     # the module previously omitted it entirely, alongside ZR's own
     # connector.issue registry. pg-connector-thread-slack joins in turn
     # (bead pg2-2j5ac.40.3): without this, the binary is never actually
-    # installed even though its nix output exists.
+    # installed even though its nix output exists. pg-connector-calendar-
+    # osx-bridge joins in turn (docket pg2-o2dmu): installed
+    # unconditionally, independent of whether connector.calendar is itself
+    # populated -- mirrors every other Tier-2 backend's own
+    # always-installed convention.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -331,6 +355,7 @@ in
       pkgs.pg-connector-issue-jira
       pkgs.pg-connector-scm-git
       pkgs.pg-connector-thread-slack
+      pkgs.pg-connector-calendar-osx-bridge
     ];
 
     # No programs.tldr.customPages entry: unlike pg-pr's own module,
