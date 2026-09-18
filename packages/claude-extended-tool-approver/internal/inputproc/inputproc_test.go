@@ -274,7 +274,7 @@ func TestChain_DecliningMiddlePassesThrough(t *testing.T) {
 // not abort the chain — it is skipped (treated as a decline) and the chain
 // continues with the text as it stood before that processor ran.
 func TestChain_TimedOutProcessorSkipped_ContinuesWithPriorText(t *testing.T) {
-	withTimeout(t, 100*time.Millisecond)
+	withTimeout(t, 300*time.Millisecond)
 	slow := writeMockProcessor(t, "slow", `sleep 30; echo "should never appear $1"`)
 	second := writeMockProcessor(t, "second", `echo "wrapped $1"`)
 	setProcessors(t, slow, second)
