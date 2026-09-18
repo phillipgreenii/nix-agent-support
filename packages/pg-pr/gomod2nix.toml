@@ -14,8 +14,8 @@ schema = 3
     hash = 'sha256-7hRlwSR+fos1kx4VZmJ/7snR7zHh8ZFKX+qqqqGcQpY='
 
   [mod.'github.com/dustin/go-humanize']
-    version = 'v1.0.1'
-    hash = 'sha256-yuvxYYngpfVkUg9yAmG99IUVmADTQA0tMbBXe0Fq0Mc='
+    version = 'v1.1.0'
+    hash = 'sha256-Qa7BSAXtgH7CB5STBiXTTOCgivWUiA65u3KxDOSZCkQ='
 
   [mod.'github.com/go-enry/go-enry/v2']
     version = 'v2.9.6'
@@ -166,16 +166,16 @@ schema = 3
     hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260911204522-f61a6ca850bd'
-    hash = 'sha256-A27dbKgvssN+k3s3C3GpR6VXiAlgRJd+hfOkdzJHzzM='
+    version = 'v0.0.0-20260917231906-eeb232e0883d'
+    hash = 'sha256-3Spx1Si0B5nQXEusgLPHt4rV5mRrFky0yP/cG3uSLeU='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260911204522-f61a6ca850bd'
-    hash = 'sha256-CQdjYGIrgAnEDfWW3DIJF9Orf7oJdhx3G9rGg6fow88='
+    version = 'v0.0.0-20260917231906-eeb232e0883d'
+    hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
-    version = 'v1.83.2'
-    hash = 'sha256-q5VtdeJvWM7kbIvui8ncNV/+Rm+d0y/b6XkNN0/u1is='
+    version = 'v1.84.0'
+    hash = 'sha256-gUDleBLGxwuzhA0emDRNAr1GnPlMfjgpkOX9u/0WsOk='
 
   [mod.'google.golang.org/protobuf']
     version = 'v1.36.12'
@@ -186,8 +186,8 @@ schema = 3
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'modernc.org/libc']
-    version = 'v1.75.7'
-    hash = 'sha256-Iq3Pcr3RrbhC82RWDM1I4gyKh3V/HI1gVQzoGR+0YYo='
+    version = 'v1.76.0'
+    hash = 'sha256-D+oQKx7RCb+mECpA21Xyt8cSkS8HEAFNvjmvQxuOZJ4='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
