@@ -472,6 +472,60 @@ func TestThroughputThroughQueue_RecordsOnAccept(t *testing.T) {
 	}
 }
 
+// Fan-out (Register's own doc: "fan-out delivers a matching event to each
+// bound listener") means OnAccept can fire more than once for the SAME
+// eventID in one Dispatch pass — once per accepting listener. Each accept
+// must be counted: throughput mirrors the queue's own per-listener
+// q.delivered tally, not a per-event one.
+func TestThroughputThroughQueue_FanOutRecordsEachListenerAccept(t *testing.T) {
+	h := newHarness(t)
+	h.q.Register(namedAcceptingListener{id: "l1", typ: "review-requested"})
+	h.q.Register(namedAcceptingListener{id: "l2", typ: "review-requested"})
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+
+	h.q.Dispatch()
+
+	m := findMetric(t, h.collect(t), MetricThroughput)
+	if got := sumFor(m, "type", "review-requested"); got != 2 {
+		t.Fatalf("throughput[review-requested] = %d, want 2 (one per accepting listener)", got)
+	}
+}
+
+// A re-emitted event id after its predecessor's retention has ended
+// (eventqueue.Queue.Enqueue's documented stale-retire path, INV-EVT-3) is a
+// FRESH event, not a continuation — OnEnqueue must refresh the correlation
+// entry, not leave the original's stale type/time in place.
+func TestOnEnqueue_StaleIDReuse_RefreshesTypeAndTime(t *testing.T) {
+	h := newHarness(t)
+	h.enqueue(t, "dup1", "type-A", 5*time.Minute)
+	h.clk.advance(6 * time.Minute)
+	h.q.Expire() // type-A's "dup1" retention ends; never accepted
+
+	h.clk.advance(1 * time.Hour)
+	h.q.Register(acceptingListener{typ: "type-B"})
+	h.enqueue(t, "dup1", "type-B", 10*time.Minute) // legitimate same-id re-emit
+	h.clk.advance(50 * time.Millisecond)
+
+	h.q.Dispatch()
+
+	m := findMetric(t, h.collect(t), MetricThroughput)
+	if got := sumFor(m, "type", "type-B"); got != 1 {
+		t.Fatalf("throughput[type-B] = %d, want 1 (the fresh re-emit's own type)", got)
+	}
+	if got := sumFor(m, "type", "type-A"); got != -1 {
+		t.Fatalf("throughput[type-A] = %d, want none recorded (the stale type must not leak through)", got)
+	}
+
+	lat := findMetric(t, h.collect(t), MetricDispatchLatency)
+	hist, ok := lat.Data.(metricdata.Histogram[float64])
+	if !ok || len(hist.DataPoints) != 1 {
+		t.Fatalf("dispatch_latency = %+v, want exactly one recorded datapoint", lat.Data)
+	}
+	if hist.DataPoints[0].Sum > 1000 {
+		t.Fatalf("dispatch_latency sum = %v ms, want ~50 (fresh), not the stale hour-old enqueue time", hist.DataPoints[0].Sum)
+	}
+}
+
 // Integration through the queue: a real accept in Dispatch reaches
 // RecordDispatchLatency via OnAccept, measuring elapsed time since OnEnqueue
 // against the injected clock, labeled outcome="accepted" — the one outcome
@@ -662,6 +716,22 @@ func (l acceptingListener) Matches(e eventqueue.Event) bool {
 }
 
 func (acceptingListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+}
+
+// namedAcceptingListener is acceptingListener with a settable ID, so a test
+// can register more than one accepting listener bound to the same type
+// without their queue-internal per-listener state (q.inFlight, keyed by ID)
+// colliding — acceptingListener's own ID() is a fixed constant, unsuitable
+// for a genuine fan-out test.
+type namedAcceptingListener struct{ id, typ string }
+
+func (l namedAcceptingListener) ID() string { return l.id }
+func (l namedAcceptingListener) Matches(e eventqueue.Event) bool {
+	return e.Type == l.typ
+}
+
+func (namedAcceptingListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }
 

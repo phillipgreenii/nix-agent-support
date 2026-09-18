@@ -351,15 +351,25 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 // event; this bookkeeping exists purely to recover what OnAccept's signature
 // does not carry.
 //
-// Mirrors cmd/pg-router/run.go's activityObserver.OnEnqueue exactly,
-// including the FIFO-at-cap eviction: an event that is only ever
-// declined-then-expired (never accepted) is never removed from this map by
-// anything OTHER than that eviction, so dispatchPendingCap bounds it the same
-// way activityPendingTypesCap bounds its sibling.
+// Mirrors cmd/pg-router/run.go's activityObserver.OnEnqueue, including the
+// FIFO-at-cap eviction: an event that is only ever declined-then-expired
+// (never accepted) is never removed from this map by anything OTHER than
+// that eviction, so dispatchPendingCap bounds it the same way
+// activityPendingTypesCap bounds its sibling.
+//
+// An already-present id is REFRESHED in place rather than skipped: a fresh
+// event legitimately reusing an id after its predecessor's retention ended
+// (eventqueue.Queue.Enqueue's documented stale-retire re-emit path,
+// INV-EVT-3) must not be judged against the stale entry's type or enqueue
+// time. `order` is left untouched on a refresh — the id's FIFO eviction
+// position stays where it was first inserted, which only affects WHEN it
+// might later be evicted, never correctness (a miss is the tolerated
+// imperfection OnAccept's own doc describes).
 func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, exists := e.pending[evt.ID]; exists {
+		e.pending[evt.ID] = pendingDispatch{typ: evt.Type, enqueuedAt: evt.At}
 		return
 	}
 	if len(e.order) >= dispatchPendingCap {
@@ -372,25 +382,31 @@ func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
 }
 
 // OnAccept feeds RecordThroughput and RecordDispatchLatency from the entry
-// OnEnqueue recorded for eventID, then deletes it — an accepted event needs
-// no further correlation (unlike activityObserver's pending map, nothing
-// here ever arrives AFTER OnAccept for the same eventID). A miss (the FIFO
-// cap already evicted it) is silently skipped: the same tolerated
-// imperfection activityObserver's own doc accepts for its identical map.
+// OnEnqueue recorded for eventID. The entry is NOT deleted: Register's own
+// doc says "fan-out delivers a matching event to each bound listener", so
+// OnAccept can fire more than once for the SAME eventID in one Dispatch pass
+// (once per accepting listener) — each such accept is a real, independent
+// delivery (mirrored by queue.go's own per-listener q.delivered tally) and
+// must be counted, so the entry must still be there for a second, third,
+// etc. accept. It is removed only by dispatchPendingCap's FIFO eviction —
+// the same lifecycle activityObserver's identical map already has. A miss
+// there (evicted under load) is silently skipped: the same tolerated
+// imperfection activityObserver's own doc accepts for its map.
 // listenerID is accepted for interface symmetry with eventqueue.Observer's
 // other per-listener hooks but is not part of either label set.
 func (e *Emitter) OnAccept(eventID, _ string) {
 	e.mu.Lock()
 	p, ok := e.pending[eventID]
-	if ok {
-		delete(e.pending, eventID)
-	}
 	e.mu.Unlock()
 	if !ok {
 		return
 	}
 	e.RecordThroughput(p.typ)
-	e.RecordDispatchLatency(float64(e.now().Sub(p.enqueuedAt).Milliseconds()), "accepted")
+	// Divide as a float rather than truncate through time.Duration.Milliseconds
+	// (int64): that would floor 0.6ms to 0 and 4.9ms to 4, biasing every
+	// sample low against the histogram's own sub-10ms buckets.
+	elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
+	e.RecordDispatchLatency(elapsedMS, "accepted")
 }
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's
