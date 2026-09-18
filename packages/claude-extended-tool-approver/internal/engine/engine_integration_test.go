@@ -4699,20 +4699,20 @@ func TestIntegration_NixNestedBashDashCEnvVarBypass(t *testing.T) {
 	}
 }
 
-// TestIntegration_BareTopLevelBashDashC_StillAbstains_OutOfScope pins pg2-ipn7w's
-// explicit SCOPING DECISION on its own third acceptance criterion: a bare,
-// top-level `bash -c "HOME=... cmd"` — no nix/docker wrapper at all — still
-// abstains after this bead, deliberately, and this test exists to make that
-// a documented, checked fact rather than a silent gap.
+// TestIntegration_BareTopLevelBashDashC_StillAbstains_OutOfScope pinned
+// pg2-ipn7w's explicit SCOPING DECISION on its own third acceptance
+// criterion: a bare, top-level `bash -c "HOME=... cmd"` — no nix/docker
+// wrapper at all — abstained after that bead, deliberately, and this test
+// existed to make that a documented, checked fact rather than a silent gap.
 //
-// The bead's own diagnosis confirmed this bare case is unclaimed for the
-// SAME underlying reason as `nix develop -c bash -c "..."`: nothing in the
+// pg2-ipn7w's own diagnosis found this bare case unclaimed for the SAME
+// underlying reason as `nix develop -c bash -c "..."`: nothing in the
 // GENERAL leaf-evaluation path (as opposed to a specific caller like
 // nix.go/docker.go/kubectl.go/safecmds.go, each of which unwraps its OWN
-// `-c` site before delegating) recognizes a bare `bash -c`/`sh -c` leaf and
-// looks inside it. Closing THAT gap generically — so every leaf the engine
+// `-c` site before delegating) recognized a bare `bash -c`/`sh -c` leaf and
+// looked inside it. Closing THAT gap generically — so every leaf the engine
 // ever reaches, wrapped or not, gets this treatment — was deliberately NOT
-// done in this bead, for reasons this codebase had already, independently
+// done in that bead, for reasons this codebase had already, independently
 // landed on for the materially identical problem in a DIFFERENT rule:
 //
 //  1. `internal/rules/secrets` already runs its OWN independent descent into
@@ -4728,17 +4728,34 @@ func TestIntegration_NixNestedBashDashCEnvVarBypass(t *testing.T) {
 //  2. It would touch internal/engine's core evaluateParsed loop — the single
 //     highest-blast-radius file in this module, whose behaviour is pinned by
 //     the whole ADR-0039 lineage of tests (engine_integration_test.go alone
-//     runs to hundreds of cases) — for a benefit this bead's mandatory
-//     criterion does not require.
+//     runs to hundreds of cases) — for a benefit pg2-ipn7w's mandatory
+//     criterion did not require.
 //
-// nix.go's targeted fix (cmdparse.UnwrapShellDashC, called from
-// innerCommandStructure) deliberately stays scoped to the caller the bead's
-// own reproduction and mandatory criterion actually name. Generalizing
-// further — including migrating docker.go/kubectl.go/safecmds.go's own
-// already-correct, independently-implemented unwrap logic onto the shared
-// helper, and/or teaching the engine's general leaf loop to unwrap ANY
-// bash/sh -c leaf — is recorded here as a follow-up for a human to decide
-// whether to file, not attempted under this bead's budget.
+// SUPERSEDED (operator ruling, Phillip, 2026-09-18, recorded on pg2-zsv1c):
+// pg2-zsv1c's own fix — widening internal/rules/envvars's PATH/HOME/
+// safe-substitution handling to recurse into any self-contained `bash -c`/
+// `sh -c` payload via cmdparse.UnwrapShellDashCChain, so envvars.go sees
+// assignments nested inside a wrapped payload the same way it sees the
+// outer command's own — evaluates leaf-by-leaf and does not distinguish a
+// NESTED bash -c leaf (e.g. inside `nix develop -c bash -c "..."`) from a
+// BARE top-level one: when the whole command IS just `bash -c "..."`, that
+// is the sole leaf envvars.go walks, and the identical unwrap now reaches
+// it too. Presented to the operator as a decision — accept the widened
+// reach vs. narrow pg2-zsv1c's recursion so the bare top-level case keeps
+// abstaining — the operator chose to ACCEPT the widened behavior. This test
+// now pins that ACCEPTED, widened behavior: a bare top-level
+// `bash -c "HOME=... cmd"` is correctly caught (Reject, env-vars rule), and
+// pg2-ipn7w's bare-top-level-abstains scoping note is superseded for this
+// shape.
+//
+// This ruling is scoped to the env-vars rule's own recursion only. The two
+// concerns numbered above — interop with internal/rules/secrets'
+// independent bare-top-level descent, and generalizing internal/engine's
+// shared leaf-evaluation loop (evaluateParsed) so EVERY rule (not just
+// env-vars), including migrating docker.go/kubectl.go/safecmds.go's own
+// unwrap logic onto a shared helper — remain untouched by pg2-zsv1c and are
+// NOT decided by this ruling; they stay open questions for whoever next
+// touches that shared layer.
 func TestIntegration_BareTopLevelBashDashC_StillAbstains_OutOfScope(t *testing.T) {
 	projectRoot := t.TempDir()
 	eng := buildFullEngine(projectRoot, projectRoot)
@@ -4746,9 +4763,11 @@ func TestIntegration_BareTopLevelBashDashC_StillAbstains_OutOfScope(t *testing.T
 	cmd := `bash -c "HOME=/tmp/replaced some-cmd"`
 	in := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: makeBashJSON(cmd)}
 	got := eng.EvaluateHook(in)
-	if got.Decision != hookio.NoOpinion {
-		t.Errorf("EvaluateHook(%q) = %s (%s: %s); this bead's scoping decision expected NoOpinion — "+
-			"if this now fires, the scoping decision recorded in this test's own doc comment may be stale "+
-			"and should be revisited, not silently left behind", cmd, got.Decision, got.Module, got.Reason)
+	if got.Decision != hookio.Reject || got.Module != "env-vars" {
+		t.Errorf("EvaluateHook(%q) = %s (%s: %s), want Reject from env-vars — "+
+			"pg2-zsv1c's env-vars-rule recursion into bash -c/sh -c payloads now also "+
+			"reaches this bare top-level case, per the operator ruling recorded in "+
+			"this test's own doc comment (superseding pg2-ipn7w's original scoping)",
+			cmd, got.Decision, got.Module, got.Reason)
 	}
 }
