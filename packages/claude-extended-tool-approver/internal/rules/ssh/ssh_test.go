@@ -844,3 +844,102 @@ func TestSSH_DangerousInlineFlags(t *testing.T) {
 		})
 	}
 }
+
+// TestSSH_SudoPrefixRecursion pins tc-5m7jg: a leading `sudo` / `sudo -n` on
+// an ssh remote-command leaf is stripped and the remainder recurses into the
+// SAME data-driven read-only check (commandArgsReadonly) a top-level leaf
+// gets — reusing tc-heokt's landed helpers rather than duplicating them.
+// Covers every verified read-only shape from tc-75j1r's evidence (`sudo
+// systemctl status …`, `sudo journalctl -u …`, `sudo -n -l`, `sudo cat
+// <path>`, `sudo ls -la <path>`) and confirms the contrasting still-mutating
+// sudo forms (systemctl stop/restart/reload/enable/disable, sudo rm) stay
+// Ask — sudo is never blanket-approved.
+func TestSSH_SudoPrefixRecursion(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers: []string{"tcadmin"},
+		ReadonlyCommands: []string{
+			"sudo", "systemctl", "journalctl", "cat", "ls", "-l",
+		},
+		ReadonlySubcommands: map[string][]string{
+			"systemctl": {"status"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// Verified read-only forms (tc-75j1r evidence).
+		{"sudo systemctl status", "ssh host sudo systemctl status vault-agent.service --no-pager -l", hookio.Approve},
+		{"sudo -n systemctl status", "ssh host sudo -n systemctl status vault-agent.service", hookio.Approve},
+		{"sudo journalctl -u", "ssh host sudo journalctl -u vault-agent --no-pager -n 60", hookio.Approve},
+		{"sudo -n -l", "ssh host 'sudo -n -l'", hookio.Approve},
+		{"sudo cat", "ssh host sudo cat /etc/blocky/config.yml", hookio.Approve},
+		{"sudo ls -la", "ssh host sudo ls -la /var/log/vault/", hookio.Approve},
+
+		// Still-mutating sudo forms stay Ask — never blanket-approved.
+		{"sudo systemctl stop still asks", "ssh host sudo systemctl stop hermes-backend.service", hookio.Ask},
+		{"sudo systemctl restart still asks", "ssh host sudo systemctl restart hermes-backend.service", hookio.Ask},
+		{"sudo systemctl reload still asks", "ssh host sudo systemctl reload hermes-backend.service", hookio.Ask},
+		{"sudo systemctl enable still asks", "ssh host sudo systemctl enable hermes-backend.service", hookio.Ask},
+		{"sudo systemctl disable still asks", "ssh host sudo systemctl disable hermes-backend.service", hookio.Ask},
+		{"sudo rm still asks", "ssh host sudo rm -rf /tmp/x", hookio.Ask},
+
+		// Bare sudo / sudo -n with nothing to judge stays Ask.
+		{"bare sudo asks", "ssh host sudo", hookio.Ask},
+		{"bare sudo -n asks", "ssh host sudo -n", hookio.Ask},
+
+		// A sudo flag other than -n is not stripped, so the flag itself is
+		// judged as the "command" and matches no allowlist entry.
+		{"sudo -u flag not handled still asks", "ssh host sudo -u root cat /etc/blocky/config.yml", hookio.Ask},
+
+		// A write redirect or secret path on the OUTER sudo leaf still
+		// disqualifies it, same as any other remote-command leaf.
+		{"sudo cat with write redirect still asks", "ssh host 'sudo cat /etc/hosts > /tmp/out'", hookio.Ask},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_SudoNotConfiguredStillAsks pins the SAFE DEFAULT: when a consumer
+// has not added "sudo" itself to ReadonlyCommands, every sudo-prefixed
+// remote command keeps Asking exactly as it did before tc-5m7jg — this is
+// the guardrail TestSSH_RedirectionClassification's "non-allowlisted with
+// 2>&1 asks" case (`sudo -n -l`) already exercises against an even narrower
+// config; this test pins the same behavior against a config that DOES
+// recognize the wrapped command (systemctl) but still omits "sudo".
+func TestSSH_SudoNotConfiguredStillAsks(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers: []string{"tcadmin"},
+		ReadonlyCommands: []string{
+			"systemctl",
+		},
+		ReadonlySubcommands: map[string][]string{
+			"systemctl": {"status"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"sudo systemctl status asks without sudo configured", "ssh host sudo systemctl status sshd", hookio.Ask},
+		{"bare systemctl status still approved", "ssh host systemctl status sshd", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}

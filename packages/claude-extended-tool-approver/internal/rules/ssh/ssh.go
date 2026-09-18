@@ -37,16 +37,24 @@
 //     demoted back to Ask. A ReadonlySubcommands entry may itself be a
 //     space-separated multi-token PREFIX (e.g. "operator raft list-peers"), not
 //     only a bare first-token subcommand (tc-heokt; see subcommandAllowed).
-//   - three families need MORE than the config-driven allowlist above, each
-//     added by tc-heokt: `qm guest exec <vmid> -- <command> [args...]`
-//     recurses this SAME read-only check onto its trailing argv (qm guest exec
-//     runs the trailing command directly, not through a remote shell, so no
-//     re-parse is needed — see qmGuestExecTrailing); `ssacli`'s read verb
-//     ("show") sits at a position that varies with the selector prefix, so it
-//     is matched anywhere in the args rather than by a fixed-position prefix
-//     (see ssacliArgsAreReadonly); an embedded `curl` leaf reuses (mirrors)
-//     rules/curl's own base-host (loopback/localhost) read-only allowlist
-//     rather than duplicating it (see curl.IsReadOnlyToBaseHost).
+//   - four families need MORE than the config-driven allowlist above, each
+//     added by tc-heokt (three) or tc-5m7jg (sudo): `qm guest exec <vmid> --
+//     <command> [args...]` recurses this SAME read-only check onto its
+//     trailing argv (qm guest exec runs the trailing command directly, not
+//     through a remote shell, so no re-parse is needed — see
+//     qmGuestExecTrailing); `ssacli`'s read verb ("show") sits at a position
+//     that varies with the selector prefix, so it is matched anywhere in the
+//     args rather than by a fixed-position prefix (see ssacliArgsAreReadonly);
+//     an embedded `curl` leaf reuses (mirrors) rules/curl's own base-host
+//     (loopback/localhost) read-only allowlist rather than duplicating it
+//     (see curl.IsReadOnlyToBaseHost); a leading `sudo` / `sudo -n` prefix
+//     (and only that — no other sudo flag is stripped) is peeled off and the
+//     remaining (executable, args) pair recurses into commandArgsReadonly,
+//     the SAME data-driven check a top-level leaf gets (see
+//     sudoTrailingReadonly). Like the other three, this is gated on "sudo"
+//     itself being present in ReadonlyCommands — the file's SAFE DEFAULT
+//     applies here too, so an unconfigured consumer keeps Asking on every
+//     sudo-prefixed remote command exactly as before.
 //   - scp: download from a non-secret remote path -> Approve; upload, mixed
 //     local/remote, or a secret remote path -> Ask.
 package ssh
@@ -556,9 +564,10 @@ func (r *Rule) segmentIsReadonly(pc cmdparse.ParsedCommand) bool {
 		return false
 	}
 
-	// tc-heokt: three families need MORE than a subcommand allowlist can
-	// express — see this file's package doc for why each is special-cased
-	// rather than folded into subcommandAllowed.
+	// tc-heokt (qm/ssacli/curl) and tc-5m7jg (sudo): four families need MORE
+	// than a subcommand allowlist can express — see this file's package doc
+	// for why each is special-cased rather than folded into
+	// subcommandAllowed.
 	switch base {
 	case "qm":
 		if exe, trailing, ok := qmGuestExecTrailing(pc.Args); ok {
@@ -568,6 +577,8 @@ func (r *Rule) segmentIsReadonly(pc cmdparse.ParsedCommand) bool {
 		return ssacliArgsAreReadonly(pc.Args)
 	case "curl":
 		return curl.IsReadOnlyToBaseHost(pc.Args)
+	case "sudo":
+		return r.sudoTrailingReadonly(pc.Args)
 	}
 
 	if allowed, ok := r.readonlySubcommands[base]; ok {
@@ -675,6 +686,40 @@ func qmGuestExecTrailing(args []string) (exe string, trailingArgs []string, ok b
 		return "", nil, false
 	}
 	return args[dashdash+1], args[dashdash+2:], true
+}
+
+// sudoTrailingReadonly peels an OPTIONAL leading "-n" (sudo's non-interactive
+// flag) off args and recurses commandArgsReadonly onto whatever remains —
+// tc-5m7jg's evidence: an ssh remote command was falling through to "not a
+// recognized read-only command" for every sudo-prefixed form, including
+// verified read-only shapes like `sudo systemctl status …`, `sudo journalctl
+// -u …`, `sudo cat <path>` and `sudo ls -la <path>`.
+//
+// Deliberately narrow, per the bead's own scope note: ONLY a bare leading
+// "-n" is recognized and stripped, never any other sudo flag (-u, -i, -E, a
+// long --flag, …) — an unrecognized shape falls through to
+// commandArgsReadonly treating that flag itself as the "executable", which
+// matches no ReadonlyCommands entry and Asks, rather than this function
+// guessing at sudo's own flag grammar. This mirrors qmGuestExecTrailing: no
+// re-parse through cmdparse is needed here either, because sudo — like the
+// QEMU guest agent — execs its trailing argv directly (segmentIsReadonly's
+// caller already parsed the whole remote command through the ONE
+// quote-aware splitter; sudo's argv is just pc.Args from that same parse).
+//
+// Reached only when "sudo" itself is in ReadonlyCommands (segmentIsReadonly's
+// switch is gated on that, same as the qm/ssacli/curl families), so an
+// unconfigured consumer's sudo-prefixed remote commands keep Asking exactly
+// as before this bead.
+func (r *Rule) sudoTrailingReadonly(args []string) bool {
+	i := 0
+	if i < len(args) && args[i] == "-n" {
+		i++
+	}
+	if i >= len(args) {
+		// Bare "sudo" or "sudo -n" with nothing to judge.
+		return false
+	}
+	return r.commandArgsReadonly(args[i], args[i+1:])
 }
 
 // ssacliMutatingVerbs are HPE ssacli subcommands that mutate controller/array
