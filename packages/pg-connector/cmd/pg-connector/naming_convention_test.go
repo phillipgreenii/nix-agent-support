@@ -24,7 +24,11 @@ import (
 // "calendar" was appended by this docket's own first code-producing packet
 // (bead pg2-o2dmu.1), which likewise builds pkg/provider/calendar from the
 // moment it lands — same precedent as thread's own addition above.
-var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread", "calendar"}
+// "agentsession" was appended by the agentsession connector docket's own
+// provider-interface packet (bead pg2-eezd1.6), which likewise builds
+// pkg/provider/agentsession from the moment it lands — same precedent as
+// thread/calendar's own additions above.
+var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread", "calendar", "agentsession"}
 
 // systemNamingTokens is the "names no backend/system (github/jira/slack/…)"
 // half of INV-CAP-1's acceptance criteria. It is deliberately a curated
