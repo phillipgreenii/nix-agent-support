@@ -25,9 +25,9 @@ let
   socketPath = "${stateHome}/osx-bridge-api/osx-bridge-api.sock";
 in
 {
-  # LaunchAgent registration via the canonical helper (ADR 0049, amended by
-  # 0051), mirroring darwin/modules/pa-monitor/default.nix and
-  # darwin/modules/pg-router/default.nix: this is the ONLY deployment path
+  # LaunchAgent registration via the canonical helper (`phillipgreenii-nix-personal`
+  # ADR 0049, amended by 0051 and 0054), mirroring darwin/modules/pa-monitor/default.nix
+  # and darwin/modules/pg-router/default.nix: this is the ONLY deployment path
   # osx-bridge-api has (design: "Deployment: a
   # phillipgreenii.system.launchdServices.userAgents entry (gui/<uid>
   # domain, KeepAlive), never a bespoke launchd wiring" — and "Why a shared
@@ -35,6 +35,16 @@ in
   # launchd, with no GUI-terminal parent, is its own TCC "responsible"
   # identity, unlike a process running inside this workspace's interactive
   # terminal).
+  #
+  # Uses execPath (`phillipgreenii-nix-personal` ADR 0054), not script: a
+  # personal-information TCC consent prompt attributes to ProgramArguments[0]'s
+  # FIRST loaded Mach-O image, and a shell-script wrapper's first image is the
+  # shell interpreter, not this daemon (confirmed live, pg2-xacj6 — the prompt
+  # displayed "bash"). execPath resolves the stable wrapper path as a plain
+  # symlink straight to the real binary instead, so the correct binary gets the
+  # correct TCC identity. The env var this daemon previously injected via shell
+  # `export` moves to serviceConfig.EnvironmentVariables, the native plist
+  # mechanism — execPath has no shell to run an `export` in.
   #
   # AC #2-4 (a real TCC consent prompt firing on first run against THIS
   # module's own LaunchAgent, matching Calendar.app's data, reproducing
@@ -45,15 +55,15 @@ in
   config = lib.mkIf daemonEnabledByAnyUser {
     phillipgreenii.system.launchdServices.userAgents.osx-bridge-api-daemon = {
       label = "com.phillipg.osx-bridge-api-daemon";
-      script = ''
-        export OSX_BRIDGE_API_SOCKET=${lib.escapeShellArg socketPath}
-        exec ${pkg}/bin/osx-bridge-api
-      '';
+      execPath = "${pkg}/bin/osx-bridge-api";
       runAtLoad = true;
       keepAlive = true;
       serviceConfig = {
         StandardErrorPath = "${stateHome}/osx-bridge-api/launchd-stderr.log";
         StandardOutPath = "${stateHome}/osx-bridge-api/launchd-stdout.log";
+        EnvironmentVariables = {
+          OSX_BRIDGE_API_SOCKET = socketPath;
+        };
       };
     };
   };
