@@ -135,11 +135,22 @@ type changesEntry struct {
 // EXIT-CODE/query_not_recognized CLASSIFICATION logic is still reused
 // unchanged from list.go (via outcomeSources below feeding
 // listExitCode/allQueryNotRecognized) — only this wire ROW SHAPE differs.
+//
+// Reason (bead pg2-unqcn) is added on top of the design's illustrative
+// example: fanOutChanges/classifyListSource already capture the real
+// degraded/failed cause (e.g. a rate-limit guard tripping) in
+// changesBackendResult.reason, but until this field existed neither this
+// struct nor humanizeChangesOutcome below ever surfaced it, so "changes"
+// callers only ever saw "degraded"/"failed" with the real cause silently
+// dropped. Mirrors SourceResult's own Reason field and pr.go's
+// formatSourcesTable "(%s)" human-mode rendering — omitempty so a
+// succeeded row's JSON stays exactly as before.
 type changesSourceRow struct {
 	Backend   string       `json:"backend"`
 	Status    SourceStatus `json:"status"`
 	Version   int64        `json:"version"`
 	Truncated bool         `json:"truncated"`
+	Reason    string       `json:"reason,omitempty"`
 }
 
 type changesWire struct {
@@ -521,7 +532,7 @@ func changesWireFor(results []changesBackendResult) changesWire {
 		if r.ledger != nil {
 			version = r.ledger.Version
 		}
-		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated})
+		w.Sources = append(w.Sources, changesSourceRow{Backend: r.backend, Status: r.status, Version: version, Truncated: r.truncated, Reason: r.reason})
 		w.Changes = append(w.Changes, r.entries...)
 	}
 	return w
@@ -536,7 +547,11 @@ func newPrChangesCmd() *cobra.Command    { return newChangesCmd("pr") }
 func newIssueChangesCmd() *cobra.Command { return newChangesCmd("issue") }
 
 // humanizeChangesOutcome formats a "changes" fan-out outcome for human
-// display, mirroring humanizePRListOutcome's own shape.
+// display, mirroring humanizePRListOutcome's own shape. Each sources[]
+// row prints its Reason in the same "(%s)" trailing form as pr.go's
+// formatSourcesTable, when non-empty (bead pg2-unqcn) — so a degraded or
+// failed backend's real cause (e.g. a rate-limit guard tripping) shows up
+// here instead of just "degraded"/"failed".
 func humanizeChangesOutcome(w changesWire) string {
 	var b strings.Builder
 	if len(w.Changes) == 0 {
@@ -557,6 +572,9 @@ func humanizeChangesOutcome(w changesWire) string {
 			b.WriteByte('\n')
 		}
 		fmt.Fprintf(&b, "  %s: %s version=%d truncated=%t", s.Backend, s.Status, s.Version, s.Truncated)
+		if s.Reason != "" {
+			fmt.Fprintf(&b, " (%s)", s.Reason)
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

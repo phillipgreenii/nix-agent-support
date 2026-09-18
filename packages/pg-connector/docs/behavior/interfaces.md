@@ -166,8 +166,13 @@ per-consumer cursor positions.
   call one duplicate delivery, never a lost one. `--cached` skips the backend call entirely,
   answering only from what the ledger already has on disk. `--reset` replays every live entity to
   that consumer as freshly added, with no tombstone for anything already removed before the reset.
-  The response shape is `{sources: [{backend, status, version, truncated}], changes: [{change,
-source, entity}]}` — `change` is one of `added`/`changed`/`removed`. As of phase 14 (bead
+  The response shape is `{sources: [{backend, status, version, truncated, reason}], changes:
+[{change, source, entity}]}` — `change` is one of `added`/`changed`/`removed`. `reason` (bead
+  `pg2-unqcn`) is `omitempty`: present with the real degraded/failed cause (e.g. a backend's own
+  rate-limit guard tripping) whenever that backend's row did not succeed, matching `list`'s own
+  `sources[]` `reason` field — SUPERSEDES this packet's original Contract, which deliberately
+  adapted the design's illustrative `{backend, status, version, truncated}` shape with no `reason`
+  field; the swallowed-cause gap that left was itself the bug `pg2-unqcn` fixed. As of phase 14 (bead
   `pg2-2j5ac.42.2`, below), a `removed` row's `entity` carries that id's last cached content
   (the same `{id, ...}` shape a live read would have returned) instead of the bare `{id: ...}`
   envelope, whenever the umbrella's own entity cache still holds a live copy — the envelope, change
@@ -405,12 +410,15 @@ sequenceDiagram
   operator-facing surface the note directly above was written to revisit — land with no
   OpenTelemetry or Prometheus emission and no structured logging of their own: pg-connector still
   has no telemetry emitter anywhere in this module (unchanged from bead pg2-2j5ac.28.3's own
-  telemetry note above). A `changes` refresh failure surfaces only via its `sources[]` row's
-  `status`/no-reason-on-the-wire-shape (this packet's own Contract deliberately adapts the design's
-  illustrative `{backend, status, version, truncated}` shape, which carries no `reason` field,
-  unlike `list`'s `sources[]`); `ledger show`/`ledger clear` surface a failure only as a plain CLI
-  error. Nothing here writes to stderr beyond the ordinary wire-level error propagation every other
-  verb in this catalog already has. Feeds the observability review `pg2-7kizi`.
+  telemetry note above). A `changes` refresh failure surfaces via its `sources[]` row's
+  `status` AND, as of bead `pg2-unqcn`, a `reason` string carrying the real degraded/failed cause
+  (this packet's ORIGINAL Contract deliberately adapted the design's illustrative `{backend,
+status, version, truncated}` shape with no `reason` field, unlike `list`'s `sources[]` — bead
+  `pg2-unqcn` found that gap silently swallowed the real cause behind a bare "degraded"/"failed"
+  and added `reason`, matching `list`'s own field, superseding this note's original claim);
+  `ledger show`/`ledger clear` surface a failure only as a plain CLI error. Nothing here writes to
+  stderr beyond the ordinary wire-level error propagation every other verb in this catalog already
+  has. Feeds the observability review `pg2-7kizi`.
 - **Telemetry (D24, bead pg2-2j5ac.42.1).** The umbrella entity cache engine (`cmd/pg-connector/cache.go`
   — the per-`(type, backend)` on-disk store of full entity copies, its max-age/LRU/tombstone
   eviction rules, and the per-type/per-backend opt-out checks) emits nothing yet over

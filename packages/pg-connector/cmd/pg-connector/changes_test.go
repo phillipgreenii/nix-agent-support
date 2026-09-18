@@ -260,6 +260,64 @@ func TestRun_PrChanges_FanOutExitCode_DegradedAndTotalFailure(t *testing.T) {
 	}
 }
 
+// TestRun_PrChanges_DegradedReason_SurfacesInJSONAndHuman covers this
+// bead's own acceptance criterion (pg2-unqcn): fanOutChanges/
+// classifyListSource already capture a degraded/failed backend's real
+// cause (e.g. a rate-limit guard tripping) internally, but until
+// changesSourceRow/humanizeChangesOutcome carried a Reason field it was
+// silently dropped, leaving only "degraded" with no cause. Confirms the
+// real reason now reaches both --output json's sources[].reason and
+// --output human's rendered sources: line, mirroring pr.go's existing
+// SourceResult{Reason}/formatSourcesTable "(%s)" handling.
+func TestRun_PrChanges_DegradedReason_SurfacesInJSONAndHuman(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	const reason = "scriptout: unavailable: backend-changes-reason-bad: GraphQL rate limit remaining (759) is below the configured reserve (1000)"
+	// Two backends (one healthy, one failing) so the overall call is
+	// "degraded" (exit 2) rather than "total failure" (exit 3), matching
+	// TestRun_PrChanges_FanOutExitCode_DegradedAndTotalFailure's own
+	// pattern — this test's own focus is the Reason content, not the
+	// exit-code scheme (already covered by that other test).
+	writeOpAwareFakeBackend(t, "backend-changes-reason-ok", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[],"present_ids":[],"cursor":null,"truncated":false}}`,
+	}, `{}`)
+	writeOpAwareFakeBackend(t, "backend-changes-reason-bad", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"` + reason + `"}}`,
+	}, `{}`)
+
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - backend-changes-reason-ok\n    - backend-changes-reason-bad\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 (degraded); stdout=%s", code, stdout)
+	}
+	w := decodeChangesWire(t, stdout)
+	if len(w.Sources) != 2 {
+		t.Fatalf("Sources = %+v, want one row per backend", w.Sources)
+	}
+	var badReason string
+	for _, s := range w.Sources {
+		if s.Backend == "backend-changes-reason-bad" {
+			badReason = s.Reason
+		}
+	}
+	if !strings.Contains(badReason, "rate limit") {
+		t.Fatalf("bad backend's Reason = %q, want it to contain the real backend error, not be swallowed", badReason)
+	}
+
+	stdoutHuman, _, codeHuman := executePr(t, []string{"--output", "human", "pr", "changes", "--query", "mine", "--consumer", "c1"})
+	if codeHuman != 2 {
+		t.Fatalf("human exit code = %d, want 2; stdout=%s", codeHuman, stdoutHuman)
+	}
+	if !strings.Contains(stdoutHuman, "rate limit") {
+		t.Fatalf("human output missing the real reason; stdout=%s", stdoutHuman)
+	}
+}
+
 // TestRun_PrChanges_QueryNotRecognized_ExcludedFromDegradedAccounting
 // covers the "query_not_recognized excluded from degraded accounting"
 // half of the same acceptance criterion, reusing list.go's own
