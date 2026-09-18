@@ -38,17 +38,20 @@ var entityTypesWithList = []string{"pr", "issue"}
 // applicable is deliberately distinguished from "gaps == nil": a ci-only
 // or scm-only backend (or ANY backend when nothing is registered under
 // pr/issue at all — the common case in this file's own pre-existing unit
-// tests, which pass a nil *Registry) is NOT applicable at all, and MUST
-// NOT be folded into configValidateOne's count/degradation logic the same
-// way a genuine zero-gap PASS would be — doing so would silently change
-// what Count means for every backend this check has nothing to say about
-// [bug discovered against this packet's own pre-existing
-// TestFanOutConfigValidate_CountReflectsChecksPassed: an always-counted
-// third check inflated Count from 2 to 3 even for backends with no
-// pr/issue registration at all]. gaps is sorted and de-duplicated across
-// every entityTypesWithList type backend is registered under (a
-// multi-capability backend registered under both pr and issue would
-// otherwise report the same gap twice).
+// tests, which pass a nil *Registry) is NOT applicable at all. Historically
+// this distinction mattered because an inapplicable check was NOT folded
+// into configValidateOne's count/degradation logic the same way a genuine
+// zero-gap PASS would be [bug discovered against this packet's own
+// pre-existing TestFanOutConfigValidate_CountReflectsChecksPassed: an
+// always-counted third check inflated Count from 2 to 3 even for backends
+// with no pr/issue registration at all]. As of OPERATOR DECISION
+// (2026-09-18, bead pg2-rnnfz), configValidateOne no longer folds THIS
+// check's result in at all (applicable or not, gaps or none) — the
+// distinction is kept anyway since applicable/gaps remain the return
+// values available to any future informational surface. gaps is sorted
+// and de-duplicated across every entityTypesWithList type backend is
+// registered under (a multi-capability backend registered under both pr
+// and issue would otherwise report the same gap twice).
 func queryCoverageCheck(reg *Registry, backend string) (applicable bool, gaps []string, err error) {
 	seen := map[string]bool{}
 	for _, t := range entityTypesWithList {
@@ -103,12 +106,15 @@ func queryCoverageCheck(reg *Registry, backend string) (applicable bool, gaps []
 	return true, gaps, nil
 }
 
-// FanOutConfigValidate fans auth_status, capabilities, and (bead
-// pg2-2j5ac.28.1) query-name coverage out across every backend in
-// backends, building the sources[] envelope. Each backend gets exactly
-// one row combining all three checks' verdict — never collapsed across
-// backends, but the checks ARE combined per-backend since all exist to
-// answer the single question "is this backend usable."
+// FanOutConfigValidate fans auth_status and capabilities out across every
+// backend in backends, building the sources[] envelope. Each backend gets
+// exactly one row combining both checks' verdict — never collapsed across
+// backends, but the checks ARE combined per-backend since both exist to
+// answer the single question "is this backend usable." Query-name
+// coverage (bead pg2-2j5ac.28.1) also runs per backend but, per OPERATOR
+// DECISION (2026-09-18, bead pg2-rnnfz), is informational-only and does
+// not contribute to this verdict — see configValidateOne's own doc
+// comment.
 func FanOutConfigValidate(ctx context.Context, reg *Registry, backends []string) FanOutOutcome {
 	// Sources starts as a non-nil empty slice so a zero-backend
 	// (misconfigured host) result still marshals its sources[] field as
@@ -147,32 +153,24 @@ func configValidateOne(ctx context.Context, reg *Registry, backend string) Sourc
 		}
 	}
 
-	// queryCoverage is applicable only when backend is registered under a
-	// list-capable type (pr/issue) — see queryCoverageCheck's own doc
-	// comment for why an inapplicable check must NOT be folded into
-	// count/degradation the same way a genuine pass would be.
-	applicable, gaps, gapErr := queryCoverageCheck(reg, backend)
-	queriesOK := true
-	if applicable {
-		if gapErr != nil {
-			queriesOK = false
-			reasons = append(reasons, "query coverage: "+gapErr.Error())
-		} else if len(gaps) > 0 {
-			queriesOK = false
-			reasons = append(reasons, fmt.Sprintf(
-				"query coverage: missing %s (declared by another registered backend of the same type)",
-				strings.Join(gaps, ", "),
-			))
-		}
-	}
+	// queryCoverageCheck (bead pg2-2j5ac.28.1) still runs so its
+	// applicable/gaps computation stays available for a future
+	// informational surface, but per OPERATOR DECISION (2026-09-18, bead
+	// pg2-rnnfz) it MUST NOT affect this backend's Status, Reason, or
+	// Count: the check flags a backend relative to a PEER backend of the
+	// same type's declared query names, not against any pinned
+	// required-query spec, and the fan-out scenario it was meant to guard
+	// against never fires in practice (pg-router-source-pg-connector's
+	// list command always pins --backend explicitly). See
+	// queryCoverageCheck's own doc comment for the full mechanism.
+	_, _, _ = queryCoverageCheck(reg, backend)
 
 	// Count is the number of this source's checks that actually came back
 	// healthy — its own raw pre-merge count (outcome.go's SourceResult doc
 	// comment), rather than the hardcoded 0 that made a fully-degraded
 	// backend indistinguishable from one that failed only one of the
-	// checks [bug A16]. Query coverage only contributes to Count/the
-	// overall verdict when applicable is true — see queryCoverageCheck's
-	// own doc comment.
+	// checks [bug A16]. Query coverage never contributes to Count as of
+	// pg2-rnnfz (informational-only).
 	count := 0
 	if authOK {
 		count++
@@ -180,11 +178,8 @@ func configValidateOne(ctx context.Context, reg *Registry, backend string) Sourc
 	if capsOK {
 		count++
 	}
-	if applicable && queriesOK {
-		count++
-	}
 
-	if authOK && capsOK && (!applicable || queriesOK) {
+	if authOK && capsOK {
 		return SourceResult{Source: backend, Status: SourceSucceeded, Count: count}
 	}
 	return SourceResult{Source: backend, Status: SourceDegraded, Count: count, Reason: strings.Join(reasons, "; ")}

@@ -274,7 +274,17 @@ backends:
 	}
 }
 
-func TestFanOutConfigValidate_QueryCoverageGap_IsDegraded(t *testing.T) {
+func TestFanOutConfigValidate_QueryCoverageGap_IsInformationalOnly(t *testing.T) {
+	// OPERATOR DECISION (2026-09-18, bead pg2-rnnfz): queryCoverageCheck's
+	// gaps no longer affect configValidateOne's Status/Reason/Count — the
+	// check still runs (its own applicable/gaps computation is covered by
+	// the TestQueryCoverageCheck_* tests above), but a backend with a
+	// real query-coverage gap and otherwise-healthy auth/capabilities now
+	// reports succeeded, with no gap-related reason and a count reflecting
+	// only its two checks that actually ran. Supersedes this test's
+	// previous incarnation,
+	// TestFanOutConfigValidate_QueryCoverageGap_IsDegraded, which asserted
+	// the pre-pg2-rnnfz degraded-on-gap behavior.
 	writeOpAwareFakeBackend(t, "qc-backend-a", map[string]string{
 		"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
 		"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["show","auth_status","capabilities"]}`, schema.PRSchemaVersion),
@@ -310,14 +320,24 @@ backends:
 	for _, s := range outcome.Sources {
 		byName[s.Source] = s
 	}
-	if byName["qc-backend-a"].Status != SourceSucceeded {
-		t.Fatalf("qc-backend-a = %+v, want succeeded (it declares every query name)", byName["qc-backend-a"])
+	a := byName["qc-backend-a"]
+	if a.Status != SourceSucceeded {
+		t.Fatalf("qc-backend-a = %+v, want succeeded (it declares every query name)", a)
 	}
+	if a.Count != 2 {
+		t.Fatalf("qc-backend-a count = %d, want 2 (auth_status + capabilities only)", a.Count)
+	}
+	// qc-backend-b has a real query-coverage gap ("focus", declared only
+	// by qc-backend-a) but must still report succeeded: query coverage is
+	// informational-only and must not affect Status, Reason, or Count.
 	b := byName["qc-backend-b"]
-	if b.Status != SourceDegraded {
-		t.Fatalf("qc-backend-b = %+v, want degraded (missing \"focus\")", b)
+	if b.Status != SourceSucceeded {
+		t.Fatalf("qc-backend-b = %+v, want succeeded (query coverage is informational-only per pg2-rnnfz)", b)
 	}
-	if !strings.Contains(b.Reason, "focus") {
-		t.Fatalf("reason = %q, want it to mention the missing query name", b.Reason)
+	if b.Reason != "" {
+		t.Fatalf("qc-backend-b reason = %q, want empty (query coverage must not contribute a reason)", b.Reason)
+	}
+	if b.Count != 2 {
+		t.Fatalf("qc-backend-b count = %d, want 2 (query coverage must not contribute to count)", b.Count)
 	}
 }

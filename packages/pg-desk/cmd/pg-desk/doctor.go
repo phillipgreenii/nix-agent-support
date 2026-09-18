@@ -22,10 +22,12 @@ const defaultServeAddr = "127.0.0.1:9818"
 var doctorLookPath = func(name string) (string, error) { return exec.LookPath(name) }
 
 // doctorConfigValidate execs `pg-connector config validate` (the D10
-// literal) — its own report already covers both "every configured query
-// name is recognized by some backend" and general backend/auth health
-// [packages/pg-connector/cmd/pg-connector/config_validate.go's own query
-// coverage check], so doctor does not re-implement that separately.
+// literal) — its own report covers backend/auth health.
+// [packages/pg-connector/cmd/pg-connector/config_validate.go] also
+// computes a query-name-coverage check, but per OPERATOR DECISION
+// (2026-09-18, bead pg2-rnnfz) that check is informational-only and does
+// not affect config validate's exit code, so it cannot fail doctor
+// either — doctor does not re-implement or surface it separately.
 var doctorConfigValidate = func(ctx context.Context) error {
 	return exec.CommandContext(ctx, "pg-connector", "config", "validate").Run()
 }

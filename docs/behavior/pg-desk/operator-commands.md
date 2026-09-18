@@ -29,8 +29,11 @@ only to check `sync.mode`) degrades to omitting the planned-sync-rows section ra
 ## doctor
 
 `pg-desk doctor` checks: the config resolves; `pg-connector` is on `PATH` and its `config
-validate` passes; every configured query name is recognized by some backend; `serve` is
-reachable; and the stranded-cycle report formerly produced by `pr-pool reconcile`.
+validate` passes; `serve` is reachable; and the stranded-cycle report formerly produced by
+`pr-pool reconcile`. `pg-connector config validate`'s own query-name-coverage check (a
+config-authoring signal comparing a backend's declared query names against its peers of the
+same type, bead `pg2-2j5ac.28.1`) is informational-only as of `pg2-rnnfz` — it does not affect
+that check's pass/fail verdict, so a query-coverage gap alone never fails `doctor`.
 
 Exit codes: `0` when every check passes; `1` when any check fails (naming which one).
 
