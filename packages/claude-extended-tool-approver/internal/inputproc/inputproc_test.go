@@ -275,9 +275,19 @@ func TestChain_DecliningMiddlePassesThrough(t *testing.T) {
 // continues with the text as it stood before that processor ran.
 func TestChain_TimedOutProcessorSkipped_ContinuesWithPriorText(t *testing.T) {
 	withTimeout(t, 300*time.Millisecond)
-	slow := writeMockProcessor(t, "slow", `sleep 30; echo "should never appear $1"`)
-	second := writeMockProcessor(t, "second", `echo "wrapped $1"`)
-	setProcessors(t, slow, second)
+	// Both processors are STOCK system binaries, never a freshly written
+	// /bin/sh script: a brand-new executable at a fresh t.TempDir() path pays
+	// a first-exec scan cost (SentinelOne/EDR) that can itself exceed a
+	// processor's own independent 300ms budget, killing the "second"
+	// processor too and collapsing this test's own assertion (pg2-yxtdq).
+	// "sleep${IFS}30" is one argv token with no literal space, so it survives
+	// runOneProcessor's naive strings.Fields split; sh performs IFS
+	// word-splitting on the unquoted expansion at RUNTIME, so it still execs
+	// as `sleep 30`. The chain always appends the command string as this
+	// processor's own trailing argv (bead tc-7m85u item 1); wrapping via
+	// `sh -c` absorbs that extra argument as $0 instead of a second sleep
+	// operand, which bare `sleep 30 <command>` would fail to parse.
+	setProcessors(t, "sh -c sleep${IFS}30", "echo wrapped")
 
 	rewritten, changed, errs := processChain("git status", mainSessionPayload)
 	if len(errs) != 1 {
