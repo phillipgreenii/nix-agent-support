@@ -19,9 +19,11 @@ even though Phase 9 supports exactly one (see "Out of scope" below).
   [`sync.md`](sync.md)) only on a sync failure for that entity, via the SAME writer, never a
   separate column or table.
 - **`xref`** — cross-reference edges (`from`/`to` type and id, the evidence that produced the
-  link, first-seen and last-confirmed times). Written by interpret's cross-reference step. This
-  table's schema exists in Phase 9's ladder; it stays unpopulated until that step ships (Phase
-  13).
+  link, first-seen and last-confirmed times). This table's schema exists in Phase 9's ladder;
+  starting Phase 13 (docket `pg2-2j5ac.40`) it is written by gather's own ticket-key scan (see
+  [`gather.md`](gather.md)) — one row per `(ticket key, evidence field)` pair for the Jira half —
+  and read back by `run issue <jira-ticket-key>`'s reverse lookup (see
+  [`run-issue.md`](run-issue.md)) and this docket's Slack-half sibling packet.
 - **`annotation`** — hidden state and reason, WIP state, and per-`(PR, comment)` disposition
   overrides with who set them. Written only by the CLI — an operator or an agent, through `hide`,
   `unhide`, `wip`, `feedback set`, or `import-pg-pr-annotations` — and MUST NEVER be written by the
@@ -48,9 +50,10 @@ The store emits nothing over OpenTelemetry or Prometheus on its own (D24) and wr
 its own — a store-open or migration failure is logged by whichever command tried to open it
 (structured JSON on stderr for `run`; plain CLI error text otherwise).
 
-## Out of scope (Phase 9, narrowed by Phase 10)
+## Out of scope
 
-The `xref` table exists in the schema ladder but stays unpopulated until the cross-reference step
-ships (Phase 13). The `ledger` table is now populated by sync (Phase 10). `repos[]` support for
-more than one repository is out of scope this phase; the schema is additive-ready for it, but no
-packet in this phase exercises a second repository.
+The `xref` table is now populated (Phase 13, the Jira half only — see [`gather.md`](gather.md));
+the Slack half (permalink cross-references, `to_type="thread"` rows) is this docket's sibling
+packet. The `ledger` table is populated by sync (Phase 10). `repos[]` support for more than one
+repository is out of scope; the schema is additive-ready for it, but no packet exercises a second
+repository yet.

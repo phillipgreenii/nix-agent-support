@@ -306,3 +306,155 @@ func TestRunCmdIssue_ConfigFailureNeverResolves(t *testing.T) {
 		t.Fatal("run issue: runResolveBeadPR was called despite a config-load failure")
 	}
 }
+
+// --- run issue: Jira half (docket pg2-2j5ac.40, Phase 13) ------------------
+
+// jiraTestCfg mirrors issueTestCfg, additionally configuring TicketPatterns
+// so ticketkey.MatchesShape can recognize a Jira ticket key at all (an
+// unconfigured TicketPatterns list is itself covered by
+// TestRunCmdIssue_ResolvesAndReinterprets above, which never sets it).
+func jiraTestCfg() *config.Config {
+	cfg := issueTestCfg()
+	cfg.TicketPatterns = []string{`[A-Z]+-\d+`}
+	return cfg
+}
+
+// seedXref writes one xref row directly through the real store — this
+// packet's own Store.UpsertXref, never a fake, since run.go's Jira dispatch
+// reads it back through the real Store.ListXrefsByTo.
+func seedXref(t *testing.T, st *store.Store, fromID, toID string) {
+	t.Helper()
+	if err := st.UpsertXref(store.Xref{
+		Repo: "acme/widgets", FromType: entityTypePR, FromID: fromID,
+		ToType: "issue", ToID: toID, Evidence: "branch",
+		FirstSeen: "2026-09-17T00:00:00Z", LastConfirmed: "2026-09-17T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed xref: %v", err)
+	}
+}
+
+// TestRunCmdIssue_JiraTicketKey_ResolvesViaXrefAndReinterprets is this
+// packet's own pinned acceptance criterion: `run issue <jira-ticket-key>
+// --change changed` resolves via the xref table to its linked PR(s) and
+// re-runs interpret WITHOUT a gather call (there is no real pg-connector on
+// this test's $PATH, so an accidental gather call would fail this test
+// loudly rather than silently) and without writing any bead (RunInterpretOnly
+// never writes a bead by construction — there is no bead-writing code on
+// this path at all to assert a call count against).
+func TestRunCmdIssue_JiraTicketKey_ResolvesViaXrefAndReinterprets(t *testing.T) {
+	origConfigLoad := runConfigLoad
+	origStoreOpen := runStoreOpen
+	origResolve := runResolveBeadPR
+	t.Cleanup(func() {
+		runConfigLoad = origConfigLoad
+		runStoreOpen = origStoreOpen
+		runResolveBeadPR = origResolve
+	})
+
+	cfg := jiraTestCfg()
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store.SetSynchronousForTests("OFF")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	runStoreOpen = func() (*store.Store, error) { return st, nil }
+	seedPRFacts(t, st, "acme/widgets#7")
+	seedXref(t, st, "acme/widgets#7", "PROJ-99")
+
+	resolveCalled := false
+	runResolveBeadPR = func(ctx context.Context, c *config.Config, beadID string) (string, string, error) {
+		resolveCalled = true
+		return "", "", nil
+	}
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"issue", "PROJ-99", "--change", "changed"}); runErr != nil {
+		t.Fatalf("run issue PROJ-99: unexpected error: %v", runErr)
+	}
+	if resolveCalled {
+		t.Fatal("run issue PROJ-99: runResolveBeadPR (the beads path) was called for a Jira-shaped id")
+	}
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+
+	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if interp.Category == "" && interp.GateState == "" && interp.Ownership == "" {
+		t.Fatalf("interpretation row looks unpopulated: %+v", interp)
+	}
+}
+
+// TestRunCmdIssue_JiraTicketKey_NoLinkedPR_IsNoop proves the no-op half:
+// a Jira-shaped id with no xref row at all (nothing has ever linked a PR
+// to it) exits cleanly rather than erroring.
+func TestRunCmdIssue_JiraTicketKey_NoLinkedPR_IsNoop(t *testing.T) {
+	origConfigLoad := runConfigLoad
+	origStoreOpen := runStoreOpen
+	t.Cleanup(func() {
+		runConfigLoad = origConfigLoad
+		runStoreOpen = origStoreOpen
+	})
+
+	cfg := jiraTestCfg()
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
+	st := store.OpenForTest(t)
+	runStoreOpen = func() (*store.Store, error) { return st, nil }
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"issue", "PROJ-999"}); runErr != nil {
+		t.Fatalf("run issue PROJ-999 (no linked PR): want a no-op (nil error), got %v", runErr)
+	}
+}
+
+// TestRunCmdIssue_NonJiraShapedID_StillUsesBeadsPath proves the dispatch
+// order is genuinely by the incoming id's own SHAPE, not merely "configured
+// TicketPatterns => always the Jira path": a beads-shaped id, even with
+// TicketPatterns configured, still resolves via runResolveBeadPR.
+func TestRunCmdIssue_NonJiraShapedID_StillUsesBeadsPath(t *testing.T) {
+	origConfigLoad := runConfigLoad
+	origStoreOpen := runStoreOpen
+	origResolve := runResolveBeadPR
+	t.Cleanup(func() {
+		runConfigLoad = origConfigLoad
+		runStoreOpen = origStoreOpen
+		runResolveBeadPR = origResolve
+	})
+
+	cfg := jiraTestCfg()
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
+	st := store.OpenForTest(t)
+	runStoreOpen = func() (*store.Store, error) { return st, nil }
+	seedPRFacts(t, st, "acme/widgets#7")
+
+	resolveCalls := 0
+	runResolveBeadPR = func(ctx context.Context, c *config.Config, beadID string) (string, string, error) {
+		resolveCalls++
+		return "acme/widgets", "acme/widgets#7", nil
+	}
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"issue", "anchor-1"}); runErr != nil {
+		t.Fatalf("run issue anchor-1: unexpected error: %v", runErr)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("runResolveBeadPR called %d times, want 1 (a beads-shaped id must still use the beads path)", resolveCalls)
+	}
+}

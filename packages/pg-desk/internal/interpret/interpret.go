@@ -231,6 +231,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	var teamMembers, watchLabels, approverAllowlist []string
 	var categoryVocab map[string][]string
 	var urgencyCfg *config.UrgencyConfig
+	var jiraCfg *config.JiraConfig
 	var checkInterpreters []config.CheckInterpreterConfig
 	if cfg != nil {
 		selfLogin = cfg.SelfLogin
@@ -239,6 +240,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 		approverAllowlist = cfg.ApproverAllowlist
 		categoryVocab = cfg.CategoryVocabulary
 		urgencyCfg = cfg.Urgency
+		jiraCfg = cfg.Jira
 		checkInterpreters = cfg.CheckInterpreters
 	}
 
@@ -251,7 +253,14 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	ci := computeCIRollup(facts.CI, checkInterpreters)
 
 	enrichment := computeEnrichment(pr, files, commits)
-	urgency := computeUrgency(pr, commits, ci, urgencyCfg)
+	// scoreUrgencyWithHealth fully replaces the base-only computeUrgency
+	// call here (docket pg2-2j5ac.40, Phase 13's own freedom-boundary
+	// choice — see urgency.go's doc comment): it degrades to
+	// computeUrgency's own output byte-for-byte when there is no
+	// cross-referenced Jira issue for this PR (facts.JiraIssues empty) or
+	// jiraCfg is nil.
+	jiraIssues := decodeJiraIssues(facts.JiraIssues)
+	urgency := scoreUrgencyWithHealth(pr, commits, ci, urgencyCfg, jiraIssues, jiraCfg)
 	category := classifyCategory(pr, categoryVocab)
 	dispositions := computeDispositions(pr)
 	approvals := computeApprovals(pr, approverAllowlist)

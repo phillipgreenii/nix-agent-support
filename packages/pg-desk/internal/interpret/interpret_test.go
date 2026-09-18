@@ -161,6 +161,140 @@ func TestScoreUrgency(t *testing.T) {
 	})
 }
 
+// --- layered urgency: Jira half (docket pg2-2j5ac.40, Phase 13) -----------
+
+// jiraIssueRaw marshals a jiraIssueFields literal to json.RawMessage, this
+// test file's own shorthand for building a gather.Facts.JiraIssues-shaped
+// map without going through a real gather call.
+func jiraIssueRaw(t *testing.T, f jiraIssueFields) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatalf("marshal jiraIssueFields: %v", err)
+	}
+	return raw
+}
+
+// TestScoreUrgencyWithHealth_HighPriorityXref_HigherLevelThanNoXref is this
+// packet's own pinned acceptance criterion: "scoreUrgencyWithHealth
+// returns a higher level for a PR xref'd to an issue whose priority is in
+// config.Jira.HighPriorityValues than for an otherwise-identical PR with
+// no such xref."
+func TestScoreUrgencyWithHealth_HighPriorityXref_HigherLevelThanNoXref(t *testing.T) {
+	pr := prShow{Title: "x"}
+	ci := ciRollupResult{State: "success"}
+	jiraCfg := &config.JiraConfig{HighPriorityValues: []string{"Highest"}}
+
+	withoutXref := scoreUrgencyWithHealth(pr, nil, ci, nil, nil, jiraCfg)
+	withXref := scoreUrgencyWithHealth(pr, nil, ci, nil,
+		[]jiraIssueFields{{ID: "PROJ-1", Priority: "Highest"}}, jiraCfg)
+
+	if withXref.Score <= withoutXref.Score {
+		t.Fatalf("withXref.Score=%d, want strictly greater than withoutXref.Score=%d", withXref.Score, withoutXref.Score)
+	}
+	if levelRank(withXref.Level) <= levelRank(withoutXref.Level) {
+		t.Fatalf("withXref.Level=%q, want strictly higher than withoutXref.Level=%q", withXref.Level, withoutXref.Level)
+	}
+}
+
+// levelRank orders low < medium < high, for the strict-inequality
+// assertion above.
+func levelRank(level string) int {
+	switch level {
+	case "high":
+		return 2
+	case "medium":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// TestScoreUrgencyWithHealth_DegradesToBase proves the Binding decisions'
+// "MUST degrade to the base computeUrgency/scoreUrgency signal" rule, both
+// halves: a nil config.Jira, and a PR with no cross-referenced Jira issue
+// at all, each return computeUrgency's own result unchanged.
+func TestScoreUrgencyWithHealth_DegradesToBase(t *testing.T) {
+	pr := prShow{Title: "hotfix outage"} // fires the base keyword signal, so base itself is non-zero
+	ci := ciRollupResult{State: "success"}
+	base := computeUrgency(pr, nil, ci, nil)
+
+	t.Run("nil jira config", func(t *testing.T) {
+		got := scoreUrgencyWithHealth(pr, nil, ci, nil,
+			[]jiraIssueFields{{ID: "PROJ-1", Priority: "Highest"}}, nil)
+		if !reflect.DeepEqual(got, base) {
+			t.Fatalf("scoreUrgencyWithHealth(nil jiraCfg) = %+v, want computeUrgency's own %+v unchanged", got, base)
+		}
+	})
+
+	t.Run("no cross-referenced jira issue", func(t *testing.T) {
+		jiraCfg := &config.JiraConfig{HighPriorityValues: []string{"Highest"}}
+		got := scoreUrgencyWithHealth(pr, nil, ci, nil, nil, jiraCfg)
+		if !reflect.DeepEqual(got, base) {
+			t.Fatalf("scoreUrgencyWithHealth(no jiraIssues) = %+v, want computeUrgency's own %+v unchanged", got, base)
+		}
+	})
+
+	t.Run("cross-referenced issue matches no jira criterion", func(t *testing.T) {
+		jiraCfg := &config.JiraConfig{HighPriorityValues: []string{"Highest"}, IncidentLabels: []string{"incident"}, IncidentIssueTypes: []string{"Incident"}}
+		got := scoreUrgencyWithHealth(pr, nil, ci, nil,
+			[]jiraIssueFields{{ID: "PROJ-1", Priority: "Low", Labels: []string{"enhancement"}, IssueType: "Story"}}, jiraCfg)
+		if !reflect.DeepEqual(got, base) {
+			t.Fatalf("scoreUrgencyWithHealth(non-matching jiraIssue) = %+v, want computeUrgency's own %+v unchanged", got, base)
+		}
+	})
+}
+
+// TestScoreUrgencyWithHealth_IncidentLabelAndIssueType proves the OTHER
+// two Jira signal sources jiraIssueSignal recognizes (config.Jira's
+// incident_labels and incident_issue_types), not only high_priority_values.
+func TestScoreUrgencyWithHealth_IncidentLabelAndIssueType(t *testing.T) {
+	pr := prShow{Title: "x"}
+	ci := ciRollupResult{State: "success"}
+	base := computeUrgency(pr, nil, ci, nil)
+
+	t.Run("incident label", func(t *testing.T) {
+		jiraCfg := &config.JiraConfig{IncidentLabels: []string{"incident"}}
+		got := scoreUrgencyWithHealth(pr, nil, ci, nil,
+			[]jiraIssueFields{{ID: "PROJ-1", Labels: []string{"incident"}}}, jiraCfg)
+		if got.Score <= base.Score {
+			t.Fatalf("incident-labeled xref did not raise the score: got=%d base=%d", got.Score, base.Score)
+		}
+	})
+
+	t.Run("incident issue type", func(t *testing.T) {
+		jiraCfg := &config.JiraConfig{IncidentIssueTypes: []string{"Incident"}}
+		got := scoreUrgencyWithHealth(pr, nil, ci, nil,
+			[]jiraIssueFields{{ID: "PROJ-1", IssueType: "Incident"}}, jiraCfg)
+		if got.Score <= base.Score {
+			t.Fatalf("incident issue_type xref did not raise the score: got=%d base=%d", got.Score, base.Score)
+		}
+	})
+}
+
+// TestDecodeJiraIssues proves the decode helper: a well-formed map decodes
+// every entry in sorted-by-key order (deterministic, not map-iteration-order
+// dependent), and a malformed entry is skipped rather than erroring the
+// whole call.
+func TestDecodeJiraIssues(t *testing.T) {
+	if got := decodeJiraIssues(nil); got != nil {
+		t.Fatalf("decodeJiraIssues(nil) = %v, want nil", got)
+	}
+
+	raw := map[string]json.RawMessage{
+		"PROJ-2": jiraIssueRaw(t, jiraIssueFields{ID: "PROJ-2", Priority: "Low"}),
+		"PROJ-1": jiraIssueRaw(t, jiraIssueFields{ID: "PROJ-1", Priority: "Highest"}),
+		"BAD-1":  json.RawMessage(`{not valid json`),
+	}
+	got := decodeJiraIssues(raw)
+	if len(got) != 2 {
+		t.Fatalf("decodeJiraIssues returned %d entries, want 2 (malformed entry skipped): %+v", len(got), got)
+	}
+	if got[0].ID != "PROJ-1" || got[1].ID != "PROJ-2" {
+		t.Fatalf("decodeJiraIssues order = [%s, %s], want sorted-by-key [PROJ-1, PROJ-2]", got[0].ID, got[1].ID)
+	}
+}
+
 // --- CI rollup ---
 
 func TestComputeCIRollup(t *testing.T) {

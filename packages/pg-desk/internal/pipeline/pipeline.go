@@ -131,7 +131,7 @@ func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 	p := &Pipeline{
 		cfg:      cfg,
 		store:    st,
-		gatherer: gather.NewGatherer(cfg),
+		gatherer: gather.NewGatherer(cfg, st),
 		syncer:   sync.New(cfg, st),
 		clock:    interpret.SystemClock{},
 		out:      os.Stderr,

@@ -53,6 +53,23 @@
 // re-read: its outcome decides RemovedState (open/merged/closed/not_found),
 // and a not_found answer there is an expected outcome, not a hard error
 // [docs/behavior/pg-desk/gather.md "--change removed handling"].
+//
+// # Phase 13's seventh input: Jira cross-references
+//
+// Phase 13 (docket pg2-2j5ac.40) adds a seventh input to the same PR-gather
+// call above, never a new entityType: every Jira ticket key found in the
+// triggering PR's branch/title/body (internal/ticketkey.Parse, config-driven
+// via config.Config.TicketPatterns) is looked up with `issue show
+// <ticket-key>` and recorded two ways — into Facts.JiraIssues (so
+// interpret's scoreUrgencyWithHealth can read the PR's own cross-referenced
+// Jira issue(s) without a second gather, including on a later
+// interpret-only re-run over these SAME stored facts) and as an xref row
+// (Store.UpsertXref, via the xrefUpserter this Gatherer now holds) so `run
+// issue <jira-ticket-key>` can resolve back from the Jira side. This step
+// runs only in the same place the other six do — never on a `removed`
+// re-read, and never on a sweep this Gatherer's own head_sha cache has
+// already decided to skip — since it depends on this same triggering PR's
+// text, gathered together with everything else.
 package gather
 
 import (
@@ -67,6 +84,8 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
 
 // ChangeKind is the pr-pool event's own change kind, reproduced verbatim
@@ -130,6 +149,18 @@ type Facts struct {
 	// deps of).
 	Deps json.RawMessage `json:"deps,omitempty"`
 
+	// JiraIssues is Phase 13's seventh input (see the package doc comment):
+	// `issue show <ticket-key>`'s raw result, keyed by the ticket key it
+	// answered, for every Jira ticket key found in the triggering PR's
+	// branch/title/body. interpret's scoreUrgencyWithHealth (urgency.go)
+	// reads this — never a fresh gather of its own — including when this
+	// SAME stored Facts value is later re-interpreted by `run issue
+	// <jira-ticket-key>` (pipeline.RunInterpretOnly never re-gathers).
+	// Empty when config.Config.TicketPatterns matches nothing in this PR's
+	// text (the common Phase-9-unaware or non-Jira-linked case) — a safe
+	// default, not a degradation.
+	JiraIssues map[string]json.RawMessage `json:"jira_issues,omitempty"`
+
 	// AsOf is the timestamp pg-connector's `pr show` reported for this read.
 	AsOf string `json:"as_of,omitempty"`
 	// HeadSHA is the triggering PR's current head commit, from `pr show` —
@@ -161,14 +192,26 @@ const pgConnectorBinary = "pg-connector"
 // pg-connector rather than an adapter calling it).
 var execCmdFactory = exec.CommandContext
 
+// xrefUpserter is the subset of *store.Store's API this package depends on
+// to record Phase 13's cross-reference rows (see the package doc comment),
+// defined locally — mirroring internal/pipeline/pipeline.go's own
+// gatherer/syncer local-interface pattern, one layer down — so tests can
+// inject a fake without a real SQLite store. *store.Store satisfies this
+// by construction.
+type xrefUpserter interface {
+	UpsertXref(x store.Xref) error
+}
+
 // Gatherer holds this run's per-run budget cache (see the package doc
-// comment) and the config Gather needs (the beads workspace directory for
-// every issue exec). Not safe for concurrent Gather calls — the pipeline
-// (packet 6) is expected to call Gather sequentially, one entity at a time,
-// exactly as pg-connector's own multi-instance resolution and this
-// package's file/commits/sweep cache both assume.
+// comment), the config Gather needs (the beads workspace directory for
+// every issue exec, and Phase 13's TicketPatterns), and the xref writer
+// Phase 13's seventh input records to. Not safe for concurrent Gather
+// calls — the pipeline (packet 6) is expected to call Gather sequentially,
+// one entity at a time, exactly as pg-connector's own multi-instance
+// resolution and this package's file/commits/sweep cache both assume.
 type Gatherer struct {
-	cfg *config.Config
+	cfg   *config.Config
+	xrefs xrefUpserter
 
 	// filesCommitsCache is keyed by head_sha (Binding decisions > "Per-run
 	// budget": "cache/skip by head_sha for files and commits").
@@ -185,9 +228,16 @@ type filesCommits struct {
 }
 
 // NewGatherer constructs a Gatherer with a fresh, empty per-run cache.
-func NewGatherer(cfg *config.Config) *Gatherer {
+// xrefs is Phase 13's cross-reference writer (internal/pipeline's New
+// passes its own *store.Store, which satisfies xrefUpserter); a nil xrefs
+// is safe as long as no configured TicketPatterns ever recognizes a ticket
+// key to upsert (every Phase-9/10 caller that never sets TicketPatterns —
+// including this package's own pre-Phase-13 tests — never reaches that
+// code path).
+func NewGatherer(cfg *config.Config, xrefs xrefUpserter) *Gatherer {
 	return &Gatherer{
 		cfg:               cfg,
+		xrefs:             xrefs,
 		filesCommitsCache: make(map[string]filesCommits),
 		lastHeadSHA:       make(map[string]string),
 	}
@@ -240,6 +290,7 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 	g.gatherCI(ctx, entityID, &f)
 	matched := g.gatherWorkBeads(ctx, show.Repo, show.Number, &f)
 	g.gatherDeps(ctx, matched, &f)
+	g.gatherJiraXrefs(ctx, entityID, show, &f)
 
 	return f, nil
 }
@@ -356,6 +407,108 @@ func (g *Gatherer) gatherDeps(ctx context.Context, matched []workBeadEntity, f *
 	f.Deps = raw
 }
 
+// jiraTicketField is one field of the triggering PR's own text this
+// packet scans for a Jira ticket key, paired with the xref "evidence"
+// value that field's own name IS (Produces: "evidence set to the SINGLE
+// field name the key was found in").
+type jiraTicketField struct {
+	evidence string
+	text     string
+}
+
+// gatherJiraXrefs is Phase 13's seventh input (see the package doc
+// comment): for every Jira ticket key found in the triggering PR's
+// branch/title/body, it fetches `issue show <ticket-key>` at most ONCE per
+// distinct key (reused across every field the key was found in — an
+// efficiency choice the design does not pin either way) and records that
+// key two ways:
+//
+//   - Into f.JiraIssues, keyed by ticket key, on a successful (non-
+//     not_found) issue show — consumed by interpret's
+//     scoreUrgencyWithHealth. A failure OTHER than not_found degrades this
+//     run exactly like every other non-triggering-entity input; not_found
+//     is a well-formed negative answer (mirrors removedFacts' own
+//     not_found handling), not a degradation, and simply means no Jira
+//     fact was fetched for that key this run.
+//   - As an UpsertXref call, once per (key, field) pair — so a key found
+//     in more than one field is upserted once per field it appears in,
+//     per the Produces rule this packet documents on the xref table's own
+//     ON CONFLICT semantics (the LAST-upserted field wins the stored
+//     evidence value; the design does not ask for multi-evidence
+//     tracking). This happens regardless of whether the paired issue show
+//     call above succeeded: the xref records that the PR's text
+//     REFERENCES this key, independent of whether Jira currently answers
+//     for it (e.g. the ticket not yet existing when this PR was gathered).
+//
+// Uses show.AsOf (this same gather call's own temporal anchor, already
+// stamped by pg-connector's `pr show`) for both first_seen and
+// last_confirmed — this package has no injectable clock of its own (unlike
+// interpret.Clock), and AsOf is already the "as of" time this whole gather
+// run represents.
+func (g *Gatherer) gatherJiraXrefs(ctx context.Context, entityID string, show prShowFields, f *Facts) {
+	patterns := g.cfg.TicketPatterns
+	fields := []jiraTicketField{
+		{evidence: "branch", text: show.Branch},
+		{evidence: "title", text: show.Title},
+		{evidence: "body", text: show.Body},
+	}
+
+	fetched := make(map[string]json.RawMessage)
+	attempted := make(map[string]bool)
+	repo := g.repo()
+
+	for _, fld := range fields {
+		keys := ticketkey.Parse(fld.text, "", "", patterns)
+		for _, key := range keys {
+			if !attempted[key] {
+				attempted[key] = true
+				raw, notFound, err := g.targetedCall(ctx, []string{"issue", "show", key}, g.issueBeadsDirEnv())
+				switch {
+				case err != nil:
+					f.degrade("issue show")
+				case notFound:
+					// Well-formed negative answer, not a degradation — see
+					// this method's own doc comment.
+				default:
+					fetched[key] = raw
+				}
+			}
+			if raw, ok := fetched[key]; ok {
+				if f.JiraIssues == nil {
+					f.JiraIssues = make(map[string]json.RawMessage)
+				}
+				f.JiraIssues[key] = raw
+			}
+			if g.xrefs != nil {
+				_ = g.xrefs.UpsertXref(store.Xref{
+					Repo:          repo,
+					FromType:      "pr",
+					FromID:        entityID,
+					ToType:        "issue",
+					ToID:          key,
+					Evidence:      fld.evidence,
+					FirstSeen:     show.AsOf,
+					LastConfirmed: show.AsOf,
+				})
+			}
+		}
+	}
+}
+
+// repo returns the single Phase-9 configured repository's remote, or ""
+// if none is configured — mirrors internal/pipeline's own identical
+// p.repo() helper (each package keeps its own private copy rather than a
+// shared one, per this package's established precedent for e.g.
+// pgConnectorBinary), so the xref rows this method writes are keyed by the
+// SAME repo value the entity/interpretation tables and the pipeline's own
+// ListXrefsByTo lookup use.
+func (g *Gatherer) repo() string {
+	if g.cfg == nil || len(g.cfg.Repos) == 0 {
+		return ""
+	}
+	return g.cfg.Repos[0].Remote
+}
+
 // degrade records name as the failing input IFF nothing has degraded this
 // Facts yet — Degraded is a single string field, first failure wins
 // (matches the design's singular "the failing input named").
@@ -385,15 +538,22 @@ func (g *Gatherer) issueBeadsDirEnv() []string {
 
 // prShowFields is the minimal subset of `pr show`'s result payload this
 // package decodes for itself (AsOf/HeadSHA for Facts, Repo/Number/State/
-// Merged for the removed re-read and the work-beads match key) — this
-// package imports no pkg/schema type (D10 is about exec, not import, but
-// staying off pkg/schema too keeps this package decoupled from
-// pg-connector's internal Go API, talking to it only over the CLI/wire
-// surface, matching "Gather ONLY through pg-connector" read literally).
+// Merged for the removed re-read and the work-beads match key,
+// Title/Branch/Body for Phase 13's ticket-key scan below) — this package
+// imports no pkg/schema type (D10 is about exec, not import, but staying
+// off pkg/schema too keeps this package decoupled from pg-connector's
+// internal Go API, talking to it only over the CLI/wire surface, matching
+// "Gather ONLY through pg-connector" read literally). Title/Branch/Body
+// were added by Phase 13 (docket pg2-2j5ac.40): schema.PR already carries
+// all three, but this struct did not decode them until this packet's own
+// ticket-key scan needed them as input.
 type prShowFields struct {
 	Repo    string `json:"repo"`
 	Number  int    `json:"number"`
+	Title   string `json:"title"`
 	State   string `json:"state"`
+	Branch  string `json:"branch"`
+	Body    string `json:"body"`
 	Merged  bool   `json:"merged"`
 	HeadSHA string `json:"head_sha"`
 	AsOf    string `json:"as_of"`

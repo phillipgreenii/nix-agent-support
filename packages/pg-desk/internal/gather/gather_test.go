@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // gather_test.go is this packet's wire-double test harness: a reentrant
@@ -172,13 +173,42 @@ const (
 	fixtureHeadSHA = "sha-AAA"
 	fixtureAsOf    = "2026-09-16T00:00:00Z"
 	fixtureBeadID  = "bd-work-1"
+
+	// fixtureTicketKey1/2 are Phase 13's own ticket-key scan fixtures.
+	// fixtureTicketKey1 appears in BOTH branch and title (proving the
+	// "upsert once per field, one issue show call" rule); fixtureTicketKey2
+	// appears only in body (proving multiple distinct keys in one PR are
+	// each recognized).
+	fixtureTicketKey1 = "PROJ-99"
+	fixtureTicketKey2 = "PROJ-100"
 )
+
+var fixtureTicketPatterns = []string{`[A-Z]+-\d+`}
 
 func prShowFixture(state string, merged bool, headSHA string) string {
 	return `{"protocolVersion":1,"schemaVersion":4,"result":{` +
 		`"id":"PR1","repo":"` + fixtureRepo + `","number":` + itoa(fixtureNumber) + `,` +
 		`"state":"` + state + `","merged":` + boolStr(merged) + `,` +
 		`"head_sha":"` + headSHA + `","as_of":"` + fixtureAsOf + `"}}`
+}
+
+// prShowWithTicketsFixture is prShowFixture widened with a
+// branch/title/body carrying fixtureTicketKey1 (branch + title) and
+// fixtureTicketKey2 (body only) — Phase 13's own ticket-key scan input.
+func prShowWithTicketsFixture() string {
+	return `{"protocolVersion":1,"schemaVersion":4,"result":{` +
+		`"id":"PR1","repo":"` + fixtureRepo + `","number":` + itoa(fixtureNumber) + `,` +
+		`"title":"fix ` + fixtureTicketKey1 + `: the thing","branch":"user.` + fixtureTicketKey1 + `.fix",` +
+		`"body":"Also relates to ` + fixtureTicketKey2 + `.",` +
+		`"state":"open","merged":false,` +
+		`"head_sha":"` + fixtureHeadSHA + `","as_of":"` + fixtureAsOf + `"}}`
+}
+
+// jiraIssueShowFixture is a canned `issue show <ticket-key>` result for
+// Phase 13's ticket-key scan — schema.Issue's own shape, minimal.
+func jiraIssueShowFixture(key, priority string) string {
+	return `{"protocolVersion":1,"schemaVersion":5,"result":{` +
+		`"id":"` + key + `","title":"a jira issue","state":"open","priority":"` + priority + `"}}`
 }
 
 func notFoundFixture() string {
@@ -259,6 +289,45 @@ func helperMain() {
 			os.Stderr.WriteString("unexpected verb: " + verb)
 			os.Exit(99)
 		}
+	case "happy_with_jira", "jira_not_found", "jira_error":
+		// Same six-input happy path, but `pr show` carries ticket keys in
+		// branch/title/body, and `issue show` (the seventh input) answers
+		// per this behavior's own name.
+		switch verb {
+		case "pr show":
+			writeAndExit(prShowWithTicketsFixture(), 0)
+		case "pr files":
+			writeAndExit(prFilesFixture(), 0)
+		case "pr commits":
+			writeAndExit(prCommitsFixture(), 0)
+		case "ci list":
+			writeAndExit(ciListFixture(), 0)
+		case "issue list":
+			writeAndExit(issueListFixture(), 0)
+		case "issue deps":
+			writeAndExit(issueDepsFixture(), 0)
+		case "issue show":
+			key := ""
+			if len(args) >= 3 {
+				key = args[2]
+			}
+			switch behavior {
+			case "jira_not_found":
+				writeAndExit(notFoundFixture(), 4)
+			case "jira_error":
+				os.Stderr.WriteString("unavailable")
+				os.Exit(1)
+			default:
+				priority := "Low"
+				if key == fixtureTicketKey1 {
+					priority = "Highest"
+				}
+				writeAndExit(jiraIssueShowFixture(key, priority), 0)
+			}
+		default:
+			os.Stderr.WriteString("unexpected verb: " + verb)
+			os.Exit(99)
+		}
 	case "removed_open":
 		writeAndExit(prShowFixture("open", false, fixtureHeadSHA), 0)
 	case "removed_merged":
@@ -290,6 +359,27 @@ func testConfig(beadsDir string) *config.Config {
 	}
 }
 
+// testConfigWithTicketPatterns mirrors testConfig, additionally populating
+// TicketPatterns — Phase 13's own config-driven source of valid ticket-key
+// patterns (see this package's gatherJiraXrefs), never a hardcoded pattern.
+func testConfigWithTicketPatterns(beadsDir string, patterns []string) *config.Config {
+	cfg := testConfig(beadsDir)
+	cfg.TicketPatterns = patterns
+	return cfg
+}
+
+// fakeXrefUpserter is this suite's own xrefUpserter test double (mirroring
+// this package's local-interface pattern one layer down): it records every
+// UpsertXref call without touching a real SQLite store.
+type fakeXrefUpserter struct {
+	upserts []store.Xref
+}
+
+func (f *fakeXrefUpserter) UpsertXref(x store.Xref) error {
+	f.upserts = append(f.upserts, x)
+	return nil
+}
+
 // TestFixturesConformToWireSchema proves this suite's own targeted-op
 // fixtures are real, protocol-valid wire envelopes — the actual "wire
 // double" check this packet's Files bullet asks for, reusing
@@ -299,9 +389,11 @@ func TestFixturesConformToWireSchema(t *testing.T) {
 	successFixtures := []string{
 		prShowFixture("open", false, fixtureHeadSHA),
 		prShowFixture("closed", true, fixtureHeadSHA),
+		prShowWithTicketsFixture(),
 		prFilesFixture(),
 		prCommitsFixture(),
 		issueDepsFixture(),
+		jiraIssueShowFixture(fixtureTicketKey1, "Highest"),
 	}
 	for _, fx := range successFixtures {
 		if err := conformance.CheckResponseBytes([]byte(fx)); err != nil {
@@ -319,7 +411,7 @@ func TestFixturesConformToWireSchema(t *testing.T) {
 // PG_CONNECTOR_ISSUE_BEADS_DIR while every PR/CI exec does not.
 func TestGather_SixInputs_CalledWithRightArgsAndEnv(t *testing.T) {
 	recordFile := withFactory(t, "happy")
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
 	if err != nil {
@@ -398,7 +490,7 @@ func TestGather_SixInputs_CalledWithRightArgsAndEnv(t *testing.T) {
 // gather sets nothing at all, never PG_CONNECTOR_ISSUE_BEADS_DIR="".
 func TestGather_NoConfiguredBeadsDir_FallsBackToAmbientBEADSDIR(t *testing.T) {
 	recordFile := withFactory(t, "happy")
-	g := NewGatherer(testConfig(""))
+	g := NewGatherer(testConfig(""), nil)
 
 	if _, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded); err != nil {
 		t.Fatalf("Gather: %v", err)
@@ -422,7 +514,7 @@ func TestGather_NoConfiguredBeadsDir_FallsBackToAmbientBEADSDIR(t *testing.T) {
 // run reports degraded rather than erroring.
 func TestGather_DegradedInput_RunContinues(t *testing.T) {
 	withFactory(t, "degraded_ci")
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeChanged)
 	if err != nil {
@@ -454,7 +546,7 @@ func TestGather_Removed_ReReadRule(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.behavior, func(t *testing.T) {
 			recordFile := withFactory(t, tc.behavior)
-			g := NewGatherer(testConfig("/configured/beads"))
+			g := NewGatherer(testConfig("/configured/beads"), nil)
 
 			facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeRemoved)
 			if err != nil {
@@ -478,7 +570,7 @@ func TestGather_Removed_ReReadRule(t *testing.T) {
 // removed re-read) is a hard error, not a degradation.
 func TestGather_HardFailure_TriggeringEntityOnly(t *testing.T) {
 	withFactory(t, "removed_not_found") // pr show itself answers not_found
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	_, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
 	if err == nil {
@@ -491,7 +583,7 @@ func TestGather_HardFailure_TriggeringEntityOnly(t *testing.T) {
 // gather is pr-triggered only; see the package doc comment).
 func TestGather_UnsupportedEntityType_Rejected(t *testing.T) {
 	withFactory(t, "happy")
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	_, err := g.Gather(context.Background(), "issue", "BD1", ChangeAdded)
 	if err == nil {
@@ -505,7 +597,7 @@ func TestGather_UnsupportedEntityType_Rejected(t *testing.T) {
 // further calls at all.
 func TestGather_Sweep_UnchangedHead_SkipsRestOfStageOne(t *testing.T) {
 	recordFile := withFactory(t, "happy")
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	if _, err := g.Gather(context.Background(), "pr", "PR1", ChangeSweep); err != nil {
 		t.Fatalf("first Gather: %v", err)
@@ -544,7 +636,7 @@ func TestGather_Sweep_UnchangedHead_SkipsRestOfStageOne(t *testing.T) {
 // movement) reuses the cached files/commits rather than re-fetching them.
 func TestGather_HeadSHACache_SkipsRedundantFilesCommits(t *testing.T) {
 	recordFile := withFactory(t, "happy")
-	g := NewGatherer(testConfig("/configured/beads"))
+	g := NewGatherer(testConfig("/configured/beads"), nil)
 
 	if _, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded); err != nil {
 		t.Fatalf("first Gather: %v", err)
@@ -564,5 +656,137 @@ func TestGather_HeadSHACache_SkipsRedundantFilesCommits(t *testing.T) {
 		if r.verb() == "pr files" || r.verb() == "pr commits" {
 			t.Fatalf("second Gather re-invoked %q at an unchanged head_sha, want the cache reused", r.verb())
 		}
+	}
+}
+
+// --- Phase 13: Jira ticket-key scan (packet pg2-2j5ac.40.2) ----------------
+
+// TestGather_JiraTicketScan_UpsertsXrefsAndPopulatesJiraIssues is this
+// packet's own primary acceptance criterion: a PR whose branch/title/body
+// contains a recognizable Jira ticket key gets an `issue show` gather call
+// and an upserted xref row, and the fetched issue lands in Facts.JiraIssues
+// for interpret's scoreUrgencyWithHealth to read.
+func TestGather_JiraTicketScan_UpsertsXrefsAndPopulatesJiraIssues(t *testing.T) {
+	recordFile := withFactory(t, "happy_with_jira")
+	xrefs := &fakeXrefUpserter{}
+	g := NewGatherer(testConfigWithTicketPatterns("/configured/beads", fixtureTicketPatterns), xrefs)
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if facts.Degraded != "" {
+		t.Fatalf("Degraded = %q, want empty", facts.Degraded)
+	}
+
+	// fixtureTicketKey1 is found in both branch and title -> one issue
+	// show call (dedup fetch), two xref upserts (one per field);emphasises
+	// the "upsert once per field, fetch once per distinct key" rule.
+	// fixtureTicketKey2 is found only in body -> one issue show call, one
+	// xref upsert.
+	records := readCallRecords(t, recordFile)
+	issueShowCalls := 0
+	for _, r := range records {
+		if r.verb() == "issue show" {
+			issueShowCalls++
+		}
+	}
+	if issueShowCalls != 2 {
+		t.Fatalf("recorded %d \"issue show\" calls, want exactly 2 (one per distinct key): %+v", issueShowCalls, records)
+	}
+
+	if len(xrefs.upserts) != 3 {
+		t.Fatalf("recorded %d UpsertXref calls, want exactly 3 (key1 x branch+title, key2 x body): %+v", len(xrefs.upserts), xrefs.upserts)
+	}
+	byKeyAndEvidence := map[string]bool{}
+	for _, x := range xrefs.upserts {
+		if x.Repo != fixtureRepo || x.FromType != "pr" || x.FromID != "PR1" || x.ToType != "issue" {
+			t.Fatalf("unexpected xref shape: %+v", x)
+		}
+		byKeyAndEvidence[x.ToID+"/"+x.Evidence] = true
+	}
+	for _, want := range []string{
+		fixtureTicketKey1 + "/branch",
+		fixtureTicketKey1 + "/title",
+		fixtureTicketKey2 + "/body",
+	} {
+		if !byKeyAndEvidence[want] {
+			t.Fatalf("missing xref upsert %q; got %+v", want, xrefs.upserts)
+		}
+	}
+
+	if len(facts.JiraIssues) != 2 {
+		t.Fatalf("Facts.JiraIssues has %d entries, want 2: %+v", len(facts.JiraIssues), facts.JiraIssues)
+	}
+	for _, key := range []string{fixtureTicketKey1, fixtureTicketKey2} {
+		if len(facts.JiraIssues[key]) == 0 {
+			t.Fatalf("Facts.JiraIssues[%q] is empty, want the fetched issue show result", key)
+		}
+	}
+}
+
+// TestGather_JiraTicketScan_NotFoundIsNotADegradation proves the
+// not_found half of this method's own doc comment: a ticket key found in
+// text but currently unknown to Jira is a well-formed negative answer
+// (Facts stays healthy, no JiraIssues entry) — but the xref is STILL
+// upserted, since the PR's text does reference that key regardless of
+// whether Jira answers for it today.
+func TestGather_JiraTicketScan_NotFoundIsNotADegradation(t *testing.T) {
+	withFactory(t, "jira_not_found")
+	xrefs := &fakeXrefUpserter{}
+	g := NewGatherer(testConfigWithTicketPatterns("/configured/beads", fixtureTicketPatterns), xrefs)
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if facts.Degraded != "" {
+		t.Fatalf("Degraded = %q, want empty (not_found is a well-formed negative answer)", facts.Degraded)
+	}
+	if len(facts.JiraIssues) != 0 {
+		t.Fatalf("Facts.JiraIssues = %+v, want empty on a not_found issue show", facts.JiraIssues)
+	}
+	if len(xrefs.upserts) != 3 {
+		t.Fatalf("recorded %d UpsertXref calls, want exactly 3 (the xref is upserted regardless of the issue show outcome): %+v", len(xrefs.upserts), xrefs.upserts)
+	}
+}
+
+// TestGather_JiraTicketScan_ErrorDegrades proves the OTHER-than-not_found
+// failure half: a genuine issue show failure degrades this run exactly
+// like every other non-triggering-entity input, naming "issue show".
+func TestGather_JiraTicketScan_ErrorDegrades(t *testing.T) {
+	withFactory(t, "jira_error")
+	g := NewGatherer(testConfigWithTicketPatterns("/configured/beads", fixtureTicketPatterns), &fakeXrefUpserter{})
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather returned an error for a non-critical degraded input: %v", err)
+	}
+	if facts.Degraded != "issue show" {
+		t.Fatalf("Degraded = %q, want %q", facts.Degraded, "issue show")
+	}
+}
+
+// TestGather_NoTicketPatterns_NoJiraCallsAtAll proves the safe default:
+// an unconfigured (empty) TicketPatterns list means no ticket key is ever
+// recognized, so this seventh input makes no calls at all — exactly its
+// pre-Phase-13 behavior, even when the PR's own text would otherwise
+// match a hardcoded pattern.
+func TestGather_NoTicketPatterns_NoJiraCallsAtAll(t *testing.T) {
+	recordFile := withFactory(t, "happy_with_jira")
+	xrefs := &fakeXrefUpserter{}
+	g := NewGatherer(testConfig("/configured/beads"), xrefs) // no TicketPatterns configured
+
+	if _, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue show" {
+			t.Fatalf("recorded an \"issue show\" call with no TicketPatterns configured: %+v", r)
+		}
+	}
+	if len(xrefs.upserts) != 0 {
+		t.Fatalf("recorded %d UpsertXref calls with no TicketPatterns configured, want 0: %+v", len(xrefs.upserts), xrefs.upserts)
 	}
 }

@@ -9,10 +9,13 @@ import (
 // another, with evidence and first/last-confirmed timestamps, per the
 // design doc's section 7.6.
 //
-// This phase (Phase 9) creates the xref table empty and never writes to
-// it — cross-reference population is Phase 13 (this packet's Out of scope
-// section). UpsertXref/GetXref exist so a later packet's interpret stage
-// has the writer/reader to call; nothing in THIS package calls them.
+// Phase 9 created the xref table empty and wrote nothing to it — cross-
+// reference population is Phase 13 (docket pg2-2j5ac.40). It is populated
+// starting Phase 13 by internal/gather's own ticket-key scan
+// (UpsertXref, one call per (ticket key, evidence field) pair) and read
+// back by cmd/pg-desk/run.go's `run issue <jira-ticket-key>` (ListXrefsByTo)
+// and this docket's Slack-half sibling packet's `run thread`
+// (ListXrefsByTo/ListXrefsByFrom).
 type Xref struct {
 	Repo          string
 	FromType      string
@@ -57,4 +60,74 @@ func (s *Store) GetXref(repo, fromType, fromID, toType, toID string) (xref Xref,
 		return Xref{}, false, fmt.Errorf("store: get xref (%s,%s,%s -> %s,%s): %w", repo, fromType, fromID, toType, toID, err)
 	}
 	return xref, true, nil
+}
+
+// ListXrefsByTo returns every xref row for (repo, toType, toID), regardless
+// of from_type/from_id — the REVERSE (to-id-keyed, multi-row) lookup
+// GetXref's own exact-key query cannot serve at all, since it requires
+// from_id already known, which is exactly what this lookup exists to
+// discover (docket pg2-2j5ac.40, Phase 13). Consumed by
+// cmd/pg-desk/run.go's own `run issue <jira-ticket-key>` (to_type="issue")
+// and this docket's Slack-half sibling packet's `run thread`
+// (to_type="thread") — the same reverse lookup, two to_type values. Returns
+// an empty (nil) slice, not an error, when nothing matches.
+func (s *Store) ListXrefsByTo(repo, toType, toID string) ([]Xref, error) {
+	rows, err := s.sql.Query(
+		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
+		 FROM xref WHERE repo = ? AND to_type = ? AND to_id = ?`,
+		repo, toType, toID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list xrefs by to (%s,%s,%s): %w", repo, toType, toID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Xref
+	for rows.Next() {
+		var x Xref
+		if err := rows.Scan(&x.Repo, &x.FromType, &x.FromID, &x.ToType, &x.ToID,
+			&x.Evidence, &x.FirstSeen, &x.LastConfirmed); err != nil {
+			return nil, fmt.Errorf("store: scan xref row (%s,%s,%s): %w", repo, toType, toID, err)
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate xrefs by to (%s,%s,%s): %w", repo, toType, toID, err)
+	}
+	return out, nil
+}
+
+// ListXrefsByFrom returns every xref row for (repo, fromType, fromID,
+// toType) — the FORWARD direction, regardless of to_id (docket
+// pg2-2j5ac.40, Phase 13). Added alongside ListXrefsByTo for this docket's
+// Slack-half sibling packet's own gather-stage addition (reading thread
+// entities already linked to a PR, from_type="pr"/to_type="thread"), which
+// has no other file/edit rights of its own to add it — this packet already
+// holds xref.go edit rights for ListXrefsByTo above. Not consumed by this
+// packet's own code. Returns an empty (nil) slice, not an error, when
+// nothing matches.
+func (s *Store) ListXrefsByFrom(repo, fromType, fromID, toType string) ([]Xref, error) {
+	rows, err := s.sql.Query(
+		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
+		 FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ?`,
+		repo, fromType, fromID, toType,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list xrefs by from (%s,%s,%s,%s): %w", repo, fromType, fromID, toType, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Xref
+	for rows.Next() {
+		var x Xref
+		if err := rows.Scan(&x.Repo, &x.FromType, &x.FromID, &x.ToType, &x.ToID,
+			&x.Evidence, &x.FirstSeen, &x.LastConfirmed); err != nil {
+			return nil, fmt.Errorf("store: scan xref row (%s,%s,%s,%s): %w", repo, fromType, fromID, toType, err)
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate xrefs by from (%s,%s,%s,%s): %w", repo, fromType, fromID, toType, err)
+	}
+	return out, nil
 }

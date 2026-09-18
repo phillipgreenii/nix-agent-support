@@ -395,3 +395,128 @@ func computeUrgency(pr prShow, commits []prCommit, ci ciRollupResult, cfg *confi
 		Reasons: reasons,
 	}
 }
+
+// --- layered urgency: Jira half (docket pg2-2j5ac.40, Phase 13) ------------
+//
+// scoreUrgencyWithHealth implements urgency.go's own forward-reference
+// ("The layered project-health/Jira/Slack signals (scoreUrgencyWithHealth)
+// are Phase 13 and are never computed here") — only the Jira half: project
+// health and the Slack incident signal stay deferred (pg2-jpfw.5). It
+// FULLY REPLACES computeUrgency's own call site in Interpret (this
+// packet's own freedom-boundary choice — the design pins the signal
+// SOURCE, cross-referenced Jira priority/incident, not the exact
+// scoring-function composition): scoreUrgencyWithHealth always computes
+// the base signal first (scoreUrgency, unchanged), then layers ONE
+// additional signal on top, at the SAME +3 weight tier this file's own
+// scoreUrgency gives its single strongest existing signal (a matched
+// urgency label) — the strongest signal this file already recognizes, and
+// the natural weight for a signal analogous in strength (a linked
+// incident-shaped or high-priority Jira issue), rather than inventing a
+// new, unstated weight. A PR with no cross-referenced Jira issue at all,
+// or config.Jira itself nil, degrades to EXACTLY computeUrgency's own
+// output — the layered signal is additive only [Binding decisions].
+
+// jiraIssueFields is the minimal subset of an `issue show` result this
+// package decodes for itself — mirroring interpret.go's own decode-shape
+// convention (hand-decoded, no pkg/schema import) — the three fields
+// config.JiraConfig's own keys (high_priority_values, incident_labels,
+// incident_issue_types) are compared against.
+type jiraIssueFields struct {
+	ID        string   `json:"id"`
+	Priority  string   `json:"priority,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+	IssueType string   `json:"issue_type,omitempty"`
+}
+
+// decodeJiraIssues decodes gather.Facts.JiraIssues (one raw `issue show`
+// result per cross-referenced ticket key) into jiraIssueFields, in a
+// deterministic (sorted by ticket key) order — a Go map has no stable
+// iteration order, and this signal's own "first match wins" rule
+// (scoreUrgencyWithHealth below) must not depend on map iteration order to
+// stay reproducible under Interpret's own fixed-clock determinism
+// contract. A malformed entry is skipped (soft-fail, matching
+// decodePRCommits/decodePRFiles' own convention) rather than erroring the
+// whole Interpret call.
+func decodeJiraIssues(raw map[string]json.RawMessage) []jiraIssueFields {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]jiraIssueFields, 0, len(raw))
+	for _, key := range sortedKeys(raw) { // interpret.go's own generic key-sort helper
+		var f jiraIssueFields
+		if err := json.Unmarshal(raw[key], &f); err != nil {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// jiraIssueSignal reports whether issue matches jiraCfg's own criteria for
+// "layered health" — its Priority is one of HighPriorityValues, one of its
+// Labels is in IncidentLabels, or its IssueType is in IncidentIssueTypes
+// [design: 7.4, 7.8's "config keys jira.high_priority_values,
+// incident_labels, incident_issue_types"]. jiraCfg is assumed non-nil (the
+// caller checks first).
+func jiraIssueSignal(issue jiraIssueFields, jiraCfg *config.JiraConfig) bool {
+	priority := strings.ToLower(strings.TrimSpace(issue.Priority))
+	for _, v := range jiraCfg.HighPriorityValues {
+		if strings.ToLower(strings.TrimSpace(v)) == priority && priority != "" {
+			return true
+		}
+	}
+	issueType := strings.ToLower(strings.TrimSpace(issue.IssueType))
+	for _, v := range jiraCfg.IncidentIssueTypes {
+		if strings.ToLower(strings.TrimSpace(v)) == issueType && issueType != "" {
+			return true
+		}
+	}
+	incidentLabels := toSet(lowerAll(jiraCfg.IncidentLabels))
+	for _, l := range issue.Labels {
+		if _, ok := incidentLabels[strings.ToLower(strings.TrimSpace(l))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// lowerAll lowercases every element of ss (used to build a case-
+// insensitive lookup set, mirroring urgencyLabelSet's own convention).
+func lowerAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strings.ToLower(strings.TrimSpace(s))
+	}
+	return out
+}
+
+// scoreUrgencyWithHealth is the Jira half of layered urgency: it calls
+// computeUrgency (unchanged) for the base signal, then layers ONE
+// additional +3 "jira-health" reason on top when config.Jira is configured
+// and at least one of jiraIssues (the PR's own cross-referenced Jira
+// issue(s), from gather.Facts.JiraIssues) matches jiraIssueSignal — first
+// match wins, matching scoreUrgency's own "first match per signal wins"
+// convention exactly. Returns computeUrgency's own result UNCHANGED
+// (literally the same value, not a recomputation) when jiraCfg is nil or
+// no jiraIssues entry matches [Binding decisions: "MUST degrade to the
+// base computeUrgency/scoreUrgency signal, never error and never silently
+// score as 'no urgency' ... additive only"].
+func scoreUrgencyWithHealth(pr prShow, commits []prCommit, ci ciRollupResult, urgencyCfg *config.UrgencyConfig, jiraIssues []jiraIssueFields, jiraCfg *config.JiraConfig) Urgency {
+	base := computeUrgency(pr, commits, ci, urgencyCfg)
+	if jiraCfg == nil {
+		return base
+	}
+	for _, issue := range jiraIssues {
+		if !jiraIssueSignal(issue, jiraCfg) {
+			continue
+		}
+		score := base.Score + 3
+		reasons := append(append([]string{}, base.Reasons...), "jira-health:"+issue.ID)
+		return Urgency{
+			Level:   levelForScore(score, urgencyThresholds(urgencyCfg)),
+			Score:   score,
+			Reasons: reasons,
+		}
+	}
+	return base
+}

@@ -9,9 +9,16 @@ and MUST NOT use an LLM for any step below.
 - **Ownership** — classifies a PR as mine, co-owned, or team, from config and the commit-author
   logins `pr commits` reported.
 - **Enrichment** — derives kind, languages, and size from `pr files` and `pr commits`.
-- **Urgency (base only)** — labels, keywords, checks rollup, and bugfix commits. The layered
-  signals (project health, Jira priority) read cross-referenced rows and are out of scope until
-  Phase 13 (see below); this phase runs base urgency alone.
+- **Urgency (base + layered Jira half)** — the base signal (labels, keywords, checks rollup, and
+  bugfix commits) is always computed first, unchanged since Phase 9. Starting Phase 13 (docket
+  `pg2-2j5ac.40`), it is layered with ONE additional signal read from the PR's own
+  cross-referenced Jira issue(s) (gathered by [`gather.md`](gather.md)'s ticket-key scan): a
+  match against the configured `jira.high_priority_values`, `jira.incident_labels`, or
+  `jira.incident_issue_types` raises the level exactly as a matched urgency label would. A PR with
+  no cross-referenced Jira issue, or an unconfigured `jira` section, degrades to the base signal
+  unchanged — the layered signal is additive only, never a replacement that could silently score a
+  PR as "no urgency." The Slack incident signal is deliberately NOT carried yet (tracked
+  separately) — only the Jira half is in scope this phase.
 - **Category** — a ranked classification over a configured vocabulary.
 - **Feedback dispositions** — evaluated over every comment and thread of the PR on every run (a
   live, idempotent recompute, never cached). A disposition an operator or agent recorded through
@@ -35,16 +42,16 @@ its own `hidden` array.
 
 Interpret has no exit code of its own; like gather, it contributes to `run`'s exit code (`0` on
 success or a degraded run, `1` only on a triggering-entity fetch or store failure — interpret
-itself never introduces a new failure exit). It emits nothing over OpenTelemetry or Prometheus in
-Phase 9 (D24). Its activity is part of `run`'s structured JSON stderr log and, under `--verbose`,
-the three-stage timeline.
+itself never introduces a new failure exit). It emits nothing over OpenTelemetry or Prometheus
+through Phase 13 (D24; resolved by the observability review `pg2-7kizi`). Its activity is part of
+`run`'s structured JSON stderr log and, under `--verbose`, the three-stage timeline.
 
-## Out of scope (Phase 9)
+## Out of scope
 
-The layered urgency signals (project health, Jira priority) and the cross-reference step (ticket
-keys and URLs found in PR, Jira, and thread text) are Phase 13; the `xref` table exists in the
-schema ladder but is not populated until then. The Slack incident signal stays deferred (tracked
-separately; it is today a nil-disabled, LLM-assessed hook with no deterministic variant, so it
-carries no phase assignment yet). Draft auto-promotion, `wip on`'s upstream draft conversion, and
-pending reply posting are accepted, recorded losses for this whole window — `ready_to_promote`
-and `open --promotable` exist precisely so the operator can act on them by hand instead.
+The project-health half of layered urgency, and everything Slack/thread-shaped (the Slack
+incident signal, permalink cross-references) stay deferred — the Slack incident signal is today a
+nil-disabled, LLM-assessed hook with no deterministic variant, so it carries no phase assignment
+yet; project health has none assigned either. Draft auto-promotion, `wip on`'s upstream draft
+conversion, and pending reply posting are accepted, recorded losses for this whole window —
+`ready_to_promote` and `open --promotable` exist precisely so the operator can act on them by hand
+instead.

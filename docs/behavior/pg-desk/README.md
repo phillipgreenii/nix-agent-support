@@ -29,16 +29,19 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
 qualifier every time:**
 
-- **`run issue` for Jira and `run thread`** are Phase 13, together with the cross-reference step
-  that would give either kind of event a linked PR to re-interpret. `run issue` for the beads
-  backend (see [`run-issue.md`](run-issue.md)) is implemented as of Phase 10.
-- **The cross-reference step** (ticket keys and URLs found in PR/Jira/thread text, and the `xref`
-  table it populates) is Phase 13. The table exists in this phase's schema ladder and stays
-  unpopulated until then.
-- **Layered urgency** (project health, Jira priority) is Phase 13; this phase runs base urgency
-  only (labels, keywords, checks rollup, bugfix commits).
-- **Multi-repository support.** `repos[]` supports exactly one repository in this phase; every
-  command below resolves against that one configured (or cwd-resolved) repository.
+- **`run thread`**, and everything Slack/thread-shaped (permalink cross-references, thread-linked
+  gather inputs, the Slack incident signal), are this docket's Slack-half sibling packet. `run
+issue` is implemented for BOTH backends: the beads backend (Phase 10) and Jira (Phase 13, docket
+  `pg2-2j5ac.40`) — see [`run-issue.md`](run-issue.md).
+- **The cross-reference step.** Ticket keys found in a PR's own branch/title/body, and the `xref`
+  table rows they produce, are implemented as of Phase 13 (the Jira half only — see
+  [`gather.md`](gather.md)). URLs and thread-linked cross-references (the Slack half) are this
+  docket's sibling packet.
+- **Layered urgency.** The Jira half (priority and incident signals, read from a PR's own
+  cross-referenced Jira issue) is implemented as of Phase 13 — see [`interpret.md`](interpret.md).
+  The project-health half stays deferred.
+- **Multi-repository support.** `repos[]` supports exactly one repository; every command below
+  resolves against that one configured (or cwd-resolved) repository.
 
 Each doc below restates only the exclusions that apply to its own command family, as a pointer
 back here — not the full list.
@@ -79,13 +82,18 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
   into that same line rather than a separate stream (see [`sync.md`](sync.md)); `run issue`'s
   interpret-only re-run folds into that same structured line too, logged against the resolved
-  PR's own entity id (see [`run-issue.md`](run-issue.md)); `serve` logs to the path its launchd
-  module configures. Every other command logs only ordinary CLI report/error text, with no
-  structured-JSON contract of its own.
+  PR's own entity id — once per linked PR on the Jira path, which can re-interpret more than one
+  (see [`run-issue.md`](run-issue.md)); a degraded Jira `issue show` during gather's own
+  ticket-key scan is named `issue show` in that same line (see [`gather.md`](gather.md)); `serve`
+  logs to the path its launchd module configures. Every other command logs only ordinary CLI
+  report/error text, with no structured-JSON contract of its own.
 
 ## Status
 
 Phase 9's `store`/`gather`/`interpret`/`run` pipeline and CLI surface, Phase 10's `sync` (all
-three modes), and Phase 10's beads-backend `run issue` bead -> PR resolution are implemented at
-`packages/pg-desk`. `daemon.enable` and the ZR-side query/role wiring are this docket's remaining
+three modes) and beads-backend `run issue` bead -> PR resolution, and Phase 13's Jira half
+(docket `pg2-2j5ac.40`: gather's ticket-key scan and cross-reference writes, `run issue`'s
+Jira-id reverse resolution, and layered urgency's Jira signal) are implemented at
+`packages/pg-desk`. `daemon.enable`, the Slack half (`run thread`, permalink cross-references,
+thread-linked gather inputs), and the ZR-side query/role wiring are this docket's remaining
 packets.

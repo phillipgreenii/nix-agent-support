@@ -31,18 +31,45 @@ membership and match reasons update); `merged` or `closed` is a confirmed closur
 treated as a closure with reason `gone`, and the run exits `0`. An id the store does not know
 about is a no-op.
 
+## Phase 13 input: the Jira ticket-key scan
+
+Phase 13 (docket `pg2-2j5ac.40`) adds a seventh input to the same PR-gather call above, for the
+`pr`-triggered path only: every Jira ticket key found in the triggering PR's branch name, title,
+and body — recognized by the configured `ticket_patterns` list, never a hardcoded pattern — is
+looked up with `issue show <ticket-key>` (fanned out across every registered issue backend by
+`pg-connector` itself, exactly like any other `issue show` call; gather does not pin `--backend`).
+Each recognized key is recorded two ways:
+
+- As a cross-reference row (`repo`, `pr`, `<pr-id>`, `issue`, `<ticket-key>`, evidence), written
+  immediately as the key is recognized — one write per `(key, field)` pair, so a key found in more
+  than one of branch/title/body is written once per field it appears in. This happens regardless
+  of whether the paired `issue show` call below succeeded: the row records that the PR's own text
+  references the key, independent of whether the tracker currently answers for it.
+- Into the gathered facts, keyed by ticket key, when `issue show` succeeds — consumed by
+  interpret's layered urgency signal (see [`interpret.md`](interpret.md)) without a second gather,
+  including when the SAME stored facts are later re-interpreted by `run issue <jira-ticket-key>`
+  (see [`run-issue.md`](run-issue.md)), which never re-gathers.
+
+An unconfigured (empty) `ticket_patterns` recognizes no key at all — this input then makes no
+calls, exactly its pre-Phase-13 behavior; this is a safe default, not a regression. A `not_found`
+answer from `issue show` is a well-formed negative answer (the cross-reference row is still
+written), not a degradation; any other failure degrades this run exactly like every other
+non-triggering-entity input, naming `issue show`.
+
 ## Exit codes, telemetry, and logs
 
 Gather has no exit code of its own; it contributes to `run`'s exit code (`0` on success or a
 degraded fetch, `1` only when the failing fetch is the triggering entity itself — see
 [`pipeline-run.md`](pipeline-run.md)).
 
-Gather emits nothing over OpenTelemetry or Prometheus in Phase 9 (D24; OpenTelemetry export is a
-later observability item). Its activity is part of `run`'s structured JSON log line to stderr; a
-degraded input is named there, and `--verbose` includes it in the three-stage timeline.
+Gather emits nothing over OpenTelemetry or Prometheus through Phase 13 (D24; OpenTelemetry export
+is a later observability item, resolved by the observability review `pg2-7kizi`). Its activity is
+part of `run`'s structured JSON log line to stderr; a degraded input (including a Jira `issue
+show` failure, named `issue show`) is reported there, and `--verbose` includes it in the
+three-stage timeline.
 
-## Out of scope (Phase 9)
+## Out of scope
 
-`issue show` per ticket key found in branch, title, or body, and the linked-thread input, are not
-gathered this phase — both arrive with the cross-reference step in Phase 13. Gather targets
-exactly one configured repository; multi-repository gather is out of scope.
+The linked-thread input (permalinks and ticket keys found in Slack thread text) is this docket's
+Slack-half sibling packet. Gather targets exactly one configured repository; multi-repository
+gather is out of scope.
