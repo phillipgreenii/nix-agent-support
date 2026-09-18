@@ -578,9 +578,29 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 // rather than silently no-opping or fabricating a partial write. Adding
 // an update op to pjira itself (phillipg-nix-repo-base) is out of this
 // bead's own scope [freedom boundary].
+//
+// Bug fix (pg2-rf8k2): the previous implementation returned that
+// ErrUnavailable stub unconditionally, for ANY id, without ever checking
+// whether the id belongs to Jira at all. That broke DispatchTargeted's
+// multi-instance try-each resolution policy (design's section 4.13): a
+// `not_found` answer means "try the next backend," but this method never
+// produced one, so with issue-jira registered before issue-beads, a
+// beads-shaped id's `update` call always short-circuited on Jira's
+// ErrUnavailable before issue-beads was ever tried. Deps had the exact
+// same defect and was fixed by pg2-ljk9k (see Deps below); Update now
+// follows the identical pattern: an existence check via a follow-up Show
+// call before answering its own capability-gap stub — so an id Jira does
+// not recognize propagates ErrNotFound and multi-instance resolution
+// correctly falls through to the next registered backend, while a
+// genuine Jira id still gets the documented ErrUnavailable stub rather
+// than a silent (and wrong) fallthrough to beads.
 func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdateFields) (*schema.Issue, error) {
-	if strings.TrimSpace(id) == "" {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	if _, err := b.Show(ctx, id); err != nil {
+		return nil, err
 	}
 	return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: no update op available (issue field updates are not yet supported against Jira)")
 }

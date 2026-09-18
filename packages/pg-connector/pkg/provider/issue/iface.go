@@ -106,7 +106,16 @@ type Provider interface {
 	// existing field-mapping conventions]. A backend that genuinely cannot
 	// perform this write against its underlying tool (no update op exists
 	// at all) reports that as its own well-formed error, per
-	// pkg/scriptout's closed error taxonomy — it must not silently no-op.
+	// pkg/scriptout's closed error taxonomy — it must not silently no-op —
+	// but ONLY for an id it actually recognizes as its own (fixed by
+	// pg2-rf8k2: issue-jira now verifies existence via Show before
+	// answering its own capability-gap stub). For an id the backend does
+	// NOT recognize at all, it MUST answer not_found like any other
+	// targeted op, so DispatchTargeted's multi-instance try-each
+	// resolution policy (design's section 4.13) can fall through to the
+	// next registered backend — an unconditional capability-gap error for
+	// every id, regardless of ownership, silently defeats that resolution
+	// policy exactly as an unconditional empty success would for Deps.
 	Update(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error)
 
 	// Close closes issue id, recording reason where its tracker has a

@@ -505,16 +505,42 @@ func TestBackend_Transition_NotFound_IsClassified(t *testing.T) {
 // TestBackend_Update_NoOpAvailable_IsUnavailable locks in Update's own
 // documented binding decision: pjira has no field-level update op at all
 // today, so this method returns a well-formed ErrUnavailable stub rather
-// than silently no-opping.
+// than silently no-opping — for an id it actually recognizes as its own.
+// Fixed by pg2-rf8k2: Update now verifies existence via a follow-up Show
+// call first [mirrors Deps' own call-then-Show pattern], so pjira IS
+// invoked (unlike the pre-fix version of this test, which asserted pjira
+// was NEVER invoked).
 func TestBackend_Update_NoOpAvailable_IsUnavailable(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		t.Fatal("pjira must not be invoked; no update op exists")
-		return "", nil
+		if args[0] != "issue" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		return `{"key":"PROJ-1","summary":"probe","status":"To Do"}`, nil
 	}}
 	b := New(fr)
 	_, err := b.Update(context.Background(), "PROJ-1", issue.IssueUpdateFields{Title: "new title"})
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+}
+
+// TestBackend_Update_UnknownID_NotFound is pg2-rf8k2's own regression
+// test (mirroring TestBackend_Deps_UnknownID_NotFound): an id Jira does
+// not recognize at all (e.g. a beads-shaped id from a sibling
+// issue-beads backend) must classify to scriptout.ErrNotFound, not the
+// ErrUnavailable capability-gap stub — otherwise DispatchTargeted's
+// multi-instance try-each resolution policy (design's section 4.13)
+// never falls through to try the next registered backend, and a beads
+// id's `update` call always dies on Jira's own stub instead of ever
+// reaching the beads backend's own real update.
+func TestBackend_Update_UnknownID_NotFound(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return "", errors.New("pjira issue -- pg2-2j5ac.30: exit status 1: pjira: issue pg2-2j5ac.30 not found")
+	}}
+	b := New(fr)
+	_, err := b.Update(context.Background(), "pg2-2j5ac.30", issue.IssueUpdateFields{Title: "new title"})
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
 	}
 }
 
