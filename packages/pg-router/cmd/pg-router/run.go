@@ -147,7 +147,23 @@ func warnHandlerCommandAmbiguity(cfg config.Config) {
 // configured participant set with `excluded` computed independently of
 // `enabled` (see core.Options' own docs on DeclaredRoles/ExcludedRoles/
 // ExcludedSources).
-func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
+//
+// runMode is core.RunModeLongRunning or core.RunModeDrainAndExit — the same
+// two-value identity runOneTick/resolvedConfigFor already thread through
+// core.TickSnapshot. bootCore uses it for exactly one decision: whether to
+// pass metrics.WithLiveness when constructing the Emitter below (pg2-tp13g).
+// Per the operator's DECIDED process-health semantics (pg2-tp13g: "report 1
+// as long as the pg-router daemon process is up and its metrics endpoint
+// responds -- do not gate it on recent dispatch activity or a heartbeat
+// window"), the isLive callback itself is a constant `true`: OTel only ever
+// invokes an ObservableGauge's callback while collecting a live scrape of a
+// running process, so the callback firing at all already proves both facts
+// this metric is defined to report — there is no further condition to
+// check. runMode == core.RunModeDrainAndExit (runUntilIdleGated,
+// runRunUntilIdle) MUST NOT pass WithLiveness at all, per Task 3.3's binding
+// decision that drain-and-exit never registers the observable, not merely
+// never observes it true.
+func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions, runMode string) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
 	// o.Handler (this bead, pg2-g068j): wire a real wireclient.Client so
 	// dispatch/postStartup/preShutdown reach a registered handler
 	// participant instead of falling through to unconfiguredHandler — the
@@ -164,7 +180,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		return nil, nil, nil, nil, fmt.Errorf("open event queue: %w", err)
 	}
 	mp, metricsReader := resolveMeterProvider(cfg)
-	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() })
+	var metricsOpts []metrics.Option
+	if runMode == core.RunModeLongRunning {
+		metricsOpts = append(metricsOpts, metrics.WithLiveness(func() bool { return true }))
+	}
+	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
@@ -951,7 +971,7 @@ func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.O
 	if notice := gateNotice(cfg); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}
-	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded)
+	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded, core.RunModeDrainAndExit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
@@ -1014,7 +1034,7 @@ func runRunUntilIdle(only, disable []string) int {
 		return runUntilIdleGated(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
 	}
 
-	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
+	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeDrainAndExit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
 		return exitGeneric
@@ -1150,7 +1170,7 @@ func runRun(only, disable []string, metricsAddr string) int {
 		}()
 	}
 
-	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
+	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeLongRunning)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric

@@ -135,7 +135,7 @@ func TestBootCore_selectorExcludedRoleNotRegisteredAsListener(t *testing.T) {
 	// which is a query-source-only seam.
 	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: fh}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded)
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
 		},
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, cfg.Roles, runExclusions{})
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestHandlerCommandFor_dirConfiguredPlacesSubcommandBeforeFlags(t *testing.T
 func TestBootCore_wiresRealHandlerWhenUnset(t *testing.T) {
 	cfg := config.Config{LogDir: shortDir(t)}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{})
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestBootCore_warnsHandlerCommandAmbiguity(t *testing.T) {
 		},
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{})
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestBootCore_preservesCallerInjectedHandler(t *testing.T) {
 	fh := &fakeHandlerClient{}
 	cfg := config.Config{LogDir: shortDir(t)}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: fh}
-	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{})
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, o, nil, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testi
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestBootCore_DefaultMeterProviderWiresReadableMetricsReader(t *testing.T) {
 	cfg := config.Config{LogDir: shortDir(t)}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil(t *testing.T) {
 	cfg := config.Config{LogDir: shortDir(t), MeterProvider: mp}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, _, gotMP, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
+	svc, _, gotMP, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
@@ -725,6 +725,87 @@ func TestBootCore_ExternalMeterProviderLeavesMetricsReaderNil(t *testing.T) {
 	}
 	if got := svc.MetricsReader(); got != nil {
 		t.Fatalf("MetricsReader() = %v, want nil when Config.MeterProvider is externally set", got)
+	}
+}
+
+// TestBootCore_LivenessRegisteredInDaemonMode proves this bead's (pg2-tp13g)
+// own wiring: passing core.RunModeLongRunning — runRun's own call — makes
+// bootCore register MetricLiveness reporting 1, the operator's DECIDED
+// process-health semantics ("report 1 as long as the pg-router daemon
+// process is up and its metrics endpoint responds"). internal/metrics'
+// own TestLivenessReflectsIsLive already proves WithLiveness's mechanics in
+// isolation; this proves bootCore actually SUPPLIES the option in daemon
+// mode, at the real production wiring site.
+func TestBootCore_LivenessRegisteredInDaemonMode(t *testing.T) {
+	cfg := config.Config{LogDir: shortDir(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeLongRunning)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	reader := svc.MetricsReader()
+	if reader == nil {
+		t.Fatal("MetricsReader() = nil, want a wired read-back handle")
+	}
+	rm, err := reader.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metrics.MetricLiveness {
+				continue
+			}
+			g, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok || len(g.DataPoints) == 0 {
+				continue
+			}
+			found = true
+			if got := g.DataPoints[0].Value; got != 1 {
+				t.Fatalf("%s = %d, want 1 in daemon mode (core.RunModeLongRunning)", metrics.MetricLiveness, got)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s not registered; bootCore(core.RunModeLongRunning) must pass metrics.WithLiveness", metrics.MetricLiveness)
+	}
+}
+
+// TestBootCore_LivenessNotRegisteredInDrainAndExitMode proves the other half
+// of this bead's (pg2-tp13g) binding decision: core.RunModeDrainAndExit
+// (runUntilIdleGated/runRunUntilIdle's own call) MUST NOT register
+// MetricLiveness at all — Task 3.3's binding decision that drain-and-exit
+// never registers this observable, not merely never observes it true.
+func TestBootCore_LivenessNotRegisteredInDrainAndExitMode(t *testing.T) {
+	cfg := config.Config{LogDir: shortDir(t)}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	reader := svc.MetricsReader()
+	if reader == nil {
+		t.Fatal("MetricsReader() = nil, want a wired read-back handle")
+	}
+	rm, err := reader.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == metrics.MetricLiveness {
+				t.Fatalf("%s registered in core.RunModeDrainAndExit; want it absent entirely", metrics.MetricLiveness)
+			}
+		}
 	}
 }
 
@@ -767,7 +848,7 @@ func TestBootCore_ThreadsMonitorSubsetsIntoCoreOptions(t *testing.T) {
 	}
 	o := &orchestrator.Orchestrator{Cfg: cfg}
 	ctx := context.Background()
-	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{})
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
 	if err != nil {
 		t.Fatalf("bootCore: %v", err)
 	}
