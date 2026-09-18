@@ -13,17 +13,25 @@ mkGoApp {
   # this bead does not create a second Go module (layout_convention_test.go).
   #
   # Filtered src, mirroring pg-connector-issue-jira.nix's own fileset
-  # scoping (bead pg2-p5at3's precedent): this binary's entire
-  # build+test dependency graph is go.mod/go.sum/gomod2nix.toml, pkg/schema,
-  # pkg/scriptout's top-level package (not its schemas/ or conformance/
-  # subpackages — mkGoApp runs no `go test` of its own, doCheck = false;
-  # the whole-module `go test ./...` gate that DOES exercise this bead's own
-  # conformance_test.go is checks.<system>.pg-connector-go-tests, which
-  # reads the raw, unfiltered package dir, not this trimmed fileset),
-  # pkg/provider's root iface.go (for pkg/provider.AuthChecker's type-check
-  # in pkg/provider/thread/dispatch.go) plus its own pkg/provider/thread
-  # capability subpackage, and its own cmd/pg-connector-thread-slack/ tree
-  # (main.go, internal/**). No cross-backend import exists, so editing
+  # scoping (bead pg2-p5at3's precedent) — with ONE deliberate divergence
+  # from every sibling backend: mkGoApp does NOT skip `go test` (doCheck is
+  # left at buildGoApplication's real default, which runs goCheckHook
+  # scoped to `subPackages`; see default.nix's own pg2-p5at3 comment for
+  # where this was first learned the hard way). Every sibling backend's
+  # `cmd/pg-connector-<name>/` test files happen not to import
+  # pkg/scriptout/{schemas,conformance}, so trimming those two subpackages
+  # out of `src` is invisible to them. This binary's own
+  # cmd/pg-connector-thread-slack/conformance_test.go is the first to
+  # import pkg/scriptout/conformance on purpose (its own doc comment:
+  # deliberately not build-tag-gated, so it runs under plain `go test`),
+  # and conformance.go itself imports pkg/scriptout/schemas — so both stay
+  # IN `src` here, unlike every sibling's difference-based exclusion.
+  # go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout WHOLE (not
+  # trimmed), pkg/provider's root iface.go (for pkg/provider.AuthChecker's
+  # type-check in pkg/provider/thread/dispatch.go) plus its own
+  # pkg/provider/thread capability subpackage, and its own
+  # cmd/pg-connector-thread-slack/ tree (main.go, internal/**,
+  # conformance_test.go). No cross-backend import exists, so editing
   # pg-connector-scm-git/-pr-github/-ci-github-actions/-issue-beads/-issue-jira's
   # own files does not touch this derivation's content hash.
   src = lib.fileset.toSource {
@@ -33,12 +41,7 @@ mkGoApp {
       ./go.sum
       ./gomod2nix.toml
       ./pkg/schema
-      (lib.fileset.difference ./pkg/scriptout (
-        lib.fileset.unions [
-          ./pkg/scriptout/schemas
-          ./pkg/scriptout/conformance
-        ]
-      ))
+      ./pkg/scriptout
       ./pkg/provider/iface.go
       ./pkg/provider/thread
       ./cmd/pg-connector-thread-slack
