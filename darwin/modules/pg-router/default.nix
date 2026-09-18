@@ -126,6 +126,9 @@ in
           ${lib.optionalString (
             daemonCfg.handlerCommandDir != null
           ) "export PG_ROUTER_HANDLER_COMMAND_DIR=${lib.escapeShellArg daemonCfg.handlerCommandDir}"}
+          ${lib.optionalString (
+            daemonCfg.metricsAddr != null
+          ) "export PG_ROUTER_METRICS_ADDR=${lib.escapeShellArg daemonCfg.metricsAddr}"}
           exec ${pkg}/bin/pg-router run
         '';
         runAtLoad = true;

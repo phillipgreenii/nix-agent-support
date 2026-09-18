@@ -24,6 +24,7 @@ let
       cicdDownPath ? null,
       handlerCommand ? null,
       handlerCommandDir ? null,
+      metricsAddr ? null,
     }:
     [
       "PG_ROUTER_REPO_ROOT=${repoRoot}"
@@ -40,7 +41,13 @@ let
     # own Environment, following the same optional-var pattern as
     # operatorPausedPath/cicdDownPath above.
     ++ lib.optional (handlerCommand != null) "PG_ROUTER_HANDLER_COMMAND=${handlerCommand}"
-    ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}";
+    ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}"
+    # metricsAddr (pg2-ui2i3): threads PG_ROUTER_METRICS_ADDR, which
+    # internal/config/config.go only reads for the `run` core (this
+    # systemd unit's daemon service, not periodicDrain's `run-until-idle`),
+    # into the OTel Prometheus /metrics direct-scrape endpoint — same
+    # optional-var pattern as the other daemon-only fields above.
+    ++ lib.optional (metricsAddr != null) "PG_ROUTER_METRICS_ADDR=${metricsAddr}";
 in
 {
   options.phillipgreenii.programs.pg-router = {
@@ -163,6 +170,20 @@ in
         default = null;
         description = "PG_ROUTER_HANDLER_COMMAND_DIR override for the daemon core — see `periodicDrain.handlerCommandDir`.";
       };
+      metricsAddr = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          PG_ROUTER_METRICS_ADDR: listen address (`host:port`) for the daemon
+          core's OTel Prometheus `/metrics` direct-scrape HTTP endpoint
+          (`internal/config/config.go`, `internal/metrics`). `null` leaves it
+          unset, disabling the endpoint (`Config.Load()`'s own default).
+          Daemon-only — `internal/config/config.go` only reads
+          `PG_ROUTER_METRICS_ADDR` for the `run` core; `periodicDrain`'s
+          `run-until-idle` has no equivalent option since a drain-and-exit
+          pass has nothing to keep scraping.
+        '';
+      };
       gates = {
         operatorPausedPath = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
@@ -270,6 +291,7 @@ in
                 cicdDownPath = cfg.daemon.gates.cicdDownPath;
                 handlerCommand = cfg.daemon.handlerCommand;
                 handlerCommandDir = cfg.daemon.handlerCommandDir;
+                metricsAddr = cfg.daemon.metricsAddr;
               };
             };
           };
