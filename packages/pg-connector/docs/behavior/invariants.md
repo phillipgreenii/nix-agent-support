@@ -165,11 +165,13 @@ distinction come from the behavior-docs method
 ## Registry
 
 - **`INV-REG-1`** <!-- uuid: 0b8b254c-3fcf-46ce-bbe7-1c9b1c03be0d --> — The `connector.<type>`
-  registry MUST be flat and type-keyed at the top level. `issue`, `ci`, and `pr` MUST be
-  list-valued (zero or more simultaneously-registered backends); `scm` MUST be single-valued
+  registry MUST be flat and type-keyed at the top level. `issue`, `ci`, `pr`, and `calendar` MUST
+  be list-valued (zero or more simultaneously-registered backends); `scm` MUST be single-valued
   (exactly zero or one). Every registry value MUST be a bare backend binary name — there MUST be
   no `exec:`-prefix or other built-in/external distinction, because nothing is compiled into the
-  umbrella itself (`GOAL-MIN-1`).
+  umbrella itself (`GOAL-MIN-1`). (`thread` is also list-valued in practice but, as of this
+  writing, is missing from this enumeration — a pre-existing gap this rule's own text has not yet
+  been updated to close.)
 - **`INV-REG-2`** <!-- uuid: 6ea815c2-293c-40ca-93d7-2d8cc1b73b93 --> — A **targeted** op MUST
   resolve to exactly one registered backend for its capability. When a capability's registry
   entry names zero backends, a targeted op against that capability MUST fail as a CLI-level error
@@ -322,6 +324,29 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   effects rather than after a targeted write op has already run against a live backend. The
   output-mode choice MUST NOT alter `INTF-WIRE`'s own wire protocol in any way — it is a
   CLI-presentation concern layered entirely on top of an already-decoded, already-typed result.
+
+## Calendar identity matching
+
+- **`INV-CAL-1`** <!-- uuid: cbbe6491-8676-42fb-a491-418f3f36f6a9 --> — A `calendar` backend
+  matching an event's attendee identity against a configured `important_people` list MUST do so
+  case-INSENSITIVELY, and MUST disambiguate an email-shaped entry from a bare username/display-name
+  entry: an entry containing `@` matches only against an attendee's own `email` field (compared
+  case-insensitively, with NO domain normalization — `alice@Example.com` and `alice@example.com`
+  MUST be treated as the same address, but `alice@example.com` and `alice@sub.example.com` MUST
+  NOT); a non-email entry matches only against an attendee's own `name` field (compared
+  case-insensitively, exact string match — no fuzzy or substring matching). Every `calendar`
+  backend implements this matching independently (ADR 0062 principle 6 forbids a shared
+  credential/logic library across backends), so this invariant — not each backend's own private
+  copy — is what keeps `pg-connector-calendar-osx-bridge` and a future `pg-connector-mail-osx-bridge`
+  from silently drifting apart, even though the `important_people` config VALUES themselves are
+  shared between them via nix.
+
+  A backend MUST treat "organizer matching" as attendee-list matching only:
+  `schema.CalendarEvent` (ported from `calendarapi.Event` [landed: `pg2-p9ap3`]) carries no
+  separate `Organizer` field — only an `Attendees` list with no is-organizer marker at all — so
+  there is no way to test "is this important person the organizer specifically" until
+  `osx-bridge-api`'s own wire shape gains one. A backend MUST NOT paper over this: it is a real,
+  verified constraint of the underlying system, not an oversight in this invariant.
 
 ## Goal
 

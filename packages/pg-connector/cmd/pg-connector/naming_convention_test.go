@@ -21,7 +21,10 @@ import (
 // (Phase 13's Thread v1 schema + claude -p backend packet), which DOES
 // build pkg/provider/thread — unlike attention/search above, this token
 // has a real directory to check from the moment this bead lands.
-var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread"}
+// "calendar" was appended by this docket's own first code-producing packet
+// (bead pg2-o2dmu.1), which likewise builds pkg/provider/calendar from the
+// moment it lands — same precedent as thread's own addition above.
+var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread", "calendar"}
 
 // systemNamingTokens is the "names no backend/system (github/jira/slack/…)"
 // half of INV-CAP-1's acceptance criteria. It is deliberately a curated

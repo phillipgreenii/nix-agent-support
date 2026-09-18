@@ -34,4 +34,5 @@ var CurrentSchemaVersions = map[string]int{
 	"attention": AttentionSchemaVersion,
 	"search":    SearchSchemaVersion,
 	"thread":    ThreadSchemaVersion,
+	"calendar":  CalendarSchemaVersion,
 }

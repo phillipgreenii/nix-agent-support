@@ -90,6 +90,19 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
 7. **Adding a backend is a registry-config change, never an umbrella code change.** The umbrella's
    `connector.<type>` registry entries are bare binary names, with no `exec:`-prefix or other
    built-in/external distinction, because nothing is compiled into the umbrella itself.
+8. **A new entity-type capability (`calendar`) was added under this same model, without changing
+   the model itself.** `calendar` follows every rule above identically: one capability-scoped
+   `calendar.Provider` Go interface (`packages/pg-connector/pkg/provider/calendar`), its own
+   independently-versioned `schema.CalendarSchemaVersion`, and (in a later packet of the same
+   docket) its own Tier-2 backend and `connector.calendar` registry entry. That later backend
+   (`pg-connector-calendar-osx-bridge`) talks to `osx-bridge-api` — a local, already-landed
+   (bead `pg2-p9ap3`) shared daemon that solves a macOS TCC process-identity problem, never a
+   credential-resolution concern. This does **not** contradict principle 6's rejection of a
+   shared credential-resolution library: `osx-bridge-api`'s shared-daemon pattern exists because
+   EventKit's own TCC permission grant is scoped to whichever process first requested it — a
+   problem with no credential/token shape at all — distinct from resolving a backend's OWN
+   external-system credentials (a GitHub token, a Jira session, …), which is the concern
+   principle 6 actually rejects sharing.
 
 ## Consequences
 
@@ -115,7 +128,15 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
   behavior-docs set's extent: only what has landed is recorded as intended behavior today. A future
   packet that builds one of those pieces MUST amend both this ADR's scope and the behavior-docs set
   in the same change, per this repo's own documentation rule (`CLAUDE.md`, "pg-pr / pr-pool
-  Development Rules").
+  Development Rules"). (That list is itself already stale with respect to `attention`, `search`,
+  and `Thread` — all three have since landed, as an ADDITION to Decision item 1's own capability
+  enumeration and to the behavior-docs set, never a removal from this list, since none of the three
+  was ever named on it. Fixing that pre-existing drift is out of scope for the `calendar` packet
+  that added this note.)
+- As of bead `pg2-o2dmu` (the "pg-connector-calendar-osx-bridge: calendar Tier-2 backend" docket,
+  decomposing bead `pg2-si5jo`'s design), the `calendar` entity-type capability is likewise added
+  to this ADR's Decision (item 8, above) and to the accompanying behavior-docs set's extent — it is
+  no longer part of the "not yet built" list in the bullet above.
 - Behavior-docs-first ordering, having been skipped for the first ten packets, cannot be
   retroactively un-skipped; this ADR and its behavior-docs set are a backfill, not evidence the
   process was followed from day one.
@@ -163,3 +184,5 @@ none of them well, and a future backend is free to pick whatever chain fits its 
   [0034](0034-pg-pr-prpool-review-ownership-split.md).
 - Is the intended retargeting point for the design-spec citation cleanup tracked in bead
   `pg2-hidkm`.
+- Extended by bead `pg2-si5jo`'s design (decomposed as docket `pg2-o2dmu`), which added the
+  `calendar` entity-type capability (Decision item 8, above) under this same Tier-1/Tier-2 model.

@@ -105,6 +105,8 @@ obliges to exist and to name no backend/system; `INTF-WIRE` is the interface tha
 | `scm`       | `worktree_remove` | `{path}` → no result payload (`result: null`)                                                                           | targeted                                                                                                          |
 | `scm`       | `worktree_list`   | (no args) → every local worktree this backend manages                                                                   | targeted (a single-backend list, not a fan-out — `scm`'s registry entry is single-valued)                         |
 | `scm`       | `branch_detect`   | `{cwd}` → `{repo, branch}`                                                                                              | targeted                                                                                                          |
+| `calendar`  | `list`            | `{query, ids_only}` → `{entities, present_ids, cursor: null, truncated}`                                                | fanned out by the umbrella across every registered `calendar` backend unless `--backend` pins one                 |
+| `calendar`  | `list_events`     | `{start, end, calendar}` → `{entities, present_ids, cursor: null, truncated}`                                           | fanned out by the umbrella across every registered `calendar` backend unless `--backend` pins one                 |
 | `attention` | `list_attention`  | (no args) → `[]AttentionItem` (`{type, id, summary}` + optional `severity`)                                             | fan-out only — every backend registered under the top-level `attention.sources` key; no targeted form at all      |
 | `search`    | `search`          | `{query, fields}` → `[]SearchResult` (`{type, id, title, url, source}` + optional `attributes`)                         | fan-out only — every backend registered under the top-level `search.sources` key; no targeted form at all         |
 | _(any)_     | `capabilities`    | (no args) → the bespoke discovery shape                                                                                 | common; every backend MUST answer it                                                                              |
@@ -146,6 +148,30 @@ answer as "not applicable to this backend" (`disabled` in `sources[]`, excluded 
 degraded-outcome accounting) unless EVERY registered backend of the type answers it, in which case
 the umbrella fails the whole call as its own `invalid_argument` CLI-level failure (`INV-ERR-3`).
 `changes` (below) reuses this exact classification unchanged.
+
+### `calendar`'s `list`/`list_events` — a duration-based `list`, and a dedicated time-range primary op
+
+`calendar` gets the same `list` op name as `pr`/`issue`, resolved the same centrally-dispatched
+way against `config.queries` (above), but with a capability-specific query-VALUE convention: a
+`calendar` backend's `config.queries` entry maps a caller-facing name to one or more plain Go
+`time.ParseDuration`-parseable duration strings (`ns`/`us`/`ms`/`s`/`m`/`h` units only, no `d`/`w`
+— mirroring `home/programs/pg-connector/default.nix`'s own `attention.perBackend.threshold`
+option), read as "how far ahead of now to look" — never free text and never a JQL-style grammar.
+A concrete `calendar` `List` implementation computes `start = now`, `end = start.Add(<parsed
+duration>)`, and — when the resolved query carries more than one element — uses the LARGEST
+parsed duration (the calendar analogue of `list`'s own "run each, union" convention, collapsed to
+one time range rather than a per-element union of disjoint result sets, since this capability has
+one underlying time-range fetch rather than one query per element). A malformed (non-duration)
+element answers `invalid_argument`, never `query_not_recognized` (the name itself DID resolve; its
+VALUE was malformed) and never a silently ignored/defaulted element.
+
+`list_events` is `calendar`'s own, separately-named PRIMARY op — never reusing `list` — mirroring
+`ci`'s existing `list_runs` "fan-out-shaped, parameter-keyed, NOT a named query" precedent. Its
+wire-envelope args are `{start, end, calendar}`: `start`/`end` are RFC3339 timestamps (the range to
+list, `[start, end)`); `calendar`, when empty, means every calendar this backend is configured
+for, and when non-empty pins to exactly that one named calendar. Both `list` and `list_events`
+return the SAME result shape (`CalendarListResult`) — only the request shape differs — and a
+concrete implementation MAY share logic between them [freedom boundary].
 
 ### `changes` / `ledger show` / `ledger clear` / `cache show` / `cache clear` — the delta ledger's and entity cache's CLI surface
 
@@ -325,7 +351,8 @@ not authorize (`INV-COMP-1`).
   capability (`pr show`, `pr files`, `pr commits`, `issue show/create/comment/
 transition/update/close/deps`, `ci logs`, `ci rerun-failed`, `scm worktree add/remove/list`, `scm branch
 detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
-  `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`), across every backend
+  `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`, `calendar list`,
+  `calendar changes`), across every backend
   registered under the top-level `attention.sources`/`search.sources` keys (`attention list`,
   `search <query>`), or across every backend registered for **any** entity-type capability
   (`config validate`); inspect or reset the on-disk delta ledger or the umbrella entity cache
@@ -478,6 +505,19 @@ status, version, truncated}` shape with no `reason` field, unlike `list`'s `sour
   path in this catalog. `list`'s own `truncated: true` (unconditional for this backend, per its own
   binding decision) is likewise only a wire-response field, not a metric a caller can aggregate
   without parsing the response body itself. Feeds the observability review `pg2-7kizi`.
+- **Telemetry (D24, bead `pg2-o2dmu.1`).** The new calendar capability (`pkg/schema/calendar.go`,
+  `pkg/provider/calendar`) emits nothing over OpenTelemetry or Prometheus and writes no structured
+  logs of its own — pg-connector still has no telemetry emitter anywhere in this module (unchanged
+  from every telemetry note above). No telemetry/logging is added by this docket at all — stated
+  explicitly here, mirroring `thread`'s own `pg2-2j5ac.40.3` precedent bullet directly above,
+  rather than left silently unaddressed. This packet builds only the `calendar.Provider` interface
+  and its dispatch table, not a concrete backend; a later Tier-2 backend of the same docket
+  (`pg-connector-calendar-osx-bridge`) inherits this same "no telemetry emitter exists in this
+  module" fact unless and until that changes independently of this note. `list`'s own
+  `truncated: false` (unconditional for this capability, per its own binding decision — the
+  opposite of `thread`'s own `truncated: true` above) is likewise only a wire-response field, not
+  a metric a caller can aggregate without parsing the response body itself. Feeds the
+  observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`
