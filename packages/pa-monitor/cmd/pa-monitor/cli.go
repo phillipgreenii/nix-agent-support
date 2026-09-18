@@ -13,17 +13,20 @@ import (
 // runStatus implements the `status` subcommand — one-shot dump of
 // daemon state.
 func runStatus(args []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	args, jsonMode := stripJSONFlag(args)
+	_ = args // status takes no positional args today; kept for a future flag to compose against.
+
+	ctx, cancel := contextWithTimeout()
 	defer cancel()
 
-	client, err := rpcclient.Dial(ctx)
+	client, err := dialOrExit(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, rpcclient.DaemonUnavailableMessage("<unknown>"))
 		os.Exit(2)
 	}
 	defer func() { _ = client.Close() }()
 
-	state, err := client.C.GetState(ctx, &pb.GetStateRequest{})
+	state, err := getStateOrExit(ctx, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status: GetState: %v\n", err)
 		os.Exit(2)
@@ -63,6 +66,15 @@ func runStatus(args []string) {
 			details = append(details, sd)
 		}
 	}
+
+	if jsonMode {
+		if err := writeStatusJSON(os.Stdout, state, details); err != nil {
+			fmt.Fprintf(os.Stderr, "status: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+
 	if banner := formatAuthFailureBanner(details); banner != "" {
 		fmt.Print(banner)
 	}
