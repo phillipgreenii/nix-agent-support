@@ -27,10 +27,17 @@ let
     name = "config";
     src = ./.;
     description = "pg-wi-flow two-layer JSON config loader ($XDG_CONFIG_HOME/pg-wi-flow/config.json deep-merged under <repo>/.claude/wi-flow/config.json, repo wins) and workflow/stage lookup helpers, with a built-in null-workflow fallback (tc-9ddu3.1.1)";
-    # git: pgwf_config_repo_path resolves the repo layer via `git
-    # rev-parse --show-toplevel`; its bats coverage exercises that against
-    # a throwaway, hermetically-fixtured git repo (git-fixture-harness.bash).
-    testDeps = [ pkgs.git ];
+    # jq: every function here builds/reads JSON. git: pgwf_config_repo_path
+    # resolves the repo layer via `git rev-parse --show-toplevel`; its bats
+    # coverage exercises that against a throwaway, hermetically-fixtured
+    # git repo (git-fixture-harness.bash). bash: unlike mkBashScript's own
+    # check, mkBashLibrary's check does NOT put `bash` on PATH by default
+    # -- needed here for `#!/usr/bin/env bash` mocks the tests spawn.
+    testDeps = [
+      pkgs.jq
+      pkgs.git
+      pkgs.bash
+    ];
     inherit testSupport;
   };
 
@@ -43,9 +50,14 @@ let
     src = ./.;
     description = "pg-wi-flow's bd Adapter -- the only file in this package that invokes \`bd\` (config-aware query builder, item fetch/update, claim/release, the internal stage-advance primitive) (tc-9ddu3.1.1)";
     libraries = [ config ];
-    # git: config.bash's tests (see above) also run under tracker's own
-    # check (its composed lib includes config.bash's content).
-    testDeps = [ pkgs.git ];
+    # jq + git + bash: config.bash's tests (see above) also run under
+    # tracker's own check (its composed lib includes config.bash's
+    # content); tracker's own tests spawn `#!/usr/bin/env bash` mocks too.
+    testDeps = [
+      pkgs.jq
+      pkgs.git
+      pkgs.bash
+    ];
     inherit testSupport;
   };
 in
