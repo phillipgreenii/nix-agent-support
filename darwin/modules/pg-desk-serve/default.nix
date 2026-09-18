@@ -32,6 +32,35 @@ let
   primaryUser = config.system.primaryUser or null;
   stateHome =
     if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pg-desk-serve";
+
+  # Cross-module reach into home-manager scope (mirrors darwin/modules/
+  # pg-router-ccpool-handler's own hmUsers pattern): pg-desk's config.yaml is
+  # rendered by phillipgreenii.programs.pg-desk (home-manager scope,
+  # home/programs/pg-desk/default.nix), not by this darwin module. Reading
+  # the enabled user's rendered xdg.configFile source here and threading it
+  # into PG_DESK_CONFIG below means any config content change produces a new
+  # content-addressed store path, which changes this service's generated
+  # wrapper text, which changes the wrapper derivation's hash -- exactly what
+  # makes `phillipgreenii-nix-personal` ADR 0049's plist-hash comparison
+  # bootout/bootstrap the daemon on the next darwin-rebuild switch. Without
+  # this, a config-only change (no package rebuild) never touches the
+  # wrapper and the running daemon silently keeps serving stale config until
+  # someone manually restarts it (observed 2026-09-18, pg2-b0rj4:
+  # agentTrackerBackend landed and applied to disk, but pg-desk-serve kept
+  # failing "2 backends registered" for two hours because nothing restarted
+  # it).
+  hmUsers = config.home-manager.users or { };
+  pgDeskUsers = lib.filter (u: u.phillipgreenii.programs.pg-desk.enable or false) (
+    lib.attrValues hmUsers
+  );
+  # null when no HM user has phillipgreenii.programs.pg-desk enabled -- falls
+  # back to pg-desk's own default config resolution ($XDG_CONFIG_HOME then
+  # ~/.config), same as before this change.
+  pgDeskConfigSource =
+    if pgDeskUsers != [ ] then
+      (lib.head pgDeskUsers).xdg.configFile."pg-desk/config.yaml".source
+    else
+      null;
 in
 {
   # A generic darwin module running `pg-desk serve` as a launchd user agent
@@ -86,7 +115,11 @@ in
       runAtLoad = true;
       keepAlive = true;
       serviceConfig = {
-        EnvironmentVariables = emitterEnv;
+        EnvironmentVariables =
+          emitterEnv
+          // lib.optionalAttrs (pgDeskConfigSource != null) {
+            PG_DESK_CONFIG = toString pgDeskConfigSource;
+          };
         StandardOutPath = "${stateHome}/pg-desk/launchd-stdout.log";
         StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
       };
