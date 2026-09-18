@@ -584,7 +584,7 @@ func TestCLI_RootHelp_ListsAllSubcommands(t *testing.T) {
 		t.Fatalf("--help failed: %v", err)
 	}
 	for _, sub := range []string{
-		"baseline", "compare", "evaluate", "mark-excluded",
+		"archive", "baseline", "compare", "evaluate", "mark-excluded",
 		"report", "set-correct-decision", "show", "completion",
 	} {
 		if !bytes.Contains([]byte(stdout), []byte(sub)) {
@@ -598,6 +598,7 @@ func TestCLI_SubcommandHelp_ShowsFlags(t *testing.T) {
 		sub   string
 		wants []string
 	}{
+		{"archive", []string{"--db", "--before", "--days", "--fixtures-out", "--sample-per-bucket", "--dry-run", "--yes"}},
 		{"baseline", []string{"--settings", "--output"}},
 		{"compare", []string{"--settings", "--baseline", "--format"}},
 		{"evaluate", []string{"--days", "--since", "--settings", "--format", "--misses-only", "--approval-source"}},

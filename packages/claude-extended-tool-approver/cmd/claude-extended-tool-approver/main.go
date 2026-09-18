@@ -42,6 +42,7 @@ func sandboxEnabledKey(v sql.NullInt64) string {
 // binary is invoked with no arguments (as a Claude Code hook) or when the
 // first argument is not a recognized CLI entry point.
 var knownSubcommands = map[string]bool{
+	"archive":              true,
 	"baseline":             true,
 	"compare":              true,
 	"evaluate":             true,
@@ -72,6 +73,7 @@ and analyzing the decision log.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.AddCommand(newArchiveCmd())
 	root.AddCommand(newBaselineCmd())
 	root.AddCommand(newCompareCmd())
 	root.AddCommand(newEvaluateCmd())

@@ -254,19 +254,65 @@ func NewReadOnlyStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open db read-only: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", readOnlyDSN(dbPath))
+	db, err := openReadOnlyConn(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db read-only: %w", err)
 	}
 
-	// Ping forces the connection open now, so a bad DSN or an unopenable file
-	// fails here — at construction — rather than silently on the first query.
+	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// readOnlyCacheSizePragma sets SQLite's per-connection page cache to ~128MB
+// (negative cache_size is a KiB budget, not a page count: -131072 KiB =
+// 128MB). This is READ-PATH ONLY — see openReadOnlyConn — by OPERATOR
+// DECISION on pg2-riwdh (2026-09-18), which weighed it against the write
+// path (asklog.NewStore) and deliberately excluded that path:
+//
+//   - Write connections (the PreToolUse/PostToolUse/etc. hooks) are numerous,
+//     short-lived (one process per tool call), and each does exactly one
+//     small write. Multiplying a 64-128MB cache across many concurrent tiny
+//     writer processes would waste memory for no benefit — none of them ever
+//     read enough of the corpus back to fill, let alone reuse, a cache that
+//     large.
+//   - A linear full-table scan's dominant cost is disk I/O, which the OS
+//     file cache already absorbs after the first pass over the file within a
+//     given process's lifetime — so a bigger SQLite-level cache mainly pays
+//     off when ONE invocation makes MORE THAN ONE pass over the corpus
+//     (e.g. `evaluate --baseline` diffing two runs, or `report` computing
+//     several groupings), which describes the read/CLI path
+//     (evaluate/report/compare/baseline/show; NewReadOnlyStore's own callers)
+//     and not the write path.
+//
+// See also NewStore's busy_timeout/journal_mode pragmas immediately above,
+// which are the write path's equivalents and are deliberately left at their
+// compiled defaults for cache_size.
+const readOnlyCacheSizePragma = "PRAGMA cache_size=-131072"
+
+// openReadOnlyConn opens a fresh immutable=1 connection to dbPath, applies
+// readOnlyCacheSizePragma, and Pings it so a bad DSN or an unopenable file
+// fails here — at construction — rather than silently on the first query.
+//
+// Shared by NewReadOnlyStore and reopen (the torn-read retry seam in
+// QueryRows) so EVERY read-only connection — the first one and every retry
+// — gets the larger cache, not just the first: the whole point of the
+// pragma is amortizing cost across a MULTI-PASS CLI invocation, and a
+// reopened connection that silently fell back to the compiled default would
+// undermine that on exactly the runs (repeated retries against a large,
+// actively-growing corpus) where it matters most.
+func openReadOnlyConn(dbPath string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", readOnlyDSN(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(readOnlyCacheSizePragma); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set cache_size: %w", err)
+	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("open db read-only: %w", err)
+		return nil, err
 	}
-
-	return &Store{db: db, dbPath: dbPath}, nil
+	return db, nil
 }
 
 // readOnlyDSN is the immutable=1 DSN shared by NewReadOnlyStore and
@@ -412,12 +458,8 @@ func (s *Store) reopen() error {
 	if s.dbPath == "" {
 		return fmt.Errorf("reopen: not a read-only store")
 	}
-	fresh, err := sql.Open("sqlite", readOnlyDSN(s.dbPath))
+	fresh, err := openReadOnlyConn(s.dbPath)
 	if err != nil {
-		return err
-	}
-	if err := fresh.Ping(); err != nil {
-		_ = fresh.Close()
 		return err
 	}
 	_ = s.db.Close()
