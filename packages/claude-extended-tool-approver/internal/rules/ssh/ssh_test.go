@@ -580,6 +580,228 @@ func TestSSH_QuotedRedirectionCharIsNotARedirection(t *testing.T) {
 	}
 }
 
+// TestSSH_ReadonlyVerbFamilies pins tc-heokt: every read-only verb family
+// tc-w3xl7's evidence named moves from Ask to Approve once configured, and
+// every mutating counterpart in the SAME family stays Ask. Families that need
+// nothing beyond the existing ReadonlyCommands/ReadonlySubcommands mechanism
+// (pvesh, qm's plain list/config/status, systemctl, vault's single-token
+// verbs, journalctl, tc-support, timedatectl, synopkg, groups, getent, ps,
+// mount, iostat) are covered here; qm guest exec recursion, ssacli, and curl
+// each get their own dedicated test below (TestSSH_QmGuestExecRecursion,
+// TestSSH_SsacliShowAnywhere, TestSSH_CurlLoopbackReuse).
+func TestSSH_ReadonlyVerbFamilies(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers: []string{"tcadmin"},
+		ReadonlyCommands: []string{
+			"pvesh", "qm", "systemctl", "vault", "journalctl", "tc-support",
+			"timedatectl", "synopkg", "groups", "getent", "ps", "mount", "iostat",
+		},
+		ReadonlySubcommands: map[string][]string{
+			"pvesh":      {"get", "usage"},
+			"qm":         {"list", "config", "status"},
+			"systemctl":  {"status", "list-timers", "cat"},
+			"vault":      {"read", "status", "operator raft list-peers"},
+			"tc-support": {"status", "check", "--help"},
+			"synopkg":    {"help", "list"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// pvesh — read verbs approved.
+		{"pvesh get", "ssh host pvesh get /cluster/status --output-format json", hookio.Approve},
+		{"pvesh get with limit", "ssh host pvesh get /nodes/pve3/tasks --limit 500 --output-format json", hookio.Approve},
+		{"pvesh usage", "ssh host pvesh usage /cluster/resources", hookio.Approve},
+		{"pvesh create not allowed", "ssh host pvesh create /access/users", hookio.Ask},
+
+		// qm — list/config/status approved, start/set stay Ask.
+		{"qm list", "ssh host qm list", hookio.Approve},
+		{"qm config", "ssh host qm config 203", hookio.Approve},
+		{"qm status", "ssh host qm status 203", hookio.Approve},
+		{"qm start still asks", "ssh host qm start 203", hookio.Ask},
+		{"qm set still asks", "ssh host qm set 203 --onboot 1", hookio.Ask},
+
+		// systemctl — status/list-timers/cat approved, mutating verbs stay Ask.
+		{"systemctl status", "ssh host systemctl status sshd", hookio.Approve},
+		{"systemctl list-timers", "ssh host systemctl list-timers --all --no-pager", hookio.Approve},
+		{"systemctl cat", "ssh host systemctl cat logrotate-checkconf.service", hookio.Approve},
+		{"systemctl start still asks", "ssh host systemctl start sshd", hookio.Ask},
+		{"systemctl stop still asks", "ssh host systemctl stop sshd", hookio.Ask},
+		{"systemctl restart still asks", "ssh host systemctl restart sshd", hookio.Ask},
+		{"systemctl reload still asks", "ssh host systemctl reload sshd", hookio.Ask},
+		{"systemctl enable still asks", "ssh host systemctl enable sshd", hookio.Ask},
+		{"systemctl disable still asks", "ssh host systemctl disable sshd", hookio.Ask},
+		{"systemctl mask still asks", "ssh host systemctl mask sshd", hookio.Ask},
+
+		// vault — read/status/the specific operator compound approved; the
+		// mutating operator sibling (same first token) stays Ask.
+		{"vault read", "ssh host vault read sys/auth/token/tune", hookio.Approve},
+		{"vault status", "ssh host vault status", hookio.Approve},
+		{"vault operator raft list-peers", "ssh host vault operator raft list-peers", hookio.Approve},
+		{"vault operator raft remove-peer still asks", "ssh host vault operator raft remove-peer n1", hookio.Ask},
+		{"vault write still asks", "ssh host vault write sys/auth/token/tune ttl=1h", hookio.Ask},
+
+		// journalctl (non-sudo) — no subcommand restriction configured, so any
+		// invocation not carrying a dangerous inline flag is read-only.
+		{"journalctl bare", "ssh host journalctl -u sshd", hookio.Approve},
+
+		// tc-support — status/check/--help approved, deploy stays Ask.
+		{"tc-support status", "ssh host tc-support status", hookio.Approve},
+		{"tc-support check", "ssh host tc-support check", hookio.Approve},
+		{"tc-support --help", "ssh host tc-support --help", hookio.Approve},
+		{"tc-support deploy still asks", "ssh host tc-support deploy", hookio.Ask},
+
+		// timedatectl / synopkg / groups / getent / ps / mount / iostat.
+		{"timedatectl bare", "ssh host timedatectl", hookio.Approve},
+		{"synopkg help", "ssh host synopkg help", hookio.Approve},
+		{"synopkg list", "ssh host synopkg list --name", hookio.Approve},
+		{"groups", "ssh host groups", hookio.Approve},
+		{"getent", "ssh host getent passwd deploy", hookio.Approve},
+		{"ps", "ssh host ps -ef --forest", hookio.Approve},
+		{"mount", "ssh host mount", hookio.Approve},
+		{"iostat", "ssh host iostat -x 1 1", hookio.Approve},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_QmGuestExecRecursion pins the `qm guest exec <vmid> -- <command>
+// [args...]` recursion tc-heokt added: the trailing command is judged by the
+// SAME read-only rules a top-level remote-command leaf would be, including
+// its own DangerousInlineFlags demotion. `qm` itself must still be
+// ReadonlyCommands-gated (a config with no `qm` entry at all abstains to Ask
+// exactly as before), and the plain `qm guest <anything-else>` shape (not
+// `guest exec ... -- ...`) is NOT this recursion and stays Ask unless
+// separately allowlisted.
+func TestSSH_QmGuestExecRecursion(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"tcadmin"},
+		ReadonlyCommands: []string{"qm", "cat", "systemctl", "sed"},
+		ReadonlySubcommands: map[string][]string{
+			// "guest exec ... -- ..." never reaches this allowlist (it is
+			// intercepted by qmGuestExecTrailing before this check runs), so
+			// restricting qm's OWN top-level subcommands here to list/config/
+			// status does not interfere with the recursion — it only proves
+			// every OTHER qm shape (bare "guest", a malformed guest-exec with
+			// no "--" or nothing after it) still falls through to Ask rather
+			// than inheriting qm's unrestricted default.
+			"qm":        {"list", "config", "status"},
+			"systemctl": {"status"},
+		},
+		DangerousInlineFlags: map[string][]string{
+			"sed": {"-i"},
+		},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"guest exec of a readonly command approved", "ssh host qm guest exec 100 -- cat /var/log/foo", hookio.Approve},
+		{"guest exec of a readonly command with subcommand approved", "ssh host qm guest exec 100 -- systemctl status sshd", hookio.Approve},
+		{"guest exec of a non-readonly command asks", "ssh host qm guest exec 100 -- rm -rf /", hookio.Ask},
+		{"guest exec of a subcommand not on the allowlist asks", "ssh host qm guest exec 100 -- systemctl restart sshd", hookio.Ask},
+		{"guest exec demoted by a dangerous inline flag on the trailing command", "ssh host qm guest exec 100 -- sed -i s/a/b/ /f", hookio.Ask},
+		{"guest exec with no trailing command after -- asks", "ssh host qm guest exec 100 --", hookio.Ask},
+		{"guest exec with no -- at all asks", "ssh host qm guest exec 100 cat /var/log/foo", hookio.Ask},
+		{"plain qm guest (not exec) is not this recursion", "ssh host qm guest cmd 100 network-get-interfaces", hookio.Ask},
+		{"qm not in ReadonlyCommands still asks", "ssh host2 qm guest exec 100 -- cat /var/log/foo", hookio.Ask},
+	}
+	r2 := New(configrules.SshConfig{AllowedUsers: []string{"tcadmin"}, ReadonlyCommands: []string{"cat"}})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eval := r
+			if tt.name == "qm not in ReadonlyCommands still asks" {
+				eval = r2
+			}
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(eval.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_SsacliShowAnywhere pins ssacliArgsAreReadonly: tc-w3xl7's evidence
+// has the "show" read verb at index 2 in one real command and index 4 in
+// another (a variable position depending on the ctrl/slot selector prefix),
+// which a position-anchored ReadonlySubcommands entry cannot express — so
+// this is a bespoke, ssacli-only "contains show, and no mutating verb" check.
+// Mutating counterparts (create/delete/modify/...) must stay Ask even when
+// paired with the same selector shape.
+func TestSSH_SsacliShowAnywhere(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"tcadmin"},
+		ReadonlyCommands: []string{"ssacli"},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"show at a shallow position", "ssh host ssacli ctrl all show status", hookio.Approve},
+		{"show at a deeper position behind an extra selector", "ssh host ssacli ctrl slot=0 ld all show detail", hookio.Approve},
+		{"modify is refused even without show", "ssh host ssacli ctrl slot=0 modify dwc=disable", hookio.Ask},
+		{"delete is refused even alongside show elsewhere", "ssh host ssacli ctrl slot=0 ld 1 delete forced show", hookio.Ask},
+		{"no show token at all asks", "ssh host ssacli ctrl all", hookio.Ask},
+		{"create is refused", "ssh host ssacli ctrl slot=0 create type=ld drives=1I:1:1", hookio.Ask},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSSH_CurlLoopbackReuse pins the reuse tc-heokt's acceptance criteria
+// required: a `curl` leaf embedded in an ssh remote command is judged by
+// rules/curl's own base-host (loopback/localhost) read-only allowlist
+// (curl.IsReadOnlyToBaseHost), not a fresh, unrelated allowlist. Covers both
+// evidence shapes (tc-w3xl7: `curl -s localhost:9100/metrics`, `curl -s -m 10
+// localhost:9100/metrics` — neither carries an explicit scheme) plus the
+// non-loopback and non-read-only-method cases that must stay Ask.
+func TestSSH_CurlLoopbackReuse(t *testing.T) {
+	cfg := configrules.SshConfig{
+		AllowedUsers:     []string{"tcadmin"},
+		ReadonlyCommands: []string{"curl"},
+	}
+	r := New(cfg)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{"schemeless localhost metrics", "ssh host curl -s localhost:9100/metrics", hookio.Approve},
+		{"schemeless localhost metrics with max-time", "ssh host curl -s -m 10 localhost:9100/metrics", hookio.Approve},
+		{"explicit http scheme to 127.0.0.1", "ssh host curl -s http://127.0.0.1:9100/metrics", hookio.Approve},
+		{"non-loopback host asks", "ssh host curl -s http://10.0.0.5:9100/metrics", hookio.Ask},
+		{"POST to loopback asks", "ssh host curl -s -X POST localhost:9100/reload", hookio.Ask},
+		{"body flag implies POST and asks", "ssh host curl -s -d foo=bar localhost:9100/x", hookio.Ask},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			if got := hookio.Verdict(r.Evaluate(input)).Decision; got != tt.want {
+				t.Errorf("%q => %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSSH_DangerousInlineFlags proves that a remote command whose executable is
 // in ReadonlyCommands is demoted from Approve to Ask when it carries a configured
 // dangerous inline flag (parity with hook-support's _DANGEROUS_INLINE_FLAGS). The

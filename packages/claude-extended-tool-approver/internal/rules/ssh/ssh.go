@@ -34,7 +34,19 @@
 //     where an unknown sink is a writer), and names no secret path; otherwise Ask.
 //     A leaf whose executable is in ReadonlyCommands but which carries a configured
 //     DangerousInlineFlags flag (e.g. `journalctl --vacuum-size=1G`, `sed -i`) is
-//     demoted back to Ask.
+//     demoted back to Ask. A ReadonlySubcommands entry may itself be a
+//     space-separated multi-token PREFIX (e.g. "operator raft list-peers"), not
+//     only a bare first-token subcommand (tc-heokt; see subcommandAllowed).
+//   - three families need MORE than the config-driven allowlist above, each
+//     added by tc-heokt: `qm guest exec <vmid> -- <command> [args...]`
+//     recurses this SAME read-only check onto its trailing argv (qm guest exec
+//     runs the trailing command directly, not through a remote shell, so no
+//     re-parse is needed — see qmGuestExecTrailing); `ssacli`'s read verb
+//     ("show") sits at a position that varies with the selector prefix, so it
+//     is matched anywhere in the args rather than by a fixed-position prefix
+//     (see ssacliArgsAreReadonly); an embedded `curl` leaf reuses (mirrors)
+//     rules/curl's own base-host (loopback/localhost) read-only allowlist
+//     rather than duplicating it (see curl.IsReadOnlyToBaseHost).
 //   - scp: download from a non-secret remote path -> Approve; upload, mixed
 //     local/remote, or a secret remote path -> Ask.
 package ssh
@@ -47,6 +59,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/configrules"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/curl"
 )
 
 // sshValueFlags are ssh/scp short flags that consume the following token as
@@ -533,24 +546,174 @@ func (r *Rule) segmentIsReadonly(pc cmdparse.ParsedCommand) bool {
 	if base == "" || !r.readonlyCommands[base] {
 		return false
 	}
-	if allowed, ok := r.readonlySubcommands[base]; ok {
-		sub := firstSubToken(pc.Args)
-		if sub == "" || !allowed[sub] {
-			return false
-		}
-	}
 	// A configured dangerous inline flag demotes an otherwise read-only command
 	// back to Ask: a token equal to the flag or beginning with "<flag>=" (e.g.
 	// `journalctl --vacuum-size=1G`, `sed -i`) is destructive despite the command
-	// being in ReadonlyCommands.
+	// being in ReadonlyCommands. Checked uniformly, before any of the
+	// per-family special cases below, so it still demotes them too (e.g. a
+	// consumer-configured dangerousInlineFlags["curl"] entry).
+	if r.hasDangerousInlineFlag(base, pc.Args) {
+		return false
+	}
+
+	// tc-heokt: three families need MORE than a subcommand allowlist can
+	// express — see this file's package doc for why each is special-cased
+	// rather than folded into subcommandAllowed.
+	switch base {
+	case "qm":
+		if exe, trailing, ok := qmGuestExecTrailing(pc.Args); ok {
+			return r.commandArgsReadonly(exe, trailing)
+		}
+	case "ssacli":
+		return ssacliArgsAreReadonly(pc.Args)
+	case "curl":
+		return curl.IsReadOnlyToBaseHost(pc.Args)
+	}
+
+	if allowed, ok := r.readonlySubcommands[base]; ok {
+		return subcommandAllowed(allowed, pc.Args)
+	}
+	return true
+}
+
+// commandArgsReadonly applies this rule's own DATA-driven classification
+// (ReadonlyCommands membership, ReadonlySubcommands allowlist,
+// DangerousInlineFlags demotion) to an arbitrary (executable, args) pair. It
+// is the shared body behind segmentIsReadonly's default case AND, recursively,
+// qmGuestExecTrailing's nested check — the trailing command embedded in a
+// `qm guest exec <vmid> -- <command> [args...]` invocation is judged by the
+// exact same rules a top-level remote-command leaf would be, just without the
+// write-redirection/substitution/env-assignment scans (moot: qm guest exec
+// runs its trailing argv directly, never through a shell, so none of those
+// shell-only concerns apply to it).
+func (r *Rule) commandArgsReadonly(base string, args []string) bool {
+	if base == "" || !r.readonlyCommands[base] {
+		return false
+	}
+	if r.hasDangerousInlineFlag(base, args) {
+		return false
+	}
+	if allowed, ok := r.readonlySubcommands[base]; ok {
+		return subcommandAllowed(allowed, args)
+	}
+	return true
+}
+
+// hasDangerousInlineFlag reports whether args carries a configured
+// DangerousInlineFlags entry for base — a token equal to the flag, or
+// beginning with "<flag>=".
+func (r *Rule) hasDangerousInlineFlag(base string, args []string) bool {
 	for _, bad := range r.dangerousInlineFlags[base] {
-		for _, tok := range pc.Args {
+		for _, tok := range args {
 			if tok == bad || strings.HasPrefix(tok, bad+"=") {
-				return false
+				return true
 			}
 		}
 	}
-	return true
+	return false
+}
+
+// subcommandAllowed reports whether args' leading tokens match at least one
+// entry in allowed, anchored at position 0. An entry may be a single token
+// ("status") or a space-separated multi-token PREFIX ("operator raft
+// list-peers", matched against args[0], args[1], args[2]) — the multi-token
+// form lets a consumer read-approve one specific nested subcommand (e.g.
+// `vault operator raft list-peers`) without approving every "operator"
+// invocation (`vault operator raft remove-peer` must stay Ask). A 1-token
+// entry behaves exactly as the original first-token-only check did; this is a
+// length generalization of it, not a "contains anywhere" match — see
+// ssacliArgsAreReadonly for the one family (tc-w3xl7's evidence) whose read
+// verb sits at a variable, non-zero position and therefore deliberately does
+// NOT go through this generic, position-anchored, config-driven path.
+func subcommandAllowed(allowed map[string]bool, args []string) bool {
+	for entry := range allowed {
+		tokens := strings.Fields(entry)
+		if len(tokens) == 0 || len(tokens) > len(args) {
+			continue
+		}
+		match := true
+		for i, tok := range tokens {
+			if args[i] != tok {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// qmGuestExecTrailing isolates the executable and args passed to `qm guest
+// exec <vmid> -- <command> [args...]` (Proxmox's guest-agent exec, tc-w3xl7's
+// evidence), or reports ok=false if args does not match that shape ("qm guest
+// <anything else>" — e.g. `qm guest cmd`, `qm guest passwd` — is NOT this
+// shape and falls through to the ordinary ReadonlySubcommands check, which
+// leaves it Ask unless a consumer explicitly allowlists it).
+//
+// Unlike evaluateSSH's own remote-command reconstruction (see its own
+// extensive comment on the same subject), no re-parse through cmdparse is
+// needed or done here, and this is NOT a second I7/I13 text-entry point:
+// `qm guest exec` invokes the trailing argv DIRECTLY via the QEMU guest
+// agent (exec-style — one argv, no shell), so the tokens cmdparse already
+// split out of the OUTER remote command (pc.Args) ARE the trailing command's
+// own argv already. There is no shell-quoting layer here to re-resolve, and
+// therefore nothing to parse a second time.
+func qmGuestExecTrailing(args []string) (exe string, trailingArgs []string, ok bool) {
+	if len(args) < 2 || args[0] != "guest" || args[1] != "exec" {
+		return "", nil, false
+	}
+	dashdash := -1
+	for i, a := range args {
+		if a == "--" {
+			dashdash = i
+			break
+		}
+	}
+	if dashdash < 0 || dashdash+1 >= len(args) {
+		return "", nil, false
+	}
+	return args[dashdash+1], args[dashdash+2:], true
+}
+
+// ssacliMutatingVerbs are HPE ssacli subcommands that mutate controller/array
+// state. Named here only to keep ssacliArgsAreReadonly from ever approving a
+// command that carries one of them alongside a "show" token (see its own doc
+// for why "show" alone is not a sufficient signal by position).
+var ssacliMutatingVerbs = map[string]bool{
+	"create": true, "delete": true, "modify": true, "assign": true,
+	"clear": true, "erase": true, "rescan": true, "add": true,
+	"remove": true, "enable": true, "disable": true, "secureerase": true,
+	"undelete": true, "resize": true, "expand": true, "set": true,
+}
+
+// ssacliArgsAreReadonly special-cases HPE ssacli's RAID-controller status
+// reports, which — unlike every other family this rule recognizes — do not
+// put their read verb at a fixed argument position: tc-w3xl7's evidence has
+// both `ssacli ctrl all show status` (verb at index 2) and `ssacli ctrl
+// slot=0 ld all show detail` (verb at index 4, one token later because of the
+// extra "ld all" selector). subcommandAllowed's position-anchored prefix
+// match cannot express "the same verb, at a varying position" without adding
+// a wildcard-token mechanism this bead does not need. Instead: read-only iff
+// "show" appears anywhere in args AND no known ssacliMutatingVerbs token also
+// appears — ssacli's own read report ("show") and its mutating verbs
+// (create/delete/modify/...) never co-occur in one real invocation, so this
+// is not a meaningful weakening of the position-anchored default: it still
+// refuses every denylisted verb, and Asks (never approves) on any shape that
+// never mentions "show" at all.
+func ssacliArgsAreReadonly(args []string) bool {
+	sawShow := false
+	for _, a := range args {
+		if a == "show" {
+			sawShow = true
+			continue
+		}
+		if ssacliMutatingVerbs[a] {
+			return false
+		}
+	}
+	return sawShow
 }
 
 // carriesSubstitution reports whether a remote-command leaf embeds a command or
@@ -706,15 +869,6 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
-}
-
-// firstSubToken returns the first token of args, whether a bare positional
-// (e.g. "status") or a flag-style subcommand (e.g. "--query"), or "".
-func firstSubToken(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	return args[0]
 }
 
 // isRemoteToken reports whether an scp token is a remote `host:path` (a colon

@@ -208,6 +208,118 @@ func (r *Rule) allURLsAllowed(args []string) bool {
 	return found
 }
 
+// curlValueFlags are curl flags (short and long) that consume a SEPARATE
+// following token as their value, when spelled with a space rather than glued
+// (`-m10`) or `=`-joined (`--max-time=10`). IsReadOnlyToBaseHost needs this to
+// tell a flag's VALUE apart from a bare positional URL argument — without it,
+// `curl -s -m 10 localhost:9100/metrics` would misread the value "10" as a
+// URL candidate (host "10", allowed by neither baseExactHosts nor
+// baseHostSuffixes) and refuse the whole request.
+var curlValueFlags = map[string]bool{
+	"-m": true, "--max-time": true,
+	"-o": true, "--output": true,
+	"-A": true, "--user-agent": true,
+	"-H": true, "--header": true,
+	"-e": true, "--referer": true,
+	"-b": true, "--cookie": true,
+	"-c": true, "--cookie-jar": true,
+	"-w": true, "--write-out": true,
+	"-x": true, "--proxy": true,
+	"-u": true, "--user": true,
+	"-X": true, "--request": true,
+	"-d": true, "--data": true, "--data-raw": true, "--data-binary": true, "--data-urlencode": true,
+	"-F": true, "--form": true, "--form-string": true,
+	"-T": true, "--upload-file": true,
+	"--connect-timeout": true, "--retry": true, "--retry-delay": true,
+	"-K": true, "--config": true,
+	"-E": true, "--cert": true,
+	"--cacert": true, "--capath": true, "--interface": true, "--limit-rate": true,
+}
+
+// IsReadOnlyToBaseHost reports whether args is a curl invocation whose
+// effective HTTP method is read-only (GET/HEAD) and whose every positional
+// URL argument targets a BASE generic host (loopback/localhost —
+// baseExactHosts/baseHostSuffixes; never a consumer AllowedDomainSuffixes or
+// DomainMethods host, which need an injected CurlConfig this function does
+// not take). It exists so another rule can recognize an EMBEDDED `curl`
+// invocation as read-only by reusing (mirroring) this rule's own domain/method
+// logic, rather than re-deriving or duplicating it — built for
+// rules/ssh's remote-command recognizer (tc-heokt; evidence: `curl -s
+// localhost:9100/metrics` and `curl -s -m 10 localhost:9100/metrics` inside
+// an ssh remote command, tc-w3xl7).
+//
+// Unlike allURLsAllowed/hostAllowed above, a positional argument need NOT
+// carry an explicit "http://"/"https://" prefix to be read as a URL: curl
+// itself defaults a schemeless positional argument to http:// (curl(1)'s URL
+// section), and the ssh-embedded evidence this function was built for is
+// exactly that schemeless shorthand (`localhost:9100/metrics`, no scheme).
+// curlValueFlags lets the scan skip a flag's OWN value token so it is never
+// misread as a positional URL.
+func IsReadOnlyToBaseHost(args []string) bool {
+	method := effectiveMethod(args)
+	if method != "GET" && method != "HEAD" {
+		return false
+	}
+	found := false
+	skipNext := false
+	for _, a := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if strings.HasPrefix(a, "-") {
+			if curlValueFlags[a] {
+				skipNext = true
+			}
+			continue
+		}
+		host, ok := baseHostCandidate(a)
+		if !ok {
+			continue
+		}
+		found = true
+		if !baseHostAllowed(host) {
+			return false
+		}
+	}
+	return found
+}
+
+// baseHostCandidate extracts the lowercased hostname from a curl positional
+// argument, treating it as a URL whether or not it carries an explicit
+// scheme (see IsReadOnlyToBaseHost's own doc for why the schemeless form
+// matters here). ok is false when the argument does not parse as a URL with
+// a non-empty host at all.
+func baseHostCandidate(arg string) (host string, ok bool) {
+	if arg == "" {
+		return "", false
+	}
+	target := arg
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		target = "http://" + target
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Hostname() == "" {
+		return "", false
+	}
+	return strings.ToLower(u.Hostname()), true
+}
+
+// baseHostAllowed reports whether host is one of the BASE generic hosts
+// (loopback/localhost) — the same tier hostAllowed grants read-only requests
+// with no consumer config at all.
+func baseHostAllowed(host string) bool {
+	if baseExactHosts[host] {
+		return true
+	}
+	for _, suffix := range baseHostSuffixes {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // hostAllowed reports whether host may be requested with the given uppercase
 // HTTP method.
 func (r *Rule) hostAllowed(host, method string) bool {
