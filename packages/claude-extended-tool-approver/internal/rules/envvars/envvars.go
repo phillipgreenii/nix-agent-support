@@ -1840,12 +1840,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				innerWholeLeaf := assignmentIsWholeLeaf(inner)
 				innerVars := cmdparse.OverlayVars(nestedVars, cmdparse.InCommandVars(innerLeaves, j))
 				innerTempDirVars := cmdparse.OverlayVars(nestedTempDirVars, cmdparse.InCommandTempDirVars(innerLeaves, j))
+				// innerSafeSubVars (pg2-zsv1c, 2026-09-18 operator ruling): mirror
+				// the outer pg2-2ytvo safeSubVars relief one level down, the same
+				// way innerVars/innerTempDirVars above already overlay the outer
+				// scan's result with this nested leaf's own InCommandVars.
+				innerSafeSubVars := cmdparse.OverlayVars(safeSubVars, cmdparse.InCommandSafeSubstitutionVars(innerLeaves, j))
 				var innerHasDownstreamConsumer bool
 				if innerWholeLeaf {
 					innerHasDownstreamConsumer = downstreamConsumerExists(innerLeaves, j)
 				}
 				for _, ev := range inner.EnvVars {
-					sub, subRefused := r.evaluateAssignment(ev, input, innerVars, innerTempDirVars, inner.EnvCleared, innerWholeLeaf, innerHasDownstreamConsumer, inner.Executable, innerLeaves, j)
+					sub, subRefused := r.evaluateAssignment(ev, input, innerVars, innerTempDirVars, innerSafeSubVars, inner.EnvCleared, innerWholeLeaf, innerHasDownstreamConsumer, inner.Executable, innerLeaves, j)
 					refused = refused || subRefused
 					if sub.Decision == hookio.Approve {
 						if innerAllAssignmentOnly && held == nil {

@@ -1810,6 +1810,58 @@ func TestEnvVars_NestedShellDashC_OuterPlainVar_TransparentBesideCommand(t *test
 	}
 }
 
+// TestEnvVars_NestedShellDashC_OuterSafeSubstitutionVar_Approve pins the
+// innerSafeSubVars threading pg2-zsv1c's 2026-09-18 operator ruling adds: an
+// EARLIER OUTER leaf's binding to a certified-safe SUBSTITUTION
+// (cmdparse.InCommandSafeSubstitutionVars, pg2-2ytvo) is now threaded into the
+// nested bash -c/sh -c payload's own scope the same way
+// TestEnvVars_NestedShellDashC_OuterPlainVar_Approve already pins for a plain
+// (non-substitution) outer binding — mirroring
+// TestEnvVars_InCommandSubstitutionBoundVar_Approve's top-level shape one
+// level down, via the inner-leaf call site's
+// innerSafeSubVars := cmdparse.OverlayVars(safeSubVars,
+// cmdparse.InCommandSafeSubstitutionVars(innerLeaves, j)). Before this fix
+// (envvars.go's inner-leaf evaluateAssignment call site), this shape either
+// failed to build at all (arity mismatch against the widened signature) or,
+// pre-widening, passed no safeSubVars and so fell through to a decisive Ask —
+// this pins the now-relieved Approve.
+func TestEnvVars_NestedShellDashC_OuterSafeSubstitutionVar_Approve(t *testing.T) {
+	commands := []string{
+		`bindir=$(dirname /usr/local/bin/go)/bin; bash -c 'export PATH="$bindir:$PATH"'`,
+		`bindir=$(dirname /usr/local/bin/go)/bin && sh -c 'PATH="$bindir:$PATH"'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("cmd %q: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
+// TestEnvVars_NestedShellDashC_OuterSafeSubstitutionVar_TransparentBesideCommand
+// re-asserts the SAME masking guard as
+// TestEnvVars_NestedShellDashC_RealCommandPresent_Transparent, now for the
+// outer-safe-substitution-crossing shape: a real command beside the safe
+// assignment must keep this rule silent (NoOpinion) rather than
+// short-circuiting the chain.
+func TestEnvVars_NestedShellDashC_OuterSafeSubstitutionVar_TransparentBesideCommand(t *testing.T) {
+	commands := []string{
+		`bindir=$(dirname /usr/local/bin/go)/bin; bash -c 'export PATH="$bindir:$PATH"; tilt alpha tiltfile-result -- develop'`,
+	}
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+			got := hookio.Verdict(New().Evaluate(input))
+			if got.Decision != hookio.NoOpinion {
+				t.Errorf("cmd %q: got %s (%s), want abstain (transparent, must not pre-empt later rules)", cmd, got.Decision, got.Reason)
+			}
+		})
+	}
+}
+
 // TestEnvVars_HomeTempDir_Ask pins the required regressions: this relief MUST
 // NOT widen beyond "grounded in a `mktemp -d` DIRECTORY, this same command" (or,
 // per pg2-sir2l, the rm+mkdir/bare-mkdir widening — none of these rows carry
