@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func newHarness(t *testing.T) *harness {
 	clk := &mockClock{t: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)}
 
 	var q *eventqueue.Queue
-	emitter, err := New(mp, func() map[string]int { return q.DepthByType() })
+	emitter, err := New(mp, func() map[string]int { return q.DepthByType() }, WithClock(clk.now))
 	if err != nil {
 		t.Fatalf("New emitter: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestCatalogHasTenMembers(t *testing.T) {
 	emitter.RecordThroughput("t")
 	emitter.OnSourceFailure("src")
 	emitter.OnDeduped("t")
-	emitter.RecordDispatchLatency(12.5)
+	emitter.RecordDispatchLatency(12.5, "accepted")
 	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestRecordThroughputPerType(t *testing.T) {
 // binding decision specifies.
 func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.RecordDispatchLatency(42)
+	h.emitter.RecordDispatchLatency(42, "accepted")
 	m := findMetric(t, h.collect(t), MetricDispatchLatency)
 	if m.Unit != "ms" {
 		t.Fatalf("dispatch_latency unit = %q, want ms", m.Unit)
@@ -446,11 +447,103 @@ func TestUnknownTypeRejectedPerType(t *testing.T) {
 	}
 }
 
-// The no-op observer hooks are safe to call (queue drives them).
+// OnEnqueue/OnAccept are safe to call even with no matching prior state (a
+// zero-value Event, or an eventID OnEnqueue never saw).
 func TestNoopHooks(t *testing.T) {
 	h := newHarness(t)
 	h.emitter.OnEnqueue(eventqueue.Event{})
 	h.emitter.OnAccept("e", "l")
+}
+
+// Integration through the queue: a real accept in Dispatch reaches
+// RecordThroughput via OnAccept, fed with the type OnEnqueue recorded for
+// this eventID — proving the production call site (activityObserver's own
+// pattern, mirrored here), not just RecordThroughput in isolation.
+func TestThroughputThroughQueue_RecordsOnAccept(t *testing.T) {
+	h := newHarness(t)
+	h.q.Register(acceptingListener{typ: "review-requested"})
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+
+	h.q.Dispatch()
+
+	m := findMetric(t, h.collect(t), MetricThroughput)
+	if got := sumFor(m, "type", "review-requested"); got != 1 {
+		t.Fatalf("throughput[review-requested] = %d, want 1 after one Dispatch-path accept", got)
+	}
+}
+
+// Integration through the queue: a real accept in Dispatch reaches
+// RecordDispatchLatency via OnAccept, measuring elapsed time since OnEnqueue
+// against the injected clock, labeled outcome="accepted" — the one outcome
+// OnAccept can observe (see RecordDispatchLatency's own doc for why other
+// outcomes are deferred).
+func TestDispatchLatencyThroughQueue_RecordsElapsedSinceEnqueue(t *testing.T) {
+	h := newHarness(t)
+	h.q.Register(acceptingListener{typ: "review-requested"})
+	h.enqueue(t, "e1", "review-requested", 10*time.Minute)
+	h.clk.advance(250 * time.Millisecond)
+
+	h.q.Dispatch()
+
+	m := findMetric(t, h.collect(t), MetricDispatchLatency)
+	hist, ok := m.Data.(metricdata.Histogram[float64])
+	if !ok || len(hist.DataPoints) != 1 {
+		t.Fatalf("dispatch_latency = %+v, want exactly one recorded datapoint", m.Data)
+	}
+	dp := hist.DataPoints[0]
+	if v, present := dp.Attributes.Value(attribute.Key("outcome")); !present || v.AsString() != "accepted" {
+		t.Fatalf("dispatch_latency outcome label = %+v, want \"accepted\"", dp.Attributes)
+	}
+	if dp.Sum != 250 {
+		t.Fatalf("dispatch_latency sum = %v ms, want 250 (elapsed since OnEnqueue)", dp.Sum)
+	}
+}
+
+// OnAccept for an eventID OnEnqueue never recorded (e.g. one the FIFO cap
+// already evicted) MUST NOT panic and MUST NOT record a throughput/latency
+// sample — the same tolerated imperfection activityObserver's own doc accepts
+// for its identical map (an evicted correlation is simply lost, not guessed).
+func TestOnAccept_UnknownEventID_NoPanicNoRecord(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnAccept("never-enqueued", "some-listener")
+
+	rm := h.collect(t)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricThroughput || m.Name == MetricDispatchLatency {
+				t.Fatalf("%s recorded from an unknown eventID's accept, want nothing recorded", m.Name)
+			}
+		}
+	}
+}
+
+// OnEnqueue's correlation map evicts the OLDEST entry once at
+// dispatchPendingCap, FIFO — proving the real cap (not merely the tolerance
+// for a missing entry TestOnAccept_UnknownEventID_NoPanicNoRecord covers).
+func TestOnEnqueue_FIFOCapEviction_OldestDropped(t *testing.T) {
+	h := newHarness(t)
+	for i := range dispatchPendingCap + 1 {
+		h.emitter.OnEnqueue(eventqueue.Event{ID: fmt.Sprintf("e%d", i), Type: "review-requested", At: h.clk.now()})
+	}
+
+	// The very first entry (e0) was evicted to make room for the (cap+1)th;
+	// its accept must be silently dropped.
+	h.emitter.OnAccept("e0", "listener")
+	rm := h.collect(t)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricThroughput {
+				t.Fatalf("throughput recorded for e0, want it evicted by the FIFO cap")
+			}
+		}
+	}
+
+	// The most recently enqueued entry must have survived.
+	h.emitter.OnAccept(fmt.Sprintf("e%d", dispatchPendingCap), "listener")
+	m := findMetric(t, h.collect(t), MetricThroughput)
+	if got := sumFor(m, "type", "review-requested"); got != 1 {
+		t.Fatalf("throughput[review-requested] = %d, want 1 for the surviving most-recent entry", got)
+	}
 }
 
 // OnDeclined — the queue's pre-accept-decline / dispatch-failure signal

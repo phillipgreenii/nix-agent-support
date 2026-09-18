@@ -28,12 +28,13 @@
 // unknown-type-rejected and deduped, and discover.SourceFailureObserver, so
 // discover's pull-source retry path drives source-failures.
 //
-// Throughput, dispatch-latency, and liveness are BUILT and EXPOSED by this
-// task (registered on the catalog, with an exported Record method / option)
-// but a live production call site for each is a LATER task's concern — see
-// RecordThroughput's doc for why. That is this task's own stated scope: build
-// and expose the catalog; consuming or further wiring it is for the sibling
-// tasks that read this Emitter's exported counters.
+// Throughput and dispatch-latency are fed from OnAccept, via the eventID
+// correlation map OnEnqueue populates — see RecordThroughput's doc for why
+// (OnAccept's signature carries no event type or timing) and
+// RecordDispatchLatency's doc for the outcome label's current scope
+// (accepted only; other outcomes are a deferred follow-up). Liveness is fed
+// from the isLive callback passed to WithLiveness, evaluated live on each
+// collect.
 //
 // Operator scope-cut (2026-07-28): pg-router measures delivery-side failures
 // ONLY. Everything post-accept (retryable / resource-limit / critical, and
@@ -56,6 +57,8 @@ package metrics
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -157,6 +160,31 @@ type Emitter struct {
 	sourceFailures  metric.Int64Counter
 	deduped         metric.Int64Counter
 	dispatchLatency metric.Float64Histogram
+
+	now func() time.Time
+
+	// mu guards pending/order — the eventID->{type, enqueue-time} correlation
+	// map OnAccept needs to feed RecordThroughput/RecordDispatchLatency (see
+	// their own docs for why: OnAccept's signature carries no event type or
+	// timing). Mirrors cmd/pg-router/run.go's activityObserver.pending/order
+	// exactly, as its own doc predicted this package would.
+	mu      sync.Mutex
+	pending map[string]pendingDispatch
+	order   []string // insertion order, for FIFO eviction
+}
+
+// dispatchPendingCap bounds Emitter's eventID->pendingDispatch correlation
+// map — same shape and value as run.go's activityPendingTypesCap, which
+// solves the identical OnAccept-carries-no-type gap for the activity ring.
+const dispatchPendingCap = 4096
+
+// pendingDispatch is what OnEnqueue records for one still-outstanding event,
+// for OnAccept to consult: the type (RecordThroughput's label) and the
+// resolved enqueue instant (evt.At) RecordDispatchLatency measures elapsed
+// time from.
+type pendingDispatch struct {
+	typ        string
+	enqueuedAt time.Time
 }
 
 // Ensure the queue can drive it.
@@ -169,6 +197,14 @@ type Option func(*options)
 
 type options struct {
 	isLive func() bool
+	now    func() time.Time
+}
+
+// WithClock injects a clock seam (default time.Now) for deterministic tests
+// of RecordDispatchLatency's production call site (OnAccept), which measures
+// elapsed time since an event's OnEnqueue — mirrors eventqueue.WithClock.
+func WithClock(now func() time.Time) Option {
+	return func(o *options) { o.now = now }
 }
 
 // WithLiveness registers MetricLiveness, an ObservableGauge reporting 1 while
@@ -186,7 +222,7 @@ func WithLiveness(isLive func() bool) Option {
 // — the observable gauge reads it on each collect, so the gauge tracks
 // enqueue/accept/expire without the queue pushing updates.
 func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option) (*Emitter, error) {
-	var cfg options
+	cfg := options{now: time.Now}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -303,13 +339,59 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		sourceFailures:  sourceFailures,
 		deduped:         deduped,
 		dispatchLatency: dispatchLatency,
+		now:             cfg.now,
+		pending:         map[string]pendingDispatch{},
 	}, nil
 }
 
-// OnEnqueue / OnAccept are no-ops: queue depth is observed via the gauge
-// callback (reading the live depth), not pushed per event.
-func (e *Emitter) OnEnqueue(eventqueue.Event) {}
-func (e *Emitter) OnAccept(_, _ string)       {}
+// OnEnqueue records evt's type and resolved enqueue instant, keyed by evt.ID,
+// for OnAccept to consult (RecordThroughput/RecordDispatchLatency's
+// production call site — see their own docs). Queue depth itself is
+// observed via the gauge callback (reading the live depth), not pushed per
+// event; this bookkeeping exists purely to recover what OnAccept's signature
+// does not carry.
+//
+// Mirrors cmd/pg-router/run.go's activityObserver.OnEnqueue exactly,
+// including the FIFO-at-cap eviction: an event that is only ever
+// declined-then-expired (never accepted) is never removed from this map by
+// anything OTHER than that eviction, so dispatchPendingCap bounds it the same
+// way activityPendingTypesCap bounds its sibling.
+func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, exists := e.pending[evt.ID]; exists {
+		return
+	}
+	if len(e.order) >= dispatchPendingCap {
+		oldest := e.order[0]
+		e.order = e.order[1:]
+		delete(e.pending, oldest)
+	}
+	e.pending[evt.ID] = pendingDispatch{typ: evt.Type, enqueuedAt: evt.At}
+	e.order = append(e.order, evt.ID)
+}
+
+// OnAccept feeds RecordThroughput and RecordDispatchLatency from the entry
+// OnEnqueue recorded for eventID, then deletes it — an accepted event needs
+// no further correlation (unlike activityObserver's pending map, nothing
+// here ever arrives AFTER OnAccept for the same eventID). A miss (the FIFO
+// cap already evicted it) is silently skipped: the same tolerated
+// imperfection activityObserver's own doc accepts for its identical map.
+// listenerID is accepted for interface symmetry with eventqueue.Observer's
+// other per-listener hooks but is not part of either label set.
+func (e *Emitter) OnAccept(eventID, _ string) {
+	e.mu.Lock()
+	p, ok := e.pending[eventID]
+	if ok {
+		delete(e.pending, eventID)
+	}
+	e.mu.Unlock()
+	if !ok {
+		return
+	}
+	e.RecordThroughput(p.typ)
+	e.RecordDispatchLatency(float64(e.now().Sub(p.enqueuedAt).Milliseconds()), "accepted")
+}
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's
 // type — the concrete "no event misses" signal (INV-DISP-3), fired from the
@@ -403,27 +485,30 @@ func (e *Emitter) OnSourceFailure(source string) {
 }
 
 // RecordThroughput increments the throughput counter, per type, for an event
-// dispatched and accepted (STORY-OBS-1). Exported for direct/test use:
-// eventqueue.Observer.OnAccept's signature carries (eventID, listenerID)
-// only, not the event's type, so wiring this directly into that hook would
-// require changing the Observer interface — outside this task's Files scope.
-// This task's own stated scope is to build and expose the catalog; a live
-// call site (fed with the type from wherever it is actually known, e.g. once
-// a future task threads it through) is left to that later task, the same way
-// Task 3.5 is documented to read this Emitter's exported counters.
+// dispatched and accepted (STORY-OBS-1). Exported for direct/test use; its
+// production call site is OnAccept, fed from the pending map OnEnqueue
+// populates — eventqueue.Observer.OnAccept's signature carries (eventID,
+// listenerID) only, not the event's type, so OnAccept recovers it the same
+// way cmd/pg-router/run.go's activityObserver already does for the identical
+// gap (see that type's own doc) rather than widening the Observer interface.
 func (e *Emitter) RecordThroughput(evtType string) {
 	e.throughput.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
 }
 
 // RecordDispatchLatency records the elapsed time, in milliseconds, from an
 // event's enqueue to a settling dispatch outcome (STORY-OBS-1) — the
-// catalog's one histogram. Exported for direct/test use; see
-// RecordThroughput's doc for why this task stops at building and exposing
-// the instrument rather than also wiring a live dispatch-timing call site
-// (measuring it would need per-event enqueue-time bookkeeping that is its
-// own design decision, not a byproduct of this task's Files).
-func (e *Emitter) RecordDispatchLatency(ms float64) {
-	e.dispatchLatency.Record(context.Background(), ms)
+// catalog's one histogram, labeled by outcome. Exported for direct/test use;
+// its production call site is OnAccept (see RecordThroughput's doc for the
+// shared pending-map mechanics), which always passes "accepted" today — the
+// one outcome OnAccept can observe. A future outcome (e.g. a final,
+// terminal-settle decline or dispatch failure) needs
+// eventqueue.Observer.OnDeclined/OnDispatchFailure to learn a terminal-settle
+// flag first (they currently fire on every retry attempt, not only the one
+// that settles the pair) — deliberately deferred (operator decision,
+// 2026-09-18); labeling from the start means adding it later is a new call
+// site, not another signature break.
+func (e *Emitter) RecordDispatchLatency(ms float64, outcome string) {
+	e.dispatchLatency.Record(context.Background(), ms, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
 // Reader is a value-read-back handle over the catalog's current counter
