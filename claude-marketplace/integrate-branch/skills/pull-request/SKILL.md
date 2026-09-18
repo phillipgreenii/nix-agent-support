@@ -149,15 +149,20 @@ classify the failure rather than treating every non-zero exit the same way.
   as a **bounded retry**, in the same shape as `ff-merge-to-main`'s FF-3:
   - `attempts++`, then re-fetch and **rebase `<WT>` onto the updated remote
     branch**, and re-attempt the push:
-    ```bash
-    git -C "$WT" fetch "$REMOTE" "$FB"
-    git -C "$WT" rebase "$REMOTE/$FB"
-    git -C "$WT" push --force-with-lease -u "$REMOTE" "$FB"
-    ```
-    `--force-with-lease` **IS permitted** for this retry — it only overwrites the
-    remote ref if it still matches what this rebase just fetched, so it cannot
-    silently clobber a commit this retry never saw. Bare `--force` is
-    **FORBIDDEN** here and everywhere else in this handler.
+
+        ```bash
+        git -C "$WT" fetch "$REMOTE" "$FB"
+        git -c rerere.enabled=false -C "$WT" rebase "$REMOTE/$FB"
+        git -C "$WT" push --force-with-lease -u "$REMOTE" "$FB"
+        ```
+
+        `--force-with-lease` **IS permitted** for this retry — it only overwrites the
+        remote ref if it still matches what this rebase just fetched, so it cannot
+        silently clobber a commit this retry never saw. Bare `--force` is
+        **FORBIDDEN** here and everywhere else in this handler.
+
+        `rerere.enabled=false` is scoped to this one rebase invocation, the same discipline `ff-merge-to-main`'s FF-1 uses and for the same reason: the shared `.git/rr-cache` is not per-worktree, so a concurrent peer worktree's recorded conflict resolution could otherwise be auto-applied here (`pg2-t4nud`). It MUST NOT be a persistent `git config rerere.enabled false` write to `<CC>`'s `.git/config` — out of scope for the same reason FF-1's note gives.
+
   - If that rebase itself conflicts, apply the same discipline as
     `ff-merge-to-main`'s FF-1: resolve it confidently and continue (summarizing
     the resolution), or abort and **halt and report** `stopped:rebase-conflict` —
@@ -169,6 +174,7 @@ classify the failure rather than treating every non-zero exit the same way.
     persistent push race warrants attention, matching FF-3's framing (R-7).
     **Halt and report** `stopped:push-non-fast-forward` with `<REMOTE>/<FB>` and
     git's rejection message.
+
 - **Auth failure** — git names it explicitly (`Authentication failed`,
   `Permission denied`, `could not read Username`, or the transport refusing
   outright, e.g. `fatal: Could not read from remote repository`). Retrying will
@@ -267,7 +273,7 @@ flowchart TD
     PUSH --> PRES{"push result?"}
     PRES -->|"exit 0"| HOST{"PR host tool available?"}
     PRES -->|"non-fast-forward"| RETRY{"attempts < 2?"}
-    RETRY -->|Yes| REB["fetch + rebase WT onto REMOTE/FB,\npush --force-with-lease"] --> PUSH
+    RETRY -->|Yes| REB["fetch + rebase (rerere disabled) WT onto REMOTE/FB,\npush --force-with-lease"] --> PUSH
     RETRY -->|No| S8["STOP: stopped:push-non-fast-forward"]
     PRES -->|"auth failure"| S9["STOP: stopped:push-auth-failed"]
     PRES -->|"anything else"| S10["STOP: stopped:push-failed — no cause asserted"]
@@ -317,6 +323,10 @@ exists. This handler never returns `landed` — that outcome belongs to
   NOT use bare `--force` under any circumstance. It MUST bound this retry and
   stop-and-ask after the **second** consecutive rejection (matching
   `ff-merge-to-main`'s FF-3 cap), reporting `stopped:push-non-fast-forward`.
+- This retry's rebase MUST disable `rerere` scoped to that one invocation
+  (`git -c rerere.enabled=false rebase ...`), matching `ff-merge-to-main`'s
+  FF-1 rule and for the same reason (shared, non-per-worktree `.git/rr-cache`,
+  `pg2-t4nud`) — never a persistent `<CC>` config write.
 - On an auth failure the handler MUST halt immediately and report
   `stopped:push-auth-failed` rather than retry — retrying cannot fix a
   credentials/access problem.

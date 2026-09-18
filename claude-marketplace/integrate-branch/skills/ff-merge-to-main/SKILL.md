@@ -171,8 +171,22 @@ the same rationale: `phillipg-nix-repo-base`'s `pnwf_rebase_in_progress` in
 ## FF-1 — Rebase the worktree onto primary
 
 ```bash
-git -C "$WT" rebase "$PRIMARY"
+git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY"
 ```
+
+**`rerere.enabled=false` is scoped to this one invocation, never written to
+`<CC>`'s `.git/config`.** `rerere`'s resolution cache (`.git/rr-cache`) lives in
+the shared `.git` directory, not per-worktree — so a conflict-shape match one
+concurrent drain worktree's rebase recorded can be silently auto-applied by a
+completely different worktree's unrelated rebase here, injecting a peer
+session's unlanded content into this landing commit (observed live: `pg2-t4nud`
+— a benign instance, but the mechanism is not inherently benign). A persistent
+`git config rerere.enabled false` in `<CC>` would fix this too, but it would
+also disable rerere for the operator's own manual git usage in that clone,
+which is out of scope (operator decision, `pg2-t4nud`) — so the override rides
+on the `git -c` invocation itself, exactly once per rebase attempt (including
+every FF-3 retry, since the retry loop re-enters here at FF-1 and reruns this
+same command).
 
 A non-zero exit here conflates **two different states** that take **opposite**
 recoveries. Either git started the rebase and stopped mid-way (a **conflict** —
@@ -432,7 +446,7 @@ flowchart TD
     F0B -->|"dirty"| S3["STOP: stopped:worktree-dirty — operator commits or stashes in WT"]
     F0B -->|"rebase already running"| S6["STOP: stopped:rebase-in-progress — operator finishes or aborts THAT rebase"]
     F0B -->|Yes| INIT["attempts = 0"]
-    INIT --> B["FF-1: git -C WT rebase primary"]
+    INIT --> B["FF-1: git -c rerere.enabled=false -C WT rebase primary"]
     B --> C{"exit 0?"}
     C -->|Yes| F1B{"FF-1b: .pre-commit-config.yaml exists? run prek --from-ref PRIMARY --to-ref FB"}
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
@@ -505,6 +519,13 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST rebase (`<WT>` onto primary) before attempting the fast-forward
   merge — this is the rebase-first requirement; it MUST NOT fall back to a plain
   non-fast-forward merge.
+- FF-1's rebase (and every FF-3 retry of it) MUST disable `rerere` scoped to
+  that one invocation (`git -c rerere.enabled=false rebase ...`), because the
+  shared `.git/rr-cache` is not per-worktree and a concurrent peer worktree's
+  recorded resolution could otherwise be auto-applied here (`pg2-t4nud`). The
+  handler MUST NOT achieve this with a persistent `git config rerere.enabled
+false` write to `<CC>`'s `.git/config` — that would also disable rerere for
+  the operator's own manual git usage in that clone, which is out of scope.
 - When `<WT>` has a `.pre-commit-config.yaml`, FF-1b MUST run
   `prek run --from-ref <PRIMARY> --to-ref <FB>` against the rebased `<WT>`
   before FF-2, and MUST halt and report `stopped:precommit-branch-diff-failed`
