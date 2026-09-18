@@ -2405,6 +2405,24 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = "/nix/store/fake-roles-dir";
                                       };
+                                      # metricsAddr stub (pg2-ui2i3): same
+                                      # non-null-default convention as
+                                      # handlerCommand/handlerCommandDir just
+                                      # above — this hand-rolled submodule is
+                                      # a PARALLEL schema to the real
+                                      # phillipgreenii.programs.pg-router.daemon
+                                      # options (home/programs/pg-router/default.nix),
+                                      # carrying only the fields
+                                      # darwin/modules/pg-router/default.nix
+                                      # actually reads off daemonCfg — so a
+                                      # new field on the real option MUST be
+                                      # mirrored here too, or daemonCfg in
+                                      # this eval path lacks the attribute
+                                      # entirely (not just null).
+                                      metricsAddr = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = "127.0.0.1:9820";
+                                      };
                                       gates = {
                                         operatorPausedPath = lib.mkOption {
                                           type = lib.types.nullOr lib.types.str;
@@ -2514,6 +2532,12 @@
                 assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # metricsAddr mirrors into the darwin LaunchAgent script too
+                # (pg2-ui2i3), sourced from the stub submodule's own
+                # non-null default above — same pattern as
+                # handlerCommand/handlerCommandDir just above.
+                assert lib.hasInfix "PG_ROUTER_METRICS_ADDR=127.0.0.1:9820"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
