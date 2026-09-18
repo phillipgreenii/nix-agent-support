@@ -12,6 +12,8 @@
 // mirror — the field set itself does not change to do that.
 package schema
 
+import "encoding/json"
+
 // IssueSchemaVersion is the issue capability's own schema version,
 // populated into the wire envelope's schemaVersion field by each of the
 // issue capability's dispatch-table entries
@@ -202,11 +204,23 @@ type IssueDependency struct {
 // full; see its doc comment for Cursor/Entities/PresentIDs/ids_only
 // semantics, which apply identically here with Issue in place of PR
 // (bead pg2-2j5ac.28.1).
+//
+// Cursor is json.RawMessage, not *string — the 2026-09-18 operator
+// decision on this docket's Jira cursor packet, mirroring
+// PRListResult.Cursor's own identical bead-pg2-2j5ac.30.3/.6 widening
+// exactly (see that field's doc comment for the double-encoding hazard
+// this avoids: a *string field holding an encoded JSON-object blob would
+// be double-JSON-encoded by encoding/json, silently breaking the cursor
+// round trip). This field was still *string as of bead pg2-2j5ac.28.1
+// (when cursor was pinned to always-null); mirroring PR's own precedent,
+// this widening does not bump IssueSchemaVersion — nil still marshals to
+// "cursor": null unchanged, so it is backward compatible with every
+// backend that still always answers nil (pg-connector-issue-beads).
 type IssueListResult struct {
-	Entities   []Issue  `json:"entities"`
-	PresentIDs []string `json:"present_ids"`
-	Cursor     *string  `json:"cursor"`
-	Truncated  bool     `json:"truncated"`
+	Entities   []Issue         `json:"entities"`
+	PresentIDs []string        `json:"present_ids"`
+	Cursor     json.RawMessage `json:"cursor"`
+	Truncated  bool            `json:"truncated"`
 }
 
 // IssueDepsResult is the "deps" op's wire result payload for the issue

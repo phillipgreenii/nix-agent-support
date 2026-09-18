@@ -373,7 +373,15 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 // results deduplicated by id" rule) — Truncated always false: bd's own
 // --limit 0 means unlimited, so this backend never truncates its own
 // result set.
-func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+//
+// cursor is accepted-and-ignored (the 2026-09-18 operator decision
+// widening issue.Provider.List to a 4th cursor param, mirroring PR's own
+// pg2-2j5ac.30.3/.6 precedent, added this parameter to keep this backend
+// satisfying the interface): this backend has never returned a non-nil
+// cursor, and bd's own `bd list`/`bd ready` have no incremental/paging
+// concept this method could apply a cursor to — no behavior change from
+// this addition.
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
 	tracker := b.tracker()
 	seen := make(map[string]bool)
 	entities := make([]schema.Issue, 0)

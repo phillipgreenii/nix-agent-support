@@ -2,7 +2,9 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -752,24 +754,30 @@ func TestPriorityVocabulary_NonEmpty(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
-// List (bead pg2-2j5ac.28.1)
+// List (bead pg2-2j5ac.28.1; cursor round trip + present_ids widening,
+// the 2026-09-18 operator decision on this docket's Jira cursor packet)
 // ----------------------------------------------------------------------
 
 func TestBackend_List_SingleExpr_JQLPassedThrough(t *testing.T) {
+	calls := 0
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
 		if args[0] != "search" {
 			t.Fatalf("unexpected op: %v", args)
 		}
 		if !argsEndWith(args, "--jql", "assignee = currentUser()", "--all") {
-			t.Fatalf("args = %v, want --jql <expr> --all", args)
+			t.Fatalf("args = %v, want --jql <expr> --all (no bound on a first/cursorless call)", args)
 		}
 		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false)
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (the bound-appended search plus the unconditional ids-only present-ids search)", calls)
 	}
 	if len(got.Entities) != 1 || got.Entities[0].ID != "PROJ-1" {
 		t.Fatalf("Entities = %+v", got.Entities)
@@ -777,8 +785,8 @@ func TestBackend_List_SingleExpr_JQLPassedThrough(t *testing.T) {
 	if len(got.PresentIDs) != 1 || got.PresentIDs[0] != "PROJ-1" {
 		t.Fatalf("PresentIDs = %+v", got.PresentIDs)
 	}
-	if got.Cursor != nil {
-		t.Fatalf("Cursor = %v, want nil (always null)", got.Cursor)
+	if len(got.Cursor) == 0 {
+		t.Fatalf("Cursor = %v, want a real, non-nil value (this backend now always returns one on success)", got.Cursor)
 	}
 }
 
@@ -793,15 +801,18 @@ func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"assignee = currentUser()", "labels = focus"}, false)
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()", "labels = focus"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2 (one per expression)", calls)
+	if calls != 4 {
+		t.Fatalf("calls = %d, want 4 (two searches per expression: bound-appended + ids-only)", calls)
 	}
 	if len(got.Entities) != 2 {
 		t.Fatalf("Entities = %+v, want exactly 2 after dedup by key (PROJ-2 appeared in both)", got.Entities)
+	}
+	if len(got.PresentIDs) != 2 {
+		t.Fatalf("PresentIDs = %+v, want exactly 2 after dedup by key", got.PresentIDs)
 	}
 	if !got.Truncated {
 		t.Fatal("Truncated = false, want true (the second expression's search reported truncated)")
@@ -814,7 +825,7 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, true)
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, true, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -832,9 +843,175 @@ func TestBackend_List_RunFailure_ClassifiedError(t *testing.T) {
 	}}
 	b := New(fr)
 
-	_, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false)
+	_, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false, nil)
 	if !errors.Is(err, scriptout.ErrUnauthenticated) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
+	}
+}
+
+// jqlArg extracts the --jql flag's own value from a `search --jql <jql>
+// --all` invocation.
+func jqlArg(args []string) string {
+	for i, a := range args {
+		if a == "--jql" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// TestBackend_List_CursorRoundTrip_AppendsUpdatedBound is the packet's
+// required test: a second List call, given the Cursor a prior call
+// returned, must send a JQL string with an "updated >=" bound appended to
+// the configured expression — while the unconditional ids-only
+// present-ids search still runs the plain, unmodified expression.
+func TestBackend_List_CursorRoundTrip_AppendsUpdatedBound(t *testing.T) {
+	fr1 := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+	}}
+	first, err := New(fr1).List(context.Background(), []string{"assignee = currentUser()"}, false, nil)
+	if err != nil {
+		t.Fatalf("first List: %v", err)
+	}
+	if len(first.Cursor) == 0 {
+		t.Fatal("first call returned no cursor")
+	}
+
+	var sawBounded, sawUnbounded bool
+	fr2 := &fakeRunner{handle: func(args []string) (string, error) {
+		jql := jqlArg(args)
+		switch {
+		case strings.HasPrefix(jql, "(assignee = currentUser())") && strings.Contains(jql, "updated >="):
+			sawBounded = true
+		case jql == "assignee = currentUser()":
+			sawUnbounded = true
+		default:
+			t.Fatalf("unexpected jql: %q", jql)
+		}
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+	}}
+	if _, err := New(fr2).List(context.Background(), []string{"assignee = currentUser()"}, false, first.Cursor); err != nil {
+		t.Fatalf("second List: %v", err)
+	}
+	if !sawBounded {
+		t.Fatal("expected the bound-appended search's own jql to carry an \"updated >=\" clause derived from the prior cursor")
+	}
+	if !sawUnbounded {
+		t.Fatal("expected the unconditional ids-only search to still run the plain, unmodified expression (no implicit rewriting)")
+	}
+}
+
+// TestBackend_List_PresentIDs_ReflectsFullSetIndependentOfBound is the
+// packet's required test: "PresentIDs reflects the ids-only search's
+// result even when idsOnly=false" — when a cursor narrows the
+// bound-appended search's own Entities, PresentIDs must still reflect
+// the query's CURRENT, unbounded full match set from the separate
+// ids-only search, not the narrower bounded set.
+func TestBackend_List_PresentIDs_ReflectsFullSetIndependentOfBound(t *testing.T) {
+	cursor := json.RawMessage(`{"updated_since":"2026-09-18T00:00:00Z"}`)
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		jql := jqlArg(args)
+		if strings.Contains(jql, "updated >=") {
+			// The bound-appended search: only what actually changed
+			// since the cursor.
+			return `{"items":[{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":false}`, nil
+		}
+		// The unconditional ids-only search: the query's CURRENT full
+		// match set.
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"},{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":false}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false, cursor)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].ID != "PROJ-2" {
+		t.Fatalf("Entities = %+v, want only PROJ-2 (the bound-appended search's own narrower result)", got.Entities)
+	}
+	if len(got.PresentIDs) != 2 {
+		t.Fatalf("PresentIDs = %+v, want both PROJ-1 and PROJ-2 (the ids-only search's own unbounded full match set)", got.PresentIDs)
+	}
+}
+
+// TestBackend_List_Truncated_FromIDsOnlySearchAlone is the packet's
+// required test: "A Truncated: true response from either the
+// bound-appended search or the ids-only search yields an overall
+// Truncated: true result" — this half specifically proves the ids-only
+// search's own truncation is honored even when the bound-appended search
+// reports none.
+func TestBackend_List_Truncated_FromIDsOnlySearchAlone(t *testing.T) {
+	cursor := json.RawMessage(`{"updated_since":"2026-09-18T00:00:00Z"}`)
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		jql := jqlArg(args)
+		if strings.Contains(jql, "updated >=") {
+			return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+		}
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":true}`, nil
+	}}
+	b := New(fr)
+
+	got, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false, cursor)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !got.Truncated {
+		t.Fatal("Truncated = false, want true (the ids-only search alone reported truncated)")
+	}
+}
+
+// TestBackend_List_MalformedCursor_TreatedAsAbsent proves an undecodable
+// cursor is tolerated as if absent (never surfaced as an error), mirroring
+// decodeJiraCursor's own doc comment.
+func TestBackend_List_MalformedCursor_TreatedAsAbsent(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if strings.Contains(jqlArg(args), "updated >=") {
+			t.Fatalf("expected no bound for a malformed/undecodable cursor, got jql %q", jqlArg(args))
+		}
+		return `{"items":[],"truncated":false}`, nil
+	}}
+	b := New(fr)
+	if _, err := b.List(context.Background(), []string{"assignee = currentUser()"}, false, json.RawMessage(`not json`)); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+}
+
+// ----------------------------------------------------------------------
+// Cursor helpers (jiraCursor / decodeJiraCursor / newJiraCursor / boundedJQL)
+// ----------------------------------------------------------------------
+
+func TestBoundedJQL(t *testing.T) {
+	if got := boundedJQL("assignee = currentUser()", ""); got != "assignee = currentUser()" {
+		t.Fatalf("boundedJQL with empty updatedSince = %q, want jql unchanged", got)
+	}
+	got := boundedJQL("assignee = currentUser()", "2026-09-18T00:00:00Z")
+	want := `(assignee = currentUser()) AND updated >= "2026-09-18 00:00"`
+	if got != want {
+		t.Fatalf("boundedJQL = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeJiraCursor(t *testing.T) {
+	if c := decodeJiraCursor(nil); c.UpdatedSince != "" {
+		t.Fatalf("decodeJiraCursor(nil) = %+v, want zero value", c)
+	}
+	if c := decodeJiraCursor(json.RawMessage("null")); c.UpdatedSince != "" {
+		t.Fatalf("decodeJiraCursor(null) = %+v, want zero value", c)
+	}
+	if c := decodeJiraCursor(json.RawMessage(`{"updated_since":"2026-09-18T00:00:00Z"}`)); c.UpdatedSince != "2026-09-18T00:00:00Z" {
+		t.Fatalf("decodeJiraCursor = %+v", c)
+	}
+	if c := decodeJiraCursor(json.RawMessage(`not json`)); c.UpdatedSince != "" {
+		t.Fatalf("decodeJiraCursor(malformed) = %+v, want zero value (tolerated as absent)", c)
+	}
+}
+
+func TestNewJiraCursor_RoundTrips(t *testing.T) {
+	asOf := time.Date(2026, 9, 18, 12, 30, 0, 0, time.UTC)
+	raw := newJiraCursor(asOf)
+	c := decodeJiraCursor(raw)
+	if c.UpdatedSince != asOf.Format(time.RFC3339) {
+		t.Fatalf("round trip = %+v, want %q", c, asOf.Format(time.RFC3339))
 	}
 }
 

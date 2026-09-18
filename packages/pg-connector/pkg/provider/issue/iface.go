@@ -21,6 +21,7 @@ package issue
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 )
@@ -95,7 +96,20 @@ type Provider interface {
 	// Provider MAY still choose to populate Entities anyway (harmless,
 	// just wasted work) but need not. Mirrors pkg/provider/pr.Provider's
 	// identical List addition (bead pg2-2j5ac.28.1).
-	List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error)
+	//
+	// cursor is the incoming page/incremental-fetch token, opaque to
+	// everything except the Provider that produced it (design: section 4.2
+	// — a per-backend-opaque JSON blob, e.g. a Jira cursor carrying an
+	// "updated >= " bound, never a bare string) — nil on a first/full
+	// fetch. dispatch.go's "list" handler decodes it off the wire and
+	// passes it through UNVALIDATED, mirroring
+	// pkg/provider/pr.Provider.List's own identical cursor parameter
+	// (bead pg2-2j5ac.30.3/.6's precedent, which this widening — the
+	// 2026-09-18 operator decision on this docket's Jira cursor packet —
+	// mirrors exactly): a Provider that does not support incremental
+	// listing MUST simply ignore whatever it is handed and MUST always
+	// answer with IssueListResult.Cursor nil.
+	List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error)
 
 	// Update applies fields' optional members to issue id in ONE call and
 	// returns its resulting state (bead pg2-2j5ac.28.3's own Contract). A

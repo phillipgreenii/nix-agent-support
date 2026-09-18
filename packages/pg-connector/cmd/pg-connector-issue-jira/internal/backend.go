@@ -30,6 +30,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -472,32 +473,149 @@ func (b *Backend) CheckAuth(ctx context.Context) error {
 	return nil
 }
 
+// jiraCursor is this backend's own opaque "list" cursor payload (design:
+// section 4.2, "a per-backend-opaque JSON blob, e.g. a Jira cursor
+// carrying an updated >= bound"; the 2026-09-18 operator decision on this
+// packet). UpdatedSince is RFC3339 (matching every per-item AsOf value's
+// own format exactly, per newJiraCursor's doc comment below) — kept as a
+// plain timestamp, never a pre-rendered JQL fragment, so a future change
+// to boundedJQL's own rendering does not require decoding an old cursor's
+// embedded JQL syntax.
+type jiraCursor struct {
+	UpdatedSince string `json:"updated_since"`
+}
+
+// decodeJiraCursor decodes an incoming wire-level cursor. A nil/empty
+// cursor, or the literal JSON "null" (encoding/json decodes a `"cursor":
+// null` wire field into a non-empty json.RawMessage holding exactly those
+// four bytes, not an empty slice — see pkg/schema/issue.go's
+// IssueListResult.Cursor doc comment), decodes to a zero jiraCursor with
+// UpdatedSince == "": boundedJQL then applies no bound at all, exactly
+// today's unconditional-full-fetch behavior on a first/full call. A
+// cursor this backend cannot decode (malformed JSON, or a shape this
+// version does not recognize) is silently treated the same as absent,
+// mirroring pkg/provider/pr.Provider.List's own doc comment ("a backend
+// that does not support incremental listing MUST simply ignore whatever
+// it is handed") applied here to a malformed-rather-than-unsupported
+// cursor — never surfaced as an error, since this backend produced every
+// cursor it will ever be handed itself.
+func decodeJiraCursor(raw json.RawMessage) jiraCursor {
+	if len(raw) == 0 || string(raw) == "null" {
+		return jiraCursor{}
+	}
+	var c jiraCursor
+	_ = json.Unmarshal(raw, &c)
+	return c
+}
+
+// newJiraCursor builds this call's own outgoing cursor: a fresh "as-of"
+// bound derived from this call's own completion time (the 2026-09-18
+// operator decision: "set Cursor to a real value derived from
+// time.Now().UTC(), matching the asOf value List already computes
+// per-item") — RFC3339, the same format toSchemaIssue's own AsOf field
+// uses, so decodeJiraCursor/boundedJQL round-trip it with no separate
+// parsing convention of their own.
+func newJiraCursor(asOf time.Time) json.RawMessage {
+	encoded, err := json.Marshal(jiraCursor{UpdatedSince: asOf.Format(time.RFC3339)})
+	if err != nil {
+		// jiraCursor is a single plain string field: Marshal cannot fail
+		// for it. This branch exists only so callers need not handle an
+		// error from what is, in practice, an infallible encode.
+		return nil
+	}
+	return encoded
+}
+
+// jqlUpdatedLayout is Jira's own JQL date-time literal syntax (Atlassian's
+// JQL grammar for date/time field comparisons accepts a quoted
+// "yyyy/MM/dd HH:mm" or "yyyy-MM-dd HH:mm" literal). pjira's own
+// SearchPage forwards the jql string this backend builds straight through
+// to Jira's REST search endpoint with no local JQL parsing of its own
+// (verified against phillipg-nix-repo-base's modules/jira/pkg/pjira/
+// client.go: SearchPage POSTs {"jql": jql, ...} to
+// /rest/api/3/search/jql unmodified) — so there is no pjira-local escape
+// hatch to confirm this format against beyond that passthrough; this is
+// Jira's own documented literal grammar, not pjira's.
+const jqlUpdatedLayout = "2006-01-02 15:04"
+
+// boundedJQL appends an "updated >= "<bound>"" clause to jql when
+// updatedSince is non-empty (design: "implement list ... with the cursor
+// an updated >= bound appended to the configured JQL"). jql is
+// parenthesized first so the appended AND clause cannot silently change
+// an existing OR's precedence. An empty updatedSince (no prior cursor, a
+// first/full fetch) returns jql unchanged. A malformed updatedSince value
+// (should never occur — this backend controls its own cursor's encoding
+// end to end — but decodeJiraCursor tolerates a cursor it cannot
+// validate) is likewise treated as absent rather than surfaced as an
+// error, mirroring decodeJiraCursor's own tolerance.
+func boundedJQL(jql, updatedSince string) string {
+	if updatedSince == "" {
+		return jql
+	}
+	t, err := time.Parse(time.RFC3339, updatedSince)
+	if err != nil {
+		return jql
+	}
+	return fmt.Sprintf(`(%s) AND updated >= "%s"`, jql, t.UTC().Format(jqlUpdatedLayout))
+}
+
 // List implements issue.Provider.List via `pjira search --jql <JQL>
 // --all` (bead pg2-2j5ac.28.1, design's own "implement List against
-// Jira JQL" Files-section note). Each element of query is ALREADY the
-// full JQL text a caller's config.queries value carries — unlike the
-// sibling beads backend's own bd-argv-vector grammar, JQL is Jira's own
-// query language, so there is nothing further for this backend to parse
-// or restrict (no equivalent "only ready/list as the first token" rule
-// applies here). --all fetches every page up front rather than one page
-// at a time, so PresentIDs reflects "the complete id set the query
-// matches right now" even though this packet's own list op
-// never itself paginates (cursor is always null). Every expression's
-// matches are unioned, deduplicated by issue key (design's "run
-// each, union results deduplicated by id" rule); Truncated is true if ANY
-// expression's own search reported truncated (pjira's own --limit
-// default, or a config-set limit lower than the match count, per its
-// --help: "max results per page").
-func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
-	seen := make(map[string]bool)
+// Jira JQL" Files-section note; widened by the 2026-09-18 operator
+// decision to give the cursor a real round trip). Each element of query
+// is ALREADY the full JQL text a caller's config.queries value carries —
+// unlike the sibling beads backend's own bd-argv-vector grammar, JQL is
+// Jira's own query language, so there is nothing further for this backend
+// to parse or restrict (no equivalent "only ready/list as the first
+// token" rule applies here).
+//
+// Per expression, TWO searches run, unconditionally, regardless of
+// idsOnly (mirroring this method's own pre-existing "always search,
+// discard Entities afterward when idsOnly" precedent, extended to a
+// second search):
+//
+//   - The bound-appended search (boundedJQL(jql, cursor's own
+//     updated_since)) feeds Entities — a fresh cursor's bound narrows this
+//     to what actually changed since the caller's previous call; an
+//     absent/first cursor runs jql unmodified, exactly today's full-fetch
+//     behavior.
+//   - A second, ids-only search against jql UNMODIFIED (no bound, ever)
+//     feeds PresentIDs — the query's CURRENT full match set, independent
+//     of whatever bound the first search just applied (design: "run a
+//     second, ids-only pjira search (no updated >= bound) to populate
+//     PresentIDs with the query's CURRENT full match set" — the
+//     two-search shape the ledger's own content-diff already expects from
+//     a cursor-bearing backend). Without this second, unbounded search,
+//     PresentIDs would silently undercount to just the bound-appended
+//     search's own subset on every call after the first.
+//
+// --all fetches every page up front for both searches. Each search's own
+// matches are unioned across every expression, deduplicated by issue key
+// (design's "run each, union results deduplicated by id" rule) —
+// separately for Entities and PresentIDs, since the two searches answer
+// different questions. Truncated is true if ANY search (either kind, any
+// expression) reported truncated (pjira's own --limit default, or a
+// config-set limit lower than the match count, per its --help: "max
+// results per page"). Cursor is always a fresh, real value on a
+// successful call (newJiraCursor, above) — this backend never again
+// answers Cursor: null once List actually runs.
+func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
+	prevCursor := decodeJiraCursor(cursor)
+
+	seenEntities := make(map[string]bool)
 	entities := make([]schema.Issue, 0)
+	seenIDs := make(map[string]bool)
+	presentIDs := make([]string, 0)
 	truncated := false
+
 	for _, jql := range query {
 		jql = strings.TrimSpace(jql)
 		if jql == "" {
 			continue
 		}
-		out, runErr := b.runner.Run(ctx, "search", "--jql", jql, "--all")
+
+		primaryJQL := boundedJQL(jql, prevCursor.UpdatedSince)
+		out, runErr := b.runner.Run(ctx, "search", "--jql", primaryJQL, "--all")
 		if runErr != nil {
 			return nil, classifyPJIRAErrorMessage(runErr.Error())
 		}
@@ -511,18 +629,44 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		asOf := time.Now().UTC()
 		for i := range result.Items {
 			item := result.Items[i]
-			if item.Key == "" || seen[item.Key] {
+			if item.Key == "" || seenEntities[item.Key] {
 				continue
 			}
-			seen[item.Key] = true
+			seenEntities[item.Key] = true
 			entities = append(entities, *toSchemaIssue(&item, asOf))
 		}
+
+		// The unconditional, unbounded present-ids search (this method's
+		// own doc comment above) — always jql itself, never
+		// boundedJQL's output, so a caller's own configured query-name
+		// value round-trips through the fake Runner unchanged.
+		idsOut, idsErr := b.runner.Run(ctx, "search", "--jql", jql, "--all")
+		if idsErr != nil {
+			return nil, classifyPJIRAErrorMessage(idsErr.Error())
+		}
+		idsResult, idsDecodeErr := decodePJIRASearchResult(idsOut)
+		if idsDecodeErr != nil {
+			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode present-ids search result: "+idsDecodeErr.Error())
+		}
+		if idsResult.Truncated {
+			truncated = true
+		}
+		for i := range idsResult.Items {
+			key := idsResult.Items[i].Key
+			if key == "" || seenIDs[key] {
+				continue
+			}
+			seenIDs[key] = true
+			presentIDs = append(presentIDs, key)
+		}
 	}
-	ids := make([]string, 0, len(entities))
-	for _, e := range entities {
-		ids = append(ids, e.ID)
+
+	res := &schema.IssueListResult{
+		Entities:   entities,
+		PresentIDs: presentIDs,
+		Cursor:     newJiraCursor(time.Now().UTC()),
+		Truncated:  truncated,
 	}
-	res := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: truncated}
 	if idsOnly {
 		res.Entities = nil
 	}

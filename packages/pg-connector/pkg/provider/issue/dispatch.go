@@ -90,14 +90,24 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 		// list mirrors pkg/provider/pr/dispatch.go's identical "list"
 		// entry — see its own comment for why query-name resolution
 		// (query_not_recognized) lives centrally here rather
-		// than inside every backend's own p.List.
+		// than inside every backend's own p.List. cursor is decoded off
+		// the wire as an opaque JSON blob (json.RawMessage, not a bare
+		// string — design: section 4.2, a per-backend-opaque cursor, e.g.
+		// a Jira cursor carrying a structured "updated >= " bound) and
+		// passed straight through to p.List UNVALIDATED (the 2026-09-18
+		// operator decision on this docket's Jira cursor packet, widening
+		// this table's prior "decode Cursor *string then drop it" shape to
+		// mirror pkg/provider/pr/dispatch.go's own identical
+		// bead-pg2-2j5ac.30.6 precedent exactly): this table does no shape
+		// validation of its own, since a cursor's shape is entirely
+		// Provider-specific.
 		"list": {
 			SchemaVersion: schema.IssueSchemaVersion,
 			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var a struct {
-					Query   string  `json:"query"`
-					Cursor  *string `json:"cursor"`
-					IDsOnly bool    `json:"ids_only"`
+					Query   string          `json:"query"`
+					Cursor  json.RawMessage `json:"cursor"`
+					IDsOnly bool            `json:"ids_only"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list args: "+err.Error())
@@ -107,7 +117,7 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return nil, scriptout.WrapError(scriptout.ErrQueryNotRecognized,
 						fmt.Sprintf("query %q is not defined in this backend's config.queries", a.Query))
 				}
-				return p.List(ctx, expr, a.IDsOnly)
+				return p.List(ctx, expr, a.IDsOnly, a.Cursor)
 			},
 		},
 		// update/close/deps were added by bead pg2-2j5ac.28.3 (this

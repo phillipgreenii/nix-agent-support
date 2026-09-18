@@ -787,7 +787,7 @@ func TestBackend_List_ReadyExpr_AppendsJSONAndUnlimitedLimit(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"ready"}, false)
+	got, err := b.List(context.Background(), []string{"ready"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestBackend_List_ListExprWithFlags(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"list --status open"}, false)
+	got, err := b.List(context.Background(), []string{"list --status open"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -837,7 +837,7 @@ func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"ready", "list --label focus"}, false)
+	got, err := b.List(context.Background(), []string{"ready", "list --label focus"}, false, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -855,7 +855,7 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	}}
 	b := New(fr)
 
-	got, err := b.List(context.Background(), []string{"ready"}, true)
+	got, err := b.List(context.Background(), []string{"ready"}, true, nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -874,7 +874,7 @@ func TestBackend_List_DisallowedFirstToken_IsUnavailable(t *testing.T) {
 	}}
 	b := New(fr)
 
-	_, err := b.List(context.Background(), []string{"close tp-1"}, false)
+	_, err := b.List(context.Background(), []string{"close tp-1"}, false, nil)
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable) — a disallowed first token is a config-authoring problem", err)
 	}

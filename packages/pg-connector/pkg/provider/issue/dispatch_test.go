@@ -19,7 +19,7 @@ type fakeProvider struct {
 	createFn     func(ctx context.Context, input IssueInput) (*schema.Issue, error)
 	commentFn    func(ctx context.Context, id, body string) error
 	transitionFn func(ctx context.Context, id, targetState string) error
-	listFn       func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error)
+	listFn       func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error)
 	updateFn     func(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error)
 	closeFn      func(ctx context.Context, id, reason string) error
 	depsFn       func(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error)
@@ -43,8 +43,8 @@ func (f *fakeProvider) Transition(ctx context.Context, id, targetState string) e
 	return f.transitionFn(ctx, id, targetState)
 }
 
-func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
-	return f.listFn(ctx, query, idsOnly)
+func (f *fakeProvider) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
+	return f.listFn(ctx, query, idsOnly, cursor)
 }
 
 func (f *fakeProvider) Update(ctx context.Context, id string, fields IssueUpdateFields) (*schema.Issue, error) {
@@ -244,7 +244,7 @@ func TestNewDispatchTable_Show_DecodeFailureIsInvalidArgument(t *testing.T) {
 func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
 	var gotQuery schema.QueryExpr
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
 			gotQuery = query
 			return &schema.IssueListResult{Entities: []schema.Issue{{ID: "issue-1"}}, PresentIDs: []string{"issue-1"}}, nil
 		},
@@ -264,9 +264,67 @@ func TestNewDispatchTable_List_ResolvesQueryFromConfig(t *testing.T) {
 	}
 }
 
+// TestNewDispatchTable_List_PassesCursorThrough proves the "list" entry
+// decodes a non-null wire cursor into an opaque json.RawMessage and hands
+// it to p.List UNCHANGED, rather than discarding it (the 2026-09-18
+// operator decision widening this table's prior "decode Cursor *string
+// then drop it" shape — mirroring
+// pkg/provider/pr/dispatch_test.go's identical bead-pg2-2j5ac.30.6 test):
+// only its own Provider decides what a cursor means, so this table must
+// not interpret or validate its shape.
+func TestNewDispatchTable_List_PassesCursorThrough(t *testing.T) {
+	var gotCursor json.RawMessage
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
+			gotCursor = cursor
+			return &schema.IssueListResult{PresentIDs: []string{}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"mine":"assignee = currentUser()"}}`))
+	if _, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"mine","cursor":{"updated_since":"2026-09-18T00:00:00Z"}}`)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	var decoded struct {
+		UpdatedSince string `json:"updated_since"`
+	}
+	if err := json.Unmarshal(gotCursor, &decoded); err != nil {
+		t.Fatalf("cursor passed to p.List did not decode: %v (raw: %s)", err, gotCursor)
+	}
+	if decoded.UpdatedSince != "2026-09-18T00:00:00Z" {
+		t.Fatalf("cursor = %#v, want the opaque blob passed through unchanged", decoded)
+	}
+}
+
+// TestNewDispatchTable_List_NilCursorPassesThroughAsNil proves the common
+// case (no cursor field on the wire) reaches p.List as a nil
+// json.RawMessage — a full/first fetch.
+func TestNewDispatchTable_List_NilCursorPassesThroughAsNil(t *testing.T) {
+	var gotCursor json.RawMessage
+	sawCall := false
+	p := &fakeProvider{
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
+			sawCall = true
+			gotCursor = cursor
+			return &schema.IssueListResult{PresentIDs: []string{}}, nil
+		},
+	}
+	table := NewDispatchTable(p)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"mine":"assignee = currentUser()"}}`))
+	if _, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"mine"}`)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !sawCall {
+		t.Fatal("p.List was never called")
+	}
+	if len(gotCursor) != 0 {
+		t.Fatalf("cursor = %s, want empty/nil when the wire request carries no cursor", gotCursor)
+	}
+}
+
 func TestNewDispatchTable_List_QueryNotRecognized(t *testing.T) {
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
 			t.Fatal("List must not be invoked for an unrecognized query name")
 			return nil, nil
 		},
@@ -281,7 +339,7 @@ func TestNewDispatchTable_List_QueryNotRecognized(t *testing.T) {
 
 func TestNewDispatchTable_List_DecodeFailureIsInvalidArgument(t *testing.T) {
 	p := &fakeProvider{
-		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool) (*schema.IssueListResult, error) {
+		listFn: func(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
 			t.Fatal("List must not be invoked when args fail to decode")
 			return nil, nil
 		},

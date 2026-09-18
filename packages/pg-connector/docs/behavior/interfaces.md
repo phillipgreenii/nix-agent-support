@@ -518,6 +518,18 @@ status, version, truncated}` shape with no `reason` field, unlike `list`'s `sour
   opposite of `thread`'s own `truncated: true` above) is likewise only a wire-response field, not
   a metric a caller can aggregate without parsing the response body itself. Feeds the
   observability review `pg2-7kizi`.
+- **Telemetry (D24, bead pg2-2j5ac.40.1).** `pg-connector-issue-jira`'s `list` op — its now-real
+  `updated >=` cursor round trip (`internal/backend.go`'s bound-appended search feeding
+  `Entities`, plus the unconditional, unbounded ids-only search feeding `PresentIDs`), and the
+  `Provider.List`/`dispatch.go` interface widening to a 4th cursor `json.RawMessage` param this
+  packet made to carry it — emit nothing over OpenTelemetry or Prometheus and write no structured
+  logs of their own: pg-connector still has no telemetry emitter anywhere in this module
+  (unchanged from every telemetry note above), and this is true for every backend through this
+  phase, `pg-connector-issue-beads` included (its own matching 4th param is accept-and-ignore,
+  no behavior change). A search/decode failure surfaces only via the wire-level `error` envelope
+  (`INV-ERR-1`), exactly as `list` already did before this packet; the cursor itself is not a
+  metric/trace a caller can aggregate without parsing the response body's own `cursor` field.
+  Feeds the observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`
