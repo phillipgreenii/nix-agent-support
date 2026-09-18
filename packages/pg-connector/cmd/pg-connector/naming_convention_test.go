@@ -17,8 +17,11 @@ import (
 // search)". attention/search do not exist as pkg/provider subpackages yet
 // (Appendix A: not yet built) — evaluateCapabilityNaming simply finds
 // nothing to check for a capability with no directory yet, which is not a
-// violation of anything.
-var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search"}
+// violation of anything. "thread" was appended by bead pg2-2j5ac.40.3
+// (Phase 13's Thread v1 schema + claude -p backend packet), which DOES
+// build pkg/provider/thread — unlike attention/search above, this token
+// has a real directory to check from the moment this bead lands.
+var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread"}
 
 // systemNamingTokens is the "names no backend/system (github/jira/slack/…)"
 // half of INV-CAP-1's acceptance criteria. It is deliberately a curated

@@ -184,6 +184,20 @@
           pg-connector-scm-git = final.callPackage ./packages/pg-connector/pg-connector-scm-git.nix {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-thread-slack: the thread capability's Tier-2
+          # backend (Phase 13, bead pg2-2j5ac.40.3) — another mkGoApp call
+          # over the SAME packages/pg-connector module (shared src +
+          # gomod2nixToml) as every sibling backend entry above, building
+          # the standalone scriptout-only binary from
+          # packages/pg-connector/pg-connector-thread-slack.nix. Unlike
+          # every capability above, its Tier-2 implementation transports
+          # over claude -p to the Slack MCP already configured on this
+          # machine, rather than exec'ing a dedicated per-system CLI.
+          pg-connector-thread-slack =
+            final.callPackage ./packages/pg-connector/pg-connector-thread-slack.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -5253,6 +5267,7 @@
               pg-connector-issue-beads
               pg-connector-issue-jira
               pg-connector-scm-git
+              pg-connector-thread-slack
               pg-ccaudit
               pg-router-source-pg-connector
               integrate-branch-support

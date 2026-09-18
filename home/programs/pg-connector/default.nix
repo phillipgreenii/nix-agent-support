@@ -21,6 +21,10 @@ let
     issue = if cfg.connector.issue == [ ] then null else cfg.connector.issue;
     ci = if cfg.connector.ci == [ ] then null else cfg.connector.ci;
     scm = cfg.connector.scm;
+    # thread (bead pg2-2j5ac.40.3): mirrors pr/issue/ci's identical
+    # empty-list-omission pattern above -- registry.go's
+    # validateBackendList rejects an explicit `connector.thread: []`.
+    thread = if cfg.connector.thread == [ ] then null else cfg.connector.thread;
   };
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
@@ -126,6 +130,17 @@ in
             type = lib.types.nullOr lib.types.str;
             default = null;
             description = "Registered `scm` capability backend (bare binary name; single-valued -- no analogous second-backend future today).";
+          };
+          # thread (bead pg2-2j5ac.40.3, Phase 13): a WHOLLY NEW capability
+          # with no existing field to reuse -- list-of-str, default [ ],
+          # mirroring pr/issue/ci's exact shape (never scm's single-valued
+          # one). Without this field, a machine config setting
+          # `connector.thread = [ "pg-connector-thread-slack" ]` is a hard
+          # Nix eval error ("option does not exist").
+          thread = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `thread` capability backends (bare binary names, resolved on PATH), in fan-out order.";
           };
         };
       };
@@ -295,17 +310,19 @@ in
     # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
     # binary named in the connector.<type> registry
     # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
-    # linkage between the binaries. All five backends therefore MUST ship
+    # linkage between the binaries. All six backends therefore MUST ship
     # alongside cfg.package whenever this module is enabled, or dispatch to
     # that capability fails at runtime with "executable file not found in
-    # $PATH". None of the five has an independent CLI identity of its own
+    # $PATH". None of the six has an independent CLI identity of its own
     # (each package's own meta.description says so — they speak only the
     # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
     # are not exposed as separate mkPackageOption overrides here; they are
     # read straight from pkgs, matching flake.nix's own package-attr names.
-    # pg-connector-issue-jira joins the other four here (pg2-2j5ac.28.5):
+    # pg-connector-issue-jira joined the other four here (pg2-2j5ac.28.5):
     # the module previously omitted it entirely, alongside ZR's own
-    # connector.issue registry.
+    # connector.issue registry. pg-connector-thread-slack joins in turn
+    # (bead pg2-2j5ac.40.3): without this, the binary is never actually
+    # installed even though its nix output exists.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -313,6 +330,7 @@ in
       pkgs.pg-connector-issue-beads
       pkgs.pg-connector-issue-jira
       pkgs.pg-connector-scm-git
+      pkgs.pg-connector-thread-slack
     ];
 
     # No programs.tldr.customPages entry: unlike pg-pr's own module,

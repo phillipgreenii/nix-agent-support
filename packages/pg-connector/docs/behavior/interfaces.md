@@ -459,6 +459,17 @@ sequenceDiagram
   `sources[]` row or fan-out exit code for it to attach to. Nothing here writes to stderr beyond
   the ordinary error propagation every other verb in this catalog already has. Feeds the
   observability review `pg2-7kizi`.
+- **Telemetry (D24, bead `pg2-2j5ac.40.3`).** The new thread capability (`pkg/schema/thread.go`,
+  `pkg/provider/thread`) and its Tier-2 backend `pg-connector-thread-slack`
+  (`cmd/pg-connector-thread-slack`) emit nothing over OpenTelemetry or Prometheus and write no
+  structured logs of their own — pg-connector still has no telemetry emitter anywhere in this
+  module (unchanged from every telemetry note above). This backend's own transport (exec'ing
+  `claude -p` against the Slack MCP already configured on this machine) writes no log of its own
+  either; a transport failure or a malformed/schema-invalid reply surfaces only as this call's own
+  wire-level `unavailable` error (never a panic), exactly like every other backend's own failure
+  path in this catalog. `list`'s own `truncated: true` (unconditional for this backend, per its own
+  binding decision) is likewise only a wire-response field, not a metric a caller can aggregate
+  without parsing the response body itself. Feeds the observability review `pg2-7kizi`.
 - **Inter-consistency (method `INV-18`) binds here in its _implementer_ form.** `ACTOR-BACKEND` is
   a pluggable implementation with no behavior-docs set of its own; agreement with `INTF-WIRE` is
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`
