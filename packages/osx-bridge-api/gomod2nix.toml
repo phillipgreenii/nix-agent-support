@@ -1,0 +1,6 @@
+schema = 3
+
+[mod]
+  [mod.'github.com/BRO3886/go-eventkit']
+    version = 'v0.15.0'
+    hash = 'sha256-recwp2YvrS9jd5BKnsPfjxqyUKI0Qonh1EURS2o2ZGE='

@@ -248,6 +248,13 @@
           pa-monitor-decorator-scope = final.callPackage ./packages/pa-monitor-decorator-scope {
             inherit (goBuilders) mkGoApp;
           };
+          # osx-bridge-api (bead pg2-p9ap3): the shared macOS integration
+          # daemon (Calendar via EventKit v1, extensible to Mail/Contacts/
+          # Reminders). Pattern A (ADR 0008) — no local `replace`, go-eventkit
+          # is a plain third-party dep vendored via gomod2nix.
+          osx-bridge-api = final.callPackage ./packages/osx-bridge-api {
+            inherit (goBuilders) mkGoApp;
+          };
           claude-activity =
             let
               result = import ./packages/claude-activity {
@@ -880,6 +887,15 @@
                 "pg-ccaudit"
                 "pg-connector"
                 "pg-router-source-pg-connector"
+                # osx-bridge-api (bead pg2-p9ap3): Pattern A, no local
+                # replace. Its two `//go:build darwin`/`!darwin` files
+                # (internal/eventkitprovider) are platform-gated
+                # non-test source, not one of nonUnitGoBuildTags'
+                # registered tags, so — like pg-ccaudit above — it is a
+                # deliberate `taggedGoLintModules` exemption (verified via
+                # this comment block's own prescribed
+                # `grep -rln '^//go:build' packages/osx-bridge-api`).
+                "osx-bridge-api"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -1630,6 +1646,23 @@
                 pname = "pg-ccaudit-go-tests";
                 src = lib.cleanSource ./packages/pg-ccaudit; # matches default.nix
                 gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+              };
+
+              # osx-bridge-api (bead pg2-p9ap3, AC #1): the daemon's
+              # service-routing/dispatch logic and JSON envelope
+              # (request/response, error taxonomy), exercised against a
+              # FAKE/stub calendar provider — EventKit/TCC cannot be
+              # exercised in this sandboxed, automated CI runner. mkGoTest's
+              # default enableRace = true threads CGO_ENABLED=1, which
+              # internal/eventkitprovider's darwin build (cgo bindings to
+              # EventKit) needs anyway on the two darwin systems; on the two
+              # linux systems this same package builds via its non-darwin,
+              # pure-Go fallback file (provider_other.go) instead — see
+              # packages/osx-bridge-api/default.nix's own comment.
+              osx-bridge-api-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "osx-bridge-api-go-tests";
+                src = lib.cleanSource ./packages/osx-bridge-api; # matches default.nix
+                gomod2nixToml = ./packages/osx-bridge-api/gomod2nix.toml;
               };
 
               # pg-router-source-pg-connector — the changes/sweep/list golden
@@ -5200,6 +5233,7 @@
               pg-router-source-pg-connector
               integrate-branch-support
               pg-desk
+              osx-bridge-api
               ;
             # The two agent-activity-api wrappers, re-exported for the same
             # reason codeburn is: they are overlay-only attrs, so without this

@@ -11,5 +11,6 @@
     ./modules/pg-ccaudit
     ./modules/ollama
     ./modules/codeburn
+    ./modules/osx-bridge-api
   ];
 }
