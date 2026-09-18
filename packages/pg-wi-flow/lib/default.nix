@@ -1,8 +1,59 @@
 {
   mkBashLibrary,
+  pkgs,
 }:
-mkBashLibrary {
-  name = "actor";
-  src = ./.;
-  description = "pg-wi-flow CLI actor composition: PG_WI_FLOW_IDENT + stage, or an explicit --actor override (bead tc-q25wo item 2)";
+let
+  # test-support: the shared hermetic-by-construction bats git-fixture
+  # harness (vendored copy, see test-support/git-fixture-harness.bash's own
+  # header), needed by test-config.bats's two git-toplevel-resolution
+  # cases. Wired onto BOTH config and tracker below -- tracker's own check
+  # ALSO runs test-config.bats in full (its composed lib includes
+  # config.bash), not just config's own check.
+  testSupport = ./test-support;
+
+  # actor.bash: PG_WI_FLOW_IDENT + stage composition, or an explicit
+  # --actor override (bead tc-q25wo item 2).
+  actor = mkBashLibrary {
+    name = "actor";
+    src = ./.;
+    description = "pg-wi-flow CLI actor composition: PG_WI_FLOW_IDENT + stage, or an explicit --actor override (bead tc-q25wo item 2)";
+  };
+
+  # config.bash: the two-layer JSON config loader (machine layer deep-merged
+  # under a repo layer, repo wins) plus workflow/stage lookup helpers,
+  # falling back to the built-in null workflow when none is configured
+  # (tc-9ddu3.1.1).
+  config = mkBashLibrary {
+    name = "config";
+    src = ./.;
+    description = "pg-wi-flow two-layer JSON config loader ($XDG_CONFIG_HOME/pg-wi-flow/config.json deep-merged under <repo>/.claude/wi-flow/config.json, repo wins) and workflow/stage lookup helpers, with a built-in null-workflow fallback (tc-9ddu3.1.1)";
+    # git: pgwf_config_repo_path resolves the repo layer via `git
+    # rev-parse --show-toplevel`; its bats coverage exercises that against
+    # a throwaway, hermetically-fixtured git repo (git-fixture-harness.bash).
+    testDeps = [ pkgs.git ];
+    inherit testSupport;
+  };
+
+  # tracker.bash: the bd Adapter -- the ONLY file in this package that
+  # invokes `bd` (query building, item fetch, claim/release, the internal
+  # stage-advance primitive `next`'s container descent and the later
+  # `advance` verb share) (tc-9ddu3.1.1).
+  tracker = mkBashLibrary {
+    name = "tracker";
+    src = ./.;
+    description = "pg-wi-flow's bd Adapter -- the only file in this package that invokes \`bd\` (config-aware query builder, item fetch/update, claim/release, the internal stage-advance primitive) (tc-9ddu3.1.1)";
+    libraries = [ config ];
+    # git: config.bash's tests (see above) also run under tracker's own
+    # check (its composed lib includes config.bash's content).
+    testDeps = [ pkgs.git ];
+    inherit testSupport;
+  };
+in
+{
+  inherit actor config tracker;
+  checks = {
+    test-pg-wi-flow-actor = actor.check;
+    test-pg-wi-flow-config = config.check;
+    test-pg-wi-flow-tracker = tracker.check;
+  };
 }

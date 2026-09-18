@@ -1,0 +1,32 @@
+#compdef pg-wi-flow
+
+_arguments -C \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '--actor[Explicit actor override (outside Claude Code only)]:actor:' \
+  '1: :(query list next claim release)' \
+  '*::arg:->args'
+
+case $words[1] in
+query)
+  _arguments \
+    '*--stage[Restrict to a stage]:stage:' \
+    '--attended[Attention query]'
+  ;;
+list)
+  _arguments \
+    '*--stage[Restrict to a stage]:stage:' \
+    '--attended[Attention query]' \
+    '--questions[Alias for --attended]' \
+    '--unpooled[Open items no query admits]' \
+    '--stale[Stale-reservation/question view]' \
+    '--days[--stale window, in days]:days:' \
+    '--reserved-hours[--stale window, in hours]:hours:'
+  ;;
+next)
+  _arguments '*--stage[Restrict to a stage]:stage:'
+  ;;
+claim | release)
+  _arguments '1:item id:'
+  ;;
+esac

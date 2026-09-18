@@ -21,6 +21,17 @@ setup() {
   fi
 
   unset PG_WI_FLOW_IDENT
+
+  # lib/default.nix (tc-9ddu3.1.1) added sibling mkBashLibrary derivations
+  # (config, tracker) that share this SAME tests/ directory (mkBashLibrary
+  # hardcodes testDir = src + "/tests", and all three share src = ./.).
+  # Under config's or tracker's own check, LIB_PATH provides only THAT
+  # library's composed content -- pgwf_compose_actor is genuinely absent
+  # there, not a bug. Skip gracefully; actor's own check is where this
+  # file's tests actually run.
+  if ! declare -F pgwf_compose_actor >/dev/null 2>&1; then
+    skip "actor.bash functions not present under this library's composed LIB_PATH"
+  fi
 }
 
 @test "env only: PG_WI_FLOW_IDENT set but no stage refuses without printing an actor" {
