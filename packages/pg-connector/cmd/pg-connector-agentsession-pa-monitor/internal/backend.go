@@ -70,8 +70,18 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.AgentSession, er
 	return &result, nil
 }
 
+// usageWindowJSON mirrors pa-monitor's own wire shape for an active usage
+// window (5h block or 7-day week) inside status --json's output.
+type usageWindowJSON struct {
+	ID       string  `json:"id"`
+	CostUSD  float64 `json:"cost_usd"`
+	CapHitAt string  `json:"cap_hit_at,omitempty"`
+}
+
 type statusJSONDoc struct {
-	Sessions []sessionJSON `json:"sessions"`
+	Sessions    []sessionJSON    `json:"sessions"`
+	ActiveBlock *usageWindowJSON `json:"active_block,omitempty"`
+	ActiveWeek  *usageWindowJSON `json:"active_week,omitempty"`
 }
 
 // List execs `pa-monitor status --json`. query is always nil as called by
