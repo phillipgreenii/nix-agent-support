@@ -31,8 +31,10 @@ package dangerouscmds
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
 
@@ -61,7 +63,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 	}
 	for _, pc := range parsed {
 		base := filepath.Base(pc.Executable)
-		if isDangerous(base, pc.Args) {
+		if isDangerous(base, pc.Args, parsed) {
 			// Reject, not Ask: this package's Decision policy (top of file) is a
 			// hard block matching hook-support's DENY, the same non-overridable
 			// treatment ceta gives `assume`'s assume-role and config-rules' blocked
@@ -84,13 +86,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 // isDangerous reports whether an invocation of base with args is dangerous: base
 // must be on the denylist (including any `mkfs.<fstype>` filesystem-builder
 // variant), and — for the entries in operandGated — its arguments must not reduce
-// the invocation to that command's read-only query form.
-func isDangerous(base string, args []string) bool {
+// the invocation to that command's read-only query form (or, for `dd`, its narrow
+// self-cleaning fsync-probe idiom). siblings is every leaf parsed from the SAME
+// compound (this leaf included), so a gate predicate can look for a paired leaf
+// elsewhere in the command (e.g. `dd`'s paired `rm -f` cleanup).
+func isDangerous(base string, args []string, siblings []cmdparse.ParsedCommand) bool {
 	if !onDenylist(base) {
 		return false
 	}
 	if gate, ok := operandGated[base]; ok {
-		return gate(args)
+		return gate(args, siblings)
 	}
 	return true
 }
@@ -124,8 +129,15 @@ func onDenylist(base string) bool {
 //	         operand schedules a shutdown). Inverted, not present.
 //	telnet   NOT gated. Bare `telnet` opens the interactive `telnet>` prompt — a
 //	         live session, not a query.
-//	dd       NOT gated. Bare `dd` copies stdin to stdout; it performs I/O and
-//	         blocks rather than answering a question. No query form.
+//	dd       GATED, narrowly (tc-ymur8). Bare `dd` still has no query form — it
+//	         copies stdin to stdout and blocks — so this is NOT the mount-style
+//	         "harmless without operands" shape. Instead ddIsDangerous recognizes
+//	         one specific self-cleaning idiom (tc-dfnbu): a small oflag=dsync
+//	         write to a throwaway dotfile immediately followed by `rm -f` of that
+//	         same path in the same compound (used by bb's worktree setup to
+//	         measure fsync latency). Every other dd invocation, and any of THIS
+//	         idiom's operands the predicate cannot positively verify, stays
+//	         Reject — see ddIsDangerous's own doc for the exact conditions.
 //	parted   NOT gated. Bare `parted` enters the INTERACTIVE partition editor on
 //	         the first block device found. Inverted, not present.
 //	sudo / doas / wget / nc / ncat / netcat / sftp / mkfs / mkfs.*
@@ -140,8 +152,9 @@ func onDenylist(base string) bool {
 //	         editor), and mis-reading an operand as a listing flag on an
 //	         interactive partition editor is the worst outcome on this list. Should
 //	         it ever be wanted, it needs its own bead and its own evidence.
-var operandGated = map[string]func(args []string) bool{
+var operandGated = map[string]func(args []string, siblings []cmdparse.ParsedCommand) bool{
 	"mount": mountIsDangerous,
+	"dd":    ddIsDangerous,
 }
 
 // mountInfoFlags are `mount` flags that only affect what the LISTING reports, never
@@ -181,8 +194,8 @@ var mountInfoValueFlags = map[string]bool{
 // beyond that, EVERY argument must be an informational flag. Any positional operand
 // (a device, a mountpoint, or an unresolved expansion such as `$TARGET`), anything
 // after a `--` end-of-options marker, and any flag not on the allowlist all make it
-// dangerous.
-func mountIsDangerous(args []string) bool {
+// dangerous. mount's gate needs no sibling leaves, unlike dd's.
+func mountIsDangerous(args []string, _ []cmdparse.ParsedCommand) bool {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -232,4 +245,173 @@ func isMountInfoShortCluster(a string) bool {
 		}
 	}
 	return true
+}
+
+// ddMaxProbeBytes is the byte-count cap (bs * count) under which a dd write is
+// small enough to plausibly be a probe rather than a real payload — the ratified
+// fsync-probe idiom (tc-dfnbu) writes 4k*8 = 32KiB, well under this.
+const ddMaxProbeBytes = 64 * 1024
+
+// ddIsDangerous reports whether a `dd` leaf is dangerous (tc-ymur8). Unlike
+// mount, bare `dd` has no query form at all — it blocks copying stdin to stdout.
+// The one carve-out is a narrow self-cleaning fsync-probe idiom: a small
+// oflag=dsync write to a throwaway dotfile, immediately deleted by a paired
+// `rm -f` of the SAME path elsewhere in the same compound. The invocation is
+// "not dangerous" (returns false) only when ALL of the following hold; any
+// failing condition keeps it dangerous (fail-closed, matching mountIsDangerous):
+//
+//   - of= is present and a RELATIVE path (never under /dev, /proc, /sys — which
+//     are absolute, so the relative check alone rules them out)
+//   - of='s basename starts with `.` (a dotfile, not a real artifact)
+//   - oflag= is present and includes `dsync`
+//   - bs= and count= are both present, and their product is <= ddMaxProbeBytes
+//   - neither seek= nor conv=notrunc is present (both can make dd overwrite
+//     existing data mid-file rather than only ever touching a throwaway dotfile)
+//   - siblings contains an `rm -f` (or `--force`) leaf naming that IDENTICAL
+//     of= path
+func ddIsDangerous(args []string, siblings []cmdparse.ParsedCommand) bool {
+	ops := ddOperands(args)
+
+	of, ok := ops["of"]
+	if !ok || of == "" || filepath.IsAbs(of) {
+		return true
+	}
+	if !strings.HasPrefix(filepath.Base(of), ".") {
+		return true
+	}
+	if !ddFlagListHas(ops["oflag"], "dsync") {
+		return true
+	}
+	if _, hasSeek := ops["seek"]; hasSeek {
+		return true
+	}
+	if ddFlagListHas(ops["conv"], "notrunc") {
+		return true
+	}
+
+	bsStr, hasBS := ops["bs"]
+	countStr, hasCount := ops["count"]
+	if !hasBS || !hasCount {
+		return true
+	}
+	bs, ok := parseDDSize(bsStr)
+	if !ok {
+		return true
+	}
+	count, ok := parseDDSize(countStr)
+	if !ok {
+		return true
+	}
+	if bs*count > ddMaxProbeBytes {
+		return true
+	}
+
+	if !ddHasPairedCleanup(of, siblings) {
+		return true
+	}
+
+	return false
+}
+
+// ddOperands parses dd's `key=value` argument style into a map. Positional
+// arguments (dd takes none in normal usage) and malformed tokens with no `=`
+// are ignored, not treated as an error — an ignored/unrecognized operand simply
+// cannot satisfy any of ddIsDangerous's required keys, so the fail-closed
+// default handles it.
+func ddOperands(args []string) map[string]string {
+	ops := make(map[string]string, len(args))
+	for _, a := range args {
+		key, value, found := strings.Cut(a, "=")
+		if !found || key == "" {
+			continue
+		}
+		ops[key] = value
+	}
+	return ops
+}
+
+// ddFlagListHas reports whether want appears as one comma-separated element of
+// list (dd's oflag=/conv= style, e.g. "dsync,sync").
+func ddFlagListHas(list, want string) bool {
+	for _, f := range strings.Split(list, ",") {
+		if f == want {
+			return true
+		}
+	}
+	return false
+}
+
+// ddSizeSuffixes are dd's recognized bs=/count= multiplier suffixes, longest
+// (and most specific) first so a suffix check never misfires on a shorter
+// suffix that happens to also match the tail (e.g. "MiB" before "M"). GNU
+// coreutils dd itself only recognizes the uppercase forms ("K"/"M"/"G" = 1024^n,
+// "kB"/"MB"/"GB" = 1000^n), but the lowercase "k"/"m"/"g" spelling (as in the
+// ratified `bs=4k` fsync-probe idiom, tc-dfnbu) is the near-universal shell
+// convention and is accepted here as a 1024-based synonym for "K"/"M"/"G".
+var ddSizeSuffixes = []struct {
+	suffix string
+	mult   int64
+}{
+	{"KiB", 1024},
+	{"kB", 1000},
+	{"K", 1024},
+	{"k", 1024},
+	{"MiB", 1024 * 1024},
+	{"MB", 1000 * 1000},
+	{"M", 1024 * 1024},
+	{"m", 1024 * 1024},
+	{"GiB", 1024 * 1024 * 1024},
+	{"GB", 1000 * 1000 * 1000},
+	{"G", 1024 * 1024 * 1024},
+	{"g", 1024 * 1024 * 1024},
+	{"c", 1},
+	{"w", 2},
+	{"b", 512},
+}
+
+// parseDDSize parses a dd bs=/count= value: a plain non-negative integer (bytes,
+// or a bare count), or one with a recognized multiplier suffix. An unrecognized
+// suffix, a negative number, or anything else that fails to parse reports ok
+// false — the caller (ddIsDangerous) treats that as fail-closed dangerous rather
+// than guessing.
+func parseDDSize(s string) (n int64, ok bool) {
+	for _, suf := range ddSizeSuffixes {
+		if numStr, found := strings.CutSuffix(s, suf.suffix); found {
+			v, err := strconv.ParseInt(numStr, 10, 64)
+			if err != nil || v < 0 {
+				return 0, false
+			}
+			return v * suf.mult, true
+		}
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v < 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// ddHasPairedCleanup reports whether siblings contains an `rm -f`/`rm --force`
+// leaf whose arguments include the IDENTICAL path string. siblings is every leaf
+// of the parsed compound (the dd leaf itself included, which never matches since
+// its executable is never `rm`).
+func ddHasPairedCleanup(path string, siblings []cmdparse.ParsedCommand) bool {
+	for _, pc := range siblings {
+		if filepath.Base(pc.Executable) != "rm" {
+			continue
+		}
+		forced, matchesPath := false, false
+		for _, a := range pc.Args {
+			switch a {
+			case "-f", "--force":
+				forced = true
+			case path:
+				matchesPath = true
+			}
+		}
+		if forced && matchesPath {
+			return true
+		}
+	}
+	return false
 }

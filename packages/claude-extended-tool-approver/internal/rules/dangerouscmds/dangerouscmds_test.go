@@ -148,3 +148,93 @@ func TestMountOperandGate(t *testing.T) {
 		})
 	}
 }
+
+// TestDDOperandGate pins the operand gate added for tc-ymur8: the narrow
+// self-cleaning fsync-probe idiom (tc-dfnbu) is no longer hard-denied, while
+// every dd invocation that isn't provably that exact shape still Rejects.
+func TestDDOperandGate(t *testing.T) {
+	r := New()
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		// --- the exact fsyncprobe idiom: no longer dangerous ---
+		{
+			"fsyncprobe idiom",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 oflag=dsync && rm -f .fsyncprobe",
+			hookio.NoOpinion,
+		},
+		// --- regression: device-node target stays dangerous ---
+		{"device node target", "dd if=/dev/zero of=/dev/sda", hookio.Reject},
+		{
+			"device node target even with matching rm",
+			"dd if=/dev/zero of=/dev/sda bs=4k count=8 oflag=dsync && rm -f /dev/sda",
+			hookio.Reject,
+		},
+		// --- regression: large byte count stays dangerous ---
+		{
+			"large count",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=100000 oflag=dsync && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		{
+			"large bs",
+			"dd if=/dev/zero of=.fsyncprobe bs=1M count=1 oflag=dsync && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		// --- regression: dotfile write with no trailing rm stays dangerous ---
+		{
+			"dotfile write, no cleanup",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 oflag=dsync",
+			hookio.Reject,
+		},
+		// --- regression: dotfile write cleaned up by a DIFFERENT file stays dangerous ---
+		{
+			"dotfile write, rm of a different file",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 oflag=dsync && rm -f .other",
+			hookio.Reject,
+		},
+		// --- additional fail-closed coverage over the predicate's own conditions ---
+		{
+			"non-dotfile relative path",
+			"dd if=/dev/zero of=probefile bs=4k count=8 oflag=dsync && rm -f probefile",
+			hookio.Reject,
+		},
+		{
+			"no oflag=dsync",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		{
+			"missing bs/count",
+			"dd if=/dev/zero of=.fsyncprobe oflag=dsync && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		{
+			"seek present",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 seek=1 oflag=dsync && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		{
+			"conv=notrunc present",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 oflag=dsync conv=notrunc && rm -f .fsyncprobe",
+			hookio.Reject,
+		},
+		{
+			"rm without -f",
+			"dd if=/dev/zero of=.fsyncprobe bs=4k count=8 oflag=dsync && rm .fsyncprobe",
+			hookio.Reject,
+		},
+		{"bare dd", "dd", hookio.Reject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(tt.command)}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != tt.want {
+				t.Errorf("Evaluate(%q).Decision = %v (%s), want %v", tt.command, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
