@@ -322,7 +322,7 @@ func TestStatusResolvedConfig_PerParticipantPresentButEmpty(t *testing.T) {
 // red-first test (Binding Decision 7): counters reads back VERBATIM from
 // the already-landed internal/metrics.Emitter/MetricsReader mechanism —
 // the exact values mon.read would independently report for
-// pg_router.unconsumed_expired/unknown_type_rejected/deduped — proving
+// pg_router_unconsumed_expired/unknown_type_rejected/deduped — proving
 // "never a second, divergently-counted set" by construction.
 func TestStatusCounters_MirrorsMetricCatalogVerbatim(t *testing.T) {
 	mp, reader := metrics.NewReadableProvider()

@@ -66,10 +66,22 @@ import (
 )
 
 // Metric names (the declared catalog, INV-OBS-1; ten members, Task 3.3).
+//
+// Registered with underscore/legacy-safe names directly (pg2-y3u22, operator
+// decision 2026-09-18), NOT OTel's usual dotted convention: Prometheus 3.x's
+// UTF-8 metric-name-escaping negotiation is honored by the OTel Prometheus
+// bridge (cmd/pg-router/metrics_http.go), so a dotted name like
+// "pg_router.backlog" was exposed to Prometheus verbatim with the dot
+// preserved instead of being translated to "pg_router_backlog" — the
+// pg-router.json Grafana dashboard queries the underscore names (matching
+// the established convention already used by pg-pr-ops.json), so those
+// panels rendered empty. Naming the instrument with underscores up front
+// means Prometheus never needs to escape-negotiate a dotted name in the
+// first place, regardless of which scheme the scraper offers.
 const (
-	MetricQueueDepth        = "pg_router.queue_depth"
-	MetricFailures          = "pg_router.failures"
-	MetricUnconsumedExpired = "pg_router.unconsumed_expired"
+	MetricQueueDepth        = "pg_router_queue_depth"
+	MetricFailures          = "pg_router_failures"
+	MetricUnconsumedExpired = "pg_router_unconsumed_expired"
 	// MetricUnknownTypeRejected counts the ingest-time condition INV-DISP-3
 	// requires the core to record to logs AND metrics: an event rejected because no
 	// configured binding declares its type. It is the catalog member INTF-MON names
@@ -77,33 +89,33 @@ const (
 	// is what makes its "recorded to ... metrics" true. It stays distinct from
 	// MetricUnconsumedExpired, which carries the OTHER case (a binding declared but
 	// merely inactive this run) plus the ordinary miss.
-	MetricUnknownTypeRejected = "pg_router.unknown_type_rejected"
+	MetricUnknownTypeRejected = "pg_router_unknown_type_rejected"
 	// MetricThroughput counts events dispatched and accepted, per type
 	// (STORY-OBS-1's "tell a busy system from a stalled one"). See
 	// RecordThroughput's doc for why this task builds and exposes it without
 	// also wiring a live production call site.
-	MetricThroughput = "pg_router.throughput"
+	MetricThroughput = "pg_router_throughput"
 	// MetricBacklog is a scalar sum(DepthByType()) across every type — distinct
 	// from the existing per-type MetricQueueDepth gauge (Task 3.3 binding
 	// decision).
-	MetricBacklog = "pg_router.backlog"
+	MetricBacklog = "pg_router_backlog"
 	// MetricLiveness reports 1 while the daemon's last tick is within its
 	// liveness window, else 0. Registered ONLY when New is given WithLiveness
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
 	// registers this observable at all, not merely never observes it true).
-	MetricLiveness = "pg_router.liveness"
+	MetricLiveness = "pg_router_liveness"
 	// MetricDispatchLatency is the catalog's one Histogram: the time from an
 	// event's enqueue to a settling dispatch outcome, in milliseconds. See
 	// RecordDispatchLatency's doc for why this task builds and exposes it
 	// without also wiring a live production call site.
-	MetricDispatchLatency = "pg_router.dispatch_latency"
+	MetricDispatchLatency = "pg_router_dispatch_latency"
 	// MetricSourceFailures counts a pull-source query failure, per source —
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
 	// silently idle pass" (register gap R21, bead pg2-00jpn). Fed by
 	// OnSourceFailure, which discover.go's runAndEnqueue calls (via the
 	// SourceFailureObserver seam) on every retry after a pull-source failure,
 	// alongside the log-only Warn that already existed there.
-	MetricSourceFailures = "pg_router.source_failures"
+	MetricSourceFailures = "pg_router_source_failures"
 	// MetricDeduped counts a duplicate event id the core absorbed because
 	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
 	// It is a BRAND-NEW counter (not a promotion of any pre-existing field —
@@ -111,7 +123,7 @@ const (
 	// internal/core/ingest.go's handleIngestEvent calls (via the extended
 	// core.IngestObserver contract) on its existing res == eventqueue.Deduped
 	// branch, alongside the Debug log that already existed there.
-	MetricDeduped = "pg_router.deduped"
+	MetricDeduped = "pg_router_deduped"
 )
 
 // FailureClassDeclined is fed from eventqueue.Observer.OnDeclined

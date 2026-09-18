@@ -454,7 +454,7 @@ func TestNoopHooks(t *testing.T) {
 }
 
 // OnDeclined — the queue's pre-accept-decline / dispatch-failure signal
-// (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pg_router.failures counter
+// (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pg_router_failures counter
 // RecordFailure does, labeled with the one class knowable at that call site.
 // Task 2.3 widened the signature to 3 args (evtType, listenerID, reason);
 // none of the three is part of the failure-rate label set.
@@ -506,7 +506,7 @@ func TestDeclineThroughQueueFeedsFailuresCounter(t *testing.T) {
 }
 
 // OnDispatchFailure — the queue's OTHER delivery-side failure signal
-// (eventqueue.Observer, INV-OBS-1) — feeds the SAME pg_router.failures counter
+// (eventqueue.Observer, INV-OBS-1) — feeds the SAME pg_router_failures counter
 // RecordFailure does, labeled with FailureClassDispatchFail.
 func TestOnDispatchFailureFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)

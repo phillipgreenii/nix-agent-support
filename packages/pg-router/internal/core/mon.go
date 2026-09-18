@@ -157,7 +157,7 @@ func composeMonReadValues(rm metricdata.ResourceMetrics, requested, subset []str
 
 // monReadDataPoints flattens one metric's current data points into the
 // {name, value, labels} wire shape. A Histogram catalog member (the
-// catalog's one, pg_router.dispatch_latency) has no single scalar projection
+// catalog's one, pg_router_dispatch_latency) has no single scalar projection
 // defined by this task's Contract and is deliberately omitted rather than
 // guessed at — a later task's concern if a sink's subset ever names it.
 func monReadDataPoints(m metricdata.Metrics) []monReadValue {
@@ -187,7 +187,7 @@ func monReadPoints[N int64 | float64](name string, pts []metricdata.DataPoint[N]
 
 // attrLabels renders an OTel attribute.Set as the reply's plain `labels`
 // object, or nil (omitted) when the data point carries no attributes at all
-// (the catalog's scalar members, e.g. pg_router.backlog).
+// (the catalog's scalar members, e.g. pg_router_backlog).
 func attrLabels(attrs attribute.Set) map[string]any {
 	if attrs.Len() == 0 {
 		return nil
