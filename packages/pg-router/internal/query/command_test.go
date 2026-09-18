@@ -3,6 +3,8 @@ package query
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,5 +130,56 @@ func TestCommandQuery_typeSetNoEmitUsesFirstDeclaredEmitType(t *testing.T) {
 	}
 	if len(evts) != 1 || evts[0].Type != "typeA" || evts[0].Item.Type != "bug" {
 		t.Fatalf("want event type typeA (first declared emit) and payload.item.type unchanged (bug): %+v", evts)
+	}
+}
+
+// bead pg2-wa5uk: OSCommander.Run must fold a failed child's own captured
+// stderr into its returned error's own message, since *exec.ExitError.Error()
+// alone is just "exit status N" — without this, CommandQuery.Run's "command
+// query %v: %w" wrapping (and everything built from it downstream, e.g.
+// pg-router's own producer-tick WARN log) never carries the real cause a
+// source's backing command reported on its own stderr.
+func TestOSCommanderRun_FoldsChildStderrIntoError(t *testing.T) {
+	c := OSCommander{}
+	_, err := c.Run(context.Background(), []string{"/bin/sh", "-c", "echo boom-reason 1>&2; exit 3"})
+	if err == nil {
+		t.Fatal("non-zero exit must produce an error")
+	}
+	if !strings.Contains(err.Error(), "boom-reason") {
+		t.Fatalf("error must fold in the child's own stderr text; err = %v", err)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
+		t.Fatalf("errors.As must still resolve the original *exec.ExitError (code 3); err = %v", err)
+	}
+}
+
+// A child that exits non-zero with NO stderr output must keep the plain
+// "exit status N" message unchanged — this is the pre-existing behavior for
+// every non-zero exit that carries no diagnostic of its own.
+func TestOSCommanderRun_EmptyStderrLeavesPlainExitError(t *testing.T) {
+	c := OSCommander{}
+	_, err := c.Run(context.Background(), []string{"/bin/sh", "-c", "exit 1"})
+	if err == nil {
+		t.Fatal("non-zero exit must produce an error")
+	}
+	if err.Error() != "exit status 1" {
+		t.Fatalf("with no child stderr, error text should stay exactly the plain exit-status message; err = %v", err)
+	}
+}
+
+// End-to-end through CommandQuery.Run's default Commander (Env.Cmd left
+// nil, per its own "cmd := env.Cmd; if cmd == nil { cmd = OSCommander{} }"
+// fallback): a real failing backing command's own stderr reason must reach
+// the error CommandQuery.Run returns, since that is exactly what
+// pg-router's own producer-tick WARN log (run.go) logs for a failed source.
+func TestCommandQuery_RealFailingCommandFoldsStderrReasonIntoError(t *testing.T) {
+	q := CommandQuery{Argv: []string{"/bin/sh", "-c", "echo rate-limited-reason 1>&2; exit 3"}, Format: FormatJSONL}
+	_, err := q.Run(context.Background(), Env{})
+	if err == nil {
+		t.Fatal("non-zero exit must propagate as error")
+	}
+	if !strings.Contains(err.Error(), "rate-limited-reason") {
+		t.Fatalf("error must carry the backing command's own stderr reason; err = %v", err)
 	}
 }

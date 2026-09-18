@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/event"
@@ -147,5 +148,30 @@ func (OSCommander) Run(ctx context.Context, argv []string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty argv")
 	}
-	return exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).Output()
+	if err != nil {
+		// exec.Cmd.Output populates a non-zero-exit *exec.ExitError's own
+		// Stderr field with the child's captured stderr bytes (since
+		// cmd.Stderr was left nil above) — but *exec.ExitError.Error()
+		// itself is just os.ProcessState.String() ("exit status N"),
+		// never the child's own stderr text. Without folding it in here,
+		// Run's caller (CommandQuery.Run's "command query %v: %w"
+		// wrapping) and every WARN log built from that error downstream
+		// (e.g. pg-router's own producer-tick log, run.go) showed only
+		// that bare "exit status N" no matter how much diagnostic detail
+		// the child actually wrote to its own stderr — bead pg2-wa5uk:
+		// pg-router-source-pg-connector's own invokeOrFail now writes
+		// pg-connector's real degraded/failed reason there specifically
+		// so it can reach here. The original *exec.ExitError is still
+		// wrapped with %w, so errors.As(err, &exitErr) keeps resolving
+		// the real exit code for any caller that needs it.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if childStderr := strings.TrimSpace(string(exitErr.Stderr)); childStderr != "" {
+				return out, fmt.Errorf("%w: %s", exitErr, childStderr)
+			}
+		}
+		return out, err
+	}
+	return out, nil
 }

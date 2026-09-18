@@ -21,12 +21,18 @@ type changesWire struct {
 }
 
 // changesSource is one row of the "changes" wire response's sources[]
-// array. Only Backend/Status are needed here (building
-// metadata.degraded_sources below); Version/Truncated are ignorable extra
-// JSON for this call path.
+// array. Backend/Status/Reason are needed here (building
+// metadata.degraded_sources/degraded_reasons below); Version/Truncated
+// are ignorable extra JSON for this call path.
+//
+// Reason (bead pg2-wa5uk) was previously left undecoded, so a degraded
+// backend's real cause (e.g. a rate-limit guard tripping) never reached
+// this adapter's own printed items — only the degraded backend's name
+// did, via degraded_sources.
 type changesSource struct {
 	Backend string `json:"backend"`
 	Status  string `json:"status"`
+	Reason  string `json:"reason"`
 }
 
 // changesEntry is one row of the "changes" wire response's changes[]
@@ -75,11 +81,21 @@ func newChangesCmd() *cobra.Command {
 		// The same degraded-backend list applies to every item printed
 		// by this one invocation — it describes the OVERALL call's
 		// degraded backends, never a per-entity fact [design: section
-		// 6.1].
+		// 6.1]. degradedReasons (bead pg2-wa5uk) carries each degraded
+		// backend's own real cause alongside it, keyed by backend name
+		// rather than positionally paired with degraded, so a missing
+		// reason on one backend can never desync the two; only
+		// populated (and only then added to each item's own metadata
+		// below) when at least one degraded backend actually reported
+		// one.
 		degraded := make([]string, 0)
+		degradedReasons := make(map[string]string)
 		for _, s := range wire.Sources {
 			if s.Status == "degraded" {
 				degraded = append(degraded, s.Backend)
+				if s.Reason != "" {
+					degradedReasons[s.Backend] = s.Reason
+				}
 			}
 		}
 
@@ -94,15 +110,19 @@ func newChangesCmd() *cobra.Command {
 			if title == "" {
 				title = id.ID
 			}
+			metadata := map[string]any{
+				"change":           c.Change,
+				"source":           c.Source,
+				"degraded_sources": degraded,
+			}
+			if len(degradedReasons) > 0 {
+				metadata["degraded_reasons"] = degradedReasons
+			}
 			items = append(items, rawItem{
-				ID:    id.ID,
-				Type:  entityType,
-				Title: title,
-				Metadata: map[string]any{
-					"change":           c.Change,
-					"source":           c.Source,
-					"degraded_sources": degraded,
-				},
+				ID:       id.ID,
+				Type:     entityType,
+				Title:    title,
+				Metadata: metadata,
 			})
 		}
 		return writeItems(cmd.OutOrStdout(), items)

@@ -15,11 +15,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // pgConnectorBinary is the ambient $PATH name this adapter execs. Never a
@@ -120,6 +122,21 @@ func classifyExit(exitCode int) bool {
 // sentinel — so every one of the three verbs shares one implementation
 // of "MUST NOT propagate a pg-connector CLI exit code as its own"
 // [design: section 6.1].
+//
+// On this same failure path, pg-connector's own real degraded/failed
+// reason (sources[].reason) is ALSO forwarded to stderr, decoded from
+// pg-connector's own stdout (bead pg2-wa5uk): pg-connector's own
+// writeFanOutResult writes its wire body to stdout before ever checking
+// the fan-out's exit code, so a "total failure" outcome (the exact
+// observed case: a single degraded backend, rate-limited, no other
+// healthy source) still carries the real cause on stdout even though the
+// call as a whole failed — but pg-connector's own stderr is ALWAYS empty
+// for that outcome by design (its own exitError doc comment: "carries a
+// specific exit code without printing anything to stderr, since the JSON
+// body on stdout is the reported outcome"). Without this, the failure
+// path above forwarded nothing at all for that case, and every caller
+// downstream (including pg-router's own producer-tick WARN log) saw only
+// a bare "exit status N".
 func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv []string) ([]byte, error) {
 	res, err := runPgConnector(ctx, args, extraEnv)
 	if err != nil {
@@ -130,9 +147,67 @@ func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv
 		if len(res.stderr) > 0 {
 			_, _ = stderr.Write(res.stderr)
 		}
+		if reasons := failureReasons(res.stdout); len(reasons) > 0 {
+			fmt.Fprintln(stderr, strings.Join(reasons, "; "))
+		}
 		return nil, errFailed
 	}
 	return res.stdout, nil
+}
+
+// pgConnectorSourceRow is the minimal subset of a fan-out wire response's
+// sources[] row this adapter needs to recover a degraded/failed
+// backend's own reason text on the failure path (invokeOrFail above).
+// The row's own identifying field is spelled "backend" in pg-connector's
+// "changes" wire (changesSourceRow, changes.go) and "source" in every
+// other fan-out verb's own SourceResult-shaped wire ("list", which
+// list.go/sweep.go both invoke) — both are decoded here so this one
+// extraction works across every verb this adapter invokes, without
+// needing to know which shape a given call used [bead pg2-wa5uk].
+type pgConnectorSourceRow struct {
+	Backend string `json:"backend"`
+	Source  string `json:"source"`
+	Reason  string `json:"reason"`
+}
+
+// pgConnectorSourcesEnvelope is the minimal subset of pg-connector's own
+// stdout JSON this adapter needs on its own failure path: just the
+// sources[] array, decoded generically since invokeOrFail is shared by
+// every verb and a Tier-1 CLI-level failure (no backend ever dispatched)
+// carries no sources[] at all — that case simply yields zero rows below,
+// not a decode error [bead pg2-wa5uk].
+type pgConnectorSourcesEnvelope struct {
+	Sources []pgConnectorSourceRow `json:"sources"`
+}
+
+// failureReasons extracts one "<backend>: <reason>" string per sources[]
+// row that carries a non-empty reason, from pg-connector's own stdout on
+// invokeOrFail's failure path. best-effort: a malformed/non-JSON stdout
+// body (never actually emitted by pg-connector today, but not this
+// adapter's job to assume) yields no reasons rather than an error, so a
+// genuinely different failure mode never masks itself as "no reason
+// available" [bead pg2-wa5uk].
+func failureReasons(stdout []byte) []string {
+	var env pgConnectorSourcesEnvelope
+	if err := json.Unmarshal(stdout, &env); err != nil {
+		return nil
+	}
+	reasons := make([]string, 0, len(env.Sources))
+	for _, s := range env.Sources {
+		if s.Reason == "" {
+			continue
+		}
+		backend := s.Backend
+		if backend == "" {
+			backend = s.Source
+		}
+		if backend == "" {
+			reasons = append(reasons, s.Reason)
+			continue
+		}
+		reasons = append(reasons, backend+": "+s.Reason)
+	}
+	return reasons
 }
 
 // beadsDirEnv builds the extraEnv slice runPgConnector appends when

@@ -102,6 +102,20 @@ func helperMain() {
 	case "changes_ok_empty":
 		_, _ = fmt.Fprint(os.Stdout, `{"sources":[],"changes":[]}`)
 		os.Exit(0)
+	case "changes_degraded_with_reason":
+		// bead pg2-wa5uk: same shape as "changes_degraded" but the
+		// degraded backend also carries a real reason (as pg-connector's
+		// own changesSourceRow does since bead pg2-unqcn) — proving this
+		// adapter now forwards it into each printed item's own
+		// degraded_reasons metadata, keyed by backend name.
+		_, _ = fmt.Fprint(os.Stdout, `{"sources":[`+
+			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},`+
+			`{"backend":"b2","status":"degraded","version":2,"truncated":false,"reason":"rate limited: too many requests"},`+
+			`{"backend":"b3","status":"disabled","version":0,"truncated":false}`+
+			`],"changes":[`+
+			`{"change":"added","source":"b1","entity":{"id":"e1","title":"Entity One"}}`+
+			`]}`)
+		os.Exit(2)
 	case "total_failure":
 		// A total-failure outcome still writes a well-formed wire body
 		// to its OWN stdout (matching pg-connector's real
@@ -110,6 +124,20 @@ func helperMain() {
 		// this path and print nothing of its own [design: section 6.1].
 		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false}],"changes":[]}`)
 		_, _ = fmt.Fprintln(os.Stderr, "pg-connector: total failure: no backend succeeded")
+		os.Exit(3)
+	case "total_failure_with_reason":
+		// bead pg2-wa5uk: the exact observed real-world shape — a single
+		// degraded backend (rate-limited), no other healthy source, so
+		// pg-connector's own exit is 3 ("total failure"). Per its own
+		// exitError doc comment, pg-connector's own STDERR is always
+		// empty for this outcome ("carries a specific exit code without
+		// printing anything to stderr, since the JSON body on stdout is
+		// the reported outcome") — only stdout carries the real reason.
+		// Before this bead's fix, invokeOrFail discarded stdout entirely
+		// on this path, so this adapter's own stderr was completely
+		// empty too and every caller downstream only ever saw a bare
+		// "exit status 1".
+		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"b1","status":"degraded","version":1,"truncated":false,"reason":"rate limited: too many requests"}],"changes":[]}`)
 		os.Exit(3)
 	case "invalid_argument":
 		_, _ = fmt.Fprint(os.Stdout, `{"error":{"code":"invalid_argument","message":"query not recognized"}}`)

@@ -66,6 +66,73 @@ func TestChanges_DegradedOutcome_ExitsZeroWithDegradedSourcesNamed(t *testing.T)
 	}
 }
 
+// bead pg2-wa5uk: the partial-degraded (exit 2) path now also forwards
+// each degraded backend's own real reason into degraded_reasons,
+// alongside the pre-existing degraded_sources name list.
+func TestChanges_DegradedOutcomeWithReason_ForwardsReasonInMetadata(t *testing.T) {
+	withFactory(t, "changes_degraded_with_reason")
+	stdout, stderr, code := runCLI(t, "changes", "issue", "feedback-ready", "--consumer", "c1")
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1 (items=%+v)", len(items), items)
+	}
+
+	got := items[0]
+	if ds := metadataStrings(t, got, "degraded_sources"); len(ds) != 1 || ds[0] != "b2" {
+		t.Fatalf("items[0].metadata.degraded_sources = %v, want [b2]", ds)
+	}
+	reasons, ok := got.Metadata["degraded_reasons"].(map[string]any)
+	if !ok {
+		t.Fatalf("items[0].metadata.degraded_reasons = %T, want map[string]any (metadata=%v)", got.Metadata["degraded_reasons"], got.Metadata)
+	}
+	if reasons["b2"] != "rate limited: too many requests" {
+		t.Fatalf("items[0].metadata.degraded_reasons = %v, want b2's real reason", reasons)
+	}
+}
+
+// The pre-existing "changes_degraded" fixture carries no reason on its
+// degraded row (omitempty), so degraded_reasons must be absent entirely
+// rather than present-but-empty — no behavior change for a call that
+// never had a reason to forward.
+func TestChanges_DegradedOutcomeWithoutReason_OmitsDegradedReasonsKey(t *testing.T) {
+	withFactory(t, "changes_degraded")
+	stdout, stderr, code := runCLI(t, "changes", "issue", "feedback-ready", "--consumer", "c1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) == 0 {
+		t.Fatal("want at least one item")
+	}
+	if _, present := items[0].Metadata["degraded_reasons"]; present {
+		t.Fatalf("items[0].metadata.degraded_reasons = %v, want key absent when no degraded source carried a reason", items[0].Metadata["degraded_reasons"])
+	}
+}
+
+// bead pg2-wa5uk: the exact observed real-world scenario — a single
+// degraded (rate-limited) backend, no other healthy source, pg-connector's
+// own stderr always empty for this outcome by design. This adapter's own
+// stderr must now carry the real reason decoded from pg-connector's own
+// stdout, not be silent.
+func TestChanges_TotalFailureWithReason_ForwardsReasonToStderr(t *testing.T) {
+	withFactory(t, "total_failure_with_reason")
+	stdout, stderr, code := runCLI(t, "changes", "issue", "feedback-ready", "--consumer", "c1")
+
+	if code == 0 {
+		t.Fatalf("exit code = 0, want non-zero")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "b1: rate limited: too many requests") {
+		t.Fatalf("stderr = %q, want pg-connector's own real reason (decoded from its stdout) forwarded", stderr)
+	}
+}
+
 func TestChanges_TotalFailure_ExitsNonZeroPrintingNothingOnStdout(t *testing.T) {
 	withFactory(t, "total_failure")
 	stdout, stderr, code := runCLI(t, "changes", "issue", "feedback-ready", "--consumer", "c1")

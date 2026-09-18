@@ -28,7 +28,10 @@ flowchart LR
   `pg-connector <type> changes --query <query> --consumer <id> --output json`, and reprints its
   response as one rawItem per reported change. Every printed item's `metadata.degraded_sources`
   names every backend that answered degraded on that ONE invocation (the same list on every item,
-  never a per-entity fact).
+  never a per-entity fact). When at least one of those degraded backends also reported a reason
+  (pg-connector's own `sources[].reason`), `metadata.degraded_reasons` carries it too, as a
+  `{backend: reason}` map — omitted entirely when no degraded backend on that call reported one
+  (bead `pg2-wa5uk`).
 - **`sweep <type> <query>... [--beads-dir <path>]`** — runs
   `pg-connector <type> list --query <query> --ids-only --output json` once per named query
   (one or more), unions the matched ids by reading each response's top-level `present_ids` array
@@ -47,10 +50,10 @@ flowchart LR
 This binary's own exit-code scheme is deliberately just two values, never pg-connector's own
 0/1/2/3/4 taxonomy re-emitted as its own:
 
-| pg-connector's own CLI exit                     | This adapter's own exit | What happens                                                                                                                          |
-| ----------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends named in the items)                                                           |
-| 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis |
+| pg-connector's own CLI exit                     | This adapter's own exit | What happens                                                                                                                                                                                                                           |
+| ----------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                             |
+| 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries is appended too (bead `pg2-wa5uk`) |
 
 `sweep`'s own "zero query names given" case never reaches a pg-connector subprocess at all — it
 is classified directly as the same non-zero exit, with this adapter's own usage message on
@@ -64,10 +67,14 @@ that execs pg-connector once (or, for `sweep`, once per named query) and exits.
 
 Logging is stderr-only, and only on a failure path: on a total-failure or invalid_argument
 outcome from pg-connector, this adapter copies pg-connector's own captured stderr bytes verbatim
-to its own stderr; on a purely local usage error (e.g. `sweep` given zero query names, or a
-malformed JSON response this adapter could not decode), it writes its own one-line diagnostic to
-stderr instead. On success it writes nothing to stderr at all — the printed rawItem array on
-stdout is the only output.
+to its own stderr, and — since pg-connector's own stderr is always empty for an ordinary fan-out
+failure by design — additionally decodes pg-connector's own stdout JSON for any `sources[].reason`
+a degraded/failed backend reported and appends that too (bead `pg2-wa5uk`; this is what lets the
+real cause, e.g. a rate-limit message, survive all the way to pg-router's own producer-tick WARN
+log instead of a bare "exit status N"); on a purely local usage error (e.g. `sweep` given zero
+query names, or a malformed JSON response this adapter could not decode), it writes its own
+one-line diagnostic to stderr instead. On success it writes nothing to stderr at all — the printed
+rawItem array on stdout is the only output.
 
 ## Out of scope
 
