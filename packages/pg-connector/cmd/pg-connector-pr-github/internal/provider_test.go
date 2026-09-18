@@ -498,10 +498,10 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 // answers Cursor: nil, regardless of what the caller passed as its own
 // incoming cursor, since every call already fetches every field fresh
 // via SearchPRsEnriched's own batched query -- there is no more per-PR
-// "did this change" decision for a cursor to inform. Deleting
-// internal/github's DecodeCursor/EncodeCursor/RefreshCursor codec
-// (fingerprint.go) itself is a separate, later cleanup (bead pg2-c0vs3),
-// not part of this bead.
+// "did this change" decision for a cursor to inform. internal/github's
+// DecodeCursor/EncodeCursor/RefreshCursor codec (fingerprint.go) was
+// deleted outright as a follow-up cleanup (bead pg2-c0vs3) once this
+// vestigial status was confirmed.
 func TestBackend_List_CursorAlwaysNil(t *testing.T) {
 	gh := &fakeGH{
 		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {

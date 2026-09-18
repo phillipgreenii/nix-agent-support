@@ -218,16 +218,16 @@ func rateReservePoints(config json.RawMessage) int {
 // cursor is accepted for pr.Provider.List's own interface conformance
 // but is no longer read: List always answers Cursor: nil now (bead
 // pg2-aehpr) — the FingerprintCursor mechanism (internal/github's
-// DecodeCursor/EncodeCursor/RefreshCursor codec, fingerprint.go) is now
-// vestigial, since SearchPRsEnriched already fetches every field fresh
+// DecodeCursor/EncodeCursor/RefreshCursor codec) became vestigial for the
+// same reason, since SearchPRsEnriched already fetches every field fresh
 // on every call, leaving no more per-PR "did this change" decision for a
 // cursor to inform. This matches pr.Provider.List's own doc comment,
 // which already sanctioned exactly this: "A backend that does not
 // support incremental listing MUST simply ignore whatever it is handed
-// and MUST always answer with PRListResult.Cursor nil." fingerprint.go/
-// fingerprint_test.go are deliberately left in place, unused by this
-// method — deleting them outright is a separate, later cleanup (bead
-// pg2-c0vs3), not part of this change.
+// and MUST always answer with PRListResult.Cursor nil." internal/github's
+// fingerprint.go/fingerprint_test.go were deleted outright as a follow-up
+// cleanup (bead pg2-c0vs3) once nothing outside them still referenced the
+// codec.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
