@@ -55,14 +55,21 @@ sibling of something the CLI already does, or a thin new library primitive:
 2. **`--json` on `info <selector>`.** `runInfo` (`cmd/pa-monitor/control.go:230`) already resolves
    a `session:<id>` / `path:<p>` / `cmux:<id>` selector via `GetSessionInfo`/`GetPathInfo`.
    `--json` emits the same `SessionDetail`/`Directory` response as JSON instead of formatted text.
-3. **New `search` subcommand**: `pa-monitor search --json <query> [--session <id>]`. Resolves the
-   transcript(s) for sessions in scope (one, if `--session` is given; otherwise the same session set
-   `status` enumerates) via the existing `session.ResolveTranscript`, then calls a **new** primitive
-   added to the `claude-transcript` library — `Search(path, query) ([]Match, error)`, a naive
+3. **New `search` subcommand**: `pa-monitor search --json <query> [--session <id>] [--since
+<bound>] [--before <bound>]`. Resolves the transcript(s) for sessions in scope (one, if
+   `--session` is given; otherwise the same session set `status` enumerates) via the existing
+   `session.ResolveTranscript`, then calls a **new** primitive added to the `claude-transcript`
+   library — `Search(path, query string, since, before time.Time) ([]Match, error)`, a naive
    per-call scan over parsed text blocks reusing the package's existing oversized-line-safe scanner
-   (`newTranscriptScanner`) — against each. Returns JSON: `session_id` → matches (role, snippet,
-   approximate line/turn index). Naive/unindexed by design (operator decision, 2026-09-18):
-   efficient search across full history is explicitly deferred.
+   (`newTranscriptScanner`) — against each. Each transcript event already carries its own
+   `Timestamp` (`Event.Timestamp time.Time`, confirmed in `claude-transcript/events.go`), so bounding
+   by time needs no new data — only a comparison against it. `--since`/`--before` each accept either
+   a `time.ParseDuration` string interpreted as "this long ago" (e.g. `24h`, mirroring this repo's
+   existing `attention.perBackend.threshold` convention) or an absolute RFC3339 timestamp — the two
+   forms never collide syntactically, so one flag serves both without an explicit mode switch.
+   Returns JSON: `session_id` → matches (role, snippet, timestamp, approximate line/turn index).
+   Naive/unindexed by design (operator decision, 2026-09-18): efficient search across full history
+   is explicitly deferred — a time bound narrows the scan, it does not index it.
 
 No new gRPC calls and no new daemon logic for (1)/(2); (3) is new pure-Go code in
 `claude-transcript`, layered on the existing `ResolveTranscript` + the RPCs (1)/(2) already use to
@@ -242,3 +249,11 @@ prior addition (`thread`, `calendar`) forgot one:
   fields today; deferred until something actually needs the choice.
 - A caller-facing named-query mechanism for `agentsession list` — deferred; today it always returns
   pa-monitor's own default session scope.
+- **Time-bound filtering on pg-connector's generic `search` capability.** `--since`/`--before` are
+  added only to `pa-monitor search` (a direct CLI flag) and to `claudetranscript.Search`'s own
+  signature. `pkg/provider/search.Provider.Search(ctx, query, fields)` — the interface EVERY search
+  backend implements, including pr-github and issue-jira, not just this one — has no time-bound
+  parameter at all, so a caller of `pg-connector search <query>` (the generic Tier-1 fan-out) has no
+  way to reach this filter today. Extending the shared interface to carry a time bound is a
+  cross-cutting change affecting every existing search backend, not something to decide unilaterally
+  inside this design — tracked as its own brainstorm/exploration bead: `pg2-emmut`.

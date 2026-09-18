@@ -55,7 +55,12 @@ already a `pg-connector-contract` umbrella app that will pick up this backend's 
 - A `--json`-style flag MUST be parsed by scanning `args` for the token anywhere in the list, never
   by assuming a fixed position relative to a positional argument (Task 2/3/4 all follow this).
 - Naive/unindexed transcript search only — no index, no cross-history optimization (explicitly
-  deferred per the spec).
+  deferred per the spec). `--since`/`--before` (Task 1/4) narrow the scan; they do not index it.
+- `pa-monitor search`'s `--since`/`--before` filter is reachable only via that direct CLI
+  invocation. `pkg/provider/search.Provider`'s shared interface (every search backend implements
+  it, not just this one) has no time-bound parameter, so `pg-connector search <query>`'s generic
+  fan-out cannot reach this filter yet — extending the shared interface is tracked separately as
+  bead `pg2-emmut`, not decided inside this plan.
 - Out of scope (do not implement): Jira/beads/Slack entity cross-linking, new "hung" detection
   beyond pa-monitor's existing `Status`/`Blocker`/`LongIdle`, the `agent-transcript` capability
   split, exposing the store-layer Active/All `Filter` choice over gRPC.
@@ -74,19 +79,23 @@ already a `pg-connector-contract` umbrella app that will pick up this backend's 
 
 **Interfaces:**
 
-- Produces: `type Match struct { Role string; Line int; Snippet string }` and
-  `func Search(path string, query string) ([]Match, error)` — exported from package
-  `claudetranscript`. Phase 1 Task 4 (pa-monitor's `search` subcommand) and Phase 2 Task 10 (the
-  agentsession backend's own tests, indirectly) both depend on this exact signature.
+- Produces: `type Match struct { Role string; Line int; Snippet string; Timestamp time.Time }` and
+  `func Search(path, query string, since, before time.Time) ([]Match, error)` — exported from
+  package `claudetranscript`. `since`/`before` are zero-value `time.Time` when unbounded. Phase 1
+  Task 4 (pa-monitor's `search` subcommand) and Phase 2 Task 10 (the agentsession backend's own
+  tests, indirectly) both depend on this exact signature. `Event.Timestamp time.Time` already
+  exists (`claude-transcript/events.go:8`, confirmed by direct inspection) — no new parsing is
+  needed to bound by time, only a comparison against a field already decoded.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/claude-transcript/testdata/search-basic.jsonl`:
+Create `packages/claude-transcript/testdata/search-basic.jsonl` (each line now carries a distinct
+`timestamp`, needed for the since/before test cases below):
 
 ```jsonl
-{"type":"user","message":{"role":"user","content":[{"type":"text","text":"can you look at the flaky test in payments?"}]}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I looked at the payments test — it is flaky because of a race in the retry loop."}]}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"unrelated turn about docs"}]}}
+{"type":"user","timestamp":"2026-09-18T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"can you look at the flaky test in payments?"}]}}
+{"type":"assistant","timestamp":"2026-09-18T10:05:00Z","message":{"role":"assistant","content":[{"type":"text","text":"I looked at the payments test — it is flaky because of a race in the retry loop."}]}}
+{"type":"assistant","timestamp":"2026-09-18T11:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"unrelated turn about docs"}]}}
 ```
 
 Create `packages/claude-transcript/search_test.go`:
@@ -94,10 +103,13 @@ Create `packages/claude-transcript/search_test.go`:
 ```go
 package claudetranscript
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSearch_MatchesCaseInsensitiveSubstring(t *testing.T) {
-	matches, err := Search("testdata/search-basic.jsonl", "flaky")
+	matches, err := Search("testdata/search-basic.jsonl", "flaky", time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -113,7 +125,7 @@ func TestSearch_MatchesCaseInsensitiveSubstring(t *testing.T) {
 }
 
 func TestSearch_NoMatches(t *testing.T) {
-	matches, err := Search("testdata/search-basic.jsonl", "nonexistent-token")
+	matches, err := Search("testdata/search-basic.jsonl", "nonexistent-token", time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -123,8 +135,44 @@ func TestSearch_NoMatches(t *testing.T) {
 }
 
 func TestSearch_MissingFile(t *testing.T) {
-	if _, err := Search("testdata/does-not-exist.jsonl", "x"); err == nil {
+	if _, err := Search("testdata/does-not-exist.jsonl", "x", time.Time{}, time.Time{}); err == nil {
 		t.Fatal("expected an error for a missing file, got nil")
+	}
+}
+
+func TestSearch_SinceExcludesEarlierMatches(t *testing.T) {
+	// "flaky" matches lines 1 (10:00) and 2 (10:05). since=10:03 must keep
+	// only line 2.
+	since := time.Date(2026, 9, 18, 10, 3, 0, 0, time.UTC)
+	matches, err := Search("testdata/search-basic.jsonl", "flaky", since, time.Time{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Line != 2 {
+		t.Fatalf("got %+v, want exactly line 2", matches)
+	}
+}
+
+func TestSearch_BeforeExcludesLaterMatches(t *testing.T) {
+	before := time.Date(2026, 9, 18, 10, 3, 0, 0, time.UTC)
+	matches, err := Search("testdata/search-basic.jsonl", "flaky", time.Time{}, before)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Line != 1 {
+		t.Fatalf("got %+v, want exactly line 1", matches)
+	}
+}
+
+func TestSearch_SinceAndBeforeNarrowToOneWindow(t *testing.T) {
+	since := time.Date(2026, 9, 18, 10, 1, 0, 0, time.UTC)
+	before := time.Date(2026, 9, 18, 10, 30, 0, 0, time.UTC)
+	matches, err := Search("testdata/search-basic.jsonl", "flaky", since, before)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Line != 2 {
+		t.Fatalf("got %+v, want exactly line 2", matches)
 	}
 }
 ```
@@ -132,7 +180,7 @@ func TestSearch_MissingFile(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd packages/claude-transcript && go test ./... -run TestSearch -v`
-Expected: FAIL — `Search` (and `Match`) undefined.
+Expected: FAIL — `Search` (and `Match`) undefined, or signature mismatch.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -140,16 +188,18 @@ Create `packages/claude-transcript/search.go`:
 
 ```go
 // search.go: a naive, unindexed per-call scan of one transcript's text
-// content for a substring query — the concrete backing for pg-connector's
-// agentsession search.Provider implementation. Deliberately no index: an
-// efficient/cross-history search is explicitly deferred (design decision,
-// 2026-09-18).
+// content for a substring query, optionally bounded by time — the
+// concrete backing for pg-connector's agentsession search.Provider
+// implementation. Deliberately no index: an efficient/cross-history
+// search is explicitly deferred (design decision, 2026-09-18). The time
+// bound narrows the scan; it does not index it.
 package claudetranscript
 
 import (
 	"encoding/json"
 	"os"
 	"strings"
+	"time"
 )
 
 // Match is one line of one transcript that matched a Search query.
@@ -161,13 +211,18 @@ type Match struct {
 	// Snippet is the matching text block's full text (callers needing a
 	// bounded-length preview truncate it themselves).
 	Snippet string
+	// Timestamp is the matching event's own Timestamp, as already parsed
+	// from the transcript (Event.Timestamp) — not separately computed.
+	Timestamp time.Time
 }
 
 // Search scans path (a transcript .jsonl file) for query as a
 // case-insensitive substring match against every user/assistant text
-// block, returning one Match per matching event. An empty result (nil,
-// nil) is a well-formed "no matches," not an error.
-func Search(path string, query string) ([]Match, error) {
+// block whose own Timestamp falls within [since, before] (either bound
+// may be the zero time.Time, meaning unbounded on that side), returning
+// one Match per matching event. An empty result (nil, nil) is a
+// well-formed "no matches," not an error.
+func Search(path, query string, since, before time.Time) ([]Match, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -187,6 +242,12 @@ func Search(path string, query string) ([]Match, error) {
 		if ev.Type != "user" && ev.Type != "assistant" {
 			continue
 		}
+		if !since.IsZero() && ev.Timestamp.Before(since) {
+			continue
+		}
+		if !before.IsZero() && ev.Timestamp.After(before) {
+			continue
+		}
 		var b strings.Builder
 		for _, blk := range ev.Message.Content {
 			if blk.Type == "text" {
@@ -198,7 +259,7 @@ func Search(path string, query string) ([]Match, error) {
 			continue
 		}
 		if strings.Contains(strings.ToLower(text), lower) {
-			matches = append(matches, Match{Role: ev.Type, Line: line, Snippet: text})
+			matches = append(matches, Match{Role: ev.Type, Line: line, Snippet: text, Timestamp: ev.Timestamp})
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -211,7 +272,7 @@ func Search(path string, query string) ([]Match, error) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd packages/claude-transcript && go test ./... -run TestSearch -v`
-Expected: PASS (all three subtests).
+Expected: PASS (all six subtests).
 
 - [ ] **Step 5: Commit**
 
@@ -682,12 +743,15 @@ git commit -m "pa-monitor: add --json to info"
 
 **Interfaces:**
 
-- Consumes: `claudetranscript.Search(path, query) ([]Match, error)` (Task 1),
-  `session.ResolveTranscript(claudeHome, s *session.Session) (path string, mtime time.Time, ok
-bool)` (existing, `internal/core/session/transcript.go:76`), `stripJSONFlag`/
+- Consumes: `claudetranscript.Search(path, query string, since, before time.Time) ([]Match, error)`
+  (Task 1), `session.ResolveTranscript(claudeHome, s *session.Session) (path string, mtime
+time.Time, ok bool)` (existing, `internal/core/session/transcript.go:76`), `stripJSONFlag`/
   `contextWithTimeout`/`dialOrExit`/`getStateOrExit` (Task 2).
-- Produces: JSON on stdout: `{"query": "...", "matches": [{"session_id","role","line","snippet"}]}`
-  — Phase 2 Task 10 (the agentsession backend's `search.Provider`) unmarshals this exact shape.
+- Produces: JSON on stdout: `{"query": "...", "matches":
+[{"session_id","role","line","snippet","timestamp"}]}` — Phase 2 Task 10 (the agentsession
+  backend's `search.Provider`) unmarshals this exact shape. `--since <bound>`/`--before <bound>`
+  each accept either a `time.ParseDuration` string (interpreted as "this long ago" relative to
+  now) or an absolute RFC3339 timestamp.
 
 **Before writing new code, verify the refactor has a safety net.** Task 2/3 extracted
 `contextWithTimeout`/`dialOrExit`/`getStateOrExit` out of `runStatus`'s inline logic. Read
@@ -713,6 +777,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 )
@@ -730,13 +795,16 @@ func TestParseSearchArgs(t *testing.T) {
 		{"json after query", []string{"flaky", "--json"}, "flaky", "", false},
 		{"with session", []string{"flaky", "--session", "s1"}, "flaky", "s1", false},
 		{"session before query", []string{"--session", "s1", "flaky"}, "flaky", "s1", false},
+		{"with since duration", []string{"flaky", "--since", "24h"}, "flaky", "", false},
+		{"with before rfc3339", []string{"flaky", "--before", "2026-09-18T00:00:00Z"}, "flaky", "", false},
 		{"no query", []string{}, "", "", true},
 		{"two positional", []string{"flaky", "other"}, "", "", true},
 		{"dangling --session", []string{"flaky", "--session"}, "", "", true},
+		{"invalid --since", []string{"flaky", "--since", "not-a-time"}, "", "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			query, sessionID, err := parseSearchArgs(c.args)
+			query, sessionID, _, _, err := parseSearchArgs(c.args, time.Now())
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")
@@ -753,6 +821,30 @@ func TestParseSearchArgs(t *testing.T) {
 	}
 }
 
+func TestParseTimeBound(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	got, err := parseTimeBound("24h", now)
+	if err != nil {
+		t.Fatalf("parseTimeBound(24h): %v", err)
+	}
+	if want := now.Add(-24 * time.Hour); !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	got, err = parseTimeBound("2026-09-17T00:00:00Z", now)
+	if err != nil {
+		t.Fatalf("parseTimeBound(rfc3339): %v", err)
+	}
+	want := time.Date(2026, 9, 17, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if _, err := parseTimeBound("not-a-time", now); err == nil {
+		t.Fatal("expected an error for an unparseable bound")
+	}
+}
+
 func TestSearchSessions_FindsMatchInOneTranscript(t *testing.T) {
 	home := t.TempDir()
 	projDir := filepath.Join(home, "projects", "-repo")
@@ -760,14 +852,14 @@ func TestSearchSessions_FindsMatchInOneTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	transcript := filepath.Join(projDir, "s1.jsonl")
-	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the payments test is flaky"}]}}` + "\n"
+	line := `{"type":"assistant","timestamp":"2026-09-18T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"the payments test is flaky"}]}}` + "\n"
 	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	sessions := []*session.Session{{SessionID: "s1", Cwd: "/repo"}}
 	var buf bytes.Buffer
-	if err := searchSessions(&buf, home, sessions, "flaky", ""); err != nil {
+	if err := searchSessions(&buf, home, sessions, "flaky", "", time.Time{}, time.Time{}); err != nil {
 		t.Fatalf("searchSessions: %v", err)
 	}
 
@@ -778,7 +870,7 @@ func TestSearchSessions_FindsMatchInOneTranscript(t *testing.T) {
 	if doc.Query != "flaky" || len(doc.Matches) != 1 {
 		t.Fatalf("got %+v", doc)
 	}
-	if doc.Matches[0].SessionID != "s1" || doc.Matches[0].Role != "assistant" {
+	if doc.Matches[0].SessionID != "s1" || doc.Matches[0].Role != "assistant" || doc.Matches[0].Timestamp == "" {
 		t.Errorf("match wrong: %+v", doc.Matches[0])
 	}
 }
@@ -789,13 +881,37 @@ func TestSearchSessions_ScopedToOneSession(t *testing.T) {
 	var buf bytes.Buffer
 	// Neither session has a real transcript on disk; --session s2 must not
 	// error just because s1 (unresolvable) is in the broader session list.
-	if err := searchSessions(&buf, home, sessions, "x", "s2"); err != nil {
+	if err := searchSessions(&buf, home, sessions, "x", "s2", time.Time{}, time.Time{}); err != nil {
 		t.Fatalf("searchSessions: %v", err)
 	}
 	var doc searchJSONDoc
 	_ = json.Unmarshal(buf.Bytes(), &doc)
 	if len(doc.Matches) != 0 {
 		t.Errorf("expected no matches for an unresolvable transcript, got %+v", doc.Matches)
+	}
+}
+
+func TestSearchSessions_SinceExcludesEarlierMatch(t *testing.T) {
+	home := t.TempDir()
+	projDir := filepath.Join(home, "projects", "-repo")
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := filepath.Join(projDir, "s1.jsonl")
+	line := `{"type":"assistant","timestamp":"2026-09-18T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"the payments test is flaky"}]}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessions := []*session.Session{{SessionID: "s1", Cwd: "/repo"}}
+	since := time.Date(2026, 9, 18, 11, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	if err := searchSessions(&buf, home, sessions, "flaky", "", since, time.Time{}); err != nil {
+		t.Fatalf("searchSessions: %v", err)
+	}
+	var doc searchJSONDoc
+	_ = json.Unmarshal(buf.Bytes(), &doc)
+	if len(doc.Matches) != 0 {
+		t.Errorf("expected the match to be excluded by --since, got %+v", doc.Matches)
 	}
 }
 ```
@@ -812,8 +928,9 @@ Create `packages/pa-monitor/cmd/pa-monitor/search.go`:
 ```go
 // search.go: the `search` subcommand — resolves each in-scope session's
 // transcript via session.ResolveTranscript, then scans it with
-// claude-transcript's naive Search primitive. No index, no daemon RPC of
-// its own beyond whatever runSearch used to build the session list.
+// claude-transcript's naive Search primitive, optionally bounded by
+// --since/--before. No index, no daemon RPC of its own beyond whatever
+// runSearch used to build the session list.
 package main
 
 import (
@@ -822,6 +939,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
@@ -832,6 +950,7 @@ type searchMatchJSON struct {
 	Role      string `json:"role"`
 	Line      int    `json:"line"`
 	Snippet   string `json:"snippet"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 type searchJSONDoc struct {
@@ -839,38 +958,77 @@ type searchJSONDoc struct {
 	Matches []searchMatchJSON `json:"matches"`
 }
 
+// parseTimeBound parses a --since/--before value as either a
+// time.ParseDuration string (interpreted as "this long ago" relative to
+// now — mirrors this repo's existing attention.perBackend.threshold
+// convention, e.g. "24h") or an absolute RFC3339 timestamp. The two forms
+// never collide syntactically (a duration string has no "-"/":"/"T"
+// punctuation), so duration is tried first with no ambiguity.
+func parseTimeBound(s string, now time.Time) (time.Time, error) {
+	if d, err := time.ParseDuration(s); err == nil {
+		return now.Add(-d), nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid time bound %q: not a duration (e.g. \"24h\") or RFC3339 timestamp", s)
+	}
+	return t, nil
+}
+
 // parseSearchArgs parses `search`'s own argv: exactly one positional query
 // token, an optional "--json" flag (accepted but not required — search has
 // no text-output mode, so this flag is a no-op kept only for command-line
-// symmetry with status/info), and an optional "--session <id>" value flag
-// — any of the three MAY appear in any order.
-func parseSearchArgs(args []string) (query, sessionID string, err error) {
+// symmetry with status/info), and optional "--session <id>"/"--since
+// <bound>"/"--before <bound>" value flags — any of these MAY appear in any
+// order. now is injected for testability; production callers pass
+// time.Now().UTC().
+func parseSearchArgs(args []string, now time.Time) (query, sessionID string, since, before time.Time, err error) {
 	rest, _ := stripJSONFlag(args)
 	var positional []string
 	for i := 0; i < len(rest); i++ {
-		if rest[i] == "--session" {
+		switch rest[i] {
+		case "--session":
 			if i+1 >= len(rest) {
-				return "", "", errors.New("search: --session requires a value")
+				return "", "", time.Time{}, time.Time{}, errors.New("search: --session requires a value")
 			}
 			sessionID = rest[i+1]
 			i++
-			continue
+		case "--since":
+			if i+1 >= len(rest) {
+				return "", "", time.Time{}, time.Time{}, errors.New("search: --since requires a value")
+			}
+			since, err = parseTimeBound(rest[i+1], now)
+			if err != nil {
+				return "", "", time.Time{}, time.Time{}, fmt.Errorf("search: --since: %w", err)
+			}
+			i++
+		case "--before":
+			if i+1 >= len(rest) {
+				return "", "", time.Time{}, time.Time{}, errors.New("search: --before requires a value")
+			}
+			before, err = parseTimeBound(rest[i+1], now)
+			if err != nil {
+				return "", "", time.Time{}, time.Time{}, fmt.Errorf("search: --before: %w", err)
+			}
+			i++
+		default:
+			positional = append(positional, rest[i])
 		}
-		positional = append(positional, rest[i])
 	}
 	if len(positional) != 1 {
-		return "", "", fmt.Errorf("search: expected exactly one query argument, got %d", len(positional))
+		return "", "", time.Time{}, time.Time{}, fmt.Errorf("search: expected exactly one query argument, got %d", len(positional))
 	}
-	return positional[0], sessionID, nil
+	return positional[0], sessionID, since, before, nil
 }
 
 // searchSessions scans every session in sessions (or only sessionID, when
-// non-empty) for query, writing the result as JSON to w. A session whose
-// transcript cannot be resolved (ResolveTranscript's ok == false) is
-// silently skipped — not an error, mirroring how a dead/cold session is
-// silently skipped elsewhere in this CLI (e.g. runStatus's per-session
-// GetSessionInfo loop).
-func searchSessions(w io.Writer, claudeHome string, sessions []*session.Session, query, sessionID string) error {
+// non-empty) for query within [since, before] (either may be the zero
+// time.Time, meaning unbounded), writing the result as JSON to w. A
+// session whose transcript cannot be resolved (ResolveTranscript's ok ==
+// false) is silently skipped — not an error, mirroring how a dead/cold
+// session is silently skipped elsewhere in this CLI (e.g. runStatus's
+// per-session GetSessionInfo loop).
+func searchSessions(w io.Writer, claudeHome string, sessions []*session.Session, query, sessionID string, since, before time.Time) error {
 	doc := searchJSONDoc{Query: query}
 	for _, s := range sessions {
 		if sessionID != "" && s.SessionID != sessionID {
@@ -880,14 +1038,16 @@ func searchSessions(w io.Writer, claudeHome string, sessions []*session.Session,
 		if !ok {
 			continue
 		}
-		matches, err := claudetranscript.Search(path, query)
+		matches, err := claudetranscript.Search(path, query, since, before)
 		if err != nil {
 			continue // unreadable transcript: skip, don't fail the whole search
 		}
 		for _, m := range matches {
-			doc.Matches = append(doc.Matches, searchMatchJSON{
-				SessionID: s.SessionID, Role: m.Role, Line: m.Line, Snippet: m.Snippet,
-			})
+			mj := searchMatchJSON{SessionID: s.SessionID, Role: m.Role, Line: m.Line, Snippet: m.Snippet}
+			if !m.Timestamp.IsZero() {
+				mj.Timestamp = m.Timestamp.UTC().Format(time.RFC3339)
+			}
+			doc.Matches = append(doc.Matches, mj)
 		}
 	}
 	enc := json.NewEncoder(w)
@@ -895,13 +1055,13 @@ func searchSessions(w io.Writer, claudeHome string, sessions []*session.Session,
 }
 
 // runSearch implements the `search` subcommand: `pa-monitor search
-// [--json] <query> [--session <id>]`. It dials the daemon the same way
-// runStatus does (via Task 2's shared helpers), converts the returned
-// SessionViews into session.Session values (only the fields
-// ResolveTranscript needs: SessionID, Cwd, Name), and delegates to
-// searchSessions.
+// [--json] <query> [--session <id>] [--since <bound>] [--before <bound>]`.
+// It dials the daemon the same way runStatus does (via Task 2's shared
+// helpers), converts the returned SessionViews into session.Session
+// values (only the fields ResolveTranscript needs: SessionID, Cwd, Name),
+// and delegates to searchSessions.
 func runSearch(args []string) {
-	query, sessionID, err := parseSearchArgs(args)
+	query, sessionID, since, before, err := parseSearchArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(3)
@@ -938,7 +1098,7 @@ func runSearch(args []string) {
 		os.Exit(2)
 	}
 	claudeHome := home + "/.claude"
-	if err := searchSessions(os.Stdout, claudeHome, sessions, query, sessionID); err != nil {
+	if err := searchSessions(os.Stdout, claudeHome, sessions, query, sessionID, since, before); err != nil {
 		fmt.Fprintf(os.Stderr, "search: %v\n", err)
 		os.Exit(2)
 	}
@@ -2195,6 +2355,7 @@ type searchMatchJSON struct {
 	Role      string `json:"role"`
 	Line      int    `json:"line"`
 	Snippet   string `json:"snippet"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 type searchJSONDoc struct {
@@ -2204,7 +2365,12 @@ type searchJSONDoc struct {
 // Search ignores fields — pa-monitor's search subcommand has no
 // attribute-selection concept; a well-behaved Provider silently ignores an
 // unsupported requested attribute (pkg/provider/search.Provider's own
-// documented freedom boundary).
+// documented freedom boundary). It cannot pass a time bound through to
+// `pa-monitor search` here: pkg/provider/search.Provider's own signature
+// (query, fields — shared by every search backend, not just this one) has
+// no time-bound parameter at all, so this call is always unbounded
+// regardless of pa-monitor's own --since/--before support. Extending the
+// shared interface to carry one is tracked separately as bead pg2-emmut.
 func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schema.SearchResult, error) {
 	raw, err := b.runner.Search(ctx, query, "")
 	if err != nil {
@@ -2216,9 +2382,13 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 	}
 	var results []schema.SearchResult
 	for _, m := range doc.Matches {
+		attrs := map[string]any{"role": m.Role, "line": m.Line}
+		if m.Timestamp != "" {
+			attrs["timestamp"] = m.Timestamp
+		}
 		results = append(results, schema.SearchResult{
 			Type: "agentsession", ID: m.SessionID, Title: m.Snippet, Source: "pa-monitor",
-			Attributes: map[string]any{"role": m.Role, "line": m.Line},
+			Attributes: attrs,
 		})
 	}
 	return results, nil
@@ -2561,3 +2731,10 @@ git commit -m "ziprecruiter: register pg-connector-agentsession-pa-monitor backe
   `packages/pg-connector/flake.nix` to the real repo-root `flake.nix`; Task 14 rewritten against
   the real, current `phillipg-nix-ziprecruiter` machine config shape (no `thread` entry exists
   there to mirror, as an earlier draft claimed) instead of a fabricated precedent.
+- **`--since`/`--before` time-bound filtering added (2026-09-18, user request):** Task 1
+  (`claudetranscript.Search`) and Task 4 (`pa-monitor search`) now take a `since`/`before` bound,
+  using each transcript event's own already-parsed `Timestamp` field — no new data needed, only a
+  comparison. This filter is reachable only via `pa-monitor search` directly; the shared
+  `pkg/provider/search.Provider` interface every search backend implements has no time-bound
+  parameter, so extending it is out of scope here and tracked as its own exploration bead,
+  `pg2-emmut`.
