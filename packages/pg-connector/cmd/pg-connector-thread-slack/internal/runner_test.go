@@ -89,11 +89,10 @@ func TestCLIRunner_Command_ArgsAndStdin(t *testing.T) {
 		}
 	}
 
-	stdin, ok := cmd.Stdin.(io.Reader)
-	if !ok {
-		t.Fatalf("cmd.Stdin = %#v, want an io.Reader", cmd.Stdin)
+	if cmd.Stdin == nil {
+		t.Fatal("cmd.Stdin is nil, want the prompt reader command() set")
 	}
-	got, err := io.ReadAll(stdin)
+	got, err := io.ReadAll(cmd.Stdin)
 	if err != nil {
 		t.Fatalf("read stdin: %v", err)
 	}
