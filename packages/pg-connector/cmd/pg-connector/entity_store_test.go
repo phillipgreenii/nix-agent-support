@@ -24,14 +24,15 @@ import (
 // this same heuristic even though no Thread type exists anywhere in
 // pkg/schema yet.
 var entityKindTokens = map[string]string{
-	"pr":       "pr",
-	"issue":    "issue",
-	"ci":       "ci",
-	"cirun":    "ci",
-	"scm":      "scm",
-	"worktree": "scm",
-	"branch":   "scm",
-	"thread":   "thread",
+	"pr":           "pr",
+	"issue":        "issue",
+	"ci":           "ci",
+	"cirun":        "ci",
+	"scm":          "scm",
+	"worktree":     "scm",
+	"branch":       "scm",
+	"thread":       "thread",
+	"agentsession": "agentsession",
 }
 
 // entityKindOf heuristically maps a Go identifier (a struct field name, or

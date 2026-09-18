@@ -27,12 +27,13 @@ package schema
 // yet know about) is not a mismatch by omission — the caller skips keys
 // it has no opinion on rather than treating "unknown to me" as "wrong."
 var CurrentSchemaVersions = map[string]int{
-	"pr":        PRSchemaVersion,
-	"ci":        CISchemaVersion,
-	"scm":       ScmSchemaVersion,
-	"issue":     IssueSchemaVersion,
-	"attention": AttentionSchemaVersion,
-	"search":    SearchSchemaVersion,
-	"thread":    ThreadSchemaVersion,
-	"calendar":  CalendarSchemaVersion,
+	"pr":           PRSchemaVersion,
+	"ci":           CISchemaVersion,
+	"scm":          ScmSchemaVersion,
+	"issue":        IssueSchemaVersion,
+	"attention":    AttentionSchemaVersion,
+	"search":       SearchSchemaVersion,
+	"thread":       ThreadSchemaVersion,
+	"calendar":     CalendarSchemaVersion,
+	"agentsession": AgentSessionSchemaVersion,
 }
