@@ -32,6 +32,11 @@ let
     # calendar names hardcoded here) -- the real registration lives in the
     # consuming machine flake (phillipg-nix-ziprecruiter).
     calendar = if cfg.connector.calendar == [ ] then null else cfg.connector.calendar;
+    # agentsession (docket pg2-eezd1): mirrors thread/calendar's identical
+    # empty-list-omission pattern above -- registry.go's
+    # validateBackendList rejects an explicit `connector.agentsession: []`
+    # the same way.
+    agentsession = if cfg.connector.agentsession == [ ] then null else cfg.connector.agentsession;
   };
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
@@ -161,6 +166,19 @@ in
             type = lib.types.listOf lib.types.str;
             default = [ ];
             description = "Registered `calendar` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+          };
+          # agentsession (docket pg2-eezd1): a WHOLLY NEW capability,
+          # mirroring thread's exact shape (list-of-str, default [ ])
+          # rather than scm's single-valued one. Without this field, a
+          # machine config setting
+          # `connector.agentsession = [ "pg-connector-agentsession-pa-monitor" ]`
+          # is a hard Nix eval error ("option does not exist"). Default
+          # stays [ ] here (this repo is a public flake) -- the real
+          # registration lives in the consuming machine flake(s).
+          agentsession = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `agentsession` capability backends (bare binary names, resolved on PATH), in fan-out order.";
           };
         };
       };
@@ -330,10 +348,10 @@ in
     # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
     # binary named in the connector.<type> registry
     # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
-    # linkage between the binaries. All six backends therefore MUST ship
+    # linkage between the binaries. All seven backends therefore MUST ship
     # alongside cfg.package whenever this module is enabled, or dispatch to
     # that capability fails at runtime with "executable file not found in
-    # $PATH". None of the six has an independent CLI identity of its own
+    # $PATH". None of the seven has an independent CLI identity of its own
     # (each package's own meta.description says so — they speak only the
     # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
     # are not exposed as separate mkPackageOption overrides here; they are
@@ -346,7 +364,10 @@ in
     # osx-bridge joins in turn (docket pg2-o2dmu): installed
     # unconditionally, independent of whether connector.calendar is itself
     # populated -- mirrors every other Tier-2 backend's own
-    # always-installed convention.
+    # always-installed convention. pg-connector-agentsession-pa-monitor
+    # joins in turn (docket pg2-eezd1): also always-installed, independent
+    # of whether connector.agentsession is itself populated -- it answers
+    # the attention and search capabilities too, not only agentsession.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -356,6 +377,7 @@ in
       pkgs.pg-connector-scm-git
       pkgs.pg-connector-thread-slack
       pkgs.pg-connector-calendar-osx-bridge
+      pkgs.pg-connector-agentsession-pa-monitor
     ];
 
     # No programs.tldr.customPages entry: unlike pg-pr's own module,

@@ -230,6 +230,20 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-agentsession-pa-monitor: the agentsession
+          # capability's Tier-2 pa-monitor backend (docket pg2-eezd1) —
+          # another mkGoApp call over the SAME packages/pg-connector module
+          # (shared src + gomod2nixToml) as every sibling backend entry
+          # above, building the standalone scriptout-only binary from
+          # packages/pg-connector/pg-connector-agentsession-pa-monitor.nix.
+          # This backend also answers the attention and search
+          # capabilities (Tasks 8/9/10) — its own .nix file's src fileset
+          # names all three provider subpackages.
+          pg-connector-agentsession-pa-monitor =
+            final.callPackage ./packages/pg-connector/pg-connector-agentsession-pa-monitor.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
@@ -5716,6 +5730,7 @@
               pg-connector-scm-git
               pg-connector-thread-slack
               pg-connector-calendar-osx-bridge
+              pg-connector-agentsession-pa-monitor
               pg-ccaudit
               pg-router-source-pg-connector
               integrate-branch-support
