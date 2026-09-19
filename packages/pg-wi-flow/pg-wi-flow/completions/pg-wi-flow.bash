@@ -2,7 +2,7 @@ _pg_wi_flow() {
   local cur prev
   _init_completion || return
 
-  local -a commands=(query list next claim release)
+  local -a commands=(query list next claim release annotate record-verdict round advance create-child merge close close-duplicate)
 
   if [[ $COMP_CWORD -eq 1 ]]; then
     if [[ $cur == -* ]]; then
@@ -15,10 +15,9 @@ _pg_wi_flow() {
 
   prev="${COMP_WORDS[COMP_CWORD - 1]}"
   case "$prev" in
-  --stage)
-    return
-    ;;
-  --days | --reserved-hours | --actor)
+  --stage | --days | --reserved-hours | --actor | --kind | --component | --premise | --acceptance | \
+    --append-description | --append-notes | --design | --concern | --json | --to | --reason | \
+    --title | --blocked-by | --description | --into | --of | --trace)
     return
     ;;
   esac
@@ -35,6 +34,29 @@ _pg_wi_flow() {
     ;;
   claim | release)
     # positional ID -- nothing sensible to offer without a live tracker.
+    ;;
+  annotate)
+    mapfile -t COMPREPLY < <(compgen -W "--kind --component --premise --acceptance --append-description --append-notes --design" -- "$cur")
+    ;;
+  record-verdict)
+    mapfile -t COMPREPLY < <(compgen -W "--concern --json" -- "$cur")
+    ;;
+  round)
+    ;;
+  advance)
+    mapfile -t COMPREPLY < <(compgen -W "--to --reason" -- "$cur")
+    ;;
+  create-child)
+    mapfile -t COMPREPLY < <(compgen -W "--title --kind --stage --blocked-by --description" -- "$cur")
+    ;;
+  merge)
+    mapfile -t COMPREPLY < <(compgen -W "--into" -- "$cur")
+    ;;
+  close)
+    mapfile -t COMPREPLY < <(compgen -W "--reason --trace" -- "$cur")
+    ;;
+  close-duplicate)
+    mapfile -t COMPREPLY < <(compgen -W "--of" -- "$cur")
     ;;
   esac
 }

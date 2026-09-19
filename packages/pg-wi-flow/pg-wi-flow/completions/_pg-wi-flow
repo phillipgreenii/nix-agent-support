@@ -4,7 +4,7 @@ _arguments -C \
   '(-h --help)'{-h,--help}'[Show help message]' \
   '(-v --version)'{-v,--version}'[Show version information]' \
   '--actor[Explicit actor override (outside Claude Code only)]:actor:' \
-  '1: :(query list next claim release)' \
+  '1: :(query list next claim release annotate record-verdict round advance create-child merge close close-duplicate)' \
   '*::arg:->args'
 
 case $words[1] in
@@ -28,5 +28,56 @@ next)
   ;;
 claim | release)
   _arguments '1:item id:'
+  ;;
+annotate)
+  _arguments \
+    '1:item id:' \
+    '--kind[Classify kind]:kind:' \
+    '--component[Classify component]:component:' \
+    '--premise[External target the acceptance depends on]:premise:' \
+    '--acceptance[Acceptance criteria]:acceptance:' \
+    '--append-description[Append to the description]:text:' \
+    '--append-notes[Append to notes]:text:' \
+    '--design[Design notes]:design:'
+  ;;
+record-verdict)
+  _arguments \
+    '1:item id:' \
+    '--concern[Concern name]:concern:' \
+    '--json[Verdict JSON file, or - for stdin]:file:_files'
+  ;;
+round)
+  _arguments '1:item id:'
+  ;;
+advance)
+  _arguments \
+    '1:item id:' \
+    '--to[Target stage]:stage:' \
+    '--reason[Required for a move to a lower-order stage]:reason:'
+  ;;
+create-child)
+  _arguments \
+    '1:parent id:' \
+    '--title[Child title]:title:' \
+    '--kind[Child kind]:kind:' \
+    '--stage[Child stage (default: entry)]:stage:' \
+    '*--blocked-by[Blocking dependency id]:id:' \
+    '--description[Child description]:description:'
+  ;;
+merge)
+  _arguments \
+    '*:item id:' \
+    '--into[Survivor id]:id:'
+  ;;
+close)
+  _arguments \
+    '1:item id:' \
+    '--reason[Close reason]:reason:' \
+    '*--trace[bullet=disposition]:trace:'
+  ;;
+close-duplicate)
+  _arguments \
+    '1:item id:' \
+    '--of[Canonical (older, open) id]:id:'
   ;;
 esac

@@ -369,3 +369,701 @@ pgwf_cmd_release() {
 
   pgwf_tracker_release "$id" "$actor" >/dev/null
 }
+
+# pgwf_stamp_top_level_workflow CONFIG_JSON ID ACTOR -- stamps ID's
+# `wi_workflow` metadata with the primary configured workflow's name
+# [design: ## Configuration, "Three terms": "every top-level item the CLI
+# creates is stamped with it [the primary workflow]"]. A no-op when no real
+# workflow is configured (the primary resolves to the built-in null
+# workflow): stamping the null sentinel would permanently pin the item to
+# it, defeating the ancestry-fallback mechanism a later phase's real
+# `workflows` config relies on. Used by close --trace's `filed:` items --
+# the only NEW top-level (parentless) items this packet's verbs create.
+pgwf_stamp_top_level_workflow() {
+  local config_json="$1" id="$2" actor="$3" primary
+  primary="$(pgwf_config_primary_workflow_name "$config_json")" || return 1
+  if [[ $primary != "$PGWF_NULL_WORKFLOW_NAME" ]]; then
+    pgwf_tracker_update "$id" "$actor" --set-metadata "wi_workflow=${primary}" >/dev/null
+  fi
+}
+
+# pgwf_prefixed_labels_to_remove ITEM_JSON PREFIX -- ITEM_JSON's existing
+# PREFIX-prefixed labels (kind:/component:, both single-valued per ##
+# State model -> Axis 3), one per line -- what annotate's --kind/
+# --component must --remove-label before --add-label'ing the new value.
+pgwf_prefixed_labels_to_remove() {
+  local item_json="$1" prefix="$2"
+  jq -r --arg p "$prefix" '(.labels // [])[] | select(startswith($p))' <<<"$item_json"
+}
+
+# pgwf_cmd_annotate ID [--kind k] [--component c] [--premise p]
+# [--acceptance t] [--append-description t] [--append-notes t]
+# [--design t] -- the only way to write item content; flags are combinable
+# in one call [design: ## Components table, annotate row]. --kind/
+# --component replace any existing same-prefixed label (single-valued, ##
+# State model Axis 3); --premise is stored in metadata (WI_PREMISE has no
+# native bd field); --acceptance/--design/--append-notes route straight to
+# bd's own flags; --append-description reads the current description and
+# appends with a newline separator (bd has no native --append-description).
+pgwf_cmd_annotate() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: annotate: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local kind="" component="" premise="" acceptance="" append_description="" append_notes="" design=""
+  local have_kind=0 have_component=0 have_premise=0 have_acceptance=0
+  local have_append_description=0 have_append_notes=0 have_design=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --kind)
+      kind="$2"
+      have_kind=1
+      shift 2
+      ;;
+    --component)
+      component="$2"
+      have_component=1
+      shift 2
+      ;;
+    --premise)
+      premise="$2"
+      have_premise=1
+      shift 2
+      ;;
+    --acceptance)
+      acceptance="$2"
+      have_acceptance=1
+      shift 2
+      ;;
+    --append-description)
+      append_description="$2"
+      have_append_description=1
+      shift 2
+      ;;
+    --append-notes)
+      append_notes="$2"
+      have_append_notes=1
+      shift 2
+      ;;
+    --design)
+      design="$2"
+      have_design=1
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: annotate: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+
+  if [[ $have_kind -eq 0 && $have_component -eq 0 && $have_premise -eq 0 && $have_acceptance -eq 0 &&
+    $have_append_description -eq 0 && $have_append_notes -eq 0 && $have_design -eq 0 ]]; then
+    echo "pg-wi-flow: annotate: at least one flag is required" >&2
+    return 1
+  fi
+
+  local config_json stage actor item_json
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+  item_json="$(pgwf_tracker_show_json "$id")" || return 1
+
+  local -a update_args=()
+
+  if [[ $have_kind -eq 1 ]]; then
+    local kind_prefix l
+    kind_prefix="$(pgwf_config_label "$config_json" kind_prefix 'kind:')"
+    while IFS= read -r l; do
+      [[ -n $l ]] && update_args+=(--remove-label "$l")
+    done < <(pgwf_prefixed_labels_to_remove "$item_json" "$kind_prefix")
+    update_args+=(--add-label "${kind_prefix}${kind}")
+  fi
+
+  if [[ $have_component -eq 1 ]]; then
+    local component_prefix l
+    component_prefix="$(pgwf_config_label "$config_json" component_prefix 'component:')"
+    while IFS= read -r l; do
+      [[ -n $l ]] && update_args+=(--remove-label "$l")
+    done < <(pgwf_prefixed_labels_to_remove "$item_json" "$component_prefix")
+    update_args+=(--add-label "${component_prefix}${component}")
+  fi
+
+  [[ $have_premise -eq 1 ]] && update_args+=(--set-metadata "wi_premise=${premise}")
+  [[ $have_acceptance -eq 1 ]] && update_args+=(--acceptance "$acceptance")
+  [[ $have_design -eq 1 ]] && update_args+=(--design "$design")
+  [[ $have_append_notes -eq 1 ]] && update_args+=(--append-notes "$append_notes")
+
+  if [[ $have_append_description -eq 1 ]]; then
+    local cur_desc new_desc
+    cur_desc="$(jq -r '.description // ""' <<<"$item_json")"
+    if [[ -n $cur_desc ]]; then
+      new_desc="${cur_desc}"$'\n'"${append_description}"
+    else
+      new_desc="$append_description"
+    fi
+    update_args+=(--description "$new_desc")
+  fi
+
+  pgwf_tracker_update "$id" "$actor" "${update_args[@]}" >/dev/null
+}
+
+# pgwf_cmd_record_verdict ID --concern C --json <file|-> -- run BY THE
+# REVIEWER LEAF; records C's verdict for the CURRENT round in item metadata
+# [design: ## Components table, record-verdict row; ## Reviewer verdict
+# contract for the illustrative --json shape]. `round` reads it back.
+# Concrete schema (this packet's own freedom boundary, documented per the
+# packet's Binding decisions): the raw --json payload is stored verbatim,
+# compacted, under metadata key "wi_verdict_r<round>_<concern>" -- round
+# re-parses it directly (bd metadata values are plain strings throughout
+# this codebase, e.g. wi_workflow; no double-JSON-encoding is introduced).
+pgwf_cmd_record_verdict() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: record-verdict: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local concern="" json_src=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --concern)
+      concern="$2"
+      shift 2
+      ;;
+    --json)
+      json_src="$2"
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: record-verdict: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+  if [[ -z $concern || -z $json_src ]]; then
+    echo "pg-wi-flow: record-verdict: --concern and --json are required" >&2
+    return 1
+  fi
+
+  local payload
+  if [[ $json_src == "-" ]]; then
+    payload="$(cat)"
+  else
+    if [[ ! -f $json_src ]]; then
+      echo "pg-wi-flow: record-verdict: no such file: $json_src" >&2
+      return 1
+    fi
+    payload="$(cat "$json_src")"
+  fi
+
+  local compact
+  if ! compact="$(jq -c '.' <<<"$payload" 2>/dev/null)"; then
+    echo "pg-wi-flow: record-verdict: --json is not valid JSON" >&2
+    return 1
+  fi
+
+  local verdict
+  verdict="$(jq -r '.verdict // empty' <<<"$compact")"
+  case "$verdict" in
+  ready | gaps | blocked | duplicate | related) ;;
+  *)
+    echo "pg-wi-flow: record-verdict: verdict must be one of ready|gaps|blocked|duplicate|related, got: ${verdict:-<none>}" >&2
+    return 1
+    ;;
+  esac
+
+  local config_json stage actor round
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+  round="$(pgwf_tracker_metadata_field "$id" wi_round)" || return 1
+  round="${round:-0}"
+
+  pgwf_tracker_update "$id" "$actor" --set-metadata "wi_verdict_r${round}_${concern}=${compact}" >/dev/null
+}
+
+# pgwf_cmd_round ID -- reads every verdict record-verdict recorded for the
+# CURRENT round from item metadata (no --verdicts file -- nothing is passed
+# in by hand); merges them, increments the round counter, and prints the
+# merged verdict plus WI_MUST_ESCALATE when the (post-increment) counter
+# reaches iteration_bound without ready [design: ## The flow -> "Per-stage
+# loop" steps 1-2, quoted verbatim in this packet's own Contract]. Merge
+# priority (this packet's own freedom boundary): any concern verdict
+# `blocked` wins outright; else the `intent` concern's own
+# duplicate/related verdict wins (per "duplicate <id> / related <ids> when
+# the intent verdict says so"); else any `gaps` wins; else `ready`.
+pgwf_cmd_round() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: round: missing ID" >&2
+    return 1
+  fi
+
+  local config_json stage actor item_json round iteration_bound
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+  item_json="$(pgwf_tracker_show_json "$id")" || return 1
+  round="$(jq -r '.metadata.wi_round // "0"' <<<"$item_json")"
+  iteration_bound="$(pgwf_config_iteration_bound "$config_json")"
+
+  local prefix="wi_verdict_r${round}_"
+  local -a verdicts=()
+  mapfile -t verdicts < <(jq -r --arg p "$prefix" \
+    '(.metadata // {}) | to_entries[] | select(.key | startswith($p)) | .value' <<<"$item_json")
+
+  if [[ ${#verdicts[@]} -eq 0 ]]; then
+    echo "pg-wi-flow: round: no verdicts recorded for round $round" >&2
+    return 1
+  fi
+
+  local blocked=0 any_gaps=0 intent_verdict="" intent_of=""
+  local v verdict_value concern_value
+  for v in "${verdicts[@]}"; do
+    verdict_value="$(jq -r '.verdict // empty' <<<"$v")"
+    concern_value="$(jq -r '.concern // empty' <<<"$v")"
+    case "$verdict_value" in
+    blocked) blocked=1 ;;
+    gaps) any_gaps=1 ;;
+    esac
+    if [[ $concern_value == intent ]]; then
+      intent_verdict="$verdict_value"
+      intent_of="$(jq -r '(.of // []) | join(",")' <<<"$v")"
+    fi
+  done
+
+  local merged
+  if [[ $blocked -eq 1 ]]; then
+    merged="blocked"
+  elif [[ $intent_verdict == duplicate ]]; then
+    merged="duplicate ${intent_of}"
+  elif [[ $intent_verdict == related ]]; then
+    merged="related ${intent_of}"
+  elif [[ $any_gaps -eq 1 ]]; then
+    merged="gaps"
+  else
+    merged="ready"
+  fi
+
+  local -i new_round=$((round + 1))
+  pgwf_tracker_update "$id" "$actor" --set-metadata "wi_round=${new_round}" >/dev/null
+
+  printf '%s\n' "$merged"
+  if [[ $merged != "ready" && $new_round -ge $iteration_bound ]]; then
+    echo "WI_MUST_ESCALATE=true"
+  fi
+}
+
+# pgwf_cmd_advance ID --to STAGE [--reason TEXT] -- validates C-2 (STAGE
+# exists in ID's workflow; a move to a LOWER-order stage requires --reason),
+# swaps the stage label through pgwf_advance_stage (the ONE stage-label
+# writer, shared with `next`'s childless-container case and create-child's
+# --stage), and adds `container` if ID has any children [design: ##
+# Configuration C-2; ## Components table, advance row; ## State model ->
+# Axis 1, "advance is the ONLY writer of stage labels"]. NEVER creates a
+# land bead.
+pgwf_cmd_advance() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: advance: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local to="" reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --to)
+      to="$2"
+      shift 2
+      ;;
+    --reason)
+      reason="$2"
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: advance: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+  if [[ -z $to ]]; then
+    echo "pg-wi-flow: advance: --to is required" >&2
+    return 1
+  fi
+
+  local config_json workflow stages
+  config_json="$(pgwf_config_effective)" || return 1
+  workflow="$(pgwf_workflow_for "$config_json" "$id")" || return 1
+  stages="$(pgwf_workflow_stages_by_name "$config_json" "$workflow")"
+
+  if ! pgwf_workflow_stage_exists "$stages" "$to"; then
+    echo "pg-wi-flow: advance: $to is not a stage in workflow $workflow" >&2
+    return 1
+  fi
+
+  local cur_stage cur_order to_order actor
+  cur_stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  cur_order="$(pgwf_workflow_stage_order "$stages" "$cur_stage")"
+  to_order="$(pgwf_workflow_stage_order "$stages" "$to")"
+
+  if [[ -n $cur_order && -n $to_order ]] && ((to_order < cur_order)) && [[ -z $reason ]]; then
+    echo "pg-wi-flow: advance: moving to a lower-order stage ($to) requires --reason" >&2
+    return 1
+  fi
+
+  actor="$(pgwf_current_actor "$cur_stage")" || return 1
+  pgwf_advance_stage "$config_json" "$id" "$to" "$actor" "$reason" || return 1
+
+  local children
+  children="$(pgwf_tracker_any_children "$id")" || return 1
+  if [[ "$(jq 'length' <<<"$children")" -gt 0 ]] && ! pgwf_tracker_has_label "$id" container; then
+    pgwf_tracker_update "$id" "$actor" --add-label container >/dev/null
+  fi
+}
+
+# pgwf_cmd_create_child PARENT --title T [--kind K] [--stage S]
+# [--blocked-by ID]... [--description T] -- new child at the workflow's
+# entry stage (or --stage, validated against the child's INHERITED
+# workflow exactly like C-2); parent gains `container` in the same call and
+# STAYS OPEN; no inherited labels, no supersedes link; each --blocked-by
+# adds a blocking edge from the child to ID (repeatable) [design: ##
+# Components table, create-child row; ## State model -> "Containers"].
+# --stage's label write (when non-entry) goes through the SAME
+# pgwf_advance_stage primitive `advance` uses, keeping "advance is the only
+# stage-label writer" true even here.
+pgwf_cmd_create_child() {
+  local parent="${1:-}"
+  if [[ -z $parent ]]; then
+    echo "pg-wi-flow: create-child: missing PARENT" >&2
+    return 1
+  fi
+  shift
+
+  local title="" kind="" stage="" description=""
+  local -a blocked_by=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --title)
+      title="$2"
+      shift 2
+      ;;
+    --kind)
+      kind="$2"
+      shift 2
+      ;;
+    --stage)
+      stage="$2"
+      shift 2
+      ;;
+    --blocked-by)
+      blocked_by+=("$2")
+      shift 2
+      ;;
+    --description)
+      description="$2"
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: create-child: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+  if [[ -z $title ]]; then
+    echo "pg-wi-flow: create-child: --title is required" >&2
+    return 1
+  fi
+
+  local config_json workflow stages entry_stage target_stage
+  config_json="$(pgwf_config_effective)" || return 1
+  workflow="$(pgwf_workflow_for "$config_json" "$parent")" || return 1
+  stages="$(pgwf_workflow_stages_by_name "$config_json" "$workflow")"
+  entry_stage="$(pgwf_workflow_entry_stage "$stages")"
+
+  if [[ -n $stage ]]; then
+    if ! pgwf_workflow_stage_exists "$stages" "$stage"; then
+      echo "pg-wi-flow: create-child: $stage is not a stage in workflow $workflow" >&2
+      return 1
+    fi
+    target_stage="$stage"
+  else
+    target_stage="$entry_stage"
+  fi
+
+  local parent_stage actor
+  parent_stage="$(pgwf_effective_stage_name "$config_json" "$parent")" || return 1
+  actor="$(pgwf_current_actor "$parent_stage")" || return 1
+
+  local -a create_args=(--title "$title" --parent "$parent" --no-inherit-labels)
+  [[ -n $description ]] && create_args+=(--description "$description")
+  if [[ -n $kind ]]; then
+    local kind_prefix
+    kind_prefix="$(pgwf_config_label "$config_json" kind_prefix 'kind:')"
+    create_args+=(--labels "${kind_prefix}${kind}")
+  fi
+
+  local created child_id
+  created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
+  child_id="$(jq -r '.id // empty' <<<"$created")"
+  if [[ -z $child_id ]]; then
+    echo "pg-wi-flow: create-child: bd create did not return an id" >&2
+    return 1
+  fi
+
+  if [[ -n $target_stage && $target_stage != "$entry_stage" ]]; then
+    pgwf_advance_stage "$config_json" "$child_id" "$target_stage" "$actor" || return 1
+  fi
+
+  if ! pgwf_tracker_has_label "$parent" container; then
+    pgwf_tracker_update "$parent" "$actor" --add-label container >/dev/null
+  fi
+
+  local b
+  for b in "${blocked_by[@]}"; do
+    pgwf_tracker_add_dependency "$child_id" "$b" "$actor" >/dev/null || return 1
+  done
+
+  printf '%s %s %s\n' "$child_id" "$target_stage" "$workflow"
+}
+
+# pgwf_cmd_merge ID... --into SURVIVOR -- closes each listed ID as duplicate
+# of SURVIVOR with related links; SURVIVOR gets a note listing the merged
+# symptoms [design: ## Components table, merge row].
+pgwf_cmd_merge() {
+  local -a ids=()
+  local survivor=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --into)
+      survivor="$2"
+      shift 2
+      ;;
+    *)
+      ids+=("$1")
+      shift
+      ;;
+    esac
+  done
+  if [[ -z $survivor ]]; then
+    echo "pg-wi-flow: merge: --into is required" >&2
+    return 1
+  fi
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    echo "pg-wi-flow: merge: at least one ID to merge is required" >&2
+    return 1
+  fi
+
+  local config_json survivor_stage actor
+  config_json="$(pgwf_config_effective)" || return 1
+  survivor_stage="$(pgwf_effective_stage_name "$config_json" "$survivor")" || return 1
+  actor="$(pgwf_current_actor "$survivor_stage")" || return 1
+
+  local -a symptoms=()
+  local id item_json t
+  for id in "${ids[@]}"; do
+    item_json="$(pgwf_tracker_show_json "$id")" || return 1
+    t="$(jq -r '.title // ""' <<<"$item_json")"
+    symptoms+=("$id ($t)")
+    pgwf_tracker_duplicate "$id" "$survivor" "$actor" >/dev/null || return 1
+    pgwf_tracker_relate "$id" "$survivor" "$actor" >/dev/null || return 1
+  done
+
+  local note_text joined
+  joined="$(
+    local IFS=', '
+    echo "${symptoms[*]}"
+  )"
+  note_text="Merged from: ${joined}"
+  pgwf_tracker_note "$survivor" "$note_text" "$actor" >/dev/null
+}
+
+# pgwf_close_trace CONFIG_JSON ID ACTOR ENTRY... -- close --trace's
+# mechanics [design: ## The flow -> "Pointer path", quoted verbatim in this
+# packet's Contract]: parses every "<bullet>=<disposition>" ENTRY, refuses
+# the close unless every bullet parsed from ID's own description has one,
+# adds a `related` link per traced-id disposition, and files a new
+# entry-stage item (ID's own priority) for every "filed:<title>"
+# disposition, related-linked back to ID. A disposition that is neither an
+# existing id nor "filed:..." is a plain label -- recorded implicitly by
+# having been supplied, no further CLI action.
+pgwf_close_trace() {
+  local config_json="$1" id="$2" actor="$3"
+  shift 3
+  local -a entries=("$@")
+
+  local item_json description
+  item_json="$(pgwf_tracker_show_json "$id")" || return 1
+  description="$(jq -r '.description // ""' <<<"$item_json")"
+
+  local -a bullets=()
+  while IFS= read -r line; do
+    [[ -n $line ]] && bullets+=("$line")
+  done < <(grep -E '^[[:space:]]*[-*][[:space:]]+' <<<"$description" |
+    sed -E 's/^[[:space:]]*[-*][[:space:]]+//; s/[[:space:]]+$//')
+
+  if [[ ${#bullets[@]} -eq 0 ]]; then
+    echo "pg-wi-flow: close --trace: $id has no parsed bullets to trace" >&2
+    return 1
+  fi
+
+  local -A dispositions=()
+  local entry bullet disp
+  for entry in "${entries[@]}"; do
+    bullet="${entry%%=*}"
+    disp="${entry#*=}"
+    dispositions["$bullet"]="$disp"
+  done
+
+  local -a missing=()
+  for bullet in "${bullets[@]}"; do
+    if [[ -z ${dispositions[$bullet]+x} ]]; then
+      missing+=("$bullet")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "pg-wi-flow: close --trace: missing disposition for: ${missing[*]}" >&2
+    return 1
+  fi
+
+  local priority
+  priority="$(jq -r '.priority // empty' <<<"$item_json")"
+
+  for bullet in "${bullets[@]}"; do
+    disp="${dispositions[$bullet]}"
+    case "$disp" in
+    filed:*)
+      local new_title="${disp#filed:}"
+      local -a create_args=(--title "$new_title" --no-inherit-labels)
+      [[ -n $priority ]] && create_args+=(--priority "$priority")
+      local created new_id
+      created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
+      new_id="$(jq -r '.id // empty' <<<"$created")"
+      if [[ -z $new_id ]]; then
+        echo "pg-wi-flow: close --trace: bd create did not return an id for bullet: $bullet" >&2
+        return 1
+      fi
+      pgwf_stamp_top_level_workflow "$config_json" "$new_id" "$actor" || return 1
+      pgwf_tracker_relate "$id" "$new_id" "$actor" >/dev/null || return 1
+      ;;
+    *)
+      if pgwf_tracker_show_json "$disp" >/dev/null 2>&1; then
+        pgwf_tracker_relate "$id" "$disp" "$actor" >/dev/null || return 1
+      fi
+      ;;
+    esac
+  done
+}
+
+# pgwf_cmd_close ID --reason TEXT [--trace "bullet=disposition"]... --
+# closes; with --trace, refuses unless every parsed bullet of a pointer
+# item has a disposition, links traced ids, files filed: items at the
+# workflow's entry stage with the pointer's priority [design: ## Components
+# table, close row; ## The flow -> "Pointer path"].
+pgwf_cmd_close() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: close: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local reason=""
+  local -a trace_entries=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --reason)
+      reason="$2"
+      shift 2
+      ;;
+    --trace)
+      trace_entries+=("$2")
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: close: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+  if [[ -z $reason ]]; then
+    echo "pg-wi-flow: close: --reason is required" >&2
+    return 1
+  fi
+
+  local config_json stage actor
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+
+  if [[ ${#trace_entries[@]} -gt 0 ]]; then
+    pgwf_close_trace "$config_json" "$id" "$actor" "${trace_entries[@]}" || return 1
+  fi
+
+  pgwf_tracker_close "$id" "$reason" "$actor" >/dev/null
+}
+
+# pgwf_cmd_close_duplicate ID --of OF -- refuses unless ID is NEWER than OF
+# and OF is open on a FRESH read (so two concurrent sessions cannot close
+# each other's item); adds a `related` link [design: ## Components table,
+# close-duplicate row -- the survivor rule, MANDATED verbatim per this
+# packet's Binding decisions].
+pgwf_cmd_close_duplicate() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: close-duplicate: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local of=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --of)
+      of="$2"
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: close-duplicate: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+  if [[ -z $of ]]; then
+    echo "pg-wi-flow: close-duplicate: --of is required" >&2
+    return 1
+  fi
+
+  local id_json of_json id_created of_created of_status
+  id_json="$(pgwf_tracker_show_json "$id")" || return 1
+  of_json="$(pgwf_tracker_show_json "$of")" || return 1
+  id_created="$(jq -r '.created_at // empty' <<<"$id_json")"
+  of_created="$(jq -r '.created_at // empty' <<<"$of_json")"
+  of_status="$(jq -r '.status // empty' <<<"$of_json")"
+
+  if [[ -z $id_created || -z $of_created ]]; then
+    echo "pg-wi-flow: close-duplicate: could not determine created_at for $id or $of" >&2
+    return 1
+  fi
+  if [[ ! ($id_created > $of_created) ]]; then
+    echo "pg-wi-flow: close-duplicate: refused: $id ($id_created) is not newer than $of ($of_created)" >&2
+    return 1
+  fi
+  if [[ $of_status == closed ]]; then
+    echo "pg-wi-flow: close-duplicate: refused: $of is already closed" >&2
+    return 1
+  fi
+
+  local config_json stage actor
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+
+  pgwf_tracker_duplicate "$id" "$of" "$actor" >/dev/null || return 1
+  pgwf_tracker_relate "$id" "$of" "$actor" >/dev/null || return 1
+}

@@ -200,3 +200,20 @@ pgwf_workflow_closing_stage() {
 pgwf_workflow_stage_names() {
   jq -r 'keys[]' <<<"$1"
 }
+
+# pgwf_workflow_stage_exists STAGE_MAP_JSON STAGE -- true (status 0) iff
+# STAGE is a key of STAGE_MAP_JSON [design: ## Configuration C-2, "advance
+# --to X MUST fail unless X names a stage in the item's workflow"]. Shared
+# by `advance` and `create-child --stage` (tc-9ddu3.1.3), which the Contract
+# requires validate identically.
+pgwf_workflow_stage_exists() {
+  jq -e --arg s "$2" 'has($s)' <<<"$1" >/dev/null
+}
+
+# pgwf_workflow_stage_order STAGE_MAP_JSON STAGE -- STAGE's `order` value,
+# or empty when STAGE is absent or carries no `order` [design: ##
+# Configuration C-2, "a move to a stage with a LOWER order... requires
+# --reason"].
+pgwf_workflow_stage_order() {
+  jq -r --arg s "$2" '.[$s].order // empty' <<<"$1"
+}

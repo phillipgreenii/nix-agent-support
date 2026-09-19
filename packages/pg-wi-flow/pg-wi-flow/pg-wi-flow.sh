@@ -16,10 +16,11 @@ pg-wi-flow: bead-workflow CLI framework
 
 Usage: pg-wi-flow COMMAND [ARGS...]
 
-This packet (tc-9ddu3.1.1) implements the read/reservation core: query,
-list, next, claim, release. Later packets in the tc-9ddu3.1 docket add
-context/annotate/round/advance/create-child/merge/close/escalate/resolve
-as subcommands of this same entry point.
+Packet tc-9ddu3.1.1 implements the read/reservation core: query, list,
+next, claim, release. This packet (tc-9ddu3.1.3) adds the item-content and
+stage-transition write verbs: annotate, record-verdict, round, advance,
+create-child, merge, close, close-duplicate. context/--render lands in a
+separate packet (tc-9ddu3.1.2); escalate/resolve in tc-9ddu3.1.4.
 
 Commands:
   query [--stage S]... [--attended]
@@ -42,6 +43,48 @@ Commands:
   release ID
       Release ID, clearing the assignee in the same call as the status
       change.
+
+  annotate ID [--kind K] [--component C] [--premise P] [--acceptance T]
+           [--append-description T] [--append-notes T] [--design T]
+      The only way to write item content. Flags are combinable in one
+      call.
+
+  record-verdict ID --concern C --json <file|->
+      Run by a reviewer leaf; records C's verdict for the current round in
+      item metadata. Stdin allowed via "-".
+
+  round ID
+      Reads every verdict recorded for the current round, merges them,
+      increments the round counter, and prints the merged verdict (ready,
+      gaps, blocked, "duplicate ID", or "related IDs") plus
+      WI_MUST_ESCALATE=true when the counter reaches iteration_bound
+      without ready.
+
+  advance ID --to STAGE [--reason TEXT]
+      Validates the target stage exists in ID's workflow (a move to a
+      lower-order stage requires --reason), swaps the stage label, and
+      adds the container label if ID has any children. Never creates a
+      land bead.
+
+  create-child PARENT --title T [--kind K] [--stage S]
+               [--blocked-by ID]... [--description T]
+      New child at the workflow's entry stage (or --stage, validated
+      against the child's inherited workflow). PARENT gains the container
+      label in the same call and stays open. Each --blocked-by adds a
+      blocking edge from the child to ID (repeatable).
+
+  merge ID... --into SURVIVOR
+      Closes each listed ID as a duplicate of SURVIVOR with related
+      links; SURVIVOR gets a note listing the merged symptoms.
+
+  close ID --reason TEXT [--trace "BULLET=DISPOSITION"]...
+      Closes ID. With --trace, refuses unless every bullet parsed from
+      ID's description has a disposition (an existing id, a plain label,
+      or "filed:TITLE" to file a new entry-stage item).
+
+  close-duplicate ID --of OF
+      Refuses unless ID is newer than OF and OF is open on a fresh read;
+      adds a related link.
 
 Global options (before COMMAND):
   --actor NAME   Explicit actor override. Accepted ONLY outside Claude
@@ -111,6 +154,30 @@ claim)
   ;;
 release)
   pgwf_cmd_release "$@"
+  ;;
+annotate)
+  pgwf_cmd_annotate "$@"
+  ;;
+record-verdict)
+  pgwf_cmd_record_verdict "$@"
+  ;;
+round)
+  pgwf_cmd_round "$@"
+  ;;
+advance)
+  pgwf_cmd_advance "$@"
+  ;;
+create-child)
+  pgwf_cmd_create_child "$@"
+  ;;
+merge)
+  pgwf_cmd_merge "$@"
+  ;;
+close)
+  pgwf_cmd_close "$@"
+  ;;
+close-duplicate)
+  pgwf_cmd_close_duplicate "$@"
   ;;
 *)
   echo "pg-wi-flow: unknown command: $command" >&2

@@ -239,6 +239,107 @@ pgwf_tracker_release() {
   bd update "$id" --status open --assignee "" --actor "$actor" --json
 }
 
+# pgwf_tracker_any_children ID -- `bd children ID --json`'s data array,
+# UNFILTERED by status (contrast pgwf_tracker_open_children) -- used where
+# "children exist" means any children at all, open or closed [design: ##
+# Components table, advance row: "adds container if children exist"].
+pgwf_tracker_any_children() {
+  local id="$1" out
+  if ! out="$(bd children "$id" --json 2>&1)"; then
+    echo "pg-wi-flow: bd children $id failed: $out" >&2
+    return 1
+  fi
+  jq -c '(.data // .)' <<<"$out"
+}
+
+# pgwf_tracker_update ID ACTOR ARGS... -- generic `bd update` write wrapper,
+# shared by every write verb this packet adds (annotate, record-verdict,
+# round's counter increment, advance's container add, create-child's parent
+# container add) so lib/tracker.bash stays the ONLY file that invokes `bd`
+# [design: ## Architecture, "Adapter, confined to one file"]. Fails loudly
+# on a `bd` error; prints bd's own JSON on success.
+pgwf_tracker_update() {
+  local id="$1" actor="$2"
+  shift 2
+  local out
+  if ! out="$(bd update "$id" "$@" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd update $id failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# pgwf_tracker_create ACTOR ARGS... -- generic `bd create` write wrapper
+# (create-child, and close --trace's `filed:` disposition). Prints the
+# created issue's `.data[0]` object (compact JSON) on stdout.
+pgwf_tracker_create() {
+  local actor="$1"
+  shift
+  local out
+  if ! out="$(bd create "$@" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd create failed: $out" >&2
+    return 1
+  fi
+  jq -c '.data[0]' <<<"$out"
+}
+
+# pgwf_tracker_add_dependency BLOCKED_ID BLOCKER_ID ACTOR -- `bd dep add
+# BLOCKED_ID BLOCKER_ID`: BLOCKER_ID blocks BLOCKED_ID. Used by
+# create-child's repeatable `--blocked-by`.
+pgwf_tracker_add_dependency() {
+  local blocked_id="$1" blocker_id="$2" actor="$3" out
+  if ! out="$(bd dep add "$blocked_id" "$blocker_id" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd dep add $blocked_id $blocker_id failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# pgwf_tracker_relate ID1 ID2 ACTOR -- `bd dep relate ID1 ID2`: a
+# bidirectional `related` link. Used by merge, close --trace, and
+# close-duplicate's survivor rule.
+pgwf_tracker_relate() {
+  local id1="$1" id2="$2" actor="$3" out
+  if ! out="$(bd dep relate "$id1" "$id2" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd dep relate $id1 $id2 failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# pgwf_tracker_duplicate ID OF ACTOR -- `bd duplicate ID --of OF`: closes ID
+# as a duplicate of OF. Used by merge and close-duplicate.
+pgwf_tracker_duplicate() {
+  local id="$1" of="$2" actor="$3" out
+  if ! out="$(bd duplicate "$id" --of "$of" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd duplicate $id --of $of failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# pgwf_tracker_close ID REASON ACTOR -- `bd close ID --reason REASON`.
+pgwf_tracker_close() {
+  local id="$1" reason="$2" actor="$3" out
+  if ! out="$(bd close "$id" --reason "$reason" --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd close $id failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# pgwf_tracker_note ID TEXT ACTOR -- `bd note ID --stdin`: appends TEXT to
+# ID's notes. TEXT is piped via stdin rather than passed as an argument so
+# arbitrary punctuation/length is never re-parsed by the shell.
+pgwf_tracker_note() {
+  local id="$1" text="$2" actor="$3" out
+  if ! out="$(printf '%s' "$text" | bd note "$id" --stdin --actor "$actor" --json 2>&1)"; then
+    echo "pg-wi-flow: bd note $id failed: $out" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
 # pgwf_advance_stage CONFIG_JSON ID TO_STAGE ACTOR [REASON] -- the internal
 # stage-write primitive [design: ## Configuration C-4's closing paragraph;
 # this packet's Contract]: swaps ID's stage:<x> label to stage:<TO_STAGE>.
