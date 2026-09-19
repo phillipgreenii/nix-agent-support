@@ -5306,12 +5306,13 @@
             inherit (pkgs) pg-disk-reclaimer;
             # pg-wi-flow is likewise an overlay-only attr (symlinkJoin of the
             # CLI script plus its sibling pg-wi-flow-identity input
-            # processor) -- re-exported for the same reason, so `nix build
-            # .#pg-wi-flow` (and packet tc-9ddu3.1.2's own change-scoped
-            # Validation, `nix build .#packages.<system>.pg-wi-flow`)
-            # resolves via flake.packages.<system> instead of failing with
-            # "does not provide attribute" (this was never wired when
-            # tc-9ddu3.1.1 first defined the overlay attr).
+            # processor, per its own comment above) -- re-exported for the
+            # same reason, so `nix build .#pg-wi-flow` / `nix build
+            # .#packages.<system>.pg-wi-flow` resolves via
+            # flake.packages.<system> instead of failing with "does not
+            # provide attribute" (missing since tc-9ddu3.1.1/P1 first
+            # defined the overlay attr; both tc-9ddu3.1.2's and
+            # tc-9ddu3.1.4's own mandated Validation bullets needed this).
             inherit (pkgs) pg-wi-flow;
             # wtnew is likewise an overlay-only attr (single mkBashScript
             # tool holding just the script derivation) -- re-exported for
@@ -5326,13 +5327,6 @@
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
-            # pg-wi-flow is likewise an overlay-only attr (symlinkJoin of its
-            # own multi-script `result.packages`, per its own comment above)
-            # -- re-exported for the same reason, so `nix build
-            # .#pg-wi-flow` resolves via flake.packages.<system> (tc-9ddu3.1.4's
-            # own mandated Validation bullet needs this to be buildable at
-            # all -- missing since P1 first defined the overlay attr).
-            inherit (pkgs) pg-wi-flow;
             # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
             # Pattern-B consumers (bead pg2-wtjz). your-private-flake's
             # modules/pg-pr-zr has a `replace => …/packages/pg-pr` in its go.mod;
