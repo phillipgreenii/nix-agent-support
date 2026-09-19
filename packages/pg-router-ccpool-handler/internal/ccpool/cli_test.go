@@ -425,3 +425,50 @@ func TestEnsure_argv_includesMeta(t *testing.T) {
 		t.Errorf("--meta keys not sorted: %v", got[0])
 	}
 }
+
+// pg2-qye99.8: CLIRunner.Ensure flags pgrouter.role/pgrouter.pool as ccpool
+// session labels (--label <key>) in the same `ccpool new` call that writes
+// them via --meta, per D8.1. pgrouter.bead is NOT labeled — its value space
+// is effectively unbounded (D9). The --label VALUES must be the real,
+// prefixed --meta key names (pgrouter.role/pgrouter.pool), never the bare
+// design-illustration spelling (role/pool) — a bare key would make
+// MarkAsLabel error "key not found" since only the prefixed keys are ever
+// SetMeta'd (meta.go's MetaKeyRole/MetaKeyPool).
+func TestEnsure_argv_includesLabels(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	meta := DispatchMeta("zr-1", "worker")
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	joined := strings.Join(got[0], " ")
+	for _, want := range []string{"--label pgrouter.role", "--label pgrouter.pool"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv missing %q; got %v", want, got[0])
+		}
+	}
+	if strings.Contains(joined, "--label pgrouter.bead") {
+		t.Errorf("pgrouter.bead must NOT be labeled (unbounded cardinality, D9); got %v", got[0])
+	}
+	if strings.Contains(joined, "--label role") || strings.Contains(joined, "--label pool") {
+		t.Errorf("labels must use the prefixed meta key names, not bare role/pool; got %v", got[0])
+	}
+}
+
+// A call with no meta (or meta missing role/pool) must omit --label entirely
+// — this must not regress the many existing Ensure tests that pass nil meta.
+func TestEnsure_argv_omitsLabelsWhenMetaAbsent(t *testing.T) {
+	cli, got, _ := newSpy()
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	for _, a := range (*got)[0] {
+		if a == "--label" {
+			t.Errorf("argv must omit --label when meta carries no role/pool; got %v", (*got)[0])
+		}
+	}
+}

@@ -137,6 +137,17 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	for _, k := range mkeys {
 		args = append(args, "--meta", k+"="+meta[k])
 	}
+	// Flag pgrouter.role/pgrouter.pool as ccpool session labels in this SAME
+	// invocation (D8.1's "same invocation that already writes the metadata"),
+	// when this call's own meta actually carries them. pgrouter.bead is
+	// deliberately NOT labeled — its value space is effectively unbounded
+	// (D9's cardinality guard).
+	if _, ok := meta[MetaKeyRole]; ok {
+		args = append(args, "--label", MetaKeyRole)
+	}
+	if _, ok := meta[MetaKeyPool]; ok {
+		args = append(args, "--label", MetaKeyPool)
+	}
 	if c.PermissionMode != "" {
 		args = append(args, "--permission-mode", c.PermissionMode)
 	}
