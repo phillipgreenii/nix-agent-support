@@ -89,14 +89,29 @@ func (rc *runContext) upsertLedger(kind, beadID, contentHash, lastReviewedHeadSH
 	})
 }
 
-// handleClosure closes the anchor and its open cycle on a CONFIRMED closure
-// (design section 7.5's Anchor rule) — never because the PR merely left a
-// query (closureFromFacts, sync.go, only ever reports isClosure=true from a
-// real `pr show` re-read). review-request beads are deliberately NOT
-// touched here — the design's Anchor rule closes "the anchor, with its open
-// cycles" only; a review-pr bead's own completion is somebody else's write
-// (a human or reviewing agent), and sync only ever reopens one (see
-// ensureReviewRequest), never closes one.
+// handleClosure closes the anchor and its open cycles — BOTH cycle types,
+// the process-feedback cycle and the review-pr request alike — on a
+// CONFIRMED closure (design section 7.5's Anchor rule: "closed, with its
+// open cycles, only on a CONFIRMED closure"; the phase-10 packet's own
+// acceptance criterion is explicit that this covers both: "the anchor is
+// created only after the first cycle or review request ... and confirmed
+// closure closes the anchor and its cycles") — never because the PR merely
+// left a query (closureFromFacts, sync.go, only ever reports isClosure=true
+// from a real `pr show` re-read).
+//
+// This ports pg-pr's own cascade-close verbatim
+// (packages/pg-pr/internal/beadsbridge/bridge.go's cascadeClose /
+// CascadeCloseMergeRequest), which closes every direct child of the
+// merge-request bead type-blindly via ListChildrenOfPR — feedback cycles
+// AND review requests alike, with feedback's own grandchildren closed
+// separately — not only the feedback cycle. An earlier revision of this
+// function closed only the feedback cycle and left review-pr beads
+// untouched on this path, reasoning that a review-pr bead's completion is
+// "somebody else's write"; that reasoning does not match pg-pr's ported
+// behavior above, and produced exactly the asymmetry `pg2-ryexi` measured
+// live: review-pr cycles went stale at ~8x process-feedback's rate because
+// they were never cascade-closed here, only eventually caught by the
+// slower sweep re-verification path (section 7.5).
 func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	_ = reason // names why (merged/closed/gone); no pinned bead/ledger field carries it (see design's Bead-shapes table)
 	if rc.anchorID == "" {
@@ -113,17 +128,29 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	if err := rc.upsertLedger(KindAnchor, rc.anchorID, closedSentinel, ""); err != nil {
 		return err
 	}
-	if rc.cycleID != "" {
-		if rc.mode == ModeApply {
-			if err := rc.syncer.client.Transition(ctx, rc.cycleID, "closed"); err != nil {
-				return fmt.Errorf("sync: close feedback cycle %s: %w", rc.cycleID, err)
-			}
-		}
-		if err := rc.upsertLedger(KindFeedbackCycle, rc.cycleID, closedSentinel, ""); err != nil {
-			return err
-		}
+	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID); err != nil {
+		return err
+	}
+	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID); err != nil {
+		return err
 	}
 	return nil
+}
+
+// closeCascadedChild closes one open cycle-type child bead of the anchor
+// (a process-feedback cycle or a review-pr request) as part of handleClosure's
+// cascade, and records the closure in that kind's own ledger row. An empty
+// beadID means that child never existed for this PR — nothing to close.
+func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadID string) error {
+	if beadID == "" {
+		return nil
+	}
+	if rc.mode == ModeApply {
+		if err := rc.syncer.client.Transition(ctx, beadID, "closed"); err != nil {
+			return fmt.Errorf("sync: close %s %s: %w", label, beadID, err)
+		}
+	}
+	return rc.upsertLedger(kind, beadID, closedSentinel, "")
 }
 
 // reconcile applies the Anchor/Feedback-cycle/Review-request rules for an

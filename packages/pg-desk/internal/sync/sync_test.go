@@ -545,7 +545,7 @@ func TestSync_Adoption_TitleKeyedAnchor_BackfillsMetadataOnApplyOnly(t *testing.
 
 // --- test: removed/open closes nothing; confirmed closure closes anchor+cycle
 
-func seedExistingAnchorAndCycle(t *testing.T, s *Syncer) (anchorID, cycleID string) {
+func seedExistingAnchorCycleAndReview(t *testing.T, s *Syncer) (anchorID, cycleID, reviewID string) {
 	t.Helper()
 	if err := s.store.UpsertLedger(store.LedgerEntry{
 		Repo: fixtureRepo, EntityType: "pr", EntityID: fixtureEntity, Kind: KindAnchor,
@@ -559,13 +559,20 @@ func seedExistingAnchorAndCycle(t *testing.T, s *Syncer) (anchorID, cycleID stri
 	}); err != nil {
 		t.Fatalf("seed cycle ledger: %v", err)
 	}
-	return "bd-anchor-existing", "bd-cycle-existing"
+	if err := s.store.UpsertLedger(store.LedgerEntry{
+		Repo: fixtureRepo, EntityType: "pr", EntityID: fixtureEntity, Kind: KindReviewRequest,
+		BeadID: "bd-review-existing", LastSyncedContentHash: "somehash", LastSyncedAt: "2026-09-16T00:00:00Z",
+		LastReviewedHeadSHA: fixtureHeadSHA,
+	}); err != nil {
+		t.Fatalf("seed review ledger: %v", err)
+	}
+	return "bd-anchor-existing", "bd-cycle-existing", "bd-review-existing"
 }
 
 func TestSync_Removed_OpenClosesNothing(t *testing.T) {
 	s := newTestSyncer(t, ModeApply)
 	recordFile := withFactory(t)
-	seedExistingAnchorAndCycle(t, s)
+	seedExistingAnchorCycleAndReview(t, s)
 
 	facts := gather.Facts{PRShow: prFixture(map[string]any{"state": "open"}), HeadSHA: fixtureHeadSHA, RemovedState: "open"}
 	interp := interpFor("mine", nil)
@@ -583,10 +590,17 @@ func TestSync_Removed_OpenClosesNothing(t *testing.T) {
 	}
 }
 
-func TestSync_ConfirmedClosure_ClosesAnchorAndCycle(t *testing.T) {
+// TestSync_ConfirmedClosure_ClosesAnchorAndBothCycleTypes guards pg2-ryexi:
+// a confirmed closure MUST cascade-close BOTH cycle types symmetrically —
+// the process-feedback cycle AND the review-pr request — not just the
+// feedback cycle. Before the pg2-ryexi fix, review-pr beads were never
+// touched on this path and only ever caught by the slower sweep
+// re-verification, which is exactly the ~8x stale-rate asymmetry that bead
+// measured live.
+func TestSync_ConfirmedClosure_ClosesAnchorAndBothCycleTypes(t *testing.T) {
 	s := newTestSyncer(t, ModeApply)
 	recordFile := withFactory(t)
-	anchorID, cycleID := seedExistingAnchorAndCycle(t, s)
+	anchorID, cycleID, reviewID := seedExistingAnchorCycleAndReview(t, s)
 
 	facts := gather.Facts{HeadSHA: fixtureHeadSHA, RemovedState: "merged"}
 	interp := interpFor("mine", nil)
@@ -594,7 +608,7 @@ func TestSync_ConfirmedClosure_ClosesAnchorAndCycle(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	var closedAnchor, closedCycle bool
+	var closedAnchor, closedCycle, closedReview bool
 	for _, r := range readCallRecords(t, recordFile) {
 		joined := strings.Join(r.Args, " ")
 		if r.verb() == "issue transition" && strings.Contains(joined, anchorID) && strings.Contains(joined, "closed") {
@@ -603,14 +617,25 @@ func TestSync_ConfirmedClosure_ClosesAnchorAndCycle(t *testing.T) {
 		if r.verb() == "issue transition" && strings.Contains(joined, cycleID) && strings.Contains(joined, "closed") {
 			closedCycle = true
 		}
+		if r.verb() == "issue transition" && strings.Contains(joined, reviewID) && strings.Contains(joined, "closed") {
+			closedReview = true
+		}
 	}
-	if !closedAnchor || !closedCycle {
-		t.Fatalf("confirmed closure did not close both anchor and cycle; records: %+v", readCallRecords(t, recordFile))
+	if !closedAnchor || !closedCycle || !closedReview {
+		t.Fatalf("confirmed closure did not close anchor, cycle, and review request; records: %+v", readCallRecords(t, recordFile))
 	}
 
 	anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
 	if anchor.LastSyncedContentHash != closedSentinel {
 		t.Fatalf("anchor ledger row not marked closed: %+v", anchor)
+	}
+	cycle, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindFeedbackCycle)
+	if cycle.LastSyncedContentHash != closedSentinel {
+		t.Fatalf("feedback-cycle ledger row not marked closed: %+v", cycle)
+	}
+	review, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)
+	if review.LastSyncedContentHash != closedSentinel {
+		t.Fatalf("review-request ledger row not marked closed: %+v", review)
 	}
 
 	// Re-run: idempotent, no further transition calls.
