@@ -22,8 +22,12 @@ Prefer `pg-pr` over ad-hoc `gh` invocations for anything PR-related:
 - Refresh (per-PR interpretation): `pg-desk show <n> --refresh` (D20; replaces the old
   bead-writing manual re-check verb)
 - Create/update: `pg-pr pr create`, `pg-pr pr update <n>`
-- Lifecycle: `pg-pr pr ready <n>`, `pg-pr pr draft <n>`, `pg-pr pr wip on|off <n>`
-- Visibility: `pg-pr pr hide <n> [reason]`, `pg-pr pr unhide <n>`
+- Lifecycle: `pg-pr pr draft <n>`, `pg-desk wip on|off <n>`. There is no direct
+  `ready` command: clear WIP with `pg-desk wip off <n>` and promotion to
+  ready-for-review happens automatically once CI is green and there is no bot
+  disapproval or merge conflict (check `pg-desk show <n> --json`'s
+  `ready_to_promote` field). Do not force readiness by hand.
+- Visibility: `pg-desk hide <n> [reason]`, `pg-desk unhide <n>`
 - Review: `pg-pr review draft|post|submit <n>`
 - Comment: `pg-pr comment add|respond|resolve`
 

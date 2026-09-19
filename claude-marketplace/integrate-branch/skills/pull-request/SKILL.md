@@ -249,9 +249,13 @@ existing **open** PR whose head is `<FB>`, rather than trusting a caller-supplie
   which prompts); this handler MUST NOT run it, for the same reason PR-3 forbids the
   merge verbs.
 
-- **`pg-pr` present (no `gh`):** consult its own listing (e.g. `pg-pr pr list
---json`, filtered to a head of `<FB>`) for an existing open PR. Found → report
-  `pr-updated`. Not found → `pg-pr pr create --head "$FB" --base "$PRIMARY" --title
+- **`pg-pr` present (no `gh`):** consult `pg-connector`'s own listing (e.g.
+  `pg-connector pr list --query <name>`, `<name>` a query already registered
+  for the target repo's own PR backend — JSON is `pg-connector`'s default
+  output mode, no `--json` flag exists; its result is the fan-out envelope
+  `{entities, present_ids, sources}`, so filter `.entities[]` to a head of
+  `<FB>`) for an existing open PR. Found → report `pr-updated`. Not found →
+  `pg-pr pr create --head "$FB" --base "$PRIMARY" --title
 "<derived title>"` (a title is required; derive it from the branch's commit
   history — e.g. the first commit's subject — or ask the user if the branch mixes
   unrelated work) and report `pr-opened` with the returned URL.
