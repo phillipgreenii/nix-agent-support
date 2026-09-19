@@ -17,10 +17,11 @@ pg-wi-flow: bead-workflow CLI framework
 Usage: pg-wi-flow COMMAND [ARGS...]
 
 Packet tc-9ddu3.1.1 implements the read/reservation core: query, list,
-next, claim, release. This packet (tc-9ddu3.1.3) adds the item-content and
+next, claim, release. tc-9ddu3.1.3 adds the item-content and
 stage-transition write verbs: annotate, record-verdict, round, advance,
 create-child, merge, close, close-duplicate. context/--render lands in a
-separate packet (tc-9ddu3.1.2); escalate/resolve in tc-9ddu3.1.4.
+separate packet (tc-9ddu3.1.2). This packet (tc-9ddu3.1.4) adds the
+attention-axis write verbs: escalate, resolve.
 
 Commands:
   query [--stage S]... [--attended]
@@ -85,6 +86,26 @@ Commands:
   close-duplicate ID --of OF
       Refuses unless ID is newer than OF and OF is open on a fresh read;
       adds a related link.
+
+  escalate ID [--question T --trigger t]...
+      With --question/--trigger pairs: ID is the blocked work item.
+      Computes a fingerprint per pair; reuses an OPEN question already
+      carrying it (blocking edge added, nothing created) or creates a new
+      question child (labeled question+escalated+the trigger). With no
+      --question at all: ID must already be a question -- bumps it from
+      escalated to human (the resolver could not settle it).
+
+  resolve ID (--decision D --rationale R | --answer A |
+             --abandon --reason-code r | --defer d)
+      Exactly one outcome. --decision/--answer record and close (the
+      parent resumes); --decision refuses a q:intent question unless the
+      actor's role is main. --abandon --reason-code
+      <moot-premise|superseded|wont-do|duplicate> records and closes;
+      moot-premise also files a groom-stage follow-up; if this was the
+      parent's last open blocker, the parent is closed too. --defer defers.
+      A legacy human item (not a question) is accepted too: --answer
+      appends to notes, removes human, releases; --abandon closes; --defer
+      defers.
 
 Global options (before COMMAND):
   --actor NAME   Explicit actor override. Accepted ONLY outside Claude
@@ -178,6 +199,12 @@ close)
   ;;
 close-duplicate)
   pgwf_cmd_close_duplicate "$@"
+  ;;
+escalate)
+  pgwf_cmd_escalate "$@"
+  ;;
+resolve)
+  pgwf_cmd_resolve "$@"
   ;;
 *)
   echo "pg-wi-flow: unknown command: $command" >&2

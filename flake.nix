@@ -5317,6 +5317,13 @@
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
+            # pg-wi-flow is likewise an overlay-only attr (symlinkJoin of its
+            # own multi-script `result.packages`, per its own comment above)
+            # -- re-exported for the same reason, so `nix build
+            # .#pg-wi-flow` resolves via flake.packages.<system> (tc-9ddu3.1.4's
+            # own mandated Validation bullet needs this to be buildable at
+            # all -- missing since P1 first defined the overlay attr).
+            inherit (pkgs) pg-wi-flow;
             # pg-pr SOURCE as a realized store path, for cross-repo gomod2nix
             # Pattern-B consumers (bead pg2-wtjz). your-private-flake's
             # modules/pg-pr-zr has a `replace => …/packages/pg-pr` in its go.mod;

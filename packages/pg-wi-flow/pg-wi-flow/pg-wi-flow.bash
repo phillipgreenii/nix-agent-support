@@ -1067,3 +1067,366 @@ pgwf_cmd_close_duplicate() {
   pgwf_tracker_duplicate "$id" "$of" "$actor" >/dev/null || return 1
   pgwf_tracker_relate "$id" "$of" "$actor" >/dev/null || return 1
 }
+
+# pgwf_escalation_normalize_question TEXT -- the "normalized question text"
+# fingerprint dedupe hashes [design: ## State model -> Axis 2, "[rev7]
+# Fingerprint dedupe"]. Freedom boundary (this packet's own Contract):
+# case-folds and collapses/trims whitespace so cosmetic phrasing
+# differences (extra spaces, a trailing newline, case) don't defeat reuse.
+# Any future caller composing the SAME fingerprint (execution-phase-2 stage
+# workers) MUST normalize identically to this.
+pgwf_escalation_normalize_question() {
+  local text="$1"
+  printf '%s' "$text" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//'
+}
+
+# pgwf_escalation_fingerprint TRIGGER QUESTION -- fingerprint =
+# sha256(trigger + normalized question text), verbatim [design: ## State
+# model -> Axis 2, "[rev7] Fingerprint dedupe"]. Freedom boundary (this
+# packet's own Contract): sha256sum (coreutils), with a `shasum` fallback
+# for macOS -- same precedent as packages/claude-activity/lib/claude-
+# activity-lib.bash's get_session_id.
+pgwf_escalation_fingerprint() {
+  local trigger="$1" question="$2" normalized combined
+  normalized="$(pgwf_escalation_normalize_question "$question")"
+  combined="${trigger}${normalized}"
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$combined" | sha256sum | cut -d' ' -f1
+  else
+    printf '%s' "$combined" | shasum -a 256 | cut -d' ' -f1
+  fi
+}
+
+# pgwf_escalation_valid_trigger TRIGGER -- true iff TRIGGER is one of the
+# fixed trigger vocabulary [design: ## State model -> Axis 2, opening
+# paragraph: "q:intent | q:info | q:conflict | q:stall"].
+pgwf_escalation_valid_trigger() {
+  case "$1" in
+  q:intent | q:info | q:conflict | q:stall) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# pgwf_resolve_actor_role -- the caller's "role" for resolve --decision's
+# q:intent refusal [design: ## State model -> Axis 2, "[rev7] resolve
+# --decision MUST refuse..."; ## Identity, "role = agent_type"]:
+# PG_WI_FLOW_IDENT's THIRD hyphen-separated field (agent_type), pinned by
+# pg-wi-flow-identity.bash's pgwfi_compose_ident to always be exactly the
+# last field, so stripping up to the last "-" is exact, not a heuristic.
+# Outside Claude Code (no PG_WI_FLOW_IDENT, an explicit --actor override)
+# there is no agent framework and so no agent_type to refuse on -- treated
+# as the equivalent of the interactive main session.
+pgwf_resolve_actor_role() {
+  if [[ -z ${PG_WI_FLOW_IDENT:-} ]]; then
+    printf 'main\n'
+    return 0
+  fi
+  printf '%s\n' "${PG_WI_FLOW_IDENT##*-}"
+}
+
+# pgwf_cmd_escalate ID [--question T --trigger t]... -- two modes [design:
+# ## Components table, escalate row; ## State model -> Axis 2]:
+#
+# 1. One or more --question/--trigger pairs (zipped positionally by order
+#    of appearance): ID is the BLOCKED work item. Per pair, computes the
+#    fingerprint, reuses an OPEN question already carrying it (adds a
+#    blocking edge from ID to that question, creates nothing) or creates a
+#    new question child (bd type task, --no-inherit-labels, labeled
+#    question+escalated+the trigger, `fingerprint` metadata set), then adds
+#    the blocking edge from ID to it. The check-then-create race is
+#    ACCEPTED, not prevented [rev7] -- no locking is added here.
+# 2. No --question given at all: ID must already carry the question label
+#    -- the resolver, unable to settle it, bumps escalated -> human [design:
+#    Components table escalate row, "on a question: escalated -> human";
+#    the escalation-ladder diagram's "resolver -> operator" hop]. No new
+#    question, no fingerprint work.
+pgwf_cmd_escalate() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: escalate: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local -a questions=() triggers=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --question)
+      questions+=("$2")
+      shift 2
+      ;;
+    --trigger)
+      triggers+=("$2")
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: escalate: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+
+  local config_json
+  config_json="$(pgwf_config_effective)" || return 1
+
+  if [[ ${#questions[@]} -eq 0 ]]; then
+    if ! pgwf_tracker_has_label "$id" question; then
+      echo "pg-wi-flow: escalate: --question is required (or ID must already be a question, to bump escalated -> human)" >&2
+      return 1
+    fi
+    local stage actor human_label escalated_label
+    stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+    actor="$(pgwf_current_actor "$stage")" || return 1
+    human_label="$(pgwf_config_label "$config_json" human human)"
+    escalated_label="$(pgwf_config_label "$config_json" escalated escalated)"
+    local -a bump_args=(--add-label "$human_label")
+    if pgwf_tracker_has_label "$id" "$escalated_label"; then
+      bump_args+=(--remove-label "$escalated_label")
+    fi
+    pgwf_tracker_update "$id" "$actor" "${bump_args[@]}" >/dev/null
+    return $?
+  fi
+
+  if [[ ${#questions[@]} -ne ${#triggers[@]} ]]; then
+    echo "pg-wi-flow: escalate: --question and --trigger must be given in matching pairs" >&2
+    return 1
+  fi
+
+  local i trigger question
+  for ((i = 0; i < ${#questions[@]}; i++)); do
+    trigger="${triggers[$i]}"
+    if ! pgwf_escalation_valid_trigger "$trigger"; then
+      echo "pg-wi-flow: escalate: --trigger must be one of q:intent|q:info|q:conflict|q:stall, got: $trigger" >&2
+      return 1
+    fi
+  done
+
+  local stage actor question_label escalated_label
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+  question_label="$(pgwf_config_label "$config_json" question question)"
+  escalated_label="$(pgwf_config_label "$config_json" escalated escalated)"
+
+  for ((i = 0; i < ${#questions[@]}; i++)); do
+    trigger="${triggers[$i]}"
+    question="${questions[$i]}"
+
+    local fp existing existing_id
+    fp="$(pgwf_escalation_fingerprint "$trigger" "$question")"
+    existing="$(pgwf_tracker_list --metadata-field "fingerprint=$fp" --label "$question_label" \
+      --status open,in_progress,blocked,deferred)" || return 1
+    existing_id="$(jq -r '.[0].id // empty' <<<"$existing")"
+
+    if [[ -n $existing_id ]]; then
+      pgwf_tracker_add_dependency "$id" "$existing_id" "$actor" >/dev/null || return 1
+      continue
+    fi
+
+    local -a create_args=(
+      --title "$question"
+      --labels "${question_label},${escalated_label},${trigger}"
+      --no-inherit-labels
+      --metadata "$(jq -cn --arg fp "$fp" '{fingerprint: $fp}')"
+    )
+    local created new_id
+    created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
+    new_id="$(jq -r '.id // empty' <<<"$created")"
+    if [[ -z $new_id ]]; then
+      echo "pg-wi-flow: escalate: bd create did not return an id" >&2
+      return 1
+    fi
+    pgwf_tracker_add_dependency "$id" "$new_id" "$actor" >/dev/null || return 1
+  done
+}
+
+# pgwf_cmd_resolve ID (--decision D --rationale R | --answer A | --abandon
+# --reason-code r | --defer d) -- the four fixed outcomes, verbatim
+# [design: ## State model -> Axis 2, resolve outcomes paragraph;
+# "[rev7] resolve --decision MUST refuse..."; "Legacy human items"
+# paragraph]. Exactly one outcome per call.
+pgwf_cmd_resolve() {
+  local id="${1:-}"
+  if [[ -z $id ]]; then
+    echo "pg-wi-flow: resolve: missing ID" >&2
+    return 1
+  fi
+  shift
+
+  local decision="" rationale="" answer="" reason_code="" defer_date=""
+  local have_decision=0 have_rationale=0 have_answer=0 have_abandon=0 have_reason_code=0 have_defer=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --decision)
+      decision="$2"
+      have_decision=1
+      shift 2
+      ;;
+    --rationale)
+      rationale="$2"
+      have_rationale=1
+      shift 2
+      ;;
+    --answer)
+      answer="$2"
+      have_answer=1
+      shift 2
+      ;;
+    --abandon)
+      have_abandon=1
+      shift
+      ;;
+    --reason-code)
+      reason_code="$2"
+      have_reason_code=1
+      shift 2
+      ;;
+    --defer)
+      defer_date="$2"
+      have_defer=1
+      shift 2
+      ;;
+    *)
+      echo "pg-wi-flow: resolve: unknown argument: $1" >&2
+      return 1
+      ;;
+    esac
+  done
+
+  local -i outcome_count=0
+  [[ $have_decision -eq 1 || $have_rationale -eq 1 ]] && outcome_count+=1
+  [[ $have_answer -eq 1 ]] && outcome_count+=1
+  [[ $have_abandon -eq 1 || $have_reason_code -eq 1 ]] && outcome_count+=1
+  [[ $have_defer -eq 1 ]] && outcome_count+=1
+  if [[ $outcome_count -ne 1 ]]; then
+    echo "pg-wi-flow: resolve: exactly one of --decision/--rationale, --answer, --abandon/--reason-code, --defer is required" >&2
+    return 1
+  fi
+
+  if [[ $have_decision -eq 1 || $have_rationale -eq 1 ]] && [[ $have_decision -ne 1 || $have_rationale -ne 1 ]]; then
+    echo "pg-wi-flow: resolve: --decision requires --rationale (and vice versa)" >&2
+    return 1
+  fi
+
+  if [[ $have_abandon -eq 1 || $have_reason_code -eq 1 ]]; then
+    if [[ $have_abandon -ne 1 || $have_reason_code -ne 1 ]]; then
+      echo "pg-wi-flow: resolve: --abandon requires --reason-code (and vice versa)" >&2
+      return 1
+    fi
+    case "$reason_code" in
+    moot-premise | superseded | wont-do | duplicate) ;;
+    *)
+      echo "pg-wi-flow: resolve: --reason-code must be one of moot-premise|superseded|wont-do|duplicate, got: $reason_code" >&2
+      return 1
+      ;;
+    esac
+  fi
+
+  local config_json stage actor item_json
+  config_json="$(pgwf_config_effective)" || return 1
+  stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
+  actor="$(pgwf_current_actor "$stage")" || return 1
+  item_json="$(pgwf_tracker_show_json "$id")" || return 1
+
+  local question_label human_label escalated_label
+  question_label="$(pgwf_config_label "$config_json" question question)"
+  human_label="$(pgwf_config_label "$config_json" human human)"
+  escalated_label="$(pgwf_config_label "$config_json" escalated escalated)"
+
+  local is_question=0 is_legacy_human=0
+  if jq -e --arg l "$question_label" '(.labels // []) | index($l) != null' <<<"$item_json" >/dev/null; then
+    is_question=1
+  elif jq -e --arg l "$human_label" '(.labels // []) | index($l) != null' <<<"$item_json" >/dev/null; then
+    is_legacy_human=1
+  else
+    echo "pg-wi-flow: resolve: $id is neither a question nor a legacy human item" >&2
+    return 1
+  fi
+
+  if [[ $is_question -eq 1 && $have_decision -eq 1 ]]; then
+    if jq -e '(.labels // []) | index("q:intent") != null' <<<"$item_json" >/dev/null; then
+      local role
+      role="$(pgwf_resolve_actor_role)"
+      if [[ $role != main ]]; then
+        echo "pg-wi-flow: resolve: --decision refused for a q:intent question unless the actor's role is main (got: ${role:-<unknown>})" >&2
+        return 1
+      fi
+    fi
+  fi
+
+  if [[ $is_legacy_human -eq 1 ]]; then
+    if [[ $have_answer -eq 1 ]]; then
+      pgwf_tracker_update "$id" "$actor" --append-notes "$answer" --remove-label "$human_label" >/dev/null || return 1
+      pgwf_tracker_release "$id" "$actor" >/dev/null
+      return $?
+    elif [[ $have_abandon -eq 1 ]]; then
+      pgwf_tracker_close "$id" "resolve --abandon --reason-code $reason_code" "$actor" >/dev/null
+      return $?
+    elif [[ $have_defer -eq 1 ]]; then
+      pgwf_tracker_update "$id" "$actor" --defer "$defer_date" >/dev/null
+      return $?
+    else
+      echo "pg-wi-flow: resolve: legacy human items only accept --answer, --abandon --reason-code, or --defer" >&2
+      return 1
+    fi
+  fi
+
+  # Question items: clear whichever attention label is present [design: ##
+  # Components, "Invariants enforced inside the CLI": "attention labels
+  # only through escalate/resolve"].
+  local -a clear_args=()
+  if jq -e --arg l "$escalated_label" '(.labels // []) | index($l) != null' <<<"$item_json" >/dev/null; then
+    clear_args+=(--remove-label "$escalated_label")
+  fi
+  if jq -e --arg l "$human_label" '(.labels // []) | index($l) != null' <<<"$item_json" >/dev/null; then
+    clear_args+=(--remove-label "$human_label")
+  fi
+  if [[ ${#clear_args[@]} -gt 0 ]]; then
+    pgwf_tracker_update "$id" "$actor" "${clear_args[@]}" >/dev/null || return 1
+  fi
+
+  if [[ $have_defer -eq 1 ]]; then
+    pgwf_tracker_update "$id" "$actor" --defer "$defer_date" >/dev/null
+    return $?
+  fi
+
+  if [[ $have_decision -eq 1 ]]; then
+    pgwf_tracker_update "$id" "$actor" --append-notes "decision: ${decision}; rationale: ${rationale}" >/dev/null || return 1
+    pgwf_tracker_close "$id" "$decision" "$actor" >/dev/null
+    return $?
+  fi
+
+  if [[ $have_answer -eq 1 ]]; then
+    pgwf_tracker_update "$id" "$actor" --append-notes "answer: ${answer}" >/dev/null || return 1
+    pgwf_tracker_close "$id" "$answer" "$actor" >/dev/null
+    return $?
+  fi
+
+  # --abandon: fetch parents BEFORE closing (the dependency edge survives
+  # the question's own close either way, but this keeps the read ordering
+  # obviously correct). moot-premise additionally files a groom-stage
+  # follow-up [design: same section]; ONLY --abandon closes a parent for
+  # which this was the last open blocker -- --decision/--answer just
+  # "resume" the parent through the ordinary dependency rule.
+  local parents
+  parents="$(pgwf_tracker_blocks "$id")" || return 1
+
+  pgwf_tracker_close "$id" "resolve --abandon --reason-code $reason_code" "$actor" >/dev/null || return 1
+
+  if [[ $reason_code == moot-premise ]]; then
+    local first_parent
+    first_parent="$(jq -r '.[0].id // empty' <<<"$parents")"
+    if [[ -n $first_parent ]]; then
+      pgwf_cmd_create_child "$first_parent" \
+        --title "Clean up remnants: $id abandoned as moot-premise" >/dev/null || return 1
+    fi
+  fi
+
+  local parent_id other_open
+  while IFS= read -r parent_id; do
+    [[ -z $parent_id ]] && continue
+    other_open="$(pgwf_tracker_open_blockers_excluding "$parent_id" "$id")" || return 1
+    if [[ "$(jq 'length' <<<"$other_open")" -eq 0 ]]; then
+      pgwf_tracker_close "$parent_id" "last open blocker abandoned ($id)" "$actor" >/dev/null || return 1
+    fi
+  done < <(jq -r '.[].id' <<<"$parents")
+}

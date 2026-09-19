@@ -340,6 +340,37 @@ pgwf_tracker_note() {
   printf '%s\n' "$out"
 }
 
+# pgwf_tracker_blocks ID -- `bd dep list ID --direction=up --type blocks
+# --json`'s data array: the issues ID itself blocks (the "parents" a
+# question was attached to via escalate's blocking edge -- direction "up"
+# is "what depends on ID", i.e. what ID blocks). Compact JSON array on
+# stdout. Used by resolve's --abandon last-open-blocker check and its
+# moot-premise follow-up target.
+pgwf_tracker_blocks() {
+  local id="$1" out
+  if ! out="$(bd dep list "$id" --direction=up --type blocks --json 2>&1)"; then
+    echo "pg-wi-flow: bd dep list $id --direction=up failed: $out" >&2
+    return 1
+  fi
+  jq -c '.data // .' <<<"$out"
+}
+
+# pgwf_tracker_open_blockers_excluding ID EXCLUDE_ID -- ID's own blockers
+# (`bd dep list ID --direction=down --type blocks --json`) that are neither
+# EXCLUDE_ID nor closed. Used by resolve --abandon to decide whether the
+# question just closed was a parent's LAST open blocker [design: ## State
+# model -> Axis 2, resolve outcomes paragraph: "if this was the parent's
+# last open blocker the CLI closes the parent in the same call"].
+pgwf_tracker_open_blockers_excluding() {
+  local id="$1" exclude_id="$2" out
+  if ! out="$(bd dep list "$id" --direction=down --type blocks --json 2>&1)"; then
+    echo "pg-wi-flow: bd dep list $id --direction=down failed: $out" >&2
+    return 1
+  fi
+  jq -c --arg x "$exclude_id" \
+    '[(.data // .)[] | select(.id != $x) | select(.status != "closed")]' <<<"$out"
+}
+
 # pgwf_advance_stage CONFIG_JSON ID TO_STAGE ACTOR [REASON] -- the internal
 # stage-write primitive [design: ## Configuration C-4's closing paragraph;
 # this packet's Contract]: swaps ID's stage:<x> label to stage:<TO_STAGE>.
