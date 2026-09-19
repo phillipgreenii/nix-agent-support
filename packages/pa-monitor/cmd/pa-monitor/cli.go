@@ -42,11 +42,6 @@ func runStatus(args []string) {
 		blocked += b
 		idle += i
 	}
-	fmt.Printf("client:        pa-monitor %s\n", version)
-	fmt.Printf("daemon:        pa-monitor %s\n", state.GetDaemonVersion())
-	fmt.Printf("uptime:        %ds\n", state.GetDaemonUptimeSeconds())
-	fmt.Printf("plan_tier:     %s\n", state.GetPlanTier())
-	fmt.Printf("sessions:      %s\n", formatSessionCounts(working, blocked, idle))
 
 	// Collect per-session details (LastError + PendingNudge) and print
 	// annotations only when at least one session has something noteworthy.
@@ -74,6 +69,12 @@ func runStatus(args []string) {
 		}
 		return
 	}
+
+	fmt.Printf("client:        pa-monitor %s\n", version)
+	fmt.Printf("daemon:        pa-monitor %s\n", state.GetDaemonVersion())
+	fmt.Printf("uptime:        %ds\n", state.GetDaemonUptimeSeconds())
+	fmt.Printf("plan_tier:     %s\n", state.GetPlanTier())
+	fmt.Printf("sessions:      %s\n", formatSessionCounts(working, blocked, idle))
 
 	if banner := formatAuthFailureBanner(details); banner != "" {
 		fmt.Print(banner)

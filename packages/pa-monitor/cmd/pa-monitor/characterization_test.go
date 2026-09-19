@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
@@ -116,5 +118,46 @@ func TestRunStatusTextOutputCharacterization(t *testing.T) {
 
 	if out != want {
 		t.Errorf("runStatus text output changed.\ngot:\n%q\nwant:\n%q", out, want)
+	}
+}
+
+// TestRunStatusJSONOutputIsCleanJSON is the pg2-bx515 regression: runStatus
+// used to print its text-summary lines (client/daemon/uptime/plan_tier/
+// sessions) UNCONDITIONALLY, before the jsonMode gate later in the
+// function — so `pa-monitor status --json` emitted human text followed by
+// a JSON object on stdout instead of a clean JSON document, breaking any
+// consumer that expects valid JSON on stdout (confirmed live:
+// packages/pg-connector-agentsession-pa-monitor's real-daemon contract
+// test failed to decode it).
+//
+// json.Unmarshal runs against the FULL captured stdout, not a substring —
+// a substring-based JSON extraction (e.g. finding the first '{') would have
+// passed on the old buggy output too, since the JSON object itself was
+// always well-formed; only what preceded it on the same stream was wrong.
+func TestRunStatusJSONOutputIsCleanJSON(t *testing.T) {
+	sock := waitTestSocket(t)
+	serveFakeDaemon(t, sock, &fakeStatusDaemon{state: characterizationState()})
+
+	out := captureStdout(t, func() { runStatus([]string{"--json"}) })
+
+	if !strings.HasPrefix(out, "{") {
+		t.Fatalf("status --json stdout has leading non-JSON content before the first '{': %q", out)
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("status --json stdout is not valid, single-document JSON: %v\nfull captured stdout:\n%q", err, out)
+	}
+	if _, ok := doc["sessions"]; !ok {
+		t.Errorf("decoded JSON missing expected top-level \"sessions\" key: %+v", doc)
+	}
+	// "sessions:" is deliberately excluded here: the JSON key renders as
+	// `"sessions":...` (no space), which contains this substring even in the
+	// fixed output — the leading-'{' check above and json.Unmarshal on the
+	// full string are what actually prove no text precedes the JSON.
+	for _, text := range []string{"client:", "daemon:", "uptime:", "plan_tier:"} {
+		if strings.Contains(out, text) {
+			t.Errorf("status --json stdout still contains a text-mode summary line %q: %q", text, out)
+		}
 	}
 }
