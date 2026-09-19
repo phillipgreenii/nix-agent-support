@@ -21,6 +21,18 @@ import (
 // bead pg2-3nb2t already burned this workspace on once, there for a
 // build-vs-check-attribute confusion rather than a bench-vs-test one, but the
 // same shape: the wrong thing was being watched).
+//
+// TestDispatchOverheadUnderRingReader is the one exception (bead tc-6l70b):
+// it is a wall-CLOCK budget, so unlike the allocation-counted budgets below
+// its own duration — not just its pass/fail threshold — is at the mercy of
+// how fast the host is, and a shared nix builder under load can make its
+// ~470s-on-a-quiet-host runtime exceed go test's fixed 600s per-package
+// timeout outright. It self-skips under `-short` for exactly that reason
+// (see its own doc comment); `pg-router-go-tests` passes `-short`, so
+// `nix flake check` never depends on this one test's wall time, while
+// TestEnqueueAllocBudget/TestDispatchAllocBudget (allocation-counted, not
+// wall-clock-budgeted — host speed cannot exhaust them) keep enforcing the
+// hard gate this file's Task 3.11 Objective describes.
 
 // ringObserver is the MINIMAL Observer this file needs to measure "the
 // observability path": recording straight onto an activity.Ring using the
@@ -286,6 +298,32 @@ func pairedOverheadPct(t *testing.T, round, n int, caseObs Observer, readerHz in
 // short of a genuine multi-x regression in the observability path (a 2x
 // regression is a 100% overhead).
 func TestDispatchOverheadUnderRingReader(t *testing.T) {
+	// Skip under -short (bead tc-6l70b): this test's PASS/FAIL criterion
+	// (pairedOverheadPct's back-to-back baseline/case ratio) is already
+	// load-relative, but reaching it costs real wall time that is NOT
+	// load-relative — rounds*n*2 arms*2 subtests = 9*6000*2*2 = 216,000
+	// Enqueue+Dispatch pairs, one of them with a concurrent 4Hz ring
+	// reader running throughout. On a quiet host that's ~472s total for
+	// the whole internal/eventqueue package (79% of go test's 600s
+	// default per-package timeout); under shared-builder load it exceeded
+	// that fixed external budget outright (observed: still running at
+	// 9m44s when the harness fired `panic: test timed out after 10m0s`,
+	// citing an innocent t.Parallel()'d bystander test in its truncated
+	// log tail rather than this one). That is a property of go test's own
+	// per-package deadline, which this test cannot make load-relative no
+	// matter how the internal ratio is computed — so the flake-check path
+	// (`checks.pg-router-go-tests`, which the repo's `pg-router-go-tests`
+	// nix derivation runs with `-short` for exactly this reason) skips it
+	// and relies on TestEnqueueAllocBudget/TestDispatchAllocBudget (same
+	// file, allocation-counted rather than wall-clock-budgeted, so host
+	// speed cannot exhaust them) to keep enforcing the observability-path
+	// hard gate under `nix flake check`. Run this test directly for the
+	// wall-time overhead signal: `go test ./internal/eventqueue/...
+	// -run TestDispatchOverheadUnderRingReader -v`.
+	if testing.Short() {
+		t.Skip("skipping wall-clock overhead gate in -short mode (bead tc-6l70b): unbounded by design, see doc comment")
+	}
+
 	const n = 6000
 	const rounds = 9
 	const maxOverheadPct = 40.0
