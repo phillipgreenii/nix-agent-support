@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -121,12 +123,83 @@ func TestClient_Paste_loadsBufferThenPastesBracketed(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 tmux calls, got %d: %v", len(got), got)
 	}
-	wantLoad := []string{"-L", "ccpool", "load-buffer", "-b", "ccpool-paste", "-"}
-	wantPaste := []string{"-L", "ccpool", "paste-buffer", "-p", "-d", "-b", "ccpool-paste", "-t", "cc-a"}
+	// The buffer name is per-call-unique (session name + uuid nonce, see
+	// pg2-xz6es) rather than the old hardcoded "ccpool-paste" constant, so
+	// pull the actual name out of the load-buffer argv (index 4: -L ccpool
+	// load-buffer -b <name> -) and assert load/paste agree on it and that it
+	// is scoped to this call's session name.
+	if len(got[0]) != 6 || got[0][3] != "-b" {
+		t.Fatalf("load argv shape = %v, want [-L ccpool load-buffer -b <name> -]", got[0])
+	}
+	buf := got[0][4]
+	if !strings.HasPrefix(buf, "ccpool-paste-cc-a-") {
+		t.Errorf("buffer name = %q, want prefix %q", buf, "ccpool-paste-cc-a-")
+	}
+	wantLoad := []string{"-L", "ccpool", "load-buffer", "-b", buf, "-"}
+	wantPaste := []string{"-L", "ccpool", "paste-buffer", "-p", "-d", "-b", buf, "-t", "cc-a"}
 	if !reflect.DeepEqual(got[0], wantLoad) {
 		t.Errorf("load argv = %v want %v", got[0], wantLoad)
 	}
 	if !reflect.DeepEqual(got[1], wantPaste) {
 		t.Errorf("paste argv = %v want %v", got[1], wantPaste)
+	}
+}
+
+// TestClient_Paste_bufferNameUniquePerCall exercises concurrent Paste() calls
+// (pg2-xz6es): the buffer name used to be a shared hardcoded constant
+// ("ccpool-paste"), so two concurrent calls raced on load-buffer/paste-buffer
+// -d against the SAME name — one side silently got the other's prompt body,
+// the other got a "no buffer" error. Firing many goroutines concurrently and
+// asserting every load-buffer name is distinct proves the race is gone
+// without needing a real tmux socket.
+func TestClient_Paste_bufferNameUniquePerCall(t *testing.T) {
+	var mu sync.Mutex
+	var loadBufs []string
+	var pasteBufs []string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		// paste-buffer argv: -L ccpool paste-buffer -p -d -b <name> -t <session>
+		mu.Lock()
+		pasteBufs = append(pasteBufs, args[6])
+		mu.Unlock()
+		return nil, nil
+	}}
+	c.runStdin = func(_ string, args ...string) ([]byte, error) {
+		// load-buffer argv: -L ccpool load-buffer -b <name> -
+		mu.Lock()
+		loadBufs = append(loadBufs, args[4])
+		mu.Unlock()
+		return nil, nil
+	}
+
+	const n = 50
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- c.Paste("cc-concurrent", "body")
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Paste: %v", err)
+		}
+	}
+
+	if len(loadBufs) != n || len(pasteBufs) != n {
+		t.Fatalf("got %d load-buffer calls and %d paste-buffer calls, want %d each", len(loadBufs), len(pasteBufs), n)
+	}
+	seen := make(map[string]bool, n)
+	for _, buf := range loadBufs {
+		if seen[buf] {
+			t.Fatalf("buffer name %q reused across concurrent Paste calls", buf)
+		}
+		seen[buf] = true
+	}
+	if len(seen) != n {
+		t.Fatalf("got %d unique buffer names across %d concurrent calls, want %d unique", len(seen), n, n)
 	}
 }

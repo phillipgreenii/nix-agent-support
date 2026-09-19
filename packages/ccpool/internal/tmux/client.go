@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // Client is the tmux adapter. All operations target the dedicated -L socket.
@@ -111,8 +113,17 @@ func (c *Client) PaneCurrentPath(name string) (string, error) {
 // Code 2.1.170: a pasted multi-line prompt produced ONE turn / one Stop, whereas
 // raw send-keys of the same body would submit line-by-line, and `;`, `\` and
 // key-name tokens would be reinterpreted. Caller sends Enter separately to submit.
+//
+// The tmux buffer name is per-call-unique (target session name + a uuid nonce),
+// never a shared constant. paste-buffer's -d deletes the buffer immediately
+// after use, so two concurrent Paste calls sharing one buffer name race:
+// load-buffer B can overwrite load-buffer A's body before paste-buffer -d A
+// runs, delivering the WRONG prompt to session A with no error at all, while
+// the other side gets a loud "no buffer" error once it's already been deleted
+// (pg2-xz6es). The name still carries the session name for readability when
+// debugging a stray buffer.
 func (c *Client) Paste(name, body string) error {
-	const buf = "ccpool-paste"
+	buf := fmt.Sprintf("ccpool-paste-%s-%s", name, uuid.NewString())
 	if _, err := c.runStdin(body, "-L", c.Socket, "load-buffer", "-b", buf, "-"); err != nil {
 		return fmt.Errorf("tmux load-buffer: %w", err)
 	}
