@@ -83,6 +83,11 @@
       "name": "plan-decompose",
       "source": "./plan-decompose",
       "description": "Claude skill + agents: decompose an approved design into curated, self-contained work-packet beads (docket epic + children), with staleness stamps, reconcile, and a packet-first implementer agent."
+    },
+    {
+      "name": "pg-wi-flow",
+      "source": "./pg-wi-flow",
+      "description": "The /drain skill and dispatcher/worker/resolver agent definitions that drive the pg-wi-flow CLI's work-item loop (execution phase 1: framework only, null workflow)."
     }
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "name": "pg-wi-flow",
+  "description": "The /drain skill and dispatcher/worker/resolver agent definitions that drive the pg-wi-flow CLI's work-item loop (execution phase 1: framework only, null workflow).",
+  "version": "0.1.0",
+  "defaultEnabled": true
+}
