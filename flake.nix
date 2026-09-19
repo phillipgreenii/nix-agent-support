@@ -218,6 +218,15 @@
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
+          # claude-hook-router: Pattern A (ADR 0008), ADR 0071 Phase B's dispatch/merge
+          # runtime (packet B1, tc-rjzd3.6). packages/claude-hook-router/default.nix
+          # landed with B1 but was never actually wired into this overlay — this entry
+          # was missing until packet B5 (tc-rjzd3.10) added it, needed so B3's bats E2E
+          # check (below) can inject a real built ROUTER_BIN rather than have the check
+          # sandbox invoke `go build` itself.
+          claude-hook-router = final.callPackage ./packages/claude-hook-router {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-ccaudit: Pattern A (ADR 0008) — a self-contained Go module with no
           # local `replace`, so no sibling needs to be in the same store tree.
           # It deliberately does NOT reuse claude-transcript; see the rationale in
@@ -1641,6 +1650,60 @@
                   "integration"
                 ];
               };
+
+              # claude-hook-router — B2 (ADR 0071 Phase B, packet tc-rjzd3.7): the
+              # dispatch/merge runtime's matcher/event-selection/priority-dispatch/
+              # merge/attribution/budget/cross-process-isolation suite (main_test.go,
+              # attribution_test.go, config_test.go, dispatch_test.go, matcher_test.go,
+              # merge_test.go). Pattern A (single module, no local `replace`), same
+              # shape as pb-go-tests below. No testDeps: nothing here shells out to a
+              # tracked external tool -- the delegate-stub and cross-process tests
+              # re-exec the test binary itself (os/exec TestHelperProcess idiom) or
+              # `go build` the router binary directly, both self-contained within the
+              # sandboxed Go toolchain already on PATH for `go test`.
+              claude-hook-router-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "claude-hook-router-go-tests";
+                src = lib.cleanSource ./packages/claude-hook-router; # matches default.nix
+                gomod2nixToml = ./packages/claude-hook-router/gomod2nix.toml;
+              };
+
+              # claude-hook-router-e2e — B3 (ADR 0071 Phase B, packet tc-rjzd3.8): the
+              # bats end-to-end suite (tests/test-claude-hook-router-e2e.bats) driving
+              # the REAL built router binary as a subprocess against stub shell
+              # delegates. The bats file itself documents this exact wiring ("ROUTER_BIN
+              # may already be set by a caller that built the binary itself ... it would
+              # inject a package's own built exe path rather than have the check sandbox
+              # invoke `go build`") -- so ROUTER_BIN is set to the claude-hook-router
+              # overlay package's own built binary (added to the overlay by this same
+              # packet, B5, since B1 landed the package's default.nix but never actually
+              # wired it into the overlay) rather than letting bats invoke `go build`
+              # itself a second time.
+              #
+              # The whole `tests/` dir (not just the .bats file) must be copied as ONE
+              # store path: the suite resolves its stub delegates via
+              # `$(dirname BATS_TEST_FILENAME)/fixtures/delegates` (mirrors the
+              # claude-settings/behavior-docs-conformance bats checks' own
+              # "sibling would be absent" note above) -- a bare `.bats` interpolation
+              # would copy only that one file and leave DELEGATES_DIR empty.
+              claude-hook-router-e2e =
+                let
+                  e2eTestsSrc = lib.fileset.toSource {
+                    root = ./packages/claude-hook-router/tests;
+                    fileset = ./packages/claude-hook-router/tests;
+                  };
+                in
+                pkgs.runCommand "check-claude-hook-router-e2e"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    export ROUTER_BIN=${pkgs.claude-hook-router}/bin/claude-hook-router
+                    bats ${e2eTestsSrc}/test-claude-hook-router-e2e.bats
+                    touch $out
+                  '';
 
               # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
               # duration, run). git on PATH for the real-git unit tests; bd/pn
@@ -5404,6 +5467,7 @@
               integrate-branch-support
               pg-desk
               osx-bridge-api
+              claude-hook-router
               ;
             # The two agent-activity-api wrappers, re-exported for the same
             # reason codeburn is: they are overlay-only attrs, so without this
