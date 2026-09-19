@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -224,10 +226,20 @@ func nudgeSuppressionNote(queued []string, statusOf func(sid string) (status, bl
 	return "note: " + strings.Join(supp, ", ") + " — suppressed until idle"
 }
 
+// writeSessionInfoJSON writes v as one sessionJSON object (the status
+// --json wire shape) — the --json sibling of
+// formatSessionInfoHeader/formatSessionInfo's text output for a session:
+// selector.
+func writeSessionInfoJSON(w io.Writer, v *pb.SessionView, now time.Time) error {
+	enc := json.NewEncoder(w)
+	return enc.Encode(toSessionJSON(v, now))
+}
+
 // runInfo implements `info <selector>` — prints session detail (when
 // selector starts with session: or cmux:) or directory rollup (when
 // path:).
 func runInfo(args []string) {
+	args, jsonMode := stripJSONFlag(args)
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "info: missing selector")
 		os.Exit(3)
@@ -272,6 +284,13 @@ func runInfo(args []string) {
 	if v == nil {
 		fmt.Fprintln(os.Stderr, "info: no session matched")
 		os.Exit(1)
+	}
+	if jsonMode {
+		if err := writeSessionInfoJSON(os.Stdout, v, time.Now().UTC()); err != nil {
+			fmt.Fprintf(os.Stderr, "info: %v\n", err)
+			os.Exit(2)
+		}
+		return
 	}
 	fmt.Print(formatSessionInfoHeader(v))
 	if len(resp.GetLabelPairs()) > 0 {
