@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
 
 var version = "dev"
@@ -69,10 +72,34 @@ func stripPoolFlag(argv []string) (clean []string, pool string, err error) {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+// run holds everything main() used to do directly, so that telemetry.
+// Init's shutdown (below) is guaranteed to flush before the process exits.
+// A deferred call in main() itself would never run: every branch below
+// used to end by calling os.Exit directly, and os.Exit bypasses deferred
+// functions outright — so the flush has to live inside a function main()
+// calls and returns FROM, not inside main() itself. Mirrors packages/
+// pg-router/cmd/pg-router/main.go's own main()/run() split (pg2-qye99 /
+// pg2-24f89).
+func run() int {
+	// Telemetry: called unconditionally, for every subcommand. Init never
+	// returns an error in practice — a missing OTEL_EXPORTER_OTLP_ENDPOINT
+	// installs no-op providers (the common case for a one-shot operator
+	// invocation with no OTLP env set), and a bad endpoint logs one stderr
+	// warning and continues.
+	shutdown := telemetry.Init(context.Background())
+	defer func() { _ = shutdown(context.Background()) }()
+	slog.SetDefault(slog.New(telemetry.Fanout(
+		slog.NewTextHandler(os.Stderr, nil),
+		telemetry.NewSlogHandler(),
+	)))
+
 	argv, pool, err := stripPoolFlag(os.Args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
 	if pool != "" {
 		// Validate (and create-on-demand) the pool dir up front so a bad --pool fails
@@ -82,48 +109,49 @@ func main() {
 		pc, perr := config.ResolvePool(pool)
 		if perr != nil {
 			fmt.Fprintln(os.Stderr, perr)
-			os.Exit(2)
+			return 2
 		}
 		_ = os.Setenv("CCPOOL_POOL", pc.Root)
 	}
 	cmd, rest := pickSubcommand(argv)
 	switch cmd {
 	case "attach":
-		os.Exit(runAttach(rest))
+		return runAttach(rest)
 	case "attend":
-		os.Exit(runAttend(rest))
+		return runAttend(rest)
 	case "cancel":
-		os.Exit(runCancel(rest))
+		return runCancel(rest)
 	case "close":
-		os.Exit(runClose(rest))
+		return runClose(rest)
 	case "doctor":
-		os.Exit(runDoctor(rest))
+		return runDoctor(rest)
 	case "hook":
-		os.Exit(runHook(rest))
+		return runHook(rest)
 	case "list":
-		os.Exit(runList(rest))
+		return runList(rest)
 	case "meta":
-		os.Exit(runMeta(rest))
+		return runMeta(rest)
 	case "new":
-		os.Exit(runNew(rest))
+		return runNew(rest)
 	case "reap":
-		os.Exit(runReap(rest))
+		return runReap(rest)
 	case "reap-all":
-		os.Exit(runReapAll(rest))
+		return runReapAll(rest)
 	case "reply":
-		os.Exit(runReply(rest))
+		return runReply(rest)
 	case "result":
-		os.Exit(runResult(rest))
+		return runResult(rest)
 	case "state":
-		os.Exit(runState(rest))
+		return runState(rest)
 	case "tail":
-		os.Exit(runTail(rest))
+		return runTail(rest)
 	case "trust":
-		os.Exit(runTrust(rest))
+		return runTrust(rest)
 	case "version":
 		fmt.Println(version)
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
-		os.Exit(2)
+		return 2
 	}
 }
