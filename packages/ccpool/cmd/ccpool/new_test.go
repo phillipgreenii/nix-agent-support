@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -138,5 +139,91 @@ func TestMetaFlag_allowsEmptyValue(t *testing.T) {
 	}
 	if v, ok := m["pgrouter.pinned"]; !ok || v != "" {
 		t.Errorf("bare tag = (%q,%v), want (\"\",true)", v, ok)
+	}
+}
+
+func TestNewLabelFlag_collectsRepeatedKeys(t *testing.T) {
+	l := labelFlag{}
+	for _, k := range []string{"pgrouter.role", "pgrouter.pool"} {
+		if err := l.Set(k); err != nil {
+			t.Fatalf("Set(%q): %v", k, err)
+		}
+	}
+	want := labelFlag{"pgrouter.role": true, "pgrouter.pool": true}
+	if !reflect.DeepEqual(l, want) {
+		t.Errorf("labelFlag = %v, want %v", l, want)
+	}
+}
+
+func TestNewLabelFlag_rejectsEmptyKey(t *testing.T) {
+	if err := (labelFlag{}).Set(""); err == nil {
+		t.Fatal("labelFlag.Set(\"\") must error")
+	}
+}
+
+func TestNewLabelFlag_parsesViaFlagSetRepeatable(t *testing.T) {
+	// --label is repeatable and may follow the positional external_id, exactly
+	// like --meta/--env (mirrors TestRunNew_acceptsAllowedToolsFlag's pattern).
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	label := labelFlag{}
+	fs.Var(label, "label", "")
+	pos := parseInterspersed(fs, []string{"zr-abc", "--label", "role", "--label", "pool"})
+	if len(pos) != 1 || pos[0] != "zr-abc" {
+		t.Fatalf("positional parse = %v, want [zr-abc]", pos)
+	}
+	want := labelFlag{"role": true, "pool": true}
+	if !reflect.DeepEqual(label, want) {
+		t.Errorf("labelFlag after parse = %v, want %v", label, want)
+	}
+}
+
+// fakeLabelMarker is a labelMarker test double recording every MarkAsLabel
+// call, optionally erroring for named keys — lets applyLabels' wiring (used by
+// both `ccpool new` and `ccpool meta set`) be unit-tested without a real store.
+type fakeLabelMarker struct {
+	marked  map[string]bool
+	errKeys map[string]error
+}
+
+func (f *fakeLabelMarker) MarkAsLabel(externalID, key string) error {
+	if f.errKeys != nil {
+		if err, ok := f.errKeys[key]; ok {
+			return err
+		}
+	}
+	if f.marked == nil {
+		f.marked = map[string]bool{}
+	}
+	f.marked[externalID+"/"+key] = true
+	return nil
+}
+
+func TestNewApplyLabels_callsMarkAsLabelForEachKey(t *testing.T) {
+	m := &fakeLabelMarker{}
+	labels := labelFlag{"role": true, "pool": true}
+	if err := applyLabels(m, "zr-abc", labels); err != nil {
+		t.Fatalf("applyLabels: %v", err)
+	}
+	want := map[string]bool{"zr-abc/role": true, "zr-abc/pool": true}
+	if !reflect.DeepEqual(m.marked, want) {
+		t.Errorf("marked = %v, want %v", m.marked, want)
+	}
+}
+
+func TestNewApplyLabels_emptySetIsNoop(t *testing.T) {
+	m := &fakeLabelMarker{}
+	if err := applyLabels(m, "zr-abc", labelFlag{}); err != nil {
+		t.Fatalf("applyLabels(empty): %v", err)
+	}
+	if len(m.marked) != 0 {
+		t.Errorf("marked = %v, want none", m.marked)
+	}
+}
+
+func TestNewApplyLabels_propagatesMarkAsLabelError(t *testing.T) {
+	wantErr := fmt.Errorf("mark as label %q/%q: key not found", "zr-abc", "bead")
+	m := &fakeLabelMarker{errKeys: map[string]error{"bead": wantErr}}
+	if err := applyLabels(m, "zr-abc", labelFlag{"bead": true}); err != wantErr {
+		t.Errorf("applyLabels error = %v, want %v", err, wantErr)
 	}
 }

@@ -67,3 +67,70 @@ func TestRenderMetaListJSON_object(t *testing.T) {
 		t.Errorf("renderMetaListJSON = %s", got)
 	}
 }
+
+func TestMetaFlagsParse_pullsJSONAndLeavesPositionals(t *testing.T) {
+	jsonOut, labels, pos, err := parseMetaFlags([]string{"list", "zr-abc", "--json"})
+	if err != nil {
+		t.Fatalf("parseMetaFlags: %v", err)
+	}
+	if !jsonOut {
+		t.Error("jsonOut = false, want true")
+	}
+	if len(labels) != 0 {
+		t.Errorf("labels = %v, want none", labels)
+	}
+	want := []string{"list", "zr-abc"}
+	if !reflect.DeepEqual(pos, want) {
+		t.Errorf("pos = %v, want %v", pos, want)
+	}
+}
+
+// TestMetaFlagsParse_pullsRepeatedLabelsInterspersed pins meta.go's own
+// --label flag (repeatable, only meaningful for `set`), and that it may be
+// interspersed with the positional set/external_id/key args exactly like
+// --json already is (pg2-24f89/pg2-qye99 D8.1).
+func TestMetaFlagsParse_pullsRepeatedLabelsInterspersed(t *testing.T) {
+	jsonOut, labels, pos, err := parseMetaFlags(
+		[]string{"set", "zr-abc", "--label", "pgrouter.role", "role", "worker", "--label", "pgrouter.pool"},
+	)
+	if err != nil {
+		t.Fatalf("parseMetaFlags: %v", err)
+	}
+	if jsonOut {
+		t.Error("jsonOut = true, want false")
+	}
+	wantLabels := labelFlag{"pgrouter.role": true, "pgrouter.pool": true}
+	if !reflect.DeepEqual(labels, wantLabels) {
+		t.Errorf("labels = %v, want %v", labels, wantLabels)
+	}
+	wantPos := []string{"set", "zr-abc", "role", "worker"}
+	if !reflect.DeepEqual(pos, wantPos) {
+		t.Errorf("pos = %v, want %v", pos, wantPos)
+	}
+}
+
+func TestMetaFlagsParse_labelRequiresAValue(t *testing.T) {
+	if _, _, _, err := parseMetaFlags([]string{"set", "zr-abc", "role", "worker", "--label"}); err == nil {
+		t.Fatal("trailing --label with no value must error")
+	}
+}
+
+func TestMetaFlagsParse_rejectsEmptyLabelKey(t *testing.T) {
+	if _, _, _, err := parseMetaFlags([]string{"set", "zr-abc", "--label", ""}); err == nil {
+		t.Fatal("--label \"\" must error (empty key)")
+	}
+}
+
+func TestMetaFlagsParse_noFlagsIsAllPositional(t *testing.T) {
+	jsonOut, labels, pos, err := parseMetaFlags([]string{"get", "zr-abc", "role"})
+	if err != nil {
+		t.Fatalf("parseMetaFlags: %v", err)
+	}
+	if jsonOut || len(labels) != 0 {
+		t.Errorf("jsonOut=%v labels=%v, want false/none", jsonOut, labels)
+	}
+	want := []string{"get", "zr-abc", "role"}
+	if !reflect.DeepEqual(pos, want) {
+		t.Errorf("pos = %v, want %v", pos, want)
+	}
+}

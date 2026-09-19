@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -26,13 +27,15 @@ func runNew(args []string) int {
 	fs.Var(env, "env", "extra env KEY=VAL injected into the session (repeatable)")
 	meta := metaFlag{}
 	fs.Var(meta, "meta", "session metadata KEY=VAL upserted at dispatch (repeatable)")
+	label := labelFlag{}
+	fs.Var(label, "label", "flag a metadata key (set via --meta in this same call, or previously) as label-eligible (repeatable)")
 	permMode := fs.String("permission-mode", "", "claude --permission-mode value: default|acceptEdits|plan|auto|dontAsk|bypassPermissions (workers need bypassPermissions)")
 	allowedTools := fs.String("allowed-tools", "", "claude --allowed-tools allowlist forwarded verbatim (comma/space-separated, e.g. \"Bash(git *),Edit\"); empty omits the flag")
 	effort := fs.String("effort", "", "claude --effort value (e.g. max)")
 	autonomous := fs.Bool("autonomous", false, "autonomous mode: block AskUserQuestion (the hook denies it so a human-less worker never stalls on the picker); injects CCPOOL_AUTONOMOUS into the session")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id
 	if len(pos) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--meta KEY=VAL ...] [--permission-mode m] [--allowed-tools list] [--effort v] [--autonomous]")
+		fmt.Fprintln(os.Stderr, "usage: ccpool new <external_id> [--name label] [--cwd dir] [--model m] [--env KEY=VAL ...] [--meta KEY=VAL ...] [--label KEY ...] [--permission-mode m] [--allowed-tools list] [--effort v] [--autonomous]")
 		return 2
 	}
 	externalID := pos[0]
@@ -47,7 +50,7 @@ func runNew(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("new: config load failed", "err", err)
 		return 1
 	}
 	dir := *cwd
@@ -66,7 +69,7 @@ func runNew(args []string) int {
 	el := openEventLog(cfg)
 	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("new: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
@@ -83,7 +86,14 @@ func runNew(args []string) int {
 		Meta:           meta,
 	})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "new:", err)
+		slog.Error("new: ensure failed", "err", err)
+		return 1
+	}
+	// --label marks each named key as label-eligible in this SAME invocation,
+	// after the metadata itself (--meta, applied inside Ensure) has committed
+	// (pg2-24f89/pg2-qye99 D8.1).
+	if err := applyLabels(st, externalID, label); err != nil {
+		slog.Error("new: label failed", "err", err)
 		return 1
 	}
 	// Columns: external_id, name, state, short claude_session_id (ADR 0015).
@@ -119,6 +129,43 @@ func (m metaFlag) Set(kv string) error {
 		return fmt.Errorf("invalid --meta %q, want KEY=VAL", kv)
 	}
 	m[k] = v
+	return nil
+}
+
+// labelFlag collects repeated `--label <key>` into a set (mirrors envFlag/
+// metaFlag, but a bare key rather than a KEY=VAL pair). Wired into a
+// post-metadata-write MarkAsLabel loop (applyLabels) so `ccpool new` and
+// `ccpool meta set` flag a key as label-eligible in the same invocation that
+// writes the metadata itself (pg2-24f89/pg2-qye99 D8.1).
+type labelFlag map[string]bool
+
+func (l labelFlag) String() string { return "" }
+
+func (l labelFlag) Set(key string) error {
+	if key == "" {
+		return fmt.Errorf("invalid --label %q: key required", key)
+	}
+	l[key] = true
+	return nil
+}
+
+// labelMarker is the minimal store surface applyLabels needs — satisfied by
+// *store.Store — kept as a seam so the --label wiring is unit-testable
+// without a real SQLite store.
+type labelMarker interface {
+	MarkAsLabel(externalID, key string) error
+}
+
+// applyLabels calls MarkAsLabel(externalID, key) for every key in labels.
+// Iteration order over a set is unspecified; the design places no ordering
+// requirement on repeated --label flags, so that is fine. Returns the first
+// error encountered (e.g. a key never written via SetMeta/--meta).
+func applyLabels(m labelMarker, externalID string, labels labelFlag) error {
+	for k := range labels {
+		if err := m.MarkAsLabel(externalID, k); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

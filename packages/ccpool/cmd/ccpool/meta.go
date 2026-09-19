@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -46,6 +47,36 @@ func parseMetaArgs(args []string) (verb, externalID, key, value string, err erro
 	return verb, externalID, key, value, nil
 }
 
+// parseMetaFlags pulls a trailing --json (only meaningful for `list`) and any
+// repeatable --label <key> (only meaningful for `set`; consumes the following
+// token) out of args, before parseMetaArgs's positional parse. meta.go
+// hand-parses positional args rather than using flag.FlagSet (unlike new.go),
+// so this pre-scan is where any interspersed flag has to be pulled out
+// (pg2-24f89/pg2-qye99 D8.1 — this file has no flag.FlagSet pattern to copy
+// from new.go). Pure (no I/O) so it is unit-testable.
+func parseMetaFlags(args []string) (jsonOut bool, labels labelFlag, pos []string, err error) {
+	labels = labelFlag{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch a {
+		case "--json":
+			jsonOut = true
+			continue
+		case "--label":
+			if i+1 >= len(args) {
+				return false, nil, nil, fmt.Errorf("ccpool meta: --label requires a value")
+			}
+			i++
+			if err := labels.Set(args[i]); err != nil {
+				return false, nil, nil, err
+			}
+			continue
+		}
+		pos = append(pos, a)
+	}
+	return jsonOut, labels, pos, nil
+}
+
 // renderMetaList renders metadata as sorted "key=value\n" lines. Pure.
 func renderMetaList(m map[string]string) string {
 	keys := make([]string, 0, len(m))
@@ -74,15 +105,10 @@ func renderMetaListJSON(m map[string]string) (string, error) {
 }
 
 func runMeta(args []string) int {
-	// Pull a trailing --json (only meaningful for `list`) before positional parse.
-	jsonOut := false
-	var pos []string
-	for _, a := range args {
-		if a == "--json" {
-			jsonOut = true
-			continue
-		}
-		pos = append(pos, a)
+	jsonOut, labels, pos, err := parseMetaFlags(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
 	}
 	verb, externalID, key, value, err := parseMetaArgs(pos)
 	if err != nil {
@@ -92,12 +118,12 @@ func runMeta(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("meta: config load failed", "err", err)
 		return 1
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("meta: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
@@ -106,13 +132,20 @@ func runMeta(args []string) int {
 	switch verb {
 	case "set":
 		if err := st.SetMeta(ctx, externalID, key, value); err != nil {
-			fmt.Fprintln(os.Stderr, "meta set:", err)
+			slog.Error("meta: set failed", "err", err)
+			return 1
+		}
+		// --label marks each named key as label-eligible in this SAME
+		// invocation, right after the metadata write above commits
+		// (pg2-24f89/pg2-qye99 D8.1).
+		if err := applyLabels(st, externalID, labels); err != nil {
+			slog.Error("meta: label failed", "err", err)
 			return 1
 		}
 	case "get":
 		v, ok, err := st.GetMeta(ctx, externalID, key)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "meta get:", err)
+			slog.Error("meta: get failed", "err", err)
 			return 1
 		}
 		if !ok {
@@ -122,19 +155,19 @@ func runMeta(args []string) int {
 		fmt.Println(v)
 	case "rm":
 		if err := st.DeleteMeta(ctx, externalID, key); err != nil {
-			fmt.Fprintln(os.Stderr, "meta rm:", err)
+			slog.Error("meta: rm failed", "err", err)
 			return 1
 		}
 	case "list":
 		m, err := st.Meta(ctx, externalID)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "meta list:", err)
+			slog.Error("meta: list failed", "err", err)
 			return 1
 		}
 		if jsonOut {
 			out, err := renderMetaListJSON(m)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "meta list:", err)
+				slog.Error("meta: list json render failed", "err", err)
 				return 1
 			}
 			fmt.Println(out)
