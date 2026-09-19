@@ -58,10 +58,15 @@ prompts that read these shapes, in the same change:
   pg-pr's existing `pbase` mechanism: stash the pre-conflict priority on the first conflicting
   tick, nudge mine/co-owned toward higher priority and team toward lower, no-op on a repeated
   conflicting tick, restore the baseline once the conflict clears) is applied via `issue update`.
-  Closed, with its open feedback cycle, only on a CONFIRMED closure — a `--change removed` re-read
-  (or an ordinary/sweep `pr show`) reporting `merged` or `closed`, or a removed re-read's own
-  `not_found` (a closure with reason `gone`) — never because the PR merely left a query. An
-  already-closed anchor is never reopened.
+  Closed, with its open cycles — BOTH the feedback cycle and the review request, symmetrically —
+  only on a CONFIRMED closure — a `--change removed` re-read (or an ordinary/sweep `pr show`)
+  reporting `merged` or `closed`, or a removed re-read's own `not_found` (a closure with reason
+  `gone`) — never because the PR merely left a query. An already-closed anchor is never reopened.
+  This mirrors pg-pr's own cascade-close (`beadsbridge.CascadeCloseMergeRequest`), which closes
+  every direct child of the merge-request bead type-blindly; an earlier revision of this doc and
+  the code it described closed only the feedback cycle here, which left review-pr beads open at a
+  far higher stale rate than feedback cycles, caught only by the slower sweep re-verification
+  instead of cascading immediately (`pg2-ryexi`).
 - **Feedback cycle** — for every PR with unaddressed feedback (a disposition that is still
   `open`), ensure one open cycle keyed by title and deduplicated by the `fbsum` digest (a port of
   pg-pr's existing digest computation), carrying the `mine` label only when the PR's ownership
