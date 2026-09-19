@@ -98,7 +98,7 @@ never one aggregate line, since `run`'s own structured-log shape is per-entity b
 ## Out of scope
 
 `run thread` and its own cross-reference step (permalinks and ticket keys found in Slack thread
-text) are this docket's Slack-half sibling packet. The project-health half of layered urgency
-stays deferred (see [`interpret.md`](interpret.md)). ZR's desk-issue and desk-thread role wiring
-(the callers that invoke this command) is this docket's own ZR-wiring sibling packet.
-`daemon.enable` is this docket's last packet.
+text) are the Slack half — see [`run-thread.md`](run-thread.md). The project-health half of
+layered urgency stays deferred (see [`interpret.md`](interpret.md)). ZR's desk-issue and
+desk-thread role wiring (the callers that invoke this command) is this docket's own ZR-wiring
+sibling packet. `daemon.enable` is this docket's last packet.

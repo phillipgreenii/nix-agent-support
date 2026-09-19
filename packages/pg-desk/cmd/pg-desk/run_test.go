@@ -13,36 +13,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// TestRunCmdRejectsUnsupportedEntityType proves the Binding decisions'
-// "run thread is NOT implemented by this packet — the CLI stub returns
-// 'not implemented, see Phase 13' if invoked with that type" (run issue is
-// now implemented by THIS packet — see the TestRunCmdIssue_* tests below)
-// — and that an entirely unknown type is rejected too, rather than
-// silently falling through to the pr pipeline.
+// TestRunCmdRejectsUnsupportedEntityType proves an entirely unknown type is
+// rejected rather than silently falling through to the pr pipeline (issue
+// and thread are now both implemented — see the TestRunCmdIssue_* and
+// TestRunCmdThread_* tests below).
 func TestRunCmdRejectsUnsupportedEntityType(t *testing.T) {
-	cases := []struct {
-		entityType string
-		wantSubstr []string
-	}{
-		{"thread", []string{"not implemented", "Phase 13"}},
-		{"pull-request", []string{"unknown entity type"}},
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
 	}
-	for _, c := range cases {
-		t.Run(c.entityType, func(t *testing.T) {
-			cmd, _, err := rootCmd.Find([]string{"run"})
-			if err != nil {
-				t.Fatalf("rootCmd has no run subcommand: %v", err)
-			}
-			runErr := cmd.RunE(cmd, []string{c.entityType, "1"})
-			if runErr == nil {
-				t.Fatalf("run %s: expected an error, got nil", c.entityType)
-			}
-			for _, want := range c.wantSubstr {
-				if !strings.Contains(runErr.Error(), want) {
-					t.Fatalf("run %s: error = %q, want it to contain %q", c.entityType, runErr.Error(), want)
-				}
-			}
-		})
+	runErr := cmd.RunE(cmd, []string{"pull-request", "1"})
+	if runErr == nil {
+		t.Fatal("run pull-request: expected an error, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "unknown entity type") {
+		t.Fatalf("run pull-request: error = %q, want it to contain %q", runErr.Error(), "unknown entity type")
 	}
 }
 
@@ -456,5 +441,230 @@ func TestRunCmdIssue_NonJiraShapedID_StillUsesBeadsPath(t *testing.T) {
 	}
 	if resolveCalls != 1 {
 		t.Fatalf("runResolveBeadPR called %d times, want 1 (a beads-shaped id must still use the beads path)", resolveCalls)
+	}
+}
+
+// --- run thread: Slack half (docket pg2-2j5ac.40, Phase 13) ---------------
+
+// setupRunThreadTest wires runConfigLoad/runStoreOpen/runThreadShow for one
+// `run thread` test and returns the opened store plus the store's own file
+// path (so a caller can reopen it afterward for verification, mirroring
+// TestRunCmdIssue_ResolvesAndReinterprets' own dbPath convention — runCmd's
+// RunE closes the store it opens).
+func setupRunThreadTest(t *testing.T, cfg *config.Config, show threadShowResult, notFound bool, showErr error) (st *store.Store, dbPath string) {
+	t.Helper()
+	origConfigLoad := runConfigLoad
+	origStoreOpen := runStoreOpen
+	origThreadShow := runThreadShow
+	t.Cleanup(func() {
+		runConfigLoad = origConfigLoad
+		runStoreOpen = origStoreOpen
+		runThreadShow = origThreadShow
+	})
+
+	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
+	runThreadShow = func(ctx context.Context, threadID string) (threadShowResult, bool, error) {
+		return show, notFound, showErr
+	}
+
+	dbPath = filepath.Join(t.TempDir(), "test.db")
+	store.SetSynchronousForTests("OFF")
+	var err error
+	st, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open test store: %v", err)
+	}
+	runStoreOpen = func() (*store.Store, error) { return st, nil }
+	return st, dbPath
+}
+
+// TestRunCmdThread_PermalinkMatch_WritesXrefAndReinterprets proves the
+// permalink half of this packet's own acceptance criterion: a thread whose
+// text contains a GitHub PR URL is cross-referenced to that PR
+// (evidence="permalink"), and that PR is re-interpreted (stage 2 only, no
+// gather — there is no real pg-connector on this test's $PATH, so an
+// accidental gather call would fail this test loudly rather than silently
+// — and no sync, and no bead write: RunInterpretOnly never writes a bead
+// by construction, mirroring TestRunCmdIssue_JiraTicketKey_*'s own
+// identical reasoning — there is no bead-writing code on this path at all
+// to assert a call count against).
+func TestRunCmdThread_PermalinkMatch_WritesXrefAndReinterprets(t *testing.T) {
+	cfg := issueTestCfg()
+	show := threadShowResult{
+		Text: "see https://github.com/acme/widgets/pull/7 for the context",
+		AsOf: "2026-09-18T00:00:00Z",
+	}
+	st, dbPath := setupRunThreadTest(t, cfg, show, false, nil)
+	seedPRFacts(t, st, "acme/widgets#7")
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"thread", "T1", "--change", "changed"}); runErr != nil {
+		t.Fatalf("run thread T1: unexpected error: %v", runErr)
+	}
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+
+	xref, found, err := verify.GetXref("acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T1")
+	if err != nil || !found {
+		t.Fatalf("GetXref: found=%v err=%v", found, err)
+	}
+	if xref.Evidence != "permalink" {
+		t.Fatalf("xref evidence = %q, want %q", xref.Evidence, "permalink")
+	}
+
+	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if interp.Category == "" && interp.GateState == "" && interp.Ownership == "" {
+		t.Fatalf("interpretation row looks unpopulated: %+v", interp)
+	}
+}
+
+// TestRunCmdThread_TicketKeyMatch_ResolvesViaXrefAndReinterprets proves the
+// ticket-key half: a thread whose text contains a Jira ticket key already
+// cross-referenced to a PR (by internal/gather's own Jira scan, seeded here
+// via seedXref) is cross-referenced to that SAME PR (evidence="ticket-key",
+// resolved indirectly through the issue-side xref — never a second,
+// independent PR guess), and that PR is re-interpreted.
+func TestRunCmdThread_TicketKeyMatch_ResolvesViaXrefAndReinterprets(t *testing.T) {
+	cfg := jiraTestCfg()
+	show := threadShowResult{
+		Text: "any update on PROJ-99?",
+		AsOf: "2026-09-18T00:00:00Z",
+	}
+	st, dbPath := setupRunThreadTest(t, cfg, show, false, nil)
+	seedPRFacts(t, st, "acme/widgets#7")
+	seedXref(t, st, "acme/widgets#7", "PROJ-99")
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"thread", "T2", "--change", "changed"}); runErr != nil {
+		t.Fatalf("run thread T2: unexpected error: %v", runErr)
+	}
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+
+	xref, found, err := verify.GetXref("acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T2")
+	if err != nil || !found {
+		t.Fatalf("GetXref: found=%v err=%v", found, err)
+	}
+	if xref.Evidence != "ticket-key" {
+		t.Fatalf("xref evidence = %q, want %q", xref.Evidence, "ticket-key")
+	}
+
+	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
+	}
+	if interp.Category == "" && interp.GateState == "" && interp.Ownership == "" {
+		t.Fatalf("interpretation row looks unpopulated: %+v", interp)
+	}
+}
+
+// TestRunCmdThread_NoMatch_WritesNoXrefAndNoReinterpret proves the negative
+// half of this packet's own acceptance criterion: a thread whose text
+// contains neither a PR permalink nor a recognized ticket key writes no
+// xref row and triggers no re-interpret.
+func TestRunCmdThread_NoMatch_WritesNoXrefAndNoReinterpret(t *testing.T) {
+	cfg := jiraTestCfg()
+	show := threadShowResult{Text: "nothing relevant in here", AsOf: "2026-09-18T00:00:00Z"}
+	st, dbPath := setupRunThreadTest(t, cfg, show, false, nil)
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"thread", "T3", "--change", "changed"}); runErr != nil {
+		t.Fatalf("run thread T3: unexpected error: %v", runErr)
+	}
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+
+	linked, err := verify.ListXrefsByTo("acme/widgets", "thread", "T3")
+	if err != nil {
+		t.Fatalf("ListXrefsByTo: %v", err)
+	}
+	if len(linked) != 0 {
+		t.Fatalf("no-match thread wrote %d xref row(s), want 0: %+v", len(linked), linked)
+	}
+	_ = st // st itself is exercised only through runStoreOpen above
+}
+
+// TestRunCmdThread_ExistingLink_StaysLinkedWithoutRematch proves the
+// "never just the matches this one scan found" rule [design 7.2]: a PR
+// already xref'd to this thread from an EARLIER run stays linked (and gets
+// re-interpreted) even when THIS run's own scan finds no new match at all.
+func TestRunCmdThread_ExistingLink_StaysLinkedWithoutRematch(t *testing.T) {
+	cfg := issueTestCfg()
+	show := threadShowResult{Text: "just chatting, no links here", AsOf: "2026-09-18T00:00:00Z"}
+	st, dbPath := setupRunThreadTest(t, cfg, show, false, nil)
+	seedPRFacts(t, st, "acme/widgets#7")
+	if err := st.UpsertXref(store.Xref{
+		Repo: "acme/widgets", FromType: entityTypePR, FromID: "acme/widgets#7",
+		ToType: "thread", ToID: "T4", Evidence: "permalink",
+		FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed pre-existing thread xref: %v", err)
+	}
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	if runErr := cmd.RunE(cmd, []string{"thread", "T4", "--change", "changed"}); runErr != nil {
+		t.Fatalf("run thread T4: unexpected error: %v", runErr)
+	}
+
+	verify, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen test store for verification: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+
+	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	if err != nil || !found {
+		t.Fatalf("GetInterpretation: found=%v err=%v (the pre-existing link should still have been re-interpreted)", found, err)
+	}
+	if interp.Category == "" && interp.GateState == "" && interp.Ownership == "" {
+		t.Fatalf("interpretation row looks unpopulated: %+v", interp)
+	}
+}
+
+// TestRunCmdThread_FetchFailure_ReturnsClearError proves the freedom-
+// boundary choice documented on runThread: a thread `pg-connector` cannot
+// fetch at all (here, a not_found answer) is a hard, clear error — never a
+// silent no-op or a panic.
+func TestRunCmdThread_FetchFailure_ReturnsClearError(t *testing.T) {
+	cfg := issueTestCfg()
+	_, _ = setupRunThreadTest(t, cfg, threadShowResult{}, true, nil)
+
+	cmd, _, err := rootCmd.Find([]string{"run"})
+	if err != nil {
+		t.Fatalf("rootCmd has no run subcommand: %v", err)
+	}
+	runErr := cmd.RunE(cmd, []string{"thread", "missing-thread"})
+	if runErr == nil {
+		t.Fatal("run thread missing-thread: expected an error for a not_found thread, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "not_found") {
+		t.Fatalf("run thread missing-thread: error = %q, want it to mention not_found", runErr.Error())
 	}
 }

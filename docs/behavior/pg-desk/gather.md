@@ -56,6 +56,24 @@ answer from `issue show` is a well-formed negative answer (the cross-reference r
 written), not a degradation; any other failure degrades this run exactly like every other
 non-triggering-entity input, naming `issue show`.
 
+## Phase 13 input: linked threads (eighth input)
+
+Phase 13's Slack-half sibling packet ("pg-desk run thread") adds an eighth input, in the same
+place as the seventh (the `pr`-triggered path only; never on a `--change removed` re-read or a
+sweep-unchanged skip): a passive STORE READ of every thread already cross-referenced to the
+triggering PR (the `xref` table's forward lookup, `from_type="pr"`/`to_type="thread"` — the reverse
+of [`run-thread.md`](run-thread.md)'s own xref writes). This is a store read ONLY — gather never
+calls `pg-connector-thread-slack` itself; `run thread`'s own active cross-referencing, triggered by
+the thread-me feed, is what populates these links in the first place.
+
+Populated into the gathered facts as, at minimum, each linked thread's own id. A fresh fetch of the
+full `Thread` entity (for its permalink) is a known, documented gap in this phase: no packet
+through Phase 13 persists a thread's own facts anywhere this read could recover a permalink from
+without a live `pg-connector-thread-slack` call, which this input is deliberately forbidden from
+making. A read failure degrades this run exactly like every other non-triggering-entity input,
+naming `linked threads`; zero linked threads is a normal, expected outcome (most PRs have none),
+not a degradation.
+
 ## Exit codes, telemetry, and logs
 
 Gather has no exit code of its own; it contributes to `run`'s exit code (`0` on success or a
@@ -65,11 +83,12 @@ degraded fetch, `1` only when the failing fetch is the triggering entity itself 
 Gather emits nothing over OpenTelemetry or Prometheus through Phase 13 (D24; OpenTelemetry export
 is a later observability item, resolved by the observability review `pg2-7kizi`). Its activity is
 part of `run`'s structured JSON log line to stderr; a degraded input (including a Jira `issue
-show` failure, named `issue show`) is reported there, and `--verbose` includes it in the
-three-stage timeline.
+show` failure, named `issue show`, or a linked-threads read failure, named `linked threads`) is
+reported there, and `--verbose` includes it in the three-stage timeline.
 
 ## Out of scope
 
-The linked-thread input (permalinks and ticket keys found in Slack thread text) is this docket's
-Slack-half sibling packet. Gather targets exactly one configured repository; multi-repository
-gather is out of scope.
+The ACTIVE half of thread cross-referencing — scanning a thread's own permalink/text for PR/issue
+references and writing the resulting xref rows — is [`run-thread.md`](run-thread.md), not gather;
+gather's own eighth input above is a passive read of links that command already wrote. Gather
+targets exactly one configured repository; multi-repository gather is out of scope.

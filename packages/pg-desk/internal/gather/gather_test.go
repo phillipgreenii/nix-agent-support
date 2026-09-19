@@ -3,6 +3,7 @@ package gather
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -370,14 +371,27 @@ func testConfigWithTicketPatterns(beadsDir string, patterns []string) *config.Co
 
 // fakeXrefUpserter is this suite's own xrefUpserter test double (mirroring
 // this package's local-interface pattern one layer down): it records every
-// UpsertXref call without touching a real SQLite store.
+// UpsertXref call without touching a real SQLite store, and answers
+// ListXrefsByFrom from a canned linkedThreads slice/error the caller sets
+// (Phase 13's eighth input, gatherLinkedThreads, below) — zero-value
+// (nil, nil) by default, matching "no linked threads, no error" for every
+// pre-existing test that never sets it.
 type fakeXrefUpserter struct {
-	upserts []store.Xref
+	upserts       []store.Xref
+	linkedThreads []store.Xref
+	listErr       error
 }
 
 func (f *fakeXrefUpserter) UpsertXref(x store.Xref) error {
 	f.upserts = append(f.upserts, x)
 	return nil
+}
+
+func (f *fakeXrefUpserter) ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.linkedThreads, nil
 }
 
 // TestFixturesConformToWireSchema proves this suite's own targeted-op
@@ -788,5 +802,89 @@ func TestGather_NoTicketPatterns_NoJiraCallsAtAll(t *testing.T) {
 	}
 	if len(xrefs.upserts) != 0 {
 		t.Fatalf("recorded %d UpsertXref calls with no TicketPatterns configured, want 0: %+v", len(xrefs.upserts), xrefs.upserts)
+	}
+}
+
+// --- Phase 13: eighth input, linked threads (docket pg2-2j5ac.40's
+// Slack-half sibling packet "pg-desk run thread") ---------------------------
+
+// TestGather_LinkedThreads_PopulatesFactsWithoutAnyPgConnectorCall is this
+// input's own primary acceptance criterion: every thread already
+// cross-referenced to the triggering PR in the store (Store.ListXrefsByFrom)
+// is populated into Facts.LinkedThreads, and this is a pure store read —
+// the recorded pg-connector call count is unchanged from the plain
+// six-input happy path (no pg-connector-thread-slack call of gather's own).
+func TestGather_LinkedThreads_PopulatesFactsWithoutAnyPgConnectorCall(t *testing.T) {
+	recordFile := withFactory(t, "happy")
+	xrefs := &fakeXrefUpserter{
+		linkedThreads: []store.Xref{
+			{Repo: fixtureRepo, FromType: "pr", FromID: "PR1", ToType: "thread", ToID: "T1", Evidence: "permalink"},
+			{Repo: fixtureRepo, FromType: "pr", FromID: "PR1", ToType: "thread", ToID: "T2", Evidence: "ticket-key"},
+		},
+	}
+	g := NewGatherer(testConfig("/configured/beads"), xrefs)
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if facts.Degraded != "" {
+		t.Fatalf("Degraded = %q, want empty", facts.Degraded)
+	}
+	if len(facts.LinkedThreads) != 2 {
+		t.Fatalf("LinkedThreads = %+v, want exactly 2 entries", facts.LinkedThreads)
+	}
+	gotIDs := map[string]bool{}
+	for _, tr := range facts.LinkedThreads {
+		gotIDs[tr.ID] = true
+	}
+	for _, want := range []string{"T1", "T2"} {
+		if !gotIDs[want] {
+			t.Fatalf("LinkedThreads missing id %q; got %+v", want, facts.LinkedThreads)
+		}
+	}
+
+	// Still exactly the six pg-connector calls the happy path always makes
+	// (see TestGather_SixInputs_CalledWithRightArgsAndEnv) — the eighth
+	// input never invokes pg-connector at all.
+	if got := len(readCallRecords(t, recordFile)); got != 6 {
+		t.Fatalf("recorded %d pg-connector call(s), want exactly 6 (the eighth input makes none of its own)", got)
+	}
+}
+
+// TestGather_LinkedThreads_NoXrefStore_SkipsSilently proves the nil-xrefs
+// safety net (NewGatherer's own doc comment): a nil xrefs (the common
+// pre-Phase-13 caller shape) leaves LinkedThreads empty and never
+// degrades — mirrors gatherJiraXrefs' own identical nil-check convention.
+func TestGather_LinkedThreads_NoXrefStore_SkipsSilently(t *testing.T) {
+	withFactory(t, "happy")
+	g := NewGatherer(testConfig("/configured/beads"), nil)
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if facts.Degraded != "" {
+		t.Fatalf("Degraded = %q, want empty", facts.Degraded)
+	}
+	if len(facts.LinkedThreads) != 0 {
+		t.Fatalf("LinkedThreads = %+v, want empty with a nil xref store", facts.LinkedThreads)
+	}
+}
+
+// TestGather_LinkedThreads_ReadFailureDegrades proves a genuine store-read
+// failure degrades this run exactly like every other non-triggering-entity
+// input, naming "linked threads".
+func TestGather_LinkedThreads_ReadFailureDegrades(t *testing.T) {
+	withFactory(t, "happy")
+	xrefs := &fakeXrefUpserter{listErr: errors.New("store: connection lost")}
+	g := NewGatherer(testConfig("/configured/beads"), xrefs)
+
+	facts, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded)
+	if err != nil {
+		t.Fatalf("Gather returned an error for a non-critical degraded input: %v", err)
+	}
+	if facts.Degraded != "linked threads" {
+		t.Fatalf("Degraded = %q, want %q", facts.Degraded, "linked threads")
 	}
 }

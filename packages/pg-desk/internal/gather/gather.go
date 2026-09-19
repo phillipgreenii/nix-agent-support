@@ -70,6 +70,27 @@
 // re-read, and never on a sweep this Gatherer's own head_sha cache has
 // already decided to skip — since it depends on this same triggering PR's
 // text, gathered together with everything else.
+//
+// # Phase 13's eighth input: linked threads
+//
+// Phase 13's Slack-half sibling packet ("pg-desk run thread") adds an
+// eighth input, in the same place as the seventh (the `pr`-triggered path
+// only, never on a `removed` re-read or a sweep-unchanged skip): a passive
+// STORE READ of every thread already cross-referenced to the triggering PR
+// (Store.ListXrefsByFrom(repo, "pr", <pr-id>, "thread")) — the reverse of
+// `run thread`'s own from_type="pr"/to_type="thread" xref writes [Binding
+// decisions > "xref row DIRECTION"]. This is a store read ONLY: gather
+// never calls pg-connector-thread-slack itself — `run thread`'s own active
+// cross-referencing (permalink/ticket-key scan, xref write), triggered by
+// the thread-me feed, is what populates these links in the first place
+// [Binding decisions]. Populated into Facts.LinkedThreads, at minimum each
+// linked thread's id (from the xref row's own to_id); a fresh fetch of the
+// full Thread entity for its permalink is deliberately NOT done here (this
+// input stays a store read, never a live call) — see Facts.LinkedThreads'
+// own doc comment for that gap. A read failure degrades this run exactly
+// like every other non-triggering-entity input (named "linked threads");
+// zero linked threads is a normal, expected outcome (most PRs have none),
+// not a degradation.
 package gather
 
 import (
@@ -161,6 +182,28 @@ type Facts struct {
 	// default, not a degradation.
 	JiraIssues map[string]json.RawMessage `json:"jira_issues,omitempty"`
 
+	// LinkedThreads is Phase 13's eighth input (see the package doc
+	// comment): every thread already cross-referenced to the triggering PR
+	// in the store, at the time of this gather run. Populated by a passive
+	// store read (Store.ListXrefsByFrom) — never a pg-connector-thread-slack
+	// call of gather's own. The design pins WHAT is gathered ("thread
+	// entities already linked in the store") but not what interpret does
+	// with it (unlike JiraIssues' own scoreUrgencyWithHealth consumer) — no
+	// consumer exists yet; this field only makes the data available.
+	//
+	// KNOWN GAP: ThreadRef.Permalink is defined (the design names it
+	// alongside the thread's id as the two fields "any xref row already
+	// carries... once fetched") but this Gatherer never populates it: the
+	// xref table's own rows (internal/store/xref.go) carry no permalink
+	// column, and no packet through Phase 13 persists a thread's own facts
+	// (schema.Thread) anywhere pg-desk's store could read one back from
+	// without a fresh pg-connector-thread-slack call — which this input is
+	// deliberately forbidden from making [Binding decisions: "gather
+	// performs a STORE READ only for this half"]. Left empty rather than
+	// guessed; a future phase that persists thread facts can backfill it
+	// without changing this field's shape.
+	LinkedThreads []ThreadRef `json:"linked_threads,omitempty"`
+
 	// AsOf is the timestamp pg-connector's `pr show` reported for this read.
 	AsOf string `json:"as_of,omitempty"`
 	// HeadSHA is the triggering PR's current head commit, from `pr show` —
@@ -192,14 +235,33 @@ const pgConnectorBinary = "pg-connector"
 // pg-connector rather than an adapter calling it).
 var execCmdFactory = exec.CommandContext
 
-// xrefUpserter is the subset of *store.Store's API this package depends on
-// to record Phase 13's cross-reference rows (see the package doc comment),
-// defined locally — mirroring internal/pipeline/pipeline.go's own
-// gatherer/syncer local-interface pattern, one layer down — so tests can
-// inject a fake without a real SQLite store. *store.Store satisfies this
-// by construction.
+// ThreadRef is one thread already cross-referenced to the triggering PR in
+// the store — Facts.LinkedThreads' own element type (Phase 13's eighth
+// input; see the package doc comment and Facts.LinkedThreads' own doc
+// comment for the Permalink gap).
+type ThreadRef struct {
+	// ID is the linked thread's own id (the xref row's to_id).
+	ID string `json:"id"`
+	// Permalink is left empty by this Gatherer (see Facts.LinkedThreads'
+	// own "KNOWN GAP" doc comment) — present in the shape for a future
+	// phase to backfill without a field-shape change.
+	Permalink string `json:"permalink,omitempty"`
+}
+
+// xrefUpserter is the subset of *store.Store's API Phase 13's ticket-key
+// scan depends on to record its cross-reference rows (see the package doc
+// comment) and Phase 13's Slack-half sibling packet's own gather addition
+// depends on to read them back (ListXrefsByFrom, below) — defined locally
+// — mirroring internal/pipeline/pipeline.go's own gatherer/syncer
+// local-interface pattern, one layer down — so tests can inject a fake
+// without a real SQLite store. *store.Store satisfies this by
+// construction. Named xrefUpserter for its historical (Jira-half-only)
+// first consumer; widened here rather than split into two interfaces,
+// since both this Gatherer's own xref reads and writes go through the
+// SAME *store.Store value (NewGatherer's own xrefs parameter, below).
 type xrefUpserter interface {
 	UpsertXref(x store.Xref) error
+	ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error)
 }
 
 // Gatherer holds this run's per-run budget cache (see the package doc
@@ -228,12 +290,14 @@ type filesCommits struct {
 }
 
 // NewGatherer constructs a Gatherer with a fresh, empty per-run cache.
-// xrefs is Phase 13's cross-reference writer (internal/pipeline's New
-// passes its own *store.Store, which satisfies xrefUpserter); a nil xrefs
-// is safe as long as no configured TicketPatterns ever recognizes a ticket
-// key to upsert (every Phase-9/10 caller that never sets TicketPatterns —
-// including this package's own pre-Phase-13 tests — never reaches that
-// code path).
+// xrefs is Phase 13's cross-reference reader/writer (internal/pipeline's
+// New passes its own *store.Store, which satisfies xrefUpserter); a nil
+// xrefs is safe: the ticket-key scan's own writes are reached only when a
+// configured TicketPatterns recognizes a ticket key (every Phase-9/10
+// caller that never sets TicketPatterns — including this package's own
+// pre-Phase-13 tests — never reaches that code path), and
+// gatherLinkedThreads (Phase 13's eighth input, below) checks for a nil
+// xrefs explicitly before calling ListXrefsByFrom.
 func NewGatherer(cfg *config.Config, xrefs xrefUpserter) *Gatherer {
 	return &Gatherer{
 		cfg:               cfg,
@@ -291,6 +355,7 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 	matched := g.gatherWorkBeads(ctx, show.Repo, show.Number, &f)
 	g.gatherDeps(ctx, matched, &f)
 	g.gatherJiraXrefs(ctx, entityID, show, &f)
+	g.gatherLinkedThreads(entityID, &f)
 
 	return f, nil
 }
@@ -492,6 +557,29 @@ func (g *Gatherer) gatherJiraXrefs(ctx context.Context, entityID string, show pr
 				})
 			}
 		}
+	}
+}
+
+// gatherLinkedThreads is Phase 13's eighth input (see the package doc
+// comment): a passive STORE READ of every thread already cross-referenced
+// to the triggering PR (Store.ListXrefsByFrom(repo, "pr", entityID,
+// "thread")) — never a pg-connector-thread-slack call of gather's own. A
+// nil xrefs (see NewGatherer's own doc comment) skips this silently, same
+// as gatherJiraXrefs' own nil check. A read failure degrades this run
+// exactly like every other non-triggering-entity input; zero linked
+// threads is a normal, expected outcome (most PRs have none), not a
+// degradation.
+func (g *Gatherer) gatherLinkedThreads(entityID string, f *Facts) {
+	if g.xrefs == nil {
+		return
+	}
+	xrefs, err := g.xrefs.ListXrefsByFrom(g.repo(), "pr", entityID, "thread")
+	if err != nil {
+		f.degrade("linked threads")
+		return
+	}
+	for _, x := range xrefs {
+		f.LinkedThreads = append(f.LinkedThreads, ThreadRef{ID: x.ToID})
 	}
 }
 
