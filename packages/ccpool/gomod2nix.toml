@@ -93,6 +93,10 @@ schema = 3
     version = 'v0.0.0-20190226123456-11a2b8fa57af'
     hash = 'sha256-o0Z+nrd8l5A/CjJAW7lq5cpjdbaihfqiu5laLnSjJS8='
 
+  [mod.'go.opentelemetry.io/otel']
+    version = 'v1.46.0'
+    hash = 'sha256-2+xTacXn22hsJuMGGgXwazMbP/ZW5gkPRnf+rNUZgvQ='
+
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
     hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
@@ -100,10 +104,6 @@ schema = 3
   [mod.'go.opentelemetry.io/contrib/bridges/otelslog']
     version = 'v0.20.1'
     hash = 'sha256-x9ok/8QKu32U3os9lM7oUBQ4aPVMPjFCHvNR69rtkKA='
-
-  [mod.'go.opentelemetry.io/otel']
-    version = 'v1.46.0'
-    hash = 'sha256-2+xTacXn22hsJuMGGgXwazMbP/ZW5gkPRnf+rNUZgvQ='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc']
     version = 'v0.22.0'
