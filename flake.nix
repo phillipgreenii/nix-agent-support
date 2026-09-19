@@ -5304,6 +5304,15 @@
             # re-exported for the same reason, so `nix build
             # .#pg-disk-reclaimer` resolves via flake.packages.<system>.
             inherit (pkgs) pg-disk-reclaimer;
+            # pg-wi-flow is likewise an overlay-only attr (symlinkJoin of the
+            # CLI script plus its sibling pg-wi-flow-identity input
+            # processor) -- re-exported for the same reason, so `nix build
+            # .#pg-wi-flow` (and packet tc-9ddu3.1.2's own change-scoped
+            # Validation, `nix build .#packages.<system>.pg-wi-flow`)
+            # resolves via flake.packages.<system> instead of failing with
+            # "does not provide attribute" (this was never wired when
+            # tc-9ddu3.1.1 first defined the overlay attr).
+            inherit (pkgs) pg-wi-flow;
             # wtnew is likewise an overlay-only attr (single mkBashScript
             # tool holding just the script derivation) -- re-exported for
             # the same reason, so `nix build .#wtnew` resolves via

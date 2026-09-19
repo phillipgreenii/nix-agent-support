@@ -17,11 +17,11 @@ pg-wi-flow: bead-workflow CLI framework
 Usage: pg-wi-flow COMMAND [ARGS...]
 
 Packet tc-9ddu3.1.1 implements the read/reservation core: query, list,
-next, claim, release. tc-9ddu3.1.3 adds the item-content and
-stage-transition write verbs: annotate, record-verdict, round, advance,
-create-child, merge, close, close-duplicate. context/--render lands in a
-separate packet (tc-9ddu3.1.2). This packet (tc-9ddu3.1.4) adds the
-attention-axis write verbs: escalate, resolve.
+next, claim, release. Packet tc-9ddu3.1.2 adds the render engine:
+context, explain, history, duplicates, docs. tc-9ddu3.1.3 adds the
+item-content and stage-transition write verbs: annotate, record-verdict,
+round, advance, create-child, merge, close, close-duplicate. tc-9ddu3.1.4
+adds the attention-axis write verbs: escalate, resolve.
 
 Commands:
   query [--stage S]... [--attended]
@@ -39,11 +39,31 @@ Commands:
 
   claim ID
       Transfer a reservation to the caller's identity, printing
-      "ID STAGE WORKFLOW".
+      "ID STAGE WORKFLOW" followed by the full assembled prompt.
 
   release ID
       Release ID, clearing the assignee in the same call as the status
       change.
+
+  context [--render] ID [--role reviewer --concern C | --role researcher --gap G]
+      Classify ID and resolve its kind/instructions/checklist/concerns/
+      duplicates/applicable docs/lessons/premise/siblings/workflow.
+      Without --render, prints WI_* lines; with --render, prints the fully
+      assembled prompt.
+
+  explain ID
+      Classification, stage, workflow, kind, component, premise state,
+      open questions, round count, and the current holder.
+
+  history ID
+      The verdict and round trail (metadata.wi_verdicts).
+
+  duplicates ID
+      Title/key-term duplicate candidates plus same-component related
+      candidates.
+
+  docs ID
+      The applicable-docs candidate search on its own.
 
   annotate ID [--kind K] [--component C] [--premise P] [--acceptance T]
            [--append-description T] [--append-notes T] [--design T]
@@ -175,6 +195,21 @@ claim)
   ;;
 release)
   pgwf_cmd_release "$@"
+  ;;
+context)
+  pgwf_context_cmd "$@"
+  ;;
+explain)
+  pgwf_cmd_explain "$@"
+  ;;
+history)
+  pgwf_cmd_history "$@"
+  ;;
+duplicates)
+  pgwf_cmd_duplicates "$@"
+  ;;
+docs)
+  pgwf_cmd_docs "$@"
   ;;
 annotate)
   pgwf_cmd_annotate "$@"

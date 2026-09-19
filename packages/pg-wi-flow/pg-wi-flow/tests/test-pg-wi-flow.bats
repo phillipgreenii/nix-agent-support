@@ -22,6 +22,12 @@ setup() {
 echo "$*" >>"$MOCK_BD_LOG"
 case "$1" in
 ready) printf '[]\n' ;;
+show)
+  printf '{"data":[{"id":"%s","title":"an item","labels":[],"metadata":{}}]}\n' "$2"
+  ;;
+list) printf '{"data":[]}\n' ;;
+children) printf '{"data":[]}\n' ;;
+dep) printf '{"data":[]}\n' ;;
 *)
   echo "mock bd: unhandled subcommand: $1" >&2
   exit 1
@@ -88,4 +94,37 @@ run_pg_wi_flow() {
   run_pg_wi_flow --actor should-be-refused query
   [ "$status" -ne 0 ]
   [[ "$output" == *"not accepted inside Claude Code"* ]]
+}
+
+# --- tc-9ddu3.1.2: context/explain/history/duplicates/docs dispatch -----
+
+@test "context dispatches to the render engine" {
+  run_pg_wi_flow context tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_ID=tc-1"* ]]
+}
+
+@test "explain dispatches and reports a holder" {
+  run_pg_wi_flow explain tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_HOLDER=unclaimed"* ]]
+}
+
+@test "history dispatches and prints an empty trail under the null workflow" {
+  run_pg_wi_flow history tc-1
+  [ "$status" -eq 0 ]
+  [ "$output" = "[]" ]
+}
+
+@test "duplicates dispatches and prints WI_DUPLICATES/WI_RELATED" {
+  run_pg_wi_flow duplicates tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_DUPLICATES="* ]]
+  [[ "$output" == *"WI_RELATED="* ]]
+}
+
+@test "docs dispatches and prints WI_APPLICABLE_DOCS" {
+  run_pg_wi_flow docs tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_APPLICABLE_DOCS="* ]]
 }

@@ -99,6 +99,9 @@ list)
     printf '{"data":[]}\n'
   fi
   ;;
+dep)
+  printf '{"data":[]}\n'
+  ;;
 *)
   echo "mock bd: unhandled subcommand: $1" >&2
   exit 1
@@ -227,11 +230,20 @@ show_fixture() {
 
 # --- claim / release ---
 
-@test "cmd_claim: prints id stage workflow" {
+@test "cmd_claim: first line is still id stage workflow" {
   show_fixture tc-1 '{"id":"tc-1","labels":["stage:implement"],"metadata":{}}'
   run pgwf_cmd_claim tc-1
   [ "$status" -eq 0 ]
-  [ "$output" = "tc-1 implement $PGWF_NULL_WORKFLOW_NAME" ]
+  [ "${lines[0]}" = "tc-1 implement $PGWF_NULL_WORKFLOW_NAME" ]
+}
+
+@test "cmd_claim: emits the full assembled prompt in the same call (tc-9ddu3.1.2)" {
+  show_fixture tc-1 '{"id":"tc-1","title":"widget bug","description":"desc","labels":["stage:implement"],"metadata":{}}'
+  run pgwf_cmd_claim tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"## Item"* ]]
+  [[ "$output" == *"WI_ID=tc-1"* ]]
+  [[ "$output" == *"WI_STAGE=implement"* ]]
 }
 
 @test "cmd_release: clears the assignee in one bd call" {

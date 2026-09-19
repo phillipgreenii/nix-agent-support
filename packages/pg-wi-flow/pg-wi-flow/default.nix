@@ -7,11 +7,12 @@
 mkBashScript {
   name = "pg-wi-flow";
   src = ./.;
-  description = "pg-wi-flow: bead-workflow CLI framework (query, list, next, claim, release this packet; more subcommands land in later tc-9ddu3.1 packets)";
+  description = "pg-wi-flow: bead-workflow CLI framework (query, list, next, claim, release, context, explain, history, duplicates, docs; more subcommands land in later tc-9ddu3.1 packets)";
   libraries = [
     pgWiFlowLib.actor
     pgWiFlowLib.config
     pgWiFlowLib.tracker
+    pgWiFlowLib.context
   ];
   # jq: every verb reads/builds JSON. git: pgwf_config_repo_path (via
   # lib/config.bash) resolves the repo config layer's location. coreutils:

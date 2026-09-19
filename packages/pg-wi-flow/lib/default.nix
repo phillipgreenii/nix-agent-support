@@ -60,12 +60,39 @@ let
     ];
     inherit testSupport;
   };
+  # context.bash: the render engine -- classification, WI_* line dump, and
+  # the fully assembled prompt for context/explain/history/duplicates/docs
+  # (tc-9ddu3.1.2). Depends on tracker (which already composes config
+  # ahead of itself), so sourcing context's composed lib alone brings in
+  # all three.
+  context = mkBashLibrary {
+    name = "context";
+    src = ./.;
+    description = "pg-wi-flow's render engine: classification, kind/topic/instructions/checklist/concerns/duplicates/docs/premise/siblings resolution, the WI_* line dump, and the fully assembled prompt (tc-9ddu3.1.2)";
+    libraries = [ tracker ];
+    # jq: every function here builds/reads JSON. git: pgwf_context_repo_root
+    # resolves the data-overlay root the same way config.bash's
+    # pgwf_config_repo_path does. bash: spawned #!/usr/bin/env bash mocks
+    # in this file's own bats coverage.
+    testDeps = [
+      pkgs.jq
+      pkgs.git
+      pkgs.bash
+    ];
+    inherit testSupport;
+  };
 in
 {
-  inherit actor config tracker;
+  inherit
+    actor
+    config
+    tracker
+    context
+    ;
   checks = {
     test-pg-wi-flow-actor = actor.check;
     test-pg-wi-flow-config = config.check;
     test-pg-wi-flow-tracker = tracker.check;
+    test-pg-wi-flow-context = context.check;
   };
 }

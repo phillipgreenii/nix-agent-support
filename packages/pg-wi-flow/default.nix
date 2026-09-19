@@ -35,6 +35,7 @@ in
     test-pg-wi-flow-actor = pgWiFlowLib.actor.check;
     test-pg-wi-flow-config = pgWiFlowLib.config.check;
     test-pg-wi-flow-tracker = pgWiFlowLib.tracker.check;
+    test-pg-wi-flow-context = pgWiFlowLib.context.check;
     test-pg-wi-flow-identity = pg-wi-flow-identity.check;
     test-pg-wi-flow-cli = pg-wi-flow.check;
   };

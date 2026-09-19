@@ -14,6 +14,8 @@ if ! declare -F pgwf_query_build >/dev/null 2>&1; then
   source "$__pgwf_lib_dir/tracker.bash"
   # shellcheck disable=SC1091 # sibling lib dir, resolved at source time
   source "$__pgwf_lib_dir/actor.bash"
+  # shellcheck disable=SC1091 # sibling lib dir, resolved at source time
+  source "$__pgwf_lib_dir/context.bash"
   unset __pgwf_lib_dir
 fi
 
@@ -325,12 +327,16 @@ pgwf_cmd_next() {
   echo none
 }
 
-# pgwf_cmd_claim ID -- transfers the reservation to the caller's identity
-# and prints "id stage workflow" [design: ## Components write-verb table
-# row for claim]. Freedom boundary (this packet's own Contract): does NOT
-# print the full assembled prompt (context --render's output) -- that
-# engine is packet P2 (row 2) in this docket; P2 wires claim to also emit
-# it in the same call.
+# pgwf_cmd_claim ID -- transfers the reservation to the caller's identity,
+# prints "id stage workflow", THEN the full assembled prompt (context
+# --render's output) in the SAME call [design: ## Components write-verb
+# table row for claim; ## Components -> Worker step 1: "claim <id>
+# transfers the reservation ... and prints the full assembled prompt in
+# the same call"]. Closes the gap packet P1 (tc-9ddu3.1.1) deliberately
+# left open; the id/stage/workflow line stays first and unchanged so
+# P1's documented "id stage workflow" contract (which the dispatcher/
+# worker agents parse, packet P6) still recovers cleanly from the combined
+# output.
 pgwf_cmd_claim() {
   local id="$1"
   if [[ -z $id ]]; then
@@ -351,6 +357,7 @@ pgwf_cmd_claim() {
   local workflow
   workflow="$(pgwf_workflow_for "$config_json" "$id")" || return 1
   printf '%s %s %s\n' "$id" "$stage" "$workflow"
+  pgwf_context_cmd --render "$id"
 }
 
 # pgwf_cmd_release ID -- releases with the assignee cleared in ONE call

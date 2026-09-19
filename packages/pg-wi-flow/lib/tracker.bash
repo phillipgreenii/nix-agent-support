@@ -220,6 +220,20 @@ pgwf_tracker_open_children() {
   jq -c '[(.data // .)[] | select(.status != "closed")]' <<<"$out"
 }
 
+# pgwf_tracker_dependents ID TYPE -- `bd dep list ID --direction up --type
+# TYPE --json`'s data array (compact JSON on stdout): every item that
+# depends on ID via a TYPE edge (e.g. `blocks`, for WI_BLOCKED_PARENTS --
+# the parents a question item blocks [design: ## State model -> Axis 2,
+# "Fingerprint dedupe"]).
+pgwf_tracker_dependents() {
+  local id="$1" dep_type="$2" out
+  if ! out="$(bd dep list "$id" --direction up --type "$dep_type" --json 2>&1)"; then
+    echo "pg-wi-flow: bd dep list $id failed: $out" >&2
+    return 1
+  fi
+  jq -c '.data // .' <<<"$out"
+}
+
 # pgwf_tracker_try_claim ID ACTOR -- `bd update ID --claim`, under ACTOR.
 # Returns bd's own exit code: 0 on success, non-zero when the claim did not
 # happen (already claimed by someone else, unknown id, etc.) -- this is
