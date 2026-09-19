@@ -2541,11 +2541,34 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = "/nix/store/fake-roles-dir";
                                       };
-                                      # metricsAddr stub (pg2-ui2i3): same
+                                      # handlerConfig stub (pg2-6e5h6): same
                                       # non-null-default convention as
                                       # handlerCommand/handlerCommandDir just
-                                      # above — this hand-rolled submodule is
-                                      # a PARALLEL schema to the real
+                                      # above. This field's OMISSION here is
+                                      # exactly the failure the comment below
+                                      # warns about, and is what broke `nix
+                                      # eval`/`nix flake check` on main after
+                                      # commit 37a850f3 added
+                                      # daemon.handlerConfig to the real
+                                      # option without mirroring it into this
+                                      # stub: `daemonCfg.handlerConfig` in
+                                      # darwin/modules/pg-router/default.nix
+                                      # then hit a genuinely absent attribute
+                                      # (not merely null) on this eval path,
+                                      # even though the real
+                                      # home-manager.users submodule (outside
+                                      # this test) always carries it via its
+                                      # own `default = null`.
+                                      handlerConfig = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = "/nix/store/fake-handler-config.toml";
+                                      };
+                                      # metricsAddr stub (pg2-ui2i3): same
+                                      # non-null-default convention as
+                                      # handlerCommand/handlerCommandDir/
+                                      # handlerConfig just above — this
+                                      # hand-rolled submodule is a PARALLEL
+                                      # schema to the real
                                       # phillipgreenii.programs.pg-router.daemon
                                       # options (home/programs/pg-router/default.nix),
                                       # carrying only the fields
@@ -2668,6 +2691,14 @@
                 assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert lib.hasInfix "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # handlerConfig mirrors into the darwin LaunchAgent script
+                # too (pg2-6e5h6 regression fix): sourced from the stub
+                # submodule's own non-null default above — same pattern as
+                # handlerCommand/handlerCommandDir just above. This is the
+                # assertion that would have caught the missing stub field
+                # before it broke `nix eval`/`nix flake check`.
+                assert lib.hasInfix "PG_ROUTER_CCPOOL_HANDLER_CONFIG=/nix/store/fake-handler-config.toml"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # metricsAddr mirrors into the darwin LaunchAgent script too
                 # (pg2-ui2i3), sourced from the stub submodule's own
