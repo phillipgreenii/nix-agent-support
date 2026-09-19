@@ -27,6 +27,32 @@ let
   stateHome = if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/ccpool";
 
   obs = config.phillipgreenii.observability;
+
+  # OTel emitter env for ccpool-reap (design D10): resolved here (darwin
+  # scope, where the observability surface — declared in
+  # phillipgreenii-nix-support-apps — lives) and merged into the
+  # LaunchAgent's EnvironmentVariables, mirroring pa-monitor's/pg-router's/
+  # pg-desk-serve's own obs.mkEmitterEnv call pattern exactly. ccpool-reap is
+  # the ONE ccpool entry point that is its own independently-scheduled
+  # process, not a subprocess of something already wired — it deliberately
+  # does not (and structurally cannot) reach the dispatch-invocation path:
+  # when pg-router-ccpool-handler execs ccpool as pg-router's own subprocess,
+  # the endpoint/protocol vars are inherited for free from pg-router's
+  # already-wired LaunchAgent environment (D10). Plain human-interactive
+  # shell invocations get OTel wiring only if the human's own shell exports
+  # these vars, which is out of scope (D10). Guarded defensively
+  # (`obs ? mkEmitterEnv`) the same way every other consumer of this helper
+  # is: this repo does not declare phillipgreenii-nix-support-apps as a
+  # flake input, so the option only exists once a consuming machine flake
+  # imports both.
+  emitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "ccpool";
+        protocol = "grpc";
+      }
+    else
+      { };
 in
 {
   config = lib.mkMerge [
@@ -78,6 +104,10 @@ in
           # stay on their own non-tailed paths).
           StandardErrorPath = "${stateHome}/ccpool/reap.err.log";
           StandardOutPath = "${stateHome}/ccpool/reap.out.log";
+          # OTel OTLP log-export env (D10) — empty when obs.enable is false
+          # or the helper is absent (emitterEnv's own guard above), so this
+          # is a no-op merge on a machine without the observability stack.
+          EnvironmentVariables = emitterEnv;
         };
       };
     })
