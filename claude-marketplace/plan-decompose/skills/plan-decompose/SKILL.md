@@ -190,30 +190,46 @@ deduplication.
    `released:partial` contains `released` as a substring and a prefix-matching routing check
    would silently mis-route a partial release into the "nothing to do" branch.
 
-   **RESUME dedup** (`pg2-b439c`): a RESUME back into step 3 MUST NOT re-run curation blind.
-   Step 0 unconditionally re-runs mode `check` and produces a fresh boundary sketch every
-   time `decompose` is invoked, including on a RESUME — so an interrupted attempt's sketch and
-   the RESUME's freshly re-generated sketch cover the same design but are not guaranteed
-   byte-identical in title wording. Before calling `create-packet` for any planned packet,
-   list the docket's current children (the same lightweight id/title/metadata read
-   `read-metrics`'s children-list step already uses) and, for each existing child, check its
-   content's `[design: <section>]` citation footprint against the planned packet's scope —
-   MATCH ON CITED DESIGN SECTIONS, never on title text: sections are the design-derived
-   identity a slice keeps across re-sketches, titles are not. A planned packet whose scope
-   already has a matching existing child (any status — open, deferred, or closed) MUST NOT be
-   created again; treat it as already curated (mode `reconcile`'s re-curation path handles it
-   if the design changed since, never a fresh `create-packet`). Only slices with no existing
-   match get created. This check applies on EVERY entry into step 3, not only a first pass —
-   it is what stops an interrupted `curating`/`failed:curating` run from producing duplicate
-   packets for the same design slice once it resumes.
+   **RESUME dedup** (`pg2-b439c`; widened `tc-96czz` — a check performed once at step-3 ENTRY
+   cannot catch a concurrent PEER that finishes decomposing the same docket in the interval
+   between that entry and a LATER `create-packet` call in the same curation pass; that gap is
+   exactly what let two concurrent `phase-decompose` runs both fully curate the same docket
+   from the same trigger): a RESUME back into step 3 MUST NOT re-run curation blind, and no
+   entry into step 3 — first pass, resume, or otherwise — MAY perform this check ONCE and then
+   reuse that result across more than one `create-packet` call. Step 0 unconditionally re-runs
+   mode `check` and produces a fresh boundary sketch every time `decompose` is invoked,
+   including on a RESUME — so an interrupted attempt's sketch and the RESUME's freshly
+   re-generated sketch cover the same design but are not guaranteed byte-identical in title
+   wording. **Immediately before EACH individual `create-packet` call** — with a FRESH read
+   taken at that moment, never a children list fetched earlier in this run (or earlier in this
+   same step-3 pass) and reused — list the docket's current children (the same lightweight
+   id/title/metadata read `read-metrics`'s children-list step already uses) and, for each
+   existing child, check its content's `[design: <section>]` citation footprint against the
+   planned packet's scope — MATCH ON CITED DESIGN SECTIONS, never on title text: sections are
+   the design-derived identity a slice keeps across re-sketches, titles are not. A planned
+   packet whose scope already has a matching existing child (any status — open, deferred, or
+   closed, and including one THIS SAME PASS already created for an earlier planned packet in
+   the batch) MUST NOT be created again; treat it as already curated (mode `reconcile`'s
+   re-curation path handles it if the design changed since, never a fresh `create-packet`).
+   Only a slice whose just-taken check finds no existing match gets created, and that
+   `create-packet` call MUST follow immediately — no other planned packet's check or creation
+   interleaved between this check and this call. This check applies immediately before EVERY
+   `create-packet` call, not once per step-3 entry and not once per batch of planned packets —
+   it is what stops an interrupted `curating`/`failed:curating` run, AND a concurrent peer that
+   completes the same docket mid-batch, from producing duplicate packets for the same design
+   slice.
 
 2. Create the docket (design VERBATIM + `pd_rev` + policy + `pd_source`); set `pd_phase` at
    every transition from here on.
 3. **Curate** each packet per the anatomy, packets created HELD — but run step 1's RESUME
-   dedup check FIRST, on every entry into this step, not only a first pass: a slice already
-   covered by an existing child is not re-created. `create-packet` runs EXACTLY ONCE per
-   packet and stamps `pd_curated_rev` to the docket's CURRENT `pd_rev` (read once, not
-   re-read per packet) — that stamp is WRITE-ONCE (see the metadata-keys table). A RE-ENTRY
+   dedup check IMMEDIATELY BEFORE EACH individual `create-packet` call, with a fresh
+   children-list read taken at that moment (never once per entry into this step, never once
+   per batch, and never a list cached from an earlier packet in the same pass): a slice
+   already covered by an existing child — including one this same step-3 pass already created
+   for an earlier planned packet — is not re-created. `create-packet` runs EXACTLY ONCE per
+   packet, immediately after that packet's own just-taken dedup check finds no match, and
+   stamps `pd_curated_rev` to the docket's CURRENT `pd_rev` (read once, not re-read per
+   packet) — that stamp is WRITE-ONCE (see the metadata-keys table). A RE-ENTRY
    into this step from step 5's, step 6's, or step 7's loop-back revises an ALREADY-CREATED
    packet's CONTENT only (the beads binding's `bd update <packet> --body-file <file>`, never
    `create-packet` again) and MUST NOT touch `pd_curated_rev` or call `write-metadata` on it —
