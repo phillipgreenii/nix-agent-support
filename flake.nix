@@ -233,6 +233,16 @@
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
+          # claude-hook-router: ADR 0071's dispatch/merge runtime (Phase B1, packet
+          # tc-rjzd3.6). B1's own validation was `go build ./...`/`go vet ./...` only and
+          # deliberately did not wire this overlay attribute (out of its scope) — this
+          # single-line entry is the minimal companion wiring packet C1 (tc-rjzd3.11) needs
+          # so `pkgs.claude-hook-router` resolves for `home/programs/claude-hook-router`'s
+          # `mkPackageOption`/`home.packages` entry. Mirrors claude-extended-tool-approver's
+          # own wiring immediately above.
+          claude-hook-router = final.callPackage ./packages/claude-hook-router {
+            inherit (goBuilders) mkGoApp;
+          };
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
@@ -3694,6 +3704,126 @@
                 assert disabledSettings.plugins == [ ];
                 assert disabled.home.file == { };
                 pkgs.runCommand "claude-marketplaces-ok" { } "touch $out";
+
+              # Durable build test for the claude-hook-router HM module (ADR 0071 Phase
+              # C1, packet tc-rjzd3.11). Unlike test-claude-marketplaces above (pure eval,
+              # a MOCK marketplace passthru), this one actually BUILDS the module's own
+              # generated plugin/marketplace derivations — the packet's own validation
+              # obligation is confirming "the generated plugin/router-config.json land
+              # where expected", which a pure eval cannot demonstrate. Evaluates the
+              # module standalone (evalModules + stubs, same technique as
+              # test-claude-marketplaces) with one PreToolUse delegate, then reads the
+              # real built plugin directory's hooks.json/router-config.json/plugin.json.
+              test-claude-hook-router =
+                let
+                  evalCfg =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib inputs; };
+                      modules = [
+                        ./home/programs/claude-hook-router/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Minimal stubs for the config surface this module reads and
+                            # contributes to (the real options live in claude-code /
+                            # claude-marketplaces, not pulled in here).
+                            options = {
+                              # Real home-manager/NixOS module sets provide `assertions`
+                              # (base "misc" module); this standalone evalModules harness
+                              # does not pull that in, so stub it -- unlike
+                              # test-claude-marketplaces above, this module DOES define
+                              # assertions (delegate contract/matcher validation).
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
+                              phillipgreenii = {
+                                programs.claude-code = {
+                                  enable = lib.mkEnableOption "claude (stub)";
+                                  settings = {
+                                    extraKnownMarketplaces = lib.mkOption {
+                                      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                      default = { };
+                                    };
+                                    enabledPlugins = lib.mkOption {
+                                      type = lib.types.attrsOf lib.types.bool;
+                                      default = { };
+                                    };
+                                    plugins = lib.mkOption {
+                                      type = lib.types.listOf lib.types.str;
+                                      default = [ ];
+                                    };
+                                  };
+                                  marketplaces.nixProvided = lib.mkOption {
+                                    type = lib.types.listOf lib.types.package;
+                                    default = [ ];
+                                  };
+                                };
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  withDelegate = evalCfg {
+                    phillipgreenii.programs.claude-code.enable = true;
+                    phillipgreenii.programs.claude-hook-router = {
+                      enable = true;
+                      delegates = lib.mkOrder 1000 [
+                        {
+                          name = "test-tool";
+                          event = "PreToolUse";
+                          matcher = null;
+                          command = "test-tool-hook";
+                          contract = "decide";
+                          priority = 1000;
+                        }
+                      ];
+                    };
+                  };
+
+                  marketplaceDrvs = withDelegate.phillipgreenii.programs.claude-code.marketplaces.nixProvided;
+                  marketplaceDrv = builtins.elemAt marketplaceDrvs 0;
+                in
+                # Exactly one marketplace registered, carrying the expected plugin key —
+                # forces the module to evaluate end to end (delegates -> assertions ->
+                # rendered files -> mkClaudeHookRouterPlugin skeleton -> overlay ->
+                # mkClaudeMarketplace) before any derivation is realized.
+                assert lib.length marketplaceDrvs == 1;
+                assert lib.elem "hook-router@claude-hook-router-marketplace-local" (
+                  map (p: p.key) marketplaceDrv.passthru.plugins
+                );
+                # home.packages carries the router binary itself, not the marketplace drv.
+                assert
+                  withDelegate.home.packages == [
+                    withDelegate.phillipgreenii.programs.claude-hook-router.package
+                  ];
+                pkgs.runCommand "test-claude-hook-router" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  set -euo pipefail
+                  plugin="${marketplaceDrv}/hook-router"
+                  test -f "$plugin/.claude-plugin/plugin.json"
+                  test -f "$plugin/hooks/hooks.json"
+                  test -f "$plugin/router-config.json"
+
+                  jq -e '.defaultEnabled == true' "$plugin/.claude-plugin/plugin.json" > /dev/null
+                  jq -e '.hooks.PreToolUse[0].hooks[0].command == "claude-hook-router"' "$plugin/hooks/hooks.json" > /dev/null
+                  jq -e '.hooks.PreToolUse[0] | has("matcher") | not' "$plugin/hooks/hooks.json" > /dev/null
+                  jq -e '.PreToolUse[0].name == "test-tool" and .PreToolUse[0].priority == 1000 and .PreToolUse[0].contract == "decide" and .PreToolUse[0].matcher == null' \
+                    "$plugin/router-config.json" > /dev/null
+
+                  touch $out
+                '';
 
               # Durable eval test (pg2-sij2i) for the wayfinder/beads MATCHED PAIR: the
               # `wayfinder-beads` skill in this repo's marketplace exists only to bind

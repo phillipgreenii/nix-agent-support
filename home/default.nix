@@ -25,6 +25,7 @@
     ./programs/pg-desk
     ./programs/pb
     ./programs/claude-extended-tool-approver
+    ./programs/claude-hook-router
     ./programs/git-tools
     ./programs/bg-tools
     ./programs/session-mode
