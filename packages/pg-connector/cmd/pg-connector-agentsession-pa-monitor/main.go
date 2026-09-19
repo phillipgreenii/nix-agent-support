@@ -6,6 +6,7 @@ import (
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-agentsession-pa-monitor/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/agentsession"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -26,11 +27,15 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}
+	for op, handler := range search.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.AgentSessionSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions: map[string]int{
 			"agentsession": schema.AgentSessionSchemaVersion,
 			"attention":    schema.AttentionSchemaVersion,
+			"search":       schema.SearchSchemaVersion,
 		},
 		Version: Version,
 	})
