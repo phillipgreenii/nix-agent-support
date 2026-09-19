@@ -25,6 +25,25 @@ in
       };
     };
 
+    # Machine-layer config (bead tc-9ddu3.1.5, design: ## Configuration --
+    # "paths" is a machine-layer value, not a repo-layer one, per the
+    # opening paragraph's machine-layer (paths, models) vs. repo-layer
+    # (backlog-specific) distinction). Read by lib/config.bash's
+    # pgwf_config_machine_path ($XDG_CONFIG_HOME/pg-wi-flow/config.json),
+    # deep-merged UNDER the repo layer (repo wins). `paths.defaults` points
+    # at the pg-wi-flow-data store directory (packages/pg-wi-flow/data) --
+    # this is the FIRST config this module has ever rendered here, so
+    # there is nothing pre-existing to merge with or clobber.
+    # `paths.repo_local` is left unset deliberately: lib/context.bash
+    # already falls back to its design-mandated default (".claude/wi-flow")
+    # when the key is absent, and this packet's own scope is paths.defaults
+    # only.
+    xdg.configFile."pg-wi-flow/config.json".source =
+      (pkgs.formats.json { }).generate "pg-wi-flow-config.json"
+        {
+          paths.defaults = "${pkgs.pg-wi-flow-data}";
+        };
+
     # Wire the identity processor into ceta's ordered inputProcessors list
     # (bead tc-q25wo item 3), but only when ceta is itself enabled -- a
     # pg-wi-flow-only machine has nowhere for the processor to run. `mkAfter`

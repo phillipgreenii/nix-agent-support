@@ -451,6 +451,18 @@
               name = "pg-wi-flow-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
+          # pg-wi-flow-data (bead tc-9ddu3.1.5): the paths.defaults store
+          # directory home/programs/pg-wi-flow's module points a machine
+          # config's `paths.defaults` value at. A separate overlay attr
+          # (not folded into the `pg-wi-flow` symlinkJoin above) because it
+          # is plain data, not a script -- symlinkJoin-ing it into the CLI's
+          # own bin-shaped closure would put a README.md next to the
+          # executables for no reason.
+          pg-wi-flow-data =
+            (import ./packages/pg-wi-flow {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pgWiFlowData;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
         // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
@@ -2978,6 +2990,110 @@
                   touch $out
                 '';
 
+              # test-pg-wi-flow-module (bead tc-9ddu3.1.5): proves
+              # home/programs/pg-wi-flow/default.nix's new paths.defaults
+              # wiring actually evaluates and renders the expected
+              # xdg.configFile output, using the same bare-evalModules
+              # technique as test-ceta-extra-readonly-roots below (imports
+              # the REAL claude-extended-tool-approver module alongside
+              # pg-wi-flow's own, rather than stubbing its
+              # enable/inputProcessors options by hand -- the same
+              # rationale that check gives). Disabled resolves inert (no
+              # package installed, no config.json rendered); enabled
+              # renders $XDG_CONFIG_HOME/pg-wi-flow/config.json with
+              # paths.defaults pointing at the built pg-wi-flow-data store
+              # path, and the ceta inputProcessors list gains
+              # "pg-wi-flow-identity" (unchanged behaviour -- this packet's
+              # own Acceptance criteria requires the pre-existing wiring to
+              # stay unchanged).
+              test-pg-wi-flow-module =
+                let
+                  evalHM =
+                    pgWiFlowCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pg-wi-flow/default.nix
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the config surface neither module
+                            # itself declares; the real options live in
+                            # home-manager / programs.tldr / claude-code.
+                            options = {
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              # claude-code.enable: read by the imported ceta
+                              # module's own `config = lib.mkIf
+                              # (claude-code.enable && cfg.enable) { ... }`
+                              # gate -- must exist or evaluating that
+                              # attribute throws "attribute missing", even
+                              # though it stays false here (ceta's own
+                              # package/wrapping is not what this check is
+                              # about; only its inputProcessors OPTION,
+                              # which pg-wi-flow's module contributes to
+                              # regardless of this gate).
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.pg-wi-flow = pgWiFlowCfg;
+                          phillipgreenii.programs.claude-extended-tool-approver.enable = pgWiFlowCfg.enable;
+                        }
+                      ];
+                    }).config;
+
+                  hmDisabled = evalHM { enable = false; };
+                  hmEnabled = evalHM { enable = true; };
+
+                  configJsonDrv = hmEnabled.xdg.configFile."pg-wi-flow/config.json".source;
+                in
+                # Disabled: nothing installed, nothing rendered.
+                assert hmDisabled.home.packages == [ ];
+                assert hmDisabled.xdg.configFile == { };
+                # Enabled: the package is installed, the config file is
+                # rendered, and the pre-existing ceta wiring still fires
+                # (unchanged by this packet, per its own Acceptance
+                # criteria).
+                assert lib.elem pkgs.pg-wi-flow hmEnabled.home.packages;
+                assert hmEnabled.xdg.configFile ? "pg-wi-flow/config.json";
+                assert lib.elem "pg-wi-flow-identity"
+                  hmEnabled.phillipgreenii.programs.claude-extended-tool-approver.inputProcessors;
+                pkgs.runCommand "test-pg-wi-flow-module-ok"
+                  {
+                    nativeBuildInputs = [ pkgs.jq ];
+                  }
+                  ''
+                    got="$(jq -r '.paths.defaults' ${configJsonDrv})"
+                    want="${pkgs.pg-wi-flow-data}"
+                    if [ "$got" != "$want" ]; then
+                      echo "FAIL: rendered paths.defaults=$got, expected $want" >&2
+                      exit 1
+                    fi
+                    touch $out
+                  '';
+
               # test-pg-desk-module (docket pg2-2j5ac.32, Phase 9, packet
               # 10): proves the new darwin (services.pg-desk-serve) and
               # home (programs.pg-desk) modules evaluate standalone — no
@@ -5314,6 +5430,12 @@
             # defined the overlay attr; both tc-9ddu3.1.2's and
             # tc-9ddu3.1.4's own mandated Validation bullets needed this).
             inherit (pkgs) pg-wi-flow;
+            # pg-wi-flow-data (bead tc-9ddu3.1.5) is likewise an overlay-only
+            # attr (a plain pkgs.runCommand data directory, the
+            # paths.defaults store path home/programs/pg-wi-flow's module
+            # wires in) -- re-exported for the same reason, so `nix build
+            # .#pg-wi-flow-data` resolves via flake.packages.<system>.
+            inherit (pkgs) pg-wi-flow-data;
             # wtnew is likewise an overlay-only attr (single mkBashScript
             # tool holding just the script derivation) -- re-exported for
             # the same reason, so `nix build .#wtnew` resolves via

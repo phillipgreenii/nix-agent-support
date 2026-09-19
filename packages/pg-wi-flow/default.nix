@@ -26,9 +26,20 @@ let
     inherit (bashBuilders) mkBashScript;
     inherit pkgs pgWiFlowLib;
   };
+
+  # pgWiFlowData: the paths.defaults store directory (bead tc-9ddu3.1.5) --
+  # a plain data directory, not a bashBuilders artifact, so it is
+  # `pkgs.callPackage`d directly rather than threaded through mkBashLibrary/
+  # mkBashScript.
+  pgWiFlowData = pkgs.callPackage ./data { };
 in
 {
-  inherit pgWiFlowLib pg-wi-flow-identity pg-wi-flow;
+  inherit
+    pgWiFlowLib
+    pg-wi-flow-identity
+    pg-wi-flow
+    pgWiFlowData
+    ;
   packages = pg-wi-flow-identity.packages ++ pg-wi-flow.packages;
   tldr = pg-wi-flow-identity.tldr // pg-wi-flow.tldr;
   checks = {
