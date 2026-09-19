@@ -182,6 +182,22 @@ pgwf_tracker_ready() {
   jq -c '.data // .' <<<"$out"
 }
 
+# pgwf_tracker_list ARGS... -- `bd list ARGS... --json`'s data array
+# (compact JSON on stdout). Generic list wrapper for verbs that need `bd
+# list`'s own filter surface directly (e.g. list's --stale/--unpooled rows,
+# which are not expressible as a workflow-aware `bd ready` query) rather
+# than pgwf_tracker_ready's query-builder path -- still routed through this
+# ONE adapter file, never called directly from elsewhere in the package.
+pgwf_tracker_list() {
+  local -a args=("$@")
+  local out
+  if ! out="$(bd list "${args[@]}" --json 2>&1)"; then
+    echo "pg-wi-flow: bd list failed: $out" >&2
+    return 1
+  fi
+  jq -c '.data // .' <<<"$out"
+}
+
 # pgwf_tracker_ready_under PARENT_ID ARGS... -- `bd ready --parent
 # PARENT_ID ARGS... --json`'s data array; `--parent` already resolves
 # descendants recursively (bd's own filter semantics), which is exactly

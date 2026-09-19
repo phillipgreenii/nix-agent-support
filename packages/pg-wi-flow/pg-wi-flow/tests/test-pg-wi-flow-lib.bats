@@ -88,6 +88,10 @@ update)
   echo '{"data":[{}]}'
   ;;
 list)
+  if [[ -n ${MOCK_BD_LIST_FAIL:-} ]]; then
+    echo "mock bd list: forced failure" >&2
+    exit 1
+  fi
   file="${MOCK_BD_LIST_FILE:-}"
   if [[ -n $file && -f $file ]]; then
     cat "$file"
@@ -263,4 +267,97 @@ show_fixture() {
   [ "$status" -eq 0 ]
   result="$(jq 'length' <<<"$output")"
   [ "$result" -eq 2 ]
+}
+
+# --- pgwf_tracker_list: the generic `bd list` adapter wrapper, used by
+# list's --stale/--unpooled rows below (these MUST route through
+# lib/tracker.bash, never call `bd` directly -- Contract, "the ONLY file in
+# this package that invokes bd") ---
+
+@test "pgwf_tracker_list: returns bd list's data array" {
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  printf '{"data":[{"id":"tc-1"}]}' >"$MOCK_BD_LIST_FILE"
+  export MOCK_BD_LIST_FILE
+  run pgwf_tracker_list --status open
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-1" ]
+  grep -q '^list --status open --json$' "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_list: fails loudly on a bd error" {
+  MOCK_BD_LIST_FAIL=1
+  export MOCK_BD_LIST_FAIL
+  run pgwf_tracker_list --status open
+  [ "$status" -ne 0 ]
+}
+
+# --- list's --stale/--unpooled rows [design: ## Components, list's full
+# flag semantics, quoted verbatim in this packet] ---
+
+@test "pgwf_list_stale_days: questions/human items older than N days, excluding newer ones" {
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-old","updated_at":"2000-01-01T00:00:00Z"},{"id":"tc-new","updated_at":"2099-01-01T00:00:00Z"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_list_stale_days '{}' 1
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-old" ]
+  grep -q '^list --label-any question --label-any human --status open,in_progress,blocked,deferred --json$' "$MOCK_BD_LOG"
+}
+
+@test "pgwf_list_stale_reserved: dispatcher-held reservations older than H hours" {
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-stale","assignee":"sess1-dispatcher-1","updated_at":"2000-01-01T00:00:00Z"},{"id":"tc-fresh","assignee":"sess1-dispatcher-1","updated_at":"2099-01-01T00:00:00Z"},{"id":"tc-worker","assignee":"sess1-worker-1","updated_at":"2000-01-01T00:00:00Z"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_list_stale_reserved '{}' 2
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-stale" ]
+  grep -q '^list --status in_progress --json$' "$MOCK_BD_LOG"
+}
+
+@test "pgwf_list_unpooled: open items neither the default nor the attention query admits" {
+  printf '[{"id":"tc-1"},{"id":"tc-2"}]' >"$MOCK_BD_READY_DIR/default.json"
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-1"},{"id":"tc-2"},{"id":"tc-3"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_list_unpooled '{}'
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' <<<"$output")" -eq 1 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-3" ]
+  grep -q '^list --status open,in_progress --json$' "$MOCK_BD_LOG"
+}
+
+@test "cmd_list: --stale --days dispatches to pgwf_list_stale_days" {
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-old","updated_at":"2000-01-01T00:00:00Z"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_cmd_list --stale --days 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-old" ]
+}
+
+@test "cmd_list: --stale --reserved-hours dispatches to pgwf_list_stale_reserved" {
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-old","assignee":"sess1-dispatcher-1","updated_at":"2000-01-01T00:00:00Z"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_cmd_list --stale --reserved-hours 2
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-old" ]
+}
+
+@test "cmd_list: --stale rejects --days and --reserved-hours together" {
+  run pgwf_cmd_list --stale --days 1 --reserved-hours 2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--stale takes --days OR --reserved-hours, not both"* ]]
+}
+
+@test "cmd_list: --unpooled dispatches to pgwf_list_unpooled" {
+  printf '[]' >"$MOCK_BD_READY_DIR/default.json"
+  MOCK_BD_LIST_FILE="$TEST_DIR/list.json"
+  export MOCK_BD_LIST_FILE
+  printf '{"data":[{"id":"tc-3"}]}' >"$MOCK_BD_LIST_FILE"
+  run pgwf_cmd_list --unpooled
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].id' <<<"$output")" = "tc-3" ]
 }

@@ -204,12 +204,12 @@ pgwf_list_stale_days() {
   question_label="$(pgwf_config_label "$config_json" question question)"
   human_label="$(pgwf_config_label "$config_json" human human)"
   cutoff="$(date -u -d "-${days} days" +%Y-%m-%dT%H:%M:%SZ)"
-  if ! out="$(bd list --label-any "$question_label" --label-any "$human_label" \
-    --status open,in_progress,blocked,deferred --json 2>&1)"; then
-    echo "pg-wi-flow: bd list --stale --days failed: $out" >&2
+  if ! out="$(pgwf_tracker_list --label-any "$question_label" --label-any "$human_label" \
+    --status open,in_progress,blocked,deferred)"; then
+    echo "pg-wi-flow: list --stale --days failed" >&2
     return 1
   fi
-  jq -c --arg cutoff "$cutoff" '[(.data // .)[] | select(.updated_at < $cutoff)]' <<<"$out"
+  jq -c --arg cutoff "$cutoff" '[.[] | select(.updated_at < $cutoff)]' <<<"$out"
 }
 
 # pgwf_list_stale_reserved CONFIG_JSON HOURS -- reservations whose holder
@@ -224,12 +224,12 @@ pgwf_list_stale_days() {
 pgwf_list_stale_reserved() {
   local config_json="$1" hours="$2" out cutoff
   cutoff="$(date -u -d "-${hours} hours" +%Y-%m-%dT%H:%M:%SZ)"
-  if ! out="$(bd list --status in_progress --json 2>&1)"; then
-    echo "pg-wi-flow: bd list --stale --reserved-hours failed: $out" >&2
+  if ! out="$(pgwf_tracker_list --status in_progress)"; then
+    echo "pg-wi-flow: list --stale --reserved-hours failed" >&2
     return 1
   fi
   jq -c --arg cutoff "$cutoff" \
-    '[(.data // .)[] | select((.assignee // "") | test("-dispatcher-")) | select(.updated_at < $cutoff)]' \
+    '[.[] | select((.assignee // "") | test("-dispatcher-")) | select(.updated_at < $cutoff)]' \
     <<<"$out"
 }
 
@@ -245,12 +245,10 @@ pgwf_list_unpooled() {
   default_ready="$(pgwf_tracker_ready "${default_args[@]}")" || return 1
   attended_ready="$(pgwf_tracker_ready "${attended_args[@]}")" || return 1
 
-  local out
-  if ! out="$(bd list --status open,in_progress --json 2>&1)"; then
-    echo "pg-wi-flow: bd list --unpooled failed: $out" >&2
+  if ! all="$(pgwf_tracker_list --status open,in_progress)"; then
+    echo "pg-wi-flow: list --unpooled failed" >&2
     return 1
   fi
-  all="$(jq -c '.data // .' <<<"$out")"
   jq -c --argjson d "$default_ready" --argjson a "$attended_ready" \
     '($d + $a | map(.id)) as $admitted | [.[] | select((.id as $i | $admitted | index($i)) == null)]' \
     <<<"$all"
