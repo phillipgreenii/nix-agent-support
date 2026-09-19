@@ -55,7 +55,15 @@ type CheckResult struct {
 	// gate. That trains the operator to ignore the warning. It gets its own list so
 	// the actionable reason has somewhere to be reported without touching the exit
 	// code.
-	Blocked      []Skip        `json:"blocked,omitempty"`
+	Blocked []Skip `json:"blocked,omitempty"`
+	// Repaired holds gates whose await_id was a RAW COMMIT SHA (created outside
+	// `pb gate create`/`attach-verified-child`, which always key on patch-id) and
+	// was rewritten in place onto the commit's stable patch-id — see tryRawSHA.
+	// The underlying change was not yet found applied, so the gate stays blocked;
+	// only its identity was repaired, immunizing it against the SHA being rewritten
+	// or pruned by a later rebase before the change is actually applied.
+	Repaired     []string      `json:"repaired,omitempty"`
+	WouldRepair  []string      `json:"would_repair,omitempty"`
 	StaleActions []StaleAction `json:"stale_actions"`
 }
 
@@ -143,32 +151,42 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			// checkout containing this change. Key presence is exactly the old
 			// `set[patchID]` test; the shas are the by-product condition 2 needs.
 			if gatedCommits, found := set[patchID]; found {
-				// CONDITION 2: that apply's lock contained the commit — applied only to
-				// an input that apply actually RESOLVED THROUGH THE LOCK, not to one it
-				// overrode with a local clone (bead pg2-14yqh).
-				verdict, reason := d.applyBuiltGatedCommit(ctx, repo, gatedCommits)
-				if verdict != lockSatisfied {
-					entry := Skip{GateID: g.ID, Repo: repoName, Reason: reason}
-					if verdict == lockUnknown {
-						result.Skipped = append(result.Skipped, entry)
-					} else {
-						result.Blocked = append(result.Blocked, entry)
-					}
-					if stale {
-						d.applyStale(ctx, db.Dir, g.ID, p, &result)
-					}
-					continue
-				}
-				if p.DryRun {
-					result.WouldResolve = append(result.WouldResolve, g.ID)
-				} else if err := d.BD.ResolveGate(ctx, db.Dir, g.ID, ""); err != nil {
-					result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "resolve failed: " + err.Error()})
-				} else {
-					result.Resolved = append(result.Resolved, g.ID)
-				}
+				d.resolveOrBlock(ctx, db.Dir, g.ID, repoName, repo, gatedCommits, p, stale, &result)
 				continue
 			}
-			// Not found → leave blocked; stale-handle if eligible.
+			// RAW-SHA REPAIR (tc-htcum): `pb gate create` / `attach-verified-child`
+			// always key a gate on a git patch-id, which survives a rebase. A gate
+			// created OUTSIDE pb — an ad-hoc `bd gate create --await-id
+			// "<wsid>:<repo>:<sha>"` — may instead carry a raw commit SHA, and a raw
+			// SHA is exactly one rebase away from becoming permanently unreachable: once
+			// ff-merge-to-main rewrites it (or a later `git gc` prunes the dangling
+			// object), NO check can ever recover it again — this is what stranded most
+			// of the 36-gate pileup tc-htcum enumerates and hand-fixed. So try the
+			// await-id field as a commitish RIGHT NOW, on every check, before that can
+			// happen: if it still resolves to a real commit, recover ITS patch-id and
+			// treat the gate as if `pb gate create` had made it correctly.
+			if computedID, ok := d.tryRawSHA(ctx, repo.Path, patchID); ok {
+				if gatedCommits, found := set[computedID]; found {
+					// The recovered patch-id is ALREADY in the applied range — resolve
+					// now, exactly as the normal path would have.
+					d.resolveOrBlock(ctx, db.Dir, g.ID, repoName, repo, gatedCommits, p, stale, &result)
+					continue
+				}
+				// Not applied yet, but now provably a real, patch-id-computable commit:
+				// rewrite the gate onto the stable patch-id so every FUTURE check finds
+				// it through the normal path, immune to this SHA being rewritten or
+				// pruned before the change is actually applied.
+				newAwaitID := fmt.Sprintf("%s:%s:%s", wsid, repoName, computedID)
+				if p.DryRun {
+					result.WouldRepair = append(result.WouldRepair, g.ID)
+				} else if err := d.BD.SetAwaitID(ctx, db.Dir, g.ID, newAwaitID); err != nil {
+					result.Skipped = append(result.Skipped, Skip{GateID: g.ID, Repo: repoName, Reason: "raw-SHA repair failed: " + err.Error()})
+				} else {
+					result.Repaired = append(result.Repaired, g.ID)
+				}
+			}
+			// Not found (and not a recoverable raw SHA) → leave blocked; stale-handle
+			// if eligible.
 			if stale {
 				d.applyStale(ctx, db.Dir, g.ID, p, &result)
 			}
@@ -318,6 +336,54 @@ func (d CheckDeps) applyBuiltGatedCommit(ctx context.Context, repo pn.Repo, gate
 			repo.AppliedStateSchema, pnOverrideRecordSchema)
 	}
 	return lockMissing, reason
+}
+
+// resolveOrBlock runs CONDITION 2 (the apply's lock actually built gatedCommits)
+// for a gate whose patch-id (found directly, or recovered by tryRawSHA) IS in the
+// scanned applied range, and either resolves gateID or records why it stays
+// blocked (stale-handling it if eligible). Factored out so the raw-SHA-repair path
+// below can share it with the normal, already-patch-id-keyed path.
+func (d CheckDeps) resolveOrBlock(ctx context.Context, dbDir, gateID, repoName string, repo pn.Repo,
+	gatedCommits []string, p CheckParams, stale bool, result *CheckResult,
+) {
+	// CONDITION 2: that apply's lock contained the commit — applied only to an
+	// input that apply actually RESOLVED THROUGH THE LOCK, not to one it overrode
+	// with a local clone (bead pg2-14yqh).
+	verdict, reason := d.applyBuiltGatedCommit(ctx, repo, gatedCommits)
+	if verdict != lockSatisfied {
+		entry := Skip{GateID: gateID, Repo: repoName, Reason: reason}
+		if verdict == lockUnknown {
+			result.Skipped = append(result.Skipped, entry)
+		} else {
+			result.Blocked = append(result.Blocked, entry)
+		}
+		if stale {
+			d.applyStale(ctx, dbDir, gateID, p, result)
+		}
+		return
+	}
+	if p.DryRun {
+		result.WouldResolve = append(result.WouldResolve, gateID)
+	} else if err := d.BD.ResolveGate(ctx, dbDir, gateID, ""); err != nil {
+		result.Skipped = append(result.Skipped, Skip{GateID: gateID, Repo: repoName, Reason: "resolve failed: " + err.Error()})
+	} else {
+		result.Resolved = append(result.Resolved, gateID)
+	}
+}
+
+// tryRawSHA attempts to interpret candidate (an await-id's third field) as a
+// commitish still present in repoPath. It returns the commit's own patch-id and
+// true when the object still resolves — a leftover raw-SHA gate that has not yet
+// been rebased away or pruned. It returns false for the common, correct case
+// (candidate is already a patch-id, which is not a resolvable commit) and for a
+// raw SHA whose object is already gone — at that point no check can ever recover
+// it, by design of what a patch-id is FOR (see the package doc comment).
+func (d CheckDeps) tryRawSHA(ctx context.Context, repoPath, candidate string) (string, bool) {
+	id, err := d.PatchID.Compute(ctx, repoPath, candidate)
+	if err != nil {
+		return "", false
+	}
+	return id, true
 }
 
 // applyStale records (and unless DryRun, performs) the stale action.

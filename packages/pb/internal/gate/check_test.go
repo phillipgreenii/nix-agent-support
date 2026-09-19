@@ -1068,6 +1068,133 @@ func TestCheck_resolvesWhenPatchIDInHistory(t *testing.T) {
 	}
 }
 
+// TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied pins the tc-htcum
+// mechanism fix's happy path: a gate created OUTSIDE `pb gate create` (an ad-hoc
+// `bd gate create --await-id "...:<raw-sha>"`) carries a raw commit SHA instead of
+// a patch-id in the third field. That SHA does not appear in the scan directly
+// (the scan's key set is patch-ids), but it still resolves as a commit — not yet
+// rebased away — so Check recovers its patch-id and finds it WAS already applied
+// under its post-rebase identity. It must resolve immediately, exactly as a
+// correctly-created gate would.
+func TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	// The scan finds patch-id "abc123" from the already-landed, REWRITTEN commit
+	// "landedsha" — the same change, under its post-rebase identity.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 landedsha\n"}, nil)
+	// tryRawSHA: "deadraw1" still resolves as a commit (not yet pruned) and its
+	// patch-id is the SAME "abc123" — the pre-rebase identity of the same change.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-1" {
+		t.Fatalf("resolved = %v skipped=%+v; a raw-SHA gate whose recovered patch-id is already "+
+			"applied must resolve, not stay stranded on an identity the next rebase will destroy",
+			out.Resolved, out.Skipped)
+	}
+	if len(out.Repaired) != 0 || len(out.WouldRepair) != 0 {
+		t.Fatalf("repaired = %v would_repair=%v; it resolved this run, no await_id rewrite is needed",
+			out.Repaired, out.WouldRepair)
+	}
+}
+
+// TestCheck_rawSHARepairRewritesAwaitIDWhenNotYetApplied is the other half: the
+// raw SHA still resolves as a commit, but its recovered patch-id is NOT (yet) in
+// the applied range. The gate correctly stays blocked, but its identity is
+// rewritten onto the stable patch-id NOW — while the object still exists — so a
+// FUTURE check (once the change is actually applied) finds it through the normal
+// path, immune to the SHA being rewritten or pruned in between.
+func TestCheck_rawSHARepairRewritesAwaitIDWhenNotYetApplied(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	// The scan finds an UNRELATED patch-id — this change has not landed yet.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--await-id", "home:repo-a:abc123"}, run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Repaired) != 1 || out.Repaired[0] != "g-1" {
+		t.Fatalf("repaired = %v resolved=%v; a raw-SHA gate not yet applied must have its await_id "+
+			"rewritten onto the stable patch-id before the object can be rebased away or pruned",
+			out.Repaired, out.Resolved)
+	}
+	if len(out.Resolved) != 0 || len(out.WouldResolve) != 0 {
+		t.Fatalf("resolved = %v would=%v; the change is not yet applied — only the identity was repaired",
+			out.Resolved, out.WouldResolve)
+	}
+}
+
+// TestCheck_rawSHARepairDryRunRecordsWithoutActing mirrors
+// TestCheck_dryRunMutatesNothing for the repair path: --dry-run must report what
+// WOULD be repaired without issuing the await-id rewrite.
+func TestCheck_rawSHARepairDryRunRecordsWithoutActing(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
+
+	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
+		WorkspaceDir: "/ws", LastN: 100, DryRun: true, StaleAfter: 72 * time.Hour,
+		Now: time.Date(2026, 6, 26, 1, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(out.WouldRepair) != 1 || out.WouldRepair[0] != "g-1" || len(out.Repaired) != 0 {
+		t.Fatalf("dry-run: repaired=%v would_repair=%v", out.Repaired, out.WouldRepair)
+	}
+	for _, c := range f.Calls() {
+		if c.Name == "bd" && len(c.Args) >= 5 && c.Args[2] == "update" && c.Args[4] == "--await-id" {
+			t.Fatal("dry-run issued an await-id rewrite")
+		}
+	}
+}
+
+// TestCheck_genuinePatchIDNotYetAppliedIsNotTreatedAsRawSHA is the negative
+// control: the common, CORRECT case is a gate whose await-id third field already
+// IS a patch-id (created via `pb gate create`) that simply has not been applied
+// yet. A patch-id is not a resolvable commitish, so tryRawSHA's `git show` on it
+// must fail harmlessly (FakeRunner returns an unscripted-call error, which
+// tryRawSHA discards) and the gate must be left exactly as today: neither
+// resolved nor repaired.
+func TestCheck_genuinePatchIDNotYetAppliedIsNotTreatedAsRawSHA(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
+	// deliberately NOT scripting "git show abc123" — a real patch-id is never a
+	// resolvable commitish, so tryRawSHA must not depend on that call succeeding.
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 0 || len(out.Repaired) != 0 || len(out.WouldRepair) != 0 {
+		t.Fatalf("resolved=%v repaired=%v would_repair=%v; a genuine not-yet-applied patch-id gate "+
+			"must be left alone, not mistaken for a raw-SHA gate", out.Resolved, out.Repaired, out.WouldRepair)
+	}
+}
+
 func TestCheck_dryRunMutatesNothing(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)

@@ -70,6 +70,15 @@ func TestSetMetadata_buildsArgs(t *testing.T) {
 	}
 }
 
+func TestSetAwaitID_buildsArgs(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "update", "g-9", "--await-id", "home:repo-a:def456"},
+		run.Result{}, nil)
+	if err := (Client{R: f}).SetAwaitID(context.Background(), "/db", "g-9", "home:repo-a:def456"); err != nil {
+		t.Fatalf("SetAwaitID: %v", err)
+	}
+}
+
 func TestResolveGate_buildsArgs(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("bd", []string{"-C", "/db", "gate", "resolve", "g-9", "--reason", "applied"},

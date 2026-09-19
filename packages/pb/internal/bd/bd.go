@@ -87,6 +87,22 @@ func (c Client) SetMetadata(ctx context.Context, dir, id, key, value string) err
 	return nil
 }
 
+// SetAwaitID rewrites gate id's await_id (the "<wsid>:<repo>:<patch-id>" gate key).
+// Used by Check's raw-SHA repair (tc-htcum): a gate created OUTSIDE `pb gate
+// create` may have been pinned to a raw commit SHA instead of a patch-id, and a
+// raw SHA is one rebase away from becoming permanently unreachable. Once Check
+// recovers the patch-id for such a SHA, it rewrites the gate in place so it is
+// immune to the SHA being rewritten or pruned later.
+func (c Client) SetAwaitID(ctx context.Context, dir, id, awaitID string) error {
+	_, err := c.R.Run(ctx, "bd",
+		[]string{"-C", dir, "update", id, "--await-id", awaitID},
+		run.Options{Env: bdEnv()})
+	if err != nil {
+		return fmt.Errorf("bd update --await-id: %w", err)
+	}
+	return nil
+}
+
 // ResolveGate closes (resolves) gate id.
 func (c Client) ResolveGate(ctx context.Context, dir, id, reason string) error {
 	args := []string{"-C", dir, "gate", "resolve", id}

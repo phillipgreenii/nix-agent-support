@@ -16,12 +16,29 @@ import (
 // environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
 // GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at the
 // real repo, breaking test hermeticity when tests are run from a git commit hook.
+//
+// It also pins GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM=/dev/null,
+// mirroring packages/pg-pr/internal/gitfixture.Env's already-established fix for the same
+// defect class (pg2-12795): this repo's system/global git config wires
+// core.hooksPath at a machine-wide pg-git-check-identity dispatcher (tc-2y74), which a
+// plain `-C <dir>` git invocation does NOT escape (that only changes the working
+// directory, not which config git resolves hooks from). Without this, these fixtures'
+// own throwaway commits (author/committer name "t") trip that hook's placeholder-identity
+// denylist -- and renaming to a "safer" name does not fix it either, since
+// PGCI_FAKE_NAME_RE also rejects the "gitfixture" pattern by design (it exists to catch
+// even a fixture identity that escapes its sandbox). Skipping global/system config
+// outright is the correct fix, not picking a name the denylist happens to allow today.
 func hermeticEnviron() []string {
 	skipVars := map[string]bool{
 		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
 		"GIT_PREFIX": true, "GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true,
+		// Also skipped so an ambient value (e.g. inherited from an outer `git commit`
+		// hook's own environment) cannot override the pinned values below — exec.Cmd
+		// resolves duplicate keys by taking the LAST occurrence in Env, so these three
+		// must never appear twice.
+		"GIT_CONFIG_NOSYSTEM": true, "GIT_CONFIG_GLOBAL": true, "GIT_CONFIG_SYSTEM": true,
 	}
-	var env []string
+	env := []string{"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"}
 	for _, kv := range os.Environ() {
 		if k := strings.SplitN(kv, "=", 2)[0]; !skipVars[k] {
 			env = append(env, kv)
