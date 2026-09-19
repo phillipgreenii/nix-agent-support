@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -43,13 +44,13 @@ func runReply(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("reply: config load failed", "err", err)
 		return 1
 	}
 	el := openEventLog(cfg)
 	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("reply: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
@@ -62,7 +63,7 @@ func runReply(args []string) int {
 	}
 	// Resume if cold, then send.
 	if _, err := svc.Ensure(context.Background(), externalID, cwd, cfg.Claude.DefaultModel, session.EnsureOpts{}); err != nil {
-		fmt.Fprintln(os.Stderr, "ensure:", err)
+		slog.Error("reply: ensure failed", "err", err)
 		return 1
 	}
 	mode := session.ModeRefuseIfBusy
@@ -76,6 +77,13 @@ func runReply(args []string) int {
 	}
 	res, err := svc.SendWithConfirm(context.Background(), externalID, prompt, mode, *confirmIngest)
 	if err != nil {
+		// This one call site covers both genuinely-unexpected failures AND the
+		// named, dedicated-exit-code business outcomes replyExitCode maps below
+		// (busy/cancel-unconfirmed/prompt-not-ingested) — those are part of the
+		// CLI's own documented outcome vocabulary for callers, not operational
+		// diagnostics, and the two are not safely separable at this call site
+		// without restructuring error handling beyond this packet's scope. Left
+		// on fmt.Fprintln rather than migrated to slog (D3).
 		fmt.Fprintln(os.Stderr, "reply:", err)
 		return replyExitCode(err)
 	}
@@ -86,7 +94,7 @@ func runReply(args []string) int {
 	if mode == session.ModeNoWait || mode == session.ModeQueue {
 		turnID := uuid.NewString()
 		if err := st.InsertTurn(context.Background(), store.Turn{TurnID: turnID, ExternalID: externalID, Prompt: prompt}); err != nil {
-			fmt.Fprintln(os.Stderr, "reply:", err)
+			slog.Error("reply: record pending turn failed", "err", err)
 			return 1
 		}
 		fmt.Println(turnID)

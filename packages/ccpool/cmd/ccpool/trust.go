@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -30,7 +30,7 @@ func runTrust(args []string) int {
 
 	home, _ := os.UserHomeDir()
 	if err := trust.EnsureTrusted(filepath.Join(home, ".claude.json"), cwd); err != nil {
-		fmt.Fprintln(os.Stderr, "trust:", err)
+		slog.Error("trust: failed", "err", err)
 		return 1
 	}
 	return 0

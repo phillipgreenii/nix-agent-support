@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -37,7 +38,7 @@ func runTail(args []string) int {
 	}
 	f, err := os.Open(row.TranscriptPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "open transcript:", err)
+		slog.Error("tail: open transcript failed", "path", row.TranscriptPath, "err", err)
 		return 1
 	}
 	defer func() { _ = f.Close() }()

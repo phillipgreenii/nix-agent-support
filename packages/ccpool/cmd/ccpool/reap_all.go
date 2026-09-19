@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
@@ -24,14 +24,14 @@ func runReapAll(args []string) int {
 	//    regardless of any inherited CCPOOL_POOL. The default pool never
 	//    self-registers, so it is reaped here exactly once. Honors its own auto_reap.
 	if err := reapOnePool(""); err != nil {
-		fmt.Fprintln(os.Stderr, "reap-all: default pool:", err)
+		slog.Error("reap-all: default pool reap failed", "err", err)
 		rc = 1
 	}
 
 	// 2. Every registered pool.
 	entries, err := registry.List()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "reap-all: list registry:", err)
+		slog.Error("reap-all: list registry failed", "err", err)
 		return 1
 	}
 	for _, e := range entries {
@@ -40,13 +40,13 @@ func runReapAll(args []string) int {
 		// tolerates an already-absent link (ENOENT).
 		if verr := config.ValidatePoolDir(e.Target); verr != nil {
 			if rerr := registry.Remove(e.Name); rerr != nil {
-				fmt.Fprintf(os.Stderr, "reap-all: gc %s: %v\n", e.Name, rerr)
+				slog.Error("reap-all: registry gc failed", "name", e.Name, "err", rerr)
 				rc = 1
 			}
 			continue
 		}
 		if err := reapOnePool(e.Target); err != nil {
-			fmt.Fprintf(os.Stderr, "reap-all: pool %s: %v\n", e.Target, err)
+			slog.Error("reap-all: pool reap failed", "pool", e.Target, "err", err)
 			rc = 1
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 )
 
@@ -21,7 +22,7 @@ func runClose(args []string) int {
 	}
 	defer func() { _ = st.Close() }()
 	if err := svc.Close(context.Background(), pos[0], *purge); err != nil {
-		fmt.Fprintln(os.Stderr, "close:", err)
+		slog.Error("close: failed", "err", err)
 		return 1
 	}
 	return 0

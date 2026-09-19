@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
@@ -40,12 +41,12 @@ func runResult(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("result: config load failed", "err", err)
 		return 1
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("result: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
@@ -55,7 +56,12 @@ func runResult(args []string) int {
 
 // resultForTurn is the testable core: it loads the turn, then prints the lazily
 // resolved reply / pending indicator and returns the exit code (see runResult's
-// contract). Pure I/O via the passed writers so tests stay hermetic.
+// contract). Pure I/O via the passed writers so tests stay hermetic. Its
+// fmt.Fprintln/Fprintf calls below intentionally stay on fmt rather than
+// migrating to slog (D3): they write to the injected stdout/stderr writers
+// (result_test.go asserts directly against those buffers), and slog.Default()
+// bypasses an injected writer entirely — migrating would silently break that
+// hermetic-testing contract, not just change formatting.
 func resultForTurn(ctx context.Context, st *store.Store, rr replyResolver, turnID string, stdout, stderr io.Writer) int {
 	t, ok, err := st.GetTurn(ctx, turnID)
 	if err != nil {

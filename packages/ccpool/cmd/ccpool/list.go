@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -68,26 +68,26 @@ func runList(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("list: config load failed", "err", err)
 		return 1
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("list: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
 
 	rows, err := st.List(context.Background())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "list:", err)
+		slog.Error("list: list sessions failed", "err", err)
 		return 1
 	}
 
 	if len(filters) > 0 {
 		ids, err := st.ListExternalIDsByMeta(context.Background(), filters)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "list filter:", err)
+			slog.Error("list: filter failed", "err", err)
 			return 1
 		}
 		keep := make(map[string]bool, len(ids))
@@ -116,7 +116,7 @@ func runList(args []string) int {
 			tmux.HasSession, tmux.PaneCurrentPath, gitfacet.Resolve, metaFn, cfg.Tmux.Socket,
 			time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "list:", err)
+			slog.Error("list: json render failed", "err", err)
 			return 1
 		}
 		fmt.Println(out)

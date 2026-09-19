@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,7 +38,7 @@ func runCancel(args []string) int {
 			fmt.Fprintf(os.Stderr, "cancel may not have landed for %q — re-run `ccpool cancel %s` or `ccpool attach %s`\n",
 				fs.Arg(0), fs.Arg(0), fs.Arg(0))
 		} else {
-			fmt.Fprintln(os.Stderr, "cancel:", err)
+			slog.Error("cancel: failed", "err", err)
 		}
 		return cancelExitCode(err)
 	}
@@ -64,7 +65,7 @@ func cancelExitCode(err error) int {
 func buildService() (*session.Service, *store.Store, int) {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("config load failed", "err", err)
 		return nil, nil, 1
 	}
 	return buildServiceFor(cfg)
@@ -79,7 +80,7 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 	el := openEventLog(cfg)
 	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("store open failed", "err", err)
 		return nil, nil, 1
 	}
 	return session.New(newSessionDeps(cfg, st, el)), st, 0
@@ -123,7 +124,7 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 func openEventLog(cfg config.Config) *eventlog.Logger {
 	el, err := eventlog.Open(cfg.EventLogPath())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "event log:", err)
+		slog.Error("event log open failed", "err", err)
 		return nil
 	}
 	return el

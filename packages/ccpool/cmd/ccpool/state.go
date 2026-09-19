@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -37,12 +38,12 @@ func runState(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("state: config load failed", "err", err)
 		return 1
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("state: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
@@ -81,14 +82,14 @@ func runState(args []string) int {
 	}
 	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, registry, tmuxName, externalID, row)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "state:", err)
+		slog.Error("state: gather failed", "err", err)
 		return 1
 	}
 
 	if *jsonOut {
 		b, err := renderStateJSON(res)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "state:", err)
+			slog.Error("state: json render failed", "err", err)
 			return 1
 		}
 		fmt.Println(string(b))

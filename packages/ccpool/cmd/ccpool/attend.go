@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -40,18 +41,18 @@ func runAttend(args []string) int {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("attend: config load failed", "err", err)
 		return 1
 	}
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("attend: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()
 	rows, err := st.List(context.Background())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "list:", err)
+		slog.Error("attend: list sessions failed", "err", err)
 		return 1
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -30,13 +31,13 @@ func runDoctor(args []string) int {
 	_ = fs.Parse(args)
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("doctor: config load failed", "err", err)
 		return 1
 	}
 	fmt.Print(doctorPoolHeader(cfg))
 	st, err := store.Open(cfg.DBPath, clock.Real{})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "store:", err)
+		slog.Error("doctor: store open failed", "err", err)
 		return 1
 	}
 	defer func() { _ = st.Close() }()

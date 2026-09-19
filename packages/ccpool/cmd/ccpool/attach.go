@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
@@ -20,19 +21,19 @@ func runAttach(args []string) int {
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
+		slog.Error("attach: config load failed", "err", err)
 		return 1
 	}
 	target := session.TmuxName(cfg.Tmux.Prefix, fs.Arg(0))
 	tmuxBin, err := exec.LookPath("tmux")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "tmux not found")
+		slog.Error("attach: tmux not found on PATH", "err", err)
 		return 1
 	}
 	// Replace this process with the interactive attach.
 	argv := []string{"tmux", "-L", cfg.Tmux.Socket, "attach", "-t", target}
 	if err := syscall.Exec(tmuxBin, argv, os.Environ()); err != nil {
-		fmt.Fprintln(os.Stderr, "attach:", err)
+		slog.Error("attach: exec tmux failed", "err", err)
 		return 1
 	}
 	return 0
