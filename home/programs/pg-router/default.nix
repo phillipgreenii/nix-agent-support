@@ -24,6 +24,7 @@ let
       cicdDownPath ? null,
       handlerCommand ? null,
       handlerCommandDir ? null,
+      handlerConfig ? null,
       metricsAddr ? null,
     }:
     [
@@ -42,6 +43,16 @@ let
     # operatorPausedPath/cicdDownPath above.
     ++ lib.optional (handlerCommand != null) "PG_ROUTER_HANDLER_COMMAND=${handlerCommand}"
     ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}"
+    # handlerConfig: threads PG_ROUTER_CCPOOL_HANDLER_CONFIG, the handler
+    # participant's OWN launch/isolation config (RepoRoot/WorktreeDir/
+    # BeadsPrefix, --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG in
+    # pg-router-ccpool-handler's own internal/config), into this systemd
+    # unit's Environment — same optional-var pattern as handlerCommand[Dir]
+    # above. Without this, the handler process falls back to its own
+    # Default() (WorktreeDir: ""), and every dispatch fails at worktree
+    # creation (`mkdir : no such file or directory`) before any real work
+    # starts.
+    ++ lib.optional (handlerConfig != null) "PG_ROUTER_CCPOOL_HANDLER_CONFIG=${handlerConfig}"
     # metricsAddr (pg2-ui2i3): threads PG_ROUTER_METRICS_ADDR, which
     # internal/config/config.go only reads for the `run` core (this
     # systemd unit's daemon service, not periodicDrain's `run-until-idle`),
@@ -130,6 +141,21 @@ in
           option existed.
         '';
       };
+      handlerConfig = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          PG_ROUTER_CCPOOL_HANDLER_CONFIG override: a path to the handler
+          participant's own launch/isolation config (RepoRoot/WorktreeDir/
+          BeadsPrefix/etc — `pg-router-ccpool-handler`'s own
+          `--config`/`PG_ROUTER_CCPOOL_HANDLER_CONFIG`), typically
+          `phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile`
+          (interpolated to a string, like `handlerCommandDir` above). `null`
+          leaves it unset — the handler process falls back to its own
+          Default() (an empty WorktreeDir), so every dispatch needing
+          isolation fails at worktree creation.
+        '';
+      };
     };
 
     daemon = {
@@ -169,6 +195,11 @@ in
         type = lib.types.nullOr lib.types.str;
         default = null;
         description = "PG_ROUTER_HANDLER_COMMAND_DIR override for the daemon core — see `periodicDrain.handlerCommandDir`.";
+      };
+      handlerConfig = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "PG_ROUTER_CCPOOL_HANDLER_CONFIG override for the daemon core — see `periodicDrain.handlerConfig`.";
       };
       metricsAddr = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -272,6 +303,7 @@ in
                 configFileName = "pg-router-drain-config.toml";
                 handlerCommand = cfg.periodicDrain.handlerCommand;
                 handlerCommandDir = cfg.periodicDrain.handlerCommandDir;
+                handlerConfig = cfg.periodicDrain.handlerConfig;
               };
             };
           };
@@ -291,6 +323,7 @@ in
                 cicdDownPath = cfg.daemon.gates.cicdDownPath;
                 handlerCommand = cfg.daemon.handlerCommand;
                 handlerCommandDir = cfg.daemon.handlerCommandDir;
+                handlerConfig = cfg.daemon.handlerConfig;
                 metricsAddr = cfg.daemon.metricsAddr;
               };
             };
