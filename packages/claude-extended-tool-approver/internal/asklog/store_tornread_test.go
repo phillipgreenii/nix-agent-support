@@ -68,6 +68,36 @@ func corruptFirstCellPointer(t *testing.T, dbPath string, pageSize, pgno int) (o
 	return offset, original
 }
 
+// corruptCellCount flips a leaf table b-tree page's cell-count field (the
+// 2-byte big-endian count at byte 3 of the page, per the SQLite file format)
+// to an implausibly large value. Unlike corruptFirstCellPointer (which only
+// derails a scan that happens to dereference cell-pointer-array index 0),
+// EVERY access to the page — a full scan and a direct ROWID seek alike —
+// must read this field first to bound its search, so it reliably reproduces
+// SQLITE_CORRUPT ("database disk image is malformed") for either access
+// pattern. Confirmed empirically (tc-56z3r) against modernc.org/sqlite:
+// corruptFirstCellPointer alone did not reproduce the error through a ROWID
+// IN(...) lookup (SQLite's rowid seek does not always dereference pointer
+// index 0), only through a full scan — this corruption reproduces it for
+// both, which is what QueryRowsByIDs' regression test needs.
+func corruptCellCount(t *testing.T, dbPath string, pageSize, pgno int) (offset int64, original [2]byte) {
+	t.Helper()
+	f, err := os.OpenFile(dbPath, os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open db file for corruption: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	offset = int64(pgno-1)*int64(pageSize) + 3
+	if _, err := f.ReadAt(original[:], offset); err != nil {
+		t.Fatalf("read original cell-count bytes: %v", err)
+	}
+	if _, err := f.WriteAt([]byte{0x7F, 0xFF}, offset); err != nil {
+		t.Fatalf("corrupt cell-count bytes: %v", err)
+	}
+	return offset, original
+}
+
 func restoreBytes(t *testing.T, dbPath string, offset int64, original [2]byte) {
 	t.Helper()
 	f, err := os.OpenFile(dbPath, os.O_RDWR, 0o644)
@@ -196,6 +226,70 @@ func TestQueryRows_RecoversFromTransientTornRead(t *testing.T) {
 	}
 	if len(rows) != wantRows {
 		t.Errorf("QueryRows returned %d rows after recovering, want %d", len(rows), wantRows)
+	}
+}
+
+// TestQueryRowsByIDs_RecoversFromTransientTornRead is TestQueryRows_
+// RecoversFromTransientTornRead's counterpart for the `show` subcommand's
+// query. Before tc-56z3r, QueryRowsByIDs had no torn-read retry of its own
+// even though it opens the exact same immutable=1 connection as QueryRows
+// and walks the exact same tool_decisions b-tree pages by rowid — this test
+// pins that QueryRowsByIDs now shares QueryRows' recovery behavior via
+// withTornReadRetry.
+func TestQueryRowsByIDs_RecoversFromTransientTornRead(t *testing.T) {
+	prevDelay := SetTornReadRetryDelayForTests(5 * time.Millisecond)
+	defer SetTornReadRetryDelayForTests(prevDelay)
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "asks.db")
+	const wantRows = 25
+
+	pageSize, pgno := seedRowsAndLocateLeafPage(t, dbPath, wantRows)
+	// corruptCellCount, not corruptFirstCellPointer: QueryRowsByIDs issues a
+	// direct ROWID seek rather than a page scan, and empirically (tc-56z3r)
+	// does not always dereference cell-pointer-array index 0 on the way to
+	// its target row, so corruptFirstCellPointer's targeted corruption does
+	// not reliably reproduce SQLITE_CORRUPT through this access pattern.
+	offset, original := corruptCellCount(t, dbPath, pageSize, pgno)
+
+	ids := make([]int, wantRows)
+	for i := range ids {
+		ids[i] = i + 1
+	}
+
+	probe, err := NewReadOnlyStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewReadOnlyStore (probe): %v", err)
+	}
+	if _, err := probe.queryRowsByIDsOnce(ids); err == nil || !isTornReadError(err) {
+		_ = probe.Close()
+		restoreBytes(t, dbPath, offset, original)
+		t.Fatalf("corruption did not reproduce a torn-read error (queryRowsByIDsOnce err = %v); the test fixture needs adjusting, not the retry logic", err)
+	}
+	_ = probe.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(2 * time.Millisecond)
+		restoreBytes(t, dbPath, offset, original)
+	}()
+
+	r, err := NewReadOnlyStore(dbPath)
+	if err != nil {
+		wg.Wait()
+		t.Fatalf("NewReadOnlyStore: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	rows, err := r.QueryRowsByIDs(ids)
+	wg.Wait()
+	if err != nil {
+		t.Fatalf("QueryRowsByIDs did not recover from a transient torn read: %v", err)
+	}
+	if len(rows) != wantRows {
+		t.Errorf("QueryRowsByIDs returned %d rows after recovering, want %d", len(rows), wantRows)
 	}
 }
 

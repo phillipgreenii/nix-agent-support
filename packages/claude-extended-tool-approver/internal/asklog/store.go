@@ -467,35 +467,60 @@ func (s *Store) reopen() error {
 	return nil
 }
 
-// QueryRows returns non-excluded decision rows, optionally filtered by date.
+// withTornReadRetry runs attempt, retrying it up to tornReadRetries times
+// (each through a freshly re-opened connection — see reopen) after a short,
+// doubling delay, whenever attempt's error isTornReadError. It is the shared
+// retry loop originally written for QueryRows (pg2-do92x) and now reused by
+// every read-only query method (tc-56z3r) — QueryRowsByIDs and
+// QueryTraceByDecisionID hit the identical torn-read hazard (a full or
+// partial table scan racing a live WAL checkpoint through the same
+// immutable=1 connection) and had no retry of their own before tc-56z3r,
+// even though QueryRows' sibling read paths (report/evaluate/baseline/
+// compare, all via QueryRows) already did.
 //
-// On a read-only Store (dbPath set), a torn-read error (isTornReadError) is
-// retried up to tornReadRetries times, each through a freshly re-opened
-// connection (see reopen) after a short, doubling delay — see
-// tornReadRetryDelay and pg2-do92x's write-up on NewReadOnlyStore for why
-// this is safe to retry rather than a masked real error. A Store with no
-// dbPath (the read-write path, or a read-only Store built directly in a
-// test) gets no retry: reopen would have nothing to reopen against.
-func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
+// On a read-only Store (dbPath set), a torn-read error is retried per the
+// above; see tornReadRetryDelay and pg2-do92x's write-up on NewReadOnlyStore
+// for why this is safe to retry rather than a masked real error. A Store
+// with no dbPath (the read-write path, or a read-only Store built directly
+// in a test) gets no retry: reopen would have nothing to reopen against.
+func (s *Store) withTornReadRetry(attempt func() error) error {
 	var lastErr error
-	for attempt := 0; ; attempt++ {
-		result, err := s.queryRowsOnce(sinceDate)
+	for i := 0; ; i++ {
+		err := attempt()
 		if err == nil {
-			return result, nil
+			return nil
 		}
 		lastErr = err
-		if !isTornReadError(err) || s.dbPath == "" || attempt >= tornReadRetries {
-			return nil, lastErr
+		if !isTornReadError(err) || s.dbPath == "" || i >= tornReadRetries {
+			return lastErr
 		}
-		delay := tornReadRetryDelay << attempt
+		delay := tornReadRetryDelay << i
 		time.Sleep(delay)
 		if reopenErr := s.reopen(); reopenErr != nil {
 			// Surface the ORIGINAL query error, not the reopen failure: that
 			// is what a caller is actually debugging (e.g. the file was
 			// removed mid-retry is a much rarer, secondary problem).
-			return nil, lastErr
+			return lastErr
 		}
 	}
+}
+
+// QueryRows returns non-excluded decision rows, optionally filtered by date.
+// See withTornReadRetry for the retry contract.
+func (s *Store) QueryRows(sinceDate string) ([]DecisionRow, error) {
+	var result []DecisionRow
+	err := s.withTornReadRetry(func() error {
+		r, err := s.queryRowsOnce(sinceDate)
+		if err != nil {
+			return err
+		}
+		result = r
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // queryRowsOnce is the single-attempt body QueryRows wraps in its torn-read
@@ -553,12 +578,32 @@ type ShowRow struct {
 	SandboxEnabled        sql.NullInt64
 }
 
-// QueryRowsByIDs returns full row data for the given IDs (including excluded rows).
+// QueryRowsByIDs returns full row data for the given IDs (including excluded
+// rows). It is the `show` subcommand's query, and shares QueryRows' torn-read
+// retry (see withTornReadRetry) — a targeted lookup by id still walks the
+// same b-tree pages a concurrent WAL checkpoint may be rewriting.
 func (s *Store) QueryRowsByIDs(ids []int) ([]ShowRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 
+	var result []ShowRow
+	err := s.withTornReadRetry(func() error {
+		r, err := s.queryRowsByIDsOnce(ids)
+		if err != nil {
+			return err
+		}
+		result = r
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// queryRowsByIDsOnce is QueryRowsByIDs' single-attempt body.
+func (s *Store) queryRowsByIDsOnce(ids []int) ([]ShowRow, error) {
 	query := `SELECT id, session_id, cwd, tool_name, tool_input_json,
 		COALESCE(tool_summary, ''), COALESCE(hook_decision, ''), COALESCE(hook_reason, ''),
 		outcome, excluded, COALESCE(excluded_reason, ''),
@@ -633,8 +678,27 @@ type TraceRow struct {
 	Reason    string
 }
 
-// QueryTraceByDecisionID returns all trace entries for a given tool_decision id, ordered by rule_order.
+// QueryTraceByDecisionID returns all trace entries for a given tool_decision
+// id, ordered by rule_order. Shares QueryRows' torn-read retry (see
+// withTornReadRetry) for the same reason QueryRowsByIDs does.
 func (s *Store) QueryTraceByDecisionID(decisionID int) ([]TraceRow, error) {
+	var result []TraceRow
+	err := s.withTornReadRetry(func() error {
+		r, err := s.queryTraceByDecisionIDOnce(decisionID)
+		if err != nil {
+			return err
+		}
+		result = r
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// queryTraceByDecisionIDOnce is QueryTraceByDecisionID's single-attempt body.
+func (s *Store) queryTraceByDecisionIDOnce(decisionID int) ([]TraceRow, error) {
 	rows, err := s.db.Query(`
 		SELECT rule_order, rule_name, decision, reason
 		FROM decision_trace_entries
