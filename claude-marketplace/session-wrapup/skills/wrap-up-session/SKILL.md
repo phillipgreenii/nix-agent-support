@@ -383,6 +383,52 @@ above, pass its id along on the SAME call: `session-mode set-status finished --h
 bead id, alongside the id already visible in this run's own output. Echo the id plainly in the
 end-of-run summary either way (bead or no bead — see "End-of-run summary").
 
+### 8. Session-owned background work: check, and decide keep vs. stop (bead tc-k59lp)
+
+A wrapup can walk through phases 1-7 while a stray background job or monitor loop from
+earlier mid-session work keeps running unnoticed — or, in the other direction, an overzealous
+cleanup pass can kill something that's genuinely still needed, just because nobody wrote down
+why it had to stay. Make the check-and-decide explicit here rather than leaving it to whether
+the operator happens to ask.
+
+This is a DIFFERENT inventory from the Preamble's `--monitor-if-empty` cancellation above —
+that Preamble step covers exactly one mechanism (the drain-beads/unblock-human-beads recurring
+wakeup) and already ran unconditionally regardless of what this phase finds. Cross-reference it,
+don't duplicate it: don't re-cancel that same wakeup here, and don't skip this phase because the
+Preamble already ran — this phase covers everything else the session left running.
+
+Enumerate, read-only, everything this session itself still has outstanding:
+
+- **Background Bash jobs** — any `run_in_background` invocation this session started (a build,
+  a long test run, a deploy watch) that hasn't been reaped.
+- **Active Monitor until-loops** — any `Monitor` call this session armed that's still polling
+  (the same "ScheduleWakeup/Monitor task listing" used to confirm the Preamble step above is
+  the source for this too).
+- **Other armed wakeups** — any `ScheduleWakeup` or `/loop` recurrence this session set up for a
+  reason OTHER than the drain/unblock check the Preamble already handles.
+
+For each one found, decide, and act:
+
+- **Stop it** when it's serving no further purpose this session: a build/check that already
+  completed and whose output you already read, a poll loop whose target condition already
+  resolved, a monitor watching a task that already finished. Cancel it (`TaskStop`, stop the
+  Monitor, kill the backgrounded job) — the same "nothing stays armed past the session that
+  started it" principle the Preamble step already applies to its own mechanism.
+- **Keep it** only when there's a concrete, statable reason it must outlive this session: it's
+  watching something that finishes AFTER this session closes and something else still needs the
+  result (another session, the operator, an artifact watch); or it's a genuinely external
+  long-lived resource this session never owned in the first place (a system daemon like
+  `pa-monitor`, another session's own background job) — not this session's to stop at all.
+- When you genuinely can't tell which side a job is on, apply the same scope discipline as
+  elsewhere in this skill: leave it, and say so explicitly in the summary rather than silently
+  killing something that might matter. That's not a reason to skip checking in the first place.
+
+Record the outcome in the end-of-run summary (see below): name what's left running and why it
+still needs to be, and what was stopped and why that was safe. Say nothing when there's nothing
+to report — mirroring how the summary already stays silent on unpushed-landing-debt unless it's
+actually relevant (see "Unpushed landing debt is neither reported nor carried by the handoff"
+above).
+
 ## Next-session handoff bead
 
 When work remains, capture a resume brief as a single P0 bead. The body should let a fresh
@@ -582,6 +628,9 @@ Integrated (via `integrate-branch`):
 Beads: closed 3 (tc-12, tc-13, tc-15); filed 2 (tc-88 follow-up, tc-89 bug).
 Next session: P0 tc-90 — resume nix-personal PR #42 after review.
 
+Background: stopped stray `go test ./...` watch (output already read); left the artifact watch
+on tc-88's tracking doc running (operator still reviewing it).
+
 Left untouched (out of scope):
 - homelab branch fix-y (not this session)
 - 1 pre-existing stash in nix-overlay
@@ -593,6 +642,11 @@ For a no-beads repo, replace the Beads / Next-session lines with the handoff doc
 There is deliberately NO unpushed-debt block: commits landed locally and not pushed are expected,
 and are mentioned only when being unpublished BLOCKS the work — then as ONE line, not a section.
 
+The `Background:` line (phase 8) follows the same silent-unless-relevant pattern: include it only
+when something was actually stopped or is genuinely still needed. When phase 8 found nothing
+outstanding, omit the line entirely — don't manufacture a "no background jobs" line just to show
+the check happened.
+
 There is likewise no "in-progress elsewhere" block. `bd list --status in_progress` with no
 filter spans every repo and every concurrent session sharing this tracker, so its raw output
 MUST NOT appear in the report — the summary covers only beads THIS session closed, filed, or
@@ -602,23 +656,25 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                                              | command                                                                                                    |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| in-progress beads (scope check)                   | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)              |
-| PR-tracker beads                                  | `bd list --type=merge-request`                                                                             |
-| close finished work                               | `bd close <id> [<id>...] --reason="..."`                                                                   |
-| file discovered/unfinished                        | `bd create --title=... --description=... --type=... -p <0-4>`                                              |
-| dirty state                                       | `git status` ; ahead of main: `git log main..`                                                             |
-| unpushed blocks the work?                         | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`           |
-| run gates (nix-\* repos)                          | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check`   |
-| integrate a repo's work                           | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)      |
-| set teardown / stash cleanup                      | see `references/cleanup.md`                                                                                |
-| remove pn workforest set                          | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                         |
-| prune stale worktree admin                        | `pn workspace workforest prune`                                                                            |
-| next-session handoff                              | one P0 `bd create` (see "Next-session handoff bead")                                                       |
-| retire a spent P0 pointer                         | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                        |
-| record work (no-beads repo)                       | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                             |
-| next-session handoff (no-beads)                   | update the handoff doc's top "Resume here" section                                                         |
-| this session's mode record                        | `session-mode show` (see "Preamble: mark this session's mode")                                             |
-| record this run's handoff bead on the mode record | `session-mode set-status finished --handoff-bead <id>` (see end of phase 7)                                |
-| cancel a live --monitor-if-empty monitor          | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor") |
+| need                                                   | command                                                                                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| in-progress beads (scope check)                        | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)                                               |
+| PR-tracker beads                                       | `bd list --type=merge-request`                                                                                                              |
+| close finished work                                    | `bd close <id> [<id>...] --reason="..."`                                                                                                    |
+| file discovered/unfinished                             | `bd create --title=... --description=... --type=... -p <0-4>`                                                                               |
+| dirty state                                            | `git status` ; ahead of main: `git log main..`                                                                                              |
+| unpushed blocks the work?                              | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                            |
+| run gates (nix-\* repos)                               | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check`                                    |
+| integrate a repo's work                                | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)                                       |
+| set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                 |
+| remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                          |
+| prune stale worktree admin                             | `pn workspace workforest prune`                                                                                                             |
+| next-session handoff                                   | one P0 `bd create` (see "Next-session handoff bead")                                                                                        |
+| retire a spent P0 pointer                              | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                                                         |
+| record work (no-beads repo)                            | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                                                              |
+| next-session handoff (no-beads)                        | update the handoff doc's top "Resume here" section                                                                                          |
+| this session's mode record                             | `session-mode show` (see "Preamble: mark this session's mode")                                                                              |
+| record this run's handoff bead on the mode record      | `session-mode set-status finished --handoff-bead <id>` (see end of phase 7)                                                                 |
+| cancel a live --monitor-if-empty monitor               | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor")                                  |
+| inventory session background jobs/monitors/wakeups     | review the ScheduleWakeup/Monitor task listing plus any `run_in_background` jobs this session started, then keep-or-stop each (see phase 8) |
+| stop a session background job/monitor no longer needed | `TaskStop`, or kill the backgrounded job, or stop the Monitor loop (see phase 8)                                                            |
