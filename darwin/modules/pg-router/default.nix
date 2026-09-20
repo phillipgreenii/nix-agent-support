@@ -130,6 +130,9 @@ in
             daemonCfg.handlerConfig != null
           ) "export PG_ROUTER_CCPOOL_HANDLER_CONFIG=${lib.escapeShellArg daemonCfg.handlerConfig}"}
           ${lib.optionalString (
+            daemonCfg.handlerCcpoolPool != null
+          ) "export CCPOOL_POOL=${lib.escapeShellArg daemonCfg.handlerCcpoolPool}"}
+          ${lib.optionalString (
             daemonCfg.metricsAddr != null
           ) "export PG_ROUTER_METRICS_ADDR=${lib.escapeShellArg daemonCfg.metricsAddr}"}
           exec ${pkg}/bin/pg-router run

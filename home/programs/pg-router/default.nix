@@ -25,6 +25,7 @@ let
       handlerCommand ? null,
       handlerCommandDir ? null,
       handlerConfig ? null,
+      handlerCcpoolPool ? null,
       metricsAddr ? null,
     }:
     [
@@ -53,6 +54,22 @@ let
     # creation (`mkdir : no such file or directory`) before any real work
     # starts.
     ++ lib.optional (handlerConfig != null) "PG_ROUTER_CCPOOL_HANDLER_CONFIG=${handlerConfig}"
+    # handlerCcpoolPool (pg2-1p4yp): sets CCPOOL_POOL directly in pg-router
+    # core's OWN process environment -- NOT a PG_ROUTER_* var, but ccpool's
+    # own pool-selection env var (`packages/ccpool/internal/config/pool.go`),
+    # read verbatim by every `ccpool` CLI invocation downstream of this core
+    # process. It has to be set HERE (not in `pg-router-ccpool-handler`'s own
+    # module) because that handler is spawned as THIS core's subprocess
+    # (`internal/wireclient.OSRunner.Run`, no `cmd.Env` override -> inherits
+    # this process's env), and the handler's own `ccpool` calls
+    # (`internal/ccpool/cli.go`) inherit the handler's env the same way --
+    # so the var has to originate at the top of that inheritance chain.
+    # `null` (the default) leaves every dispatch on ccpool's shared default
+    # (XDG) pool, unchanged from before this option existed. Typically set to
+    # `phillipgreenii.programs.pg-router-ccpool-handler.pool.dir`'s own value
+    # (see that module's `pool` option group for the paired opt-in and its
+    # own bootstrap/registration step).
+    ++ lib.optional (handlerCcpoolPool != null) "CCPOOL_POOL=${handlerCcpoolPool}"
     # metricsAddr (pg2-ui2i3): threads PG_ROUTER_METRICS_ADDR, which
     # internal/config/config.go only reads for the `run` core (this
     # systemd unit's daemon service, not periodicDrain's `run-until-idle`),
@@ -156,6 +173,23 @@ in
           isolation fails at worktree creation.
         '';
       };
+      handlerCcpoolPool = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          CCPOOL_POOL override for this core's own process environment (NOT
+          a PG_ROUTER_* var — ccpool's own pool-selection env var), so every
+          ccpool dispatch this core's handler subprocess chain launches uses
+          a dedicated pool instead of ccpool's shared default pool. `null`
+          (the default) leaves it unset, unchanged from before this option
+          existed. Typically set to
+          `phillipgreenii.programs.pg-router-ccpool-handler.pool.dir`'s own
+          value — see that module's `pool` option group (`pg2-1p4yp`) for
+          the paired opt-in and its own bootstrap/registration step, and
+          that option group's doc comment for why this var can only be set
+          HERE, not in that module.
+        '';
+      };
     };
 
     daemon = {
@@ -200,6 +234,11 @@ in
         type = lib.types.nullOr lib.types.str;
         default = null;
         description = "PG_ROUTER_CCPOOL_HANDLER_CONFIG override for the daemon core — see `periodicDrain.handlerConfig`.";
+      };
+      handlerCcpoolPool = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "CCPOOL_POOL override for the daemon core — see `periodicDrain.handlerCcpoolPool`.";
       };
       metricsAddr = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -304,6 +343,7 @@ in
                 handlerCommand = cfg.periodicDrain.handlerCommand;
                 handlerCommandDir = cfg.periodicDrain.handlerCommandDir;
                 handlerConfig = cfg.periodicDrain.handlerConfig;
+                handlerCcpoolPool = cfg.periodicDrain.handlerCcpoolPool;
               };
             };
           };
@@ -324,6 +364,7 @@ in
                 handlerCommand = cfg.daemon.handlerCommand;
                 handlerCommandDir = cfg.daemon.handlerCommandDir;
                 handlerConfig = cfg.daemon.handlerConfig;
+                handlerCcpoolPool = cfg.daemon.handlerCcpoolPool;
                 metricsAddr = cfg.daemon.metricsAddr;
               };
             };

@@ -2596,6 +2596,17 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = "127.0.0.1:9820";
                                       };
+                                      # handlerCcpoolPool stub (pg2-1p4yp):
+                                      # same non-null-default convention as
+                                      # handlerCommand/handlerCommandDir/
+                                      # handlerConfig/metricsAddr just above
+                                      # -- see those fields' own doc comments
+                                      # for why a new field on the real
+                                      # option MUST be mirrored here too.
+                                      handlerCcpoolPool = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = "/tmp/fake-ccpool-pool";
+                                      };
                                       gates = {
                                         operatorPausedPath = lib.mkOption {
                                           type = lib.types.nullOr lib.types.str;
@@ -2649,6 +2660,7 @@
                       configText = baseConfigText;
                       handlerCommand = "pg-router-ccpool-handler";
                       handlerCommandDir = "/nix/store/fake-roles-dir";
+                      handlerCcpoolPool = "/state/pg-router-ccpool";
                       gates = {
                         operatorPausedPath = "/state/gates/operator-paused";
                         cicdDownPath = "/state/gates/cicd-down";
@@ -2692,6 +2704,12 @@
                 assert lib.elem "PG_ROUTER_HANDLER_COMMAND=pg-router-ccpool-handler" daemonService.Environment;
                 assert lib.elem "PG_ROUTER_HANDLER_COMMAND_DIR=/nix/store/fake-roles-dir" daemonService.Environment;
                 assert !(lib.any (v: lib.hasPrefix "PG_ROUTER_HANDLER_COMMAND" v) drainService.Environment);
+                # handlerCcpoolPool (pg2-1p4yp): CCPOOL_POOL (not a PG_ROUTER_*
+                # var) present on the daemon unit when configured, absent from
+                # the drain unit (drainOnly never sets it, so it stays at its
+                # `null` default).
+                assert lib.elem "CCPOOL_POOL=/state/pg-router-ccpool" daemonService.Environment;
+                assert !(lib.any (v: lib.hasPrefix "CCPOOL_POOL" v) drainService.Environment);
                 # Mutual-exclusion assertion fires when both are enabled.
                 assert firedAssertion != null;
                 # darwin LaunchAgent mirrors the daemon (pa-monitor pattern),
@@ -2719,6 +2737,13 @@
                 # non-null default above — same pattern as
                 # handlerCommand/handlerCommandDir just above.
                 assert lib.hasInfix "PG_ROUTER_METRICS_ADDR=127.0.0.1:9820"
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # handlerCcpoolPool mirrors into the darwin LaunchAgent
+                # script too (pg2-1p4yp) — sourced from the stub submodule's
+                # own non-null default above, same pattern as
+                # handlerCommand/handlerCommandDir/handlerConfig/metricsAddr
+                # just above.
+                assert lib.hasInfix "export CCPOOL_POOL=/tmp/fake-ccpool-pool"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
@@ -2770,28 +2795,60 @@
                     };
                   };
 
+                  # hmLib (pg2-1p4yp): the module's new `pool.enable`
+                  # activation step calls `lib.hm.dag.entryAfter`
+                  # (home-manager's extended lib, absent from the bare
+                  # nixpkgs `lib` this hand-rolled `lib.evalModules` call
+                  # would otherwise pass) -- stub it to return the raw
+                  # activation text, exactly like
+                  # test-claude-settings-activation-marketplace-add's own
+                  # `hmLib` does, so the generated script can be inspected
+                  # without a full HM harness.
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+
                   # HM-side eval: stub exactly what
                   # home/programs/pg-router-ccpool-handler/default.nix
-                  # reads/writes -- home.packages,
-                  # systemd.user.{services,timers}, assertions (mirroring
-                  # test-pg-router-module's own evalHM). This module's
-                  # `assertions` list (which reads
+                  # reads/writes -- home.packages, home.homeDirectory (the
+                  # `pool.dir` option's default),
+                  # home.activation (the `pool.enable` bootstrap step,
+                  # pg2-1p4yp), systemd.user.{services,timers}, assertions
+                  # (mirroring test-pg-router-module's own evalHM). This
+                  # module's `assertions` list (which reads
                   # `config.phillipgreenii.programs.ccpool.enable`) is never
                   # forced by this check below, so that option needs no
                   # stub here.
                   evalHM =
                     ccpoolHandler:
                     (lib.evalModules {
-                      specialArgs = { inherit pkgs lib; };
+                      specialArgs = {
+                        inherit pkgs;
+                        lib = hmLib;
+                      };
                       modules = [
                         ./home/programs/pg-router-ccpool-handler/default.nix
                         (
                           { lib, ... }:
                           {
                             options = {
-                              home.packages = lib.mkOption {
-                                type = lib.types.listOf lib.types.package;
-                                default = [ ];
+                              home = {
+                                packages = lib.mkOption {
+                                  type = lib.types.listOf lib.types.package;
+                                  default = [ ];
+                                };
+                                homeDirectory = lib.mkOption {
+                                  type = lib.types.str;
+                                  default = "/home/tester";
+                                };
+                                activation = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.anything;
+                                  default = { };
+                                };
                               };
                               systemd.user.services = lib.mkOption {
                                 type = lib.types.attrsOf lib.types.anything;
@@ -2853,6 +2910,50 @@
                     roles = { };
                   };
                   emptyHandlerCommandDir = noRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+
+                  # pool (pg2-1p4yp): disabled by default -- no
+                  # home.activation entry at all (an existing deployment
+                  # that hasn't opted in gets zero behavior change).
+                  poolDisabled = evalHM {
+                    enable = true;
+                    roles = { };
+                  };
+
+                  # pool.enable = true with overridden dir/settings -- proves
+                  # the bootstrap activation step (a) runs the REAL `ccpool
+                  # --pool <dir> list` invocation BEFORE (b) installing our
+                  # own config.toml over it (the ordering ADR
+                  # 0014-ccpool-reap-all-pool-registry.md's "pre-existing
+                  # pools are not enrolled" negative depends on -- see this
+                  # module's own `pool` option group doc comment), and that
+                  # `pool.dir`'s default resolves off `home.homeDirectory`
+                  # when left unset (checked by `poolDefaultDir` below).
+                  poolEnabled = evalHM {
+                    enable = true;
+                    roles = { };
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-1p4yp-pool";
+                      settings.pool.max_sessions = 50;
+                    };
+                  };
+                  poolActivation = poolEnabled.home.activation.pgRouterCcpoolHandlerPool;
+                  # The real module builds its script with
+                  # `lib.escapeShellArg cfg.pool.dir` -- match that exactly
+                  # rather than assuming a specific quoting style, so this
+                  # test does not silently drift from `escapeShellArg`'s own
+                  # behavior.
+                  poolDirQuoted = lib.escapeShellArg "/tmp/pg2-1p4yp-pool";
+
+                  # pool.dir left at its default -- must resolve under
+                  # home.homeDirectory, never throw (the stub's own
+                  # `home.homeDirectory` default above is "/home/tester").
+                  poolDefaultDir =
+                    (evalHM {
+                      enable = true;
+                      roles = { };
+                      pool.enable = true;
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.pool.dir;
 
                   # launchConfig / launchConfigFile (this bead, pg2-qsred):
                   # disabled -- launchConfigFile must resolve to `null`
@@ -3090,6 +3191,26 @@
                 # inert (repoRoot/worktreeDir never forced) for a consumer
                 # that imports it without enabling it.
                 assert disabledModule.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile == null;
+                # pool (pg2-1p4yp): disabled by default -- no
+                # home.activation entry emitted at all.
+                assert poolDisabled.home.activation == { };
+                # pool.enable = true: the bootstrap `ccpool --pool <dir>
+                # list` call appears BEFORE the config.toml install step
+                # (ordering the registry-enrollment fix depends on), both
+                # addressed at the configured `pool.dir`.
+                assert lib.hasInfix "ccpool --pool ${poolDirQuoted} list" poolActivation;
+                assert lib.hasInfix "cp -f" poolActivation;
+                assert lib.hasInfix "${poolDirQuoted}/config.toml" poolActivation;
+                assert lib.hasInfix "ccpool --pool ${poolDirQuoted} list" (
+                  lib.head (lib.splitString "cp -f" poolActivation)
+                );
+                # settings actually merge into the module's own output
+                # (pool.dir/settings are plain configurable options, not
+                # derived/readOnly).
+                assert
+                  poolEnabled.phillipgreenii.programs.pg-router-ccpool-handler.pool.settings.pool.max_sessions == 50;
+                # pool.dir's default resolves under home.homeDirectory.
+                assert poolDefaultDir == "/home/tester/.local/state/pg-router-ccpool";
                 renderCheck;
 
               # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's

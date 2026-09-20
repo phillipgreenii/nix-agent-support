@@ -7,6 +7,23 @@
 let
   cfg = config.phillipgreenii.programs.pg-router-ccpool-handler;
 
+  # tomlFormat / poolConfigFile (pg2-1p4yp): renders THIS handler's own
+  # dedicated ccpool pool config.toml -- mirrors home/programs/ccpool's own
+  # `settings` -> `tomlFormat.generate` pattern exactly, but scoped to
+  # `cfg.pool.settings` (one named pool's config) instead of the shared
+  # default (XDG) pool's config.toml. See `pool` option group below for why
+  # this handler needs its OWN pool at all: ccpool's default pool cap
+  # (`max_sessions = 6`, packages/ccpool/internal/config/config.go) is shared
+  # by every ccpool consumer, and this handler alone routinely runs 15-30
+  # concurrent dispatches against it -- cap eviction then force-closes
+  # actively-working sessions with no regard for in-progress work
+  # (packages/ccpool/internal/session/reap.go's Pass 2). Giving this handler
+  # its own registered pool (docs/adr/0014-ccpool-reap-all-pool-registry.md)
+  # lets its cap be raised WITHOUT touching the shared default pool's cap for
+  # every other ccpool consumer (interactive use, other handlers).
+  tomlFormat = pkgs.formats.toml { };
+  poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" cfg.pool.settings;
+
   # mkRegisterExec renders the `register` invocation shared by periodicDrain's
   # timer-triggered heartbeat and daemon's boot-time announcement below --
   # this module's ONLY systemd-facing action (Task 5.12; `phillipgreenii-nix-
@@ -645,6 +662,83 @@ in
       '';
     };
 
+    # pool (pg2-1p4yp): an OPT-IN dedicated ccpool pool for this handler's own
+    # dispatches, distinct from ccpool's shared default (XDG) pool -- see
+    # `poolConfigFile`'s doc comment above for the cap-eviction bug this
+    # exists to fix. Disabled by default (`pool.enable = false`): an existing
+    # deployment that has not opted in keeps dispatching through the shared
+    # default pool, byte-for-byte unchanged (ADR 0014's own "zero behavior
+    # change for existing single-pool installs" goal, restated for this
+    # narrower opt-in).
+    #
+    # Wiring contract for a deployment that opts in: this module renders
+    # `pool.dir`'s config.toml (`pool.settings`) and (via `home.activation`
+    # below) bootstraps the pool directory's creation/registration through a
+    # REAL `ccpool` invocation -- but it does NOT, and cannot, inject
+    # `CCPOOL_POOL` into pg-router CORE's own process environment: this
+    # handler is spawned as pg-router core's subprocess
+    # (`internal/wireclient.OSRunner.Run`, `exec.CommandContext` with no
+    # `cmd.Env` override, so it inherits pg-router core's env verbatim), and
+    # this handler's own ccpool CLI calls
+    # (`internal/ccpool/cli.go`'s `execCmd`) inherit THIS process's env the
+    # same way -- so `CCPOOL_POOL` has to be set at the top of that chain, in
+    # pg-router core's OWN daemon/periodicDrain environment
+    # (`home/programs/pg-router`'s `daemon.handlerCcpoolPool` /
+    # `periodicDrain.handlerCcpoolPool`, mirrored on darwin), not here. A
+    # deployment enabling `pool.enable` MUST also set that pg-router-side
+    # option to this module's own `pool.dir` value (same interpolate-the-
+    # value-across-modules pattern `handlerCommandDir`/`launchConfigFile`
+    # above already use).
+    pool = {
+      enable = lib.mkEnableOption ''
+        registering and governing a dedicated ccpool pool for this handler's
+        own dispatches, instead of sharing ccpool's default (XDG) pool with
+        every other ccpool consumer. See this option group's own
+        module-level doc comment for the full wiring contract (this module
+        alone cannot set `CCPOOL_POOL` for pg-router core's own dispatch
+        subprocess chain -- `home/programs/pg-router`'s own
+        `handlerCcpoolPool` option must ALSO be set, to this module's
+        `pool.dir`).
+      '';
+      dir = lib.mkOption {
+        type = lib.types.str;
+        default = "${config.home.homeDirectory}/.local/state/pg-router-ccpool";
+        description = ''
+          The dedicated pool's canonical directory (ccpool pool-dir mode --
+          `CCPOOL_POOL`/`--pool`, `packages/ccpool/internal/config/pool.go`).
+          This value is what a deployment feeds into
+          `home/programs/pg-router`'s own `daemon.handlerCcpoolPool` /
+          `periodicDrain.handlerCcpoolPool` option -- this module has no way
+          to set that option itself (see the module-level doc comment
+          above).
+        '';
+      };
+      settings = lib.mkOption {
+        inherit (tomlFormat) type;
+        default = {
+          pool.max_sessions = 40;
+        };
+        description = ''
+          Contents of the dedicated pool's own `config.toml` (merged over
+          ccpool's own per-pool defaults -- `packages/ccpool/internal/config`
+          `defaults()`: `idle_ttl = 30m`, `auto_reap = true`; a field omitted
+          here keeps that default). Mirrors
+          `phillipgreenii.programs.ccpool.settings`'s own shape, scoped to
+          this one named pool instead of the shared default pool. The
+          default (`max_sessions = 40`) is a generous-but-bounded cap in line
+          with this handler's actual observed concurrency (15-30 concurrent
+          dispatches against ccpool's own shared-pool default of 6) --
+          `packages/ccpool/internal/session/reap.go`'s cap-eviction pass
+          still runs (this is a HIGHER cap, not reap disabled), it just no
+          longer fires at a small fraction of real concurrency.
+        '';
+        example = {
+          pool.max_sessions = 50;
+          pool.idle_ttl = "45m";
+        };
+      };
+    };
+
     periodicDrain = {
       enable = lib.mkEnableOption ''
         a systemd --user timer that periodically re-runs
@@ -698,6 +792,39 @@ in
     }
     (lib.mkIf cfg.enable {
       home.packages = [ cfg.package ];
+
+      # pool activation (pg2-1p4yp): bootstrap the dedicated pool dir through
+      # a REAL `ccpool` invocation BEFORE installing our own config.toml over
+      # it, so pool creation goes through ccpool's own
+      # `ensurePoolDir`/`registry.Ensure` path and this pool enrolls in the
+      # `ccpool reap-all` registry exactly like any other named pool
+      # (docs/adr/0014-ccpool-reap-all-pool-registry.md's "Register on
+      # creation only"). Pre-placing config.toml via a bare `home.file`/
+      # `mkdir` WITHOUT this bootstrap step would make ccpool see an
+      # already-existing dir on its first real use and skip registration
+      # entirely (ADR 0014's own documented "pre-existing pools are not
+      # enrolled" negative) -- silently trading "cap eviction kills active
+      # sessions" for "this pool is never auto-reaped at all" (idle sessions
+      # would then leak forever), which is not this fix's intent. `ccpool
+      # --pool <dir> list` is read-only over the pool's OWN data (lists
+      # sessions; a fresh pool has none) but still exercises the exact
+      # create-or-validate codepath `ccpool new` does
+      # (`packages/ccpool/internal/config/pool.go`'s `ResolvePool`), so it is
+      # safe to (re-)run on every activation: on a fresh dir it creates +
+      # registers; on an existing, already-registered dir it just validates.
+      # Mirrors this repo's own `ccpoolTrust` activation precedent
+      # (`home/programs/ccpool/default.nix`) -- best-effort (`|| true`): a
+      # bootstrap hiccup must not break activation, and the handler's own
+      # dispatch-time `ccpool new` calls would otherwise hit the same
+      # create-or-validate path anyway on first real use.
+      home.activation = lib.mkIf cfg.pool.enable {
+        pgRouterCcpoolHandlerPool = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          $DRY_RUN_CMD ${pkgs.ccpool}/bin/ccpool --pool ${lib.escapeShellArg cfg.pool.dir} list >/dev/null 2>&1 || true
+          $DRY_RUN_CMD mkdir -p ${lib.escapeShellArg cfg.pool.dir}
+          $DRY_RUN_CMD cp -f ${poolConfigFile} ${lib.escapeShellArg cfg.pool.dir}/config.toml
+          $DRY_RUN_CMD chmod 0600 ${lib.escapeShellArg cfg.pool.dir}/config.toml
+        '';
+      };
 
       assertions = [
         {
