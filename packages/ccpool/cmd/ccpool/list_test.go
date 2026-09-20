@@ -328,6 +328,60 @@ func TestParseFilters_rejectsMissingEquals(t *testing.T) {
 	}
 }
 
+// TestRenderListPaths_statefilterPrintsOnlyMatchingLaunchDirs proves the
+// pg2-lyriv --paths renderer: filtered to needs_input, it prints exactly the
+// launch dirs (store.Session.CWD) of the matching rows, one per line, with no
+// header, no state/name/live columns, and no other rows' paths leaking in.
+func TestRenderListPaths_statefilterPrintsOnlyMatchingLaunchDirs(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	rows := []store.Session{
+		{ExternalID: "a", State: store.Working, TmuxSession: "cc-a", CWD: "/wt/a", LastActivityAt: now.Unix()},
+		{ExternalID: "b", State: store.NeedsInput, TmuxSession: "cc-b", CWD: "/wt/b", LastActivityAt: now.Unix()},
+		{ExternalID: "c", State: store.NeedsInput, TmuxSession: "cc-c", CWD: "/wt/c", LastActivityAt: now.Unix()},
+	}
+	liveFn := func(_, _ string) bool { return true }
+	out := renderListPaths(rows, false, "needs_input", liveFn, "ccpool", now, time.Hour, 24*time.Hour)
+	want := "/wt/b\n/wt/c\n"
+	if out != want {
+		t.Errorf("renderListPaths = %q, want %q", out, want)
+	}
+}
+
+// TestRenderListPaths_usesLaunchDirEvenWhenGoneFromDisk proves --paths reports
+// the STORED launch dir unconditionally, never a live pane-cwd query: the
+// worktree directory pg2-lyriv is about can be deleted out from under a live
+// needs_input session, so any renderer that depended on the directory still
+// existing (a pane query, a git resolve) would be exactly as blind as the
+// problem this flag exists to prevent. liveFn reports the row live (tmux
+// itself does not notice a deleted cwd), yet the output is unaffected — no
+// pane/git resolver is even wired into this renderer's signature.
+func TestRenderListPaths_usesLaunchDirEvenWhenGoneFromDisk(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	rows := []store.Session{
+		{ExternalID: "gone", State: store.NeedsInput, TmuxSession: "cc-gone", CWD: "/wt/deleted-from-disk", LastActivityAt: now.Unix()},
+	}
+	liveFn := func(_, _ string) bool { return true } // tmux still reports LIVE=yes
+	out := renderListPaths(rows, false, "needs_input", liveFn, "ccpool", now, time.Hour, 24*time.Hour)
+	if out != "/wt/deleted-from-disk\n" {
+		t.Errorf("renderListPaths = %q, want the stored launch dir regardless of disk state", out)
+	}
+}
+
+// TestRenderListPaths_emptyWhenNoneVisible proves an empty/no-match result is
+// an empty string, not a stray blank line — a `comm`/`grep -v` consumer must
+// not see a spurious empty-path row.
+func TestRenderListPaths_emptyWhenNoneVisible(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	rows := []store.Session{
+		{ExternalID: "a", State: store.Working, TmuxSession: "cc-a", CWD: "/wt/a", LastActivityAt: now.Unix()},
+	}
+	liveFn := func(_, _ string) bool { return true }
+	out := renderListPaths(rows, false, "needs_input", liveFn, "ccpool", now, time.Hour, 24*time.Hour)
+	if out != "" {
+		t.Errorf("renderListPaths = %q, want empty when no row matches the state filter", out)
+	}
+}
+
 func TestRenderListJSON_includesMetaObject(t *testing.T) {
 	rows := []store.Session{{ExternalID: "ext-a", State: store.Idle, CWD: "/w"}}
 	liveFn := func(_, _ string) bool { return false }

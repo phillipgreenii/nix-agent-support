@@ -62,6 +62,7 @@ func runList(args []string) int {
 	all := fs.Bool("all", false, "show cold terminal rows hidden by retention")
 	stateFilter := fs.String("state", "", "only show rows in this state")
 	jsonOut := fs.Bool("json", false, "emit a JSON array of sessions instead of the text table")
+	pathsOnly := fs.Bool("paths", false, "print only each visible session's launch directory (worktree path), one per line, no header, no other fields — combine with --state needs_input to get a comm/grep -v-able skip list before a manual worktree cleanup sweep (ADR 0037)")
 	filters := filterFlag{}
 	fs.Var(filters, "filter", "only show sessions whose metadata matches key=value (repeatable, AND-combined)")
 	_ = fs.Parse(args)
@@ -95,6 +96,24 @@ func runList(args []string) int {
 			keep[id] = true
 		}
 		rows = filterRowsByExternalIDSet(rows, keep)
+	}
+
+	// --paths short-circuits both the table and JSON renderers: it prints ONLY
+	// the launch directory (store.Session.CWD, i.e. the worktree path per ADR
+	// 0038 — caller-owned, persisted at creation, never re-resolved) for each
+	// visible row, one per line. This is the "documented one-liner" pg2-lyriv
+	// asked for: `ccpool list --state needs_input --paths` prints exactly the
+	// worktree paths a manual cleanup sweep MUST NOT remove (ADR 0037), ready to
+	// comm/grep -v out of a candidate-for-deletion list with no jq/JSON-parsing
+	// required. Deliberately uses the STORED launch dir, never a live pane-cwd
+	// query (renderListJSON's `cwd`/`worktree` git facets) or a git resolve
+	// against it — both would themselves depend on the very directory this
+	// command is meant to answer for even after it no longer exists on disk.
+	if *pathsOnly {
+		out := renderListPaths(rows, *all, *stateFilter, tmux.HasSession, cfg.Tmux.Socket,
+			time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
+		fmt.Print(out)
+		return 0
 	}
 
 	// metaFn reads each row's metadata from the store so the JSON shape carries a
@@ -174,6 +193,26 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 			r.ExternalID, r.Name, r.State, liveStr,
 			time.Unix(r.LastActivityAt, 0).Format("2006-01-02 15:04:05"),
 			shortUUID(r.ClaudeSessionID))
+	}
+	return b.String()
+}
+
+// renderListPaths is the pure renderer behind --paths: it applies the same
+// state-filter + retention view hygiene as renderList/renderListJSON (via
+// visibleRows), then prints each visible row's launch directory
+// (store.Session.CWD), one per line, with no header and no other fields. The
+// launch dir is used unconditionally — never a live-pane query or a git
+// resolve — because both of those would need the directory to still exist,
+// which is exactly the thing a caller of --paths cannot assume (pg2-lyriv:
+// the worktree backing a LIVE needs_input row can be deleted out from under
+// it while tmux still reports the session alive).
+func renderListPaths(rows []store.Session, all bool, stateFilter string,
+	liveFn func(socket, target string) bool, socket string,
+	now time.Time, doneTTL, failedTTL time.Duration,
+) string {
+	var b strings.Builder
+	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
+		fmt.Fprintln(&b, lr.row.CWD)
 	}
 	return b.String()
 }
