@@ -153,12 +153,14 @@ func runDelegate(ctx context.Context, d Delegate, payload map[string]json.RawMes
 		return HookOutput{}, VerdictError
 	}
 
-	var out HookOutput
-	// json.Unmarshal already ignores unknown fields by default, so a
-	// delegate returning valid JSON with unexpected EXTRA fields is handled
-	// gracefully here without any special-casing (ADR 0071 Binding
-	// decisions, "forward-compat").
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+	// decodeHookOutput accepts both the flat/unnested shape (this router's
+	// own established convention, e.g. tests/fixtures/delegates/
+	// decide-ask.sh) and the real Claude Code hook contract's nested
+	// "hookSpecificOutput" envelope (used by a delegate that is ALSO an
+	// independently-registered real hook, e.g. claude-extended-tool-approver
+	// — tc-6sfia).
+	out, err := decodeHookOutput(stdout.Bytes())
+	if err != nil {
 		return HookOutput{}, VerdictError
 	}
 	if out.IsZero() {

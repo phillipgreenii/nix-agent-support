@@ -55,6 +55,13 @@ func runHelperProcess() {
 		fmt.Print("{}")
 	case "decide":
 		fmt.Printf(`{"permissionDecision":%s}`, jsonString(param))
+	case "decide-nested":
+		// Emits the real Claude Code hook contract's nested envelope --
+		// what a delegate that is ALSO an independently-registered real
+		// hook (e.g. claude-extended-tool-approver) unconditionally
+		// produces -- rather than this router's own flat convention
+		// (tc-6sfia).
+		fmt.Printf(`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":%s}}`, jsonString(param))
 	case "annotate":
 		fmt.Printf(`{"additionalContext":%s}`, jsonString(param))
 	case "rewrite-input":
@@ -385,6 +392,29 @@ func specFor(permissionValue string) string {
 		return "abstain"
 	}
 	return "decide:" + permissionValue
+}
+
+// --- Nested hookSpecificOutput envelope (tc-6sfia) --------------------------
+
+// TestDispatchNestedHookSpecificOutputEnvelopeIsHonoredNotAbstained covers
+// tc-6sfia's empirical reproduction: a delegate that is ALSO an
+// independently-registered real Claude Code hook (e.g.
+// claude-extended-tool-approver) unconditionally nests its response under
+// "hookSpecificOutput" per the real Claude Code hook contract, rather than
+// this router's own flat convention. Before the fix, that decision was
+// silently dropped by json.Unmarshal and the delegate was treated as
+// Abstain end to end.
+func TestDispatchNestedHookSpecificOutputEnvelopeIsHonoredNotAbstained(t *testing.T) {
+	delegates := []Delegate{helperDelegate(t, "nested-delegate", "decide", 1, "decide-nested:allow")}
+
+	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+
+	if result.Entries[0].Verdict != VerdictApplied {
+		t.Errorf("verdict = %q, want %q (the nested envelope must be unwrapped, not treated as abstain)", result.Entries[0].Verdict, VerdictApplied)
+	}
+	if result.Output.PermissionDecision != "allow" {
+		t.Errorf("PermissionDecision = %q, want %q", result.Output.PermissionDecision, "allow")
+	}
 }
 
 // --- Total time budget -------------------------------------------------

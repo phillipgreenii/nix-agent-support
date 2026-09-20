@@ -158,3 +158,18 @@ run_router() {
   [ -z "$stderr" ]
   [ "$output" = "{}" ]
 }
+
+@test "a delegate emitting the real nested hookSpecificOutput contract has its decision honored, not abstained (tc-6sfia)" {
+  config=$(jq -nc \
+    --argjson d "$(delegate decide-nested-allow.sh PreToolUse '*' decide 1)" \
+    '{PreToolUse: [$d]}')
+  write_config "$config"
+
+  run_router '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/tmp/x"}}'
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  # Before the fix this was "{}" -- the nested envelope's key was silently
+  # dropped by json.Unmarshal and the delegate's real "allow" decision was
+  # discarded as abstain.
+  echo "$output" | jq -e '.permissionDecision == "allow"'
+}
