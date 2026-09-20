@@ -473,6 +473,39 @@ func TestReviewPost_JSONOutput(t *testing.T) {
 	}
 }
 
+// seedListStore creates a temp store at the XDG state path and upserts the
+// given PRs. The caller has already pointed XDG_STATE_HOME at tmp. Formerly
+// defined in pr_list_test.go (deleted along with `pr list`); moved here since
+// this package's remaining consumer is the WIP-scoped draft-review gate tests
+// below.
+func seedListStore(t *testing.T, prs ...store.PullRequest) {
+	t.Helper()
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	ctx := context.Background()
+	for _, pr := range prs {
+		if _, err := db.UpsertPR(ctx, pr); err != nil {
+			t.Fatalf("upsert pr %s#%d: %v", pr.Repo, pr.Number, err)
+		}
+	}
+	_ = db.Close()
+}
+
+// setListStateHome points XDG_STATE_HOME at a fresh temp dir with the pg-pr
+// subdir created, so store.DefaultPath() resolves. Returns the temp dir.
+// Formerly defined in pr_list_test.go; moved alongside seedListStore above.
+func setListStateHome(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "pg-pr"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", tmp)
+	return tmp
+}
+
 // ----------------------------------------------------------------------
 // WIP-scoped draft-review gate (INV-REVIEW-2, pg2-4dz88.4.6)
 // ----------------------------------------------------------------------

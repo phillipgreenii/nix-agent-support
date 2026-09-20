@@ -58,12 +58,6 @@ func (f *fakeVCS) ListReviews(context.Context, string, int) ([]api.Review, error
 // Compile check.
 var _ vcs.Provider = (*fakeVCS)(nil)
 
-// resetPRFlags clears mutable state between cobra tests since flag values
-// persist across rootCmd.Execute() calls.
-func resetPRFlags() {
-	prF = prFlags{}
-}
-
 // The five tests that used to live here (TestPRShow_HumanOutput,
 // TestPRShow_JSONOutput, TestPRInfo_AliasOfShow, TestPRInfo_ShowPlusEnrichment,
 // TestPRInfo_NoStore, TestPRInfo_JSONIsValid, TestPRShow_InvalidNumber,

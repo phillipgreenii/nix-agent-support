@@ -14,11 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/beadsbridge"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/branch"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/output"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/ownership"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/prlock"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/internal/sync"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-pr/pkg/beads"
 	"github.com/spf13/cobra"
 )
@@ -39,18 +35,6 @@ type prWriteFlags struct {
 	reviewers string
 	labels    string
 	noDraft   bool
-
-	// wip forces the created PR into draft state regardless of --no-draft
-	// (pg2-4dz88.8.6) and, per the operator ruling propagated from
-	// pg2-4dz88.8.2 (2026-09-03, Phillip Green II), persists that WIP intent
-	// immediately: after provider.CreatePR succeeds, `pr create` opens the
-	// store itself -- a NEW store-write path this command never had before --
-	// constructs a store.PullRequest from the fields creation actually has,
-	// zero-value enrichment fields included, UpsertPRs it, then calls
-	// SetWIP(true). --wip wins over --no-draft when both are passed: an
-	// explicit --wip request is a stronger, more specific signal than the
-	// general --no-draft escape hatch.
-	wip bool
 
 	// body sources (shared by create + update).
 	body      string
@@ -423,9 +407,7 @@ var prCreateCmd = &cobra.Command{
 	Long: `Open a new pull request via the configured VCS provider.
 
 The PR is created in DRAFT state by default. Pass --no-draft to open a
-ready-for-review PR directly, or --wip to force draft and immediately record
-the WIP flag in the store (--wip wins if both are passed). The PR body may be
-supplied via --body,
+ready-for-review PR directly. The PR body may be supplied via --body,
 --body-file <path> (use - for stdin), --body-stdin, or
 --generate-description (LLM-driven via the pg-pr-write-pr-description
 SKILL; shells out to an agent CLI such as zr-agent). The PR title may be
@@ -492,26 +474,13 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 	// gh expects a bare branch name for --base; trim the origin/ prefix.
 	base = strings.TrimPrefix(base, "origin/")
 
-	// --wip wins over --no-draft (see prWriteFlags.wip's doc comment): an
-	// explicit --wip request is a stronger, more specific signal than the
-	// general --no-draft escape hatch. Passing neither still defaults to
-	// draft, unchanged.
 	draft := !prWF.noDraft
-	if prWF.wip {
-		draft = true
-	}
 	reviewers := splitCSV(prWF.reviewers)
 	labels := splitCSV(prWF.labels)
 	provider := vcsProviderFor(repo)
 	pr, err := provider.CreatePR(ctx, repo, draft, title, body, headBranch, base, reviewers, labels)
 	if err != nil {
 		return err
-	}
-
-	if prWF.wip {
-		if werr := persistWIPAtCreation(ctx, repo, pr); werr != nil {
-			return fmt.Errorf("pr create: persist --wip: %w", werr)
-		}
 	}
 
 	// Best-effort: record the merge-request bead. An ORDINARY bd failure here
@@ -571,60 +540,6 @@ func runPRCreate(cmd *cobra.Command, _ []string) error {
 		return werr
 	}
 	return lockErr
-}
-
-// persistWIPAtCreation implements `pr create --wip`'s persistence path, per
-// the operator ruling propagated from pg2-4dz88.8.2 (2026-09-03, Phillip
-// Green II): after provider.CreatePR succeeds, construct a
-// store.PullRequest with the fields creation actually has (repo, number,
-// author, branch, base, URL, state, body) and zero-value enrichment fields
-// (Kind, Languages, Size, Urgency, UrgencyScore, UrgencyReasons), call
-// UpsertPR, then SetWIP(true). This is a NEW store-write path in `pr
-// create` -- it never opened the store before this leaf -- not a new
-// schema/table.
-//
-// Ownership is the ONE field this deliberately does NOT zero-value, despite
-// the ruling grouping it with the other enrichment fields: the
-// pull_request.ownership column is `NOT NULL CHECK (ownership IN ('mine',
-// 'co-owned', 'team'))` (internal/store/migrate.go) with no valid empty
-// value, and that schema predates this leaf and is out of scope to change
-// (the ruling is explicit: "NOT a new schema/table"). Recording
-// ownership.Mine here is also the ACTUALLY CORRECT value, not merely a
-// constraint workaround: `pr create`'s actor is always the operator
-// creating their own new PR (ACTOR-PGPR-OP, per journeys.md's
-// USECASE-PGPR-CREATE) -- there is no scenario where pg-pr's own CLI
-// invocation is opening a PR it should classify as someone else's. Like
-// every other field here, the next sync tick still re-derives Ownership via
-// ownership.Classify and may correct it if that assumption is ever wrong.
-//
-// The resulting row reads enrichment-incomplete (empty Kind/Languages/Size/
-// Urgency) until the next `pg-pr sync` tick recomputes those fields. That
-// gap is accepted by the ruling, not a bug -- see the regression test
-// TestPRCreate_WIP_Persisted's zero-value assertions.
-func persistWIPAtCreation(ctx context.Context, repo string, pr *api.PR) error {
-	db, err := store.Open(store.DefaultPath())
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	if _, err := db.UpsertPR(ctx, store.PullRequest{
-		Repo:      repo,
-		Number:    pr.Number,
-		Ownership: ownership.Mine.String(),
-		Author:    pr.Author,
-		Branch:    pr.Branch,
-		Base:      pr.Base,
-		URL:       pr.URL,
-		State:     pr.State,
-		Body:      pr.Body,
-	}); err != nil {
-		return fmt.Errorf("upsert pr row: %w", err)
-	}
-	if err := db.SetWIP(ctx, repo, pr.Number, true); err != nil {
-		return fmt.Errorf("set wip: %w", err)
-	}
-	return nil
 }
 
 // ----------------------------------------------------------------------
@@ -736,69 +651,8 @@ var prCloseCmd = &cobra.Command{
 }
 
 // ----------------------------------------------------------------------
-// pr ready / pr draft
+// pr draft
 // ----------------------------------------------------------------------
-
-var prReadyCmd = &cobra.Command{
-	Use:   "ready <pr>",
-	Short: "Mark a draft PR as ready for review",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		num, err := parsePR(args[0])
-		if err != nil {
-			return err
-		}
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prWF.repo)
-		if err != nil {
-			return err
-		}
-		if err := clearWIPOverrideIfSet(cmd, ctx, repo, num); err != nil {
-			return err
-		}
-		if err := vcsProviderFor(repo).SetDraft(ctx, repo, num, false); err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(),
-			"ok PR #%d marked ready for review.\n", num)
-		return err
-	},
-}
-
-// clearWIPOverrideIfSet implements the operator ruling resolving fork #2
-// (pg2-4dz88.4.4, 2026-08-24): `pr ready` on a PR whose store-recorded WIP
-// flag is true CLEARS WIP as an explicit, logged override, then proceeds to
-// call SetDraft(false) exactly as it does today. This SUPERSEDES the
-// grooming review's earlier, non-binding recommendation to refuse.
-//
-// A PR pg-pr has never observed — no store file at all, or a store file
-// with no row for this (repo, number) — has no WIP to clear, so this is
-// silently a no-op, matching this CLI's existing store-optional read paths
-// (cmd/pg-pr/pr_view.go's loadPRView).
-func clearWIPOverrideIfSet(cmd *cobra.Command, ctx context.Context, repo string, num int) error {
-	if _, statErr := os.Stat(store.DefaultPath()); statErr != nil {
-		return nil
-	}
-	db, err := store.Open(store.DefaultPath())
-	if err != nil {
-		return fmt.Errorf("pr ready: open store: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	pr, err := db.GetPR(ctx, repo, num)
-	if err != nil {
-		return fmt.Errorf("pr ready: read store: %w", err)
-	}
-	if pr == nil || !pr.WIP {
-		return nil
-	}
-	if err := db.SetWIP(ctx, repo, num, false); err != nil {
-		return fmt.Errorf("pr ready: clear wip override: %w", err)
-	}
-	_, err = fmt.Fprintf(cmd.ErrOrStderr(),
-		"OVERRIDE: PR #%d was marked WIP; clearing WIP because it is being marked ready.\n", num)
-	return err
-}
 
 var prDraftCmd = &cobra.Command{
 	Use:   "draft <pr>",
@@ -819,216 +673,6 @@ var prDraftCmd = &cobra.Command{
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(),
 			"ok PR #%d converted to draft.\n", num)
-		return err
-	},
-}
-
-// ----------------------------------------------------------------------
-// pr wip {on, off}
-// ----------------------------------------------------------------------
-
-// prWipCmd is the WIP toggle's command surface (pg2-4dz88.4.4, fork #3
-// ruling, operator 2026-08-24: a `pr wip` command group with `on`/`off`
-// subcommands). WIP is a store-only flag — it is never synced to beads.
-var prWipCmd = &cobra.Command{
-	Use:   "wip",
-	Short: "Toggle the store-only WIP (work-in-progress) suppression flag on a PR",
-	Long: `Toggle the WIP flag (pg2-4dz88.4). WIP defaults false, is store-only,
-and is never synced to beads.
-
-Turning WIP on converts the PR to draft upstream immediately, even if it is
-currently ready for review, by calling SetDraft(true) exactly once.
-
-Turning WIP off does NOT itself return the PR to ready — no upstream call
-is made at toggle time. The eventual return to ready is the rebuilt
-draft-promotion predicate's job on its next evaluation.`,
-}
-
-var prWipOnCmd = &cobra.Command{
-	Use:   "on <pr>",
-	Short: "Turn WIP on: converts a currently-ready PR to draft",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		num, err := parsePR(args[0])
-		if err != nil {
-			return err
-		}
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prWF.repo)
-		if err != nil {
-			return err
-		}
-		return runPRWipOn(cmd, ctx, repo, num)
-	},
-}
-
-var prWipOffCmd = &cobra.Command{
-	Use:   "off <pr>",
-	Short: "Turn WIP off (does not itself return the PR to ready)",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		num, err := parsePR(args[0])
-		if err != nil {
-			return err
-		}
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prWF.repo)
-		if err != nil {
-			return err
-		}
-		return runPRWipOff(cmd, ctx, repo, num)
-	},
-}
-
-// runPRWipOn fetches the PR's live state, persists WIP=true via the
-// store's dedicated setter (pg2-4dz88.4.2's SetWIP — errors against an
-// unknown PR, per that leaf's fork #6 ruling), and applies the WIP-ON
-// transition (sync.ApplyWIP): a currently-ready PR is converted to draft
-// upstream exactly once; an already-draft or merged/closed PR is left
-// alone.
-func runPRWipOn(cmd *cobra.Command, ctx context.Context, repo string, num int) error {
-	provider := vcsProviderFor(repo)
-	pr, err := provider.GetPR(ctx, repo, num)
-	if err != nil {
-		return fmt.Errorf("pr wip on: fetch PR: %w", err)
-	}
-
-	db, err := store.Open(store.DefaultPath())
-	if err != nil {
-		return fmt.Errorf("pr wip on: open store: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-	if err := db.SetWIP(ctx, repo, num, true); err != nil {
-		return fmt.Errorf("pr wip on: %w", err)
-	}
-
-	converted, err := sync.ApplyWIP(ctx, provider, repo, *pr, true)
-	if err != nil {
-		return fmt.Errorf("pr wip on: %w", err)
-	}
-
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d marked WIP.\n", num); err != nil {
-		return err
-	}
-	if converted {
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d converted to draft.\n", num)
-	}
-	return err
-}
-
-// runPRWipOff clears the store-only WIP flag. It makes NO upstream call —
-// the eventual return to ready is the rebuilt draft-promotion predicate's
-// job on its next evaluation (sibling leaf pg2-4dz88.4.5), not an
-// immediate effect of this toggle.
-func runPRWipOff(cmd *cobra.Command, ctx context.Context, repo string, num int) error {
-	db, err := store.Open(store.DefaultPath())
-	if err != nil {
-		return fmt.Errorf("pr wip off: open store: %w", err)
-	}
-	defer func() { _ = db.Close() }()
-	if err := db.SetWIP(ctx, repo, num, false); err != nil {
-		return fmt.Errorf("pr wip off: %w", err)
-	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(),
-		"ok PR #%d WIP cleared. This does not itself return the PR to ready "+
-			"-- that happens on the promotion predicate's next evaluation.\n", num)
-	return err
-}
-
-// ----------------------------------------------------------------------
-// pr hide / pr unhide (pg2-4dz88.4.3)
-// ----------------------------------------------------------------------
-
-// prHideCmd sets the store-only USER_HIDDEN flag (+ optional reason) via
-// store.SetHidden (pg2-4dz88.4.2). Hiding is DISPLAY-LAYER ONLY: it never
-// affects ingestion, and it stays hidden until explicitly unhidden — no
-// auto-expiry (operator ruling on the parent bead pg2-4dz88.4). It suppresses
-// the PR from every HUMAN-facing surface (pg-pr open, the dashboard's
-// Mine/Team rows) unless that surface's --include-hidden is passed; the
-// machine seam (`pg-pr pr list --json`) never filters on it at all (fork #1
-// ruling, 2026-08-24) — it always reports the flag + reason as fields and
-// leaves the judgement to its consumer.
-var prHideCmd = &cobra.Command{
-	Use:   "hide <pr> [reason]",
-	Short: "Hide a PR from human-facing surfaces (pg-pr open, the dashboard)",
-	Long: `Hide a PR: sets the store-only USER_HIDDEN flag (+ optional reason).
-
-Hidden PRs are excluded by default from pg-pr open and the dashboard's
-Mine/Team rows; pass --include-hidden on those commands to see them anyway,
-with the reason displayed. There is no auto-expiry -- a hidden PR stays
-hidden until 'pg-pr pr unhide' clears it.
-
-Hiding is DISPLAY-LAYER ONLY: it never affects ingestion. The PR continues to
-be synced exactly as before -- its revisions and feedback keep being
-recorded, and it is never mistaken for closed/merged because of the hide
-alone.
-
-'pg-pr pr list --json' (the machine seam pg-router's ACL consumes) NEVER
-filters on this flag -- it always includes the PR, carrying "hidden" and
-"reason" fields so that consumer can make its own judgement.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		num, err := parsePR(args[0])
-		if err != nil {
-			return err
-		}
-		reason := ""
-		if len(args) == 2 {
-			reason = args[1]
-		}
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prWF.repo)
-		if err != nil {
-			return err
-		}
-		db, err := store.Open(store.DefaultPath())
-		if err != nil {
-			return fmt.Errorf("pr hide: open store: %w", err)
-		}
-		defer func() { _ = db.Close() }()
-		if err := db.SetHidden(ctx, repo, num, true, reason); err != nil {
-			return fmt.Errorf("pr hide: %w", err)
-		}
-		if reason != "" {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d hidden (reason: %s).\n", num, reason)
-		} else {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d hidden.\n", num)
-		}
-		return err
-	},
-}
-
-// prUnhideCmd clears the store-only USER_HIDDEN flag via store.SetHidden,
-// which also ALWAYS clears the recorded reason regardless of what a caller
-// might pass (SetHidden's own fork #5 ruling) -- there is no reason argument
-// here because unhiding always discards it.
-var prUnhideCmd = &cobra.Command{
-	Use:   "unhide <pr>",
-	Short: "Unhide a previously hidden PR",
-	Long: `Unhide a PR: clears the store-only USER_HIDDEN flag and its recorded
-reason, restoring it to every human-facing surface (pg-pr open, the
-dashboard's Mine/Team rows). 'pg-pr pr list --json' was never affected by the
-hide in the first place.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		num, err := parsePR(args[0])
-		if err != nil {
-			return err
-		}
-		ctx := cmd.Context()
-		repo, err := resolveRepo(ctx, prWF.repo)
-		if err != nil {
-			return err
-		}
-		db, err := store.Open(store.DefaultPath())
-		if err != nil {
-			return fmt.Errorf("pr unhide: open store: %w", err)
-		}
-		defer func() { _ = db.Close() }()
-		if err := db.SetHidden(ctx, repo, num, false, ""); err != nil {
-			return fmt.Errorf("pr unhide: %w", err)
-		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "ok PR #%d unhidden.\n", num)
 		return err
 	},
 }
@@ -1199,7 +843,6 @@ func init() {
 	prCreateCmd.Flags().StringVar(&prWF.reviewers, "reviewers", "", "Comma-separated list of reviewers to assign on the GitHub PR")
 	prCreateCmd.Flags().StringVar(&prWF.labels, "labels", "", "Comma-separated list of labels to apply on the GitHub PR")
 	prCreateCmd.Flags().BoolVar(&prWF.noDraft, "no-draft", false, "Open the PR ready-for-review instead of as a draft")
-	prCreateCmd.Flags().BoolVar(&prWF.wip, "wip", false, "Force the PR into draft state (wins over --no-draft) and persist WIP=true immediately in the store")
 	addRepoFlag(prCreateCmd)
 	addBodyFlags(prCreateCmd)
 	addGenerateDescriptionFlags(prCreateCmd)
@@ -1212,14 +855,13 @@ func init() {
 	addGenerateDescriptionFlags(prUpdateCmd)
 	addJSONFlag(prUpdateCmd)
 
-	// close / ready / draft / wip / hide / unhide / merge / automerge children
-	for _, c := range []*cobra.Command{prCloseCmd, prReadyCmd, prDraftCmd, prWipOnCmd, prWipOffCmd, prHideCmd, prUnhideCmd, prMergeCmd, prAutomergeOnCmd, prAutomergeOffCmd} {
+	// close / draft / merge / automerge children
+	for _, c := range []*cobra.Command{prCloseCmd, prDraftCmd, prMergeCmd, prAutomergeOnCmd, prAutomergeOffCmd} {
 		addRepoFlag(c)
 	}
 
-	prWipCmd.AddCommand(prWipOnCmd, prWipOffCmd)
 	prAutomergeCmd.AddCommand(prAutomergeOnCmd, prAutomergeOffCmd)
-	prCmd.AddCommand(prCreateCmd, prUpdateCmd, prCloseCmd, prReadyCmd, prDraftCmd, prWipCmd, prHideCmd, prUnhideCmd, prAutomergeCmd, prMergeCmd)
+	prCmd.AddCommand(prCreateCmd, prUpdateCmd, prCloseCmd, prDraftCmd, prAutomergeCmd, prMergeCmd)
 }
 
 // avoid unused-warning if splitCSV is ever inlined out.

@@ -20,11 +20,8 @@ import (
 
 // prFlags holds the parsed CLI flags for the `pg-pr pr` subcommands.
 type prFlags struct {
-	jsonOutput  bool
-	repo        string
-	base        string
-	reviewers   bool // pr list: augment each PR with the live reviewer roster + labels
-	forceReload bool // pr view: run a live SyncPR refresh before rendering (pg2-4dz88.6.4)
+	jsonOutput bool
+	base       string
 }
 
 var prF prFlags
@@ -156,13 +153,6 @@ var prCommitsCmd = &cobra.Command{
 		}
 		return renderCommits(cmd.OutOrStdout(), commits)
 	},
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }
 
 func renderFiles(w io.Writer, files []gitlocal.FileChange) error {
