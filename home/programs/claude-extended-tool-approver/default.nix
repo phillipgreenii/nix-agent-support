@@ -1,5 +1,6 @@
 {
   config,
+  options,
   lib,
   pkgs,
   ...
@@ -8,6 +9,41 @@
 let
   cfg = config.phillipgreenii.programs.claude-extended-tool-approver;
   pkg = cfg.package;
+
+  # routerEnabled (ADR 0071 Phase C, C0/C2) is the graceful-degradation switch:
+  # when true, ceta contributes its full five-event surface to
+  # programs.claude-hook-router.delegates INSTEAD OF firing through its own
+  # committed claude-marketplace/claude-extended-tool-approver/ plugin's
+  # hooks.json (disabled below via marketplaces.overrides) -- avoiding the
+  # double-dispatch that would otherwise result from BOTH the router's delegate
+  # call AND ceta's own direct hook registration invoking this same binary for
+  # the same event. When false (the default, and any context where the router
+  # module's OPTIONS aren't even declared -- e.g. an evalModules check that
+  # imports this module standalone, such as test-pg-wi-flow-module), ceta's
+  # direct registration is untouched and remains the sole dispatch path -- the
+  # rollback story ADR 0071 Phase C, C0 requires.
+  #
+  # The `options ? claude-hook-router` guard makes referencing
+  # `config.phillipgreenii.programs.claude-hook-router` safe even when that
+  # module isn't imported at all: `config...claude-hook-router.enable` would
+  # otherwise throw "attribute 'claude-hook-router' missing" rather than
+  # merely evaluating to a missing option. `&&` short-circuits, so the config
+  # lookup only happens once the option is known to exist.
+  routerModulePresent = options.phillipgreenii.programs ? claude-hook-router;
+  routerEnabled = routerModulePresent && config.phillipgreenii.programs.claude-hook-router.enable;
+
+  # marketplacesModulePresent guards the OTHER half of the graceful-degradation
+  # wiring below (claude-code.marketplaces.overrides, declared by the separate
+  # home/programs/claude-marketplaces module). Merely wrapping that
+  # assignment's VALUE in `lib.mkIf false` is NOT enough to make it safe in an
+  # evaluation context missing that module: the module system rejects an
+  # attribute PATH with no declared option at all ("The option
+  # `phillipgreenii.programs.claude-code.marketplaces' does not exist")
+  # regardless of the mkIf condition, since that check is structural
+  # (does this path correspond to a declared option?), not value-based. So
+  # the assignment itself must not be emitted at all when the option isn't
+  # declared -- see the `lib.optionalAttrs` uses below.
+  marketplacesModulePresent = options.phillipgreenii.programs.claude-code ? marketplaces;
 
   # knownAbsentRoots (pg2-fxu7k) is DELIBERATELY the SAME nix option that
   # home/programs/agent-rules already renders into the prose Absolute-Path
@@ -181,15 +217,107 @@ in
     # each at runtime). Individual rc FILES are valid roots (pathContains
     # exact-matches a file). NOT ~/.config / ~/.gc / ~/.colima (secret-adjacent
     # or out of scope).
-    phillipgreenii.programs.claude-extended-tool-approver.extraReadOnlyRoots = [
-      "${config.home.homeDirectory}/.beads"
-      "${config.home.homeDirectory}/.zshrc"
-      "${config.home.homeDirectory}/.zshenv"
-      "${config.home.homeDirectory}/.zprofile"
-      "${config.home.homeDirectory}/.profile"
-      "${config.home.homeDirectory}/.local/bin"
-      "${config.home.homeDirectory}/.local/state"
+    phillipgreenii.programs = lib.mkMerge [
+      {
+        claude-extended-tool-approver.extraReadOnlyRoots = [
+          "${config.home.homeDirectory}/.beads"
+          "${config.home.homeDirectory}/.zshrc"
+          "${config.home.homeDirectory}/.zshenv"
+          "${config.home.homeDirectory}/.zprofile"
+          "${config.home.homeDirectory}/.profile"
+          "${config.home.homeDirectory}/.local/bin"
+          "${config.home.homeDirectory}/.local/state"
+        ];
+      }
+
+      # The two blocks below are each gated on the DECLARING module's options
+      # actually being present (routerModulePresent /
+      # marketplacesModulePresent), not merely on routerEnabled -- see those
+      # bindings' comments above for why `lib.mkIf routerEnabled { ... }`
+      # alone is not sufficient when the option path itself is undeclared
+      # (e.g. test-pg-wi-flow-module's isolated evalModules context, which
+      # imports neither claude-hook-router nor claude-marketplaces).
+
+      (lib.optionalAttrs routerModulePresent {
+        # ADR 0071 Phase C, C2: ceta's full real five-event surface, migrated
+        # to the router's shared delegates registration point. PreToolUse is
+        # the only event with real decision work (handlePreToolUse:
+        # permissionDecision/updatedInput); the other four (PostToolUse,
+        # PermissionRequest, PermissionDenied, SessionEnd) are pure
+        # side-effect handlers that unconditionally print `{}` (confirmed by
+        # re-reading cmd/claude-extended-tool-approver/main.go lines
+        # 129-311) -- i.e. observe-contract delegates. Every entry carries NO
+        # matcher (match-all), matching ceta's real claude-marketplace/
+        # claude-extended-tool-approver/hooks/hooks.json registration today.
+        # Ceta's own internal inputProcessors chain is unchanged by this
+        # migration -- it remains a separate, already-solved composition
+        # layer one level below the router.
+        #
+        # Per Phase C1's ordering-mechanism correction, the lib.mkOrder wrap
+        # goes on the WHOLE LIST assigned here (matching ADR 0020's
+        # status-line-parts = lib.mkOrder 1000 … precedent), never on a
+        # per-element priority field.
+        claude-hook-router.delegates = lib.mkIf routerEnabled (
+          lib.mkOrder 1000 [
+            {
+              name = "ceta";
+              event = "PreToolUse";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "decide+rewrite";
+              priority = 1000;
+            }
+            {
+              name = "ceta";
+              event = "PostToolUse";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "observe";
+              priority = 1000;
+            }
+            {
+              name = "ceta";
+              event = "PermissionRequest";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "observe";
+              priority = 1000;
+            }
+            {
+              name = "ceta";
+              event = "PermissionDenied";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "observe";
+              priority = 1000;
+            }
+            {
+              name = "ceta";
+              event = "SessionEnd";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "observe";
+              priority = 1000;
+            }
+          ]
+        );
+      })
+
+      (lib.optionalAttrs marketplacesModulePresent {
+        # Graceful degradation (ADR 0071 Phase C, C0): once the router is
+        # enabled, ceta contributes its five delegates above INSTEAD OF
+        # firing through its own committed marketplace plugin's hooks.json --
+        # both registrations invoking the same binary for the same event
+        # would double-dispatch. Disabled (the default): no override is
+        # contributed, so the plugin's own `defaultEnabled = true` applies
+        # and ceta's direct registration remains the sole, unmodified
+        # fallback dispatch path.
+        claude-code.marketplaces.overrides = lib.mkIf routerEnabled {
+          claude-extended-tool-approver = false;
+        };
+      })
     ];
+
     home = {
       # Plugin registration + content (plugin.json, skills, hooks/hooks.json) now
       # live in the committed claude-marketplace/ tree, built by the nix
