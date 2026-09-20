@@ -233,16 +233,6 @@
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
-          # claude-hook-router: ADR 0071's dispatch/merge runtime (Phase B1, packet
-          # tc-rjzd3.6). B1's own validation was `go build ./...`/`go vet ./...` only and
-          # deliberately did not wire this overlay attribute (out of its scope) — this
-          # single-line entry is the minimal companion wiring packet C1 (tc-rjzd3.11) needs
-          # so `pkgs.claude-hook-router` resolves for `home/programs/claude-hook-router`'s
-          # `mkPackageOption`/`home.packages` entry. Mirrors claude-extended-tool-approver's
-          # own wiring immediately above.
-          claude-hook-router = final.callPackage ./packages/claude-hook-router {
-            inherit (goBuilders) mkGoApp;
-          };
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
