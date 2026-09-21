@@ -19,12 +19,39 @@ func TestHook_notify_firesOnEdgeIntoNeedsInput(t *testing.T) {
 	ctx := context.Background()
 	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Working})
 	rn := &recordNotifier{}
-	const p = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification"}`
+	const p = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification","notification_type":"permission_prompt"}`
 	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "errored"}, nil, false, io.Discard); err != nil {
 		t.Fatalf("handleHookN: %v", err)
 	}
 	if len(rn.events) != 1 || rn.events[0].State != "needs_input" || rn.events[0].Name != "a" {
 		t.Errorf("expected one needs_input event, got %+v", rn.events)
+	}
+}
+
+// TestHook_notify_idlePromptIsNoOp proves the pg2-8p1om fix: an idle_prompt
+// notify (Claude Code's benign "still sitting at the prompt" ping) must leave
+// the session's state untouched and must NOT fire the notifier, unlike a
+// genuine permission_prompt (TestHook_notify_firesOnEdgeIntoNeedsInput above).
+// Reproduces the live incident's exact shape: a session that finished cleanly
+// (idle) got flipped back to needs_input ~60s later with zero real activity.
+func TestHook_notify_idlePromptIsNoOp(t *testing.T) {
+	st, _ := openTestStore(t)
+	ctx := context.Background()
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid-x", State: store.Idle})
+	rn := &recordNotifier{}
+	const p = `{"session_id":"csid-x","transcript_path":"/p/x.jsonl","cwd":"/x","hook_event_name":"Notification","notification_type":"idle_prompt"}`
+	if err := handleHookN("notify", strings.NewReader(p), st, "", rn, []string{"needs_input", "errored"}, nil, false, io.Discard); err != nil {
+		t.Fatalf("handleHookN: %v", err)
+	}
+	if len(rn.events) != 0 {
+		t.Errorf("idle_prompt must not fire the notifier; got %+v", rn.events)
+	}
+	got, ok, err := st.GetByExternalID(ctx, "a")
+	if err != nil || !ok {
+		t.Fatalf("GetByExternalID: %v, ok=%v", err, ok)
+	}
+	if got.State != store.Idle {
+		t.Errorf("idle_prompt must not transition state; got %q, want %q", got.State, store.Idle)
 	}
 }
 

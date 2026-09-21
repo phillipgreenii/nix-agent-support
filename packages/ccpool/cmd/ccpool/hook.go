@@ -26,6 +26,11 @@ type hookPayload struct {
 	// (tool_name=="AskUserQuestion"); empty/absent for the other hook events.
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	// NotificationType is populated for the Notification `notify` event --
+	// hooks.json's matcher restricts it to "permission_prompt" or "idle_prompt"
+	// (verified against the installed Claude Code binary's own hookInput
+	// construction, 2026-09-21); empty/absent for the other hook events.
+	NotificationType string `json:"notification_type"`
 }
 
 // askToolInput is the AskUserQuestion tool_input shape (claude 2.1.177): a list of
@@ -44,7 +49,9 @@ type askToolInput struct {
 
 // eventState maps the hook subcommand to the observed session FACT it records
 // (ADR 0015): start→ready, stop→idle (Claude Stop = turn ended), fail→errored
-// (Claude StopFailure = API error), notify→needs_input. None is a work judgment.
+// (Claude StopFailure = API error), notify→needs_input for a genuine
+// permission_prompt (an idle_prompt notify is a no-op, handled before this map
+// is consulted -- pg2-8p1om). None is a work judgment.
 var eventState = map[string]store.State{
 	"start":  store.Ready,
 	"stop":   store.Idle,
@@ -126,6 +133,16 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 	var p hookPayload
 	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
+	}
+	// idle_prompt is Claude Code's benign "still sitting at the prompt" ping -- it
+	// fires for ANY idling session regardless of whether anything is actually
+	// pending, unlike permission_prompt (a genuine block). It must be a no-op, not
+	// a needs_input transition (pg2-8p1om). hooks.json's matcher already restricts
+	// the notify event to exactly these two subtypes, so skipping idle_prompt here
+	// is equivalent to allow-listing permission_prompt, but degrades safely (falls
+	// back to today's unconditional transition) if that invariant ever drifts.
+	if event == "notify" && p.NotificationType == "idle_prompt" {
+		return nil
 	}
 	ctx := context.Background()
 	externalID, ok, err := resolveExternalID(ctx, st, p.SessionID, envExternalID)
