@@ -218,7 +218,7 @@ func TestKickRepeatedKicksAgainstBusyListenerThenNextItem(t *testing.T) {
 		t.Fatal("listener never entered its first offer (e1) (timeout)")
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if launched := q.Kick(); launched != 0 {
 			t.Fatalf("Kick() #%d while e1 still outstanding launched = %d, want 0 (listener busy)", i, launched)
 		}
@@ -510,7 +510,7 @@ func TestKickDrainReachesIdleWithoutWaitingOnStuckListener(t *testing.T) {
 	mustEnqueue(t, q, evtUntil("stuckEvt", "S", clk.in(time.Hour)))
 
 	const n = 5
-	for i := 0; i < n; i++ {
+	for i := range n {
 		typ := fmt.Sprintf("T%d", i)
 		q.Register(newListener(fmt.Sprintf("f%d", i), typ))
 		mustEnqueue(t, q, evt(fmt.Sprintf("e%d", i), typ)) // born-expired: retires promptly once accepted

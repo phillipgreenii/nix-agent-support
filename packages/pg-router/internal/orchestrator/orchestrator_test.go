@@ -386,7 +386,7 @@ func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testi
 	// progress is unaffected by the stuck offer (INV-LIFE-3), and giving
 	// -race a real concurrent window against the blocked offer's own
 	// goroutine.
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		if _, err := o.ProduceTick(ctx, q); err != nil {
 			t.Fatal(err)
 		}
@@ -399,7 +399,7 @@ func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testi
 	// ProduceTick/LastTick calls below -- the window that would catch a
 	// race on o.lastTick from phase 3, were one to exist.
 	close(handler.unblock)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if _, err := o.ProduceTick(ctx, q); err != nil {
 			t.Fatal(err)
 		}
