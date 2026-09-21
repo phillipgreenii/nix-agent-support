@@ -59,6 +59,15 @@ func TestStaticSchemaChecks(t *testing.T) {
 // module root as the build's working directory) — the actual artifact
 // operators run, not a package-level fake. Mirrors
 // packages/pg-router/cmd/pg-router/e2e_test.go's own buildPgRouterBinary.
+//
+// The timeout is 5 minutes, not the more typical 120s (bead pg2-6pxs1):
+// `nix flake check` observed this exact `go build` step killed at almost
+// precisely the 120s mark on three independent, unrelated worktree checkouts
+// while the machine was saturated by concurrent sessions/checks (load
+// average 90-180). None of the landed diffs touched this package, so that
+// was resource contention starving the build, not a real regression — a
+// warm-cache build here normally finishes in ~1s. 5 minutes gives headroom
+// under load while still failing fast on a genuine build break.
 func buildHandlerBinary(t *testing.T) string {
 	t.Helper()
 	moduleRoot, err := filepath.Abs("..")
@@ -66,7 +75,7 @@ func buildHandlerBinary(t *testing.T) string {
 		t.Fatalf("resolve module root: %v", err)
 	}
 	bin := filepath.Join(t.TempDir(), "pg-router-ccpool-handler")
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/pg-router-ccpool-handler")
 	cmd.Dir = moduleRoot
