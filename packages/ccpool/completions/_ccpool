@@ -1,0 +1,48 @@
+#compdef ccpool
+
+# Static zsh completion for ccpool's top-level subcommand set (pg2-htmkq).
+# ccpool is a hand-rolled flag.FlagSet dispatcher (packages/ccpool/cmd/ccpool),
+# not a cobra app, so there is no `ccpool completion zsh` generator (contrast
+# with packages/pg-pr, whose completions ARE generated at build time). This
+# list is kept in sync with the `subcommands` registry in
+# packages/ccpool/cmd/ccpool/dispatch.go by hand -- if you add/rename/remove a
+# ccpool subcommand there, update this file (and completions/ccpool.bash) in
+# the same change.
+#
+# Deliberately covers the subcommand SET only (name + one-line description),
+# mirroring the top-level usage listing ccpool --help now prints -- not each
+# subcommand's own flags (out of scope for the discoverability bug this
+# fixes; see dispatch.go's usageText for the authoritative descriptions).
+
+local -a subcommands
+subcommands=(
+  "attach:attach to a session's live tmux pane (interactive)"
+  'attend:pick a session that needs input (or is done) and attach to it'
+  "cancel:interrupt a session's current turn; it stays alive and idle"
+  'close:close a session (stop it; --purge also removes its stored data)'
+  "doctor:print each session's pool context and cached store state"
+  "hook:internal: report a turn event from the agent's own hooks"
+  'list:list sessions in the pool'
+  "meta:get/set/list/remove a session's opaque metadata key/value tags"
+  'new:launch a new session'
+  'reap:evict idle/errored sessions past their retention TTL from the default pool'
+  'reap-all:reap the default pool and every registered pool (timer-driven sweep)'
+  'reply:send a prompt into a session; wait for, or fire-and-forget, its outcome'
+  "result:resolve a previously dispatched turn's reply from its transcript anchor"
+  "state:print a session's live, reconciled state"
+  "tail:print a session's recent transcript output"
+  "trust:pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt"
+  'version:print the ccpool version'
+)
+
+_arguments -C \
+  '(-h --help)'{-h,--help}'[Show top-level usage]' \
+  '--pool[Pool directory to use instead of the default XDG pool]:directory:_files -/' \
+  '1: :->command' \
+  '*::arg:->args'
+
+case $state in
+  command)
+    _describe 'ccpool subcommand' subcommands
+    ;;
+esac

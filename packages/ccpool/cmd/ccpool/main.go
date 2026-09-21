@@ -13,37 +13,6 @@ import (
 
 var version = "dev"
 
-// pickSubcommand returns the subcommand name and the remaining args.
-// With no subcommand, defaults to "list".
-func pickSubcommand(args []string) (cmd string, rest []string) {
-	known := map[string]bool{
-		"attach":   true,
-		"attend":   true,
-		"cancel":   true,
-		"close":    true,
-		"doctor":   true,
-		"hook":     true,
-		"list":     true,
-		"meta":     true,
-		"new":      true,
-		"reap":     true,
-		"reap-all": true,
-		"reply":    true,
-		"result":   true,
-		"state":    true,
-		"tail":     true,
-		"trust":    true,
-		"version":  true,
-	}
-	if len(args) < 2 {
-		return "list", nil
-	}
-	if known[args[1]] {
-		return args[1], args[2:]
-	}
-	return "list", args[1:]
-}
-
 // stripPoolFlag removes a leading "--pool <dir>" (or "--pool=<dir>") that appears
 // BEFORE the subcommand, returning the cleaned argv + the pool dir. A --pool after
 // the subcommand, or a missing value, is an error (the subcommand flagsets are
@@ -113,45 +82,22 @@ func run() int {
 		}
 		_ = os.Setenv("CCPOOL_POOL", pc.Root)
 	}
-	cmd, rest := pickSubcommand(argv)
-	switch cmd {
-	case "attach":
-		return runAttach(rest)
-	case "attend":
-		return runAttend(rest)
-	case "cancel":
-		return runCancel(rest)
-	case "close":
-		return runClose(rest)
-	case "doctor":
-		return runDoctor(rest)
-	case "hook":
-		return runHook(rest)
-	case "list":
-		return runList(rest)
-	case "meta":
-		return runMeta(rest)
-	case "new":
-		return runNew(rest)
-	case "reap":
-		return runReap(rest)
-	case "reap-all":
-		return runReapAll(rest)
-	case "reply":
-		return runReply(rest)
-	case "result":
-		return runResult(rest)
-	case "state":
-		return runState(rest)
-	case "tail":
-		return runTail(rest)
-	case "trust":
-		return runTrust(rest)
-	case "version":
-		fmt.Println(version)
+	kind, sub, rest := pickSubcommand(argv)
+	switch kind {
+	case dispatchHelp:
+		// Bare `ccpool`, or an explicit -h/--help/help: print the top-level
+		// usage listing every subcommand. list is NOT run implicitly any
+		// more -- ask for it explicitly (`ccpool list`).
+		fmt.Print(usageText())
 		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n", cmd)
+	case dispatchUnknown:
+		// argv[1] matched nothing in the registry (typo, or an unimplemented
+		// verb like "send"). Previously this silently ran `list` with the
+		// unrecognized token passed through as list's own arg.
+		fmt.Fprintf(os.Stderr, "ccpool: unknown subcommand %q\n\n", sub.name)
+		fmt.Fprint(os.Stderr, usageText())
 		return 2
+	default: // dispatchKnown
+		return sub.run(rest)
 	}
 }

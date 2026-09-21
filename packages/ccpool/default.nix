@@ -49,6 +49,17 @@ mkGoApp {
     sed 's#"command": "ccpool #"command": "'"$out"'/bin/ccpool #g' \
       ${./ccpool-plugin/hooks/hooks.json} > $out/share/ccpool-plugin/hooks/hooks.json
 
+    # Static shell completions for the top-level subcommand set (pg2-htmkq).
+    # ccpool is a hand-rolled flag.FlagSet dispatcher, not cobra, so unlike
+    # pg-pr's `completion <shell>`-generated files these are committed source
+    # under ./completions, kept in sync by hand with cmd/ccpool/dispatch.go's
+    # subcommand registry. Installed at the same standard locations pg-pr
+    # uses, which home-manager's zsh/bash completion machinery already
+    # scans for every package on PATH -- no extra wiring needed.
+    mkdir -p $out/share/zsh/site-functions $out/share/bash-completion/completions
+    cp ${./completions/_ccpool} $out/share/zsh/site-functions/_ccpool
+    cp ${./completions/ccpool.bash} $out/share/bash-completion/completions/ccpool
+
     wrapProgram $out/bin/ccpool --prefix PATH : ${lib.makeBinPath [ tmux ]}
   '';
 
