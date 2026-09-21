@@ -274,7 +274,6 @@ let
         worktreeDir
         beadsPrefix
         permissionMode
-        allowedTools
         autonomous
         effort
         model
@@ -282,6 +281,17 @@ let
         sessionPrefix
         selfLogin
         ;
+      # allowedTools (this bead, pg2-yybrp): extraAllowedTools is additive --
+      # appended (comma-joined) onto allowedTools's own value rather than
+      # replacing it -- so a deployment can grant a handful of extra tools
+      # without restating allowedTools's entire default list (see
+      # extraAllowedTools's own doc comment for why that restatement is a
+      # drift hazard).
+      allowedTools =
+        if cfg.launchConfig.extraAllowedTools == [ ] then
+          cfg.launchConfig.allowedTools
+        else
+          lib.concatStringsSep "," ([ cfg.launchConfig.allowedTools ] ++ cfg.launchConfig.extraAllowedTools);
       confirmIngest = cfg.launchConfig.confirmIngestSeconds * 1000000000;
       budgetTokens = cfg.launchConfig.budget.tokens;
       budgetCost = cfg.launchConfig.budget.cost;
@@ -629,6 +639,22 @@ in
           also overriding this field will NOT automatically grant
           `Bash(<prTool>:*)` -- the real Go `Default()` this mirrors has the
           identical gap. A deployment that wants that grant must set both.
+        '';
+      };
+      extraAllowedTools = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Additive tool grants appended (comma-joined) onto `allowedTools`'s
+          own value when rendering the launch-config JSON -- each entry is a
+          single grant in the same syntax `allowedTools` uses, e.g.
+          `"Bash(pg-pr review:*)"`. Exists (pg2-yybrp) so a deployment that
+          needs a few extra grants (e.g. for `pg-pr`/`pg-connector`/`pg-desk`
+          CLIs a dispatched role's prompt or skill requires) can add just
+          those, rather than restating `allowedTools`'s entire default list
+          -- a drift hazard, since a restated copy silently diverges from
+          this module's own default as it evolves. Default `[ ]` appends
+          nothing, leaving `allowedTools` unchanged.
         '';
       };
       autonomous = lib.mkOption {
