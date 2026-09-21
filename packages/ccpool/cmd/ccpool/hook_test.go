@@ -78,6 +78,48 @@ func TestHook_start_resolvesByEnvExternalID_whenNoRowForSessionID(t *testing.T) 
 	}
 }
 
+// TestHandleHookN_start_autonomous_emitsAdditionalContext: in autonomous mode,
+// the `start` event must emit a well-formed SessionStart additionalContext JSON
+// so the model is primed NOT to ask (via a tool call or free-text prose) before
+// it ever does any work — closing the gap the `ask` hook's deny alone cannot
+// reach (a prose question at turn-end has no tool call to intercept).
+func TestHandleHookN_start_autonomous_emitsAdditionalContext(t *testing.T) {
+	st, _ := openTestStore(t)
+	var out bytes.Buffer
+	if err := handleHookN("start", strings.NewReader(startPayload), st, "ext-alpha", notify.None{}, nil, nil, true, &out); err != nil {
+		t.Fatalf("handleHookN start: %v", err)
+	}
+	var got struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("SessionStart context JSON malformed: %v\nraw: %s", err, out.String())
+	}
+	if got.HookSpecificOutput.HookEventName != "SessionStart" {
+		t.Errorf("hookEventName = %q, want SessionStart", got.HookSpecificOutput.HookEventName)
+	}
+	if got.HookSpecificOutput.AdditionalContext == "" {
+		t.Error("additionalContext must be non-empty (the autonomous-mode guidance)")
+	}
+}
+
+// TestHandleHookN_start_attended_emitsNothing: in attended mode (a human may be
+// watching), the `start` event must emit NOTHING — the autonomous-only guidance
+// would be misleading noise for a session someone is actually supervising.
+func TestHandleHookN_start_attended_emitsNothing(t *testing.T) {
+	st, _ := openTestStore(t)
+	var out bytes.Buffer
+	if err := handleHookN("start", strings.NewReader(startPayload), st, "ext-alpha", notify.None{}, nil, nil, false, &out); err != nil {
+		t.Fatalf("handleHookN start: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("attended mode must emit NO stdout at SessionStart; got %q", out.String())
+	}
+}
+
 func TestHook_stop_setsIdle(t *testing.T) {
 	st, _ := openTestStore(t)
 	ctx := context.Background()

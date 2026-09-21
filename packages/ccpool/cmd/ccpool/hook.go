@@ -139,6 +139,18 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 		if err := st.Upsert(ctx, externalID, p.SessionID, ""); err != nil {
 			return fmt.Errorf("upsert %q: %w", externalID, err)
 		}
+		// Autonomous mode: prime the model up front, not just at the moment it
+		// tries AskUserQuestion. The `ask` hook's deny below only fires on that
+		// ONE tool call; nothing stops the model from asking the same question in
+		// free-text PROSE at the end of a turn instead, which claude-transcript's
+		// IsAwaitingInput heuristic then (correctly) detects as needs_input — a
+		// session that genuinely waits, with no denial to unstick it (observed
+		// live, 2026-09-21: pg-router-feedback-zr-50s7h.1 sat 3 days on exactly
+		// this). Injecting this note at SessionStart closes that gap for the one
+		// hook event that fires before any tool call exists to intercept.
+		if autonomous {
+			writeStartContextJSON(denyOut)
+		}
 	}
 	// StopFailure (`fail`) transient-retry: before recording `errored`, try to
 	// resume the SAME Claude session in place when the error is transient and
@@ -246,11 +258,23 @@ func handleAskHook(stdin io.Reader, st *store.Store, envExternalID string, n not
 	return nil
 }
 
-// askDenyReason is the autonomous-mode denial fed back to the model. It MUST tell
-// the model the channel is intentionally closed (autonomous mode) and what to do
-// instead — a BARE denial can read as "user went away" and make the model give up
-// (D2 caveat). Pairs with pg-router's prompt-forbid lever.
-const askDenyReason = "Autonomous mode: AskUserQuestion is disabled — there is no human to answer. Do NOT ask; proceed with your best judgment. If a decision genuinely needs a human, record the question with `bd comment` on your bead and continue or hand the bead back."
+// autonomousGuidance is the shared "what to do instead of asking" text, used by
+// BOTH the ask-hook deny (below) and the SessionStart additionalContext (see
+// writeStartContextJSON) — defined once so the two surfaces cannot drift apart.
+// It MUST tell the model the channel is intentionally closed (autonomous mode)
+// and what to do instead — a BARE denial/note can read as "user went away" and
+// make the model give up (D2 caveat). It MUST say to file a bead labeled human,
+// never merely "record with bd comment": a comment on the bead already being
+// worked is exactly as invisible to a later human sweep as a hung tmux pane —
+// nothing queries for it (observed live, 2026-09-21: pg-router-feedback-
+// zr-50s7h.1 sat 3 days needs_input on a prose question with no bead at all —
+// the old wording, "record with bd comment", would not have surfaced it
+// either).
+const autonomousGuidance = "Autonomous mode: there is no human watching this session. Do NOT ask a question and wait for a reply — not via AskUserQuestion, and not by ending a turn on an open question in prose either. Proceed with your best judgment. If a decision genuinely needs a human, file it as its own bead labeled `human` describing exactly what's undecided, then continue or close/hand back your own bead normally."
+
+// askDenyReason is the autonomous-mode denial fed back to the model when it
+// invokes AskUserQuestion. Pairs with pg-router's prompt-forbid lever.
+const askDenyReason = autonomousGuidance
 
 // writeAskDenyJSON emits the PreToolUse structured-deny payload (claude hooks
 // spec: code.claude.com/docs/en/hooks.md). Printed to stdout with exit 0, it
@@ -269,6 +293,27 @@ func writeAskDenyJSON(w io.Writer) {
 		HookEventName:            "PreToolUse",
 		PermissionDecision:       "deny",
 		PermissionDecisionReason: askDenyReason,
+	}}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// writeStartContextJSON emits the SessionStart structured-output payload (claude
+// hooks spec: code.claude.com/docs/en/hooks.md) carrying autonomousGuidance as
+// additionalContext, so an autonomous session is primed with the "don't ask,
+// file a human bead instead" instruction from its very first turn — before any
+// tool call exists for writeAskDenyJSON's PreToolUse deny to intercept. Printed
+// to stdout with exit 0, exactly like writeAskDenyJSON. Best-effort: an encode
+// error must not fail the hook (never-fail policy, see runHook).
+func writeStartContextJSON(w io.Writer) {
+	type hookSpecificOutput struct {
+		HookEventName     string `json:"hookEventName"`
+		AdditionalContext string `json:"additionalContext"`
+	}
+	payload := struct {
+		HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
+	}{HookSpecificOutput: hookSpecificOutput{
+		HookEventName:     "SessionStart",
+		AdditionalContext: autonomousGuidance,
 	}}
 	_ = json.NewEncoder(w).Encode(payload)
 }
