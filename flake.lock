@@ -179,11 +179,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788450739,
-        "narHash": "sha256-glZLQlzIn1fXH6PazR2iUmTo7kzzyYSshrWhLS9TqCU=",
+        "lastModified": 1785627969,
+        "narHash": "sha256-4dtXQk/NMePegK/nWp5NSeuZKLATItOq61lpEvmXqGw=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "31729ca8cbdb4fa927b34e5f4353e6a83f39e993",
+        "rev": "427bf4bd9435fdf21321c8cc628c24efc14c0f7a",
         "type": "github"
       },
       "original": {
@@ -353,11 +353,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790091288,
-        "narHash": "sha256-2dUuLTiQrf2gUFVLlayDq/hgluitplAMv6Y9bYwQQ+c=",
+        "lastModified": 1788267358,
+        "narHash": "sha256-nt+lUqYVpc9Y6JeMd2WmXzCDojasdadKo0mWcluvY2Y=",
         "owner": "cachix",
         "repo": "git-hooks.nix",
-        "rev": "0d3997c4d3253505f77c9bcea63904bb575da3c5",
+        "rev": "27555e2624241fb116b49095df4caaee85a25691",
         "type": "github"
       },
       "original": {
@@ -501,17 +501,17 @@
         "phillipgreenii-nix-base": "phillipgreenii-nix-base"
       },
       "locked": {
-        "lastModified": 1790532469,
-        "narHash": "sha256-EzGt4ncCuDsgCsyB4BS3ZIjw3b/ngE6klY/4T2mRXD4=",
+        "lastModified": 1789665447,
+        "narHash": "sha256-had03f5l1Fx8Y+pdemjLclDD8/+rMkN4hO6bc8syQ0Q=",
         "ref": "refs/heads/main",
-        "rev": "1d21bb10be905e7d3f51773b026eed7ba49a8d35",
-        "revCount": 664,
+        "rev": "7d3a52c18e2bf053e8a86d24202c67eed8a5468a",
+        "revCount": 652,
         "type": "git",
-        "url": "https://forgejo.twistcone.us/github-mirrors/mobilecombackup.git"
+        "url": "ssh://git@github.com/phillipgreenii/mobilecombackup.git"
       },
       "original": {
         "type": "git",
-        "url": "https://forgejo.twistcone.us/github-mirrors/mobilecombackup.git"
+        "url": "ssh://git@github.com/phillipgreenii/mobilecombackup.git"
       }
     },
     "nix-darwin": {
@@ -651,11 +651,11 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1790518249,
-        "narHash": "sha256-PAWuYux7uX7dnNEXcG1s/mVLBml+CrvK/Y/rT0c/SBY=",
+        "lastModified": 1789596381,
+        "narHash": "sha256-zuAM9prfY0SqnOvvljFj7oR3sXyy86uVg2CcJQUlYec=",
         "owner": "phillipgreenii",
         "repo": "nix-repo-base",
-        "rev": "e9b9a91ba0abfcf8becc7c781c0caf18293d73eb",
+        "rev": "df0c453c411a5ff3d8386cb9c5b78cd20781e872",
         "type": "github"
       },
       "original": {
@@ -742,11 +742,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789963190,
-        "narHash": "sha256-mj5BLUKECIHv3rwkBXL6xQp45gIBJV7ZOYgT46LXwho=",
+        "lastModified": 1789356010,
+        "narHash": "sha256-Oj0KSZSEaGeYMXFFc2u7eb9Pqw0zcpU8/wJFLRRuD5c=",
         "owner": "pyproject-nix",
         "repo": "build-system-pkgs",
-        "rev": "14b45373ea9a14ed2fcd0abf3ed35c8e3c430020",
+        "rev": "e97f24221b3e1b9a6b492a7137b499031be6f078",
         "type": "github"
       },
       "original": {
