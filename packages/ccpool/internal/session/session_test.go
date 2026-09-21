@@ -18,6 +18,9 @@ type fakeTmux struct {
 	live     map[string]bool
 	newCalls []newCall
 	pane     string
+	// newErr, when set, is returned by NewSession instead of succeeding — used
+	// to drive the ccpool_launch_outcome_total outcome=error path.
+	newErr error
 }
 type newCall struct {
 	name string
@@ -28,6 +31,9 @@ type newCall struct {
 
 func (f *fakeTmux) HasSession(name string) bool { return f.live[name] }
 func (f *fakeTmux) NewSession(name, cwd string, env map[string]string, argv []string) error {
+	if f.newErr != nil {
+		return f.newErr
+	}
 	f.newCalls = append(f.newCalls, newCall{name, cwd, env, argv})
 	f.live[name] = true
 	return nil
@@ -40,6 +46,12 @@ func (f *fakeTmux) CapturePane(string) (string, error) { return f.pane, nil }
 type fakeTrust struct{ trusted []string }
 
 func (f *fakeTrust) EnsureTrusted(cwd string) error { f.trusted = append(f.trusted, cwd); return nil }
+
+// fakeFailingTrust always fails EnsureTrusted — used to drive ensureLocked's
+// preflight-failure route=preflight recording.
+type fakeFailingTrust struct{ err error }
+
+func (f *fakeFailingTrust) EnsureTrusted(string) error { return f.err }
 
 // fakeExister is the SessionExister test seam: ok reports whether the recorded
 // transcript path is "on disk" without touching a real filesystem.
@@ -691,4 +703,240 @@ func TestEnsure_freshLaunchUnderReusedExternalIDClearsPriorMetadata(t *testing.T
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Meta = %v, want %v (prior metadata cleared on fresh launch)", got, want)
 	}
+}
+
+// --- ccpool_launch_outcome_total call-site behavior (design D6/D11,
+// pg2-qye99.6). recordLaunchOutcomeFn is spied via the package-level
+// indirection var (declared in session.go) so these tests observe exactly
+// which route/outcome ensureLocked/launchAndWait chose — including that
+// route selection ALONE (without a resolved outcome) never records anything
+// — without depending on telemetry's own process-wide lazy instrument
+// singleton.
+
+type launchOutcomeCall struct{ route, outcome string }
+
+func withLaunchOutcomeSpy(t *testing.T, fn func(calls *[]launchOutcomeCall)) {
+	t.Helper()
+	orig := recordLaunchOutcomeFn
+	t.Cleanup(func() { recordLaunchOutcomeFn = orig })
+	var calls []launchOutcomeCall
+	recordLaunchOutcomeFn = func(route, outcome string) {
+		calls = append(calls, launchOutcomeCall{route, outcome})
+	}
+	fn(&calls)
+}
+
+// TestEnsure_recordsLaunchOutcome_reuseLive: route=reuse_live is recorded at
+// ensureLocked's own immediate "already live" return — trivially success,
+// and it never reaches launchAndWait (design D6 round-1 semantic post-check
+// finding; the injected Wait fails the test if reached, proving branch
+// selection alone records nothing).
+func TestEnsure_recordsLaunchOutcome_reuseLive(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{ExternalID: "ext-alpha", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-ext-alpha"})
+		ft := &fakeTmux{live: map[string]bool{"cc-ext-alpha": true}}
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st,
+			Wait: waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				t.Fatal("Wait must not be reached on the reuse-live route")
+				return wait.Outcome{}, nil
+			}),
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+			NewUUID: func() string { return "x" }, Now: func() time.Time { return time.Unix(1, 0) },
+		})
+		if _, err := s.Ensure(ctx, "ext-alpha", "/tmp/proj", "", EnsureOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"reuse_live", "success"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{reuse_live success}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_preflightNoPluginDir: the ErrNoPluginDir
+// early return records route=preflight, outcome=error immediately — before
+// ever reaching launchAndWait.
+func TestEnsure_recordsLaunchOutcome_preflightNoPluginDir(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}}
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st,
+			Wait: waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				t.Fatal("Wait must not be reached when PluginDir is empty")
+				return wait.Outcome{}, nil
+			}),
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "", ClaudeBin: "claude",
+			NewUUID: func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		_, err := s.Ensure(ctx, "ext-no-plugin-dir", "/tmp/proj", "", EnsureOpts{})
+		if !errors.Is(err, ErrNoPluginDir) {
+			t.Fatalf("Ensure err = %v, want ErrNoPluginDir", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"preflight", "error"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{preflight error}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_preflightTrustFailure: an EnsureTrusted
+// failure is also an early preflight-failure return (route=preflight,
+// outcome=error), the same as ErrNoPluginDir.
+func TestEnsure_recordsLaunchOutcome_preflightTrustFailure(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}}
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeFailingTrust{err: errors.New("trust boom")}, Store: st,
+			Wait: waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				t.Fatal("Wait must not be reached when EnsureTrusted fails")
+				return wait.Outcome{}, nil
+			}),
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+			NewUUID: func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		_, err := s.Ensure(ctx, "ext-trust-fail", "/tmp/proj", "", EnsureOpts{})
+		if err == nil {
+			t.Fatal("Ensure must error when EnsureTrusted fails")
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"preflight", "error"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{preflight error}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_brandNewSuccess: the brand-new route
+// records route=brand_new, outcome=success once launchAndWait resolves.
+func TestEnsure_recordsLaunchOutcome_brandNewSuccess(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}}
+		waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+			_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/t.jsonl")
+			return wait.Outcome{State: store.Ready}, nil
+		})
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+			NewUUID: func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		if _, err := s.Ensure(ctx, "ext-new", "/tmp/proj", "", EnsureOpts{}); err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"brand_new", "success"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{brand_new success}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_resumeSuccess: resuming a settled row whose
+// Claude session is still on disk records route=resume, outcome=success.
+func TestEnsure_recordsLaunchOutcome_resumeSuccess(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		if err := st.Insert(ctx, store.Session{ExternalID: "beta", ClaudeSessionID: "csid-beta", TranscriptPath: "/p/beta.jsonl", State: store.Idle, TmuxSession: "cc-beta"}); err != nil {
+			t.Fatal(err)
+		}
+		ft := &fakeTmux{live: map[string]bool{}}
+		waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+			_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/beta.jsonl")
+			return wait.Outcome{State: store.Ready}, nil
+		})
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: true},
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+			NewUUID: func() string { return "must-not-be-used" }, Now: func() time.Time { return time.Unix(1, 0) },
+		})
+		if _, err := s.Ensure(ctx, "beta", "/tmp/proj", "", EnsureOpts{}); err != nil {
+			t.Fatalf("Ensure resume: %v", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"resume", "success"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{resume success}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_resumeFreshStarting: a fresh `starting` row
+// whose Claude session isn't on disk YET (not pruned — isFreshStarting
+// guards it) records route=resume_fresh_starting, outcome=success.
+func TestEnsure_recordsLaunchOutcome_resumeFreshStarting(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		now := time.Unix(1000, 0)
+		if err := st.Insert(ctx, store.Session{ExternalID: "gamma", ClaudeSessionID: "csid-gamma", State: store.Starting, TmuxSession: "cc-gamma", CreatedAt: now.Unix()}); err != nil {
+			t.Fatal(err)
+		}
+		ft := &fakeTmux{live: map[string]bool{}}
+		waiter := waitFunc(func(_ context.Context, externalID string, since int64) (wait.Outcome, error) {
+			_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/gamma.jsonl")
+			return wait.Outcome{State: store.Ready}, nil
+		})
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter, Exister: fakeExister{ok: false},
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+			NewUUID: func() string { return "must-not-be-used" }, Now: func() time.Time { return now },
+		})
+		if _, err := s.Ensure(ctx, "gamma", "/tmp/proj", "", EnsureOpts{}); err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"resume_fresh_starting", "success"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{resume_fresh_starting success}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_timeout: launchAndWait resolving TimedOut
+// records outcome=timeout, not at ensureLocked's branch selection.
+func TestEnsure_recordsLaunchOutcome_timeout(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}}
+		waiter := waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+			return wait.Outcome{State: store.Starting, TimedOut: true}, nil
+		})
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st, Wait: waiter,
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+			NewUUID: func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		if _, err := s.Ensure(ctx, "ext-timeout", "/tmp/proj", "", EnsureOpts{}); err == nil {
+			t.Fatal("Ensure must error on timeout")
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"brand_new", "timeout"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{brand_new timeout}]", got)
+		}
+	})
+}
+
+// TestEnsure_recordsLaunchOutcome_tmuxError: a tmux new-session failure
+// records outcome=error.
+func TestEnsure_recordsLaunchOutcome_tmuxError(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}, newErr: errors.New("tmux boom")}
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st,
+			Wait: waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				t.Fatal("Wait must not be reached when tmux new-session fails")
+				return wait.Outcome{}, nil
+			}),
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/plugin", ClaudeBin: "claude",
+			NewUUID: func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		if _, err := s.Ensure(ctx, "ext-tmux-err", "/tmp/proj", "", EnsureOpts{}); err == nil {
+			t.Fatal("Ensure must error when tmux new-session fails")
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"brand_new", "error"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{brand_new error}]", got)
+		}
+	})
 }

@@ -348,6 +348,161 @@ func TestMaybeRetry_backoffIsWaited(t *testing.T) {
 	}
 }
 
+// --- ccpool_retries_total / ccpool_retry_exhausted_total call-site behavior ---
+// (design D6/D11, pg2-qye99.6). recordRetry/recordRetryExhausted are spied via
+// the package-level indirection vars (see their declaration in retry.go) so
+// these tests observe exactly which class/reason maybeRetry chose, without
+// depending on telemetry's own process-wide lazy instrument singleton.
+
+// withRetrySpies substitutes recordRetry/recordRetryExhausted with spies for
+// the duration of fn, then restores the real telemetry-backed functions.
+func withRetrySpies(t *testing.T, fn func(retryCalls *[]string, exhaustedCalls *int)) {
+	t.Helper()
+	origRetry, origExhausted := recordRetry, recordRetryExhausted
+	t.Cleanup(func() { recordRetry, recordRetryExhausted = origRetry, origExhausted })
+
+	var retryCalls []string
+	var exhaustedCalls int
+	recordRetry = func(class string) { retryCalls = append(retryCalls, class) }
+	recordRetryExhausted = func() { exhaustedCalls++ }
+	fn(&retryCalls, &exhaustedCalls)
+}
+
+// TestMaybeRetry_recordsRetryUnconditionallyForEveryClassifiableError proves
+// ccpool_retries_total fires at retryDecision's own call site, unconditionally,
+// whenever a classifiable API error reaches maybeRetry — including terminal/
+// rate_limited classes retryDecision itself never retries (design D6).
+func TestMaybeRetry_recordsRetryUnconditionallyForEveryClassifiableError(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind      ct.ErrorKind
+		text      string
+		wantClass string
+	}{
+		{"transient server", ct.ErrServerError, "API Error: 500 Internal server error", "transient_server"},
+		{"terminal (auth failed)", ct.ErrAuthFailed, "Please run /login", "terminal"},
+		{"rate limited", ct.ErrRateLimit, "You've hit your limit · resets 3:30pm (America/New_York)", "rate_limited"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withRetrySpies(t, func(retryCalls *[]string, exhaustedCalls *int) {
+				clk := &clock.Fake{T: time.Unix(2000, 0).UTC()}
+				st := newRetryStore(t, clk)
+				ctx := context.Background()
+				if err := st.Insert(ctx, store.Session{ExternalID: "ext-a", State: store.Working, TmuxSession: "cc-ext-a"}); err != nil {
+					t.Fatal(err)
+				}
+				tp := writeAPIErrorTranscript(t, tc.kind, tc.text)
+				a := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: &fakeNudger{}, now: clk.Now, sleep: func(time.Duration) {}}
+				sess, _, _ := st.GetByExternalID(ctx, "ext-a")
+				if _, err := a.maybeRetry(ctx, sess, tp); err != nil {
+					t.Fatalf("maybeRetry err = %v", err)
+				}
+				if got := *retryCalls; len(got) != 1 || got[0] != tc.wantClass {
+					t.Errorf("recordRetry calls = %v, want [%q]", got, tc.wantClass)
+				}
+			})
+		})
+	}
+}
+
+// TestMaybeRetry_exhaustedOnlyFiresForGenuineExhaustion is the AC test: it
+// confirms ccpool_retry_exhausted_total increments ONLY for the two genuine
+// policy-exhaustion reasons (attempt cap, retry-window timeout) and NOT for
+// the other two !doRetry reasons (disabled, class not configured) — even
+// though all four reach maybeRetry's same `if !doRetry` branch (design D6
+// round-2 semantic post-check finding).
+func TestMaybeRetry_exhaustedOnlyFiresForGenuineExhaustion(t *testing.T) {
+	cases := []struct {
+		name        string
+		cfg         func() config.Retry
+		retryCount  int64
+		windowStart int64
+		wantExhaust bool
+	}{
+		{
+			name:        "disabled decline does NOT count as exhaustion",
+			cfg:         func() config.Retry { c := defaultRetryCfg(); c.Enabled = false; return c },
+			wantExhaust: false,
+		},
+		{
+			name:        "class not configured does NOT count as exhaustion",
+			cfg:         func() config.Retry { c := defaultRetryCfg(); c.Classes = []string{"rate_limited"}; return c },
+			wantExhaust: false,
+		},
+		{
+			name:        "attempt cap IS genuine exhaustion",
+			cfg:         defaultRetryCfg,
+			retryCount:  3, // == MaxAttempts
+			wantExhaust: true,
+		},
+		{
+			name:        "window timeout IS genuine exhaustion",
+			cfg:         defaultRetryCfg,
+			windowStart: 1000, // now(2000) - 1000 = 1000s elapsed >= 60s timeout
+			wantExhaust: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withRetrySpies(t, func(_ *[]string, exhaustedCalls *int) {
+				clk := &clock.Fake{T: time.Unix(2000, 0).UTC()}
+				st := newRetryStore(t, clk)
+				ctx := context.Background()
+				if err := st.Insert(ctx, store.Session{
+					ExternalID: "ext-a", State: store.Working, TmuxSession: "cc-ext-a",
+					RetryCount: tc.retryCount, RetryWindowStartedAt: tc.windowStart,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				tp := writeAPIErrorTranscript(t, ct.ErrServerError, "API Error: 500 Internal server error")
+				a := &retryActuator{cfg: tc.cfg(), store: st, nudger: &fakeNudger{}, now: clk.Now, sleep: func(time.Duration) {}}
+				sess, _, _ := st.GetByExternalID(ctx, "ext-a")
+				retried, err := a.maybeRetry(ctx, sess, tp)
+				if err != nil {
+					t.Fatalf("maybeRetry err = %v", err)
+				}
+				if retried {
+					t.Fatalf("retried = true, want false (this case must decline)")
+				}
+				gotExhaust := *exhaustedCalls != 0
+				if gotExhaust != tc.wantExhaust {
+					t.Errorf("recordRetryExhausted called = %v (count=%d), want %v", gotExhaust, *exhaustedCalls, tc.wantExhaust)
+				}
+			})
+		})
+	}
+}
+
+// TestMaybeRetry_exhaustedNotFiredOnNonPolicyDeclines: the OTHER return-false
+// branches in maybeRetry (no classifiable error, dead pane, never-fail
+// infra-failure) must never fire ccpool_retry_exhausted_total either — only
+// the genuine-exhaustion path inside `if !doRetry` may.
+func TestMaybeRetry_exhaustedNotFiredOnNonPolicyDeclines(t *testing.T) {
+	withRetrySpies(t, func(_ *[]string, exhaustedCalls *int) {
+		clk := &clock.Fake{T: time.Unix(2000, 0).UTC()}
+		st := newRetryStore(t, clk)
+		ctx := context.Background()
+		if err := st.Insert(ctx, store.Session{ExternalID: "ext-a", State: store.Working, TmuxSession: "cc-ext-a"}); err != nil {
+			t.Fatal(err)
+		}
+		// No classifiable api-error → rec.Kind == "" branch, before retryDecision
+		// is ever consulted.
+		path := filepath.Join(t.TempDir(), "empty.jsonl")
+		if err := os.WriteFile(path, []byte(`{"type":"user","message":{"content":"hi"}}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: &fakeNudger{}, now: clk.Now, sleep: func(time.Duration) {}}
+		sess, _, _ := st.GetByExternalID(ctx, "ext-a")
+		if _, err := a.maybeRetry(ctx, sess, path); err != nil {
+			t.Fatalf("maybeRetry err = %v", err)
+		}
+		if *exhaustedCalls != 0 {
+			t.Errorf("recordRetryExhausted called %d times, want 0 (no classifiable error, never reached !doRetry)", *exhaustedCalls)
+		}
+	})
+}
+
 // --- hook integration: fail event ---
 
 const failPayloadRetry = `{"session_id":"csid-x","transcript_path":"%s","hook_event_name":"Stop"}`

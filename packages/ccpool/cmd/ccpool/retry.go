@@ -3,14 +3,39 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
 	ct "github.com/phillipgreenii/claude-transcript"
 )
+
+// Package-level indirections onto the telemetry package's global Record*
+// functions (design D6/pg2-qye99) — see the parallel comment in
+// internal/session/session.go for why these exist: telemetry's own
+// instruments are a lazy, process-wide singleton this package's tests
+// cannot reset or read back per-case, so tests substitute a spy here to
+// observe exactly which class/reason maybeRetry chose.
+var (
+	recordRetry          = telemetry.RecordRetry
+	recordRetryExhausted = telemetry.RecordRetryExhausted
+)
+
+// sessionLogArgs returns the slog key/value args carrying externalID and its
+// current telemetry.SessionAttrs (design D11).
+func sessionLogArgs(externalID string) []any {
+	attrs := telemetry.SessionAttrs(externalID)
+	args := make([]any, 0, 2+len(attrs)*2)
+	args = append(args, "external_id", externalID)
+	for _, a := range attrs {
+		args = append(args, string(a.Key), a.Value.AsInterface())
+	}
+	return args
+}
 
 // errNoLivePane signals the session's tmux pane is not live, so a re-nudge
 // cannot be delivered (a process drop). The actuator treats this as a hand-back
@@ -145,9 +170,26 @@ func (a *retryActuator) maybeRetry(ctx context.Context, sess store.Session, tran
 	if rec.Kind == "" {
 		return false, nil
 	}
+	class := rec.RetryClass()
+	// ccpool_retries_total: unconditional, at retryDecision/RetryClass's own
+	// call site — every classifiable API error reaching this point counts,
+	// regardless of what retryDecision itself then decides (design D6).
+	recordRetry(retryClassName(class))
 	now := a.now().Unix()
-	doRetry, backoff := retryDecision(a.cfg, rec.RetryClass(), sess.RetryCount, sess.RetryWindowStartedAt, now)
+	doRetry, backoff := retryDecision(a.cfg, class, sess.RetryCount, sess.RetryWindowStartedAt, now)
 	if !doRetry {
+		// retryDecision's bare `false` does not by itself distinguish a
+		// genuine policy exhaustion (attempt cap / retry-window timeout) from
+		// a simple decline (retry disabled, or the class not configured for
+		// retry) — re-derive the SAME two decline checks retryDecision itself
+		// applies, in the SAME order, to rule those out first. Only a decline
+		// that survives both checks is genuine exhaustion; retryDecision's own
+		// code stays unchanged (design D6 round-2 semantic post-check finding
+		// — ccpool_retry_exhausted_total MUST NOT fire for the first two).
+		if a.cfg.Enabled && retrySet(a.cfg.Classes)[retryClassName(class)] {
+			recordRetryExhausted()
+			slog.Warn("ccpool: retry policy exhausted", sessionLogArgs(sess.ExternalID)...)
+		}
 		return false, nil
 	}
 	if sess.TmuxSession == "" {

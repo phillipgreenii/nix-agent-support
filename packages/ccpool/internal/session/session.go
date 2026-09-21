@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"strings"
@@ -18,8 +19,39 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/mcpconsent"
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
+
+// Package-level indirections onto the telemetry package's global Record*
+// functions (design D6/pg2-qye99). telemetry's own instruments are a lazy,
+// process-wide singleton bound to whichever MeterProvider was live on the
+// FIRST Record* call in this test binary (see internal/telemetry/metrics.go)
+// — the sibling metrics-catalog packet's own concern, not something this
+// package's tests can reset or read back per-case. Tests in this package
+// substitute these vars with a spy to observe exactly which reason/outcome
+// this package's OWN call-site logic chose, then restore the real function.
+var (
+	recordCancel                    = telemetry.RecordCancel
+	recordReapClosure               = telemetry.RecordReapClosure
+	recordReapPhantomPruned         = telemetry.RecordReapPhantomPruned
+	recordSessionsPreservedForHuman = telemetry.RecordSessionsPreservedForHuman
+	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
+)
+
+// sessionLogArgs returns the slog key/value args carrying externalID and its
+// current telemetry.SessionAttrs (design D11) — the two fixed fields every
+// D6 per-session narration call must carry. Callers append any extra fields
+// of their own choosing alongside these.
+func sessionLogArgs(externalID string) []any {
+	attrs := telemetry.SessionAttrs(externalID)
+	args := make([]any, 0, 2+len(attrs)*2)
+	args = append(args, "external_id", externalID)
+	for _, a := range attrs {
+		args = append(args, string(a.Key), a.Value.AsInterface())
+	}
+	return args
+}
 
 // ErrNoPluginDir means Deps.PluginDir is empty. launch.go's BuildNew/BuildResume
 // ALWAYS append `--plugin-dir <PluginDir>` (see its package doc: "without it
@@ -285,8 +317,12 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		return Handle{}, err
 	}
 
-	// 1. Already live → reuse.
+	// 1. Already live → reuse. This route never reaches launchAndWait or a
+	// preflight-failure return below, so its outcome (trivially success — the
+	// branch only ever returns a nil error) is recorded HERE, at its own
+	// immediate return (design D6 round-1 semantic post-check finding).
 	if s.d.Tmux.HasSession(tmuxName) {
+		s.recordLaunchOutcome(externalID, "reuse_live", "success")
 		return Handle{
 			ExternalID: externalID, ClaudeSessionID: row.ClaudeSessionID, Name: row.Name,
 			TmuxSession: tmuxName, State: row.State,
@@ -301,6 +337,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// caller gets ErrNoPluginDir immediately instead of a row it must clean up
 	// after a 10-minute timeout.
 	if s.d.PluginDir == "" {
+		s.recordLaunchOutcome(externalID, "preflight", "error")
 		return Handle{}, ErrNoPluginDir
 	}
 
@@ -310,6 +347,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		cwd = resolved
 	}
 	if err := s.d.Trust.EnsureTrusted(cwd); err != nil {
+		s.recordLaunchOutcome(externalID, "preflight", "error")
 		return Handle{}, fmt.Errorf("pre-trust %q: %w", cwd, err)
 	}
 	// Pre-record MCP consent so an automated launch does not stall on the
@@ -320,6 +358,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// a server a human already classified elsewhere is copied in rather than
 	// default-denied (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
 	if err := mcpconsent.PreDisableUnclassified(cwd, s.d.CanonicalMCPSettingsPath); err != nil {
+		s.recordLaunchOutcome(externalID, "preflight", "error")
 		return Handle{}, fmt.Errorf("pre-disable unclassified MCP servers for %q: %w", cwd, err)
 	}
 
@@ -341,7 +380,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 				Model:          orDefault(model, row.Model),
 				PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 			})
-			return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous)
+			return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous, "resume")
 		}
 		// 4. Claude session is GONE. Prune the phantom row UNLESS it is a fresh
 		// `starting` row that hasn't had a chance to write a transcript yet.
@@ -368,7 +407,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			Model:          orDefault(model, row.Model),
 			PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 		})
-		return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous)
+		return s.launchAndWait(ctx, externalID, tmuxName, row.ClaudeSessionID, row.Name, row.CWD, since, argv, opts.Env, opts.Autonomous, "resume_fresh_starting")
 	}
 
 	// 5. Brand new.
@@ -387,7 +426,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		ClaudeBin: s.d.ClaudeBin, ClaudeSessionID: csid, Name: opts.Name, PluginDir: s.d.PluginDir, Model: model,
 		PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 	})
-	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env, opts.Autonomous)
+	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env, opts.Autonomous, "brand_new")
 }
 
 // claudeSessionResumable reports whether the row's Claude session still exists on
@@ -440,7 +479,14 @@ func (s *Service) currentGeneration(ctx context.Context, externalID string) (int
 // CCPOOL_EXTERNAL_ID, so a caller must never be able to clobber it.
 // autonomous injects CCPOOL_AUTONOMOUS=1 when true so the hook ask path emits a
 // blocking deny for human-less sessions (pg2-2f9d).
-func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid, name, cwd string, since int64, argv []string, extraEnv map[string]string, autonomous bool) (Handle, error) {
+//
+// route is one of resume|resume_fresh_starting|brand_new (ensureLocked's other
+// two routes, reuse_live and preflight, never reach this function — see their
+// own recordLaunchOutcome calls in ensureLocked). It fires ccpool_launch_
+// outcome_total once the outcome actually resolves — success, timeout, or a
+// tmux/wait error — never at branch selection (design D6 round-1 semantic
+// post-check finding).
+func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid, name, cwd string, since int64, argv []string, extraEnv map[string]string, autonomous bool, route string) (Handle, error) {
 	env := make(map[string]string, len(extraEnv)+len(claudeChildMarkers)+4)
 	maps.Copy(env, extraEnv)
 	env["CCPOOL_EXTERNAL_ID"] = externalID
@@ -457,17 +503,34 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 		env[k] = ""
 	}
 	if err := s.d.Tmux.NewSession(tmuxName, cwd, env, argv); err != nil {
+		s.recordLaunchOutcome(externalID, route, "error")
 		return Handle{}, fmt.Errorf("tmux new-session: %w", err)
 	}
 	out, err := s.d.Wait.Wait(ctx, externalID, since)
 	if err != nil {
+		s.recordLaunchOutcome(externalID, route, "error")
 		return Handle{}, fmt.Errorf("wait ready: %w", err)
 	}
 	h := Handle{ExternalID: externalID, ClaudeSessionID: csid, Name: name, TmuxSession: tmuxName, State: out.State}
 	if out.TimedOut {
+		s.recordLaunchOutcome(externalID, route, "timeout")
 		return h, fmt.Errorf("session %q did not reach ready before timeout (state=%s)", externalID, out.State)
 	}
+	s.recordLaunchOutcome(externalID, route, "success")
 	return h, nil
+}
+
+// recordLaunchOutcome fires ccpool_launch_outcome_total and its paired
+// narration log (design D6/D11). success narrates at Info; timeout/error at
+// Warn.
+func (s *Service) recordLaunchOutcome(externalID, route, outcome string) {
+	recordLaunchOutcomeFn(route, outcome)
+	args := append([]any{"route", route, "outcome", outcome}, sessionLogArgs(externalID)...)
+	if outcome == "success" {
+		slog.Info("ccpool: launch outcome", args...)
+		return
+	}
+	slog.Warn("ccpool: launch outcome", args...)
 }
 
 // fireNotify edge-triggers the configured notifier for a transition that the

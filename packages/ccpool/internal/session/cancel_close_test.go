@@ -200,6 +200,107 @@ func TestCancel_idleNormalizesToReady(t *testing.T) {
 	}
 }
 
+// --- ccpool_cancel_total call-site behavior (design D6/D11, pg2-qye99.6) ---
+// recordCancel is spied via the package-level indirection var (declared in
+// session.go) so these tests observe exactly which outcome cancelLocked
+// chose, without depending on telemetry's own process-wide lazy instrument
+// singleton.
+
+// withCancelSpy substitutes recordCancel with a spy for the duration of fn,
+// then restores the real telemetry-backed function.
+func withCancelSpy(t *testing.T, fn func(calls *[]string)) {
+	t.Helper()
+	orig := recordCancel
+	t.Cleanup(func() { recordCancel = orig })
+	var calls []string
+	recordCancel = func(outcome string) { calls = append(calls, outcome) }
+	fn(&calls)
+}
+
+// TestCancel_recordsSuccessOnIdleShortCircuit: the already-idle/ready
+// short-circuit is ONE of Cancel's two success returns (design D6 round-1
+// semantic post-check finding) — it must record outcome=success too, not
+// only the confirmed-cancel path.
+func TestCancel_recordsSuccessOnIdleShortCircuit(t *testing.T) {
+	withCancelSpy(t, func(calls *[]string) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
+		tm := &closeTmux{live: true}
+		s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+		if err := s.Cancel(ctx, "a"); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != "success" {
+			t.Errorf("recordCancel calls = %v, want [success]", got)
+		}
+	})
+}
+
+// TestCancel_recordsSuccessOnConfirmedCancel: the normal confirmed-cancel path
+// (Escape burst + confirmStable, then Transition-to-Ready) also records
+// outcome=success.
+func TestCancel_recordsSuccessOnConfirmedCancel(t *testing.T) {
+	withCancelSpy(t, func(calls *[]string) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
+		thinking := "✽ Envisioning… (5s · ↓ 13 tokens · thinking with xhigh effort)"
+		rewound := "❯ Think step by step in extensive detail...\n  -- INSERT --"
+		tm := &closeTmux{live: true, panes: []string{thinking, rewound}}
+		s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+		if err := s.Cancel(ctx, "a"); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != "success" {
+			t.Errorf("recordCancel calls = %v, want [success]", got)
+		}
+	})
+}
+
+// TestCancel_recordsUnconfirmedOnly: ErrCancelUnconfirmed is the ONLY
+// non-success outcome this metric tracks (design binding decision, round-1
+// finding).
+func TestCancel_recordsUnconfirmedOnly(t *testing.T) {
+	withCancelSpy(t, func(calls *[]string) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-a"})
+		tm := &closeTmux{live: true, panes: tickingPanes(cancelMaxSamples)} // never stabilizes
+		s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+		err := s.Cancel(ctx, "a")
+		if !errors.Is(err, ErrCancelUnconfirmed) {
+			t.Fatalf("err = %v, want ErrCancelUnconfirmed", err)
+		}
+		if got := *calls; len(got) != 1 || got[0] != "unconfirmed" {
+			t.Errorf("recordCancel calls = %v, want [unconfirmed]", got)
+		}
+	})
+}
+
+// TestCancel_notLiveDoesNotRecord: cancelLocked's generic technical-failure
+// returns (no live pane here) are NOT outcome states this metric tracks —
+// only the two success returns and ErrCancelUnconfirmed are.
+func TestCancel_notLiveDoesNotRecord(t *testing.T) {
+	withCancelSpy(t, func(calls *[]string) {
+		ctx := context.Background()
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
+		tm := &closeTmux{live: false}
+		s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+		if err := s.Cancel(ctx, "a"); err == nil {
+			t.Fatal("Cancel on a non-live session must error")
+		}
+		if got := *calls; len(got) != 0 {
+			t.Errorf("recordCancel calls = %v, want none (not-live is not a tracked outcome)", got)
+		}
+	})
+}
+
 func TestClose_graceful(t *testing.T) {
 	ctx := context.Background()
 	st := newMemStore(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -84,10 +85,15 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 		return fmt.Errorf("session %q is not live", externalID)
 	}
 	// Nothing to interrupt if already idle (standalone cancel on a ready/idle
-	// session); just normalize to ready without bursting/verifying.
+	// session); just normalize to ready without bursting/verifying. This is
+	// one of Cancel's TWO success returns (design D6 round-1 semantic
+	// post-check finding) — both count as outcome=success.
 	if row, ok, err := s.d.Store.GetByExternalID(ctx, externalID); err == nil && ok &&
 		(row.State == store.Ready || row.State == store.Idle) {
 		_, err := s.d.Store.Transition(ctx, externalID, store.Ready, "", "")
+		if err == nil {
+			s.recordCancelOutcome(externalID, "success")
+		}
 		return err
 	}
 	// Brute-force a burst of Escapes spanning the thinking->streaming window; a
@@ -115,10 +121,31 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 		return err
 	}
 	if !confirmed {
+		s.recordCancelOutcome(externalID, "unconfirmed")
 		return ErrCancelUnconfirmed // row left as-is (working); caller fails safely
 	}
 	_, err = s.d.Store.Transition(ctx, externalID, store.Ready, "", "")
+	if err == nil {
+		s.recordCancelOutcome(externalID, "success")
+	}
 	return err
+}
+
+// recordCancelOutcome fires ccpool_cancel_total and its paired narration log
+// (design D6/D11). Covers only Cancel's two success returns (the already-
+// idle/ready short-circuit and the confirmed-cancel path) and
+// ErrCancelUnconfirmed — cancelLocked's other, generic technical-failure
+// returns (no live pane, Escape delivery, pane-capture errors) are not
+// outcome states this metric tracks (design binding decision, round-1
+// finding: "only ErrCancelUnconfirmed is the non-success outcome").
+func (s *Service) recordCancelOutcome(externalID, outcome string) {
+	recordCancel(outcome)
+	args := append([]any{"outcome", outcome}, sessionLogArgs(externalID)...)
+	if outcome == "success" {
+		slog.Info("ccpool: cancel outcome", args...)
+		return
+	}
+	slog.Warn("ccpool: cancel outcome", args...)
 }
 
 // Close ends the local REPL: clear input, send /exit, wait briefly for the tmux

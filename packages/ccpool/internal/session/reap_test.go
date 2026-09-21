@@ -267,3 +267,121 @@ func TestReap_doesNotPruneFreshStartingDeadRow(t *testing.T) {
 type existerByPath map[string]bool
 
 func (e existerByPath) Exists(transcriptPath string) bool { return e[transcriptPath] }
+
+// --- ccpool_reap_closures_total / ccpool_reap_phantom_pruned_total /
+// ccpool_sessions_preserved_for_human call-site behavior (design D6/D11,
+// pg2-qye99.6). recordReapClosure/recordReapPhantomPruned/
+// recordSessionsPreservedForHuman are spied via the package-level
+// indirection vars (declared in session.go) so these tests observe exactly
+// what Reap chose, without depending on telemetry's own process-wide lazy
+// instrument singleton.
+
+// withReapSpies substitutes the three reap-related Record* indirections with
+// spies for the duration of fn, then restores the real telemetry-backed
+// functions.
+func withReapSpies(t *testing.T, fn func(closures *[]string, phantomPruned *int, preserved *[]int64)) {
+	t.Helper()
+	origClosure, origPhantom, origPreserved := recordReapClosure, recordReapPhantomPruned, recordSessionsPreservedForHuman
+	t.Cleanup(func() {
+		recordReapClosure, recordReapPhantomPruned, recordSessionsPreservedForHuman = origClosure, origPhantom, origPreserved
+	})
+	var closures []string
+	var phantomPruned int
+	var preserved []int64
+	recordReapClosure = func(reason string) { closures = append(closures, reason) }
+	recordReapPhantomPruned = func() { phantomPruned++ }
+	recordSessionsPreservedForHuman = func(count int64) { preserved = append(preserved, count) }
+	fn(&closures, &phantomPruned, &preserved)
+}
+
+// TestReap_recordsClosureReasonPerPass confirms ccpool_reap_closures_total
+// fires with reason=idle_ttl for a TTL closure and reason=cap_eviction for a
+// cap-eviction closure, in the SAME invocation, matching each pass's own
+// closures exactly (design D6).
+func TestReap_recordsClosureReasonPerPass(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, phantomPruned *int, preserved *[]int64) {
+		now := time.Unix(10_000, 0)
+		// "stale" is idle past ttl (idle_ttl); cap=2 then forces one more
+		// cap_eviction closure among the remaining sessions ("mid").
+		s, closed := reapFixture(t, now, map[string]int64{"fresh": 10, "mid": 100, "stale": 7200})
+		if err := s.Reap(context.Background(), 1, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		if !closed["cc-stale"] || !closed["cc-mid"] {
+			t.Fatalf("closed = %v, want both cc-stale and cc-mid closed", closed)
+		}
+		got := map[string]int{}
+		for _, r := range *closures {
+			got[r]++
+		}
+		if got["idle_ttl"] != 1 || got["cap_eviction"] != 1 {
+			t.Errorf("recordReapClosure calls = %v, want exactly one idle_ttl and one cap_eviction", *closures)
+		}
+		if *phantomPruned != 0 {
+			t.Errorf("phantomPruned = %d, want 0 (no dead rows in this fixture)", *phantomPruned)
+		}
+	})
+}
+
+// TestReap_recordsPhantomPrune confirms ccpool_reap_phantom_pruned_total
+// fires exactly once for a dead row whose Claude session is gone, and that
+// closure recording is untouched (a phantom prune is not a closure).
+func TestReap_recordsPhantomPrune(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, phantomPruned *int, preserved *[]int64) {
+		ctx := context.Background()
+		now := time.Unix(10_000, 0)
+		st := newMemStore(t)
+		_ = st.Insert(ctx, store.Session{
+			ExternalID: "gone", ClaudeSessionID: "csid-gone", TranscriptPath: "/p/gone.jsonl", State: store.Idle,
+			TmuxSession: "cc-gone", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200,
+		})
+		tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
+		s := New(Deps{
+			Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-",
+			Exister: existerByPath{}, Now: func() time.Time { return now },
+		})
+		if err := s.Reap(ctx, 6, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		if *phantomPruned != 1 {
+			t.Errorf("phantomPruned = %d, want 1", *phantomPruned)
+		}
+		if len(*closures) != 0 {
+			t.Errorf("recordReapClosure calls = %v, want none (a phantom prune is not a closure)", *closures)
+		}
+	})
+}
+
+// TestReap_recordsSessionsPreservedForHuman confirms
+// ccpool_sessions_preserved_for_human is Set (gauge) to the count of live
+// rows for which preservedForHuman is true, even when nothing is closed.
+func TestReap_recordsSessionsPreservedForHuman(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, phantomPruned *int, preserved *[]int64) {
+		now := time.Unix(10_000, 0)
+		s, _ := reapFixtureStates(t, now,
+			map[string]int64{"paused1": 10, "paused2": 10, "fresh": 10},
+			map[string]store.State{"paused1": store.NeedsInput, "paused2": store.NeedsInput})
+		if err := s.Reap(context.Background(), 6, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		if len(*preserved) != 1 || (*preserved)[0] != 2 {
+			t.Errorf("recordSessionsPreservedForHuman calls = %v, want exactly one call with 2", *preserved)
+		}
+	})
+}
+
+// TestReap_recordsZeroPreservedWhenNoneParked confirms the gauge is still
+// recorded (as 0) when no session is human-paused, so a dashboard reading it
+// sees an explicit zero rather than a stale prior value.
+func TestReap_recordsZeroPreservedWhenNoneParked(t *testing.T) {
+	withReapSpies(t, func(closures *[]string, phantomPruned *int, preserved *[]int64) {
+		now := time.Unix(10_000, 0)
+		s, _ := reapFixture(t, now, map[string]int64{"fresh": 10})
+		if err := s.Reap(context.Background(), 6, time.Hour); err != nil {
+			t.Fatalf("Reap: %v", err)
+		}
+		if len(*preserved) != 1 || (*preserved)[0] != 0 {
+			t.Errorf("recordSessionsPreservedForHuman calls = %v, want exactly one call with 0", *preserved)
+		}
+	})
+}

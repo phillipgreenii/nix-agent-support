@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -57,20 +58,26 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			if err := s.d.Store.Delete(ctx, r.ExternalID); err != nil {
 				return err
 			}
+			recordReapPhantomPruned()
+			slog.Info("ccpool: reap pruned phantom session", sessionLogArgs(r.ExternalID)...)
 		}
 	}
 
 	// Keep only live sessions (derived liveness), oldest-activity first.
 	sort.Slice(live, func(i, j int) bool { return live[i].LastActivityAt < live[j].LastActivityAt })
 
-	toClose := map[string]bool{}
+	// toClose maps an about-to-close external_id to WHICH pass added it
+	// ("idle_ttl" or "cap_eviction") — needed for ccpool_reap_closures_total's
+	// reason label (design D6/D11); a bare bool cannot distinguish the two
+	// passes.
+	toClose := map[string]string{}
 	// Pass 1: idle past TTL, sparing sessions parked for a human (ADR 0037).
 	for _, r := range live {
 		if preservedForHuman(r) {
 			continue
 		}
 		if idleTTL > 0 && now.Sub(time.Unix(r.LastActivityAt, 0)) > idleTTL {
-			toClose[r.ExternalID] = true
+			toClose[r.ExternalID] = "idle_ttl"
 		}
 	}
 	// Pass 2: still over cap AFTER the TTL closures → close more oldest-activity
@@ -92,17 +99,35 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		if preservedForHuman(r) {
 			continue
 		}
-		if !toClose[r.ExternalID] {
-			toClose[r.ExternalID] = true
+		if _, ok := toClose[r.ExternalID]; !ok {
+			toClose[r.ExternalID] = "cap_eviction"
 			capClosures--
 		}
 	}
+
+	// ccpool_sessions_preserved_for_human is a gauge over the whole invocation's
+	// live rows, not a per-session event, so it has no D11 narration pair (design
+	// D6/D11 list only retry-exhausted/cancel-outcome/reap-closure-or-phantom-
+	// prune/launch-outcome as per-session narration points).
+	var preserved int64
 	for _, r := range live {
-		if toClose[r.ExternalID] {
-			if err := s.Close(ctx, r.ExternalID, false); err != nil {
-				return err
-			}
+		if preservedForHuman(r) {
+			preserved++
 		}
+	}
+	recordSessionsPreservedForHuman(preserved)
+
+	for _, r := range live {
+		reason, ok := toClose[r.ExternalID]
+		if !ok {
+			continue
+		}
+		if err := s.Close(ctx, r.ExternalID, false); err != nil {
+			return err
+		}
+		recordReapClosure(reason)
+		slog.Info("ccpool: reap closed session",
+			append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)...)
 	}
 	return nil
 }
