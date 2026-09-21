@@ -323,39 +323,45 @@ type Queue struct {
 	serializeTypes map[string]bool
 
 	// custody holds exactly the offers OUTSTANDING in phase 2 of the CURRENT
-	// dispatch pass (Task 2.2): recorded (under q.mu) the moment each offer's
-	// dispatch id is assigned in phase 1, deleted (under q.mu) in phase 3 once
-	// that offer's outcome is known — WHATEVER that outcome is (accept, a
-	// final decline that settles the pair, a decline that simply re-offers
-	// next pass, or the underlying entry vanishing mid-offer and never
-	// settling at all — retireLocked's return covers that last case reaching
-	// phase 3 the same way). "Accept is not settle": a custody entry's
-	// removal in phase 3 means only that THIS PASS's offer has concluded,
-	// never that the (event, listener) pair itself is done — a re-offer next
-	// pass mints an entirely fresh dispatch id and a fresh custody entry.
-	// SessionsInFlight reads this map LIVE under q.mu at call time; it is
-	// NEVER cached in any periodic snapshot. Before Phase 5's deferred-settle
-	// form, len(custody) is always 0 or 1, since Dispatch's phase 2 offers one
-	// listener at a time, synchronously, within a single goroutine.
+	// dispatch/Kick pass (Task 2.2; Kick per this package's design doc,
+	// "decouple pg-router-core's tick loop from per-dispatch-pass
+	// completion"): recorded (under q.mu) the moment each offer's dispatch id
+	// is assigned in phase 1 (snapshotPending, shared by both methods),
+	// deleted (under q.mu) in phase 3 once that offer's outcome is known —
+	// WHATEVER that outcome is (accept, a final decline that settles the
+	// pair, a decline that simply re-offers next pass, or the underlying
+	// entry vanishing mid-offer and never settling at all — retireLocked's
+	// return covers that last case reaching phase 3 the same way). "Accept is
+	// not settle": a custody entry's removal in phase 3 means only that THIS
+	// OFFER has concluded, never that the (event, listener) pair itself is
+	// done — a re-offer next pass mints an entirely fresh dispatch id and a
+	// fresh custody entry. SessionsInFlight reads this map LIVE under q.mu at
+	// call time; it is NEVER cached in any periodic snapshot. Task 6.2's
+	// concurrent phase 2 already lets len(custody) exceed 1 within a single
+	// Dispatch pass (up to len(q.listeners)); Kick widens this further: its
+	// entries can each persist for an arbitrary, independent duration across
+	// many Kick calls, since Kick's phase 3 is detached per-offer rather than
+	// batched at one pass's end.
 	custody map[string]custody
 
 	// inFlight is a SECOND index alongside custody, keyed by LISTENER id rather
 	// than dispatch id (Task 6.1, bead pg2-84o3m.31, INV-CONC-1: "one
-	// outstanding offer per handler" at a time). Set in phase 1 the moment a
-	// pendingOffer is minted for a listener (same critical section as
-	// q.custody[id] = custody{}), deleted in phase 3 at the same point that
-	// pair's custody entry is deleted — WHATEVER the offer's outcome, exactly
-	// like custody's own lifecycle above. Phase 1 SKIPS a listener already
-	// present here — headFor is not called and no pendingOffer is minted for
-	// it this pass — whichever concurrent/reentrant Dispatch pass set it
-	// (operator ruling 2026-09-16, reverting an intervening panic-based
-	// ruling from 2026-09-15): the busy listener is naturally offered again
-	// on a later pass once its outstanding offer has settled. Neither shape
-	// that can trigger this (a genuinely concurrent racing goroutine, or a
-	// listener calling Dispatch reentrantly from inside its own Offer) is
-	// exercised by any shipped caller today, so no machinery distinguishes
-	// them — skip handles both identically. custody alone cannot do this job
-	// since it is keyed per-attempt, not per-listener.
+	// outstanding offer per handler" at a time — enforced identically for
+	// Dispatch and Kick, since both share this same map via snapshotPending).
+	// Set in phase 1 the moment a pendingOffer is minted for a listener (same
+	// critical section as q.custody[id] = custody{}), deleted in phase 3 at
+	// the same point that pair's custody entry is deleted — WHATEVER the
+	// offer's outcome, exactly like custody's own lifecycle above. Phase 1
+	// SKIPS a listener already present here — headFor is not called and no
+	// pendingOffer is minted for it this pass — whichever concurrent/reentrant
+	// Dispatch/Kick pass set it (operator ruling 2026-09-16, reverting an
+	// intervening panic-based ruling from 2026-09-15): the busy listener is
+	// naturally offered again on a later pass once its outstanding offer has
+	// settled. Neither shape that can trigger this (a genuinely concurrent
+	// racing goroutine, or a listener calling Dispatch/Kick reentrantly from
+	// inside its own Offer) is exercised by any shipped caller today, so no
+	// machinery distinguishes them — skip handles both identically. custody
+	// alone cannot do this job since it is keyed per-attempt, not per-listener.
 	inFlight map[string]struct{}
 
 	// delivered/declined are Task 2.3's POOL-WIDE delivery counters (Step
@@ -848,72 +854,38 @@ func offerSafely(l Listener, o Offering) (result OfferResult, dispatchFailed boo
 	return l.Offer(o), false
 }
 
-// Dispatch offers each listener its head deliverable event once, in
-// registration order, and returns how many events were accepted this pass. A
-// pre-accept decline OR a recovered dispatch-failure panic (offerSafely) on an
-// UNEXPIRED event leaves the head in place for a later pass (re-offer,
-// INV-FAIL-1 / INV-CONC-1); either one on an ALREADY-EXPIRED event was that
-// listener's last attempt (INV-EVT-4), so the pair is settled and the head
-// advances. The two are handled identically here and differ only in which
-// Observer hook — and so which INV-OBS-1 failure-rate class — records them
-// (bead pg2-icm3u).
+// snapshotPending performs PHASE 1 (SNAPSHOT, locked) — the logic shared,
+// byte-for-byte, between Dispatch() and Kick() (this package's design doc,
+// "decouple pg-router-core's tick loop from per-dispatch-pass completion":
+// both methods share phase 1 via one private helper; that logic does not
+// change either way). For each registered listener not already busy (an
+// outstanding offer recorded in q.inFlight, from either method — see that
+// field's own doc), it computes the listener's head deliverable event
+// (headFor, which is what makes the WithSerializeTypes occupancy gate,
+// INV-CONC-1, apply identically to both callers) and skips it if its retry
+// cadence has not elapsed (eligibleNow, INV-FAIL-2); otherwise it mints a
+// dispatch id, marks q.custody/q.inFlight for it, and appends a
+// pendingOffer to the pass.
 //
-// Dispatch ids (Task 2.2) are minted BEFORE q.mu is taken for the pass: a pass
-// offers each registered listener at most once, so listenerCount — a lock-free
+// Dispatch ids (Task 2.2) are minted BEFORE q.mu is taken: a pass offers
+// each registered listener at most once, so listenerCount — a lock-free
 // atomic mirror of len(q.listeners), maintained by Register — is always a
-// sufficient supply. Minting the whole batch up front keeps every crypto/rand
-// call outside every lock this function takes; the one fallback below (for a
-// listener registered in the narrow window between the mint and phase 1's
-// lock) mints on the spot but is, itself, still outside q.mu.
+// sufficient supply. Minting the whole batch up front keeps every
+// crypto/rand call outside every lock this function takes; the one
+// fallback below (for a listener registered in the narrow window between
+// the mint and the lock) mints on the spot but is, itself, still outside
+// q.mu.
 //
-// Locking discipline (bead pg2-56186). The pass is three phases and the queue
-// lock is held only in phases 1 and 3, NEVER across the listener callback:
-//
-//  1. SNAPSHOT (locked): compute each listener's head deliverable event, capture
-//     the (listener, event) pairs and the INV-EVT-4 expiry verdict for each,
-//     assign each one its pre-minted dispatch id, and record a custody entry
-//     for it (Task 2.2) — the offer is now OUTSTANDING. No Offer, no store
-//     write here.
-//  2. OFFER (UNLOCKED): call Listener.Offer for each pair, passing its dispatch
-//     id, via offerSafely so a panicking listener implementation cannot abort
-//     the pass (INV-PREC-1; see offerSafely's own doc). Releasing the lock is
-//     what makes a synchronous listener's accept path free to re-enter the
-//     queue (Enqueue / push-inject a follow-on event) without self-deadlocking
-//     on the non-reentrant q.mu, and stops all ingest from serializing behind
-//     an in-flight (possibly long) handler offer. Task 6.2 (bead pg2-3brwx.2):
-//     offers within a pass now run CONCURRENTLY, one goroutine per pending
-//     offer, bounded by len(pending) <= len(q.listeners).
-//  3. RECORD (locked): delete each pair's custody entry FIRST — the offer is no
-//     longer outstanding whatever its outcome, including one whose underlying
-//     entry vanished mid-offer and so never reaches the settle logic below at
-//     all — then re-validate against CURRENT state and settle the pair:
-//     marking acceptance, appending the durable opAccept record, notifying the
-//     observer and maybe-evicting, or (for a final decline or dispatch
-//     failure) recording nothing but the terminal marker.
-//
-// Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
-// Dispatch, or a re-entrant call from inside Offer), so RECORD looks the entry
-// up FRESH by id and skips two ways rather than mutating a stale snapshot:
-//   - entry no longer present (retired and swept, or early-evicted): the event
-//     has legitimately left the queue, so there is nothing to record and
-//     nothing to redeliver; drop the acceptance record (a stray opAccept for a
-//     gone id is a no-op on replay anyway). Delivery is unaffected — the listener
-//     already took responsibility when Offer returned Accepted=true (INV-EVT-1).
-//   - already accepted by this listener (a concurrent/re-entrant Dispatch offered
-//     the same head and recorded first): skip, preserving at-most-once acceptance
-//     per (event, listener) binding — the duplicate Offer is absorbed by the
-//     idempotent-listener contract (INV-EVT-2).
-//
-// The store append(s) stay under q.mu in phase 3 on purpose: the Store is not
-// internally synchronized (its writes are serialized solely by q.mu), so moving
-// them out would introduce a data race. Phase 3 is short and calls no listener
-// code, unlike the original monolithic pass that held the lock across every
-// Offer. Every accept record still persists via its own Append call (delivery
-// depends on that ordering, see below); every early-eviction record this pass
-// produces (maybeEvict, opt-in via WithEarlyEviction) is instead collected and
-// persisted once, after the loop, via a single AppendBatch call — one fsync for
-// the whole pass's evictions rather than one per evicted id.
-func (q *Queue) Dispatch() (accepted int) {
+// Returns the pass's pending offers plus the clock reading (q.now()) taken
+// at snapshot time. Both callers need that reading, but for different
+// reasons: Dispatch carries it forward into its own single,
+// immediately-following phase 3, so its whole pass is judged against
+// exactly one "now" (pendingOffer's own doc) — unchanged from before this
+// helper was extracted. Kick discards it (each of its per-offer goroutines
+// reads its OWN fresh q.now() when IT reaches phase 3, since that can
+// happen arbitrarily later than snapshot time, independently of every other
+// offer's — see Kick's own doc).
+func (q *Queue) snapshotPending() (pending []pendingOffer, now time.Time) {
 	// Dispatch ids minted BEFORE q.mu is taken (see doc above): a batch sized
 	// to the current listener count, read without a lock.
 	ids := make([]string, q.listenerCount.Load())
@@ -935,7 +907,7 @@ func (q *Queue) Dispatch() (accepted int) {
 			return id
 		}
 		// A listener registered in the narrow window between the mint above
-		// and phase 1's lock below. Minting here is still outside q.mu.
+		// and the lock below. Minting here is still outside q.mu.
 		id, err := newDispatchID()
 		if err != nil {
 			slog.Error("eventqueue: mint dispatch id failed", "err", err)
@@ -943,22 +915,22 @@ func (q *Queue) Dispatch() (accepted int) {
 		return id
 	}
 
-	// Phase 1 — SNAPSHOT (locked).
 	q.mu.Lock()
-	now := q.now()
-	pending := make([]pendingOffer, 0, len(q.listeners))
+	defer q.mu.Unlock()
+	now = q.now()
+	pending = make([]pendingOffer, 0, len(q.listeners))
 	for _, ls := range q.listeners {
 		lid := ls.l.ID()
 		if _, busy := q.inFlight[lid]; busy {
 			// Task 6.1 (pg2-84o3m.31), operator ruling 2026-09-16 (reverting
 			// an intervening panic-based ruling from 2026-09-15): an
-			// outstanding offer from another, still in-flight Dispatch pass
-			// for this SAME listener simply means this pass SKIPS it —
+			// outstanding offer from another, still in-flight Dispatch/Kick
+			// pass for this SAME listener simply means this pass SKIPS it —
 			// headFor is not called and no pendingOffer is minted for it —
 			// the busy listener is naturally offered again on a later pass
 			// once its outstanding offer has settled. Neither shape that can
 			// trigger this (a genuinely concurrent racing goroutine, or a
-			// listener calling Dispatch reentrantly from inside its own
+			// listener calling Dispatch/Kick reentrantly from inside its own
 			// Offer) is exercised by any shipped caller today; skip handles
 			// both identically, with no need to tell them apart.
 			continue
@@ -975,7 +947,201 @@ func (q *Queue) Dispatch() (accepted int) {
 		q.inFlight[lid] = struct{}{}
 		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, lastAttempt: e.evt.Expired(now)})
 	}
-	q.mu.Unlock()
+	return pending, now
+}
+
+// settleOfferLocked is PHASE 3 (RECORD, locked) for exactly ONE pending
+// offer p, evaluated against now: it deletes p's custody/inFlight entries
+// FIRST — this offer's phase 2 has concluded either way, whatever its
+// outcome, including one whose underlying entry vanished mid-offer and so
+// never reaches the settle logic below at all — then re-validates against
+// CURRENT state and settles the pair: marking acceptance, appending the
+// durable opAccept record, updating counters, and queuing any resulting
+// Observer dispatchSignal into *signals, or (for a final decline or
+// dispatch failure) recording nothing but the terminal marker. This is the
+// ONE copy of phase-3 settlement logic in the package (this package's
+// design doc's round-2 review explicitly asked for a shared helper rather
+// than two independently-maintained copies): Dispatch's own phase-3 loop and
+// Kick's per-offer goroutine both call this and nothing else to settle an
+// offer.
+//
+// now is Dispatch's own phase-1 reading, carried forward unchanged from
+// before this helper was extracted (so Dispatch's pass is still judged
+// against exactly one "now"), or Kick's own fresh q.now() read at THIS
+// offer's own settle time, which can happen arbitrarily later than phase 1
+// and independently of every other offer's — see snapshotPending's and
+// Kick's own docs for why the two callers differ here. It is used only for
+// the pre-expiry recordDecline branch below; lastAttempt (the INV-EVT-4
+// verdict) was already decided once, in phase 1, and is never
+// re-evaluated here.
+//
+// *signals accumulates dispatchSignal values the caller MUST fan out via
+// q.fanOut strictly AFTER releasing q.mu — never while still holding it, per
+// the lock-order invariant on q.mu's own doc; this function never fans out
+// itself.
+//
+// Returns any evict Record maybeEvict produced for e (evicted reports
+// whether one was produced): PERSISTING it is the CALLER's job, exactly as
+// maybeEvict's own contract already requires — Dispatch's caller batches a
+// whole pass's evicts into one AppendBatch call; Kick's caller (one
+// per-offer goroutine) persists its own single offer's evict, if any, by
+// itself, while STILL holding q.mu (see Kick's own doc: the Store is not
+// internally synchronized, so every persist stays under q.mu exactly like
+// Dispatch's). accepted reports whether this offer incremented the ACCEPTED
+// count; Dispatch sums these across its pass for its own return value —
+// Kick does not use this for ITS OWN return value, which means "launched,"
+// never "accepted" (see Kick's own doc).
+//
+// Caller holds q.mu.
+func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]dispatchSignal) (evictRec Record, evicted bool, accepted bool) {
+	lid := p.ls.l.ID()
+	// This offer's phase 2 has concluded either way — delete custody and
+	// inFlight FIRST, before any of the skip/settle branches below, so an
+	// entry that never reaches settlement (e.g. gone by the time this runs)
+	// still leaves both accurately empty. This listener is no longer
+	// in-flight regardless of outcome (Task 6.1, pg2-84o3m.31): the next
+	// Dispatch/Kick pass mints an entirely fresh pendingOffer for it,
+	// exactly like a fresh custody entry.
+	delete(q.custody, p.id)
+	delete(q.inFlight, lid)
+	e, ok := q.entries[p.evt.ID]
+	if !ok {
+		return Record{}, false, false // entry left the queue mid-dispatch (retired/evicted): skip
+	}
+	if !p.result.Accepted {
+		// A PRE-ACCEPT decline OR a dispatch failure (offerSafely recovered a
+		// panic) — INV-OBS-1's two delivery-side classes. Nothing DURABLE about
+		// the attempt is recorded — no counter, nothing on disk (DEC-EVENT-1:
+		// the core keeps no attempt history) — but it IS a delivery-side
+		// failure signal (INV-OBS-1 / INV-FAIL-1), so the observer sees every
+		// occurrence regardless of lastAttempt (see OnDeclined's doc), whatever
+		// the DeclineReason. Both classes settle IDENTICALLY from here: the
+		// single expiry comparison already made in phase 1 is the whole
+		// retention decision: past `expiresAt` that attempt was the last one
+		// this listener is owed (INV-EVT-4), so settle the pair and let its
+		// head advance; before it, the failure is simply a re-offer condition
+		// (INV-FAIL-1) — every DeclineReason re-offers identically — and the
+		// IN-MEMORY (transient, unpersisted) retry-cadence bookkeeping advances
+		// so the next offer waits at least INV-FAIL-2's cadence rather than the
+		// very next pass. Only which Observer hook fires — and so which
+		// failure-rate metric class counts it — differs.
+		if p.dispatchFailed {
+			*signals = append(*signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type})
+		} else {
+			p.ls.declined.Add(1)
+			q.declined.Add(1)
+			*signals = append(*signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline})
+		}
+		if p.lastAttempt {
+			e.settled[lid] = true
+			p.ls.resetBackoff() // nothing left to back off from once settled
+		} else {
+			p.ls.recordDecline(p.evt.ID, now, q.retryBackoffFor(p.ls.l))
+		}
+		return Record{}, false, false
+	}
+	if e.accepted[lid] {
+		return Record{}, false, false // already recorded by a concurrent/re-entrant pass: at-most-once
+	}
+	// Accepted: nothing left to back off from (INV-FAIL-2's cadence is moot
+	// once the pair is settled).
+	p.ls.resetBackoff()
+	// In-memory accept first; the durable accept record is written AFTER
+	// (ADR 0031 req 4) — the crash window that yields the at-least-once
+	// redelivery (one extra re-offer per crash window).
+	e.accepted[lid] = true
+	e.settled[lid] = true
+	if err := q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
+		// The in-memory accept already happened and the listener has taken
+		// delivery responsibility (INV-EVT-1); we do NOT roll back or change
+		// delivery semantics. But a swallowed accept-write is a durability
+		// degradation — the event replays as un-accepted on EVERY restart and
+		// is redelivered forever with no signal. Enqueue surfaces its append
+		// error by returning it; settlement cannot return here without altering
+		// delivery, so it surfaces the failure via a structured log instead
+		// (matching the codebase's slog convention for a swallowed durable
+		// write, cf. orchestrator "event log emit failed").
+		slog.Error("eventqueue: accept-append failed; event will redeliver on restart until the write succeeds",
+			"eventId", p.evt.ID, "listenerId", lid, "err", err)
+	}
+	p.ls.delivered.Add(1)
+	q.delivered.Add(1)
+	*signals = append(*signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid})
+	rec, didEvict := q.maybeEvict(e)
+	return rec, didEvict, true
+}
+
+// Dispatch offers each listener its head deliverable event once, in
+// registration order, and returns how many events were accepted this pass. A
+// pre-accept decline OR a recovered dispatch-failure panic (offerSafely) on an
+// UNEXPIRED event leaves the head in place for a later pass (re-offer,
+// INV-FAIL-1 / INV-CONC-1); either one on an ALREADY-EXPIRED event was that
+// listener's last attempt (INV-EVT-4), so the pair is settled and the head
+// advances. The two are handled identically here and differ only in which
+// Observer hook — and so which INV-OBS-1 failure-rate class — records them
+// (bead pg2-icm3u).
+//
+// Dispatch is UNCHANGED in contract and behavior by the addition of Kick
+// (this package's design doc, "decouple pg-router-core's tick loop from
+// per-dispatch-pass completion"): it still joins a pass-scoped WaitGroup
+// across phase 2 and still runs phase 3 as one batched, locked step
+// afterward, returning the accepted count once every offer in THIS pass has
+// settled. `Queue.RunUntilIdle` is, and remains, its only caller with zero
+// production callers of its own. A caller that must never block a whole
+// pass on one stuck listener wants Kick instead.
+//
+// Locking discipline (bead pg2-56186). The pass is three phases and the queue
+// lock is held only in phases 1 and 3, NEVER across the listener callback:
+//
+//  1. SNAPSHOT (locked): snapshotPending — compute each listener's head
+//     deliverable event, capture the (listener, event) pairs and the
+//     INV-EVT-4 expiry verdict for each, assign each one its pre-minted
+//     dispatch id, and record a custody entry for it (Task 2.2) — the offer
+//     is now OUTSTANDING. No Offer, no store write here. Shared with Kick
+//     (see snapshotPending's own doc).
+//  2. OFFER (UNLOCKED): call Listener.Offer for each pair, passing its dispatch
+//     id, via offerSafely so a panicking listener implementation cannot abort
+//     the pass (INV-PREC-1; see offerSafely's own doc). Releasing the lock is
+//     what makes a synchronous listener's accept path free to re-enter the
+//     queue (Enqueue / push-inject a follow-on event) without self-deadlocking
+//     on the non-reentrant q.mu, and stops all ingest from serializing behind
+//     an in-flight (possibly long) handler offer. Task 6.2 (bead pg2-3brwx.2):
+//     offers within a pass now run CONCURRENTLY, one goroutine per pending
+//     offer, bounded by len(pending) <= len(q.listeners).
+//  3. RECORD (locked): settleOfferLocked, once per pending offer — delete each
+//     pair's custody entry FIRST — the offer is no longer outstanding whatever
+//     its outcome, including one whose underlying entry vanished mid-offer and
+//     so never reaches the settle logic below at all — then re-validate
+//     against CURRENT state and settle the pair: marking acceptance, appending
+//     the durable opAccept record, notifying the observer and maybe-evicting,
+//     or (for a final decline or dispatch failure) recording nothing but the
+//     terminal marker. Shared with Kick (see settleOfferLocked's own doc).
+//
+// Between phases 2 and 3 the queue can change (concurrent Enqueue / Expire /
+// Dispatch / Kick, or a re-entrant call from inside Offer), so RECORD looks
+// the entry up FRESH by id and skips two ways rather than mutating a stale
+// snapshot:
+//   - entry no longer present (retired and swept, or early-evicted): the event
+//     has legitimately left the queue, so there is nothing to record and
+//     nothing to redeliver; drop the acceptance record (a stray opAccept for a
+//     gone id is a no-op on replay anyway). Delivery is unaffected — the listener
+//     already took responsibility when Offer returned Accepted=true (INV-EVT-1).
+//   - already accepted by this listener (a concurrent/re-entrant Dispatch offered
+//     the same head and recorded first): skip, preserving at-most-once acceptance
+//     per (event, listener) binding — the duplicate Offer is absorbed by the
+//     idempotent-listener contract (INV-EVT-2).
+//
+// The store append(s) stay under q.mu in phase 3 on purpose: the Store is not
+// internally synchronized (its writes are serialized solely by q.mu), so moving
+// them out would introduce a data race. Phase 3 is short and calls no listener
+// code, unlike the original monolithic pass that held the lock across every
+// Offer. Every accept record still persists via its own Append call (delivery
+// depends on that ordering, see below); every early-eviction record this pass
+// produces (maybeEvict, opt-in via WithEarlyEviction) is instead collected and
+// persisted once, after the loop, via a single AppendBatch call — one fsync for
+// the whole pass's evictions rather than one per evicted id.
+func (q *Queue) Dispatch() (accepted int) {
+	pending, now := q.snapshotPending()
 	if len(pending) == 0 {
 		return 0
 	}
@@ -1000,14 +1166,16 @@ func (q *Queue) Dispatch() (accepted int) {
 	wg.Wait()
 
 	// Phase 3 — RECORD (locked), re-validating each outcome against current state
-	// (see the locking-discipline note above).
+	// (see the locking-discipline note above). settleOfferLocked does the actual
+	// per-offer settlement (shared with Kick); this loop's only job is to run it
+	// for every offer in THIS pass and batch the results.
 	//
-	// Task 2.3 (Steps 2.3.5 + 2.3.6) adds two things to this phase, both
-	// staying strictly under the ALREADY-HELD q.mu:
+	// Task 2.3 (Steps 2.3.5 + 2.3.6) adds two things here, both staying strictly
+	// under the ALREADY-HELD q.mu (inside settleOfferLocked):
 	//   - per-listener delivered/declined counters (p.ls.delivered/declined,
 	//     atomic.Int64 since Task 6.4 — see listenerState's own doc) and the
 	//     pool-wide atomic counterparts (q.delivered/q.declined) —
-	//     incremented HERE via .Add(1), never from an observer hook, never
+	//     incremented via .Add(1), never from an observer hook, never
 	//     behind a separate mutex;
 	//   - every OnAccept/OnDeclined observer notification is queued into
 	//     `signals` instead of firing inline, and fanned out ONLY after q.mu
@@ -1020,82 +1188,12 @@ func (q *Queue) Dispatch() (accepted int) {
 	var evicts []Record
 	var signals []dispatchSignal
 	for _, p := range pending {
-		lid := p.ls.l.ID()
-		// The pass's phase 2 for this offer has concluded either way — delete
-		// custody and inFlight FIRST, before any of the skip/settle branches
-		// below, so an entry that never reaches settlement (e.g. gone by the
-		// time this loop reaches it) still leaves both accurately empty. This
-		// listener is no longer in-flight regardless of outcome (Task 6.1,
-		// pg2-84o3m.31): a next Dispatch pass mints an entirely fresh
-		// pendingOffer for it, exactly like a fresh custody entry.
-		delete(q.custody, p.id)
-		delete(q.inFlight, lid)
-		e, ok := q.entries[p.evt.ID]
-		if !ok {
-			continue // entry left the queue mid-dispatch (retired/evicted): skip
-		}
-		if !p.result.Accepted {
-			// A PRE-ACCEPT decline OR a dispatch failure (offerSafely recovered a
-			// panic) — INV-OBS-1's two delivery-side classes. Nothing DURABLE about
-			// the attempt is recorded — no counter, nothing on disk (DEC-EVENT-1:
-			// the core keeps no attempt history) — but it IS a delivery-side
-			// failure signal (INV-OBS-1 / INV-FAIL-1), so the observer sees every
-			// occurrence regardless of lastAttempt (see OnDeclined's doc), whatever
-			// the DeclineReason. Both classes settle IDENTICALLY from here: the
-			// single expiry comparison already made in phase 1 is the whole
-			// retention decision: past `expiresAt` that attempt was the last one
-			// this listener is owed (INV-EVT-4), so settle the pair and let its
-			// head advance; before it, the failure is simply a re-offer condition
-			// (INV-FAIL-1) — every DeclineReason re-offers identically — and the
-			// IN-MEMORY (transient, unpersisted) retry-cadence bookkeeping advances
-			// so the next offer waits at least INV-FAIL-2's cadence rather than the
-			// very next Dispatch pass. Only which Observer hook fires — and so
-			// which failure-rate metric class counts it — differs.
-			if p.dispatchFailed {
-				signals = append(signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type})
-			} else {
-				p.ls.declined.Add(1)
-				q.declined.Add(1)
-				signals = append(signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline})
-			}
-			if p.lastAttempt {
-				e.settled[lid] = true
-				p.ls.resetBackoff() // nothing left to back off from once settled
-			} else {
-				p.ls.recordDecline(p.evt.ID, now, q.retryBackoffFor(p.ls.l))
-			}
-			continue
-		}
-		if e.accepted[lid] {
-			continue // already recorded by a concurrent/re-entrant pass: at-most-once
-		}
-		// Accepted: nothing left to back off from (INV-FAIL-2's cadence is moot
-		// once the pair is settled).
-		p.ls.resetBackoff()
-		// In-memory accept first; the durable accept record is written AFTER
-		// (ADR 0031 req 4) — the crash window that yields the at-least-once
-		// redelivery (one extra re-offer per crash window).
-		e.accepted[lid] = true
-		e.settled[lid] = true
-		if err := q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
-			// The in-memory accept already happened and the listener has taken
-			// delivery responsibility (INV-EVT-1); we do NOT roll back or change
-			// delivery semantics. But a swallowed accept-write is a durability
-			// degradation — the event replays as un-accepted on EVERY restart and
-			// is redelivered forever with no signal. Enqueue surfaces its append
-			// error by returning it; Dispatch cannot return here without altering
-			// delivery, so it surfaces the failure via a structured log instead
-			// (matching the codebase's slog convention for a swallowed durable
-			// write, cf. orchestrator "event log emit failed").
-			slog.Error("eventqueue: accept-append failed; event will redeliver on restart until the write succeeds",
-				"eventId", p.evt.ID, "listenerId", lid, "err", err)
-		}
-		p.ls.delivered.Add(1)
-		q.delivered.Add(1)
-		signals = append(signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid})
-		accepted++
-		if rec, evicted := q.maybeEvict(e); evicted {
+		rec, didEvict, didAccept := q.settleOfferLocked(p, now, &signals)
+		if didEvict {
 			evicts = append(evicts, rec)
+		}
+		if didAccept {
+			accepted++
 		}
 	}
 	if len(evicts) > 0 {
@@ -1113,12 +1211,86 @@ func (q *Queue) Dispatch() (accepted int) {
 	return accepted
 }
 
+// Kick launches, for each currently-eligible, non-busy listener with a
+// deliverable head, that listener's offer as an independent goroutine that
+// proceeds directly into its OWN phase 3 the instant its Offer call
+// returns — never joining a caller-blocking WaitGroup the way Dispatch's
+// phase 2/3 does. Kick itself returns as soon as every eligible offer has
+// been LAUNCHED, reporting THAT count — the return value means "launched,"
+// NEVER "accepted" and never "settled." A caller that wants "how many have
+// settled/accepted so far" reads q.delivered / SessionsInFlight /
+// DepthByType instead (all already exported) — conflating "launched" with
+// "accepted" is exactly the mistake this doc note (and
+// TestKickReturnValueMeansLaunchedNotAccepted) guards against; the two
+// numbers can and generally will differ, since most offers have not
+// finished yet the instant Kick returns.
+//
+// Phase 1 is snapshotPending — byte-identical to Dispatch's own phase 1 (see
+// that function's doc): same busy-skip via q.inFlight, same headFor
+// (including the WithSerializeTypes occupancy gate, INV-CONC-1), same
+// dispatch-id minting, same q.custody/q.inFlight marking. Because that
+// invariant lives entirely in phase 1, "at most one outstanding offer per
+// listener" (INV-CONC-1) holds identically whether an offer was launched by
+// Dispatch or Kick, and a later Dispatch/Kick call's phase 1 always sees
+// whatever has actually settled so far, regardless of which method's
+// goroutine settled it last — occupancy (headFor) and release
+// (releasedLocked) derive solely from e.settled, mutated only under q.mu by
+// settleOfferLocked, however it was reached.
+//
+// Each offer's phase 3 (settleOfferLocked, the SAME helper Dispatch's own
+// phase-3 loop calls) re-acquires q.mu independently, at whatever instant
+// its own Offer call returns — never batched with any other offer's, unlike
+// Dispatch's single end-of-pass phase 3. Kick's per-offer accept/evict
+// durable writes and Observer signals are therefore NOT batched with each
+// other the way a Dispatch pass's are (this package's design doc's
+// "batching tradeoff": each offer persists and signals on its own
+// schedule, independent of every other offer this — or a later — Kick call
+// launched). The evict-append (if maybeEvict fires) stays under q.mu here
+// too, exactly like Dispatch's: the Store is not internally synchronized,
+// so every persist across every offer, from either method, is serialized
+// solely by q.mu.
+//
+// Kick's launched goroutines are DETACHED from the caller — nothing joins
+// them. A caller that must know no Kick-launched offer is still outstanding
+// before doing something that requires that (e.g. closing the durable store
+// at shutdown — this package's design doc's "shutdown ordering" note) needs
+// WaitForInFlightDrain.
+func (q *Queue) Kick() (launched int) {
+	pending, _ := q.snapshotPending()
+	for _, p := range pending {
+		go func(p pendingOffer) {
+			p.result, p.dispatchFailed = offerSafely(p.ls.l, Offering{ID: p.id, Event: p.evt})
+
+			q.mu.Lock()
+			unlock := q.unlockOnce()
+			defer unlock()
+			now := q.now()
+			var signals []dispatchSignal
+			rec, evicted, _ := q.settleOfferLocked(p, now, &signals)
+			if evicted {
+				// Kept under q.mu, exactly like Dispatch's batched evict-append
+				// (see this function's own doc: the Store is not internally
+				// synchronized).
+				if err := q.store.Append(rec); err != nil {
+					slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
+						"eventId", p.evt.ID, "err", err)
+				}
+			}
+			unlock()
+			q.fanOut(signals)
+		}(p)
+	}
+	return len(pending)
+}
+
 // maybeEvict evicts an event early when opted-in and every currently-bound
 // listener has accepted it (ADR 0031). Returns the durable evict Record and true
-// when an eviction happened, so the caller (Dispatch's phase 3) can collect it
-// into that pass's single AppendBatch call instead of persisting here — matching
-// Expire's per-pass batching (one fsync per pass instead of one per record).
-// Caller holds q.mu.
+// when an eviction happened, so the caller (settleOfferLocked, shared by
+// Dispatch's phase 3 and Kick's per-offer phase 3) can persist it instead of
+// persisting here — Dispatch's caller collects a whole pass's evicts into
+// one AppendBatch call (matching Expire's per-pass batching, one fsync per
+// pass instead of one per record); Kick's caller persists its own single
+// offer's evict, if any, by itself. Caller holds q.mu.
 func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 	if !q.evictWhenAllAccept {
 		return Record{}, false
@@ -1349,14 +1521,54 @@ func (q *Queue) UnmatchedBindings(declared []string) []string {
 // status banner surfaces (Task 3.0). It is read LIVE under q.mu at call time,
 // the same as DepthByType, and is NEVER cached in a periodic snapshot:
 // querying it while a listener's Offer call is blocked mid-pass must observe
-// that offer. Before Phase 5's deferred-settle form this is always 0 or 1,
-// since Dispatch offers one listener at a time, synchronously, within a
-// single goroutine; a later deferred form is what lets it grow past 1. Caller
-// must NOT hold q.mu.
+// that offer. Task 6.2's concurrent phase 2 already lets this exceed 1 within
+// a single Dispatch pass (up to len(q.listeners)); Kick widens this further
+// still, since its launched offers are detached and can each remain
+// outstanding for an arbitrary, independent duration across many Kick calls,
+// not just within one synchronous pass. Caller must NOT hold q.mu.
 func (q *Queue) SessionsInFlight() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.custody)
+}
+
+// WaitForInFlightDrain blocks until no offer is outstanding
+// (SessionsInFlight() == 0) or ctx is done, whichever comes first, polling
+// on pollInterval. It exists for the shutdown-ordering fix this package's
+// design doc requires at the actual driving call sites (cmd/pg-router's
+// bootCore/storeClose sequencing, out of this package's own scope): Kick's
+// launched goroutines are detached from their caller, so nothing else
+// guarantees an offer has finished writing to the durable store by the time
+// a caller decides to close it. Dispatch needs no such wait — it already
+// does not return until every offer in its own pass has settled.
+//
+// This adds no new synchronization primitive of its own: it polls
+// SessionsInFlight, which already reads the live in-flight count under
+// q.mu, and Go's mutex happens-before guarantee is exactly what this
+// package's own Kick tests already lean on for the identical reason (see
+// kick_test.go's shared wait helper). Returns true if the queue actually
+// drained (reached zero in-flight) before ctx ended, false if ctx ended
+// first — an offer that neither settled nor unwound in time. The caller
+// decides what "false" means for it: e.g. proceed to shut down anyway and
+// accept that an offer's write may be lost, matching this package's
+// existing swallowed-write precedent elsewhere in this file (logged at
+// "error", never silently discarded).
+func (q *Queue) WaitForInFlightDrain(ctx context.Context, pollInterval time.Duration) bool {
+	if q.SessionsInFlight() == 0 {
+		return true
+	}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return q.SessionsInFlight() == 0
+		case <-ticker.C:
+			if q.SessionsInFlight() == 0 {
+				return true
+			}
+		}
+	}
 }
 
 // ListenerCount reports how many listeners are currently registered with the
