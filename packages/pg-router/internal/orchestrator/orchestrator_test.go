@@ -421,6 +421,134 @@ func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testi
 	}
 }
 
+// TestRoleListenerOffer_CtxCancellationUnwindsStuckSubprocessOfferWithinBound
+// closes the one MUST-FIX gap an independent review left open across both
+// prior implementation passes of this bead's design doc ("decouple
+// pg-router-core's tick loop from per-dispatch-pass completion"):
+// internal/eventqueue's kick_test.go (Scenario 5(b)'s own doc comment,
+// TestWaitForInFlightDrainReturnsTrueOnceOfferSettles) explicitly punts
+// proving that cancelling the driving ctx while an offer is genuinely stuck
+// mid-dispatch actually makes it unwind, in bounded time, to "the listener
+// implementation that owns that ctx (roleListener/wireclient in
+// internal/orchestrator and cmd/pg-router), not [eventqueue] ...
+// Listener.Offer takes no context argument at all." Nothing in this package
+// or in cmd/pg-router ever wrote that other half either, until now. This
+// matters concretely because cmd/pg-router/run.go's drainThenCloseStore
+// gates storeClose() on q.WaitForInFlightDrain succeeding within
+// inFlightDrainTimeout (5s) — an assumption that a genuinely-stuck offer
+// actually unwinds that fast, which nothing before this test exercised.
+//
+// This deliberately dispatches through a REAL wireclient.Client backed by
+// the REAL wireclient.OSRunner (a real subprocess via exec.CommandContext,
+// wireclient.go), never a fake/blocking test double: roleListener.ctx (set
+// at NewListener construction, exactly as bootCore/runRunRole wire it) flows
+// into workOne -> wireclient.Client.Dispatch -> OSRunner.Run's
+// exec.CommandContext call, and THAT specific plumbing — ctx cancellation
+// actually reaching, and killing, a real subprocess — is exactly what this
+// test needs to exercise. A fake handler double (e.g. this file's own
+// fakeHandler, whose Dispatch signature literally discards its ctx
+// parameter — see fakeHandler.Dispatch above) would "unwind" the instant its
+// own blocking channel is closed regardless of whether real ctx-cancellation
+// wiring works at all: it cannot fail the way this test needs to be able to
+// fail, so it would prove nothing about the real mechanism.
+//
+// The handler here is a real subprocess (a temp shell script) that sleeps
+// far longer than this test is willing to wait. Sequence: (1) Kick() launches
+// the offer and returns without waiting on it — SessionsInFlight reaches 1,
+// proving the subprocess has genuinely started and is blocked in its own
+// sleep, not already finished; (2) cancelling the SAME ctx NewListener was
+// constructed with makes that offer settle — SessionsInFlight returns to 0 —
+// well within `bound`, a duration far shorter than the subprocess's own
+// sleep, observed via q.WaitForInFlightDrain (the exact primitive
+// drainThenCloseStore, cmd/pg-router/run.go, gates storeClose() on). If ctx
+// cancellation did not actually propagate through exec.CommandContext, the
+// subprocess would run its own full sleep, WaitForInFlightDrain would time
+// out at `bound` and return false, and this test would fail.
+//
+// What this proves: the real ctx-cancellation-through-exec.CommandContext
+// path unwinds a genuinely stuck offer well within a bound far shorter than
+// the process's own sleep — the load-bearing assumption behind
+// inFlightDrainTimeout. What remains inference, NOT exercised by this test:
+// this is a package-level (unit) proof of the mechanism, not an end-to-end
+// reproduction of run.go's exact call graph (bootCore -> NewListener -> a
+// real SIGINT via signal.NotifyContext -> drainThenCloseStore); that
+// end-to-end wiring is read, not independently re-verified, by this test.
+func TestRoleListenerOffer_CtxCancellationUnwindsStuckSubprocessOfferWithinBound(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "slow-handler.sh")
+	const handlerSleepSeconds = 10
+	body := "#!/bin/sh\n" +
+		"cat > /dev/null\n" +
+		"sleep " + fmt.Sprint(handlerSleepSeconds) + "\n" +
+		"echo '{\"schemaVersion\":\"1\",\"id\":\"fake\",\"outcome\":\"ok\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write slow handler script: %v", err)
+	}
+
+	role := roles.Role{Name: "worker", Enabled: true, Binds: []string{"work.ready"}}
+	o := &Orchestrator{
+		Reg: roles.RoleSet{role},
+		Cfg: fastCfg(),
+		Handler: wireclient.New(func(roles.Role, string) ([]string, error) {
+			return []string{script}, nil
+		}),
+	}
+
+	// listenerCtx is the SAME shape NewListener captures at construction in
+	// production (bootCore's per-role q.Register(o.NewListener(ctx, r)) call)
+	// — cancelling it below is what a real SIGINT/SIGTERM does to `run`'s own
+	// long-lived ctx.
+	listenerCtx, cancelListener := context.WithCancel(context.Background())
+	defer cancelListener()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(listenerCtx, role))
+
+	// ExpiresAt is set explicitly (unlike this file's other Enqueue calls,
+	// which rely on discover.ToQueueEvent's born-expired default): a fresh
+	// event resolves expiresAt==at==now absent this, and this test's whole
+	// point is an offer that is still outstanding well after "now" — kick_test.go's
+	// own evtUntil helper sets this for the identical reason.
+	evt := discover.ToQueueEvent(event.NewItemEvent("work.ready", "t", item.Item{ID: "item-1"}))
+	evt.ExpiresAt = time.Now().Add(time.Hour)
+	if _, err := q.Enqueue(evt); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	if launched := q.Kick(); launched != 1 {
+		t.Fatalf("Kick() launched = %d, want 1", launched)
+	}
+
+	// Wait for the offer to actually be in flight — i.e. the subprocess has
+	// genuinely started and is blocked in its own sleep — before cancelling,
+	// so the cancellation below is proven to race a REAL stuck dispatch, not
+	// an already-finished one.
+	inFlightDeadline := time.Now().Add(2 * time.Second)
+	for q.SessionsInFlight() != 1 {
+		if time.Now().After(inFlightDeadline) {
+			t.Fatalf("offer never reached SessionsInFlight()==1 within 2s -- the subprocess dispatch never even started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancelListener()
+
+	// bound is deliberately far shorter than handlerSleepSeconds: if ctx
+	// cancellation did not propagate through exec.CommandContext, the
+	// subprocess would run its own full sleep and WaitForInFlightDrain below
+	// would time out and return false, failing this test.
+	const bound = 3 * time.Second
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), bound)
+	defer cancelDrain()
+	if !q.WaitForInFlightDrain(drainCtx, 5*time.Millisecond) {
+		t.Fatalf("offer did not settle within %v of ctx cancellation (handler's own sleep is %ds) -- "+
+			"context cancellation did not propagate through exec.CommandContext to kill the real subprocess in time",
+			bound, handlerSleepSeconds)
+	}
+	if got := q.SessionsInFlight(); got != 0 {
+		t.Fatalf("SessionsInFlight() = %d after WaitForInFlightDrain returned true, want 0", got)
+	}
+}
+
 // TestNewListener_perHandlerSerialFIFO_onePerDispatchCall locks in the
 // structural replacement for the retired per-role Cap: a Listener's head
 // advances by exactly one accepted event per Dispatch() call, regardless of how

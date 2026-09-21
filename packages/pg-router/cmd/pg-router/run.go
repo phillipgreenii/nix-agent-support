@@ -1100,6 +1100,20 @@ func runRunUntilIdle(only, disable []string) int {
 		return exitGeneric
 	}
 	postStartupAll(ctx, pr.o, pr.cfg)
+	// Ordering considered and accepted (review of this bead's design doc,
+	// "decouple pg-router-core's tick loop from per-dispatch-pass
+	// completion"): defers run LIFO, and metrics.Flush's defer below is
+	// registered AFTER this one, so it runs BEFORE drainThenCloseStore's
+	// in-flight wait completes. A Kick()-launched offer that is still
+	// settling at shutdown can therefore be invisible to the final metrics
+	// snapshot. This is judged low-severity — an inherent limitation of any
+	// "final snapshot" taken before every last write is guaranteed
+	// flushed — and pre-existing in shape (a short run finishing between two
+	// periodic collections had the same blind spot before Kick() existed),
+	// not a regression this decoupling introduces. Left unreordered
+	// deliberately: reordering would make metrics.Flush wait on the SAME
+	// bounded drain this defer performs, which is a real behavior change,
+	// not a comment-only fix.
 	defer drainThenCloseStore(q, storeClose)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
@@ -1117,6 +1131,13 @@ func runRunUntilIdle(only, disable []string) int {
 	// collections of a REAL backend would report nothing (the no-op default
 	// has nothing to flush regardless), and a ProduceTick/RunUntilIdle
 	// failure used to skip it entirely.
+	//
+	// Ordering considered and accepted (see drainThenCloseStore's defer
+	// above, registered first): this defer runs BEFORE that one (LIFO), so
+	// this snapshot can miss the very last accept settling during
+	// drainThenCloseStore's own in-flight wait. Accepted as a pre-existing
+	// final-snapshot limitation, not a new regression — see that defer's own
+	// comment for the full reasoning.
 	defer func() {
 		if err := metrics.Flush(context.Background(), mp); err != nil {
 			slog.Warn("run-until-idle: metrics flush failed", "err", err)
@@ -1248,6 +1269,17 @@ func runRun(only, disable []string, metricsAddr string) int {
 		return exitGeneric
 	}
 	postStartupAll(ctx, pr.o, pr.cfg)
+	// Ordering considered and accepted (same reasoning as runRunUntilIdle's
+	// identical defer pair; review of this bead's design doc, "decouple
+	// pg-router-core's tick loop from per-dispatch-pass completion"): defers
+	// run LIFO, and metrics.Flush's defer below is registered AFTER this
+	// one, so it runs BEFORE drainThenCloseStore's in-flight wait completes
+	// — the very last accept settling during shutdown can be invisible to
+	// the final metrics snapshot. Judged low-severity (an inherent
+	// "final snapshot" limitation, not a regression this decoupling
+	// introduces) and left unreordered deliberately: reordering would make
+	// metrics.Flush block on this same drain, a real behavior change, not a
+	// comment-only fix.
 	defer drainThenCloseStore(q, storeClose)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
@@ -1265,6 +1297,13 @@ func runRun(only, disable []string, metricsAddr string) int {
 	// tick might never land before shutdown, and the package-default
 	// ManualReader has nothing to flush regardless (a safe no-op either way
 	// — see metrics.Flush's own doc comment).
+	//
+	// Ordering considered and accepted (see drainThenCloseStore's defer
+	// above, registered first): this defer runs BEFORE that one (LIFO), so
+	// this snapshot can miss the very last accept settling during
+	// drainThenCloseStore's own in-flight wait. Accepted as a pre-existing
+	// final-snapshot limitation, not a new regression — see that defer's own
+	// comment for the full reasoning.
 	defer func() {
 		if err := metrics.Flush(context.Background(), mp); err != nil {
 			slog.Warn("run: metrics flush failed", "err", err)
