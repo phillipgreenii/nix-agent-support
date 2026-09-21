@@ -24,6 +24,114 @@ let
   tomlFormat = pkgs.formats.toml { };
   poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" cfg.pool.settings;
 
+  # mkWorktreeSweepScript / worktreeReclaimRegistryEntry (pg2-4roho decision
+  # item 4): a `phillipgreenii.programs.pg-disk-reclaimer.registryEntries`
+  # contribution for this handler's own per-bead worktree pool
+  # (`launchConfig.worktreeDir`) -- the belt-and-suspenders net the decision
+  # calls for REGARDLESS of the in-process dispatch-completion cleanup
+  # (internal/executor/ccpool.go's cleanupWorktree, decision item 1) and the
+  # needs_input-tied-to-session-close rationale (decision item 2): a crash, a
+  # bug in that in-process path, or an edge case it never observes still gets
+  # caught by this independent sweep -- exactly the role pg-disk-reclaimer
+  # already plays for its other registered areas (see that module's own
+  # `registryEntries` option doc comment: "Any module MAY append entries
+  # here, gated on its own feature's enable"; gated here on THIS module's
+  # `enable`, matching that convention, not on `pg-disk-reclaimer.enable`
+  # itself -- contributing to an inert option when the reclaimer isn't
+  # separately enabled is harmless).
+  #
+  # Deletion safety guard (decision item 5), applied identically here and in
+  # the Go dispatch-completion path: `git worktree remove` (no `--force`)
+  # refuses on its own whenever the worktree is dirty (uncommitted changes) --
+  # gitclient's own documented native behavior, mirrored here at the shell
+  # level rather than reimplemented, so both removal paths rely on the SAME
+  # underlying guarantee. An explicit `git status --porcelain` pre-check adds
+  # a clearer skip message (and lets the dry-run variant report a skip
+  # without attempting a mutating command at all). A best-effort check for
+  # `index.lock`/`HEAD.lock` under the worktree's own git-dir additionally
+  # skips a worktree with a git operation visibly in progress (covers
+  # commit/rebase/merge racing this sweep) -- this is an explicitly best-
+  # effort proxy for "an in-flight push in progress": a bare `git push` that
+  # touches neither the index nor HEAD locally is NOT caught by it, but this
+  # sweep is the courser of two nets (the STRONG, ccpool-session-aware
+  # guarantee is decision items 1/2, which run in-process before this ever
+  # fires), and a worktree that keeps failing this guard across sweeps
+  # surfaces on its own next time (still listed, never force-removed) rather
+  # than being silently force-deleted.
+  #
+  # Wrapped in a subshell so its own locals (wtdir/n/skipped/wt/gitdir) never
+  # leak into pg-disk-reclaimer's own `pgdr_reclaim` function scope, since
+  # dryRunCommand/removeCommand run via that function's own `eval` (not a
+  # fresh `bash -c`, unlike displayCommand below).
+  mkWorktreeSweepScript = apply: ''
+    (
+      wtdir=${lib.escapeShellArg cfg.launchConfig.worktreeDir}
+      n=0
+      skipped=0
+      while IFS= read -r wt; do
+        gitdir=$(git -C "$wt" rev-parse --git-dir 2>/dev/null) || {
+          echo "pg-router-ccpool-handler-worktrees: skip (not a linked worktree): $wt"
+          skipped=$((skipped + 1))
+          continue
+        }
+        case "$gitdir" in
+          /*) : ;;
+          *) gitdir="$wt/$gitdir" ;;
+        esac
+        if [ -f "$gitdir/index.lock" ] || [ -f "$gitdir/HEAD.lock" ]; then
+          echo "pg-router-ccpool-handler-worktrees: skip (git operation in progress): $wt"
+          skipped=$((skipped + 1))
+          continue
+        fi
+        if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+          echo "pg-router-ccpool-handler-worktrees: skip (uncommitted changes): $wt"
+          skipped=$((skipped + 1))
+          continue
+        fi
+        ${
+          if apply then
+            ''
+              if git -C "$wt" worktree remove "$wt" 2>&1; then
+                echo "pg-router-ccpool-handler-worktrees: removed: $wt"
+                n=$((n + 1))
+              else
+                echo "pg-router-ccpool-handler-worktrees: skip (remove failed -- left for next sweep): $wt"
+                skipped=$((skipped + 1))
+              fi
+            ''
+          else
+            ''
+              echo "pg-router-ccpool-handler-worktrees: would remove: $wt"
+              n=$((n + 1))
+            ''
+        }
+      done < <(find "$wtdir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+      echo "pg-router-ccpool-handler-worktrees: $n ${
+        if apply then "removed" else "removable"
+      }, $skipped skipped"
+    )
+  '';
+
+  worktreeReclaimRegistryEntry = {
+    id = "pg-router-ccpool-handler-worktrees";
+    description = "pg-router-ccpool-handler's per-bead git worktrees -- belt-and-suspenders net for pg2-4roho's primary dispatch-completion cleanup (internal/executor/ccpool.go's cleanupWorktree)";
+    path = cfg.launchConfig.worktreeDir;
+    displayCommand = ''
+      n=$(find ${lib.escapeShellArg cfg.launchConfig.worktreeDir} -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+      sz=$(du -sh ${lib.escapeShellArg cfg.launchConfig.worktreeDir} 2>/dev/null | cut -f1)
+      if [ -z "$sz" ]; then sz="0"; fi
+      echo "$n worktree(s), $sz"
+    '';
+    variants = [
+      {
+        aggressiveness = 1;
+        variantDescription = "remove any per-bead worktree that is fully clean (no uncommitted changes, no lock file indicating an in-flight git operation) -- skips anything dirty or mid-operation, leaving it for the next sweep (decision item 5's own guard)";
+        dryRunCommand = mkWorktreeSweepScript false;
+        removeCommand = mkWorktreeSweepScript true;
+      }
+    ];
+  };
+
   # mkRegisterExec renders the `register` invocation shared by periodicDrain's
   # timer-triggered heartbeat and daemon's boot-time announcement below --
   # this module's ONLY systemd-facing action (Task 5.12; `phillipgreenii-nix-
@@ -792,6 +900,12 @@ in
     }
     (lib.mkIf cfg.enable {
       home.packages = [ cfg.package ];
+
+      # pg2-4roho decision item 4: register this handler's own worktree pool
+      # with pg-disk-reclaimer as a belt-and-suspenders safety net -- see
+      # worktreeReclaimRegistryEntry's own doc comment above for the full
+      # rationale and its relationship to decision items 1/2/5.
+      phillipgreenii.programs.pg-disk-reclaimer.registryEntries = [ worktreeReclaimRegistryEntry ];
 
       # pool activation (pg2-1p4yp): bootstrap the dedicated pool dir through
       # a REAL `ccpool` invocation BEFORE installing our own config.toml over

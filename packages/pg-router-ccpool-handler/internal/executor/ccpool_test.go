@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -22,6 +23,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 // newExec builds a *ccpoolRun with injected clock/tick + fakes, mirroring the
@@ -417,6 +419,144 @@ func TestSessionState_lookup(t *testing.T) {
 		})
 	}
 }
+
+// --- pg2-4roho: dispatch-completion worktree cleanup (decision items 1/2/5) ---
+
+// TestNeedsInputAlive_cases mirrors TestSessionState_lookup's table shape,
+// covering needsInputAlive's three outcomes: present-and-needs_input (true,
+// skip cleanup), present-in-some-other-state (false), absent (false, gone —
+// safe to clean up), and a List error (true — can't tell, so fail toward NOT
+// deleting; the opposite bias from active()'s own can't-tell case).
+func TestNeedsInputAlive_cases(t *testing.T) {
+	cases := []struct {
+		name    string
+		sess    []ccpool.Session
+		listErr error
+		want    bool
+	}{
+		{"present-needs-input", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateNeedsInput}}, nil, true},
+		{"present-working", []ccpool.Session{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}, nil, false},
+		{"absent", []ccpool.Session{{ExternalID: "other", Live: true, State: ccpool.StateNeedsInput}}, nil, false},
+		{"list-error-cant-tell", nil, errors.New("ccpool list: transient"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sess}, ListErr: tc.listErr}
+			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+			if got := e.needsInputAlive(context.Background(), "s"); got != tc.want {
+				t.Errorf("needsInputAlive(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUsesWorktreeIsolation locks in newIsolation's own empty/"worktree"
+// default against the other three strategies — the guard that keeps
+// cleanupWorktree from ever removing RepoRoot ("none"), a fixed reused
+// directory ("path"), or a workforest root ("workforest").
+func TestUsesWorktreeIsolation(t *testing.T) {
+	cases := []struct {
+		typ  string
+		want bool
+	}{
+		{"", true},
+		{"worktree", true},
+		{"none", false},
+		{"path", false},
+		{"workforest", false},
+	}
+	for _, tc := range cases {
+		if got := usesWorktreeIsolation(roles.IsolationConfig{Type: tc.typ}); got != tc.want {
+			t.Errorf("usesWorktreeIsolation(%q) = %v, want %v", tc.typ, got, tc.want)
+		}
+	}
+}
+
+// newExecWithOpener is newExec plus a NoopGitOpener wired onto deps.GitOpener,
+// returning both so a test can inspect the opener's own WTM.Calls.
+func newExecWithOpener(cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config) (*ccpoolRun, *dtest.NoopGitOpener) {
+	e := newExec(cc, bd, cfg)
+	opener := &dtest.NoopGitOpener{}
+	e.deps.GitOpener = opener.Open
+	return e, opener
+}
+
+func TestCleanupWorktree_emptyPathNoop(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}}}
+	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "")
+	if len(opener.WTM.Calls) != 0 || cc.ListIdx != 0 {
+		t.Errorf("empty wt must short-circuit before any List/RemoveWorktree call; listIdx=%d calls=%v", cc.ListIdx, opener.WTM.Calls)
+	}
+}
+
+func TestCleanupWorktree_nonWorktreeIsolationNoop(t *testing.T) {
+	for _, typ := range []string{"none", "path", "workforest"} {
+		t.Run(typ, func(t *testing.T) {
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}}}
+			e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
+			e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{Isolation: roles.IsolationConfig{Type: typ}}, "s", "/some/shared/path")
+			if len(opener.WTM.Calls) != 0 {
+				t.Errorf("isolation %q must never be removed by cleanupWorktree; calls=%v", typ, opener.WTM.Calls)
+			}
+		})
+	}
+}
+
+func TestCleanupWorktree_removesWhenSessionGone(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}} // no sessions at all — definitively gone
+	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
+	wt := "/tmp/pg2-4roho/zr-w"
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", wt)
+	if len(opener.WTM.Calls) != 1 {
+		t.Fatalf("expected exactly one RemoveWorktree call, got %v", opener.WTM.Calls)
+	}
+	got := opener.WTM.Calls[0]
+	if got[0] != "remove" || got[1] != wt || got[2] != "false" {
+		t.Errorf("RemoveWorktree call = %v, want [remove %s false] (force=false is decision item 5's own guard)", got, wt)
+	}
+}
+
+// TestCleanupWorktree_skipsWhileNeedsInput is the regression guard for the
+// exact bug pg2-lyriv reported (a needs_input session's worktree deleted out
+// from under it): decision item 2 ties a needs_input worktree's lifetime to
+// its SESSION's own close, not to this dispatch's own terminal outcome.
+func TestCleanupWorktree_skipsWhileNeedsInput(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateNeedsInput}}}}
+	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+	if len(opener.WTM.Calls) != 0 {
+		t.Errorf("needs_input session's worktree must NOT be removed; calls=%v", opener.WTM.Calls)
+	}
+}
+
+func TestCleanupWorktree_skipsOnListError(t *testing.T) {
+	cc := &dtest.FakeCC{ListErr: errors.New("ccpool list: transient")}
+	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+	if len(opener.WTM.Calls) != 0 {
+		t.Errorf("a can't-tell List error must fail toward NOT deleting; calls=%v", opener.WTM.Calls)
+	}
+}
+
+// TestCleanupWorktree_removeFailsSoft proves a RemoveWorktree failure (e.g.
+// git itself refusing a dirty worktree, decision item 5's own native guard)
+// neither panics nor is surfaced as an error — it is logged and left for the
+// next sweep.
+func TestCleanupWorktree_removeFailsSoft(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}}
+	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+	e.deps.GitOpener = func(context.Context, string) (gitclient.WorktreeManager, error) {
+		return nil, errors.New("open failed")
+	}
+	// Should not panic; failure is swallowed (fail-soft).
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+}
+
+// --- end pg2-4roho unit tests; dispatch-level end-to-end coverage lives near
+// the other TestDispatch_* cases below (TestDispatch_success_removesWorktree,
+// TestDispatch_needsInputTimeout_doesNotRemoveWorktree,
+// TestDispatch_watchdogHardStop_removesWorktree). ---
 
 // readEventLog returns the parsed JSONL records written to path.
 func readEventLog(t *testing.T, path string) []map[string]any {
@@ -864,4 +1004,120 @@ func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	if v := verbOf(res); v != report.Unclaimed {
 		t.Errorf("budget hard-stop unclaims => must report Unclaimed (NOT Escalated), got %q", v)
 	}
+}
+
+// --- pg2-4roho: dispatch-level end-to-end worktree cleanup coverage ---
+
+// TestDispatch_success_removesWorktree confirms decision item 1's primary
+// fix end-to-end: a normal successful dispatch removes its own per-bead
+// worktree immediately (RemoveWorktree with force=false — decision item 5's
+// own guard), rather than waiting on preshutdown.go's once-per-process sweep.
+func TestDispatch_success_removesWorktree(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pg-router-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
+	opener := &dtest.NoopGitOpener{}
+	deps.GitOpener = opener.Open
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err != nil {
+		t.Fatalf("dispatch should succeed (bead closed), got %v", err)
+	}
+	wantWT := filepath.Join(cfg.WorktreeDir, "zr-w")
+	if !hasRemoveCall(opener, wantWT, false) {
+		t.Errorf("expected a RemoveWorktree(force=false) call for %s; calls=%v", wantWT, opener.WTM.Calls)
+	}
+}
+
+// TestDispatch_needsInputTimeout_doesNotRemoveWorktree is the pg2-lyriv
+// regression guard at the Dispatch level: a session that stays needs_input
+// through MaxWait is still reported as a failure (unaffected — matches
+// TestWaitDone_needsInputWaitsUntilMaxWait), but its worktree must NOT be
+// removed by this dispatch call — decision item 2 ties it to the SESSION's
+// own eventual close instead, and reimplementing that tie is out of this
+// bead's own scope, but this dispatch-level fix must not violate it.
+func TestDispatch_needsInputTimeout_doesNotRemoveWorktree(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-feedback-zr-c", Live: true, State: ccpool.StateNeedsInput}}}}
+	d := DispatchContext{Role: feedbackRole(cfg), Item: item.Item{ID: "zr-c"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pg-router-feedback-zr-c"
+	deps.Git = &dtest.NoopGit{}
+	opener := &dtest.NoopGitOpener{}
+	deps.GitOpener = opener.Open
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatal("needs_input that never resolves should still time out as a failure")
+	}
+	if anyRemoveCall(opener) {
+		t.Errorf("needs_input session's worktree must NOT be removed; calls=%v", opener.WTM.Calls)
+	}
+}
+
+// TestDispatch_watchdogHardStop_removesWorktree extends
+// TestDispatch_watchdogHardStop_unclaimed with the worktree-cleanup
+// assertion: a budget hard-stop (the "timeout" of decision item 1's three
+// terminal outcomes) removes the worktree too — this fixture's session is
+// not needs_input, so needsInputAlive must not block it.
+func TestDispatch_watchdogHardStop_removesWorktree(t *testing.T) {
+	cfg := fastCfg()
+	cfg.BudgetTokens = 1000 // finite cap so the ramp trips it
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, TranscriptPath: "/t", CWD: "/repo"}}}}
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pg-router-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
+	opener := &dtest.NoopGitOpener{}
+	deps.GitOpener = opener.Open
+	// Same real-clock wrapping as TestDispatch_watchdogHardStop_unclaimed —
+	// see that test's own comment for why the watchdog and waitDone's manual
+	// clock must share a wall-clock timeline here.
+	origTick := deps.Tick
+	deps.Tick = func(ctx context.Context, d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+		}
+		return origTick(ctx, d)
+	}
+	deps.UsageReader = &dtest.RampReader{Seq: []usage.Snapshot{{OutputTokens: 2000}}} // immediately >100%
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatal("expected a budget error")
+	}
+	wantWT := filepath.Join(cfg.WorktreeDir, "zr-w")
+	if !hasRemoveCall(opener, wantWT, false) {
+		t.Errorf("expected a RemoveWorktree(force=false) call for %s after budget hard-stop; calls=%v", wantWT, opener.WTM.Calls)
+	}
+}
+
+// hasRemoveCall reports whether opener's WTM recorded a "remove" call for
+// path with exactly the given force value.
+func hasRemoveCall(opener *dtest.NoopGitOpener, path string, force bool) bool {
+	want := strconv.FormatBool(force)
+	for _, c := range opener.WTM.Calls {
+		if len(c) == 3 && c[0] == "remove" && c[1] == path && c[2] == want {
+			return true
+		}
+	}
+	return false
+}
+
+// anyRemoveCall reports whether opener's WTM recorded any "remove" call at all.
+func anyRemoveCall(opener *dtest.NoopGitOpener) bool {
+	for _, c := range opener.WTM.Calls {
+		if len(c) > 0 && c[0] == "remove" {
+			return true
+		}
+	}
+	return false
 }

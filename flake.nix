@@ -2862,6 +2862,42 @@
                                 type = lib.types.listOf hmAssertionSubmodule;
                                 default = [ ];
                               };
+                              # pg2-4roho decision item 4: this module now
+                              # appends to pg-disk-reclaimer's own registry
+                              # option -- stubbed here with the SAME shape
+                              # `home/programs/pg-disk-reclaimer/default.nix`
+                              # itself declares (not the real module, mirroring
+                              # this harness's own convention of hand-stubbing
+                              # every bare option this module reads/writes
+                              # rather than importing upstream modules), so a
+                              # real type mismatch in the appended entry is
+                              # still caught here.
+                              phillipgreenii.programs.pg-disk-reclaimer.registryEntries = lib.mkOption {
+                                type = lib.types.listOf (
+                                  lib.types.submodule {
+                                    options = {
+                                      id = lib.mkOption { type = lib.types.str; };
+                                      description = lib.mkOption { type = lib.types.str; };
+                                      path = lib.mkOption { type = lib.types.str; };
+                                      displayCommand = lib.mkOption { type = lib.types.str; };
+                                      variants = lib.mkOption {
+                                        type = lib.types.listOf (
+                                          lib.types.submodule {
+                                            options = {
+                                              aggressiveness = lib.mkOption { type = lib.types.ints.unsigned; };
+                                              variantDescription = lib.mkOption { type = lib.types.str; };
+                                              dryRunCommand = lib.mkOption { type = lib.types.str; };
+                                              removeCommand = lib.mkOption { type = lib.types.str; };
+                                            };
+                                          }
+                                        );
+                                        default = [ ];
+                                      };
+                                    };
+                                  }
+                                );
+                                default = [ ];
+                              };
                             };
                           }
                         )
@@ -2998,6 +3034,21 @@
                   };
                   defaultLaunchConfigFile =
                     defaultLaunchConfig.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
+
+                  # pg2-4roho decision item 4: enabling this module must
+                  # contribute exactly one pg-disk-reclaimer registry entry
+                  # for its own worktree pool, reusing withLaunchConfig's
+                  # already-set launchConfig.worktreeDir above (Reuse First
+                  # -- no separate evalHM call needed for this).
+                  worktreeReclaimEntries = withLaunchConfig.phillipgreenii.programs.pg-disk-reclaimer.registryEntries;
+                  worktreeReclaimEntry = lib.head worktreeReclaimEntries;
+                  worktreeReclaimVariant = lib.head worktreeReclaimEntry.variants;
+
+                  # disabled -- must contribute NO registry entry (zero
+                  # behavior change for a consumer that imports this module
+                  # without enabling it).
+                  disabledWorktreeReclaimEntries =
+                    disabledModule.phillipgreenii.programs.pg-disk-reclaimer.registryEntries;
 
                   # darwin-side eval: stub the options
                   # darwin/modules/pg-router-ccpool-handler/default.nix
@@ -3211,6 +3262,28 @@
                   poolEnabled.phillipgreenii.programs.pg-router-ccpool-handler.pool.settings.pool.max_sessions == 50;
                 # pool.dir's default resolves under home.homeDirectory.
                 assert poolDefaultDir == "/home/tester/.local/state/pg-router-ccpool";
+                # pg2-4roho decision item 4: exactly one registry entry,
+                # scoped to this handler's own configured worktreeDir, with
+                # exactly one variant.
+                assert lib.length worktreeReclaimEntries == 1;
+                assert worktreeReclaimEntry.id == "pg-router-ccpool-handler-worktrees";
+                assert worktreeReclaimEntry.path == "/tmp/pg2-qsred-repo/.worktrees";
+                assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.displayCommand;
+                assert lib.length worktreeReclaimEntry.variants == 1;
+                assert worktreeReclaimVariant.aggressiveness == 1;
+                # decision item 5's own guard: neither script ever passes
+                # `--force` to `git worktree remove` (the dry-run variant
+                # never even calls it) -- the safety guard is git's own
+                # native dirty-worktree refusal, not reimplemented here.
+                assert !lib.hasInfix "--force" worktreeReclaimVariant.dryRunCommand;
+                assert !lib.hasInfix "--force" worktreeReclaimVariant.removeCommand;
+                assert !lib.hasInfix "worktree remove" worktreeReclaimVariant.dryRunCommand;
+                assert lib.hasInfix "worktree remove" worktreeReclaimVariant.removeCommand;
+                assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.dryRunCommand;
+                assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.removeCommand;
+                # disabled module: zero behavior change (no registry entry
+                # contributed at all).
+                assert disabledWorktreeReclaimEntries == [ ];
                 renderCheck;
 
               # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's

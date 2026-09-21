@@ -70,6 +70,7 @@ type FakeCC struct {
 	EnsureErr   error
 	ListSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
 	ListIdx     int
+	ListErr     error // when set, every List call returns (nil, ListErr) instead of consuming ListSeq
 }
 
 func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _, meta map[string]string) error {
@@ -94,6 +95,9 @@ func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
 	if len(f.ListSeq) == 0 {
 		return nil, nil
 	}

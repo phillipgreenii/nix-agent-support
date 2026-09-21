@@ -120,7 +120,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	} else {
 		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt)
 	}
-	return r.waitFailureResult(cc, d.Item.ID, werr), werr
+	return r.finishWait(ctx, cc, d, r.deps.ExternalID, wt, werr)
 }
 
 // waitFailureResult maps a wait-path error to the verb actually applied to the
@@ -147,6 +147,115 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 // is needed and no budget prompt-line is appended).
 func budgetUnlimited(b budget.Budget) bool {
 	return b.Tokens.Unlimited() && b.Cost.Unlimited() && b.Time <= 0
+}
+
+// finishWait is run()/absorbDuplicate()'s shared tail: classify werr into the
+// verb actually applied to the bead (waitFailureResult, unchanged), and — as
+// the SAME step — run this dispatch's terminal-outcome worktree cleanup
+// (pg2-4roho decision item 1's "primary fix"). werr's three possible shapes
+// (nil/success, a complete.OnFailure-driven failure, or watchdog.
+// ErrBudgetExceeded) are exactly the "success, failure, OR timeout" outcomes
+// the decision names as "already distinguished elsewhere in this code" — one
+// cleanupWorktree call here covers all three, rather than three separate call
+// sites.
+func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	r.cleanupWorktree(ctx, cc, name, wt)
+	return r.waitFailureResult(cc, d.Item.ID, werr), werr
+}
+
+// cleanupWorktree removes name's per-dispatch worktree at wt now that the
+// dispatch has reached a terminal outcome (finishWait's own doc comment).
+// This is the single owner of the common-case cleanup, immediately, with no
+// new timer — replacing reliance on the once-per-process-lifetime
+// preShutdown sweep (cmd/pg-router-ccpool-handler/preshutdown.go's
+// closeUnlessNeedsInput, pg2-a8h6c's short-term stopgap) for the case this
+// dispatch call itself can observe. preshutdown.go's own sweep is left
+// unchanged — it remains the belt-and-suspenders path for a crashed prior
+// run's stray sessions, which this dispatch-scoped call can never see.
+//
+// Scoped to "worktree" isolation ONLY (roles.IsolationConfig's default,
+// usesWorktreeIsolation below): "none" isolation hands back RepoRoot itself
+// (never removable — same invariant watchdog/terminal.go's safeToReset
+// enforces for the reset path), "path" isolation is one FIXED directory
+// reused across every dispatch (removing it after one dispatch would break
+// the next one that reuses it), and "workforest" isolation has its own,
+// unrelated lifecycle (pn-workspace-rules) — none of those are a per-bead
+// git worktree this executor itself created and may unilaterally remove.
+//
+// needs_input is excluded by design (pg2-4roho decision item 2, ADR 0037):
+// a needs_input session's worktree lifetime is tied to the SESSION's own
+// eventual close, not to this dispatch call returning — reimplementing that
+// tie is explicitly out of this bead's scope, but honoring it here (rather
+// than naively removing on every terminal outcome, including the "not
+// complete within MaxWait while still needs_input" failure shape) is not:
+// this is a no-op while the session is still alive and needs_input, or while
+// its state can't be determined at all (needsInputAlive's own can't-tell
+// case). The worktree is removed later, once the session actually closes, by
+// closeUnlessNeedsInput's own existing RemoveWorktree call.
+//
+// Deletion safety guard (decision item 5): RemoveWorktree runs with
+// force=false, so git itself refuses removal whenever the worktree is dirty
+// (uncommitted changes) rather than force-deleting live work (gitclient's
+// own documented behavior — see x/gitclient's WorktreeManager.RemoveWorktree
+// doc comment). Any failure here (dirty worktree, already gone, not a linked
+// worktree, a transient git error) fails soft — log and continue, leaving it
+// for the next sweep (a future dispatch of the same bead reusing the same
+// worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
+// sweep, decision item 4) rather than force-removing.
+func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) {
+	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
+		return
+	}
+	if r.needsInputAlive(ctx, name) {
+		slog.Info("dispatch: worktree cleanup deferred -- session still needs_input",
+			"session", name, "worktree", wt)
+		return
+	}
+	wm, err := r.deps.gitOpener()(ctx, wt)
+	if err != nil {
+		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
+			"session", name, "worktree", wt, "err", err)
+		return
+	}
+	if err := wm.RemoveWorktree(ctx, wt, false); err != nil {
+		slog.Warn("dispatch: worktree cleanup: remove failed (left for next sweep)",
+			"session", name, "worktree", wt, "err", err)
+		return
+	}
+	slog.Info("dispatch: worktree removed", "session", name, "worktree", wt)
+}
+
+// needsInputAlive reports whether the session addressed by externalID is
+// currently alive and in ccpool.StateNeedsInput. Mirrors active()'s own
+// can't-tell/absent split (just below in this file) but resolves the
+// can't-tell case in the OPPOSITE direction, since the two callers need
+// opposite fail-safe biases: active() can't-tell ⇒ assume active (keep
+// waiting; MaxWait still bounds it), while this guard's can't-tell ⇒ assume
+// STILL needs_input (skip cleanup) — deleting a worktree the operator may be
+// actively inspecting is the failure mode decision item 2 exists to prevent,
+// so an ambiguous read must fail toward NOT deleting, not toward deleting. An
+// ABSENT session (definitively gone, not merely unreadable) is unambiguous
+// either way: nothing is left to preserve, so cleanup may proceed.
+func (r *ccpoolRun) needsInputAlive(ctx context.Context, externalID string) bool {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return true // can't tell ⇒ treat as still needs_input ⇒ skip cleanup
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State == ccpool.StateNeedsInput
+		}
+	}
+	return false // absent ⇒ gone ⇒ safe to clean up
+}
+
+// usesWorktreeIsolation reports whether cfg selects the "worktree" isolation
+// strategy (the default: an empty Type, or the explicit "worktree" value —
+// matching newIsolation's own switch in isolation.go) — the only strategy
+// whose Ensure result is a per-dispatch git worktree this executor itself
+// created, and so the only one cleanupWorktree may remove.
+func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
+	return cfg.Type == "" || cfg.Type == "worktree"
 }
 
 // findSessionByName looks up a ccpool session by its --name display label
@@ -191,7 +300,7 @@ func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, exis
 	} else {
 		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD)
 	}
-	return r.waitFailureResult(cc, d.Item.ID, werr), werr
+	return r.finishWait(ctx, cc, d, existing.ExternalID, existing.CWD, werr)
 }
 
 // renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety
