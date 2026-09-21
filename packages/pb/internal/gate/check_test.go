@@ -71,7 +71,7 @@ func scriptGateScan(f *run.FakeRunner, sha string) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 " + sha + "\n"}, nil)
 }
@@ -131,7 +131,7 @@ func scriptProcessableGate(f *run.FakeRunner, id, awaitType, awaitID string) {
 		run.Result{Stdout: `{"data":[` + gateJSON(id, awaitType, awaitID) + `]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"},
 		run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"},
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"},
 		run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
@@ -232,7 +232,7 @@ func TestCheck_malformedAwaitIDIsNotProcessedAsOurs(t *testing.T) {
 			gateJSON("g-good", "pn:applied", "home:repo-a:abc123") + `]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"},
 		run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"},
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"},
 		run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
@@ -289,7 +289,7 @@ func TestCheck_defaultScanWindowIsLast100(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "100", "tip"},
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "-n", "100", "tip"},
 		run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
@@ -321,7 +321,7 @@ func TestCheck_explicitScanWindowIsHonoured(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "7", "tip"},
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "-n", "7", "tip"},
 		run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
@@ -362,7 +362,7 @@ func TestCheck_negativeScanWindowIsForwardedNotDefaulted(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z"}]}`}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "-5", "tip"},
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "-n", "-5", "tip"},
 		run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 gatedsha\n"}, nil)
@@ -383,11 +383,15 @@ func TestCheck_negativeScanWindowIsForwardedNotDefaulted(t *testing.T) {
 }
 
 // logScans returns the trailing rev-range args of every `git log -p` pb ran.
+//
+// The fixed prefix is "-C", <repo>, "log", "-p", "--no-ext-diff", "--no-textconv",
+// "--no-color", "--no-merges" (8 tokens); everything after that is the rev-range.
 func logScans(f *run.FakeRunner) [][]string {
+	const prefixLen = 8
 	var got [][]string
 	for _, c := range f.Calls() {
-		if c.Name == "git" && len(c.Args) > 5 && c.Args[2] == "log" && c.Args[3] == "-p" {
-			got = append(got, c.Args[5:])
+		if c.Name == "git" && len(c.Args) > prefixLen && c.Args[2] == "log" && c.Args[3] == "-p" {
+			got = append(got, c.Args[prefixLen:])
 		}
 	}
 	return got
@@ -799,7 +803,7 @@ func TestCheck_cherryPickedCopyInLockResolves(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	// The same patch-id twice, from two different commits.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"},
 		run.Result{Stdout: "abc123 shipped\nabc123 localonly\n"}, nil)
@@ -1052,7 +1056,7 @@ func TestCheck_resolvesWhenPatchIDInHistory(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 sha\n"}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
 
@@ -1083,13 +1087,13 @@ func TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	// The scan finds patch-id "abc123" from the already-landed, REWRITTEN commit
 	// "landedsha" — the same change, under its post-rebase identity.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 landedsha\n"}, nil)
 	// tryRawSHA: "deadraw1" still resolves as a commit (not yet pruned) and its
 	// patch-id is the SAME "abc123" — the pre-rebase identity of the same change.
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
 
@@ -1118,10 +1122,10 @@ func TestCheck_rawSHARepairRewritesAwaitIDWhenNotYetApplied(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	// The scan finds an UNRELATED patch-id — this change has not landed yet.
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "update", "g-1", "--await-id", "home:repo-a:abc123"}, run.Result{}, nil)
 
@@ -1147,9 +1151,9 @@ func TestCheck_rawSHARepairDryRunRecordsWithoutActing(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:deadraw1","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "deadraw1"}, run.Result{Stdout: "diff-raw"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadraw1\n"}, nil)
 
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
@@ -1183,7 +1187,7 @@ func TestCheck_genuinePatchIDNotYetAppliedIsNotTreatedAsRawSHA(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "other999 othersha\n"}, nil)
 	// deliberately NOT scripting "git show abc123" — a real patch-id is never a
 	// resolvable commitish, so tryRawSHA must not depend on that call succeeding.
@@ -1202,7 +1206,7 @@ func TestCheck_dryRunMutatesNothing(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-a:abc123","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"base1"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "base1", "tip"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "base1..tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 sha\n"}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{
 		WorkspaceDir: "/ws", LastN: 100, DryRun: true, StaleAfter: 72 * time.Hour,
@@ -1280,7 +1284,7 @@ func TestCheck_multiDBResolvesInOwnDB(t *testing.T) {
 		run.Result{Stdout: `{"data":[{"id":"g-b","issue_type":"gate","await_type":"pn:applied",
 			"await_id":"home:repo-b:pidb","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"baseb"}}]}`}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-b", "merge-base", "--is-ancestor", "baseb", "tipb"}, run.Result{}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-b", "log", "-p", "--no-merges", "baseb..tipb"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-b", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "baseb..tipb"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-b", "patch-id", "--stable"}, run.Result{Stdout: "pidb sha\n"}, nil)
 	// resolve MUST target /ws/repo-b (the gate's own DB).
 	f.AddResponse("bd", []string{"-C", "/ws/repo-b", "gate", "resolve", "g-b"}, run.Result{}, nil)
@@ -1321,7 +1325,7 @@ func TestCheck_baselineNotAncestorFallsBackToLastN(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "stale-base", "tip"},
 		run.Result{ExitCode: 1}, fmt.Errorf("not ancestor"))
 	// MUST scan the last-N form, not stale-base..tip
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-merges", "-n", "100", "tip"}, run.Result{Stdout: "diff"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "-n", "100", "tip"}, run.Result{Stdout: "diff"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 sha\n"}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
 	out, err := Check(context.Background(), checkDeps(f, stubDiscover("/ws")), CheckParams{

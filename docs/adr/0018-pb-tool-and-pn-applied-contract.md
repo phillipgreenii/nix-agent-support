@@ -101,6 +101,20 @@ DB** every gate whose patch-id is now present.
 - **Best-effort:** undeterminable gates are skipped and reported; the command exits
   non-zero iff anything was skipped.
 
+### Patch-id inputs must be driver-free
+
+Every `git show`/`git log -p` invocation that feeds `git patch-id --stable` (in both
+`pb gate create` and `pb gate check`) MUST pass `--no-ext-diff --no-textconv --no-color`.
+Without them, a machine whose git config sets `diff.external` or a `diff.*.textconv`
+driver (e.g. difftastic via home-manager) can make `git show`/`git log -p` emit that
+driver's rendering instead of a unified diff, and `git patch-id --stable` would hash
+that rendering — breaking the "rebase-stable identity" this gate contract relies on
+between machines with different (or no) driver configured. Fixed in `pg2-bgh35`; see
+`packages/pb/internal/patchid/patchid.go`'s `Compute` doc comment for the verified
+mechanism (textconv drivers apply to `git log`/`git show` by default, ext-diff drivers
+require an explicit `--ext-diff` for that command family) and
+`packages/pb/internal/patchid/patchid_integration_test.go` for the regression test.
+
 ### Packaging
 
 `pb` is a Pattern-A `mkGoApp` (gomod2nix, no local replace; ADR 0008). `bd` and `git`

@@ -25,7 +25,7 @@ func TestCreate_singleCommitDefaultHEAD(t *testing.T) {
 	// resolveBeadDB: HasBead at /ws
 	f.AddResponse("bd", []string{"-C", "/ws", "show", "b-1", "--json"}, run.Result{Stdout: "{}"}, nil)
 	// git show HEAD | patch-id --stable
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "HEAD"}, run.Result{Stdout: "diff..."}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD"}, run.Result{Stdout: "diff..."}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 deadsha\n"}, nil)
 	// bd gate create (co-located at /ws)
 	f.AddResponse("bd", []string{
@@ -71,9 +71,9 @@ func TestCreate_multiCommitOneGatePerCommit(t *testing.T) {
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "rev-list", "--no-merges", "--reverse", "base1..HEAD"},
 		run.Result{Stdout: "sha1\nsha2\n"}, nil)
 	// patch-id of each
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "sha1"}, run.Result{Stdout: "d1"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "sha1"}, run.Result{Stdout: "d1"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "pid1 sha1\n"}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "sha2"}, run.Result{Stdout: "d2"}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "sha2"}, run.Result{Stdout: "d2"}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "pid2 sha2\n"}, nil)
 	// one gate per commit, both blocking b-1
 	f.AddResponse("bd", []string{
@@ -123,7 +123,7 @@ func TestCreate_unpushedCommitInPinnedRepoIsCreatedSilently(t *testing.T) {
 		{"name":"repo-a","path":"/ws/repo-a","applied_ref":"base1","dirty":false,
 		 "applied_state_schema":2,"terminal_input":true,"locked_rev":"locked1"}]}`}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "show", "b-1", "--json"}, run.Result{Stdout: "{}"}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "HEAD"}, run.Result{Stdout: "diff..."}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD"}, run.Result{Stdout: "diff..."}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "abc123 unpushedsha\n"}, nil)
 	f.AddResponse("bd", []string{
 		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "b-1",

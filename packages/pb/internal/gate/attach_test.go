@@ -33,7 +33,7 @@ func scriptAttachPreamble(f *run.FakeRunner) {
 func scriptOneGate(f *run.FakeRunner, gateID string) {
 	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: createInfoJSON}, nil)
 	f.AddResponse("bd", []string{"-C", "/ws", "show", "pg2-child", "--json"}, run.Result{Stdout: "{}"}, nil)
-	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "sha1"}, run.Result{Stdout: "diff..."}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "show", "--no-ext-diff", "--no-textconv", "--no-color", "sha1"}, run.Result{Stdout: "diff..."}, nil)
 	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{Stdout: "pid1 sha1\n"}, nil)
 	f.AddResponse("bd", []string{
 		"-C", "/ws", "gate", "create", "--type=pn:applied", "--blocks", "pg2-child",

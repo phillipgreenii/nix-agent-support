@@ -28,9 +28,19 @@ func firstField(line string) string {
 
 // Compute returns the patch-id of commitish in the repo at repoPath:
 //
-//	git -C repoPath show <commitish> | git -C repoPath patch-id --stable
+//	git -C repoPath show --no-ext-diff --no-textconv --no-color <commitish> | git -C repoPath patch-id --stable
+//
+// --no-ext-diff/--no-textconv/--no-color are required, not cosmetic: without them,
+// a machine whose git config sets diff.external (or a diff.*.textconv driver) makes
+// `git show`/`git log -p` emit the driver's rendering instead of a unified diff, and
+// `git patch-id --stable` hashes THAT text -- silently producing a patch-id that is
+// neither stable nor comparable with a machine/CI that has no such driver configured.
+// See docs/adr/0018-pb-tool-and-pn-applied-contract.md's "Patch-id inputs must be
+// driver-free" note.
 func (c Client) Compute(ctx context.Context, repoPath, commitish string) (string, error) {
-	show, err := c.R.Run(ctx, "git", []string{"-C", repoPath, "show", commitish}, run.Options{})
+	show, err := c.R.Run(ctx, "git",
+		[]string{"-C", repoPath, "show", "--no-ext-diff", "--no-textconv", "--no-color", commitish},
+		run.Options{})
 	if err != nil {
 		return "", fmt.Errorf("git show %s: %w", commitish, err)
 	}
@@ -55,7 +65,7 @@ func (c Client) IsAncestor(ctx context.Context, repoPath, ancestor, descendant s
 
 // ScanPatchIDs returns the set of patch-ids in the given log range:
 //
-//	git -C repoPath log -p --no-merges <revRange...> | git patch-id --stable
+//	git -C repoPath log -p --no-ext-diff --no-textconv --no-color --no-merges <revRange...> | git patch-id --stable
 //
 // revRange is split on spaces into git args (e.g. "base..tip" or "-n 100 tip").
 // It is the key set of ScanPatchIDCommits; use that when the COMMIT carrying a
@@ -75,7 +85,10 @@ func (c Client) ScanPatchIDs(ctx context.Context, repoPath, revRange string) (ma
 // ScanPatchIDCommits scans the same range as ScanPatchIDs and additionally reports
 // which COMMIT each patch-id came from:
 //
-//	git -C repoPath log -p --no-merges <revRange...> | git patch-id --stable
+//	git -C repoPath log -p --no-ext-diff --no-textconv --no-color --no-merges <revRange...> | git patch-id --stable
+//
+// --no-ext-diff/--no-textconv/--no-color are required for the same reason Compute
+// needs them: see its doc comment.
 //
 // `git patch-id` prints "<patch-id> <commit-sha>" per patch, the sha taken from the
 // `commit <sha>` header `git log -p` emits — so the commit mapping is a free
@@ -89,7 +102,7 @@ func (c Client) ScanPatchIDs(ctx context.Context, repoPath, revRange string) (ma
 // answer and is preserved verbatim, so a patch whose sha could not be read still
 // registers as found rather than silently vanishing from the scan.
 func (c Client) ScanPatchIDCommits(ctx context.Context, repoPath, revRange string) (map[string][]string, error) {
-	args := []string{"-C", repoPath, "log", "-p", "--no-merges"}
+	args := []string{"-C", repoPath, "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges"}
 	args = append(args, strings.Fields(revRange)...)
 	logRes, err := c.R.Run(ctx, "git", args, run.Options{})
 	if err != nil {

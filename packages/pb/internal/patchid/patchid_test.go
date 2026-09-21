@@ -253,7 +253,9 @@ func fakeClient() (Client, *run.FakeRunner) {
 }
 
 func scriptShow(f *run.FakeRunner, commitish, stdout string) {
-	f.AddResponse("git", []string{"-C", fakeRepo, "show", commitish}, run.Result{Stdout: stdout}, nil)
+	f.AddResponse("git",
+		[]string{"-C", fakeRepo, "show", "--no-ext-diff", "--no-textconv", "--no-color", commitish},
+		run.Result{Stdout: stdout}, nil)
 }
 
 func scriptPatchID(f *run.FakeRunner, stdout string) {
@@ -261,7 +263,8 @@ func scriptPatchID(f *run.FakeRunner, stdout string) {
 }
 
 func scriptLog(f *run.FakeRunner, rangeArgs []string, stdout string) {
-	args := append([]string{"-C", fakeRepo, "log", "-p", "--no-merges"}, rangeArgs...)
+	args := append([]string{"-C", fakeRepo, "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges"},
+		rangeArgs...)
 	f.AddResponse("git", args, run.Result{Stdout: stdout}, nil)
 }
 
