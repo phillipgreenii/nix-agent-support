@@ -266,28 +266,40 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 
 // TestPayloadGoldenMatchesGrafanaSelectors is the acceptance criterion
 // "Payload golden matches the Grafana selector list byte-for-byte on the
-// fields Grafana reads." The five root_selector strings and every per-row
-// column selector below were read directly from
-// phillipgreenii-nix-support-apps's
-// darwin/modules/observability/dashboards/pg-pr.json (read-only reference;
-// that repo's own file, packet 12's to modify, is never touched here):
+// fields Grafana reads." Every per-row column selector below was read
+// directly from phillipgreenii-nix-support-apps's
+// darwin/modules/observability/dashboards/pg-desk.json (read-only reference;
+// that repo's own file is never touched here). Commit bde10e9 (pg2-060c7,
+// landed in that repo 2026-09-18) retired this dashboard's old column set —
+// number, title, url, draft, build_state, agent_approved, has_conflicts,
+// owner, self_approval_state, self_commented, files_changed, lines_changed —
+// verifying against the real running server and this package's buildRow
+// (plus internal/interpret's Enrichment/Approvals structs, which now back
+// this row: neither carries any of those field names) that none of them are
+// emitted by the current Row shape. Only "number" got a replacement
+// (entity_id); the rest have none:
 //
 //   - Mine panels (mine_act_now, mine_awaiting_others,
-//     mine_awaiting_other_things) read: number, title, url, draft,
-//     build_state, human_approved, agent_approved, has_conflicts, bot_verdict.
-//   - Team panels (team_act_now, team_blocked) read: number, title, url,
-//     owner, build_state, human_approved, agent_approved, has_conflicts,
-//     bot_verdict, match_team_authored, match_review_requested,
-//     match_has_watch_label, self_approval_state, self_commented,
-//     files_changed, lines_changed.
-//   - The root reads: dropped_count.
+//     mine_awaiting_other_things) read: entity_id, human_approved,
+//     bot_verdict, ready_to_promote, degraded, sync_error.
+//   - Team panels (team_act_now, team_blocked) read: entity_id,
+//     human_approved, bot_verdict, match_team_authored,
+//     match_review_requested, match_has_watch_label, ready_to_promote,
+//     degraded, sync_error.
+//   - The hidden panel (hidden) reads: entity_id, category,
+//     ready_to_promote, degraded, sync_error.
+//   - The root reads: dropped_count, age_seconds.
+//
+// sync_error is exercised via the hidden-panel fixture (entity 303) rather
+// than duplicated on every fixture below: buildRow sets it through the same
+// setIfNonEmpty call regardless of which panel the row lands in (see
+// buildRow above), so proving it once is sufficient.
 //
 // The fixture stuffs those exact field names into the interpretation row's
-// enrichment/approvals blobs plus match_reasons — precisely what gather and
-// interpret (this docket's packets 4 and 5, not yet landed) are expected to
-// populate — and this test proves buildRow's flatten mechanism projects them
-// onto the served row unchanged, byte-for-byte on every key name above, and
-// that the fixed payload matches the checked-in golden file exactly.
+// approvals blob plus match_reasons — this test proves buildRow's flatten
+// mechanism projects them onto the served row unchanged, byte-for-byte on
+// every key name above, and that the fixed payload matches the checked-in
+// golden file exactly.
 func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	// The five panel keys and "hidden", pinned against the design doc and
 	// the Grafana JSON's root_selector values.
@@ -315,16 +327,14 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "101",
 		Ownership: "mine", Category: "bug", GateState: "satisfied",
-		Enrichment: `{"number":101,"title":"Fix flaky test","url":"https://github.com/acme/widgets/pull/101","draft":false}`,
-		Approvals:  `{"build_state":"passing","human_approved":true,"agent_approved":false,"has_conflicts":false,"bot_verdict":"no_decision"}`,
-		Panel:      PanelMineActNow, ReadyToPromote: true, Degraded: false,
+		Approvals: `{"human_approved":true,"bot_verdict":"no_decision"}`,
+		Panel:     PanelMineActNow, ReadyToPromote: true, Degraded: false,
 		AsOf: "2026-09-16T12:00:00Z",
 	})
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "202",
 		Ownership: "team", Category: "feature", GateState: "unsatisfied",
-		Enrichment:   `{"number":202,"title":"Add widget export","url":"https://github.com/acme/widgets/pull/202","owner":"teammate1","files_changed":5,"lines_changed":120}`,
-		Approvals:    `{"build_state":"broken","human_approved":false,"agent_approved":true,"has_conflicts":false,"bot_verdict":"disapproved","self_approval_state":"not_approved","self_commented":true}`,
+		Approvals:    `{"human_approved":false,"bot_verdict":"disapproved"}`,
 		MatchReasons: `["team-authored","label:urgent"]`,
 		Panel:        PanelTeamActNow, ReadyToPromote: false, Degraded: true,
 		AsOf: "2026-09-16T11:55:00Z",
@@ -332,9 +342,12 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "303",
 		Ownership: "mine", Category: "chore",
-		Enrichment: `{"number":303,"title":"WIP cleanup","url":"https://github.com/acme/widgets/pull/303","draft":true}`,
-		Panel:      PanelMineAwaitingOthers, ReadyToPromote: false, Degraded: false,
-		AsOf: "2026-09-16T10:00:00Z",
+		Panel: PanelMineAwaitingOthers, ReadyToPromote: false, Degraded: false,
+		// SyncError is the one row exercising the sync_error Grafana
+		// selector (see the doc comment above): buildRow sets it uniformly
+		// regardless of destination panel, so a single fixture suffices.
+		SyncError: "sync timeout",
+		AsOf:      "2026-09-16T10:00:00Z",
 	})
 	hidden := true
 	if err := s.UpsertAnnotation(store.Annotation{
@@ -359,14 +372,15 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	// Byte-for-byte on the fields Grafana reads: every mine/team column
-	// selector must be present, spelled exactly as pg-pr.json's Infinity
-	// datasource columns spell them.
-	mineColumns := []string{"number", "title", "url", "draft", "build_state", "human_approved", "agent_approved", "has_conflicts", "bot_verdict"}
+	// Byte-for-byte on the fields Grafana reads: every mine/team/hidden
+	// column selector must be present, spelled exactly as pg-desk.json's
+	// Infinity datasource columns spell them.
+	mineColumns := []string{"entity_id", "human_approved", "bot_verdict", "ready_to_promote", "degraded"}
 	teamColumns := []string{
-		"number", "title", "url", "owner", "build_state", "human_approved", "agent_approved", "has_conflicts", "bot_verdict",
-		"match_team_authored", "match_review_requested", "match_has_watch_label", "self_approval_state", "self_commented", "files_changed", "lines_changed",
+		"entity_id", "human_approved", "bot_verdict",
+		"match_team_authored", "match_review_requested", "match_has_watch_label", "ready_to_promote", "degraded",
 	}
+	hiddenColumns := []string{"entity_id", "category", "ready_to_promote", "degraded", "sync_error"}
 
 	if len(payload.MineActNow) != 1 {
 		t.Fatalf("MineActNow = %+v, want exactly 1 row", payload.MineActNow)
@@ -381,6 +395,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	if len(payload.Hidden) != 1 {
 		t.Fatalf("Hidden = %+v, want exactly 1 row (entity 303, excluded from mine_awaiting_others)", payload.Hidden)
 	}
+	requireColumns(t, "hidden[0]", payload.Hidden[0], hiddenColumns)
 	if len(payload.MineAwaitingOthers) != 0 {
 		t.Fatalf("MineAwaitingOthers = %+v, want empty (entity 303 is hidden)", payload.MineAwaitingOthers)
 	}
