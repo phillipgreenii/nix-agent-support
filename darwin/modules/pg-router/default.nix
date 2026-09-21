@@ -12,18 +12,24 @@ let
   # dashboardProviders registration).
   #
   # pg-router writes its JSONL event log to the standard path
-  # ${XDG_STATE_HOME}/pg-router/events.jsonl, which the default `path` glob
-  # (${env:XDG_STATE_HOME}/pg-router/*.jsonl) already matches — so no overrides are
-  # needed. Guarded on obs.enable so it is a no-op on machines without the stack.
+  # ${XDG_STATE_HOME}/pg-router/events.jsonl.
   #
   # Relabeled to `pg-router-events` (observability design decision D3): the
   # NEW OTLP log push this module now also wires (emitterEnv below) claims
   # the plain `pg-router` service_name for pg-router's own operational
   # WARN/ERROR slog lines, so this pre-existing registration — which only
   # ever carried the dispatch-outcome ledger (events.jsonl), a narrower
-  # signal — moves to its own label rather than colliding with it. The
-  # glob/path is UNCHANGED: events.jsonl itself is untouched as a file,
-  # only its Loki label moves.
+  # signal — moves to its own label rather than colliding with it.
+  #
+  # `path` MUST be set explicitly here. The logSources submodule's default
+  # glob is derived from the ATTRIBUTE NAME
+  # (${env:XDG_STATE_HOME}/${name}/*.jsonl, phillipgreenii-nix-support-apps's
+  # darwin/modules/observability/registration.nix), so leaving it unset after
+  # the D3 rename would watch ${XDG_STATE_HOME}/pg-router-events/*.jsonl — a
+  # directory that never exists, since events.jsonl itself stayed at
+  # ${XDG_STATE_HOME}/pg-router/events.jsonl. That mismatch is exactly what
+  # left the pg-router-events Loki stream empty from D3 onward (bead
+  # pg2-hybyu) — the filelog receiver watched a glob that could never match.
   obs = config.phillipgreenii.observability;
 
   # OTel OTLP log-export env for the daemon (design section 5.4), mirroring
@@ -93,6 +99,7 @@ in
     (lib.mkIf (obs.enable or false) {
       phillipgreenii.observability.logSources.pg-router-events = {
         serviceName = "pg-router-events";
+        path = "\${env:XDG_STATE_HOME}/pg-router/events.jsonl";
       };
     })
 
