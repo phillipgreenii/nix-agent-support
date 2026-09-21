@@ -31,6 +31,26 @@ the worktree-review label's atomic-release ordering, then blocker modeling, hand
 preconditions, and premise freshness (whose heaviest reference material lives in
 `references/premise-freshness-probes.md`, linked at that section).
 
+## `bd --json` Output Shape
+
+> Two `bd` builds that both print `bd version 1.2.2 (dev)` coexist on this machine and
+> disagree on the `--json` envelope. The machine wrapper (`/etc/profiles/per-user/$USER/bin/bd`,
+> what the pg2 workspace runs) wraps every result as `{"schema_version": …, "data": [...]}`;
+> the `beads-1.2.2` store package that the ZR monorepo dev environment puts on `PATH` — and
+> that every pg-router-dispatched session therefore runs — returns the bare array. Observed
+> 2026-09-21: nine `jq` failures in one week of dispatched sessions, all
+> `Cannot index array with string ("data")`, from filters copied out of this skill and its
+> siblings.
+
+- **J-1** A `jq` filter over `bd … --json` output MUST NOT assume either envelope. Unwrap
+  first with the shape-agnostic prelude, then index:
+  `(if type=="object" and has("data") then .data else . end)` — followed by `[0]` for a
+  single-bead command (`bd show`, `bd dep list`) or `[]` for a list command (`bd list`,
+  `bd ready`, `bd search`, `bd children`). Every probe in this skill and in
+  `references/premise-freshness-probes.md` is written in that form; copy them as written.
+- **J-2** A parse failure on `bd`'s OWN output is never a reason to re-run a MUTATING `bd`
+  command (see **B-7** below): capture the raw output once, then parse it in a separate step.
+
 ## Beads Claim Hygiene
 
 > `bd` has NO `unclaim` verb. A release MUST be synthesised, and the `--assignee ""` half is
@@ -104,7 +124,7 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   (verified: prints `Promoted P3->P0` for `pg2-spwj9`, `Promoted P2->P0` for `pg2-6laiy`):
 
   ```bash
-  bd show <id> --json | jq -r '.data[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
+  bd show <id> --json | jq -r '(if type=="object" and has("data") then .data else . end)[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
   ```
 
 - **W-4** The label's EXIT CONDITION is a RECORDED VERDICT on the isolation — which of
