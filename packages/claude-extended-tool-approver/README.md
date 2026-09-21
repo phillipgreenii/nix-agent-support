@@ -8,6 +8,18 @@ Evaluates tool invocations against an ordered chain of rule modules (envvars, gi
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design patterns behind the engine, the full lifecycle of one decision, and the two ways to extend policy (a new rule module vs. a `rules.json` data change). This README is the operational reference; that document is the architectural one.
 
+### How ceta is registered
+
+Ceta is not necessarily the sole/direct registrant of these hook events. Since
+[ADR 0071](../../docs/adr/0071-claude-code-hook-router.md), Claude Code can reach ceta one of two
+ways: directly, via ceta's own committed `claude-marketplace/claude-extended-tool-approver/`
+plugin (its `hooks/hooks.json`) — the fallback path — or through the `claude-hook-router`, when
+`programs.claude-hook-router.enable` is set, which dispatches to ceta as one of its five delegates
+instead. The two registrations are mutually exclusive (enabling the router disables ceta's own
+direct registration to avoid double-dispatch), and either way ceta evaluates and logs the call
+identically — the router only changes who invokes ceta, never what ceta decides. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sequence diagram covering both paths.
+
 ## Hook Events
 
 | Event             | Purpose                                                       |

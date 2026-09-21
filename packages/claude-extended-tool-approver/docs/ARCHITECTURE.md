@@ -55,22 +55,40 @@ deliberate, since the code comments use the pattern's own vocabulary throughout
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
+    participant Router as claude-hook-router (ADR 0071)
     participant Hook as ceta (PreToolUse hook)
     participant Cfg as configrules.Load (rules.json)
     participant Eng as Engine (RuleChain)
     participant DB as asks.db (SQLite)
 
-    CC->>Hook: PreToolUse(tool_name, tool_input, cwd, session_id, ...)
+    alt router enabled (programs.claude-hook-router.enable)
+        CC->>Router: PreToolUse(tool_name, tool_input, cwd, session_id, ...)
+        Router->>Hook: dispatch to ceta delegate (decide+rewrite contract)
+    else router disabled (graceful-degradation fallback, ADR 0071 Phase C0)
+        CC->>Hook: PreToolUse(tool_name, tool_input, cwd, session_id, ...)
+    end
     Hook->>Cfg: load consumer rules.json (per invocation)
     Hook->>Eng: build engine for this CWD, register RuleChain
     Eng->>Eng: EvaluateHook (Bash: split+fold; else: first-match-wins)
     Eng-->>Hook: RuleResult{Decision, Reason, Module, Trace}
     Hook->>DB: RecordPreToolDecision (ask/deny only)
-    Hook-->>CC: {} (no opinion) | {decision:"allow"} | {decision:"ask"} | {decision:"deny", reason}
+    alt router enabled
+        Hook-->>Router: {} (no opinion) | {decision:"allow"} | {decision:"ask"} | {decision:"deny", reason}
+        Router-->>CC: same response, unwrapped
+    else router disabled
+        Hook-->>CC: {} (no opinion) | {decision:"allow"} | {decision:"ask"} | {decision:"deny", reason}
+    end
 ```
 
-1. **Claude Code fires `PreToolUse`** with the tool name, its input, and the session's cwd. CETA is
-   registered as the hook handler (`cmd/claude-extended-tool-approver`'s hook mode).
+1. **Claude Code fires `PreToolUse`** with the tool name, its input, and the session's cwd — either
+   straight at ceta (the graceful-degradation fallback: ceta's own committed
+   `claude-marketplace/claude-extended-tool-approver/` plugin registers this event directly, per
+   its `hooks/hooks.json`) or at the `claude-hook-router` (ADR 0071), which dispatches to ceta as
+   one of its five delegates when `programs.claude-hook-router.enable` is set — the two
+   registrations are mutually exclusive (enabling the router disables ceta's own direct
+   registration to avoid double-dispatch). Either way, `cmd/claude-extended-tool-approver`'s hook
+   mode handles the call identically from the next step onward: the router is purely a dispatch
+   indirection, not a second decision-maker.
 2. **Consumer config is loaded fresh** — `configrules.Load(configrules.DefaultPath())` re-reads
    `$XDG_CONFIG_HOME/claude-extended-tool-approver/rules.json` on every call. The hook process is
    one-shot (one process per tool call), so this costs exactly one parse; it is not a caching layer

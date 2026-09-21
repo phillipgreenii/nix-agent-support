@@ -119,13 +119,23 @@ in
         processor AFTER the first receives the PREVIOUS processor's output as
         its "<bash-command>" instead of the original, so the list composes
         into a single pipeline rather than each processor seeing the same
-        input independently. This is the ONE place a bash command may be
-        rewritten (bead tc-7m85u): Claude Code runs every matching
-        PreToolUse hook in parallel and keeps only the LAST hook's
-        updatedInput wholesale, so a second, independent rewriting hook would
-        silently lose to ceta -- anything that needs to rewrite a command
-        MUST enter through this list instead of registering a hook of its
-        own.
+        input independently. Claude Code runs every matching PreToolUse hook
+        in parallel and keeps only the LAST hook's updatedInput wholesale, so
+        a second, independent REWRITE-ONLY hook registered directly with
+        Claude Code would silently lose to ceta's own rewrite: a rewrite-only
+        processor MUST still enter through this list instead of registering a
+        hook of its own (bead tc-7m85u) -- that internal composition seam,
+        one level BELOW ceta, is unchanged by ADR 0071 (packet C2's own Out
+        of scope).
+
+        This is no longer the only way a DECISION-MAKING delegate reaches
+        Claude Code, though: since ADR 0071's hook router, such a delegate
+        may instead register through
+        `programs.claude-hook-router.delegates`, one layer ABOVE ceta
+        entirely, which the router dispatches in its own banded priority
+        order rather than threading through this pipeline. `inputProcessors`
+        stays the required seam only for a processor that needs to compose
+        INSIDE ceta's own PreToolUse rewrite.
 
         Exit 0 + non-empty stdout = rewrite; exit 1+ or empty stdout =
         decline, which passes the PRIOR text through UNCHANGED to the next
