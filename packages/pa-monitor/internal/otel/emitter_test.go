@@ -126,7 +126,7 @@ func TestNew_NilWhenEndpointEmpty(t *testing.T) {
 // starts healthy. Exporter construction does not dial, so this is offline-safe,
 // mirroring the connection-emitter construction test.
 func TestNew_WiresExportHealth(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", freeLoopbackOTLPEndpoint(t))
 	e, err := New(context.Background(), Options{ServiceName: "pa-monitor", ServiceVersion: "test"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -355,7 +355,7 @@ func TestRecordersAreNilSafe(t *testing.T) {
 }
 
 func TestNewRegistersInstrumentsAndMeterProvider(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", freeLoopbackOTLPEndpoint(t))
 	e, err := New(context.Background(), Options{ServiceName: "pa-monitor"})
 	if err != nil {
 		t.Fatalf("New: %v", err)

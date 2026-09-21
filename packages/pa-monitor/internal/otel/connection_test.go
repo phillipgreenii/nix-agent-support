@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -12,6 +13,40 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
+
+// freeLoopbackOTLPEndpoint returns an "http://127.0.0.1:<port>" endpoint whose
+// port had NO listener at the moment of allocation, for tests that must
+// exercise the real, network-backed construction path (NewConnectionEmitter /
+// otel.New) with OTEL_EXPORTER_OTLP_ENDPOINT set to something non-empty.
+//
+// pg2-0idxs: these tests used to hardcode the well-known collector port
+// 127.0.0.1:4317. On a dev machine actually running a local otelcol on that
+// port, the SDK's PeriodicReader flushes on Shutdown regardless of whether its
+// export interval has elapsed, so every test run silently pushed a real
+// pa_monitor.daemon.connected=0 (service_version="test") datapoint into
+// production Prometheus, which an alert's aggregation could not distinguish
+// from a genuine daemon outage. Binding then immediately closing an ephemeral
+// port guarantees (short of another process racing the same instant) nothing
+// is listening, so the exporter's dial/export attempts have no live target to
+// leak into. The exporter does not dial synchronously, so no listener needs
+// to remain — the test never depends on the export actually succeeding.
+//
+// Also caps OTEL_EXPORTER_OTLP_TIMEOUT so the doomed export's dial-refused
+// retries give up in well under a second instead of the SDK's 10s default —
+// pure test-speed, unrelated to the leak fix itself.
+func freeLoopbackOTLPEndpoint(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate free loopback port: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "200")
+	return "http://" + addr
+}
 
 func TestConnectionEmitterDisabledWhenNoEndpoint(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
@@ -32,7 +67,7 @@ func TestConnectionEmitterDisabledWhenNoEndpoint(t *testing.T) {
 }
 
 func TestConnectionEmitterConstructsAndRecords(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", freeLoopbackOTLPEndpoint(t))
 	e, err := NewConnectionEmitter(context.Background(), ConnOptions{
 		ServiceName: "pa-monitor", ServiceVersion: "test", Component: "tui",
 	})
@@ -55,7 +90,7 @@ func TestConnectionEmitterConstructsAndRecords(t *testing.T) {
 // map, skipping empty values, without panicking. The batch log processor
 // buffers the record, so no live collector is required.
 func TestConnectionEmitterLogEvent(t *testing.T) {
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", freeLoopbackOTLPEndpoint(t))
 	e, err := NewConnectionEmitter(context.Background(), ConnOptions{
 		ServiceName: "pa-monitor", ServiceVersion: "test", Component: "cmux-bridge",
 	})
