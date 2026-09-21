@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
@@ -204,6 +205,89 @@ binds = ["example.ready"]
 	}
 	if !strings.Contains(got, "invoked:preShutdown") {
 		t.Errorf("handler invocation log = %q, want it to also contain invoked:preShutdown (runrole.go's own post-dispatch hook)", got)
+	}
+}
+
+// TestRunRunRole_BlocksSynchronouslyOnDispatch_NeverRoutedThroughKickOrQueueDispatch
+// is this bead's own (pg2-qubkf, "decouple pg-router-core's tick loop from
+// per-dispatch-pass completion") design doc's Testing plan scenario 8, "the
+// run-role regression lock": run-role's underlying RunOne call
+// (internal/orchestrator/orchestrator.go) never constructs or touches an
+// eventqueue.Queue at all — runrole.go's own runRunRole, above, has no *Queue
+// variable anywhere in it — so RunOne is, structurally, never routed through
+// Dispatch()'s or Kick()'s pass mechanism. This test locks the OBSERVABLE
+// half of that guarantee against a future refactor that might route it
+// through one anyway: it dispatches through a REAL (if fake) handler
+// participant subprocess that deliberately sleeps before replying, then
+// asserts runRunRole's own wall-clock elapsed time is AT LEAST that sleep.
+// Kick()'s whole contract is "return once every eligible offer is LAUNCHED,
+// never wait for it to SETTLE" (queue.go's own doc) — so if a future change
+// ever routed run-role's dispatch through Kick() (or through Dispatch()'s
+// pass mechanism launched from a background goroutine the caller doesn't
+// join), this call would return almost immediately regardless of the
+// handler's own latency, and this assertion would catch it. Today RunOne
+// dispatches inline via wireclient.HandlerClient.Dispatch
+// (orchestrator.go's workOneWithID), which is exactly why this call
+// legitimately blocks for the handler's own full latency.
+func TestRunRunRole_BlocksSynchronouslyOnDispatch_NeverRoutedThroughKickOrQueueDispatch(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "handler-invocations.log")
+	const handlerSleep = 250 * time.Millisecond
+	script := filepath.Join(dir, "slow-fake-handler.sh")
+	body := "#!/bin/sh\n" +
+		"sub=\"$1\"\n" +
+		"echo \"invoked:$sub\" >> \"" + logPath + "\"\n" +
+		"cat > /dev/null\n" +
+		"sleep 0.25\n" +
+		"echo '{\"schemaVersion\":\"1\",\"id\":\"fake\",\"outcome\":\"ok\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write slow fake handler script: %v", err)
+	}
+
+	cfgPath := filepath.Join(dir, "config.toml")
+	cfgBody := `[[query]]
+name = "example-query"
+emits = ["example.ready"]
+type = "command"
+[query.command]
+argv = ["true"]
+format = "json"
+
+[[role]]
+name = "example-role"
+enabled = true
+binds = ["example.ready"]
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	t.Setenv("PG_ROUTER_CONFIG", cfgPath)
+	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config.toml"))
+	t.Setenv("PG_ROUTER_HANDLER_COMMAND", script)
+
+	eventJSON := `{"id":"try-1","type":"example.ready","payload":{"id":"item-1","type":"example.ready"}}`
+	start := time.Now()
+	code := runRunRole("example-role", eventJSON, false)
+	elapsed := time.Since(start)
+
+	if code != exitOK {
+		t.Fatalf("runRunRole exit = %d, want %d (exitOK)", code, exitOK)
+	}
+	if elapsed < handlerSleep {
+		t.Fatalf("runRunRole returned after %v, want it to block for at least the handler's own %v sleep -- "+
+			"RunOne (run-role's underlying call) MUST dispatch fully synchronously and must never be routed "+
+			"through eventqueue.Queue.Kick()'s launch-and-return contract (or Dispatch()'s pass mechanism run "+
+			"from an unjoined goroutine), either of which would let this call return almost immediately "+
+			"regardless of the handler's own latency", elapsed, handlerSleep)
+	}
+
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("the fake handler participant was never invoked (no log file written): %v", err)
+	}
+	if got := string(logged); !strings.Contains(got, "invoked:dispatch") {
+		t.Errorf("handler invocation log = %q, want it to contain invoked:dispatch", got)
 	}
 }
 

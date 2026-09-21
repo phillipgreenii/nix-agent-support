@@ -31,7 +31,7 @@ import (
 
 // idleDrainTick is the between-pass wait runRunUntilIdle's own drive loop
 // blocks on while draining (Binding Decision 1: it drives
-// eventqueue.Queue.Dispatch/Expire/Idle directly rather than calling
+// eventqueue.Queue.Kick/Expire/Idle directly rather than calling
 // eventqueue.Queue.RunUntilIdle, so this wait is a plain time.After rather
 // than RunUntilIdle's injectable `after` seam). It is deliberately short and
 // unrelated to PollInterval, which paces the PRODUCER's re-query cadence, not
@@ -40,7 +40,56 @@ import (
 // synchronously (INV-CONC-1 — no busy decline), so nothing here is waiting ON
 // a handler; the wait only paces how quickly a role's next already-queued
 // head gets its turn.
+//
+// This package's design doc ("decouple pg-router-core's tick loop from
+// per-dispatch-pass completion") switched this loop's own dispatch call from
+// Dispatch to Kick (INV-LIFE-3, docs/behavior/invariants.md): this tick now
+// ALSO covers "wait for a just-launched offer to settle," not only "wait for
+// a busy listener to become eligible again" -- an accepted latency tradeoff
+// (up to one extra idleDrainTick per drain pass for a fast, non-stuck item)
+// in exchange for never blocking the whole drain loop on one genuinely stuck
+// listener.
 const idleDrainTick = 500 * time.Millisecond
+
+// inFlightDrainTimeout bounds runRun's/runRunUntilIdle's shutdown-ordering
+// wait (this package's design doc's "shutdown ordering" note) for every
+// Kick()-launched offer still outstanding on q to settle before the durable
+// store closes underneath it. By the time this runs, ctx has already been
+// cancelled (SIGINT/SIGTERM) -- which is what unsticks a genuinely-stuck
+// subprocess call via wireclient's exec.CommandContext -- so this bound only
+// needs to cover that unwind's own tail latency, never a fresh MaxWait
+// window; a few seconds is ample.
+const inFlightDrainTimeout = 5 * time.Second
+
+// inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
+// the wait inFlightDrainTimeout bounds.
+const inFlightDrainPollInterval = 100 * time.Millisecond
+
+// drainThenCloseStore waits (bounded by inFlightDrainTimeout) for every
+// Kick()-launched offer still outstanding on q to settle, then closes the
+// durable store regardless of whether the wait actually drained everything.
+// This ordering is required now that Kick()'s launched goroutines are
+// detached from the tick loop: unlike Dispatch(), whose blocking return
+// already guaranteed no offer was in flight by the time shutdown began,
+// nothing else guarantees a Kick()-launched offer is not still mid-write
+// when the store closes underneath it (this package's design doc's
+// "shutdown ordering" note).
+//
+// If the wait times out, the design doc's scenario 5b explicitly requires
+// picking one behavior rather than leaving it implicit: this proceeds to
+// storeClose() anyway (never blocks shutdown indefinitely) and accepts that
+// offer's write is lost, logged at "error" -- matching this package's
+// existing swallowed-durable-write precedent (eventqueue's own accept/
+// evict-append error handling), never a silent no-op.
+func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error) {
+	drainCtx, cancel := context.WithTimeout(context.Background(), inFlightDrainTimeout)
+	defer cancel()
+	if !q.WaitForInFlightDrain(drainCtx, inFlightDrainPollInterval) {
+		slog.Error("shutdown: in-flight dispatch offer(s) did not drain before the timeout; closing the durable store anyway -- any still-outstanding offer's durable write will be lost",
+			"timeout", inFlightDrainTimeout, "sessionsInFlight", q.SessionsInFlight())
+	}
+	_ = storeClose()
+}
 
 // handlerCommandFor builds the wireclient.CommandFor seam bootCore and
 // runRunRole both hand to wireclient.New — the "deployment/wiring layer"
@@ -908,7 +957,7 @@ func gateNotice(cfg config.Config) string {
 // the operator notice to stderr exactly on the gate-state TRANSITION (wasGated
 // false → true), which includes "once at startup while gated" since the
 // caller's very first call passes wasGated=false regardless of history;
-// ungated ⇒ ProduceTick + Dispatch + Expire, unchanged. The per-tick
+// ungated ⇒ ProduceTick + Kick + Expire. The per-tick
 // slog.Info the gated branch used to emit every tick is demoted to Debug here
 // (the stderr notice is the transition-worthy signal now). Returns the
 // gated-ness of THIS tick, for the caller to pass back in as wasGated on the
@@ -919,6 +968,17 @@ func gateNotice(cfg config.Config) string {
 // has a fresh-as-of-this-tick gate view even while dispatch itself is
 // paused), and svc.PublishTick fires only on the successful non-gated produce
 // path, unchanged from before this function existed.
+//
+// q.Dispatch() → q.Kick() (this package's design doc, "decouple
+// pg-router-core's tick loop from per-dispatch-pass completion"; INV-LIFE-3,
+// docs/behavior/invariants.md): this tick's own ProduceTick/Expire/
+// gate-observation/PublishTick sequence no longer waits on any launched
+// offer settling before proceeding to the NEXT tick, so one role stuck for
+// its own handler's full MaxWait can no longer stall source re-polling or
+// dispatch to every OTHER role. INV-CONC-1's one-outstanding-offer-per-
+// handler ceiling is unaffected — that lives entirely in Kick's (and
+// Dispatch's) shared phase-1 snapshot, not in how long this loop itself
+// waits on a pass.
 func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, svc *core.Service, q *eventqueue.Queue, wasGated bool, stderr io.Writer) bool {
 	svc.ObserveGateFromTick(time.Now(), currentGateFiles(cfg))
 	if o.Gated() {
@@ -941,7 +1001,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 		for name, serr := range rpt.SourceErrors {
 			slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
 		}
-		q.Dispatch()
+		q.Kick()
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
@@ -1040,7 +1100,7 @@ func runRunUntilIdle(only, disable []string) int {
 		return exitGeneric
 	}
 	postStartupAll(ctx, pr.o, pr.cfg)
-	defer func() { _ = storeClose() }()
+	defer drainThenCloseStore(q, storeClose)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
@@ -1068,13 +1128,25 @@ func runRunUntilIdle(only, disable []string) int {
 		fmt.Fprintln(os.Stderr, "run-until-idle: discover:", err)
 		return exitGeneric
 	}
-	// Binding Decision 1: drive Dispatch/Expire/Idle directly rather than
+	// Binding Decision 1: drive Kick/Expire/Idle directly rather than
 	// calling eventqueue.Queue.RunUntilIdle, so a tick snapshot can be
 	// published after every pass. RunUntilIdle itself (queue.go) is left
 	// completely unmodified — its own doc comment explains why dispatch runs
 	// before expire, which this loop preserves.
+	//
+	// q.Dispatch() → q.Kick() (this package's design doc, "decouple
+	// pg-router-core's tick loop from per-dispatch-pass completion";
+	// INV-LIFE-3, docs/behavior/invariants.md): draining toward idle must
+	// maximize throughput, never spend wall-clock time blocked on one stuck
+	// listener while others have deliverable work. q.Idle() below is
+	// unchanged and already correct against Kick's contract: headFor skips a
+	// (listener, event) pair only once it is SETTLED (e.settled), never on
+	// q.inFlight/busy-ness, so a listener with a still-unsettled
+	// Kick()-launched offer keeps reporting that same head as its
+	// deliverable one — Idle() sees it and correctly returns false — until
+	// that offer's own phase 3 actually settles it.
 	for {
-		q.Dispatch()
+		q.Kick()
 		q.Expire()
 		now := time.Now()
 		svc.PublishTick(core.TickSnapshot{
@@ -1176,7 +1248,7 @@ func runRun(only, disable []string, metricsAddr string) int {
 		return exitGeneric
 	}
 	postStartupAll(ctx, pr.o, pr.cfg)
-	defer func() { _ = storeClose() }()
+	defer drainThenCloseStore(q, storeClose)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 

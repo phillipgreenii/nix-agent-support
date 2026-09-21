@@ -368,6 +368,29 @@ sequenceDiagram
   next start if none is running when it is set. The two differ in **kind**, not degree, and neither
   substitutes for the other.
 
+- **`INV-LIFE-3`** <!-- uuid: 4c5534a8-3ef4-4e5f-954e-c099da336988 --> — **The drive loop's own
+  liveness does not wait on any one offer settling.** The core's drive loop — re-querying pull
+  sources on their triggers (`INTF-SOURCE`) and offering the queue's next deliverable head to every
+  bound handler — **MUST** make forward progress independent of how long any ONE outstanding offer
+  takes to settle: a handler slow to reply, up to and including one that never replies within its
+  own bound, **MUST NOT** stall the next source query or the offer of a **different** handler's own
+  head. The loop **MAY** move on to its next pass before every offer that pass **launched** has
+  settled — only the loop's own wait for that settlement is optional; the offer itself still
+  settles exactly once, still durably, still observed (`INV-EVT-1`, `INV-OBS-1`), whichever pass
+  eventually records it.
+
+  **This does not relax `INV-CONC-1`.** "**One outstanding offer per handler at a time**" holds
+  **unchanged**: a handler already holding an unsettled offer is skipped by every later pass — this
+  loop's own or a driven-to-completion one — exactly as before, regardless of how many passes the
+  loop has since moved on to. What changes is only the loop's own posture toward a pass it has
+  already launched, never the per-handler ceiling itself.
+
+  **A one-off, driven-to-completion pass remains a legitimate shape.** Nothing here forbids a caller
+  that DOES want to wait for a pass's every offer to settle before proceeding (e.g. a smoke test of
+  one handler against one event, or an internal pass with no live caller of its own) — `INV-LIFE-3`
+  states what the core's own drive loop MUST NOT be blocked by, not that every pass MUST be
+  non-blocking.
+
 ## Precedence
 
 - **`INV-PREC-1`** <!-- uuid: b298120d-2344-496b-a849-63e4af071ec0 --> — When two invariants **conflict**, the ordering is

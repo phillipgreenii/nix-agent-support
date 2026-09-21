@@ -907,7 +907,7 @@ Extensions:
 case's own first step.
 **Intent:** run the validated configuration as a **daemon** (`run`) that routes events until it is
 stopped, and inspect it while it runs (`INV-LIFE-1`).
-_Requires:_ `INV-LIFE-1`.
+_Requires:_ `INV-LIFE-1`, `INV-LIFE-3`.
 _Includes:_ `USECASE-VALIDATE-CONFIG` (the startup path validates the wiring before anything runs),
 `USECASE-DEBUG-RUN` (the run-scoped selectors this invocation applies, and the live inspection).
 
@@ -919,9 +919,11 @@ exactly; only what happens next differs.
 
 **Then it does not stop.** A daemon routes events for as long as it is up: sources and managers
 **push** to the core as facts arrive, pull sources are queried on their triggers, and the core stays
-**reachable** throughout (`INV-LIFE-1`). On an orderly shutdown it signals `stopping → stopped`; on a
-sudden one it makes the best-effort `crashing` signal whose loss no correctness rule may depend on
-(`JOURNEY-FLOW`).
+**reachable** throughout (`INV-LIFE-1`). Querying the next source and offering to a different handler
+never wait on one outstanding offer to settle (`INV-LIFE-3`) — a handler slow to reply stalls only
+its OWN next offer (`INV-CONC-1`'s one-outstanding-offer ceiling, unchanged), never the loop's own
+progress. On an orderly shutdown it signals `stopping → stopped`; on a sudden one it makes the
+best-effort `crashing` signal whose loss no correctness rule may depend on (`JOURNEY-FLOW`).
 
 **Inspecting a live core.** The operator inspects a running core for its resolved config, its live
 **deliveries** and its per-`type` queue depths; every command emits text by default and a
@@ -957,14 +959,17 @@ Extensions:
 `USECASE-RUN-DAEMON`'s shared startup path.
 **Intent:** dispatch from the durable queue and **exit** once there is provably nothing left to
 deliver (`run-until-idle`), emitting a **final observability snapshot** on the way out.
-_Requires:_ `INV-LIFE-1`, `INV-OBS-1`.
+_Requires:_ `INV-LIFE-1`, `INV-LIFE-3`, `INV-OBS-1`.
 _Includes:_ `USECASE-RUN-DAEMON` (the shared startup path), `USECASE-VALIDATE-CONFIG`.
 
 **Flow.** The startup path is `USECASE-RUN-DAEMON`'s, unchanged and included by reference. What
 differs is the **exit predicate**: this mode exits once the **queue is drained and no offer is
 outstanding** — every enqueued event accepted or expired, and no handler holding an offer
 (`INV-LIFE-1`). The core stays **reachable throughout**, so a push source is never shut out of a run
-still in progress.
+still in progress. Draining toward that predicate never spends wall-clock time blocked on one
+handler slow to reply while another has its own deliverable backlog (`INV-LIFE-3`): every OTHER
+handler's own head keeps moving, and the exit predicate itself still correctly reads a handler with
+an outstanding, not-yet-settled offer as "not yet idle."
 
 **It emits a final snapshot before it exits, and that is why this is a separate element.** A daemon
 emits observability continuously, so "what did this run do?" is always answerable from a live core.

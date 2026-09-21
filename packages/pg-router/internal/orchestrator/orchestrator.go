@@ -120,6 +120,19 @@ type Orchestrator struct {
 	// ticks. Starts nil (every source due on the very first tick, matching
 	// discover.Produce's own pre-Task-1.3 behavior) and only ever grows via
 	// ProduceTick's own merge of each pass's returned ProduceReport.LastTick.
+	//
+	// Safe with NO added locking even after cmd/pg-router's tick loop moved
+	// from eventqueue.Queue.Dispatch to Queue.Kick (this package's design
+	// doc, "decouple pg-router-core's tick loop from per-dispatch-pass
+	// completion"; INV-LIFE-3): ProduceTick/LastTick calls stay SERIAL
+	// relative to each other (same ticker, same goroutine) exactly as
+	// before, and Kick's per-offer phase 3 (eventqueue's settleOfferLocked)
+	// lives ENTIRELY inside *eventqueue.Queue's own state — it never reads
+	// or writes this field, or any other Orchestrator field, at all; the
+	// ONE Orchestrator-side call Kick's phase 2 makes on its own detached
+	// goroutine (roleListener.Offer -> workOne/emitResult) touches o.Log/
+	// o.Registry/o.resourceLimitObs, never o.lastTick — see
+	// TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer.
 	lastTick map[string]time.Time
 }
 

@@ -86,9 +86,23 @@ type fakeHandler struct {
 	reply         wireclient.Reply
 	err           error
 	repliesByItem map[string]wireclient.Reply
+	// blockRole/unblock (pg2-qubkf part 2, the tick-loop/Kick decouple
+	// design doc): when blockRole matches the dispatched role's name,
+	// Dispatch blocks on unblock before recording the call and returning.
+	// Both fields are set once, during test setup, strictly before any
+	// concurrent goroutine (a Kick()-launched offer, a driving ProduceTick
+	// loop) starts — so reading them from Dispatch later needs no lock of
+	// its own; only TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer
+	// sets them at all, every other test leaves both at their zero value
+	// (no blocking, unchanged behavior).
+	blockRole string
+	unblock   chan struct{}
 }
 
 func (f *fakeHandler) Dispatch(_ context.Context, role roles.Role, evt eventqueue.Event) (wireclient.Reply, error) {
+	if f.blockRole != "" && role.Name == f.blockRole {
+		<-f.unblock
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, dispatchCall{role: role, evt: evt})
@@ -319,6 +333,91 @@ func TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries(t *testin
 	got["other-source"] = time.Time{}
 	if !o.lastTick["other-source"].Equal(stalePriorFire) {
 		t.Fatalf("mutating LastTick()'s result corrupted the Orchestrator's own state: got %v", o.lastTick["other-source"])
+	}
+}
+
+// TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer is this
+// bead's (pg2-qubkf part 2, "decouple pg-router-core's tick loop from
+// per-dispatch-pass completion") own regression coverage for the design
+// doc's o.lastTick concurrency question (orchestrator.go's own field doc):
+// once cmd/pg-router's tick loop switched from eventqueue.Queue.Dispatch to
+// Queue.Kick, a NEW ProduceTick call can now occur while a PRIOR pass's
+// Kick()-launched offer is still settling in the background, on its own
+// detached goroutine -- Dispatch's blocking return used to make that
+// impossible.
+//
+// This proves, under `go test -race`, that o.lastTick (a bare, unlocked
+// map) survives that overlap: repeated ProduceTick/LastTick calls run from
+// THIS goroutine (the tick loop's own driving goroutine, per INV-LIFE-3)
+// while a worker listener's offer sits blocked on handler.unblock -- still
+// inside eventqueue's phase 2 (roleListener.Offer), never having reached
+// its own phase-3 settlement yet -- and again for a few more calls once
+// that offer is unblocked and settling concurrently. If a future change
+// ever made Kick's per-offer phase 2 or phase 3 touch o.lastTick (or any
+// other Orchestrator field ProduceTick/LastTick reach) without
+// synchronization, -race has a real window here to catch it; today it does
+// not (see this field's own doc: phase 3 lives entirely inside
+// *eventqueue.Queue, and phase 2's own Orchestrator-side call --
+// roleListener.Offer -> workOne/emitResult -- never reads or writes
+// o.lastTick).
+func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testing.T) {
+	cfg := fastCfg()
+	workerEvts := []event.Event{event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"})}
+	o := newOrch(cfg, testQuerySet(nil, workerEvts))
+	handler := o.Handler.(*fakeHandler)
+	handler.blockRole = "worker"
+	handler.unblock = make(chan struct{})
+	ctx := context.Background()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(ctx, feedbackRole(o)))
+	q.Register(o.NewListener(ctx, workerRole(o)))
+
+	// Enqueue the one worker.ready event, then Kick(): the worker listener's
+	// own offer launches on its own goroutine and immediately blocks on
+	// handler.unblock -- still inside phase 2, never having reached
+	// eventqueue's own phase-3 settlement.
+	if _, err := o.ProduceTick(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	q.Kick()
+
+	// While that offer sits blocked, drive many more ProduceTick/Kick/
+	// LastTick calls from THIS goroutine -- proving the driving loop's own
+	// progress is unaffected by the stuck offer (INV-LIFE-3), and giving
+	// -race a real concurrent window against the blocked offer's own
+	// goroutine.
+	for i := 0; i < 25; i++ {
+		if _, err := o.ProduceTick(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+		q.Kick()
+		_ = o.LastTick()
+	}
+
+	// Unblock the offer: its own goroutine now proceeds into eventqueue's
+	// phase-3 settlement on ITS OWN schedule, concurrently with a few more
+	// ProduceTick/LastTick calls below -- the window that would catch a
+	// race on o.lastTick from phase 3, were one to exist.
+	close(handler.unblock)
+	for i := 0; i < 10; i++ {
+		if _, err := o.ProduceTick(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+		q.Kick()
+		_ = o.LastTick()
+	}
+
+	drainCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if !q.WaitForInFlightDrain(drainCtx, 5*time.Millisecond) {
+		t.Fatal("the blocked offer never settled")
+	}
+
+	if got := handler.callCount(); got != 1 {
+		t.Fatalf("callCount = %d, want exactly 1 (the worker's one queued event, dispatched exactly once)", got)
+	}
+	if lt := o.LastTick(); lt["worker-source"].IsZero() {
+		t.Errorf("LastTick()[worker-source] is zero, want a real fire time recorded across this test's many ProduceTick calls")
 	}
 }
 
