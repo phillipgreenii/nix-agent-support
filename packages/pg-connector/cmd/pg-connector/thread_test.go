@@ -27,22 +27,26 @@ func writeThreadConfigFor(t *testing.T, backend string) {
 	t.Setenv("PG_PR_CONFIG", cfg)
 }
 
-// TestNewThreadCmd_HasShowAndListOnly is this packet's own acceptance
-// criterion: newThreadCmd() has exactly show/list subcommands — no
-// create/comment/transition/update/close/deps (thread is read-only) —
-// mirroring TestNewAgentSessionCmd_HasShowAndListOnly's identical shape
-// for its own read-only capability.
-func TestNewThreadCmd_HasShowAndListOnly(t *testing.T) {
+// TestNewThreadCmd_HasShowListAndChangesOnly is this packet's own
+// acceptance criterion: newThreadCmd() has exactly show/list/changes
+// subcommands — no create/comment/transition/update/close/deps (thread is
+// read-only) — mirroring TestNewAgentSessionCmd_HasShowAndListOnly's
+// identical shape for its own read-only capability. "changes" joined
+// show/list in bead pg2-955py (this file's own writeThreadConfigFor doc
+// comment and TestRun_ThreadChanges_Wired in changes_test.go cover it):
+// it is a non-mutating delta-report over the same "list" wire op, so its
+// addition does not weaken the read-only guarantee this test enforces.
+func TestNewThreadCmd_HasShowListAndChangesOnly(t *testing.T) {
 	cmd := newThreadCmd()
 	names := map[string]bool{}
 	for _, c := range cmd.Commands() {
 		names[c.Name()] = true
 	}
-	if !names["show"] || !names["list"] {
-		t.Fatalf("expected show and list subcommands, got %v", names)
+	if !names["show"] || !names["list"] || !names["changes"] {
+		t.Fatalf("expected show, list, and changes subcommands, got %v", names)
 	}
-	if len(names) != 2 {
-		t.Fatalf("expected exactly 2 subcommands, got %v", names)
+	if len(names) != 3 {
+		t.Fatalf("expected exactly 3 subcommands, got %v", names)
 	}
 	for _, forbidden := range []string{"create", "comment", "transition", "update", "close", "deps"} {
 		if names[forbidden] {

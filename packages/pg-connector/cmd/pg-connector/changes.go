@@ -34,6 +34,35 @@
 // above) is unchanged by calendar's addition — calendar reuses it
 // completely, exactly like pr/issue.
 //
+// UPDATE (thread, bead pg2-955py): the SCOPE NOTE above is now stale on
+// every one of its own premises — thread.go (bead pg2-2j5ac.40.6) wired
+// newThreadCmd with a real CLI surface, pkg/schema/thread.go's
+// schema.Thread/ThreadListResult landed, and registry.go's entityTypes
+// lists "thread" — so the "no CLI surface / no schema.Thread / no
+// registry entry" reasoning that justified deferring "thread changes" no
+// longer holds. Worse, the deferral broke the live system: ZR's
+// pg-router "thread-me" source (design of record's own section 6.1 query
+// set, "thread-me ... as change feeds") was already configured to call
+// pr-pool-source-pg-connector's "changes thread <query>" adapter verb,
+// which shells out to exactly this "thread changes" subcommand — one that
+// never existed, so every tick failed with cobra's "unknown flag:
+// --query" (thread's own newThreadListCmd's --query flag is the only
+// --query in the thread command tree, and it belongs to a DIFFERENT
+// subcommand). newChangesCmd gained its FOURTH caller,
+// newThreadChangesCmd (below), wired into newThreadCmd (thread.go)
+// exactly like calendar's own addition: no new algorithm, reusing this
+// file's fanOutChanges/changesListFn unchanged — they already call the
+// generic "list" wire op via invokeOne, the SAME op thread's own
+// fanOutThreadList (thread.go) already calls for "thread list", so no
+// backend-side change was needed either. One consequence carries over
+// from ThreadListResult's own documented choice: Truncated is
+// unconditionally true for every thread list reply (thread.go's own
+// ThreadListResult doc comment), so per design section 5.2 ("unless
+// truncated ... removed") and 5.5 ("a truncated result reports no
+// removals"), "thread changes" will report "added"/"changed" but never
+// "removed" — an accepted, pre-existing property of the thread backend,
+// not a new gap this addition introduces.
+//
 // Algorithm (per backend, one independent Ledger per (type, backend,
 // query) — ledger.go's LedgerKey):
 //
@@ -551,17 +580,19 @@ func changesWireFor(results []changesBackendResult) changesWire {
 	return w
 }
 
-// newPrChangesCmd/newIssueChangesCmd/newCalendarChangesCmd are the three
-// new<Type>ChangesCmd() constructors this file's callers name, each
-// attached from that type's own new<Type>Cmd() (pr.go's newPrCmd,
-// issue.go's newIssueCmd, calendar.go's newCalendarCmd) — see this file's
-// own header comment (including its calendar UPDATE note) for why there
-// is no newThreadChangesCmd. newCalendarChangesCmd is this docket's own
-// pg2-o2dmu.3 packet's addition; it calls newChangesCmd unchanged, exactly
-// like its two siblings.
+// newPrChangesCmd/newIssueChangesCmd/newCalendarChangesCmd/
+// newThreadChangesCmd are the four new<Type>ChangesCmd() constructors this
+// file's callers name, each attached from that type's own new<Type>Cmd()
+// (pr.go's newPrCmd, issue.go's newIssueCmd, calendar.go's newCalendarCmd,
+// thread.go's newThreadCmd) — see this file's own header comment
+// (including its calendar and thread UPDATE notes) for why thread was
+// deferred and then added. newCalendarChangesCmd/newThreadChangesCmd are
+// this docket's/bead pg2-955py's own additions; each calls newChangesCmd
+// unchanged, exactly like their siblings.
 func newPrChangesCmd() *cobra.Command       { return newChangesCmd("pr") }
 func newIssueChangesCmd() *cobra.Command    { return newChangesCmd("issue") }
 func newCalendarChangesCmd() *cobra.Command { return newChangesCmd("calendar") }
+func newThreadChangesCmd() *cobra.Command   { return newChangesCmd("thread") }
 
 // humanizeChangesOutcome formats a "changes" fan-out outcome for human
 // display, mirroring humanizePRListOutcome's own shape. Each sources[]

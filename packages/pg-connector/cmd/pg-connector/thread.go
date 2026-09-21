@@ -15,6 +15,19 @@
 // read-only precedent: no create/comment/transition/update/close/deps
 // verb here, unlike issue.go/pr.go.
 //
+// "thread changes" (bead pg2-955py) adds NO new algorithm here at all,
+// exactly like "calendar changes" (calendar.go's own doc comment): its
+// constructor, newThreadChangesCmd, lives in changes.go (that file's own
+// FOURTH newChangesCmd(entityType) caller), reusing that file's existing
+// delta-ledger implementation completely unchanged. This is consistent
+// with "read-only by design" above — changes only ever reports entities
+// pg-connector already fetched via the SAME "list" wire op
+// fanOutThreadList below calls, never a create/comment/transition/
+// update/close/deps mutation — it was missing only because thread had no
+// CLI surface at all when changes.go was first written (see that file's
+// own SCOPE NOTE and UPDATE (thread, ...) comments), not because it was
+// deliberately excluded once thread existed.
+//
 // Freedom-boundary choices made by this packet (stated here per this
 // bead's own Contract, which requires either choice to be recorded):
 //
@@ -62,6 +75,7 @@ func newThreadCmd() *cobra.Command {
 	}
 	threadCmd.AddCommand(newThreadShowCmd())
 	threadCmd.AddCommand(newThreadListCmd())
+	threadCmd.AddCommand(newThreadChangesCmd())
 	return threadCmd
 }
 

@@ -471,6 +471,34 @@ func TestRun_IssueChanges_Wired(t *testing.T) {
 	}
 }
 
+// TestRun_ThreadChanges_Wired proves "changes" is wired for thread too
+// (bead pg2-955py: pg-router's "thread-me" source called
+// `pg-connector thread changes --query <query>` every tick, but thread
+// only had show/list, so cobra fell through to the parent command and
+// failed with "unknown flag: --query" — see changes.go's own UPDATE
+// (thread, ...) header comment). Mirrors TestRun_IssueChanges_Wired,
+// reusing writeThreadConfigFor (thread_test.go) for the registry config.
+func TestRun_ThreadChanges_Wired(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	writeOpAwareFakeBackend(t, "backend-thread-changes", map[string]string{
+		"list": `{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"thread-1","channel":"C123","reply_count":1,"as_of":"2026-09-19T00:00:00Z","stale":false}],"present_ids":["thread-1"],"cursor":null,"truncated":true}}`,
+	}, `{}`)
+	writeThreadConfigFor(t, "backend-thread-changes")
+
+	stdout, _, code := executePr(t, []string{"thread", "changes", "--query", "involving-me", "--consumer", "pg-router"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	w := decodeChangesWire(t, stdout)
+	if len(w.Changes) != 1 {
+		t.Fatalf("Changes = %+v, want 1", w.Changes)
+	}
+	if kinds := changeKindsFor(w.Changes); kinds["added"] != 1 {
+		t.Fatalf("kinds = %+v, want 1 added", kinds)
+	}
+}
+
 // TestChangesRemovedCarriesLastCachedContent covers this packet's own
 // Validation item (d): a "pr changes" call whose backend reports an id as
 // removed, when that id has a live entry in this docket's own umbrella
