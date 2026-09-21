@@ -12,9 +12,25 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
+	"github.com/phillipgreenii/x/gitclient"
 )
+
+// gitWorktreeOpener is the production worktree.Opener wired into
+// servePreShutdown by runPreShutdown below: gitclient.New adapted to
+// worktree.Opener's covariant WorktreeManager return (mirrors
+// internal/executor.Deps.gitOpener's identical adapter closure). It anchors
+// directly at whatever dir it is given (closeUnlessNeedsInput passes s.CWD
+// itself, never RepoRoot) -- proven equivalent to `git worktree remove` run
+// from the repo root, since `git -C <worktree> worktree remove <worktree>`
+// removes a linked worktree from within itself just as well. Tests call
+// teardownAllSessions/closeUnlessNeedsInput directly with a fake
+// worktree.Opener instead of this default.
+var gitWorktreeOpener worktree.Opener = func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
+	return gitclient.New(ctx, dir)
+}
 
 // runPreShutdown implements the `preShutdown` INTF-HANDLER subcommand
 // (pg2-oju6w.15): dispatched once per process lifetime, at the same point
@@ -62,14 +78,14 @@ func runPreShutdown(args []string) int {
 		return conformance.ExitError
 	}
 
-	return servePreShutdown(ccpool.NewCLIRunner(cfg), cfg.SessionPrefix, os.Stdin, os.Stdout)
+	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, cfg.SessionPrefix, os.Stdin, os.Stdout)
 }
 
 // servePreShutdown is runPreShutdown's testable core, factored out so a test
 // can drive it against a fake ccpool.Runner and capture its reply without
 // touching a real ccpool binary or os.Stdin/os.Stdout — mirrors
 // conformance.Participant.Serve's own (stdin, stdout) shape.
-func servePreShutdown(cc ccpool.Runner, sessionPrefix string, stdin io.Reader, stdout io.Writer) int {
+func servePreShutdown(cc ccpool.Runner, open worktree.Opener, sessionPrefix string, stdin io.Reader, stdout io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "preShutdown: read request from stdin:", err)
@@ -87,7 +103,7 @@ func servePreShutdown(cc ccpool.Runner, sessionPrefix string, stdin io.Reader, s
 	var req lifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
-	closed := teardownAllSessions(context.Background(), cc, sessionPrefix)
+	closed := teardownAllSessions(context.Background(), cc, open, sessionPrefix)
 	slog.Info("preShutdown: teardown", "closed", closed)
 
 	writeReply(stdout, map[string]any{
@@ -101,8 +117,11 @@ func servePreShutdown(cc ccpool.Runner, sessionPrefix string, stdin io.Reader, s
 // teardownAllSessions closes every session whose name carries prefix — this
 // process's own sessions and strays left by a crashed prior run — EXCEPT
 // sessions in needs_input, which are preserved (left alive) so the operator
-// can still `ccpool attach` after the pass. Sessions outside the prefix are
-// left untouched. Returns the number actually closed.
+// can still `ccpool attach` after the pass. For every session it does close,
+// it also best-effort removes that session's own worktree (s.CWD) via open,
+// undoing internal/worktree.Ensure's creation side (pg2-a8h6c — the
+// short-term stopgap; the full redesign is pg2-4roho). Sessions outside the
+// prefix are left untouched. Returns the number actually closed.
 //
 // This is the once-per-process-lifetime sweep half of this module's
 // INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not
@@ -113,7 +132,7 @@ func servePreShutdown(cc ccpool.Runner, sessionPrefix string, stdin io.Reader, s
 // Orchestrator.teardownAll — this module's own local re-implementation, not
 // an import (Go's internal-package visibility rule; docs/adr/0065's
 // Addendum), since that package no longer exists in this module.
-func teardownAllSessions(ctx context.Context, cc ccpool.Runner, prefix string) (closed int) {
+func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, prefix string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("preShutdown: teardown list failed", "err", err)
@@ -123,7 +142,7 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, prefix string) (
 		if !strings.HasPrefix(s.ExternalID, prefix) {
 			continue
 		}
-		if closeUnlessNeedsInput(ctx, cc, s.ExternalID, s.State) {
+		if closeUnlessNeedsInput(ctx, cc, open, s) {
 			closed++
 		}
 	}
@@ -131,18 +150,41 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, prefix string) (
 }
 
 // closeUnlessNeedsInput tears down one session UNLESS it is in needs_input,
-// which is PRESERVED (left alive) so the operator can still
-// `ccpool attach <external_id>`. Returns true iff the session was actually
-// closed (purged).
-func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, externalID string, state ccpool.SessionState) bool {
-	if state == ccpool.StateNeedsInput {
+// which is PRESERVED (left alive, worktree untouched) so the operator can
+// still `ccpool attach <external_id>`. Returns true iff the session was
+// actually closed (purged).
+//
+// Once cc.Close succeeds, it also best-effort removes s (the session's own
+// working directory, ccpool.Session.CWD) as a linked git worktree via
+// open/gitclient.WorktreeManager.RemoveWorktree. This must fail SOFT (log +
+// continue), never abort the caller's sweep or be promoted to a nonzero
+// overall exit: teardownAllSessions sweeps every session matching
+// SessionPrefix regardless of which IsolationConfig.Type
+// (internal/executor/isolation.go) launched it, so s.CWD is not always a
+// registered linked worktree of any repository — for "none" isolation it's
+// RepoRoot itself (git refuses to remove a repo's main working tree), and
+// for "path"/"workforest" isolation it's an unrelated directory that may
+// not even be inside a git repository at all. Either failure shape (open
+// erroring because cwd isn't inside any repo, or RemoveWorktree itself
+// erroring because it isn't a registered linked worktree of the repo it IS
+// inside) is expected and equally harmless — same fail-soft posture
+// cc.Close's own error handling above already has.
+func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, s ccpool.Session) bool {
+	if s.State == ccpool.StateNeedsInput {
 		slog.Info("preShutdown: teardown preserving needs_input session for operator attach",
-			"session", externalID, "attach", "ccpool attach "+externalID)
+			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
 		return false
 	}
-	if err := cc.Close(ctx, externalID, true); err != nil {
-		slog.Warn("preShutdown: teardown close failed", "session", externalID, "err", err)
+	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
+		slog.Warn("preShutdown: teardown close failed", "session", s.ExternalID, "err", err)
 		return false
+	}
+	if wm, err := open(ctx, s.CWD); err != nil {
+		slog.Warn("preShutdown: teardown worktree remove failed (cwd may not be inside a git repository)",
+			"session", s.ExternalID, "cwd", s.CWD, "err", err)
+	} else if err := wm.RemoveWorktree(ctx, s.CWD, true); err != nil {
+		slog.Warn("preShutdown: teardown worktree remove failed (cwd may not be a linked worktree)",
+			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	}
 	return true
 }
