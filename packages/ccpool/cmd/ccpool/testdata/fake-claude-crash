@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# fake-claude-crash — test stub simulating pg2-5sirm's failure signature: fires
+# SessionStart normally (so a `ccpool new` reaches ready/live, exactly like
+# testdata/fake-claude), then CRASHES on the first input line instead of
+# completing the turn -- a non-zero exit with a distinctive stderr marker,
+# mirroring "session exited before completing" (pg2-olchz). Used by
+# crash_integration_test.go to prove remain-on-exit=failed leaves the dead
+# pane (and its stderr) inspectable instead of the pane/session vanishing.
+set -uo pipefail
+
+uuid=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id) uuid="$2"; shift 2 ;;
+    --name|--model|--plugin-dir|--resume) shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+cc="${CCPOOL_BIN:-ccpool}"
+transcript="${FAKE_CLAUDE_TRANSCRIPT:-/tmp/fake-claude-crash-$uuid.jsonl}"
+: > "$transcript"
+
+payload() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"%s"}' "$uuid" "$transcript" "$PWD" "$1"; }
+
+payload SessionStart | "$cc" hook start || true
+
+# First input line: crash instead of replying -- no Stop hook, no graceful
+# exit. Exit status is deliberately non-zero (7) so remain-on-exit=failed
+# preserves the pane.
+IFS= read -r _line
+echo "FAKE-CLAUDE-CRASH-MARKER: simulated mid-turn crash, forensic stderr" >&2
+exit 7

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,8 +25,33 @@ func TestClient_NewSession_argv(t *testing.T) {
 		"-e", "CCPOOL_NAME=alpha", "-e", "PA_MONITOR_NO_NUDGE=1",
 		"--", "claude", "--session-id", "u1",
 	}
-	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+	if len(got) != 2 || !reflect.DeepEqual(got[0], want) {
 		t.Errorf("argv = %v\nwant %v", got, want)
+	}
+	// NewSession must also arm remain-on-exit=failed on the pane it just created
+	// (pg2-olchz) so a future crash leaves an inspectable dead pane instead of
+	// vanishing, without preserving a CLEAN exit (which would break every
+	// HasSession-based liveness check elsewhere — see client.go's doc comment).
+	wantOpt := []string{"-L", "ccpool", "set-option", "-t", "cc-alpha", "remain-on-exit", "failed"}
+	if len(got) != 2 || !reflect.DeepEqual(got[1], wantOpt) {
+		t.Errorf("argv[1] = %v\nwant %v", got, wantOpt)
+	}
+}
+
+// TestClient_NewSession_remainOnExitErrorPropagates: if the follow-up
+// set-option call fails (e.g. tmux dies between the two calls), NewSession
+// must surface the error rather than silently leaving remain-on-exit unset.
+func TestClient_NewSession_remainOnExitErrorPropagates(t *testing.T) {
+	calls := 0
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		calls++
+		if calls == 2 {
+			return []byte("no such option"), fmt.Errorf("boom")
+		}
+		return nil, nil
+	}}
+	if err := c.NewSession("cc-a", "", nil, []string{"claude"}); err == nil {
+		t.Error("NewSession: want error when set-option remain-on-exit fails, got nil")
 	}
 }
 
@@ -57,6 +83,84 @@ func TestClient_HasSession_emptyTargetNeverLive(t *testing.T) {
 	}
 	if called {
 		t.Error(`HasSession("") shelled out to tmux; want short-circuit without querying`)
+	}
+}
+
+// TestClient_HasSession_queriesPaneDead: HasSession must gate a #{pane_dead}
+// query behind a preceding `has-session` (pg2-olchz), so a crashed-but-
+// preserved pane (remain-on-exit=failed) reads as NOT live — otherwise every
+// liveness-based caller (reuse-live, phantom-prune reap, Close's fast path,
+// pg-router-ccpool-handler's active()) would treat a crashed session as still
+// running. Two calls, in this order: `has-session` first (exact-match
+// existence), THEN `display-message -p '#{pane_dead}'` (liveness of the
+// confirmed-existing pane) — never pane_dead alone; see
+// TestClient_HasSession_neverQueriesPaneDeadOnNonexistentTarget for why.
+func TestClient_HasSession_queriesPaneDead(t *testing.T) {
+	var got [][]string
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		got = append(got, args)
+		if args[2] == "has-session" {
+			return nil, nil
+		}
+		return []byte("0\n"), nil
+	}}
+	if !c.HasSession("cc-a") {
+		t.Error("HasSession = false, want true for a live (pane_dead=0) session")
+	}
+	wantHas := []string{"-L", "ccpool", "has-session", "-t", "cc-a"}
+	wantDead := []string{"-L", "ccpool", "display-message", "-p", "-t", "cc-a", "#{pane_dead}"}
+	if len(got) != 2 || !reflect.DeepEqual(got[0], wantHas) || !reflect.DeepEqual(got[1], wantDead) {
+		t.Errorf("argv = %v\nwant [%v %v]", got, wantHas, wantDead)
+	}
+}
+
+func TestClient_HasSession_deadPaneNotLive(t *testing.T) {
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		if args[2] == "has-session" {
+			return nil, nil // the session itself still exists (remain-on-exit=failed kept it)
+		}
+		return []byte("1\n"), nil // but the pane's process crashed
+	}}
+	if c.HasSession("cc-a") {
+		t.Error("HasSession = true, want false for a dead (crashed) pane")
+	}
+}
+
+func TestClient_HasSession_missingSessionNotLive(t *testing.T) {
+	c := &Client{Socket: "ccpool", run: func(_ ...string) ([]byte, error) {
+		return []byte("can't find session"), fmt.Errorf("exit status 1")
+	}}
+	if c.HasSession("cc-gone") {
+		t.Error("HasSession = true, want false when the session doesn't exist")
+	}
+}
+
+// TestClient_HasSession_neverQueriesPaneDeadOnNonexistentTarget is the
+// regression this two-step shape exists to prevent (pg2-olchz): unlike
+// `has-session -t <name>`, tmux's `display-message -p -t <name>` does NOT
+// error on a target that doesn't exist — verified against tmux 3.6a, with
+// exactly one real session on the socket it silently falls back to that
+// session's own pane_dead instead of failing. Querying pane_dead first (or
+// alone) on a brand-new external_id would therefore read some OTHER, unrelated
+// session's liveness and falsely report the new one as already live (this
+// broke `ccpool new second` while "first" was the only session actually on
+// the socket: it read back route=reuse_live against first's pane instead of
+// launching). HasSession must never reach the pane_dead call unless
+// has-session already confirmed the exact target exists.
+func TestClient_HasSession_neverQueriesPaneDeadOnNonexistentTarget(t *testing.T) {
+	calledDisplayMessage := false
+	c := &Client{Socket: "ccpool", run: func(args ...string) ([]byte, error) {
+		if args[2] == "has-session" {
+			return []byte("can't find session: cc-gone"), fmt.Errorf("exit status 1")
+		}
+		calledDisplayMessage = true
+		return []byte("0\n"), nil // simulates tmux's fallback-to-another-session behavior
+	}}
+	if c.HasSession("cc-gone") {
+		t.Error("HasSession = true, want false when has-session reports the target missing")
+	}
+	if calledDisplayMessage {
+		t.Error("HasSession queried display-message after has-session reported the target missing; want short-circuit")
 	}
 }
 
