@@ -27,4 +27,3 @@ internal/budget 85
 internal/prompt 95
 internal/complete 95
 internal/beads 70
-internal/pgrouteracl 70

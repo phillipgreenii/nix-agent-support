@@ -61,11 +61,13 @@ type Config struct {
 	PermissionMode string
 	AllowedTools   string
 	Autonomous     bool
-	// PRTool is the external PR-management tool this module's ACL
-	// (internal/pgrouteracl) and preflight (resolveSelf) shell out to —
-	// configuration, never a name compiled into this module's own contract
-	// surface (GOAL-MIN-1's Floor). Empty (the default) adds no extra grant
-	// to the built-in AllowedTools default; see defaultAllowedTools below.
+	// PRTool is the external PR-management tool this module's preflight
+	// (resolveSelf) shells out to — configuration, never a name compiled
+	// into this module's own contract surface (GOAL-MIN-1's Floor). Empty
+	// (the default) adds no extra grant to the built-in AllowedTools
+	// default; see defaultAllowedTools below. (internal/pgrouteracl, the
+	// other former consumer of this field, was dead code with no caller and
+	// was deleted outright — bead pg2-gidpd.)
 	// This also realizes this module's own INV-CCH-5 (docs/behavior/
 	// invariants.md): pg-pr's name is configuration on THIS side, never
 	// written into packages/pg-router's own contract surface (its --help
