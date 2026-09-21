@@ -310,6 +310,42 @@ func TestList_parsesCWD(t *testing.T) {
 	}
 }
 
+// TestList_parsesMeta proves ccpool's own `meta` object (the pgrouter.* tags
+// DispatchMeta stamps at dispatch — ccpool's list.go listJSON.Meta) round-trips
+// into Session.Meta, so a caller can recover the session's own bead id without
+// parsing ExternalID/Name (pg2-5sirm: preShutdown's reconciliation reads
+// s.Meta[MetaKeyBead] this way rather than re-deriving it from the id string).
+func TestList_parsesMeta(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"needs_input","live":true,"meta":{"pgrouter.bead":"zr-1.2","pgrouter.role":"review","pgrouter.pool":"pg-router"}}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Meta[MetaKeyBead] != "zr-1.2" {
+		t.Errorf("parsed Meta = %+v, want pgrouter.bead=zr-1.2", got[0].Meta)
+	}
+}
+
+// TestList_absentMetaIsNil proves a session with no `meta` key (the common
+// case for older/non-tagged sessions) decodes to a nil map rather than an
+// error, so a caller can safely index it (s.Meta[MetaKeyBead] on a nil map is
+// "", not a panic).
+func TestList_absentMetaIsNil(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"idle","live":false}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Meta != nil {
+		t.Errorf("Meta = %+v, want nil for a session with no meta key", got[0].Meta)
+	}
+	if got[0].Meta[MetaKeyBead] != "" {
+		t.Errorf("indexing a nil Meta must yield the zero value, not panic")
+	}
+}
+
 // pg2-x6ef: stderr noise emitted alongside the list JSON must not reach the
 // parser. run returns stdout and stderr separately; List reads stdout only.
 func TestList_stderrDoesNotCorruptJSON(t *testing.T) {

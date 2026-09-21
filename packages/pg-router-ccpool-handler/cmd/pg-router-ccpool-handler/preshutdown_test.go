@@ -118,7 +118,7 @@ func TestTeardownAllSessions_purges(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-x", Live: true},
 		{ExternalID: "cc-unrelated", Live: true},
 	}}}
-	teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, "pg-router-")
+	teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
 		t.Fatalf("teardown must close only the pg-router session; closed=%v", cc.Closed)
 	}
@@ -135,23 +135,25 @@ func TestTeardownAllSessions_returnsClosedCount(t *testing.T) {
 		{ExternalID: "pg-router-feedback-zr-b", Live: true},
 		{ExternalID: "cc-unrelated", Live: true},
 	}}}
-	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
 	if n != 2 {
 		t.Errorf("teardownAllSessions closed count = %d, want 2 (pg-router- sessions only); closed=%v", n, cc.Closed)
 	}
 }
 
 // TestTeardownAllSessions_preservesNeedsInput: a pg-router session in
-// needs_input is left alive (NOT closed) so the operator can still attach
-// after the pass; other pg-router sessions are still reaped, and the
-// returned count excludes the preserved one.
+// needs_input with NO bead metadata (so beadAlreadyClosed fails soft — same
+// as an older session dispatched before pg2-5sirm) is left alive (NOT
+// closed) so the operator can still attach after the pass; other pg-router
+// sessions are still reaped, and the returned count excludes the preserved
+// one.
 func TestTeardownAllSessions_preservesNeedsInput(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
 		{ExternalID: "pg-router-worker-zr-need", Live: true, State: ccpool.StateNeedsInput},
 		{ExternalID: "pg-router-worker-zr-done", Live: true, State: ccpool.StateIdle},
 		{ExternalID: "cc-unrelated", Live: true, State: ccpool.StateWorking},
 	}}}
-	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
 	if n != 1 {
 		t.Errorf("teardownAllSessions closed count = %d, want 1 (needs_input preserved, stray excluded); closed=%v", n, cc.Closed)
 	}
@@ -160,6 +162,36 @@ func TestTeardownAllSessions_preservesNeedsInput(t *testing.T) {
 	}
 	if contains(cc.Closed, "pg-router-worker-zr-need") {
 		t.Errorf("teardown must NOT close a needs_input session; closed=%v", cc.Closed)
+	}
+}
+
+// TestTeardownAllSessions_reconcilesNeedsInputWhenBeadClosed is the sweep-level
+// regression for pg2-5sirm's own zr-50s7h.2: a needs_input session tagged with
+// a bead that is ALREADY closed must be reaped in the very same sweep that
+// still preserves a needs_input session whose bead remains open.
+func TestTeardownAllSessions_reconcilesNeedsInputWhenBeadClosed(t *testing.T) {
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{
+			ExternalID: "pg-router-review-zr-50s7h.2-20260919T025624.285144000",
+			Live:       true, State: ccpool.StateNeedsInput,
+			Meta: map[string]string{ccpool.MetaKeyBead: "zr-50s7h.2"},
+		},
+		{
+			ExternalID: "pg-router-worker-zr-0t0z7.3-20260919T033857.961022000",
+			Live:       true, State: ccpool.StateNeedsInput,
+			Meta: map[string]string{ccpool.MetaKeyBead: "zr-0t0z7.3"},
+		},
+	}}}
+	br := fakeBR{out: map[string]string{
+		"show zr-50s7h.2 --json": `{"status":"closed"}`,
+		"show zr-0t0z7.3 --json": `{"status":"open"}`,
+	}}
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-")
+	if n != 1 {
+		t.Fatalf("teardownAllSessions closed count = %d, want 1 (only the closed-bead session reconciled); closed=%v", n, cc.Closed)
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-review-zr-50s7h.2-20260919T025624.285144000" {
+		t.Errorf("must reconcile the closed-bead session only; closed=%v", cc.Closed)
 	}
 }
 
@@ -174,7 +206,7 @@ func TestTeardownAllSessions_removesWorktreeOfClosedSessionOnly(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-done", Live: true, State: ccpool.StateIdle, CWD: "/wt/done"},
 	}}}
 	open := &fakeWorktreeOpener{}
-	n := teardownAllSessions(context.Background(), cc, open.Open, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-")
 	if n != 1 {
 		t.Fatalf("teardownAllSessions closed count = %d, want 1; closed=%v", n, cc.Closed)
 	}
@@ -195,7 +227,7 @@ func TestCloseUnlessNeedsInput_worktreeOpenFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{OpenErrAt: map[string]bool{"/scratch/not-a-repo": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/scratch/not-a-repo"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a worktree-open failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -215,7 +247,7 @@ func TestCloseUnlessNeedsInput_removeWorktreeFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/repo/root": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/repo/root"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a RemoveWorktree failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -223,6 +255,85 @@ func TestCloseUnlessNeedsInput_removeWorktreeFailsSoft(t *testing.T) {
 	}
 	if len(open.Removed) != 1 || open.Removed[0] != "/repo/root" {
 		t.Errorf("RemoveWorktree must still be attempted; calls=%v", open.Removed)
+	}
+}
+
+// TestCloseUnlessNeedsInput_reconcilesNeedsInputWhenBeadClosed is pg2-5sirm's
+// core regression: zr-50s7h.2 closed 2026-09-19 (review fully posted) while
+// its own ccpool session sat in needs_input, live, for ~2.5 days because
+// nothing ever revisited it. A needs_input session whose pgrouter.bead is
+// already closed must now be reconciled (closed) instead of preserved
+// forever.
+func TestCloseUnlessNeedsInput_reconcilesNeedsInputWhenBeadClosed(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	br := fakeBR{out: map[string]string{"show zr-50s7h.2 --json": `{"status":"closed"}`}}
+	s := ccpool.Session{
+		ExternalID: "pg-router-review-zr-50s7h.2-20260919T025624.285144000",
+		State:      ccpool.StateNeedsInput,
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-50s7h.2"},
+	}
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+		t.Fatal("closeUnlessNeedsInput = false, want true: a needs_input session whose bead is already closed must be reconciled")
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != s.ExternalID {
+		t.Errorf("session must be closed; closed=%v", cc.Closed)
+	}
+}
+
+// TestCloseUnlessNeedsInput_preservesNeedsInputWhenBeadOpen proves the sibling
+// zr-0t0z7.3 case (a genuinely open bead awaiting a real reviewer answer)
+// stays preserved — reconciliation must not fire on an open bead.
+func TestCloseUnlessNeedsInput_preservesNeedsInputWhenBeadOpen(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	br := fakeBR{out: map[string]string{"show zr-0t0z7.3 --json": `{"status":"open"}`}}
+	s := ccpool.Session{
+		ExternalID: "pg-router-worker-zr-0t0z7.3-20260919T033857.961022000",
+		State:      ccpool.StateNeedsInput,
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-0t0z7.3"},
+	}
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session whose bead is still open must be preserved")
+	}
+	if len(cc.Closed) != 0 {
+		t.Errorf("session must NOT be closed; closed=%v", cc.Closed)
+	}
+}
+
+// TestCloseUnlessNeedsInput_preservesNeedsInputWithoutBeadMeta covers an older
+// session dispatched before pg2-5sirm's meta round-trip (or a non-"worktree"
+// stray this sweep still matches by prefix alone): with no pgrouter.bead tag
+// at all, beadAlreadyClosed must fail soft (preserve) rather than guess.
+func TestCloseUnlessNeedsInput_preservesNeedsInputWithoutBeadMeta(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	s := ccpool.Session{ExternalID: "pg-router-worker-zr-old", State: ccpool.StateNeedsInput}
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
+		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session with no bead metadata must be preserved")
+	}
+	if len(cc.Closed) != 0 {
+		t.Errorf("session must NOT be closed; closed=%v", cc.Closed)
+	}
+}
+
+// TestCloseUnlessNeedsInput_preservesNeedsInputOnBeadLookupError proves a bd
+// outage fails soft (preserve) rather than risk purging a session an
+// operator still needs to attach to just because bd could not be reached.
+func TestCloseUnlessNeedsInput_preservesNeedsInputOnBeadLookupError(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	br := fakeBR{err: errors.New("bd down")}
+	s := ccpool.Session{
+		ExternalID: "pg-router-worker-zr-x",
+		State:      ccpool.StateNeedsInput,
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-x"},
+	}
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+		t.Fatal("closeUnlessNeedsInput = true, want false: a bd lookup failure must fail soft and preserve the session")
+	}
+	if len(cc.Closed) != 0 {
+		t.Errorf("session must NOT be closed; closed=%v", cc.Closed)
 	}
 }
 
@@ -235,7 +346,7 @@ func TestTeardownAllSessions_worktreeFailureDoesNotAbortSweep(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-b", Live: true, State: ccpool.StateIdle, CWD: "/wt/b"},
 	}}}
 	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/repo/root": true}}
-	n := teardownAllSessions(context.Background(), cc, open.Open, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-")
 	if n != 2 {
 		t.Fatalf("teardownAllSessions closed count = %d, want 2 (both sessions closed despite the first's worktree removal failing); closed=%v", n, cc.Closed)
 	}
@@ -252,7 +363,7 @@ func TestServePreShutdown_success(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-x", Live: true},
 	}}}
 	var stdout bytes.Buffer
-	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, "pg-router-", strings.NewReader(`{"schemaVersion":"1","id":"hs-1"}`), &stdout)
+	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", strings.NewReader(`{"schemaVersion":"1","id":"hs-1"}`), &stdout)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d", code, conformance.ExitOK)
 	}
@@ -273,7 +384,7 @@ func TestServePreShutdown_success(t *testing.T) {
 func TestServePreShutdown_rejectsMalformedRequest(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-x", Live: true}}}}
 	var stdout bytes.Buffer
-	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, "pg-router-", strings.NewReader(`{"schemaVersion":"1"}`), &stdout) // missing id
+	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", strings.NewReader(`{"schemaVersion":"1"}`), &stdout) // missing id
 	if code != conformance.ExitError {
 		t.Fatalf("exit = %d, want %d on a schema-invalid request", code, conformance.ExitError)
 	}

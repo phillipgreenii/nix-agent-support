@@ -47,13 +47,14 @@ const (
 // Session is one row from `ccpool list --all --json`. A session is addressed by
 // ExternalID; Name is an optional, non-unique display label (ADR 0015).
 type Session struct {
-	ExternalID      string       `json:"external_id"`
-	Name            string       `json:"name"` // optional display label; nullable, non-unique
-	ClaudeSessionID string       `json:"claude_session_id"`
-	State           SessionState `json:"state"`
-	Live            bool         `json:"live"`            // tmux has-session (liveness, NOT a store state)
-	TranscriptPath  string       `json:"transcript_path"` // consumed by chunk B (token observation)
-	CWD             string       `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
+	ExternalID      string            `json:"external_id"`
+	Name            string            `json:"name"` // optional display label; nullable, non-unique
+	ClaudeSessionID string            `json:"claude_session_id"`
+	State           SessionState      `json:"state"`
+	Live            bool              `json:"live"`            // tmux has-session (liveness, NOT a store state)
+	TranscriptPath  string            `json:"transcript_path"` // consumed by chunk B (token observation)
+	CWD             string            `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
+	Meta            map[string]string `json:"meta,omitempty"`  // the pgrouter.* tags DispatchMeta stamps at dispatch (MetaKeyBead/MetaKeyRole/MetaKeyPool); absent/nil for a session ccpool never received meta for
 }
 
 type SendMode int
