@@ -54,7 +54,7 @@ const boundIntervals = 2
 // (docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md
 // lines 946-953) and cross-checked against the Grafana dashboard JSON's
 // root_selector values in phillipgreenii-nix-support-apps
-// (darwin/modules/observability/dashboards/pg-pr.json) — every byte here MUST
+// (darwin/modules/observability/dashboards/pg-desk.json) — every byte here MUST
 // match those root_selector strings exactly, or the Infinity datasource panel
 // finds nothing.
 const (
