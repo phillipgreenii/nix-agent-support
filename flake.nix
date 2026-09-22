@@ -287,6 +287,16 @@
           pg-router-source-pg-connector = final.callPackage ./packages/pg-router-source-pg-connector {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-probe: Pattern A (ADR 0008), same shape as
+          # pg-router-source-pg-connector above — a standalone deterministic
+          # health probe over pg-router's own operational health (docket
+          # pg2-93e5s, packet 1). It execs pg-connector as a subprocess
+          # (ambient $PATH) for every bd write/read and implements its own
+          # Grafana HTTP client rather than depending on another custom
+          # flake, so it needs no local `replace`/modRoot either.
+          pg-router-probe = final.callPackage ./packages/pg-router-probe {
+            inherit (goBuilders) mkGoApp;
+          };
           pg-router = final.callPackage ./packages/pg-router {
             inherit (goBuilders) mkGoApp;
             # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
@@ -922,7 +932,11 @@
               # (`pa-monitor-decorator-scope`, `claude-transcript`,
               # `pg-ccaudit` as of tc-t3wx; `pg-router-source-pg-connector`
               # added docket pg2-2j5ac.30 Phase 8 — its own wire double is a
-              # reentrant test-helper PROCESS, not a build-tagged file) is a
+              # reentrant test-helper PROCESS, not a build-tagged file;
+              # `pg-router-probe` added docket pg2-93e5s packet 1 — same
+              # reentrant test-helper-process shape for its own
+              # pg-connector wire double, verified via
+              # `grep -rln '^//go:build' packages/pg-router-probe`) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -979,6 +993,7 @@
                 "pg-ccaudit"
                 "pg-connector"
                 "pg-router-source-pg-connector"
+                "pg-router-probe"
                 # osx-bridge-api (bead pg2-p9ap3): Pattern A, no local
                 # replace. Its two `//go:build darwin`/`!darwin` files
                 # (internal/eventkitprovider) are platform-gated
@@ -1930,6 +1945,19 @@
                 pname = "pg-router-source-pg-connector-go-tests";
                 src = lib.cleanSource ./packages/pg-router-source-pg-connector; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-source-pg-connector/gomod2nix.toml;
+              };
+
+              # pg-router-probe (docket pg2-93e5s, packet 1) — fixture-driven
+              # unit/integration suite (fingerprinting, "nothing new"
+              # dedup, snapshot robustness, the reentrant test-helper-process
+              # wire double for pg-connector). No testDeps: the suite execs
+              # no real pg-connector/Grafana; execCmdFactory is swapped to
+              # re-exec the test binary itself, and the Grafana client is
+              # exercised against an httptest.Server.
+              pg-router-probe-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-probe-go-tests";
+                src = lib.cleanSource ./packages/pg-router-probe; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-probe/gomod2nix.toml;
               };
 
               # T-14 enforcement, mechanical rather than aspirational: the
@@ -6289,6 +6317,7 @@
               pg-connector-agentsession-pa-monitor
               pg-ccaudit
               pg-router-source-pg-connector
+              pg-router-probe
               integrate-branch-support
               pg-desk
               osx-bridge-api
