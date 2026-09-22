@@ -255,9 +255,24 @@ findings are recorded as a `process-feedback:` bead — never posted to
 GitHub — which the pre-existing `feedback`/`worker` role chain then turns into
 ordinary work.
 
+> **Accuracy note (2026-09-22, `pg2-r4ic2`):** the code paths and coverage cited
+> below name `internal/pgrouteracl` (`actsAsMine`, `ensureReview`) and
+> `internal/roles/builtin.go` (`BuiltinRoleSet`/`BuiltinQuerySet`,
+> `reviewPromptBody`, `TestReviewPrompt_*`) — both were deleted outright, not
+> merely moved: `internal/pgrouteracl` as dead code (`pg2-gidpd`, the same
+> deletion `pg2-xg4vv` documented for JR4 below), and the built-in beads-shaped
+> role/query pairing plus its ccpool prompt bodies as of docket `pg2-oju6w`'s
+> Task 5.8 (ADR 0065's "Source-side boundary" section) — that package's own
+> surviving doc comment (`packages/pg-router/internal/roles/roles_test.go`)
+> records them as carrying no remaining behavior to preserve. Neither symbol
+> resolves by grep in this repo today. Whatever code actually classifies
+> mine/co-owned ownership and routes the review role's output now lives in a
+> private ZR-side pg-router deployment outside this workspace; read this
+> journey as last-documented design intent, not verified against current code.
+
 ```mermaid
 flowchart TD
-    a["pg-router ACL: PR ownership=mine/co-owned<br/>(draft NOT skipped, acl.go actsAsMine)"] --> b["emit review-pr bead<br/>(metadata carries ownership)"]
+    a["pg-router ACL: PR ownership=mine/co-owned<br/>(draft NOT skipped — historical, see accuracy note)"] --> b["emit review-pr bead<br/>(metadata carries ownership)"]
     b --> c["review role: checks out head, reviews"]
     c --> d{"findings worth fixing?"}
     d -->|yes| e["bd create process-feedback: repo#n<br/>label mine, NO GitHub write"]
@@ -266,12 +281,14 @@ flowchart TD
     g --> h["worker role (UNCHANGED): implement"]
 ```
 
-- **Owner:** `pg-router` end to end — ACL selection (`ensureReview`), the review
-  role's mine/co-owned output-routing branch, and the pre-existing
-  `feedback`/`worker` role chain it now feeds. `pg-pr` has **no role** in this
-  journey any more: it neither ingests self-review findings nor is called by
-  the review role for a mine/co-owned PR.
-- **Acceptance criteria:**
+- **Owner (as documented; see accuracy note above):** `pg-router` end to end —
+  ACL selection (`ensureReview`), the review role's mine/co-owned
+  output-routing branch, and the pre-existing `feedback`/`worker` role chain
+  it now feeds. `pg-pr` has **no role** in this journey any more: it neither
+  ingests self-review findings nor is called by the review role for a
+  mine/co-owned PR.
+- **Acceptance criteria (as last documented; NOT verified against current
+  code — see accuracy note above):**
   - A PR that acts as mine (mine or co-owned; same `actsAsMine` test as
     §2.1's mine/co-owned classification) **MUST** enter the review set even
     while it is a GitHub draft.
@@ -285,28 +302,31 @@ flowchart TD
   - The review-pr bead **MUST** be closed once the review was produced,
     whether or not a `process-feedback` bead was filed — the review-pr
     obligation is "a review was produced," not "issues exist."
-- **Code paths:** `packages/pg-router/internal/pgrouteracl/acl.go` (`actsAsMine`,
-  `ensureReview` — stamps `ownership` into the review-pr bead's metadata);
-  `packages/pg-router/internal/roles/builtin.go` (`reviewPromptBody`'s
+- **Code paths (historical — both packages below were deleted from this repo;
+  unresolvable by grep today):** `packages/pg-router/internal/pgrouteracl/acl.go`
+  (`actsAsMine`, `ensureReview` — stamped `ownership` into the review-pr bead's
+  metadata); `packages/pg-router/internal/roles/builtin.go` (`reviewPromptBody`'s
   mine/co-owned branch; `BuiltinQuerySet`'s `feedback-source` /
-  `worker-source` queries, unchanged, are what pick up what this branch
-  files).
-- **Coverage:** `acl_test.go`
+  `worker-source` queries — the `feedback`/`worker` role chain those queries fed
+  is itself unchanged, only this built-in pairing that fed them is gone).
+- **Coverage (historical — deleted together with the packages above):**
+  `acl_test.go`
   (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_CoOwnedDraftReviewed`,
-  `TestReconcile_EnsuresReviewChildGateAndResolves` — asserts the `ownership`
+  `TestReconcile_EnsuresReviewChildGateAndResolves` — asserted the `ownership`
   metadata stamp); `roles_test.go`
   (`TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub`,
-  `TestReviewPrompt_TeamOwnershipStillPostsToGitHub` — pins the rendered
+  `TestReviewPrompt_TeamOwnershipStillPostsToGitHub` — pinned the rendered
   prompt's branch by content, the only thing mechanically checkable about a
   prompt an LLM executes); `pgrouteracl`'s
   `TestIntegration_MineReviewRelocation_FeedbackToWorkerFlowsEndToEnd`
-  (`//go:build integration`) — proves, against a real `bd`, that a bead shaped
-  exactly as the mine branch instructs is discovered by the real
+  (`//go:build integration`) — proved, against a real `bd`, that a bead shaped
+  exactly as the mine branch instructed was discovered by the real
   `feedback-source` query, and a work bead shaped as the (unchanged) feedback
-  role's own prompt instructs is discovered by the real `worker-source`
+  role's own prompt instructed was discovered by the real `worker-source`
   query — the strongest "flows end to end" proof available without literally
   running an LLM (no test in this repo does; role prompts are text handed to
-  an agent, never executed here).
+  an agent, never executed here). None of these test files exist in this repo
+  today.
 - **Note (historical):** before `pg2-ynhr.5`, this journey ran entirely inside
   `pg-pr`: findings were ingested as `kind=self-review` rows in `pg-pr`'s own
   SQLite `feedback` table (head-scoped, gating merges via
@@ -415,6 +435,16 @@ network-free from the store.
     which past-bound data cannot support). The refusal is **per PR**, is
     logged (refuse-and-record), and keeps the pass at exit `0`; it self-heals
     on the next pass once pg-pr's sync catches up.
+
+> **Accuracy note (2026-09-22, `pg2-r4ic2`):** the ACL-side citations just below
+> (`internal/pgrouteracl`) are historical — that package was deleted outright as
+> dead code (`pg2-gidpd`; the same deletion `pg2-xg4vv` documented for JR4 below)
+> and does not resolve by grep in this repo today. Whatever enforces the
+> stale-PR refusal described in the last acceptance-criteria bullet above now
+> lives in a private ZR-side pg-router deployment outside this workspace; the
+> `pg-pr`-side citations in this section are otherwise unaffected by that
+> deletion.
+
 - **Code paths:** `packages/pg-pr/internal/sync/detector.go`
   (`buildTeamQueries` union; `FingerprintPRs` per bucket; `mergeRosters`);
   `packages/pg-pr/internal/sync/refresh.go` (`reviewRequestedOfSelf`);
@@ -425,12 +455,13 @@ network-free from the store.
   `packages/pg-pr/internal/freshness/freshness.go` (the one staleness policy,
   shared by this seam and the dashboard payload);
   `packages/pg-router/internal/pgrouteracl/acl.go` (`ReadPRList`, `staleForAction`,
-  `actionablePRs`).
+  `actionablePRs` — **historical, deleted; see accuracy note above**).
 - **Coverage:** `broaden_test.go`, `reviewrequested_test.go`, `pr_list_test.go`,
   `fingerprint_test.go`, `builder_test.go`,
   `packages/pg-pr/internal/freshness/freshness_test.go`,
   `packages/pg-router/internal/pgrouteracl/acl_test.go`
-  (`TestStaleForAction`, `TestReconcile_StalePRRefusedNoBeadNoGate`,
+  (**historical — deleted together with the package above; unresolvable by
+  grep today**: `TestStaleForAction`, `TestReconcile_StalePRRefusedNoBeadNoGate`,
   `TestReconcile_MissingAsOfRefused`, `TestReconcile_FreshnessGateIsPerPR`,
   `TestReconcile_StaleRowSelfHeals`).
 - **Terminology note:** the **`FingerprintProvider`** decides **which PRs** enter
@@ -519,8 +550,35 @@ flowchart TD
 A pre-drain reconcile CLI (the anti-corruption layer) idempotently projects beads
 from `pg-pr` facts and never strands the following drain.
 
-- **Owner:** `pg-router` reconcile CLI.
-- **Acceptance criteria:**
+> **Accuracy note (2026-09-22, `pg2-r4ic2`):** this journey describes the
+> pre-drain `pg-router reconcile` CLI and its backing `internal/pgrouteracl`
+> package as last documented — **neither exists in this repo any more**.
+> `reconcile` (and `sessions`) were deleted outright with no deprecation shim
+> (operator ruling recorded in docket `pg2-84o3m`'s design; ADR 0065's "No
+> deprecation shim for `sessions`/`reconcile`" section) — invoking
+> `pg-router reconcile` today returns the ordinary unknown-subcommand usage
+> error (`packages/pg-router/cmd/pg-router/args_test.go`'s
+> `reconcile-subcommand-is-deleted` case). `internal/pgrouteracl` was deleted
+> separately as dead code (`pg2-gidpd`; the same deletion `pg2-xg4vv` documented
+> for JR4 above), because nothing had wired it into a `pg-router-ccpool-handler`
+> subcommand after ADR 0065's move. The lower-level pieces it called —
+> `CreateGate`/`ResolveGate`
+> (`packages/pg-router-ccpool-handler/internal/beads/gate.go`),
+> `waitFailureResult`/`escalateLaunchFailure`
+> (`packages/pg-router-ccpool-handler/internal/executor/ccpool.go`), and the
+> `AddHuman` failure action
+> (`packages/pg-router-ccpool-handler/internal/roles/enums.go`, consulted from
+> `internal/complete/complete.go`'s `OnFailure`) — all still exist, but the
+> reconcile-specific glue that called them (`BuiltinRoleSet`'s `review` role
+> entry, `reconcileACL`) does not. Whatever performs reconcile-shaped bead
+> projection today, if anything, lives in a private ZR-side pg-router
+> deployment outside this workspace. Read everything below as last-documented
+> design intent, not verified against current code.
+
+- **Owner (as documented; see accuracy note above):** `pg-router` reconcile
+  CLI.
+- **Acceptance criteria (as last documented; NOT verified against current
+  code — see accuracy note above):**
   - Reconcile **MUST** be idempotent (find-or-reuse; never duplicate a bead).
   - Reconcile **MUST** exit `0` on partial/transient `pg-pr` failures (a
     `pr list` failure is treated as zero PRs) so a following `drain` is never
@@ -538,20 +596,27 @@ from `pg-pr` facts and never strands the following drain.
     `pg-router` drained against that store. `pg2-ynhr.5` removed the legacy
     `pg-pr` hook and the `review.enabled` field entirely, so there is no
     longer a second owner this criterion could ever apply against.
-- **Code paths:** `packages/pg-router/cmd/pg-router/main.go` (`main`, its
-  `routeReconcile` arm), `reconcile_cmd.go` (`runReconcile`; exit-0-on-partial in
-  `reconcileACL`);
-  `packages/pg-router/internal/pgrouteracl/acl.go` (`Reconcile`, `ensureReview`);
-  `packages/pg-router/internal/beads/gate.go` (`CreateGate`, `ResolveGate`);
-  `packages/pg-router/internal/roles/builtin.go` (`BuiltinRoleSet`, its `review`
-  entry — `OnFailure: AddHuman`);
-  `packages/pg-router/internal/executor/ccpool.go` (`waitFailureResult`,
-  `escalateLaunchFailure`).
-- **Coverage:** `reconcile_acl_test.go`
+- **Code paths (historical — the `reconcile` subcommand and
+  `internal/pgrouteracl` were both deleted from this repo; unresolvable by
+  grep today):** `packages/pg-router/cmd/pg-router/main.go` (`main`, its
+  former `routeReconcile` arm), `reconcile_cmd.go` (`runReconcile`;
+  exit-0-on-partial in `reconcileACL`) — file deleted;
+  `packages/pg-router/internal/pgrouteracl/acl.go` (`Reconcile`,
+  `ensureReview`) — package deleted;
+  `packages/pg-router/internal/roles/builtin.go` (`BuiltinRoleSet`, its
+  `review` entry — `OnFailure: AddHuman`) — file deleted (docket
+  `pg2-oju6w`'s Task 5.8). The lower-level helpers survive under a different
+  module (see accuracy note above): `CreateGate`/`ResolveGate`
+  (`packages/pg-router-ccpool-handler/internal/beads/gate.go`) and
+  `waitFailureResult`/`escalateLaunchFailure`
+  (`packages/pg-router-ccpool-handler/internal/executor/ccpool.go`).
+- **Coverage (historical — deleted together with the code above):**
+  `reconcile_acl_test.go`
   (`TestReconcileACL_PgPrUnreachableExitsZero`, `_EmptyExitsZero`),
   `reconcile_cmd_test.go`, `reconcile_test.go` (`TestStrandedSelfCycles_*`),
   `acl_test.go` (`TestReconcile_Idempotent`, `_ExitZeroOnPartial`,
-  `_EnsuresReviewChildGateAndResolves`, `_NoMergeRequestSkips`).
+  `_EnsuresReviewChildGateAndResolves`, `_NoMergeRequestSkips`). None of these
+  test files exist in this repo today.
 - **Known gap:** there is **no classic dead-letter** in the `pg-router`
   reconcile/review path — reconcile never parks a bead, and a failing review
   escalates via a `human` label. The legacy `pg-pr` hook's 3-strike `blocked` +
@@ -704,14 +769,14 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 
 ## 6. Verification & coverage goals
 
-| Journey | Covering tests (exist)                                                                                                                                                                                                                                                                                                                                 | Coverage goal (gap)                                                          |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| JR1     | `acl_test` (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_EnsuresReviewChildGateAndResolves`), `roles_test` (`TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub`, `TestReviewPrompt_TeamOwnershipStillPostsToGitHub`), `pgrouteracl`'s `TestIntegration_MineReviewRelocation_FeedbackToWorkerFlowsEndToEnd` (build-tag `integration`) | — (a real LLM executing the review role's prompt is deploy-gated, see below) |
-| JR2     | `pending_test`, `review_test`                                                                                                                                                                                                                                                                                                                          | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved)      |
-| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                                                                                                                                                                                                                                                                                 | —                                                                            |
-| JR4     | `acl_test` (head-advance suite, incl. the `ownership` refresh), `reopen_test`                                                                                                                                                                                                                                                                          | —                                                                            |
-| JR5     | `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                                                                                                                                                                                                                                                                               | —                                                                            |
-| JR6     | `unaddressed_feedback_test`, `ingest_selffeed_test`, `process_feedback_dedup_test`, `duplicate_test`, `sync_duplicates_test`                                                                                                                                                                                                                           | Live open-count == distinct-PR-count measurement (deploy-gated)              |
+| Journey | Covering tests (exist)                                                                                                                                                                                                                                                                                                                                                                                                      | Coverage goal (gap)                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| JR1     | Historical, deleted, unresolvable by grep (see JR1's accuracy note): `acl_test` (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_EnsuresReviewChildGateAndResolves`), `roles_test` (`TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub`, `TestReviewPrompt_TeamOwnershipStillPostsToGitHub`), `pgrouteracl`'s `TestIntegration_MineReviewRelocation_FeedbackToWorkerFlowsEndToEnd` (build-tag `integration`) | — (a real LLM executing the review role's prompt is deploy-gated, see below) |
+| JR2     | `pending_test`, `review_test`                                                                                                                                                                                                                                                                                                                                                                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved)      |
+| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                                                                                                                                                                                                                                                                                                                                                      | —                                                                            |
+| JR4     | `acl_test` (head-advance suite, incl. the `ownership` refresh) is historical, deleted, unresolvable by grep (see JR4's accuracy note); `reopen_test` still exists (`packages/pg-router-ccpool-handler/internal/beads/reopen_test.go`)                                                                                                                                                                                       | —                                                                            |
+| JR5     | Historical, deleted, unresolvable by grep (see JR5's accuracy note): `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                                                                                                                                                                                                                                                                               | —                                                                            |
+| JR6     | `unaddressed_feedback_test`, `ingest_selffeed_test`, `process_feedback_dedup_test`, `duplicate_test`, `sync_duplicates_test`                                                                                                                                                                                                                                                                                                | Live open-count == distinct-PR-count measurement (deploy-gated)              |
 
 **Live end-to-end** verification (one PR I own + one teammate PR through the
 review role, plus re-review-on-head-advance) against these journeys is
