@@ -309,17 +309,61 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 // INV-EVT-2 note). A list error is treated as "no match" (can't tell ⇒ fall
 // through to launching normally), the same can't-tell posture active() and
 // sessionState() already take elsewhere in this file.
+//
+// A NAME MATCH ALONE IS NOT ENOUGH (pg2-04bf7): a name match on a row that is
+// crashOrphaned (below) must be treated as ABSENT here, or a crashed prior
+// attempt's stale row collides with every subsequent dispatch for the same
+// (bead, role) forever (the observed zombie-session incident) — letting the
+// fresh per-attempt ExternalID flow through to Ensure/ccpool new normally.
+// This is deliberately a NARROWER exclusion than active()'s own live/dead
+// split just below: a row that is Live=false but reached a legitimate,
+// hook-driven terminal state (idle/errored) WITHOUT ever being explicitly
+// closed still correlates a genuine already-settled duplicate (INV-EVT-2's
+// own "absorb rather than start a second session" guarantee) — only a row
+// that either crashed mid-flight (Live=false, never reached idle/errored) or
+// has ALREADY been explicitly closed (CloseReason set — nothing left to
+// absorb) counts as dead here.
 func (r *ccpoolRun) findSessionByName(ctx context.Context, name string) (ccpool.Session, bool) {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
 		return ccpool.Session{}, false
 	}
 	for _, s := range sessions {
-		if s.Name == name {
+		if s.Name == name && !crashOrphaned(s) {
 			return s, true
 		}
 	}
 	return ccpool.Session{}, false
+}
+
+// crashOrphaned reports whether session s is a dead row that findSessionByName
+// must treat as ABSENT rather than a genuine duplicate worth absorbing
+// (pg2-04bf7):
+//
+//   - Live sessions are never crash-orphaned — still literally running,
+//     whatever their store State (active()'s own polling logic decides
+//     separately whether it's still worth WAITING on).
+//   - A row ccpool has ALREADY explicitly closed (CloseReason != "" —
+//     idle_ttl/cap_eviction/operator, or this handler's own "handler" close,
+//     including waitDone's own dead-row cleanup below) has nothing left to
+//     absorb: re-matching it would just re-run the SAME dead-row collision
+//     waitDone already resolved once.
+//   - Otherwise (never closed by anyone, not live): a row that reached a
+//     Claude-hook-driven terminal state (Idle: Stop hook, the turn legitimately
+//     ended; Errored: StopFailure hook, an API error legitimately ended the
+//     turn) is a genuinely-settled prior duplicate — nothing auto-closes a
+//     settled session (ADR 0072/0015), so Live going false on its own here is
+//     NOT a crash signal. A row stuck in a NON-terminal state
+//     (starting/ready/working/needs_input) while not live never reached
+//     either hook: its tmux pane died mid-flight — a genuine crash.
+func crashOrphaned(s ccpool.Session) bool {
+	if s.Live {
+		return false
+	}
+	if s.CloseReason != "" {
+		return true
+	}
+	return s.State != ccpool.StateIdle && s.State != ccpool.StateErrored
 }
 
 // absorbDuplicate treats this dispatch as an already-in-flight duplicate of
@@ -524,6 +568,15 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 					escalated := r.escalateEviction(ctx, d.Item.ID)
 					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated})
 				}
+				// Unexplained death (not an external close): close the dead row
+				// now, mirroring run()'s own not-ingested cleanup (r.deps.CC.Close
+				// call above) — otherwise this exact row sits in ccpool's list
+				// forever and collides with every future dispatch attempt for
+				// this (bead, role) pair (pg2-04bf7's zombie-session root cause,
+				// part b — defense-in-depth alongside findSessionByName's own
+				// dead-row-is-absent fix). Best-effort: a failed Close here does
+				// not change the failure outcome already decided below.
+				_ = r.deps.CC.Close(ctx, name, false)
 				return r.fail(ctx, d, "session exited before completing")
 			}
 			return lose()

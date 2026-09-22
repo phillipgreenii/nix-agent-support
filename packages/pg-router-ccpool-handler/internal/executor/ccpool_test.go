@@ -502,6 +502,194 @@ func TestWaitDone_secondExternalCloseEscalates(t *testing.T) {
 	}
 }
 
+// --- pg2-04bf7: dead ccpool sessions must not block retries forever ---
+
+// TestWaitDone_deathClosesDeadRow proves waitDone's unexplained-death branch
+// (not an external close) actually issues a Close call against the dead row
+// it just identified — mirroring run()'s own not-ingested cleanup — so the
+// same stale row cannot collide with the next dispatch attempt for this
+// (bead, role) pair. This is fix (b) of the zombie-session incident.
+func TestWaitDone_deathClosesDeadRow(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateErrored}},
+	}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	if err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"); err == nil {
+		t.Fatal("dead session + in_progress = failure")
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-w" {
+		t.Errorf("death branch must Close the dead row it identified; Closed=%v", cc.Closed)
+	}
+	if len(cc.ClosedPurge) != 1 || cc.ClosedPurge[0] != false {
+		t.Errorf("death-branch Close must mirror run()'s own not-ingested Close (purge=false); ClosedPurge=%v", cc.ClosedPurge)
+	}
+}
+
+// TestWaitDone_externalCloseDoesNotDoubleClose proves the new Close call is
+// scoped to the unexplained-death path only: an EXTERNAL close (ccpool's own
+// reaper already ended the session) must NOT be closed again by waitDone —
+// that row's closure is already owned by ccpool itself.
+func TestWaitDone_externalCloseDoesNotDoubleClose(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "in_progress", "in_progress"}}}
+	row := ccpool.Session{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateWorking, CloseReason: "cap_eviction"}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{row}, {row}, {row}}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	if err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"); err == nil {
+		t.Fatal("external close must still return an error (unclaimed)")
+	}
+	if len(cc.Closed) != 0 {
+		t.Errorf("an externally-closed row must not be Closed again by waitDone; Closed=%v", cc.Closed)
+	}
+}
+
+// TestCrashOrphaned_cases pins down the exact predicate findSessionByName
+// relies on (pg2-04bf7): dead ONLY for a row that is not live AND (already
+// explicitly closed by ccpool, OR never reached a hook-driven terminal
+// state) — never for a still-live row, and never for a not-live row that
+// legitimately settled (idle/errored) without ever being explicitly closed
+// (INV-EVT-2's own "absorb, don't re-launch" guarantee for that case).
+func TestCrashOrphaned_cases(t *testing.T) {
+	cases := []struct {
+		name string
+		sess ccpool.Session
+		want bool
+	}{
+		{"crash mid-work, never closed", ccpool.Session{Live: false, State: ccpool.StateWorking}, true},
+		{"crash while needs_input, never closed", ccpool.Session{Live: false, State: ccpool.StateNeedsInput}, true},
+		{"crash while starting, never closed", ccpool.Session{Live: false, State: ccpool.StateStarting}, true},
+		{"settled idle, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateIdle}, false},
+		{"settled errored, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateErrored}, false},
+		{"already closed by ccpool despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler"}, true},
+		{"already closed by ccpool despite errored state", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "idle_ttl"}, true},
+		{"already closed but somehow still live (defensive)", ccpool.Session{Live: true, State: ccpool.StateErrored, CloseReason: "operator"}, false},
+		{"live and working", ccpool.Session{Live: true, State: ccpool.StateWorking}, false},
+		{"live and idle", ccpool.Session{Live: true, State: ccpool.StateIdle}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := crashOrphaned(tc.sess); got != tc.want {
+				t.Errorf("crashOrphaned(%+v) = %v, want %v", tc.sess, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFindSessionByName_deadRowTreatedAsAbsent proves fix (a) end-to-end
+// through findSessionByName: a --name match on a genuinely crash-orphaned row
+// — crashed mid-work with no explicit close, OR already explicitly closed by
+// ccpool regardless of its last recorded state (the fix (b) follow-up case) —
+// must be reported as NOT FOUND, so the caller falls through to Ensure/ccpool
+// new with the fresh per-attempt ExternalID instead of routing into
+// absorbDuplicate against a session that will never make progress again.
+func TestFindSessionByName_deadRowTreatedAsAbsent(t *testing.T) {
+	cases := []struct {
+		name string
+		sess ccpool.Session
+	}{
+		{"crash-orphaned, never closed (Live=false)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking}},
+		{"crash-orphaned while needs_input", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateNeedsInput}},
+		{"already closed by ccpool (fix b's own Close, idle state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler"}},
+		{"already closed by ccpool (errored state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateErrored, CloseReason: "cap_eviction"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{tc.sess}}}
+			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+			if _, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c"); ok {
+				t.Errorf("dead row must be treated as absent, not a real duplicate")
+			}
+		})
+	}
+}
+
+// TestFindSessionByName_liveMatchFound is the regression lock alongside the
+// above: a genuinely in-flight session under the same name must still be
+// found and absorbed, across every store state including the terminal ones
+// (Live=true is never crash-orphaned, regardless of state).
+func TestFindSessionByName_liveMatchFound(t *testing.T) {
+	cases := []ccpool.SessionState{
+		ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking, ccpool.StateNeedsInput,
+		ccpool.StateIdle, ccpool.StateErrored,
+	}
+	for _, state := range cases {
+		t.Run(string(state), func(t *testing.T) {
+			sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: true, State: state}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
+			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+			if !ok || got.ExternalID != "att-1" {
+				t.Errorf("live in-flight session (state=%s) must be found as the duplicate; got=%v ok=%v", state, got, ok)
+			}
+		})
+	}
+}
+
+// TestFindSessionByName_settledWithoutExplicitClose_stillMatched is the
+// direct regression lock for TestDispatch_crashWindowRedelivery_
+// absorbsIntoExistingSession's own premise: a row that legitimately finished
+// (Idle: Claude's Stop hook fired) and has since gone Live=false on its own —
+// nothing auto-closes a settled session (ADR 0072/0015) — but was NEVER
+// explicitly closed by ccpool (CloseReason=="") must still be matched. This
+// is NOT the zombie case: the row settled naturally rather than crashing
+// mid-flight, so INV-EVT-2 still requires absorbing it rather than launching
+// a redundant second session for an already-completed bead.
+func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T) {
+	sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
+	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+	got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+	if !ok || got.ExternalID != "att-1" {
+		t.Errorf("a naturally-settled (never explicitly closed) row must still be matched; got=%v ok=%v", got, ok)
+	}
+}
+
+// TestDispatch_deadNameMatch_createsFreshSession is the dispatch-level,
+// end-to-end version of fix (a): a dispatch whose stable display name
+// matches only a DEAD prior row must Ensure a brand-new session under its own
+// fresh per-attempt ExternalID, rather than short-circuiting into
+// absorbDuplicate against a row that will never complete (the exact zombie
+// collision the incident reported — "session exited before completing" on
+// every retry).
+func TestDispatch_deadNameMatch_createsFreshSession(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		// findSessionByName's own List call: only a dead row under the same
+		// stable display name exists (the crash-orphaned zombie).
+		{{ExternalID: "dead-1", Name: display, Live: false, State: ccpool.StateWorking}},
+		// Every subsequent List call (sessionState/active) sees the fresh
+		// session running alongside the still-dead old row.
+		{
+			{ExternalID: "dead-1", Name: display, Live: false, State: ccpool.StateWorking},
+			{ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking},
+		},
+	}}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	_, err := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
+	if err != nil {
+		t.Fatalf("dispatch should succeed (bead closed), got %v", err)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("a dead name match must NOT short-circuit into absorbDuplicate; a fresh session must be Ensured; Ensured=%v", got)
+	}
+	if got := cc.Sent; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("the fresh session's own nudge must be sent; Sent=%v", got)
+	}
+}
+
 // TestWaitFailureResult_externallyClosedMapsToUnclaimed proves the wait-failure
 // mapping reports ErrExternallyClosed as Unclaimed even when the role's own
 // OnFailure is AddHuman — the external-close branch must take priority over
