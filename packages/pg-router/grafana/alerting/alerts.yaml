@@ -241,3 +241,46 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # Source failure rate: pg_router_source_failures, emitted by
+      # internal/discover/discover.go's SourceFailureObserver for every
+      # query source (not scoped to any specific probe package), aggregated
+      # by its `source` label. This is a DIFFERENT metric from
+      # pg_router_failures_total above -- a [[query]]'s own backing command
+      # failing to run routes through this metric, not the dispatch-side
+      # failure-rate rule, so without this rule that failure mode is
+      # invisible. Added alongside the pg-router-probe/ccpool-probe
+      # self-monitoring system (2026-09-22) specifically so a probe's own
+      # failure to run is not itself a silent gap (pg2-93e5s). noDataState:
+      # OK, matching the failure-rate rule's own reasoning above -- an
+      # absent series means zero source failures have ever been recorded.
+      - uid: pg-router-source-failure-rate
+        title: pg-router event source failure rate is non-zero (by source)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router source {{ $labels.source }} has been failing to produce events"
+          description: "sum by (source) (rate(pg_router_source_failures[10m])) has stayed above 0 for over 10 minutes for source {{ $labels.source }} -- a query's own command is failing, which is invisible to pg_router_failures_total (dispatch-side only). Added alongside the pg-router-probe/ccpool-probe self-monitoring system (2026-09-22) specifically so a probe's own failure to run is not itself a silent gap."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (source) (rate(pg_router_source_failures[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [0] } }]
