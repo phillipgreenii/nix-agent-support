@@ -445,19 +445,48 @@ network-free from the store.
 > `pg-pr`-side citations in this section are otherwise unaffected by that
 > deletion.
 
+> **Accuracy note (2026-09-22, `pg2-vpg0k`):** the `pg-pr`-side citations below (a
+> separate staleness cluster from the `pgrouteracl` one above) also predate a
+> refactor. `internal/sync` (`detector.go`, `refresh.go`) was deleted outright and
+> does not resolve by grep in this repo today; `buildTeamQueries` and
+> `mergeRosters` have no successor symbol anywhere in this repo. `FingerprintPRs`
+> survives, relocated to `packages/pg-pr/pkg/provider/vcs/github/fingerprint.go`.
+> The `pr list` CLI command (`cmd/pg-pr/pr_list.go`) is also gone outright —
+> grepped 2026-09-22, `pg-pr pr`'s only subcommands today are `files`, `commits`,
+> `create`, `update`, `close`, `draft`, `automerge`, and `merge`; there is no
+> `list`/`show`/`view`/`hide`/`wip`/`ready`. The reason-bucketing logic those files
+> implemented (team-authored / requested-of-me / watch-labeled, excluding PRs I
+> own) is now realized by `matchReasons`/`Build` in
+> `packages/pg-pr/internal/snapshot/builder.go` (correctly cited below already) —
+> but grepped 2026-09-22, `Build` has no production caller anywhere in this repo
+> today, only tests; `internal/httpapi/dashboard.go` imports the package only for
+> the `*snapshot.Store` type it reads from, not to populate one. This note only
+> corrects citations and flags that gap; it does not re-verify the acceptance
+> criteria above against current behavior.
+
 - **Code paths:** `packages/pg-pr/internal/sync/detector.go`
-  (`buildTeamQueries` union; `FingerprintPRs` per bucket; `mergeRosters`);
-  `packages/pg-pr/internal/sync/refresh.go` (`reviewRequestedOfSelf`);
+  (`buildTeamQueries` union; `mergeRosters` — **historical, deleted; see the
+  `pg2-vpg0k` accuracy note above; no successor symbol**);
+  `packages/pg-pr/pkg/provider/vcs/github/fingerprint.go` (`FingerprintPRs` per
+  bucket — relocated here, see the `pg2-vpg0k` accuracy note above);
+  `packages/pg-pr/internal/sync/refresh.go` (`reviewRequestedOfSelf` —
+  **historical, deleted; see the `pg2-vpg0k` accuracy note above**);
   `packages/pg-pr/internal/config/config.go` (`RepoConfig.WatchLabels`);
   `packages/pg-pr/internal/snapshot/builder.go` (`matchReasons`, `Build` —
   reason-tagged; reasonless
-  non-mine excluded); `packages/pg-pr/cmd/pg-pr/pr_list.go`;
+  non-mine excluded); `packages/pg-pr/cmd/pg-pr/pr_list.go` (**historical,
+  deleted; see the `pg2-vpg0k` accuracy note above — no `pr list` CLI command
+  exists today**);
   `packages/pg-pr/internal/freshness/freshness.go` (the one staleness policy,
   shared by this seam and the dashboard payload);
   `packages/pg-router/internal/pgrouteracl/acl.go` (`ReadPRList`, `staleForAction`,
-  `actionablePRs` — **historical, deleted; see accuracy note above**).
-- **Coverage:** `broaden_test.go`, `reviewrequested_test.go`, `pr_list_test.go`,
-  `fingerprint_test.go`, `builder_test.go`,
+  `actionablePRs` — **historical, deleted; see the `pg2-r4ic2` accuracy note
+  above**).
+- **Coverage:** `broaden_test.go`, `reviewrequested_test.go`, `pr_list_test.go`
+  (**historical, deleted together with the code above; unresolvable by grep
+  today; see the `pg2-vpg0k` accuracy note above**); `fingerprint_test.go` (now
+  `packages/pg-pr/pkg/provider/vcs/github/fingerprint_test.go`), `builder_test.go`
+  (now `packages/pg-pr/internal/snapshot/builder_test.go`),
   `packages/pg-pr/internal/freshness/freshness_test.go`,
   `packages/pg-router/internal/pgrouteracl/acl_test.go`
   (**historical — deleted together with the package above; unresolvable by
@@ -773,7 +802,7 @@ post-back is now unblocked — `pg-pr` is allow-listed (`pg2-vmbn7` resolved).
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | JR1     | Historical, deleted, unresolvable by grep (see JR1's accuracy note): `acl_test` (`TestReconcile_DraftSelectionMatrix`, `TestReconcile_EnsuresReviewChildGateAndResolves`), `roles_test` (`TestReviewPrompt_MineOwnershipFilesProcessFeedbackNotGitHub`, `TestReviewPrompt_TeamOwnershipStillPostsToGitHub`), `pgrouteracl`'s `TestIntegration_MineReviewRelocation_FeedbackToWorkerFlowsEndToEnd` (build-tag `integration`) | — (a real LLM executing the review role's prompt is deploy-gated, see below) |
 | JR2     | `pending_test`, `review_test`                                                                                                                                                                                                                                                                                                                                                                                               | — (submit-path skip-if-present and the `pg-pr` allowlist both resolved)      |
-| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test`, `builder_test`                                                                                                                                                                                                                                                                                                                                                      | —                                                                            |
+| JR3     | `broaden_test`, `reviewrequested_test`, `pr_list_test` are historical, deleted, unresolvable by grep (see JR3's `pg2-vpg0k` accuracy note); `builder_test` and `fingerprint_test` still exist (`packages/pg-pr/internal/snapshot/builder_test.go`, `packages/pg-pr/pkg/provider/vcs/github/fingerprint_test.go`)                                                                                                            | —                                                                            |
 | JR4     | `acl_test` (head-advance suite, incl. the `ownership` refresh) is historical, deleted, unresolvable by grep (see JR4's accuracy note); `reopen_test` still exists (`packages/pg-router-ccpool-handler/internal/beads/reopen_test.go`)                                                                                                                                                                                       | —                                                                            |
 | JR5     | Historical, deleted, unresolvable by grep (see JR5's accuracy note): `reconcile_acl_test`, `reconcile_cmd_test`, `reconcile_test`, `acl_test`                                                                                                                                                                                                                                                                               | —                                                                            |
 | JR6     | `unaddressed_feedback_test`, `ingest_selffeed_test`, `process_feedback_dedup_test`, `duplicate_test`, `sync_duplicates_test`                                                                                                                                                                                                                                                                                                | Live open-count == distinct-PR-count measurement (deploy-gated)              |
