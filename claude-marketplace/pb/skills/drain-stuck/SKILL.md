@@ -361,9 +361,7 @@ required".
    `FRESHNESS:` line and the step-1 PRECONDITION block:
 
    ```bash
-   bd comment <id> "stuck (event-gated, not human-gated): <what you tried / observed>. The
-   blocker is a live external event/observation, not a person or another bead — see
-   beads-lifecycle D-10. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   bd comment <id> "stuck (event-gated, not human-gated): <what you tried / observed>. The blocker is a live external event/observation, not a person or another bead — see beads-lifecycle D-10. Parked on branch drain/<id> in <repo> at <worktree-path>.
    FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
    PRECONDITION: <observable outcome that must occur before this is workable>
    PRECONDITION-KEY: <stable-outcome-slug>
