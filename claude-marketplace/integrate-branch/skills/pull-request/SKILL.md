@@ -163,12 +163,41 @@ classify the failure rather than treating every non-zero exit the same way.
 
         `rerere.enabled=false` is scoped to this one rebase invocation, the same discipline `ff-merge-to-main`'s FF-1 uses and for the same reason: the shared `.git/rr-cache` is not per-worktree, so a concurrent peer worktree's recorded conflict resolution could otherwise be auto-applied here (`pg2-t4nud`). It MUST NOT be a persistent `git config rerere.enabled false` write to `<CC>`'s `.git/config` — out of scope for the same reason FF-1's note gives.
 
-  - If that rebase itself conflicts, apply the same discipline as
-    `ff-merge-to-main`'s FF-1: resolve it confidently and continue (summarizing
-    the resolution), or abort and **halt and report** `stopped:rebase-conflict` —
-    reusing that existing reason rather than inventing a parallel one, since it
-    is the same state. Do not let an unconfident conflict resolution turn into a
-    forced push.
+  - If that rebase itself conflicts, first list every conflicted path the same
+    way `ff-merge-to-main`'s FF-1 does:
+
+        ```bash
+        git -C "$WT" diff --name-only --diff-filter=U
+        ```
+
+        (`--name-only` is unaffected by the external diff driver these repos
+        configure.) When that list is exactly `flake.lock` and nothing
+        else, resolve it the same mechanical way FF-1's flake.lock-only
+        sub-step does — pick either side, stage it, continue the rebase,
+        then run `nix flake lock` in `<WT>` and commit the relock only if it
+        changed the file, rather than hand-resolving the JSON — and record
+        which side was picked and whether the relock produced a diff in the
+        outcome report:
+
+        ```bash
+        git -C "$WT" checkout --theirs -- flake.lock
+        git -C "$WT" add flake.lock
+        git -C "$WT" rebase --continue
+        (cd "$WT" && nix flake lock)
+        if [ -n "$(git -C "$WT" status --porcelain -- flake.lock)" ]; then
+          git -C "$WT" add flake.lock
+          git -C "$WT" commit -m 'chore: relock flake.lock after rebase'
+        fi
+        ```
+
+        then retry the push above. For any **other** conflicted path
+        (including `flake.lock` alongside another path), apply the same
+        discipline as `ff-merge-to-main`'s FF-1: resolve it confidently and
+        continue (summarizing the resolution), or abort and **halt and
+        report** `stopped:rebase-conflict` — reusing that existing reason
+        rather than inventing a parallel one, since it is the same state. Do
+        not let an unconfident conflict resolution turn into a forced push.
+
   - When `attempts` reaches **2** (the second consecutive non-fast-forward
     rejection), **stop and ask** the user rather than retry indefinitely — a
     persistent push race warrants attention, matching FF-3's framing (R-7).
@@ -297,6 +326,12 @@ no-cause-asserted catch-all `push-failed`). Always include the PR's URL when one
 exists. This handler never returns `landed` — that outcome belongs to
 `ff-merge-to-main`, and this handler never merges anything.
 
+When PR-1's retry hit and mechanically resolved a flake.lock-only conflict
+(above), the `pr-opened`/`pr-updated` report MUST also include a line
+recording which side was picked and whether the relock produced a diff — e.g.
+`flake.lock conflict: took theirs, relocked yes` — the same reporting
+discipline `ff-merge-to-main` follows for its `landed` report.
+
 ## Rules this handler enforces (Tier R, RFC 2119)
 
 - The handler MUST re-derive `<WT>`, `<FB>`, `<CC>`, and the primary branch from
@@ -327,6 +362,17 @@ exists. This handler never returns `landed` — that outcome belongs to
   (`git -c rerere.enabled=false rebase ...`), matching `ff-merge-to-main`'s
   FF-1 rule and for the same reason (shared, non-per-worktree `.git/rr-cache`,
   `pg2-t4nud`) — never a persistent `<CC>` config write.
+- Before applying PR-1's confident-resolve-or-abort discipline to this retry's
+  rebase conflict, the handler MUST list every conflicted path
+  (`git -C "$WT" diff --name-only --diff-filter=U`). When that list is
+  exactly `flake.lock` and nothing else, the handler MUST resolve it
+  mechanically the same way `ff-merge-to-main`'s FF-1 does — pick either
+  side, stage it, continue the rebase, then run `nix flake lock` in `<WT>`
+  and commit the relock only if it changed the file — rather than
+  hand-resolving the JSON, and MUST record which side was picked and whether
+  the relock produced a diff in the outcome report. When any other path is
+  conflicted (including `flake.lock` alongside another path), PR-1's
+  confident-resolve-or-abort discipline applies unchanged.
 - On an auth failure the handler MUST halt immediately and report
   `stopped:push-auth-failed` rather than retry — retrying cannot fix a
   credentials/access problem.

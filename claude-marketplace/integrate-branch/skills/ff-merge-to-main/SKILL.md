@@ -213,15 +213,54 @@ state found here can only be the state this step created — and that `<WT>` was
 clean, so exit 0 here cannot be the autostash false-success FF-0b describes.
 
 - **Exit 0 — no conflict:** proceed to FF-2.
-- **Conflict (rebase in progress), and you are confident in the resolution:**
-  resolve it, continue the rebase (`git -C "$WT" rebase --continue`), and do
-  **not** stop — but summarize the resolution to the user (what conflicted, how it
-  was resolved) so it isn't silent.
-- **Conflict (rebase in progress), and you are not confident:** `git -C "$WT"
-rebase --abort` to restore the pre-rebase state, keep the branch and worktree
-  exactly as they were, and hand off to the user — report
-  `stopped:rebase-conflict` with what conflicted. Do not guess at a resolution you
-  aren't sure of.
+- **Conflict (rebase in progress):** before judging confidence, list every
+  conflicted path — do not guess or eyeball which files git flagged:
+
+  ```bash
+  git -C "$WT" diff --name-only --diff-filter=U
+  ```
+
+  (`--name-only` is unaffected by the external diff driver these repos
+  configure.)
+  - **The conflicted-path list is exactly `flake.lock` — nothing else:** this
+    conflict has a mechanical resolution; do **not** hand-resolve the JSON or
+    reason about which side's `lastModified`/`rev` is newer. Pick **either**
+    side (it does not matter which), stage it, continue the rebase, then
+    recompute the lockfile from the flake's actual `inputs{}`/`follows` graph,
+    committing the relock only if it produced a diff:
+
+    ```bash
+    git -C "$WT" checkout --theirs -- flake.lock
+    git -C "$WT" add flake.lock
+    git -C "$WT" rebase --continue
+    (cd "$WT" && nix flake lock)
+    if [ -n "$(git -C "$WT" status --porcelain -- flake.lock)" ]; then
+      git -C "$WT" add flake.lock
+      git -C "$WT" commit -m 'chore: relock flake.lock after rebase'
+    fi
+    ```
+
+    `--theirs` is an arbitrary pick here — `--ours` resolves the conflict
+    equally well — because the `nix flake lock` that follows recomputes the
+    file from the flake's own `inputs{}` rather than trusting either side's
+    picked content; the checkout only needs to hand `rebase --continue` some
+    resolved, non-conflicted `flake.lock`. Do **not** stop for this case, and
+    do **not** apply either confidence branch below — it is a mechanical
+    resolution, not a hand-resolved one. Continue to FF-1b, and record in the
+    outcome report which side was picked and whether the relock produced a
+    diff (see "Reporting the outcome" below).
+
+  - **Any other path is conflicted** — `flake.lock` conflicted alongside
+    another path, or a different path entirely — **and you are confident in
+    the resolution:** resolve it, continue the rebase (`git -C "$WT" rebase
+--continue`), and do **not** stop — but summarize the resolution to the
+    user (what conflicted, how it was resolved) so it isn't silent.
+  - **Any other path is conflicted, and you are not confident:** `git -C
+"$WT" rebase --abort` to restore the pre-rebase state, keep the branch
+    and worktree exactly as they were, and hand off to the user — report
+    `stopped:rebase-conflict` with what conflicted. Do not guess at a
+    resolution you aren't sure of.
+
 - **Refused (NO rebase in progress) — it never started:** report
   `stopped:rebase-refused` with the absolute path of `<WT>` and git's own refusal
   message **verbatim**. Nothing ran, so there is nothing to resolve: you MUST NOT
@@ -452,7 +491,9 @@ flowchart TD
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
-    P -->|"Yes — conflict"| C2{"confident in the resolution?"}
+    P -->|"Yes — conflict"| CL{"conflicted paths (diff --name-only --diff-filter=U) exactly flake.lock?"}
+    CL -->|Yes| FLOCK["checkout --theirs flake.lock, add, rebase --continue, nix flake lock, commit relock if changed"] --> F1B
+    CL -->|No| C2{"confident in the resolution?"}
     C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
     F1B -->|"fails"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
@@ -470,8 +511,14 @@ flowchart TD
 
 Report the result back using the shared handler vocabulary: `landed` (FF-4
 completed) or `stopped:<reason>` (any halt above). This handler never returns
-`pr-opened` — that outcome belongs to the `pull-request` handler. Its `<reason>`
-values, and the disposition each one asks of the operator:
+`pr-opened` — that outcome belongs to the `pull-request` handler.
+
+When FF-1's flake.lock-only mechanical resolution (above) fired during this
+run, a `landed` report MUST also include a line recording which side was
+picked and whether the relock produced a diff — e.g. `flake.lock conflict:
+took theirs, relocked yes` — so a reviewer or an aggregating drain session
+does not have to re-derive it from git history. Its `<reason>` values, and the
+disposition each one asks of the operator:
 
 | `<reason>`                     | Raised by | What the operator does next                                                  |
 | ------------------------------ | --------- | ---------------------------------------------------------------------------- |
@@ -558,6 +605,17 @@ false` write to `<CC>`'s `.git/config` — that would also disable rerere for
   it MUST attempt resolution, and MUST summarize any confident resolution to the
   user rather than resolving silently. It MUST abort the rebase (leaving the
   branch untouched) and hand off when it is not confident in the resolution.
+- Before applying that confidence judgment, the handler MUST list every
+  conflicted path (`git -C "$WT" diff --name-only --diff-filter=U`). When
+  that list is exactly `flake.lock` and nothing else, the handler MUST
+  resolve it mechanically — pick either side, stage it, continue the rebase,
+  then run `nix flake lock` in `<WT>` and commit the relock only if it
+  changed the file — rather than hand-resolving the JSON or reasoning about
+  which side is newer, and MUST NOT treat this case as needing the
+  confidence judgment above. It MUST record which side was picked and
+  whether the relock produced a diff in the outcome report. When any other
+  path is conflicted (including `flake.lock` alongside another path), the
+  confidence-based discipline above applies unchanged.
 - On a **refused** rebase (non-zero exit with NO rebase in progress) the handler
   MUST report `stopped:rebase-refused` — distinct from `stopped:rebase-conflict` —
   and MUST NOT run `git rebase --abort` or `git rebase --continue`: nothing was
