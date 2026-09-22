@@ -7,10 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -110,6 +112,20 @@ func runQuery(args []string) int {
 	if err := precheck(ctx, cfg.RepoRoot, cfg.BeadsPrefix, br); err != nil {
 		writeErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError
+	}
+	// Opportunistic reconciliation (pg2-hrppg): this query tick is this
+	// binary's own only invocation that already recurs on a schedule while
+	// the daemon is up (reconcile.go's own doc comment), so it is where a
+	// session whose bead closed since the last tick gets reconciled, rather
+	// than leaking until the eventual once-per-process preShutdown sweep.
+	// Gated on `configured` (this branch) the same way precheck above is —
+	// an unconfigured invocation (no --query-config; TestLiveQuery's own
+	// case) must stay a pure, side-effect-free stub reply, never touching a
+	// real ccpool/bd. Best effort: logged, never turned into a query
+	// failure — this subcommand's primary job is answering the pull, not
+	// housekeeping.
+	if closed := reconcileClosedBeadSessions(ctx, ccpool.NewCLIRunner(cfg), gitWorktreeOpener, br, cfg.SessionPrefix); closed > 0 {
+		slog.Info("query: reconciled sessions with closed beads", "closed", closed)
 	}
 	events, err := queryBeadsReady(ctx, br, qf)
 	if err != nil {

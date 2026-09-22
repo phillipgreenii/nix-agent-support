@@ -17,11 +17,14 @@ import (
 // fakeCC is a minimal ccpool.Runner test double — this module's own local
 // reimplementation of packages/pg-router's (now-deleted) dtest.FakeCC shape
 // (ListSeq/Closed/ClosedPurge), since that package is unreachable from here
-// (Go's internal-package visibility rule).
+// (Go's internal-package visibility rule). listErr (reconcile_test.go's own
+// addition, pg2-hrppg) injects a `ccpool list` failure; unset (nil), List
+// behaves exactly as before.
 type fakeCC struct {
 	mu          sync.Mutex
 	ListSeq     [][]ccpool.Session
 	listIdx     int
+	listErr     error
 	Closed      []string
 	ClosedPurge []bool
 }
@@ -43,6 +46,9 @@ func (f *fakeCC) Close(_ context.Context, externalID string, purge bool) error {
 func (f *fakeCC) List(context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	if len(f.ListSeq) == 0 {
 		return nil, nil
 	}

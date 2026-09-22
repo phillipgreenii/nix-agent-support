@@ -180,36 +180,49 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 // never purge a session out from under an operator who still has open work
 // to attach to.
 //
-// Once cc.Close succeeds, it also best-effort removes s (the session's own
-// working directory, ccpool.Session.CWD) as a linked git worktree via
-// open/gitclient.WorktreeManager.RemoveWorktree. This must fail SOFT (log +
-// continue), never abort the caller's sweep or be promoted to a nonzero
-// overall exit: teardownAllSessions sweeps every session matching
-// SessionPrefix regardless of which IsolationConfig.Type
-// (internal/executor/isolation.go) launched it, so s.CWD is not always a
-// registered linked worktree of any repository — for "none" isolation it's
-// RepoRoot itself (git refuses to remove a repo's main working tree), and
-// for "path"/"workforest" isolation it's an unrelated directory that may
-// not even be inside a git repository at all. Either failure shape (open
-// erroring because cwd isn't inside any repo, or RemoveWorktree itself
-// erroring because it isn't a registered linked worktree of the repo it IS
-// inside) is expected and equally harmless — same fail-soft posture
-// cc.Close's own error handling above already has.
+// The actual purge — cc.Close plus the best-effort worktree removal — is
+// closeSessionAndWorktree below, shared verbatim with reconcile.go's
+// reconcileClosedBeadSessions (pg2-hrppg): the periodic counterpart to this
+// once-per-shutdown sweep, which reconciles a closed-bead session's
+// StateIdle/StateNeedsInput row while the daemon is still up, rather than
+// leaving it to leak until the next shutdown.
 func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, s ccpool.Session) bool {
 	if s.State == ccpool.StateNeedsInput && !beadAlreadyClosed(ctx, br, s) {
 		slog.Info("preShutdown: teardown preserving needs_input session for operator attach",
 			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
 		return false
 	}
+	return closeSessionAndWorktree(ctx, cc, open, s)
+}
+
+// closeSessionAndWorktree purges s via cc.Close(purge=true), then
+// best-effort removes s's own working directory (ccpool.Session.CWD) as a
+// linked git worktree via open/gitclient.WorktreeManager.RemoveWorktree.
+// This must fail SOFT (log + continue), never abort the caller's sweep or be
+// promoted to a nonzero overall exit: both callers — closeUnlessNeedsInput's
+// once-per-shutdown sweep and reconcile.go's periodic
+// reconcileClosedBeadSessions — sweep sessions regardless of which
+// IsolationConfig.Type (internal/executor/isolation.go) launched them, so
+// s.CWD is not always a registered linked worktree of any repository — for
+// "none" isolation it's RepoRoot itself (git refuses to remove a repo's main
+// working tree), and for "path"/"workforest" isolation it's an unrelated
+// directory that may not even be inside a git repository at all. Either
+// failure shape (open erroring because cwd isn't inside any repo, or
+// RemoveWorktree itself erroring because it isn't a registered linked
+// worktree of the repo it IS inside) is expected and equally harmless — same
+// fail-soft posture cc.Close's own error handling below already has.
+// Returns true iff cc.Close succeeded (the session was actually purged); a
+// worktree-removal failure never changes that.
+func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, s ccpool.Session) bool {
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
-		slog.Warn("preShutdown: teardown close failed", "session", s.ExternalID, "err", err)
+		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
 	}
 	if wm, err := open(ctx, s.CWD); err != nil {
-		slog.Warn("preShutdown: teardown worktree remove failed (cwd may not be inside a git repository)",
+		slog.Warn("teardown: worktree remove failed (cwd may not be inside a git repository)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	} else if err := wm.RemoveWorktree(ctx, s.CWD, true); err != nil {
-		slog.Warn("preShutdown: teardown worktree remove failed (cwd may not be a linked worktree)",
+		slog.Warn("teardown: worktree remove failed (cwd may not be a linked worktree)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	}
 	return true
@@ -232,6 +245,12 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // still matches by prefix alone), or a `bd show` error (bd unreachable) —
 // never risk purging a session an operator still needs to attach to just
 // because bd could not be reached.
+//
+// Shared verbatim by both callers of this file's own sweeps: closeUnlessNeedsInput
+// (needs_input only) and reconcile.go's reconcileClosedBeadSessions
+// (idle or needs_input, pg2-hrppg) — the log line below is deliberately
+// state-agnostic ("preserving session"), not "preserving needs_input
+// session", since an idle session can hit this same ambiguous-lookup path.
 func beadAlreadyClosed(ctx context.Context, br beads.Runner, s ccpool.Session) bool {
 	beadID := s.Meta[ccpool.MetaKeyBead]
 	if beadID == "" {
@@ -239,7 +258,7 @@ func beadAlreadyClosed(ctx context.Context, br beads.Runner, s ccpool.Session) b
 	}
 	status, err := beads.Status(ctx, br, beadID)
 	if err != nil {
-		slog.Warn("preShutdown: teardown bead-status lookup failed; preserving needs_input session",
+		slog.Warn("teardown: bead-status lookup failed; preserving session",
 			"session", s.ExternalID, "bead", beadID, "err", err)
 		return false
 	}
