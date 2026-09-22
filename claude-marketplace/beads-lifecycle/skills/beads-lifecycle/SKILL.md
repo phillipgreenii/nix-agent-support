@@ -311,6 +311,24 @@ human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a 
     while the decomposition had 18 open leaves. Removing the parent→child edges restored them
     immediately. Diagnosing this MUST be done with the claim RELEASED: `bd ready` excludes
     `in_progress` on its own, so the test is vacuous while the parent is claimed.
+- **D-10** D-1's classification is NOT a strict binary. A blocker that is neither ANOTHER ISSUE
+  (D-2) nor a decision/input/approval/out-of-band action only a PERSON can supply is a THIRD case —
+  a LIVE EXTERNAL EVENT or OBSERVATION that occurs on its own schedule (a metric that has not yet
+  fired, a window that has not yet occurred) and that no one, person or agent, can force to happen
+  sooner. `human` MUST NOT be applied to this case either: it MUST NOT be reached by elimination
+  merely because a blocker failed D-2's ANOTHER-ISSUE test, and "no PERSON decision is actually
+  needed" MUST be checked as its own, affirmative question — not inferred from "it wasn't a bead".
+  Model it with `--defer <date>` (re-checked periodically, no label), never a dependency edge (a
+  defer is a TIMER, D-8's last sentence) and never `human`. Verified live 2026-09-22 (`pg2-yanwe`):
+  `pg2-b48eq` — "confirm block-limit-hit + nudge.deferred counters on next live 100% five-hour
+  window", whose own 2026-07-21 comment already ruled "No human decision required" — was
+  re-labeled `human` at least three times across 2026-07-21..09-22 because the classification step
+  that actually applies the label (`pb:drain-stuck` STUCK step 3) had only the PERSON/ISSUE
+  binary, so this bead fell into PERSON by elimination on every re-park. A standing
+  "no human decision required" comment recorded on a bead is EVIDENCE of this branch, not the
+  test for it — a bead of this same shape that has never yet been ruled on must still route here
+  on its FIRST park, not only after a person has said so once. `pb:drain-stuck`'s DEFER-ON-EVENT
+  exit is the operational form of this rule.
 
 ## Handoff Preconditions
 

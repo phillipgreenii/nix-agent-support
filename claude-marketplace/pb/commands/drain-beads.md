@@ -885,8 +885,10 @@ NOT a trigger: "another bead has to land first" (that is a dependency).
 Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
 worktree/branch location, and what you tried. Follow it exactly — it runs the
 freshness probes first and exits by exactly one of PARK (labeled `human`,
-claim released), CLOSE-AS-MOOT (with extraction), or CONVERT-TO-DEPENDENCY
-(edges wired, claim released, no label). Then return to CLAIM.
+claim released), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
+(edges wired, claim released, no label), or DEFER-ON-EVENT (deferred, claim
+released, no label — a live external event, not a person or a bead, is the
+blocker). Then return to CLAIM.
 
 ## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer)
 
@@ -979,7 +981,7 @@ arguments, behavior is otherwise unchanged.
 - `human` means A PERSON IS THE BLOCKER, never "not workable right now". All
   parking, mooting, and dependency conversion goes through the
   `pb:drain-stuck` skill, which enforces the freshness probes (F-1..F-10), the
-  blocker classification (D-1..D-8), outcome-shaped preconditions (P-1..P-5),
+  blocker classification (D-1..D-10), outcome-shaped preconditions (P-1..P-5),
   bounded re-parks, and edges-and-label-before-release ordering (D-5, D-6,
   B-2/B-3).
 - A handoff pointer is dispositioned at UNDERSTAND via

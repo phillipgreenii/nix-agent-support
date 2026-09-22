@@ -12,9 +12,9 @@ write below passes `--actor "ID"`.
 
 `human` means A PERSON IS THE BLOCKER — the LAST RESORT. Work through STUCK in
 order; it exits by exactly one of: PARK (labeled `human`, claim released),
-CLOSE-AS-MOOT, or CONVERT-TO-DEPENDENCY. Whatever the exit, the claim is
-RELEASED or the bead CLOSED before you return — never return still holding a
-claim in a state this skill does not define.
+CLOSE-AS-MOOT, CONVERT-TO-DEPENDENCY, or DEFER-ON-EVENT. Whatever the exit, the
+claim is RELEASED or the bead CLOSED before you return — never return still
+holding a claim in a state this skill does not define.
 
 ## STUCK — cannot complete a claimed bead (LAST RESORT: escalate to a human)
 
@@ -34,9 +34,10 @@ NOT a trigger: "another bead has to land first".
 Step 1 only PRESERVES the work; the park that goes in front of a human is the
 COMMENT + `human` label in steps 6–7. Steps 2 and 3 stand between the two
 deliberately, and each has its OWN exit that is not a park: a bead whose premise
-the probes prove MOOT leaves via **CLOSE-AS-MOOT**, and a bead whose live blockers
-are all OTHER BEADS leaves via **CONVERT-TO-DEPENDENCY**. Reaching step 4 means a
-person really is the blocker.
+the probes prove MOOT leaves via **CLOSE-AS-MOOT**, a bead whose live blockers
+are all OTHER BEADS leaves via **CONVERT-TO-DEPENDENCY**, and a bead whose only
+live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves via
+**DEFER-ON-EVENT**. Reaching step 4 means a person really is the blocker.
 
 1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
    clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
@@ -76,13 +77,7 @@ person really is the blocker.
    - Premise PROVABLY MOOT → this bead is answered, not blocked. Do NOT park it and do
      NOT label it `human`: go to **CLOSE-AS-MOOT** below.
 
-3. CLASSIFY THE BLOCKER — is a PERSON the blocker, or is it ANOTHER BEAD? This is the
-   branch BEFORE the escalation, not a check inside it: drain claims with
-   `--exclude-label human` and `/unblock-human-beads` claims with `--label human`, so
-   the label simultaneously hides the bead from the queue that would work it AND puts
-   it in front of the operator. If you are waiting on another bead, the operator has
-   nothing to answer and the tracker can express the wait exactly. Full contract: the
-   `beads-lifecycle` skill's `Blocker Modeling` rules (**D-1..D-8**).
+3. CLASSIFY THE BLOCKER — is a PERSON the blocker, is it ANOTHER BEAD, or is it a LIVE EXTERNAL EVENT neither one can force? This is NOT a binary, and it is the branch BEFORE the escalation, not a check inside it: drain claims with `--exclude-label human` and `/unblock-human-beads` claims with `--label human`, so the label simultaneously hides the bead from the queue that would work it AND puts it in front of the operator. If you are waiting on another bead, the operator has nothing to answer and the tracker can express the wait exactly; if you are waiting on the world (a metric that has not yet fired, a window that has not yet occurred), the operator ALSO has nothing to answer. Full contract: the `beads-lifecycle` skill's `Blocker Modeling` rules (**D-1..D-10**).
    - Name every live blocker, then ask of each: could a PERSON clear this now with a
      decision, an input, an approval, or an out-of-band action? Or must ANOTHER BEAD
      finish first? Step 2's `sibling-open?` probe already answers the second half for
@@ -102,6 +97,14 @@ person really is the blocker.
    - ANY live blocker needs a PERSON → continue to step 4. If some blockers are ALSO
      beads, this is the MIXED case: do CONVERT-TO-DEPENDENCY's step 1 for the bead half
      first, then come back here and finish the escalation (**D-7**).
+   - The ONLY live blocker is a LIVE EXTERNAL EVENT or OBSERVATION — something that
+     occurs on its own schedule and that NEITHER a person NOR another bead can make
+     happen sooner (a metric that has not yet fired naturally, a window that has not
+     yet occurred) → this is NOT a human blocker (**D-10**): go to **DEFER-ON-EVENT**
+     below. Do NOT let this fall through to step 4 by elimination merely because it
+     failed the ANOTHER-BEAD test above — that fallthrough is exactly the defect
+     `pg2-yanwe` traced to `pg2-b48eq` re-acquiring `human` on every park despite its
+     own standing "no human decision required" ruling.
 
 4. NAME THE PRECONDITION — only when the park is blocked on something that must
    become TRUE before the bead is workable (skip it for an underspecified /
@@ -263,7 +266,7 @@ throws that away (F-7). EXTRACT first, close second.
 Reached when EVERY live blocker is another bead. The bead is not waiting on a person, so
 it MUST NOT be labeled `human`: the tracker can express this wait exactly, and unlike a
 label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skill's
-`Blocker Modeling` rules (**D-1..D-8**).
+`Blocker Modeling` rules (**D-1..D-10**).
 
 1. WIRE one edge per live blocker, FIRST — while the bead is still `in_progress` and
    owned by you, so `bd ready` excludes it and the write lands in a window no peer can
@@ -333,3 +336,52 @@ actually HOLDS the question:
   # capture the new id as <question>, then wire it as a blocker like any other:
   bd dep add <id> --blocked-by <question>
   ```
+
+## DEFER-ON-EVENT (STUCK step 3 found the blocker is a live external event, not a person or a bead)
+
+Reached when the ONLY live blocker is something that happens on its own schedule and that
+NEITHER a person NOR another bead can make happen sooner (**D-10**) — a metric that has not
+yet fired naturally, a live window that has not yet occurred. The bead is not waiting on a
+decision; it is waiting on the WORLD, so `human` MUST NOT be applied here: that label would
+put a non-question in front of the operator on every single re-park, which is the exact defect
+`pg2-yanwe` traced to `pg2-b48eq` re-acquiring `human` at least three times across
+2026-07-21..09-22 despite its own 2026-07-21 comment already ruling "No human decision
+required".
+
+1. NAME THE PRECONDITION exactly as STUCK step 4 — the observable event/outcome that must
+   occur before this is workable — with its `PRECONDITION-KEY` and `DERIVED-FROM`.
+2. DETECT A REPEAT exactly as STUCK step 5. Ordinary case (key absent, or key present but the
+   event genuinely still has not occurred) → continue below. If the SAME key already appears
+   from an earlier park, that is a signal the CHECK itself — not the world — may be wrong (a
+   renamed metric, a wrong PromQL, a daemon that no longer emits it): that genuinely IS worth a
+   person's judgment, so escalate it via STUCK's step 6b/7b (`human,stale-precondition`) instead
+   of continuing here. Do not let an event-gated bead re-park on the same unresolved key a third
+   time with no one ever looking at it.
+3. COMMENT what you tried and why the event has not yet occurred, carrying the STUCK step 2
+   `FRESHNESS:` line and the step-1 PRECONDITION block:
+
+   ```bash
+   bd comment <id> "stuck (event-gated, not human-gated): <what you tried / observed>. The
+   blocker is a live external event/observation, not a person or another bead — see
+   beads-lifecycle D-10. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
+   PRECONDITION: <observable outcome that must occur before this is workable>
+   PRECONDITION-KEY: <stable-outcome-slug>
+   DERIVED-FROM: <repo>@<sha> — <path(s) you read>" --actor "ID"
+   ```
+
+4. DEFER, with NO `human` label — remove it in the SAME call if the bead already carries it
+   from an earlier, mis-applied park:
+
+   ```bash
+   bd update <id> --defer +7d --remove-label human --status open --assignee "" --actor "ID"
+   ```
+
+   `+7d` matches the re-check window used elsewhere in this family (`/unblock-human-beads`'
+   own `planning-session-required` defer); shorten it if the event is expected sooner. `--defer`
+   is what keeps this out of `bd ready`, not a label — it clears itself on the date with no one
+   having to remember to remove anything, and it never reaches `/unblock-human-beads`'
+   `--label human` queue at all.
+
+5. Do NOT clean up the parked worktree/branch — the work resumes there once the event has
+   occurred. Done — return to the drain loop's CLAIM step.
