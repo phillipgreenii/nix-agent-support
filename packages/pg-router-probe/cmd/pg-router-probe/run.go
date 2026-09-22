@@ -254,9 +254,10 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	if len(findings) > 0 {
 		existing, err := deps.listEscalated(ctx, warn)
 		if err != nil {
-			msg := fmt.Sprintf("dedup query: %v", err)
-			skipped = append(skipped, msg)
-			degraded = append(degraded, msg)
+			// Not added to `skipped` -- this run is returning immediately
+			// (no bead is filed/updated on this path), so `skippedNote`
+			// above (already computed) is never used again either.
+			degraded = append(degraded, fmt.Sprintf("dedup query: %v", err))
 			return partialErrorf("run: partial (%s)", strings.Join(degraded, "; "))
 		}
 		for _, f := range findings {
