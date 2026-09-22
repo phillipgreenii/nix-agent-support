@@ -127,6 +127,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"pnwf":               true,
 		"kill-probe":         true,
 		"pg-ccaudit":         true,
+		"pg-pr":              true,
 		"safe-commands":      true,
 		"kubectl":            true,
 		"build-tools":        true,

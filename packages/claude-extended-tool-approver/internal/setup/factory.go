@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgpr"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
@@ -300,6 +301,15 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// uniformly. Ordering relative to its neighbours does not matter:
 		// "pg-ccaudit" is recognized by no other rule in this chain.
 		pgccaudit.New(),
+		// pg-pr approves the read-only half of the first-party pg-pr CLI's `pr
+		// <verb>` command family (bead pg2-lmqy1) -- see that package's doc
+		// comment for the classification and the pg2-xf564 premise-staleness
+		// account (list/view were retired before this bead was filed). Like
+		// pgccaudit/pnwf/ghstack above it takes no consumer config -- the
+		// classification is fixed and applies uniformly. Ordering relative to
+		// its neighbours does not matter: "pg-pr" is recognized by no other
+		// rule in this chain.
+		pgpr.New(),
 		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
 		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
 		// through the I13 structural entry point (EvaluateStructure) rather than
