@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gitdir"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killprobe"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killshell"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/kubectl"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/mcp"
@@ -255,6 +256,18 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// matter (neither recognizes "pn" as a basename at all today), but it is
 		// placed alongside its command-aware-classifier siblings for readability.
 		pnworkspace.New(),
+		// kill-probe approves the narrow `kill -0`/`kill -s 0` null-signal
+		// liveness-probe idiom (pg2-z3u4f, ADR 0074) — a runtime-composed shape,
+		// not a plugin-prescribed one, so unlike pnworkspace above it needs no
+		// operator-ruling citation, just its own self-contained safety argument
+		// (see the package doc). It takes no config for the same reason
+		// pnworkspace does not: the recognized signal-0 spellings are fixed and
+		// apply uniformly, with no per-consumer data to inject. Ordering
+		// relative to its neighbours does not matter — `kill` is recognized by
+		// no other rule in this chain (dangerouscmds' denylist deliberately
+		// excludes it) — it is placed here, alongside pnworkspace, because both
+		// are small fixed-allowlist Bash-command classifiers.
+		killprobe.New(),
 		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
 		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
 		// through the I13 structural entry point (EvaluateStructure) rather than
