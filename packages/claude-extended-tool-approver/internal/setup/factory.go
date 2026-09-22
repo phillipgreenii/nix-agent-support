@@ -32,6 +32,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/rcpreflight"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/safecmds"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/secrets"
 	sqlite3rule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/sqlite3"
@@ -310,6 +311,17 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// its neighbours does not matter: "pg-pr" is recognized by no other
 		// rule in this chain.
 		pgpr.New(),
+		// rc-preflight approves/gates phillipg-nix-ziprecruiter's zr-refactor
+		// plugin's worktree-pool lifecycle script per its own per-flag
+		// classification (bead pg2-o9rcj, follow-up to pg2-xf564) -- see that
+		// package's doc comment for the full classification and citations,
+		// including why buildtools' verbScopedApprovals structurally cannot
+		// resolve rc-preflight's dash-prefixed "subcommands" as a verb. Like
+		// pgpr/pgccaudit/pnwf/ghstack above, it takes no consumer config -- the
+		// classification is fixed and applies uniformly. Ordering relative to
+		// its neighbours does not matter: "rc-preflight" is recognized by no
+		// other rule in this chain.
+		rcpreflight.New(),
 		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
 		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
 		// through the I13 structural entry point (EvaluateStructure) rather than

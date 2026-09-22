@@ -128,6 +128,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"kill-probe":         true,
 		"pg-ccaudit":         true,
 		"pg-pr":              true,
+		"rc-preflight":       true,
 		"safe-commands":      true,
 		"kubectl":            true,
 		"build-tools":        true,
