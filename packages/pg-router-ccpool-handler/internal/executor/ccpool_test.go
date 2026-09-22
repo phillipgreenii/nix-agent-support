@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -316,10 +317,12 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
 		t.Errorf("worker done-without-close must add human; updates=%v", bd.Updates)
 	}
-	// sessionState (edge check) + active() each call List once on the single
-	// stopping poll, so 2 List calls proves the loop stopped immediately.
-	if cc.ListIdx != 2 {
-		t.Errorf("done must stop on first poll (listIdx=2: sessionState+active), got %d (looped to MaxWait?)", cc.ListIdx)
+	// sessionState (edge check) + active() each call List once, then closeReason
+	// (INV-CCH-7) calls List twice more (its own bounded re-read, since this
+	// session's CloseReason is unset/present) — 4 List calls on the single
+	// stopping poll proves the loop stopped immediately (not looped to MaxWait).
+	if cc.ListIdx != 4 {
+		t.Errorf("done must stop on first poll (listIdx=4: sessionState+active+closeReason's 2), got %d (looped to MaxWait?)", cc.ListIdx)
 	}
 }
 
@@ -335,8 +338,10 @@ func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
 		t.Errorf("feedback done-without-close must unclaim; updates=%v", bd.Updates)
 	}
-	if cc.ListIdx != 2 {
-		t.Errorf("done must stop on first poll (listIdx=2), got %d", cc.ListIdx)
+	// See TestWaitDone_workerDoneStopsFast_failure's comment: sessionState +
+	// active() + closeReason's own bounded re-read = 4 List calls.
+	if cc.ListIdx != 4 {
+		t.Errorf("done must stop on first poll (listIdx=4), got %d", cc.ListIdx)
 	}
 }
 
@@ -417,6 +422,97 @@ func TestSessionState_lookup(t *testing.T) {
 				t.Errorf("sessionState(%s) = (%q, %v), want (%q, %v)", tc.name, gotState, gotOK, tc.wantState, tc.wantOK)
 			}
 		})
+	}
+}
+
+// --- INV-CCH-7: eviction-aware death branch, breadcrumb + two-strike escalation ---
+
+// TestWaitDone_deathByCloseReason covers waitDone's death branch across every
+// close-reason shape: the three external reasons (idle_ttl, cap_eviction,
+// operator) must release the bead with a comment and NOT apply the role's
+// on_failure; a "handler" close, an unstamped ("") reason, and an absent row
+// must all fall through to the role's normal on_failure (human, for the
+// worker role used here) — unchanged from before this packet.
+func TestWaitDone_deathByCloseReason(t *testing.T) {
+	cases := []struct {
+		name        string
+		reason      string // "" = unstamped; "absent" = row missing from list
+		wantUnclaim bool
+		wantHuman   bool
+		wantComment bool
+	}{
+		{"cap_eviction", "cap_eviction", true, false, true},
+		{"idle_ttl", "idle_ttl", true, false, true},
+		{"operator", "operator", true, false, true},
+		{"handler is not external", "handler", false, true, false},
+		{"unstamped death", "", false, true, false},
+		{"absent row", "absent", false, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fastCfg()
+			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "in_progress", "in_progress"}}}
+			row := ccpool.Session{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateWorking, CloseReason: tc.reason}
+			var seq [][]ccpool.Session
+			if tc.reason == "absent" {
+				seq = [][]ccpool.Session{{}, {}, {}}
+			} else {
+				seq = [][]ccpool.Session{{row}, {row}, {row}}
+			}
+			cc := &dtest.FakeCC{ListSeq: seq}
+			e := newExec(cc, bd, cfg)
+			d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}} // workerRole's OnFailure is add-human
+			err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w")
+			if err == nil {
+				t.Fatal("death must return an error")
+			}
+			if got := dtest.HasUpdate(bd, "update zr-w --status=open --assignee="); got != tc.wantUnclaim {
+				t.Errorf("unclaimed = %v, want %v; updates=%v", got, tc.wantUnclaim, bd.Updates)
+			}
+			if got := dtest.HasUpdate(bd, "update zr-w --add-label human"); got != tc.wantHuman {
+				t.Errorf("human = %v, want %v; updates=%v", got, tc.wantHuman, bd.Updates)
+			}
+			if got := len(bd.Comments) > 0; got != tc.wantComment {
+				t.Errorf("comment = %v, want %v; comments=%v", got, tc.wantComment, bd.Comments)
+			}
+		})
+	}
+}
+
+// TestWaitDone_secondExternalCloseEscalates proves the two-strike idiom: a bead
+// that already carries the pool-evicted breadcrumb (from a PRIOR external
+// close) must be escalated to human on THIS external close too, in addition
+// to still being released.
+func TestWaitDone_secondExternalCloseEscalates(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{
+		StatusSeq: map[string][]string{"zr-w": {"in_progress", "in_progress"}},
+		Labels:    map[string][]string{"zr-w": {"pool-evicted"}}, // seeded from a prior external close
+	}
+	row := ccpool.Session{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateWorking, CloseReason: "cap_eviction"}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{row}, {row}}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	_ = e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w")
+	if !dtest.HasUpdate(bd, "update zr-w --status=open --assignee=") {
+		t.Fatalf("still released; updates=%v", bd.Updates)
+	}
+	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
+		t.Fatalf("second consecutive external close must add human; updates=%v", bd.Updates)
+	}
+}
+
+// TestWaitFailureResult_externallyClosedMapsToUnclaimed proves the wait-failure
+// mapping reports ErrExternallyClosed as Unclaimed even when the role's own
+// OnFailure is AddHuman — the external-close branch must take priority over
+// (not merge with) the role's configured on_failure.
+func TestWaitFailureResult_externallyClosedMapsToUnclaimed(t *testing.T) {
+	e := newExec(&dtest.FakeCC{}, &dtest.ScriptBD{}, fastCfg())
+	cc := workerRole(fastCfg()).CCPool // OnFailure: AddHuman
+	err := fmt.Errorf("zr-w: %w", ErrExternallyClosed)
+	got := e.waitFailureResult(cc, "zr-w", err)
+	if got.Actions[0].Verb != report.Unclaimed {
+		t.Fatalf("got %+v", got)
 	}
 }
 

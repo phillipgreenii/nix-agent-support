@@ -13,6 +13,7 @@ package dtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"sync"
@@ -140,7 +141,8 @@ type ScriptBD struct {
 	Ready       map[string]string // keyed by "feedback"/"worker"
 	ReadyErr    error             // if set, every `bd ready` returns this error
 	Show        map[string]string
-	ShowErrOnce map[string]error // returns error once per id, then clears
+	ShowErrOnce map[string]error    // returns error once per id, then clears
+	Labels      map[string][]string // keyed by bead id; wired into the synthesized "show" JSON's "labels" key below so beads.HasLabel can read a seeded label without a full Show[id] JSON literal.
 }
 
 func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
@@ -177,7 +179,8 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 			i = len(seq) - 1
 		}
 		s.Idx[id]++
-		return `{"id":"` + id + `","status":"` + seq[i] + `"}`, nil
+		labels, _ := json.Marshal(s.Labels[id]) // nil Labels[id] marshals to "null", decoding to an empty/nil slice — same as omitted
+		return `{"id":"` + id + `","status":"` + seq[i] + `","labels":` + string(labels) + `}`, nil
 	case "update":
 		s.Updates = append(s.Updates, join(args))
 	case "comment":

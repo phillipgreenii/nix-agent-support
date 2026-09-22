@@ -153,14 +153,22 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 }
 
 // waitFailureResult maps a wait-path error to the verb actually applied to the
-// bead: a budget hard-stop (watchdog won) always unclaimed; any other failure
-// went through fail → complete.OnFailure(OnFailure). nil/ctx errors → no verb.
-// (pg2-kj7j)
+// bead: a budget hard-stop (watchdog won) always unclaimed; an external close
+// (ErrExternallyClosed) unclaimed, or escalated when it was the second
+// consecutive strike; any other failure went through fail →
+// complete.OnFailure(OnFailure). nil/ctx errors → no verb. (pg2-kj7j, INV-CCH-7)
 func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) report.Result {
 	if err == nil {
 		return report.Result{}
 	}
 	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		return failureAction(report.Unclaimed, beadID)
+	}
+	if errors.Is(err, ErrExternallyClosed) {
+		var ec *externallyClosed
+		if errors.As(err, &ec) && ec.escalated {
+			return failureAction(report.Escalated, beadID)
+		}
 		return failureAction(report.Unclaimed, beadID)
 	}
 	switch cc.OnFailure {
@@ -189,6 +197,13 @@ func budgetUnlimited(b budget.Budget) bool {
 // sites.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
 	r.cleanupWorktree(ctx, cc, name, wt)
+	if werr == nil {
+		// A successful completion resets the eviction strike counter so
+		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
+		// (mirrors run()'s own pool-launch-fail removal after a successful
+		// Ensure, line 118). Best-effort.
+		_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-evicted")
+	}
 	return r.waitFailureResult(cc, d.Item.ID, werr), werr
 }
 
@@ -496,6 +511,19 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				return lose()
 			}
 			if won() {
+				// INV-CCH-7: distinguish an EXTERNAL close (ccpool itself ended the
+				// session — idle_ttl, cap_eviction, operator) from a genuine worker
+				// failure. On external close, release the bead regardless of the
+				// role's configured on_failure and escalate via the two-strike
+				// idiom; only an unexplained death or the handler's own close still
+				// applies on_failure below.
+				if reason := r.closeReason(ctx, name); externalCloseReasons[reason] {
+					_ = beads.Comment(ctx, r.deps.BD, d.Item.ID,
+						fmt.Sprintf("released: ccpool closed the session (%s) before the bead completed; retrying", reason))
+					_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+					escalated := r.escalateEviction(ctx, d.Item.ID)
+					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated})
+				}
 				return r.fail(ctx, d, "session exited before completing")
 			}
 			return lose()
@@ -525,6 +553,79 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) error {
 	_ = complete.OnFailure(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID)
 	return fmt.Errorf("%s: %s", d.Item.ID, reason)
+}
+
+// externalCloseReasons: SOMETHING ELSE ended the session while the worker was
+// fine — the reaper (idle_ttl, cap_eviction) or an operator. "handler" is this
+// process's own close (watchdog hard-stop, not-ingested cleanup), which already
+// owns its outcome. (INV-CCH-7, ADR 0072)
+var externalCloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true}
+
+// ErrExternallyClosed wraps a death whose close reason was external; the wait
+// failure mapping reports it as Unclaimed (or Escalated on the second
+// consecutive strike — see externallyClosed below).
+var ErrExternallyClosed = errors.New("session closed externally by ccpool")
+
+// externallyClosed is the concrete error waitDone's death branch returns for an
+// external close: it carries the specific reason plus whether escalateEviction
+// found this to be the SECOND consecutive external close (escalated). Its Is
+// method matches ErrExternallyClosed directly, so errors.Is(err,
+// ErrExternallyClosed) sees this type without needing a %w-wrapped sentinel;
+// waitFailureResult additionally errors.As's the struct to read escalated.
+type externallyClosed struct {
+	reason    string
+	escalated bool
+}
+
+func (e *externallyClosed) Error() string {
+	return fmt.Sprintf("session closed externally by ccpool (%s)", e.reason)
+}
+
+func (e *externallyClosed) Is(target error) bool {
+	return target == ErrExternallyClosed
+}
+
+// closeReason returns ccpool's recorded close reason for the session, "" when
+// absent, unstamped, or unreadable. ccpool stamps before teardown, so an empty
+// reason on a just-dead row is rare; one bounded re-read covers a list that
+// raced the stamp.
+func (r *ccpoolRun) closeReason(ctx context.Context, externalID string) string {
+	read := func() (string, bool) {
+		sessions, err := r.deps.CC.List(ctx)
+		if err != nil {
+			return "", false
+		}
+		for _, s := range sessions {
+			if s.ExternalID == externalID {
+				return s.CloseReason, true
+			}
+		}
+		return "", false
+	}
+	reason, present := read()
+	if reason == "" && present {
+		if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err == nil {
+			reason, _ = read()
+		}
+	}
+	return reason
+}
+
+// escalateEviction mirrors escalateLaunchFailure for external closes: label on
+// the first, human on the second consecutive one (INV-CCH-7). Returns true iff
+// it escalated to human (repeat external close); false on the first (label
+// only) or on a bd read hiccup.
+func (r *ccpoolRun) escalateEviction(ctx context.Context, beadID string) bool {
+	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, "pool-evicted")
+	if err != nil {
+		return false // can't tell ⇒ do nothing this pass; the next external close retries
+	}
+	if already {
+		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
+		return true
+	}
+	_ = beads.AddLabel(ctx, r.deps.BD, beadID, "pool-evicted")
+	return false
 }
 
 // active reports whether it is still worth waiting on the session addressed by
