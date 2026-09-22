@@ -27,16 +27,46 @@ import (
 // nothing to preserve.
 func preservedForHuman(r store.Session) bool { return r.State == store.NeedsInput }
 
+// countedSessions is the pool's occupancy for cap purposes: live rows NOT
+// preserved for a human (ADR 0072, Decision 1). Preserved rows sit outside
+// max_sessions entirely.
+func countedSessions(live []store.Session) int {
+	n := 0
+	for _, r := range live {
+		if !preservedForHuman(r) {
+			n++
+		}
+	}
+	return n
+}
+
+// evictable reports whether cap eviction may close a counted row: only a
+// session whose turn has ended (Stop or StopFailure). A starting/ready/working
+// row is never evicted for cap pressure (ADR 0072, Decision 2); a hung working
+// row is Pass 1's job once idle_ttl elapses, and a never-ingested ready row is
+// its dispatcher's job (close --reason handler).
+func evictable(r store.Session) bool {
+	if preservedForHuman(r) {
+		return false
+	}
+	return r.State == store.Idle || r.State == store.Errored
+}
+
 // Reap reconciles liveness, prunes phantom rows whose Claude session is gone
 // (ADR 0015), and closes live sessions that are idle past idleTTL or beyond the
 // pool cap, evicting by least-recent activity (NOT creation age — the
 // oldest-created session is often the one the operator is deepest in) — EXCEPT
 // sessions parked for a human, which both closure passes spare
-// (preservedForHuman, ADR 0037). With
-// enough preserved sessions the pool is deliberately left ABOVE maxSessions; that
-// is safe because the cap is not an admission gate (Ensure never consults it), so
-// an over-cap pool grows but cannot starve new work. Only an operator clears a
-// preserved session (`ccpool attend`/`attach`, then `ccpool close`).
+// (preservedForHuman, ADR 0037). Capacity counts only non-preserved rows
+// (countedSessions); cap eviction may close only a row whose turn has already
+// ended — idle or errored, never starting/ready/working (evictable, ADR 0072).
+// If every remaining counted row is still working, the pool is deliberately
+// left over cap — admission control (ccpool capacity), not eviction, bounds
+// working sessions. With enough preserved sessions the pool is deliberately
+// left ABOVE maxSessions; that is safe because the cap is not an admission gate
+// (Ensure never consults it), so an over-cap pool grows but cannot starve new
+// work. Only an operator clears a preserved session (`ccpool attend`/`attach`,
+// then `ccpool close`).
 func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Duration) error {
 	rows, err := s.d.Store.List(ctx)
 	if err != nil {
@@ -80,23 +110,18 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			toClose[r.ExternalID] = "idle_ttl"
 		}
 	}
-	// Pass 2: still over cap AFTER the TTL closures → close more oldest-activity
-	// sessions. TTL closures COUNT toward the cap — ADR 0037's Context records both
-	// passes, cap eviction running "while still over max_sessions AFTER the TTL
-	// closures" — so a pool already at/under cap after TTL reaping closes nothing
-	// more; otherwise we'd over-reap below the configured cap.
-	//
-	// A preserved session is skipped here too (ADR 0037) — the carve-out has NO
-	// last-resort override. It still COUNTS in len(live), so the eviction pressure
-	// on the non-preserved sessions is computed against the real pool size; the
-	// pressure just goes unrelieved once only preserved sessions remain, leaving the
-	// pool over cap by design.
-	capClosures := (len(live) - len(toClose)) - maxSessions
+	// Pass 2: still over cap AFTER the TTL closures → close more sessions, but
+	// only ones whose turn has ended, oldest-activity first (ADR 0072). Capacity
+	// counts only non-preserved rows; TTL closures count toward the cap (ADR
+	// 0037's Context). If every remaining counted row is still working, the pool
+	// is left over cap on purpose — admission control (ccpool capacity) bounds
+	// working sessions, not eviction.
+	capClosures := (countedSessions(live) - len(toClose)) - maxSessions
 	for _, r := range live { // already sorted oldest-first
 		if capClosures <= 0 {
 			break
 		}
-		if preservedForHuman(r) {
+		if !evictable(r) {
 			continue
 		}
 		if _, ok := toClose[r.ExternalID]; !ok {

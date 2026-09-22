@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,9 +90,12 @@ func TestReap_ttlClosuresCountTowardCap(t *testing.T) {
 }
 
 // Over cap with no TTL pressure: close the oldest-activity sessions until at cap.
+// old/mid are modeled as Idle (turn ended) since cap eviction is no longer
+// permitted to target a Ready (in-progress) row (ADR 0072).
 func TestReap_overCapClosesOldestFirst(t *testing.T) {
 	now := time.Unix(10_000, 0)
-	s, closed := reapFixture(t, now, map[string]int64{"fresh": 10, "mid": 100, "old": 1000})
+	s, closed := reapFixtureStates(t, now, map[string]int64{"fresh": 10, "mid": 100, "old": 1000},
+		map[string]store.State{"mid": store.Idle, "old": store.Idle})
 	// idleTTL=0 disables TTL; cap=1 → close the 2 oldest (old, mid); fresh survives.
 	if err := s.Reap(context.Background(), 1, 0); err != nil {
 		t.Fatalf("Reap: %v", err)
@@ -132,16 +136,19 @@ func TestReap_ttlSparesHumanPausedSession(t *testing.T) {
 // TestReap_capEvictionSparesHumanPausedSession: the cap-eviction pass honours the
 // SAME carve-out as the TTL pass (ADR 0037) — the oldest-activity session is
 // `needs_input`, so eviction skips it and falls through to the oldest NON-paused
-// session instead. Preserved sessions still COUNT toward the cap, so the pressure
-// (one closure) is unchanged; only the victim differs.
+// session instead. Preserved sessions no longer count toward the cap at all
+// (ADR 0072 Decision 1), so pressure here comes purely from the two non-preserved
+// rows against cap=1.
 func TestReap_capEvictionSparesHumanPausedSession(t *testing.T) {
 	now := time.Unix(10_000, 0)
 	// oldest-activity first: paused(3000s) < mid(1000s) < fresh(10s). idleTTL=0
-	// disables the TTL pass, so this is purely cap eviction.
+	// disables the TTL pass, so this is purely cap eviction. mid is modeled as
+	// Idle (turn ended) since cap eviction is no longer permitted to target a
+	// Ready (in-progress) row (ADR 0072).
 	s, closed := reapFixtureStates(t, now,
 		map[string]int64{"paused": 3000, "mid": 1000, "fresh": 10},
-		map[string]store.State{"paused": store.NeedsInput})
-	if err := s.Reap(context.Background(), 2, 0); err != nil {
+		map[string]store.State{"paused": store.NeedsInput, "mid": store.Idle})
+	if err := s.Reap(context.Background(), 1, 0); err != nil {
 		t.Fatalf("Reap: %v", err)
 	}
 	if closed["cc-paused"] {
@@ -302,8 +309,11 @@ func TestReap_recordsClosureReasonPerPass(t *testing.T) {
 	withReapSpies(t, func(closures *[]string, phantomPruned *int, preserved *[]int64) {
 		now := time.Unix(10_000, 0)
 		// "stale" is idle past ttl (idle_ttl); cap=2 then forces one more
-		// cap_eviction closure among the remaining sessions ("mid").
-		s, closed := reapFixture(t, now, map[string]int64{"fresh": 10, "mid": 100, "stale": 7200})
+		// cap_eviction closure among the remaining sessions ("mid"). "mid" is
+		// modeled as Idle since cap eviction is no longer permitted to target
+		// a Ready (in-progress) row (ADR 0072).
+		s, closed := reapFixtureStates(t, now, map[string]int64{"fresh": 10, "mid": 100, "stale": 7200},
+			map[string]store.State{"mid": store.Idle})
 		if err := s.Reap(context.Background(), 1, time.Hour); err != nil {
 			t.Fatalf("Reap: %v", err)
 		}
@@ -384,4 +394,99 @@ func TestReap_recordsZeroPreservedWhenNoneParked(t *testing.T) {
 			t.Errorf("recordSessionsPreservedForHuman calls = %v, want exactly one call with 0", *preserved)
 		}
 	})
+}
+
+// TestReap_capCountsOnlyNonPreservedSessions confirms preserved (needs_input)
+// rows sit outside max_sessions entirely: 6 preserved rows plus 2 working rows
+// does not exceed a cap of 6, because only the 2 working rows count (ADR 0072
+// Decision 1).
+func TestReap_capCountsOnlyNonPreservedSessions(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	ages := map[string]int64{"work-a": 10, "work-b": 20}
+	states := map[string]store.State{"work-a": store.Working, "work-b": store.Working}
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("paused-%d", i)
+		ages[id] = int64(3000 + i)
+		states[id] = store.NeedsInput
+	}
+	s, closed := reapFixtureStates(t, now, ages, states)
+	if err := s.Reap(context.Background(), 6, 0); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	for _, id := range []string{"cc-work-a", "cc-work-b"} {
+		if closed[id] {
+			t.Fatalf("%s was closed; preserved rows must not count toward the cap (ADR 0072)", id)
+		}
+	}
+}
+
+// TestReap_capEvictionNeverTargetsWorkingSessions confirms cap eviction skips
+// a Working row even when it is the oldest-activity candidate and only closes
+// the Idle row (ADR 0072 Decision 2).
+func TestReap_capEvictionNeverTargetsWorkingSessions(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	s, closed := reapFixtureStates(t, now,
+		map[string]int64{"idle-old": 3000, "work-1": 1000, "work-2": 10},
+		map[string]store.State{"idle-old": store.Idle, "work-1": store.Working, "work-2": store.Working})
+	if err := s.Reap(context.Background(), 2, 0); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if !closed["cc-idle-old"] {
+		t.Error("idle-old must be evicted (only evictable row)")
+	}
+	if closed["cc-work-1"] || closed["cc-work-2"] {
+		t.Errorf("working rows must never be cap-evicted; closed=%v", closed)
+	}
+}
+
+// TestReap_capEvictionSparesStartingAndReady confirms starting/ready rows are
+// not evictable — only the Errored row (oldest among evictable) closes (ADR
+// 0072 Decision 2).
+func TestReap_capEvictionSparesStartingAndReady(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	s, closed := reapFixtureStates(t, now,
+		map[string]int64{"starting": 3000, "ready": 2000, "errored": 1000},
+		map[string]store.State{"starting": store.Starting, "ready": store.Ready, "errored": store.Errored})
+	if err := s.Reap(context.Background(), 1, 0); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if closed["cc-starting"] || closed["cc-ready"] {
+		t.Errorf("starting/ready rows are not evictable; closed=%v", closed)
+	}
+	if !closed["cc-errored"] {
+		t.Error("errored row is evictable and oldest among evictable; must close")
+	}
+}
+
+// TestReap_capEvictionLeavesPoolOverCapWhenOnlyWorkingRemain confirms cap
+// eviction gets no last-resort override for Working rows: when nothing
+// evictable remains, the pool is deliberately left over cap (admission
+// control, not eviction, bounds working sessions — ADR 0072 Decision 2).
+func TestReap_capEvictionLeavesPoolOverCapWhenOnlyWorkingRemain(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	s, closed := reapFixtureStates(t, now,
+		map[string]int64{"w1": 3000, "w2": 2000, "w3": 1000},
+		map[string]store.State{"w1": store.Working, "w2": store.Working, "w3": store.Working})
+	if err := s.Reap(context.Background(), 1, 0); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("cap pressure must go unrelieved when only working rows remain; closed=%v", closed)
+	}
+}
+
+// TestReap_ttlStillClosesHungWorkingSession pins that Pass 1 (idle_ttl) is
+// unchanged by this packet: a hung Working row idle past idle_ttl is still
+// closed, even though cap eviction (Pass 2) would never target it (ADR 0072).
+func TestReap_ttlStillClosesHungWorkingSession(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	s, closed := reapFixtureStates(t, now,
+		map[string]int64{"hung": 7200},
+		map[string]store.State{"hung": store.Working})
+	if err := s.Reap(context.Background(), 6, 30*time.Minute); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if !closed["cc-hung"] {
+		t.Fatal("a working row idle past idle_ttl must still be closed by Pass 1")
+	}
 }
