@@ -44,6 +44,27 @@
 //     bead's own Files section is explicit that the Slack MCP is already
 //     configured on the machine and this backend "passes no MCP-config
 //     flags of its own."
+//   - `--json-schema <schema>`, appended per-call (see claudeArgs below)
+//     rather than baked into the fixed vector above: bead pg2-vkj77's own
+//     reproduction (running this exact invocation live) proved the prior
+//     no-schema shape's real failure mode — with no Slack MCP server
+//     actually configured on the machine (contrary to this file's own
+//     "already configured" assumption above), the model correctly and
+//     truthfully declines in PROSE ("No Slack MCP tools are available in
+//     this session ...", "I checked ... and there is no Slack server ...")
+//     rather than emitting the JSON the prompt asked for — decodeClaudeEnvelope
+//     still succeeds (the CLI's own `--output-format json` outer envelope is
+//     always well-formed), but the inner env.Result string is that prose,
+//     so decodeShowReply/decodeListReply then fail with exactly the
+//     production symptom ("invalid character 'I'/'N' looking for beginning
+//     of value"). `--json-schema` fixes the root cause rather than the
+//     symptom: re-running the identical reproduction with `--json-schema`
+//     set to this backend's own list-reply shape made the CLI validate the
+//     model's final answer against that schema and forced a
+//     schema-conformant `{"items":[]}` even though the underlying tool call
+//     was still impossible — env.Result is then always valid JSON matching
+//     the shape decodeShowReply/decodeListReply expect, so a conversational
+//     decline can never again reach either decoder as raw prose.
 package internal
 
 import (
@@ -66,11 +87,16 @@ import (
 // (pjira is a plain CLI with subcommands; claude -p's own input is its
 // prompt, not a subcommand vector).
 type Runner interface {
-	// Run invokes the resolved binary with claudeArgs (see claudeArgs
-	// below) and prompt on stdin, returning stdout. On failure, the
+	// Run invokes the resolved binary with claudeArgs(jsonSchema) (see
+	// claudeArgs below) and prompt on stdin, returning stdout. jsonSchema
+	// is the caller's own JSON Schema string for its expected reply shape
+	// (showReplySchema/listReplySchema in backend.go) — passed through to
+	// `--json-schema` so the CLI itself validates/forces the model's final
+	// answer to conform, rather than relying on prompt wording alone (see
+	// this file's own package doc comment for why). On failure, the
 	// returned error wraps the underlying exec error and includes a
 	// trimmed stderr tail so callers can classify it.
-	Run(ctx context.Context, prompt string) (stdout string, err error)
+	Run(ctx context.Context, prompt string, jsonSchema string) (stdout string, err error)
 
 	// Binary reports the resolved CLI binary name Run would exec next,
 	// without invoking it — mirrors issue-jira's Runner.Binary() precedent.
@@ -110,16 +136,26 @@ func ResolveBinary(getenv func(string) string) string {
 	return defaultBinary
 }
 
-// claudeArgs returns the fixed `claude -p ...` argument vector this
-// backend always passes, ahead of the prompt (delivered separately, over
-// stdin) — see this file's package doc comment for each flag's reasoning.
-func claudeArgs() []string {
-	return []string{
+// claudeArgs returns the `claude -p ...` argument vector this backend
+// passes, ahead of the prompt (delivered separately, over stdin) — see
+// this file's package doc comment for each flag's reasoning. jsonSchema is
+// this call's own expected-reply JSON Schema (showReplySchema/
+// listReplySchema in backend.go); when non-empty, `--json-schema
+// <jsonSchema>` is appended so the CLI validates/forces the model's final
+// answer against it. A caller with no schema of its own (there is none
+// today, but the empty case is kept cheap and explicit) passes "" and gets
+// the fixed vector unchanged.
+func claudeArgs(jsonSchema string) []string {
+	args := []string{
 		"-p",
 		"--output-format", "json",
 		"--max-turns", defaultMaxTurns,
 		"--allowed-tools", defaultAllowedTools,
 	}
+	if jsonSchema != "" {
+		args = append(args, "--json-schema", jsonSchema)
+	}
+	return args
 }
 
 // CLIRunner is the default Runner. It execs the resolved claude CLI binary
@@ -161,9 +197,10 @@ func (r *CLIRunner) Binary() string { return r.resolveBinary() }
 // command builds the *exec.Cmd Run below actually executes, split out
 // (mirroring the pjira/bd/gh backends' own Command/command choke points)
 // so a test can assert on WaitDelay/Env/Args directly without spawning a
-// real process.
-func (r *CLIRunner) command(ctx context.Context, prompt string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, r.resolveBinary(), claudeArgs()...)
+// real process. jsonSchema is forwarded to claudeArgs (see its own doc
+// comment).
+func (r *CLIRunner) command(ctx context.Context, prompt string, jsonSchema string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, r.resolveBinary(), claudeArgs(jsonSchema)...)
 	if r.Env != nil {
 		cmd.Env = r.Env
 	}
@@ -177,13 +214,13 @@ func (r *CLIRunner) command(ctx context.Context, prompt string) *exec.Cmd {
 	return cmd
 }
 
-// Run execs the resolved binary with claudeArgs and prompt on stdin,
-// returning stdout. On failure it wraps the underlying exec error with a
-// trimmed, capped stderr tail so callers can classify it without an
+// Run execs the resolved binary with claudeArgs(jsonSchema) and prompt on
+// stdin, returning stdout. On failure it wraps the underlying exec error
+// with a trimmed, capped stderr tail so callers can classify it without an
 // unbounded error string.
-func (r *CLIRunner) Run(ctx context.Context, prompt string) (string, error) {
+func (r *CLIRunner) Run(ctx context.Context, prompt string, jsonSchema string) (string, error) {
 	bin := r.resolveBinary()
-	cmd := r.command(ctx, prompt)
+	cmd := r.command(ctx, prompt, jsonSchema)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -191,10 +228,10 @@ func (r *CLIRunner) Run(ctx context.Context, prompt string) (string, error) {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return stdout.String(), fmt.Errorf("%s %s: %w: %s",
-				bin, strings.Join(claudeArgs(), " "), err, scriptout.TruncateForFold(stderr.Bytes()))
+				bin, strings.Join(claudeArgs(jsonSchema), " "), err, scriptout.TruncateForFold(stderr.Bytes()))
 		}
 		return stdout.String(), fmt.Errorf("%s %s: %w (is %s on PATH?)",
-			bin, strings.Join(claudeArgs(), " "), err, bin)
+			bin, strings.Join(claudeArgs(jsonSchema), " "), err, bin)
 	}
 	return stdout.String(), nil
 }

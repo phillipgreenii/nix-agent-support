@@ -65,7 +65,7 @@ func TestCLIRunner_Binary_ResolvesFromEnv(t *testing.T) {
 
 func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 	r := &CLIRunner{BinaryOverride: "claude"}
-	cmd := r.command(context.Background(), "prompt text")
+	cmd := r.command(context.Background(), "prompt text", "")
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
 	}
@@ -74,12 +74,14 @@ func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 // TestCLIRunner_Command_ArgsAndStdin locks in claudeArgs' own fixed
 // argument vector (this file's package doc comment explains each flag)
 // and proves the prompt is delivered over stdin, never as a positional
-// argument.
+// argument. jsonSchema is "" here — no --json-schema flag — leaving the
+// with-schema case to TestCLIRunner_Command_AppendsJSONSchemaWhenProvided
+// below.
 func TestCLIRunner_Command_ArgsAndStdin(t *testing.T) {
 	r := &CLIRunner{BinaryOverride: "claude"}
-	cmd := r.command(context.Background(), "look up thread X")
+	cmd := r.command(context.Background(), "look up thread X", "")
 
-	wantArgs := append([]string{"claude"}, claudeArgs()...)
+	wantArgs := append([]string{"claude"}, claudeArgs("")...)
 	if len(cmd.Args) != len(wantArgs) {
 		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
 	}
@@ -98,6 +100,33 @@ func TestCLIRunner_Command_ArgsAndStdin(t *testing.T) {
 	}
 	if string(got) != "look up thread X" {
 		t.Fatalf("stdin = %q, want the prompt verbatim", got)
+	}
+}
+
+// TestCLIRunner_Command_AppendsJSONSchemaWhenProvided locks in this bead's
+// own fix (pg2-vkj77, runner.go's package doc comment): a non-empty
+// jsonSchema must append exactly "--json-schema <jsonSchema>" to the end
+// of claudeArgs' own fixed vector, so the CLI validates/forces the model's
+// final answer against it rather than relying on prompt wording alone.
+func TestCLIRunner_Command_AppendsJSONSchemaWhenProvided(t *testing.T) {
+	r := &CLIRunner{BinaryOverride: "claude"}
+	schema := `{"type":"object","required":["items"]}`
+	cmd := r.command(context.Background(), "look up thread X", schema)
+
+	wantArgs := append([]string{"claude"}, claudeArgs(schema)...)
+	if len(cmd.Args) != len(wantArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+	}
+	for i := range wantArgs {
+		if cmd.Args[i] != wantArgs[i] {
+			t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+		}
+	}
+	if got := cmd.Args[len(cmd.Args)-2]; got != "--json-schema" {
+		t.Fatalf("cmd.Args[-2] = %q, want --json-schema", got)
+	}
+	if got := cmd.Args[len(cmd.Args)-1]; got != schema {
+		t.Fatalf("cmd.Args[-1] = %q, want the schema verbatim", got)
 	}
 }
 
@@ -122,7 +151,7 @@ func TestCLIRunner_Run_CapsStderr(t *testing.T) {
 	stub := claudeStubExitingWithStderr(t, "claude", 1, huge)
 
 	r := &CLIRunner{BinaryOverride: stub}
-	_, err := r.Run(context.Background(), "prompt")
+	_, err := r.Run(context.Background(), "prompt", "")
 	if err == nil {
 		t.Fatal("expected error from the failing claude stub")
 	}
@@ -142,7 +171,7 @@ func TestCLIRunner_Run_Success(t *testing.T) {
 		t.Fatalf("write stub: %v", err)
 	}
 	r := &CLIRunner{BinaryOverride: stub}
-	out, err := r.Run(context.Background(), "prompt")
+	out, err := r.Run(context.Background(), "prompt", "")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -153,7 +182,7 @@ func TestCLIRunner_Run_Success(t *testing.T) {
 
 func TestCLIRunner_Run_MissingBinary(t *testing.T) {
 	r := &CLIRunner{BinaryOverride: "/definitely/not/a/real/binary/claude"}
-	_, err := r.Run(context.Background(), "prompt")
+	_, err := r.Run(context.Background(), "prompt", "")
 	if err == nil {
 		t.Fatal("expected error for a missing binary")
 	}

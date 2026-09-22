@@ -20,7 +20,13 @@ type fakeRunner struct {
 	handle func(prompt string) (string, error)
 }
 
-func (f *fakeRunner) Run(_ context.Context, prompt string) (string, error) {
+// Run implements internal.Runner.Run. jsonSchema is deliberately ignored
+// here — this file's own wiring tests only exercise this binary's
+// dispatch-table/serve-loop plumbing against a canned reply, never the
+// real `claude -p --json-schema` CLI behavior (see
+// internal/runner_test.go's TestCLIRunner_Command_AppendsJSONSchemaWhenProvided
+// for that).
+func (f *fakeRunner) Run(_ context.Context, prompt string, _ string) (string, error) {
 	return f.handle(prompt)
 }
 

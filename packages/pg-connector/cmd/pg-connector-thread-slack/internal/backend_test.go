@@ -19,7 +19,13 @@ type fakeRunner struct {
 	handle func(prompt string) (string, error)
 }
 
-func (f *fakeRunner) Run(_ context.Context, prompt string) (string, error) {
+// Run implements Runner.Run. jsonSchema (backend.go's showReplySchema/
+// listReplySchema, passed through by Backend) is deliberately ignored
+// here — every test in this file exercises Backend's own reply-shape
+// validation against a canned string, never the real `claude -p
+// --json-schema` CLI behavior itself (that is runner_test.go's
+// TestCLIRunner_Command_AppendsJSONSchemaWhenProvided's job).
+func (f *fakeRunner) Run(_ context.Context, prompt string, _ string) (string, error) {
 	return f.handle(prompt)
 }
 

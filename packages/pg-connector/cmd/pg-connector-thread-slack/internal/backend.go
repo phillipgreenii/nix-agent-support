@@ -120,6 +120,58 @@ type slackThreadListReply struct {
 	Items []slackThreadFields `json:"items"`
 }
 
+// threadFieldsSchemaProperties is the JSON Schema "properties" object
+// shared by showReplySchema and listReplySchema below, one property per
+// slackThreadFields field — kept as a single constant so the two schemas
+// cannot drift apart on the plain-fact field set they both describe.
+const threadFieldsSchemaProperties = `
+		"id": {"type": "string"},
+		"channel": {"type": "string"},
+		"permalink": {"type": "string"},
+		"started_by": {"type": "string"},
+		"participants": {"type": "array", "items": {"type": "string"}},
+		"last_reply_at": {"type": "string"},
+		"reply_count": {"type": "integer"},
+		"text": {"type": "string"},
+		"mentions_me": {"type": "boolean"}`
+
+// showReplySchema is the `--json-schema` this backend passes for
+// showPrompt's own call (see runner.go's package doc comment for why: bead
+// pg2-vkj77's reproduction proved a conversational decline otherwise reaches
+// decodeShowReply as raw prose). Only "found" is required — id/channel/
+// permalink are conditionally required only when found is true
+// (decodeShowReply/Show's own subsequent field checks enforce that, exactly
+// as before this schema existed), so the schema stays a type/shape fence,
+// never a second, drifting copy of that conditional business rule.
+var showReplySchema = `{
+	"type": "object",
+	"properties": {
+		"found": {"type": "boolean"},` + threadFieldsSchemaProperties + `
+	},
+	"required": ["found"]
+}`
+
+// listReplySchema is the `--json-schema` this backend passes for
+// listPrompt's own call (see runner.go's package doc comment). Only
+// "items" is required; per-item fields stay optional in the schema exactly
+// as decodeListReply already tolerates them (e.g. List's own "an item with
+// an empty id is silently skipped" leniency), so the schema is a type/shape
+// fence only, never a stricter contract than the Go decode already enforces.
+var listReplySchema = `{
+	"type": "object",
+	"properties": {
+		"items": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {` + threadFieldsSchemaProperties + `
+				}
+			}
+		}
+	},
+	"required": ["items"]
+}`
+
 // decodeListReply decodes listPrompt's own instructed JSON reply.
 func decodeListReply(raw string) (*slackThreadListReply, error) {
 	var reply slackThreadListReply
@@ -192,14 +244,16 @@ If nothing matches, respond with exactly {"items": []}.
 Report every field of every item as a plain fact taken directly from the Slack MCP tool's own response for that thread. Never infer, summarize, paraphrase, or guess a value.`, modifier)
 }
 
-// runClaude execs prompt via b.runner and decodes the outer
+// runClaude execs prompt via b.runner (passing jsonSchema through to
+// `--json-schema` — see runner.go's package doc comment for why this
+// backend now always supplies one) and decodes the outer
 // `--output-format json` envelope, folding a transport-level Run failure
 // and an envelope-reported is_error:true into the same ErrUnavailable
 // outcome (both mean "the claude -p/MCP call itself did not produce a
 // usable reply," distinct from this backend's OWN reply-shape validation,
 // which each caller does itself against the envelope's Result field).
-func (b *Backend) runClaude(ctx context.Context, prompt string) (string, error) {
-	out, err := b.runner.Run(ctx, prompt)
+func (b *Backend) runClaude(ctx context.Context, prompt string, jsonSchema string) (string, error) {
+	out, err := b.runner.Run(ctx, prompt, jsonSchema)
 	if err != nil {
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: "+err.Error())
 	}
@@ -220,7 +274,7 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 	if id == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "thread: id required")
 	}
-	result, err := b.runClaude(ctx, showPrompt(id))
+	result, err := b.runClaude(ctx, showPrompt(id), showReplySchema)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +312,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		if modifier == "" {
 			continue
 		}
-		result, err := b.runClaude(ctx, listPrompt(modifier))
+		result, err := b.runClaude(ctx, listPrompt(modifier), listReplySchema)
 		if err != nil {
 			return nil, err
 		}
