@@ -191,11 +191,19 @@ condition that otherwise means Goal met and STOP.
    started — is still current. Reuse this repo's own documented convention
    rather than inventing a new one (`CLAUDE.md`'s "Skill / Plugin Delivery Is
    Store-Served"): `readlink -f` the currently-installed copy of this command
-   and diff it against the repo's working-tree/HEAD source:
+   and diff it against the repo's working-tree/HEAD source. Run this as TWO
+   separate commands rather than one `diff "$(readlink -f ...)"` — CETA's
+   `safecmds` rule deliberately never clears a `$(...)` command substitution
+   (operator ruling `pg2-kxmpe`), so a one-liner abstains every time:
 
    ```bash
-   diff "$(readlink -f ~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/commands/drain-beads.md)" \
-        <repo>/claude-marketplace/pb/commands/drain-beads.md
+   readlink -f ~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/commands/drain-beads.md
+   ```
+
+   then diff the resolved path this printed against the repo source:
+
+   ```bash
+   diff <resolved-path-from-above> <repo>/claude-marketplace/pb/commands/drain-beads.md
    ```
 
    You are current only if BOTH hold: the diff is EMPTY (the installed copy

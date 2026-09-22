@@ -1725,6 +1725,25 @@ type configFlagValuePredicate func(value string) bool
 //	                 argv screen while removing the measured prompt cost of the inert
 //	                 `GIT_EDITOR=true` idiom. See isInertEditorValue for the ruling,
 //	                 the measurements, and the three constraints it imposes.
+//	rerere.enabled   pg2-23z9w (2026-09-21), the CETA-coverage-for-our-own-plugins
+//	                 bead. Predicate: SAME class as `core.fsmonitor` (any git boolean
+//	                 literal) — reusing `isGitBooleanLiteral`, not a widening of that
+//	                 entry, because the two keys independently satisfy the class's
+//	                 own criterion: `rerere.enabled` is documented by git as a plain
+//	                 boolean with NO alternate path/program interpretation (unlike
+//	                 `core.fsmonitor`, whose non-boolean form names a hook script to
+//	                 execute — the reason that key needs the escalated-Reject floor
+//	                 for a non-boolean value, which a non-boolean `rerere.enabled`
+//	                 does NOT need and does NOT get here). Added because our own
+//	                 first-party landing skills (`integrate-branch:ff-merge-to-main`,
+//	                 `integrate-branch:pull-request`) prescribe
+//	                 `git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY"` to keep
+//	                 rerere from writing resolutions for a rebase whose conflicts are
+//	                 about to be discarded, scoped to that one invocation — and
+//	                 without this entry the injection guard rejected it outright
+//	                 (measured: 56 misses, 2026-09-15..21) even though the bare
+//	                 `rebase` this clears down to may itself Ask/Approve on its own
+//	                 merits.
 //
 // THE PREDICATES ARE DELIBERATELY DIFFERENT SHAPES, AND MUST NOT BE SHARED.
 // `core.fsmonitor` accepts a CLASS of values (any git boolean literal, matched
@@ -1745,6 +1764,9 @@ type configFlagValuePredicate func(value string) bool
 // entry is a deliberate, reviewable act.
 var clearedConfigFlagPairs = map[string]configFlagValuePredicate{
 	"core.fsmonitor": isGitBooleanLiteral,
+	// rerere.enabled (pg2-23z9w): same predicate as core.fsmonitor, independently
+	// justified — see the PROVENANCE PER ENTRY comment above this map.
+	"rerere.enabled": isGitBooleanLiteral,
 	// The editor carve-out (pg2-6qh3p). These are the ARGV TWINS of GIT_EDITOR and
 	// GIT_SEQUENCE_EDITOR, and carving out only the env half would break the relation
 	// pg2-6c85x established — "the env spelling is never LESS restrictive than argv" —

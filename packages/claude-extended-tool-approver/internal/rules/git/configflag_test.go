@@ -92,6 +92,40 @@ func TestGit_ConfigFlagAllowlist_ClearsBooleanFsmonitor(t *testing.T) {
 	}
 }
 
+// TestGit_ConfigFlagAllowlist_ClearsBooleanRerere pins pg2-23z9w's own entry: our
+// first-party landing skills (`integrate-branch:ff-merge-to-main`,
+// `integrate-branch:pull-request`) prescribe
+// `git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY"`, and before this entry the
+// injection guard rejected it outright regardless of what the bare `rebase` itself
+// would have decided. This does not re-run the full fsmonitor matrix (case variants,
+// glued quotes, `--config-env`) — those are properties of the SHARED
+// hasGitConfigInjection machinery, already pinned once by the fsmonitor tests above and
+// not re-tested per key — it only proves the relation for the actual prescribed shape.
+func TestGit_ConfigFlagAllowlist_ClearsBooleanRerere(t *testing.T) {
+	for _, sub := range []string{"rebase main", "status", "log"} {
+		bare := evalCmd(t, "git "+sub)
+		for _, cmd := range []string{
+			dashC("rerere.enabled", "false", sub),
+			dashC("rerere.enabled", "true", sub),
+			dashCBare("rerere.enabled", sub),
+			// The actual prescribed shape (order matters: -c before -C, per the
+			// skill's own invocation).
+			"git -c rerere.enabled=false -C /repo " + sub,
+		} {
+			got := evalCmd(t, cmd)
+			if got.Decision != bare.Decision {
+				t.Errorf("cmd %q: got %s (%s), but the bare `git %s` got %s (%s) — a cleared `-c rerere.enabled=` must leave the verdict exactly as it was (same relation pg2-arfw6 S-7 established for core.fsmonitor)",
+					cmd, got.Decision, got.Reason, sub, bare.Decision, bare.Reason)
+			}
+		}
+	}
+	// The specific defect this closes: before this entry, EVERY spelling below
+	// rejected outright regardless of the bare command's own verdict.
+	if got := evalCmd(t, `git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY"`); got.Decision == hookio.Reject {
+		t.Errorf(`git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY": got REJECT (%s) — an allowlisted rerere.enabled=false must not itself manufacture a Reject; whatever verdict the unresolved -C/$VAR rebase reaches on its own merits is fine, but it must not be THIS entry causing it`, got.Reason)
+	}
+}
+
 // TestGit_ConfigFlagAllowlist_GluedQuoteParity pins the pg2-9zgso fix directly on this
 // bead's OWN allowlisted pair. `-c` always takes its `<key>=<value>` pair as ONE
 // SEPARATE token (configFlagPairCleared's own doc), so `git -c core.fsmonitor='false'
@@ -418,6 +452,7 @@ func TestGit_ConfigFlagAllowlist_TableShape(t *testing.T) {
 		// GIT_SEQUENCE_EDITOR, which is constraint (a) of that ruling.
 		"core.editor":     "pg2-6qh3p, operator ruling of 2026-08-13 — value must be one of two EXACT inert literals",
 		"sequence.editor": "pg2-6qh3p, operator ruling of 2026-08-13 — value must be one of two EXACT inert literals",
+		"rerere.enabled":  "pg2-23z9w, 2026-09-21 — value must be a git boolean literal (same predicate class as core.fsmonitor, independently justified: rerere.enabled has no non-boolean/path interpretation)",
 	}
 	for key, why := range want {
 		if _, ok := clearedConfigFlagPairs[key]; !ok {
