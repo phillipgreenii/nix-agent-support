@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func noopWarn(string) {}
@@ -101,6 +102,32 @@ func TestListEscalatedTotalFailure(t *testing.T) {
 	_, err := listEscalated(context.Background(), noopWarn)
 	if err == nil {
 		t.Fatalf("expected an error for exit 3")
+	}
+}
+
+// TestListEscalatedHonorsExplicitTimeout proves this probe's own
+// pg-connector subprocess calls respect an explicit context deadline
+// rather than hanging on a wedged pg-connector process -- the
+// "pg-connector subprocess" half of the "every external call in run MUST
+// carry an explicit timeout" binding decision (grafana_test.go's
+// TestFiringAlertsHonorsExplicitTimeout is the Grafana-HTTP half). run.go
+// itself is what derives the short-lived ctx in production (via its own
+// --pg-connector-timeout flag); this test builds one directly against
+// connector.go's own listEscalated to keep the test fast and scoped to
+// this file's own layer.
+func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
+	withFactory(t, "slow")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := listEscalated(ctx, noopWarn)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("expected a timeout error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("listEscalated did not respect its context deadline: took %v", elapsed)
 	}
 }
 

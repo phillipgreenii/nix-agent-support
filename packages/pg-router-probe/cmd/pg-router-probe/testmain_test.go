@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestHelperProcess(t *testing.T) {
@@ -78,6 +79,17 @@ func helperMain() {
 	case "list_total_failure":
 		_, _ = fmt.Fprintln(os.Stderr, "pg-connector: total failure: no backend succeeded")
 		os.Exit(3)
+	case "slow":
+		// Deliberately outlives any short test timeout -- exercises
+		// "every external call in run MUST carry an explicit timeout"
+		// for the pg-connector subprocess side (grafana_test.go's
+		// TestFiringAlertsHonorsExplicitTimeout is the Grafana-HTTP-side
+		// counterpart). The parent's own ctx cancellation (via
+		// exec.CommandContext) kills this process before it ever
+		// reaches this sleep's end; it does not rely on this process
+		// exiting cleanly on its own.
+		time.Sleep(10 * time.Second)
+		os.Exit(0)
 	default:
 		_, _ = fmt.Fprintln(os.Stderr, "unknown GO_HELPER_BEHAVIOR: "+behavior+" (childArgs="+fmt.Sprint(childArgs)+")")
 		os.Exit(99)

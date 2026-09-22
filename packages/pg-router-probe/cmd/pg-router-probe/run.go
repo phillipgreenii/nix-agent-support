@@ -74,10 +74,11 @@ func defaultSnapshotPath() string {
 // runOptions is every "run" flag value, gathered before runProbe is
 // called.
 type runOptions struct {
-	grafanaURL     string
-	grafanaToken   string
-	grafanaTimeout time.Duration
-	ruleUIDs       []string
+	grafanaURL         string
+	grafanaToken       string
+	grafanaTimeout     time.Duration
+	pgConnectorTimeout time.Duration
+	ruleUIDs           []string
 
 	haveQueueDepth bool
 	queueDepth     int
@@ -121,9 +122,10 @@ func defaultRunDeps() runDeps {
 
 func newRunCmd() *cobra.Command {
 	opts := runOptions{
-		grafanaTimeout: 10 * time.Second,
-		ruleUIDs:       append([]string{}, registeredRuleUIDs...),
-		snapshotPath:   defaultSnapshotPath(),
+		grafanaTimeout:     10 * time.Second,
+		pgConnectorTimeout: 30 * time.Second,
+		ruleUIDs:           append([]string{}, registeredRuleUIDs...),
+		snapshotPath:       defaultSnapshotPath(),
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -133,6 +135,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.grafanaURL, "grafana-url", "", "Grafana base URL; unset skips the Grafana alerts sub-check")
 	cmd.Flags().StringVar(&opts.grafanaToken, "grafana-token", os.Getenv("PG_ROUTER_PROBE_GRAFANA_TOKEN"), "Grafana bearer token (default from PG_ROUTER_PROBE_GRAFANA_TOKEN)")
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
+	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the 4 registered rule UIDs")
 	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading; unset (with --backlog) skips the queue/backlog drift sub-check")
 	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading; unset (with --queue-depth) skips the queue/backlog drift sub-check")
@@ -251,8 +254,23 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 	skippedNote := strings.Join(skipped, "; ")
 
+	// withPgTimeout derives a FRESH, independent deadline for each
+	// individual pg-connector subprocess call below -- "every external
+	// call in run MUST carry an explicit timeout" [Binding decisions],
+	// same requirement as the Grafana HTTP call above, just applied at
+	// the call site here instead of inside defaultRunDeps, since there
+	// are 1..N such calls per run (one list, then one create/update+
+	// comment PER finding) rather than Grafana's single call -- a single
+	// shared deadline across all of them would let an early finding's
+	// call eat into a later finding's own budget.
+	withPgTimeout := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, opts.pgConnectorTimeout)
+	}
+
 	if len(findings) > 0 {
-		existing, err := deps.listEscalated(ctx, warn)
+		listCtx, cancel := withPgTimeout()
+		existing, err := deps.listEscalated(listCtx, warn)
+		cancel()
 		if err != nil {
 			// Not added to `skipped` -- this run is returning immediately
 			// (no bead is filed/updated on this path), so `skippedNote`
@@ -265,14 +283,23 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			body := renderBody(f, deps.now(), skippedNote)
 			switch action {
 			case actionCreate:
-				if _, err := deps.createIssue(ctx, escalationTitle(f), []string{"escalated"}, trackedMetadata(f), body, warn); err != nil {
+				createCtx, cancel := withPgTimeout()
+				_, err := deps.createIssue(createCtx, escalationTitle(f), []string{"escalated"}, trackedMetadata(f), body, warn)
+				cancel()
+				if err != nil {
 					warn(fmt.Sprintf("failed to create bd issue for %s: %v", f.Fingerprint, err))
 				}
 			case actionUpdate:
-				if err := deps.updateMetadata(ctx, match.ID, trackedMetadata(f), warn); err != nil {
+				updateCtx, cancel := withPgTimeout()
+				err := deps.updateMetadata(updateCtx, match.ID, trackedMetadata(f), warn)
+				cancel()
+				if err != nil {
 					warn(fmt.Sprintf("failed to update bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
 				}
-				if err := deps.comment(ctx, match.ID, body, warn); err != nil {
+				commentCtx, cancel2 := withPgTimeout()
+				err = deps.comment(commentCtx, match.ID, body, warn)
+				cancel2()
+				if err != nil {
 					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
 				}
 			case actionSkip:

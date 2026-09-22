@@ -97,9 +97,10 @@ func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 
 func baseOpts(t *testing.T) runOptions {
 	return runOptions{
-		grafanaTimeout: time.Second,
-		ruleUIDs:       registeredRuleUIDs,
-		snapshotPath:   filepath.Join(t.TempDir(), "snapshot.json"),
+		grafanaTimeout:     time.Second,
+		pgConnectorTimeout: time.Second,
+		ruleUIDs:           registeredRuleUIDs,
+		snapshotPath:       filepath.Join(t.TempDir(), "snapshot.json"),
 	}
 }
 
