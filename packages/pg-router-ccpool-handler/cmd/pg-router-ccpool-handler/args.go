@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query> [flags]"
+const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity> [flags]"
 
 const helpText = `pg-router-ccpool-handler — the ccpool/command participant for pg-router.
 
@@ -34,6 +34,13 @@ Subcommands:
                  label/title-prefix/item-type filters (docket pg2-oju6w's
                  Task 5.8; --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG supplies
                  RepoRoot/BeadsPrefix)
+
+  pool-capacity NOT part of the wire contract above (never spawned by
+                 pg-router core) — an operational/observability tool run
+                 directly (e.g. by a periodic timer): reports each named
+                 ccpool pool's live capacity as Prometheus exposition-format
+                 text on stdout (--pool <name>=<dir>, repeatable; bead
+                 pg2-mr0sl's per-role dedicated-pool metric)
 
 Exit codes: 0 ok, 1 unexpected error, 2 usage, 9 busy (a pre-accept decline).
 `

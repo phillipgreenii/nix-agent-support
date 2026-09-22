@@ -136,7 +136,7 @@ func runDispatch(args []string) int {
 	overlayBudgetThresholds(role, cfg)
 
 	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload)}
-	deps := buildDeps(cfg)
+	deps := buildDeps(cfg, role)
 	// Stamp a fresh per-attempt ExternalID here — the call the old monolithic
 	// internal/orchestrator made before invoking the ccpool executor
 	// in-process, and which the Phase 5 participant extraction (docket
@@ -256,13 +256,30 @@ func stampExternalID(role roles.Role, prefix, beadID string, now func() time.Tim
 	return role.ExternalID(prefix, beadID, now().UTC().Format(externalIDStampLayout))
 }
 
-// buildDeps wires the executor.Deps seam bag for production use from cfg:
-// a real ccpool.CLIRunner and beads.CLIRunner, everything else left at its
-// own nil-safe default (Deps.git/gitOpener/clock/reader/commander/waitPoll —
-// internal/executor/executor.go).
-func buildDeps(cfg config.Config) executor.Deps {
+// buildDeps wires the executor.Deps seam bag for production use from cfg and
+// role: a real ccpool.CLIRunner and beads.CLIRunner, everything else left at
+// its own nil-safe default (Deps.git/gitOpener/clock/reader/commander/
+// waitPoll — internal/executor/executor.go).
+//
+// role.CCPool.PoolDir (bead pg2-mr0sl), when this role sets one, scopes the
+// ccpool.CLIRunner to that role's own dedicated pool via
+// ccpool.NewCLIRunnerForPool — every ccpool call this dispatch call makes
+// (the admission-gate Capacity check, Ensure/Send, and every List/Close call
+// the wait-loop and worktree cleanup make) then targets that pool, not
+// whatever CCPOOL_POOL this process inherited. This is scoped to buildDeps'
+// one production call site (runDispatch) deliberately: preshutdown.go's
+// once-per-process-lifetime sweep and query.go's own reconciliation call
+// still build a plain ccpool.NewCLIRunner(cfg) — both act once across every
+// enabled role sharing this process, with no single role to scope to (see
+// each of those call sites' own doc comments on that pre-existing,
+// unchanged-by-this-bead posture).
+func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
+	cc := ccpool.NewCLIRunner(cfg)
+	if role.CCPool != nil && role.CCPool.PoolDir != "" {
+		cc = ccpool.NewCLIRunnerForPool(cfg, role.CCPool.PoolDir)
+	}
 	return executor.Deps{
-		CC:  ccpool.NewCLIRunner(cfg),
+		CC:  cc,
 		BD:  beads.NewCLIRunnerForRepo(cfg.RepoRoot),
 		Cfg: cfg,
 	}

@@ -63,6 +63,12 @@ type roleFile struct {
 			Time   string `json:"time"`
 		} `json:"budget"`
 		Isolation roles.IsolationConfig `json:"isolation"`
+		// PoolDir (bead pg2-mr0sl): this role's own dedicated ccpool pool
+		// directory override -- see roles.CCPoolConfig.PoolDir's own doc
+		// comment for the full rationale. "" (absent/omitted, the
+		// zero-value default) means unchanged behavior: no override, this
+		// process's own inherited CCPOOL_POOL still applies.
+		PoolDir string `json:"poolDir"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -115,6 +121,7 @@ func loadRole(path string) (roles.Role, error) {
 				Time:   budgetTime,
 			},
 			Isolation: rf.CCPool.Isolation,
+			PoolDir:   rf.CCPool.PoolDir,
 		}
 	case "command":
 		if rf.Command == nil {

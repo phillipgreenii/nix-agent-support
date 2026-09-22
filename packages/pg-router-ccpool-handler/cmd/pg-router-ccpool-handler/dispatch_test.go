@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
@@ -99,5 +101,44 @@ func TestStampExternalID_distinctWithinSameSecond(t *testing.T) {
 
 	if id1 == id2 {
 		t.Fatalf("two attempts within the same wall-clock second collided: both %q", id1)
+	}
+}
+
+// TestBuildDeps_scopesCCToRolePoolDir proves buildDeps (bead pg2-mr0sl)
+// actually threads a ccpool role's own PoolDir into the returned Deps.CC —
+// not merely accept it as a parameter and drop it — by asserting the
+// concrete *ccpool.CLIRunner's own PoolDir field. Without this wiring, dev-
+// ing on "one dedicated pool per role" (this bead's whole point) would still
+// silently dispatch every role against whatever CCPOOL_POOL this process
+// happened to inherit.
+func TestBuildDeps_scopesCCToRolePoolDir(t *testing.T) {
+	role := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{PoolDir: "/state/pg-router-ccpool-review"}}
+
+	deps := buildDeps(config.Default(), role)
+
+	cli, ok := deps.CC.(*ccpool.CLIRunner)
+	if !ok {
+		t.Fatalf("Deps.CC = %T, want *ccpool.CLIRunner", deps.CC)
+	}
+	if cli.PoolDir != "/state/pg-router-ccpool-review" {
+		t.Errorf("CLIRunner.PoolDir = %q, want %q", cli.PoolDir, "/state/pg-router-ccpool-review")
+	}
+}
+
+// TestBuildDeps_noPoolDirLeavesCCUnscoped is the positive control: a role
+// with no PoolDir (command roles, or a ccpool role that never opted in)
+// gets a CLIRunner with PoolDir == "" — no override, exactly today's
+// unchanged single-pool behavior.
+func TestBuildDeps_noPoolDirLeavesCCUnscoped(t *testing.T) {
+	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
+
+	deps := buildDeps(config.Default(), role)
+
+	cli, ok := deps.CC.(*ccpool.CLIRunner)
+	if !ok {
+		t.Fatalf("Deps.CC = %T, want *ccpool.CLIRunner", deps.CC)
+	}
+	if cli.PoolDir != "" {
+		t.Errorf("CLIRunner.PoolDir = %q, want \"\" (no per-role override configured)", cli.PoolDir)
 	}
 }

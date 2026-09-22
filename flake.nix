@@ -2968,11 +2968,18 @@
                   # `pool.dir` option's default),
                   # home.activation (the `pool.enable` bootstrap step,
                   # pg2-1p4yp), systemd.user.{services,timers}, assertions
-                  # (mirroring test-pg-router-module's own evalHM). This
-                  # module's `assertions` list (which reads
-                  # `config.phillipgreenii.programs.ccpool.enable`) is never
-                  # forced by this check below, so that option needs no
-                  # stub here.
+                  # (mirroring test-pg-router-module's own evalHM).
+                  # `phillipgreenii.programs.ccpool.enable` (bead pg2-mr0sl):
+                  # stubbed `true` -- this module's OWN "ccpool.enable
+                  # required" assertion reads it, and unlike before this
+                  # bead (when nothing here ever forced `.assertions` at
+                  # all), the new `firedPoolMetricsAssertion`/
+                  # `firedMissingDirAssertion` bindings below use
+                  # `lib.findFirst` over the WHOLE assertions list, which
+                  # evaluates every earlier assertion's own `.assertion`
+                  # field along the way -- an unstubbed option here would
+                  # throw "attribute missing" the first time that happens,
+                  # not merely stay unforced.
                   evalHM =
                     ccpoolHandler:
                     (lib.evalModules {
@@ -3022,6 +3029,10 @@
                               # rather than importing upstream modules), so a
                               # real type mismatch in the appended entry is
                               # still caught here.
+                              phillipgreenii.programs.ccpool.enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = true;
+                              };
                               phillipgreenii.programs.pg-disk-reclaimer.registryEntries = lib.mkOption {
                                 type = lib.types.listOf (
                                   lib.types.submodule {
@@ -3141,6 +3152,80 @@
                       pool.enable = true;
                     }).phillipgreenii.programs.pg-router-ccpool-handler.pool.dir;
 
+                  # roleWithOwnPool (bead pg2-mr0sl): a ccpool role opting
+                  # into its OWN dedicated pool, plus poolMetrics enabled --
+                  # proves (a) roleFileFor renders `poolDir` into that
+                  # role's own JSON (unlike a role that never opts in, see
+                  # `feedback` in `twoRoles`'s renderCheck assertion above,
+                  # which must NOT carry a poolDir key at all), (b)
+                  # home.activation gets a per-role bootstrap entry mirroring
+                  # the whole-process `pool.enable` activation's own
+                  # ordering (`ccpool --pool <dir> list` BEFORE installing
+                  # config.toml), and (c) poolMetrics's systemd
+                  # service/timer wire that role's own dir into a
+                  # `pool-capacity --pool <name>=<dir>` invocation.
+                  roleWithOwnPool = evalHM {
+                    enable = true;
+                    roles = {
+                      review = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "review-actor";
+                          completion = "close-only";
+                          onFailure = "unclaim";
+                          onDispatchFail = "leave";
+                          promptBody = "review prompt";
+                          pool = {
+                            enable = true;
+                            dir = "/tmp/pg2-mr0sl-review-pool";
+                            settings.pool.max_sessions = 1;
+                          };
+                        };
+                      };
+                    };
+                    poolMetrics = {
+                      enable = true;
+                      intervalSeconds = 30;
+                    };
+                  };
+                  roleWithOwnPoolHandlerDir =
+                    roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
+                  reviewPoolActivation = roleWithOwnPool.home.activation.pgRouterCcpoolHandlerPool_review;
+                  reviewPoolDirQuoted = lib.escapeShellArg "/tmp/pg2-mr0sl-review-pool";
+                  poolMetricsService = roleWithOwnPool.systemd.user.services."pg-router-ccpool-handler-pool-metrics";
+                  poolMetricsTimer = roleWithOwnPool.systemd.user.timers."pg-router-ccpool-handler-pool-metrics";
+
+                  # poolMetrics.enable = true but NO role opted into its own
+                  # pool -- the eval-time guard (bead pg2-mr0sl) must fire.
+                  poolMetricsWithoutAnyRolePool = evalHM {
+                    enable = true;
+                    roles = { };
+                    poolMetrics.enable = true;
+                  };
+                  firedPoolMetricsAssertion = lib.findFirst (
+                    a: a.assertion == false
+                  ) null poolMetricsWithoutAnyRolePool.assertions;
+
+                  # A role opting into its own pool but leaving `dir` empty
+                  # -- the eval-time guard (bead pg2-mr0sl) must fire.
+                  roleOwnPoolMissingDir = evalHM {
+                    enable = true;
+                    roles.review = {
+                      type = "ccpool";
+                      ccpool = {
+                        actor = "review-actor";
+                        completion = "close-only";
+                        onFailure = "unclaim";
+                        onDispatchFail = "leave";
+                        promptBody = "review prompt";
+                        pool.enable = true;
+                      };
+                    };
+                  };
+                  firedMissingDirAssertion = lib.findFirst (
+                    a: a.assertion == false
+                  ) null roleOwnPoolMissingDir.assertions;
+
                   # launchConfig / launchConfigFile (this bead, pg2-qsred):
                   # disabled -- launchConfigFile must resolve to `null`
                   # rather than throwing "used but not defined", even though
@@ -3225,6 +3310,15 @@
                         type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
                         default = true;
                       };
+                      # healthCheck (bead pg2-mr0sl): the poolMetrics
+                      # LaunchAgent sets this (mirroring
+                      # darwin/modules/pg-ccaudit's own sweep-agent
+                      # precedent) -- absent from this stub before this
+                      # bead since no fixture here previously set it.
+                      healthCheck = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
                       serviceConfig = lib.mkOption {
                         type = lib.types.attrs;
                         default = { };
@@ -3280,6 +3374,26 @@
                                           default = null;
                                         };
                                       };
+                                      # poolMetrics (bead pg2-mr0sl): the
+                                      # ONE option group darwin's own
+                                      # module actually reads a `script`
+                                      # package out of -- see that
+                                      # module's own `poolMetricsCfg`
+                                      # binding.
+                                      poolMetrics = {
+                                        enable = lib.mkOption {
+                                          type = lib.types.bool;
+                                          default = false;
+                                        };
+                                        intervalSeconds = lib.mkOption {
+                                          type = lib.types.ints.unsigned;
+                                          default = 60;
+                                        };
+                                        script = lib.mkOption {
+                                          type = lib.types.package;
+                                          default = pkgs.writeShellScript "unset-pool-metrics-script" "true";
+                                        };
+                                      };
                                     };
                                   }
                                 );
@@ -3298,6 +3412,22 @@
                   };
                   darwinWithoutRoles = evalDarwin { enable = false; };
 
+                  # poolMetrics darwin mirror (bead pg2-mr0sl): unlike
+                  # periodicDrain/daemon's own freeform-string intervals
+                  # ("no darwin-side equivalent yet"), poolMetrics's plain
+                  # integer `intervalSeconds` DOES get a real LaunchAgent
+                  # mirror -- see that HM option's own doc comment for why.
+                  poolMetricsScriptFixture = pkgs.writeShellScript "pg2-mr0sl-fake-pool-metrics" "true";
+                  darwinWithPoolMetrics = evalDarwin {
+                    enable = true;
+                    poolMetrics = {
+                      enable = true;
+                      intervalSeconds = 45;
+                      script = poolMetricsScriptFixture;
+                    };
+                  };
+                  darwinWithoutPoolMetrics = evalDarwin { enable = true; };
+
                   # File-content verification is done at BUILD time via a
                   # runCommand + jq (code-file-standards' "Structured Data
                   # Files MUST use jq" rule), not via builtins.readFile at
@@ -3312,6 +3442,7 @@
                           emptyHandlerCommandDir
                           launchConfigFile
                           defaultLaunchConfigFile
+                          roleWithOwnPoolHandlerDir
                           ;
                       }
                       ''
@@ -3377,6 +3508,13 @@
                         [ "$(jq -r .selfLogin "$defaultLaunchConfigFile")" = "" ]
                         [ "$(jq -r .budgetTokens "$defaultLaunchConfigFile")" -eq 0 ]
                         [ "$(jq -r .budgetCost "$defaultLaunchConfigFile")" -eq 0 ]
+
+                        # poolDir (bead pg2-mr0sl): a role that opted into
+                        # its own dedicated pool renders it into that
+                        # role's own JSON; "feedback" above (which never
+                        # opted in) must carry no such key at all.
+                        [ "$(jq -r .ccpool.poolDir "$roleWithOwnPoolHandlerDir/review.json")" = /tmp/pg2-mr0sl-review-pool ]
+                        jq -e '.ccpool | has("poolDir") | not' "$handlerCommandDir/feedback.json" >/dev/null
                         touch $out
                       '';
                 in
@@ -3387,6 +3525,31 @@
                   == handlerCommandDir;
                 assert
                   darwinWithoutRoles.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir == null;
+                # poolMetrics darwin mirror (bead pg2-mr0sl): a real
+                # LaunchAgent, running the SAME script this HM module's own
+                # systemd timer would run, with StartInterval set from
+                # intervalSeconds directly (no unit-string conversion
+                # needed -- see that HM option's own doc comment).
+                assert
+                  darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".keepAlive
+                  == false;
+                # unsafeDiscardStringContext: hasInfix's needle argument
+                # must not carry a derivation's own string context
+                # (builtins.match's documented restriction) -- this drops
+                # it, leaving a plain path-shaped string for the substring
+                # check itself.
+                assert lib.hasInfix (builtins.unsafeDiscardStringContext "${poolMetricsScriptFixture}")
+                  darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".script;
+                assert
+                  darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".serviceConfig.StartInterval
+                  == 45;
+                # No HM user opted into poolMetrics -- no LaunchAgent at all
+                # (zero behavior change).
+                assert
+                  !(
+                    darwinWithoutPoolMetrics.phillipgreenii.system.launchdServices.userAgents
+                      ? "pg-router-ccpool-handler-pool-metrics"
+                  );
                 # launchConfigFile (this bead, pg2-qsred): disabled resolves
                 # to null rather than throwing -- proves the module stays
                 # inert (repoRoot/worktreeDir never forced) for a consumer
@@ -3412,6 +3575,33 @@
                   poolEnabled.phillipgreenii.programs.pg-router-ccpool-handler.pool.settings.pool.max_sessions == 50;
                 # pool.dir's default resolves under home.homeDirectory.
                 assert poolDefaultDir == "/home/tester/.local/state/pg-router-ccpool";
+                # roleWithOwnPool (bead pg2-mr0sl): the per-role bootstrap
+                # activation entry exists, keyed by role name, and mirrors
+                # the whole-process pool.enable activation's own ordering
+                # (list BEFORE cp -f).
+                assert lib.hasInfix "ccpool --pool ${reviewPoolDirQuoted} list" reviewPoolActivation;
+                assert lib.hasInfix "cp -f" reviewPoolActivation;
+                assert lib.hasInfix "${reviewPoolDirQuoted}/config.toml" reviewPoolActivation;
+                assert lib.hasInfix "ccpool --pool ${reviewPoolDirQuoted} list" (
+                  lib.head (lib.splitString "cp -f" reviewPoolActivation)
+                );
+                # poolMetrics: the systemd service's ExecStart runs the SAME
+                # rendered script this module exposes as its own readOnly
+                # `poolMetrics.script` output (no independently-reconstructed
+                # argv to drift against it), and the timer's interval is the
+                # configured intervalSeconds, rendered as a bare (unit-less
+                # -- systemd treats this as seconds) string.
+                assert
+                  poolMetricsService.Service.ExecStart
+                  == "${roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.script}";
+                assert poolMetricsTimer.Timer.OnUnitActiveSec == "30";
+                assert poolMetricsTimer.Timer.OnBootSec == "30";
+                # Eval-time guards (bead pg2-mr0sl) actually fire under the
+                # misconfigurations they exist to catch.
+                assert firedPoolMetricsAssertion != null;
+                assert lib.hasInfix "poolMetrics.enable" firedPoolMetricsAssertion.message;
+                assert firedMissingDirAssertion != null;
+                assert lib.hasInfix "ccpool.pool.dir" firedMissingDirAssertion.message;
                 # pg2-4roho decision item 4: exactly one registry entry,
                 # scoped to this handler's own configured worktreeDir, with
                 # exactly one variant.

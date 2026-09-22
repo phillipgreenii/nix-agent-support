@@ -40,6 +40,20 @@ type CCPoolConfig struct {
 	Prompt          *template.Template // parsed PromptBody (missingkey=error)
 	Budget          budget.Budget      // finite => watchdog + prompt line; unlimited => neither
 	Isolation       IsolationConfig    // how the dispatched session's WORKSPACE_ROOT is prepared
+	// PoolDir is this role's own dedicated ccpool pool directory (bead
+	// pg2-mr0sl): every ccpool call this role's dispatch makes (Capacity's
+	// admission gate, Ensure/Send/Close, and every List call the wait-loop
+	// polls) is scoped to it by overriding CCPOOL_POOL for just that
+	// subprocess invocation (internal/ccpool.NewCLIRunnerForPool) — never by
+	// mutating this process's own environment, which every OTHER role's
+	// dispatch running in the same process must not see change. "" (the
+	// default) is unchanged behavior: the ccpool CLI resolves CCPOOL_POOL
+	// however it is already inherited from this process's own environment
+	// (today, pg-router core's single, process-wide
+	// daemon.handlerCcpoolPool / periodicDrain.handlerCcpoolPool override, or
+	// ccpool's own default XDG pool when that is unset too) — every role
+	// sharing that one pool, exactly as before this bead.
+	PoolDir string
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

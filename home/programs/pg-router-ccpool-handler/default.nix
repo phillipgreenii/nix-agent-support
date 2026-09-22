@@ -27,6 +27,38 @@ let
   tomlFormat = pkgs.formats.toml { };
   poolConfigFile = tomlFormat.generate "pg-router-ccpool-handler-pool-config.toml" cfg.pool.settings;
 
+  # ccpoolRolesWithOwnPool / poolConfigFileFor / roleBootstrapEntries (bead
+  # pg2-mr0sl): the per-ROLE analogue of poolConfigFile/the
+  # pgRouterCcpoolHandlerPool activation entry above, scoped to each `roles`
+  # entry's own `ccpool.pool` group instead of the whole-process `cfg.pool`.
+  # See that option group's own doc comment (on `roleSubmodule`) for the
+  # full rationale; the bootstrap mechanics themselves (a real
+  # `ccpool --pool <dir> list` before installing config.toml, so ccpool's
+  # own create-or-validate/registration path runs -- ADR 0014) are copied
+  # verbatim from the whole-process version below, just parameterized by
+  # role name/dir/settings instead of reading `cfg.pool.*` directly.
+  ccpoolRolesWithOwnPool = lib.filterAttrs (
+    _name: roleCfg: roleCfg.type == "ccpool" && roleCfg.ccpool.pool.enable
+  ) cfg.roles;
+  poolConfigFileFor =
+    name: roleCfg:
+    tomlFormat.generate "pg-router-ccpool-handler-pool-config-${name}.toml" roleCfg.ccpool.pool.settings;
+  # Activation entry names must be safe, static-looking bash function names
+  # (home-manager's dag activation script naming) -- an underscore
+  # separator (never a hyphen) keeps this valid regardless of what a role
+  # name happens to contain.
+  roleBootstrapEntries = lib.mapAttrs' (
+    name: roleCfg:
+    lib.nameValuePair "pgRouterCcpoolHandlerPool_${name}" (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        $DRY_RUN_CMD ${pkgs.ccpool}/bin/ccpool --pool ${lib.escapeShellArg roleCfg.ccpool.pool.dir} list >/dev/null 2>&1 || true
+        $DRY_RUN_CMD mkdir -p ${lib.escapeShellArg roleCfg.ccpool.pool.dir}
+        $DRY_RUN_CMD cp -f ${poolConfigFileFor name roleCfg} ${lib.escapeShellArg roleCfg.ccpool.pool.dir}/config.toml
+        $DRY_RUN_CMD chmod 0600 ${lib.escapeShellArg roleCfg.ccpool.pool.dir}/config.toml
+      ''
+    )
+  ) ccpoolRolesWithOwnPool;
+
   # mkWorktreeSweepScript / worktreeReclaimRegistryEntry (pg2-4roho decision
   # item 4): a `phillipgreenii.programs.pg-disk-reclaimer.registryEntries`
   # contribution for this handler's own per-bead worktree pool
@@ -194,6 +226,31 @@ let
       ]
     );
 
+  # mkPoolMetricsScript (bead pg2-mr0sl): the `poolMetrics` timer's
+  # ExecStart -- one `--pool <name>=<dir>` per role with `ccpool.pool.enable`
+  # (derived from `ccpoolRolesWithOwnPool`, defined further down once
+  # `cfg.roles` is in scope -- see that binding's own doc comment), then an
+  # atomic write of `pool-capacity`'s stdout to `outputPath` (a same-
+  # directory temp file, then `mv -f`, so a scraper never reads a
+  # half-written file). Unlike `mkRegisterExec` above (a single binary
+  # invocation, no redirection needed), this needs a real shell for the
+  # temp-file/redirect/rename dance, hence `pkgs.writeShellScript` rather
+  # than a bare `lib.concatStringsSep` argv string.
+  mkPoolMetricsScript =
+    let
+      poolArgs = lib.concatMapStrings (
+        name: " --pool ${name}=${lib.escapeShellArg cfg.roles.${name}.ccpool.pool.dir}"
+      ) (lib.attrNames ccpoolRolesWithOwnPool);
+    in
+    pkgs.writeShellScript "pg-router-ccpool-handler-pool-metrics" ''
+      set -eu
+      outputPath=${lib.escapeShellArg cfg.poolMetrics.outputPath}
+      mkdir -p "$(dirname "$outputPath")"
+      tmp="$(mktemp "$outputPath.XXXXXX")"
+      ${cfg.package}/bin/pg-router-ccpool-handler pool-capacity${poolArgs} > "$tmp"
+      mv -f "$tmp" "$outputPath"
+    '';
+
   # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
   # cmd/pg-router-ccpool-handler/roleconfig.go's `loadRole` decodes
   # (`--role-config <dir>/<role.Name>.json`, this bead pg2-pteab, wiring the
@@ -233,6 +290,16 @@ let
               Type = roleCfg.ccpool.isolation.type;
               Path = roleCfg.ccpool.isolation.path;
             };
+          }
+          // lib.optionalAttrs roleCfg.ccpool.pool.enable {
+            # poolDir (bead pg2-mr0sl): only rendered when this role opted
+            # into its own dedicated pool -- omitted (not merely "") when
+            # disabled, so `roleconfig.go`'s `loadRole` sees an absent JSON
+            # key and decodes the zero-value "" exactly like every field
+            # this schema already omits when unset, keeping a
+            # non-opted-in role's dispatch pointed at whatever CCPOOL_POOL
+            # this process already inherits (unchanged behavior).
+            poolDir = roleCfg.ccpool.pool.dir;
           };
         }
         // lib.optionalAttrs (roleCfg.type == "command") {
@@ -459,6 +526,92 @@ let
                 };
                 default = { };
                 description = "`roleFile.CCPool.Isolation`.";
+              };
+              # pool (bead pg2-mr0sl): a per-ROLE dedicated ccpool pool,
+              # mirroring the whole-process `pool` option group below
+              # (pg2-1p4yp) at a finer grain -- that mechanism gives the
+              # WHOLE handler process one shared pool; this gives each ROLE
+              # its own, so review/feedback/worker never draw from the same
+              # slot count (this bead's whole point). Disabled by default
+              # (`pool.enable = false`): an existing deployment that has not
+              # opted in keeps dispatching this role through whatever
+              # CCPOOL_POOL this process already inherits (today, the
+              # whole-process `pool` group above, or ccpool's own shared
+              # default XDG pool), byte-for-byte unchanged.
+              #
+              # Wiring: when enabled, `roleFileFor` renders this role's own
+              # `poolDir` (this option's `dir`) into its JSON
+              # (`roleFile.CCPool.PoolDir` /
+              # `roles.CCPoolConfig.PoolDir`), and `dispatch.go`'s
+              # `buildDeps` overrides CCPOOL_POOL to it for every ccpool
+              # subprocess call THIS role's own dispatch makes
+              # (`internal/ccpool.NewCLIRunnerForPool`) -- entirely inside
+              # this ONE handler process, unlike the whole-process `pool`
+              # group, which can only be threaded in via
+              # `home/programs/pg-router`'s own
+              # `daemon.handlerCcpoolPool`/`periodicDrain.handlerCcpoolPool`
+              # (pg-router core's own process environment). This module
+              # bootstraps `dir`'s config.toml the same way the
+              # whole-process `pool` group's own `home.activation` does (see
+              # `poolConfigFileFor`/`roleBootstrapEntries` below) -- through
+              # a real `ccpool --pool <dir> list` call, so a fresh dir
+              # enrolls in ccpool's own `reap-all` registry
+              # (docs/adr/0014-ccpool-reap-all-pool-registry.md) instead of
+              # silently never being reaped.
+              pool = lib.mkOption {
+                type = lib.types.submodule {
+                  options = {
+                    enable = lib.mkEnableOption ''
+                      registering and governing a dedicated ccpool pool for
+                      THIS role's own dispatches, instead of sharing
+                      whatever CCPOOL_POOL this handler process already
+                      inherits with every other role. See this option
+                      group's own module-level doc comment (on the sibling
+                      `ccpool` submodule) for the full wiring contract.
+                    '';
+                    dir = lib.mkOption {
+                      type = lib.types.str;
+                      default = "";
+                      description = ''
+                        This role's own dedicated pool's canonical directory
+                        (ccpool pool-dir mode -- `CCPOOL_POOL`/`--pool`,
+                        `packages/ccpool/internal/config/pool.go`). Empty
+                        (the default) is only valid while `enable` is
+                        `false`; a deployment that sets `enable = true`
+                        MUST also set this -- a role name alone is not
+                        unique enough to derive a safe path from (e.g.
+                        across multiple repos/deployments sharing one
+                        `$HOME`), so no non-empty default is guessed.
+                      '';
+                    };
+                    settings = lib.mkOption {
+                      inherit (tomlFormat) type;
+                      default = {
+                        pool.max_sessions = 40;
+                      };
+                      description = ''
+                        Contents of this role's own dedicated pool's
+                        `config.toml` (merged over ccpool's own per-pool
+                        defaults -- `packages/ccpool/internal/config`
+                        `defaults()`: `idle_ttl = 30m`, `auto_reap = true`).
+                        Mirrors the whole-process `pool.settings` option's
+                        own shape and defaults, scoped to this one role's
+                        own named pool. Set `pool.max_sessions` to this
+                        role's own configured cap (e.g. review=1,
+                        feedback=1, worker=3 -- bead pg2-mr0sl's own
+                        acceptance criteria).
+                      '';
+                      example = {
+                        pool.max_sessions = 1;
+                      };
+                    };
+                  };
+                };
+                default = { };
+                description = ''
+                  This role's own dedicated ccpool pool (bead pg2-mr0sl) --
+                  see this option group's own doc comment above.
+                '';
               };
             };
           }
@@ -936,22 +1089,94 @@ in
       '';
     }
     // registerOptions;
+
+    # poolMetrics (bead pg2-mr0sl): a systemd --user timer periodically
+    # running the `pool-capacity` subcommand for every role with
+    # `ccpool.pool.enable` set, so each role's own dedicated pool's
+    # occupancy is independently scrapable (this bead's "per-pool/per-role
+    # capacity metric" acceptance criterion) -- see `mkPoolMetricsScript`'s
+    # own doc comment below for the exec mechanics.
+    poolMetrics = {
+      enable = lib.mkEnableOption ''
+        a systemd --user timer that periodically runs
+        `pg-router-ccpool-handler pool-capacity` for every role with
+        `ccpool.pool.enable` set, writing Prometheus exposition-format text
+        to `outputPath`. On darwin,
+        `darwin/modules/pg-router-ccpool-handler/default.nix` mirrors this
+        into a LaunchAgent with a `StartInterval` (this HM systemd unit
+        alone is a darwin no-op, matching `periodicDrain`/`daemon`'s own
+        darwin-mirroring precedent).
+      '';
+      # intervalSeconds (unlike periodicDrain.interval's freeform systemd
+      # time-span string above) is a plain integer number of SECONDS --
+      # deliberately, so this ONE value drives both platforms with no
+      # string-parsing/conversion needed: systemd's own time-span grammar
+      # treats a bare number with no unit suffix as seconds (so
+      # `toString intervalSeconds` is a legal OnUnitActiveSec/OnBootSec
+      # value below), and darwin's LaunchAgent StartInterval
+      # (darwin/modules/pg-router-ccpool-handler's own mirror) is ALREADY
+      # a plain integer-seconds field -- matching
+      # darwin/modules/pg-ccaudit's own `sweep.intervalSeconds` precedent.
+      # This is why poolMetrics gets a REAL darwin mirror where
+      # periodicDrain/daemon's own freeform-string intervals do not.
+      intervalSeconds = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 60;
+        description = "Seconds between pool-capacity passes (OnUnitActiveSec/OnBootSec on Linux, StartInterval on darwin).";
+      };
+      outputPath = lib.mkOption {
+        type = lib.types.str;
+        default = "${config.home.homeDirectory}/.local/state/pg-router-ccpool-handler/pool-capacity.prom";
+        description = ''
+          Where the rendered Prometheus exposition-format text is written.
+          Written atomically (a same-directory temp file, then renamed) so
+          a textfile-collector-style scraper never reads a half-written
+          file. Ends in `.prom` by convention (node_exporter's textfile
+          collector convention) -- this module does not itself run
+          node_exporter or wire any scrape config; that is
+          deployment-specific.
+        '';
+      };
+      script = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        description = ''
+          Read-only output: the rendered pool-capacity script
+          (`mkPoolMetricsScript`) -- one `--pool <name>=<dir>` per role with
+          `ccpool.pool.enable`, then an atomic write to `outputPath`.
+          Exposed (mirroring `handlerCommandDir`/`launchConfigFile`'s own
+          cross-module re-export pattern) so
+          `darwin/modules/pg-router-ccpool-handler` can wire its own
+          LaunchAgent to the SAME script this HM module's own systemd timer
+          runs, rather than re-deriving the `--pool` argv independently.
+        '';
+      };
+    };
   };
 
   config = lib.mkMerge [
     {
-      # handlerCommandDir (this bead, pg2-pteab): a pure function of `roles`
+      # handlerCommandDir / launchConfigFile / poolMetrics.script are all
+      # pure functions of `roles`/`cfg.enable`/`poolMetrics.*`/`package`
       # alone, set UNCONDITIONALLY (not gated on cfg.enable, unlike
-      # everything below) -- a consumer that only wants the rendered
-      # directory to hand to `home/programs/pg-router`'s own
-      # `handlerCommandDir` option should not need this module's own
-      # register/systemd machinery enabled too.
-      phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = handlerCommandDir;
-      # launchConfigFile (this bead, pg2-qsred): `null` when disabled -- see
-      # that option's own doc comment for why (repoRoot/worktreeDir have no
-      # default, so this branch must stay unforced while disabled).
-      phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile =
-        if cfg.enable then launchConfigFile else null;
+      # everything below) -- a consumer that only wants one of these
+      # rendered outputs (e.g. to hand to `home/programs/pg-router`'s own
+      # `handlerCommandDir` option, or darwin's own LaunchAgent mirror)
+      # should not need this module's own register/systemd machinery
+      # enabled too. Nested under one `phillipgreenii.programs.pg-router-
+      # ccpool-handler` binding (rather than three separately dotted
+      # top-level assignments) per statix's repeated-keys lint.
+      phillipgreenii.programs.pg-router-ccpool-handler = {
+        # handlerCommandDir: this bead, pg2-pteab.
+        inherit handlerCommandDir;
+        # launchConfigFile: this bead, pg2-qsred. `null` when disabled --
+        # see that option's own doc comment for why (repoRoot/worktreeDir
+        # have no default, so this branch must stay unforced while
+        # disabled).
+        launchConfigFile = if cfg.enable then launchConfigFile else null;
+        # poolMetrics.script: bead pg2-mr0sl.
+        poolMetrics.script = mkPoolMetricsScript;
+      };
     }
     (lib.mkIf cfg.enable {
       home.packages = [ cfg.package ];
@@ -986,14 +1211,24 @@ in
       # bootstrap hiccup must not break activation, and the handler's own
       # dispatch-time `ccpool new` calls would otherwise hit the same
       # create-or-validate path anyway on first real use.
-      home.activation = lib.mkIf cfg.pool.enable {
-        pgRouterCcpoolHandlerPool = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          $DRY_RUN_CMD ${pkgs.ccpool}/bin/ccpool --pool ${lib.escapeShellArg cfg.pool.dir} list >/dev/null 2>&1 || true
-          $DRY_RUN_CMD mkdir -p ${lib.escapeShellArg cfg.pool.dir}
-          $DRY_RUN_CMD cp -f ${poolConfigFile} ${lib.escapeShellArg cfg.pool.dir}/config.toml
-          $DRY_RUN_CMD chmod 0600 ${lib.escapeShellArg cfg.pool.dir}/config.toml
-        '';
-      };
+      # roleBootstrapEntries (bead pg2-mr0sl) is merged in UNCONDITIONALLY
+      # here (not itself behind another lib.mkIf): it already resolves to
+      # `{ }` whenever no role has `ccpool.pool.enable` set
+      # (ccpoolRolesWithOwnPool filters down to nothing), so merging it
+      # changes nothing for a deployment that only uses the whole-process
+      # `cfg.pool` group (or neither) -- exactly like `handlerCommandDir`'s
+      # own "empty roles -> harmless empty output" posture elsewhere in this
+      # module.
+      home.activation =
+        (lib.optionalAttrs cfg.pool.enable {
+          pgRouterCcpoolHandlerPool = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+            $DRY_RUN_CMD ${pkgs.ccpool}/bin/ccpool --pool ${lib.escapeShellArg cfg.pool.dir} list >/dev/null 2>&1 || true
+            $DRY_RUN_CMD mkdir -p ${lib.escapeShellArg cfg.pool.dir}
+            $DRY_RUN_CMD cp -f ${poolConfigFile} ${lib.escapeShellArg cfg.pool.dir}/config.toml
+            $DRY_RUN_CMD chmod 0600 ${lib.escapeShellArg cfg.pool.dir}/config.toml
+          '';
+        })
+        // roleBootstrapEntries;
 
       assertions = [
         {
@@ -1022,6 +1257,37 @@ in
             ccpool role kind shells out to the `ccpool` binary on PATH
             (internal/ccpool/cli.go), and only the ccpool module renders
             claude.plugin_dir into ccpool's own config.toml (tc-24qs).
+          '';
+        }
+        {
+          # poolMetrics has nothing to report when no role opted into its
+          # own dedicated pool (bead pg2-mr0sl) -- catch that misconfiguration
+          # at eval time rather than silently shipping a timer whose every
+          # run exits usage-error (runPoolCapacity's own "at least one --pool
+          # name=dir is required" guard).
+          assertion = !cfg.poolMetrics.enable || (ccpoolRolesWithOwnPool != { });
+          message = ''
+            phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.enable
+            requires at least one `roles.<name>.ccpool.pool.enable = true` entry
+            -- there is no per-role dedicated pool to report capacity for
+            otherwise.
+          '';
+        }
+        {
+          # A role that opts into its own dedicated pool but leaves `dir`
+          # at its empty default would bootstrap (home.activation) and
+          # dispatch against `CCPOOL_POOL=""`, which ccpool's own
+          # ResolvePool treats as "unset" and falls back to the shared
+          # default XDG pool -- silently defeating the whole point of
+          # opting in. Caught at eval time rather than at first dispatch.
+          assertion =
+            ccpoolRolesWithOwnPool == { }
+            || lib.all (roleCfg: roleCfg.ccpool.pool.dir != "") (lib.attrValues ccpoolRolesWithOwnPool);
+          message = ''
+            phillipgreenii.programs.pg-router-ccpool-handler.roles.<name>.ccpool.pool.enable
+            = true requires that role's own `ccpool.pool.dir` to be set (non-empty)
+            -- an empty dir would resolve to ccpool's own shared default pool,
+            defeating the point of a per-role dedicated pool.
           '';
         }
       ];
@@ -1063,6 +1329,27 @@ in
           Timer = {
             OnUnitActiveSec = cfg.periodicDrain.interval;
             OnBootSec = cfg.periodicDrain.interval;
+            Persistent = true;
+          };
+        };
+
+        # poolMetrics (bead pg2-mr0sl): mirrors the drain service/timer pair
+        # above exactly, just running mkPoolMetricsScript's pool-capacity
+        # pass instead of a register heartbeat.
+        services.pg-router-ccpool-handler-pool-metrics = lib.mkIf cfg.poolMetrics.enable {
+          Unit.Description = "pg-router-ccpool-handler: report per-role ccpool pool capacity";
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${mkPoolMetricsScript}";
+          };
+        };
+
+        timers.pg-router-ccpool-handler-pool-metrics = lib.mkIf cfg.poolMetrics.enable {
+          Unit.Description = "Run pg-router-ccpool-handler pool-capacity periodically";
+          Install.WantedBy = [ "timers.target" ];
+          Timer = {
+            OnUnitActiveSec = toString cfg.poolMetrics.intervalSeconds;
+            OnBootSec = toString cfg.poolMetrics.intervalSeconds;
             Persistent = true;
           };
         };

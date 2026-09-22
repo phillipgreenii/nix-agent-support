@@ -422,7 +422,7 @@ func TestList_stderrDoesNotCorruptJSON(t *testing.T) {
 // pg2-x6ef: execCmd must capture stdout and stderr into SEPARATE buffers so a
 // command that writes to both yields clean stdout and surfaces stderr on error.
 func TestExecCmd_separatesStreams(t *testing.T) {
-	stdout, stderr, err := execCmd(context.Background(), "sh", []string{"-c", "printf '[]'; echo noise 1>&2; exit 7"})
+	stdout, stderr, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf '[]'; echo noise 1>&2; exit 7"})
 	if string(stdout) != "[]" {
 		t.Errorf("stdout = %q, want %q", stdout, "[]")
 	}
@@ -436,7 +436,7 @@ func TestExecCmd_separatesStreams(t *testing.T) {
 }
 
 func TestExecCmd_success(t *testing.T) {
-	stdout, stderr, err := execCmd(context.Background(), "sh", []string{"-c", "printf 'ok'"})
+	stdout, stderr, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf 'ok'"})
 	if err != nil || string(stdout) != "ok" || len(stderr) != 0 {
 		t.Errorf("stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
@@ -448,12 +448,74 @@ func TestExecCmd_honorsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, _, err := execCmd(ctx, "sh", []string{"-c", "sleep 5"})
+	_, _, err := execCmd(ctx, "sh", "", []string{"-c", "sleep 5"})
 	if err == nil {
 		t.Fatal("a sleeping command under an expired ctx must error")
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("ctx cancellation did not kill the child promptly: took %s", elapsed)
+	}
+}
+
+// pg2-mr0sl: an empty poolDir must leave cmd.Env nil (inherit os.Environ()
+// unchanged) -- execCmd must not force CCPOOL_POOL into the child's
+// environment when no per-role pool override is configured.
+func TestExecCmd_emptyPoolDirInheritsEnvUnchanged(t *testing.T) {
+	stdout, _, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
+	if err != nil {
+		t.Fatalf("execCmd: %v", err)
+	}
+	if string(stdout) != "<unset>" {
+		t.Errorf("CCPOOL_POOL = %q, want unset (poolDir was empty)", stdout)
+	}
+}
+
+// pg2-mr0sl: a non-empty poolDir must override CCPOOL_POOL in the child's
+// environment, regardless of any value already inherited from this process's
+// own environment -- the mechanism a role's own dedicated ccpool pool relies
+// on (roles.CCPoolConfig.PoolDir -> NewCLIRunnerForPool).
+func TestExecCmd_poolDirOverridesEnv(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	stdout, _, err := execCmd(context.Background(), "sh", "/role/pool", []string{"-c", "printf '%s' \"$CCPOOL_POOL\""})
+	if err != nil {
+		t.Fatalf("execCmd: %v", err)
+	}
+	if string(stdout) != "/role/pool" {
+		t.Errorf("CCPOOL_POOL = %q, want the poolDir override, not the inherited value", stdout)
+	}
+}
+
+// pg2-mr0sl: NewCLIRunnerForPool must wire poolDir through its UNFAKED run
+// closure into execCmd end to end (not merely store it unused) -- proven by
+// swapping only `bin` (unexported, same-package access) to a real shell and
+// letting the constructed closure actually exec, the same way every OTHER
+// CLIRunner call (Ensure/Send/Cancel/Close/List/Capacity) would.
+func TestNewCLIRunnerForPool_runClosureOverridesEnv(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	cli := NewCLIRunnerForPool(config.Default(), "/role/pool")
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s' \"$CCPOOL_POOL\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "/role/pool" {
+		t.Errorf("CCPOOL_POOL = %q, want the poolDir override, not the inherited value", stdout)
+	}
+}
+
+// pg2-mr0sl: the plain NewCLIRunner constructor must still leave cmd.Env
+// untouched end to end (mirrors TestExecCmd_emptyPoolDirInheritsEnvUnchanged,
+// but through the real, unfaked run closure) -- a deployment that never
+// opts into a per-role pool observes byte-for-byte unchanged behavior.
+func TestNewCLIRunner_runClosureInheritsEnvUnchanged(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "<unset>" {
+		t.Errorf("CCPOOL_POOL = %q, want unset", stdout)
 	}
 }
 

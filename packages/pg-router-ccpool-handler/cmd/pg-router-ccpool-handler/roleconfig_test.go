@@ -129,6 +129,44 @@ func TestLoadRole_ccpoolBudgetAbsentIsUnlimited(t *testing.T) {
 	}
 }
 
+// TestLoadRole_decodesPoolDir proves --role-config JSON's "poolDir" key
+// decodes into roles.CCPoolConfig.PoolDir (bead pg2-mr0sl) — the per-role
+// dedicated ccpool pool override buildDeps (dispatch.go) reads to scope this
+// role's own CLIRunner via ccpool.NewCLIRunnerForPool.
+func TestLoadRole_decodesPoolDir(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, `{
+		"name": "review",
+		"type": "ccpool",
+		"ccpool": {
+			"actor": "pgii-pool__review",
+			"completion": "close-only",
+			"onFailure": "unclaim",
+			"onDispatchFail": "unclaim",
+			"promptBody": "review",
+			"poolDir": "/state/pg-router-ccpool-review"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	if role.CCPool.PoolDir != "/state/pg-router-ccpool-review" {
+		t.Errorf("PoolDir = %q, want %q", role.CCPool.PoolDir, "/state/pg-router-ccpool-review")
+	}
+}
+
+// TestLoadRole_poolDirAbsentIsEmpty is the positive control: a roleFile with
+// no "poolDir" key at all still decodes cleanly to "" (today's unchanged
+// behavior — buildDeps only overrides the pool when PoolDir is non-empty).
+func TestLoadRole_poolDirAbsentIsEmpty(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	if role.CCPool.PoolDir != "" {
+		t.Errorf("PoolDir = %q, want \"\" (no poolDir key in budgetRoleTemplate)", role.CCPool.PoolDir)
+	}
+}
+
 // TestLoadRole_ccpoolBudgetExplicitZeroTimeIsUnlimited proves an explicit
 // `"time": "0s"` (the old schema's own way to deliberately request
 // "unlimited, no watchdog" per role — the bug report's "feedback" example)

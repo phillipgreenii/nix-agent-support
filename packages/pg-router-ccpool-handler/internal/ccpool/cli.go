@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -48,6 +49,15 @@ type CLIRunner struct {
 	ConfirmIngest time.Duration
 	Autonomous    bool   // emits --autonomous on `ccpool new` when true (block AskUserQuestion)
 	bin           string // ccpool binary name/path (resolved on PATH by execCmd)
+	// PoolDir (bead pg2-mr0sl), when non-empty, overrides CCPOOL_POOL for
+	// every `ccpool` subprocess call THIS runner makes — see
+	// NewCLIRunnerForPool's own doc comment for the full rationale. "" (the
+	// zero value, set by the plain NewCLIRunner constructor) makes no
+	// override: the subprocess inherits this process's own environment
+	// unchanged, exactly as before this bead. Exported (unlike `bin`) so a
+	// caller holding a *CLIRunner (e.g. buildDeps' own test) can confirm
+	// which pool it is scoped to.
+	PoolDir string
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
 	// pg2-x6ef) plus the run error.
@@ -55,9 +65,26 @@ type CLIRunner struct {
 }
 
 func NewCLIRunner(cfg config.Config) *CLIRunner {
-	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: config.CCPoolCommand}
+	return newCLIRunner(cfg, "")
+}
+
+// NewCLIRunnerForPool builds a CLIRunner scoped to a specific ccpool pool
+// directory (bead pg2-mr0sl): every subprocess call this runner makes
+// (Capacity/Ensure/Send/Cancel/Close/List) overrides CCPOOL_POOL to poolDir,
+// regardless of what this process's own inherited environment sets — so a
+// single handler process can dispatch one role against its own dedicated
+// pool while another role dispatched by the SAME process (or the same
+// process's core-set CCPOOL_POOL, home/programs/pg-router's own
+// daemon.handlerCcpoolPool/periodicDrain.handlerCcpoolPool) uses a different
+// one. An empty poolDir behaves exactly like NewCLIRunner (no override).
+func NewCLIRunnerForPool(cfg config.Config, poolDir string) *CLIRunner {
+	return newCLIRunner(cfg, poolDir)
+}
+
+func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
+	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: config.CCPoolCommand, PoolDir: poolDir}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
-		return execCmd(ctx, c.bin, args)
+		return execCmd(ctx, c.bin, c.PoolDir, args)
 	}
 	return c
 }
@@ -65,8 +92,14 @@ func NewCLIRunner(cfg config.Config) *CLIRunner {
 // execCmd runs `bin args...`, capturing stdout and stderr into separate buffers
 // (pg2-x6ef) via exec.CommandContext so a cancelled or expired ctx actually
 // kills the child rather than hanging the orchestrator/watchdog (pg2-yy42).
-func execCmd(ctx context.Context, bin string, args []string) (stdout, stderr []byte, err error) {
+// poolDir, when non-empty, overrides CCPOOL_POOL in the child's environment
+// (bead pg2-mr0sl) — cmd.Env is left nil (inherit os.Environ() unchanged,
+// the pre-existing behavior) when poolDir is "".
+func execCmd(ctx context.Context, bin, poolDir string, args []string) (stdout, stderr []byte, err error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
+	if poolDir != "" {
+		cmd.Env = append(os.Environ(), "CCPOOL_POOL="+poolDir)
+	}
 	var so, se bytes.Buffer
 	cmd.Stdout = &so
 	cmd.Stderr = &se

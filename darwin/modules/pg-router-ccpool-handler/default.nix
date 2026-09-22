@@ -47,6 +47,25 @@ let
     else
       null;
 
+  # poolMetrics (bead pg2-mr0sl): the ONE HM option group in this module
+  # that gets a REAL darwin mirror (unlike periodicDrain/daemon's own
+  # freeform systemd-string intervals, "no darwin-side equivalent yet")
+  # because `intervalSeconds` is a plain integer -- see that HM option's
+  # own doc comment for why. `script` is the SAME rendered
+  # mkPoolMetricsScript derivation the HM module's own systemd timer runs
+  # (re-exposed via the HM module's own readOnly `poolMetrics.script`
+  # output, mirroring how `handlerCommandDir` is re-exposed just below),
+  # so darwin never re-derives the `--pool <name>=<dir>` argv independently.
+  poolMetricsUsers = lib.filter (
+    u: u.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.enable or false
+  ) (lib.attrValues hmUsers);
+  poolMetricsEnabledByAnyUser = poolMetricsUsers != [ ];
+  poolMetricsCfg =
+    if poolMetricsEnabledByAnyUser then
+      (lib.head poolMetricsUsers).phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics
+    else
+      null;
+
   pkg = pkgs.pg-router-ccpool-handler;
 
   # XDG_STATE_HOME default for macOS user agents. The launchdServices helper
@@ -114,6 +133,32 @@ in
         serviceConfig = {
           StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router-ccpool-handler/launchd-stdout.log";
+        };
+      };
+    })
+    (lib.mkIf poolMetricsEnabledByAnyUser {
+      # poolMetrics LaunchAgent (bead pg2-mr0sl): the periodic pool-capacity
+      # pass, via the SAME canonical helper the daemon LaunchAgent above
+      # uses. `script` runs the HM module's own rendered
+      # `poolMetrics.script` derivation directly (no argv to reconstruct
+      # here) -- keepAlive = false + StartInterval, the SAME
+      # "periodic short task, not a long-running daemon" shape
+      # darwin/modules/pg-ccaudit's own sweep agent already established
+      # (see that module's own doc comment for the keepAlive=false
+      # rationale: launchd would otherwise treat every clean exit as a
+      # crash to respawn).
+      phillipgreenii.system.launchdServices.userAgents.pg-router-ccpool-handler-pool-metrics = {
+        label = "com.phillipg.pg-router-ccpool-handler-pool-metrics";
+        script = ''
+          exec ${poolMetricsCfg.script}
+        '';
+        runAtLoad = true;
+        keepAlive = false;
+        healthCheck = false; # a one-shot never reaches state=running (pg-ccaudit precedent)
+        serviceConfig = {
+          StartInterval = poolMetricsCfg.intervalSeconds;
+          StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stderr.log";
+          StandardOutPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stdout.log";
         };
       };
     })
