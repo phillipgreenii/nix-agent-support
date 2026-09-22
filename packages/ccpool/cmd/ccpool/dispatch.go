@@ -31,6 +31,7 @@ var subcommands = []subcommandInfo{
 	{"attach", "attach to a session's live tmux pane (interactive)", runAttach},
 	{"attend", "pick a session that needs input (or is done) and attach to it", runAttend},
 	{"cancel", "interrupt a session's current turn; it stays alive and idle", runCancel},
+	{"capacity", "report pool occupancy and free slots", runCapacity},
 	{"close", "close a session (stop it; --purge also removes its stored data)", runClose},
 	{"doctor", "print each session's pool context and cached store state", runDoctor},
 	{"hook", "internal: report a turn event from the agent's own hooks", runHook},
