@@ -441,18 +441,42 @@ network-free from the store.
 ### JR4 — Re-review on head advance (the review cursor)
 
 `pg-router`'s ACL owns the cursor on the `review-pr` bead: when the PR head advances
-past the reviewed SHA, the closed bead is reopened at the new head.
+past the reviewed SHA, the bead is reopened at the new head.
+
+> **Accuracy note (2026-09-22, `pg2-xg4vv`):** the flowchart and acceptance criteria
+> below record this journey's DESIGNED behavior as last documented (`pg2-ynhr.12`) —
+> they are **not verified against current code**. The implementation they cite
+> (`internal/pgrouteracl`) migrated from `packages/pg-router` into
+> `packages/pg-router-ccpool-handler` (ADR 0065's "Move list") and, by that package's
+> own doc comment, was never actually wired into a `pg-router-ccpool-handler`
+> subcommand after the move — "this crossing does not fire in production today." It
+> was then deleted outright as dead code (`pg2-gidpd`). The lower-level mutation it
+> would have called, `ReopenReview`
+> (`packages/pg-router-ccpool-handler/internal/beads/issue.go`), still exists in this
+> repo but has **no production caller here** — grepped 2026-09-22, only test files
+> reference it. The sibling `phillipg-nix-ziprecruiter` repo was also checked
+> (2026-09-22): it carries only Nix module config and prompt text for the pre-built
+> `pg-router-ccpool-handler` binary, no Go source. So whatever code actually decides
+> _when_ to reopen a `review-pr` bead today lives outside this workspace entirely —
+> presumably a private ZR-side pg-router deployment. Live evidence contradicts the
+> "closed-only" framing below: `pg2-qmltm`'s investigation (transcript for bead
+> `zr-n1abo.2`, review role, 2026-09-22) observed the ACL's head-advance reopen
+> racing a bead that was **IN_PROGRESS** (actively claimed), not closed, at the
+> moment it fired. Read "closed" in this section as the last-documented case, not a
+> proven exclusivity claim — the real, live reopen conditions may be broader and
+> cannot be confirmed without access to that deployment's source.
 
 ```mermaid
 flowchart TD
-    a["reconcile pass: PR head_sha = H2"] --> b{"closed review-pr exists?"}
+    a["reconcile pass: PR head_sha = H2"] --> b{"review-pr exists<br/>(documented as closed-only -<br/>see accuracy note above)?"}
     b -->|no| z["birth path: create review-pr @ H2"]
     b -->|yes| c{"recorded head_sha H1<br/>non-empty AND H2 != H1?"}
     c -->|yes| d["ReopenReview: status=open,<br/>set head_sha=H2, branch, clear assignee"]
     c -->|"no / missing H1 / equal"| e["not resurrected"]
 ```
 
-- **Owner:** `pg-router` ACL — the SOLE cursor. `pg-pr`'s equivalents
+- **Owner (as documented; see accuracy note above):** `pg-router` ACL — the SOLE
+  cursor. `pg-pr`'s equivalents
   (`reopenStaleReviews`, `stampAgentReviewed`, and the
   `pr_revision.reviewed_by_agent_at` SQLite column they wrote) were **removed
   entirely** by `pg2-ynhr.5` (a dropped-column migration, schema v16), not
@@ -464,7 +488,8 @@ flowchart TD
   without clearing the assignee, stranding the bead as `open` + assignee —
   which `bd ready --claim` skips and the next `--claim` rejects ("already
   claimed"), so the PR was never re-reviewed (bd `pg2-jcljm`).
-- **Acceptance criteria:**
+- **Acceptance criteria (as last documented; NOT verified against current code —
+  see accuracy note above; live evidence shows reopening is not closed-only):**
   - A closed `review-pr` bead **MUST** be reopened when the PR `head_sha`
     differs from the bead's recorded `head_sha` (both non-empty), OR when the
     PR's `ownership` differs from the bead's recorded `ownership` (pg2-ynhr.5:
@@ -475,10 +500,15 @@ flowchart TD
     current facts).
   - A closed `review-pr` with no recorded `head_sha` **MUST NOT** be resurrected
     (never review an unknown commit).
-- **Code paths:** `packages/pg-router/internal/pgrouteracl/acl.go` (`ensureReview` —
-  its closed-`review-pr` head-advance branch);
-  `packages/pg-router/internal/beads/issue.go` (`ReopenReview`).
-- **Coverage:** `acl_test.go` (`TestReconcile_HeadAdvancedReopensClosedReview`,
+- **Code paths (historical — the cited package was deleted from this repo,
+  `pg2-gidpd`; unresolvable by grep today):**
+  `packages/pg-router-ccpool-handler/internal/pgrouteracl/acl.go`
+  (`ensureReview` — its closed-`review-pr` head-advance branch, deleted); the
+  one piece that survives the deletion is the mutation helper
+  `packages/pg-router-ccpool-handler/internal/beads/issue.go` (`ReopenReview`),
+  which as of this note has no caller left in this repo.
+- **Coverage (historical — deleted together with the package above):** `acl_test.go`
+  (`TestReconcile_HeadAdvancedReopensClosedReview`,
   `_HeadUnchangedNotResurrected`, `_LegacyClosedNoHeadSHANotResurrected`,
   `_ClosedReviewNotResurrected`, and the `ownership=team` refresh assertion on
   the head-advance test), `reopen_test.go`
