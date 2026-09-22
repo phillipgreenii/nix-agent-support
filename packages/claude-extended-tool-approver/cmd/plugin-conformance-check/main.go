@@ -255,12 +255,12 @@ func walkSources(root string) ([]string, error) {
 func scanQuotesAndDepth(s string, quote byte, depth *int) byte {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		switch {
-		case quote == '\'':
+		switch quote {
+		case '\'':
 			if c == '\'' {
 				quote = 0
 			}
-		case quote == '"':
+		case '"':
 			if c == '\\' && i+1 < len(s) {
 				i++
 			} else if c == '"' {
