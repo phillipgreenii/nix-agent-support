@@ -24,6 +24,11 @@
 // pre-accept decline, OnDispatchFailure for the queue's OTHER delivery-side
 // failure class (a recovered panic from a listener's Offer, bead pg2-icm3u) —
 // see RecordFailure/FailureClassDeclined/FailureClassDispatchFail. It also
+// implements orchestrator.HandlerFailureObserver (structurally, without an
+// import — see OnHandlerFailure's own doc), a THIRD delivery-side failure
+// class fed from roleListener.Offer's own non-panic handler error return
+// (bead pg2-97539 — FailureClassHandlerError), a case the queue itself never
+// sees because that bridge "always reports acceptance" (ADR 0056). It also
 // implements core.IngestObserver, so the core's ingest path drives
 // unknown-type-rejected and deduped, and discover.SourceFailureObserver, so
 // discover's pull-source retry path drives source-failures.
@@ -146,6 +151,26 @@ const FailureClassDeclined = "declined"
 // (bead pg2-icm3u — the original Task 3.3 binding decision named "Dispatch's
 // error return", a shape that never existed; this is the resolved design).
 const FailureClassDispatchFail = "dispatch-failure"
+
+// FailureClassHandlerError is the catalog's THIRD delivery-side failure
+// class (bead pg2-97539): a genuine, non-panic error the registered handler
+// participant itself reported through wireclient's synchronous Offer call
+// (internal/orchestrator/listener.go's roleListener.Offer) — e.g. `wireclient:
+// role "review" exited 1: <bead>: session exited before completing`. This is
+// a DIFFERENT failure shape from FailureClassDispatchFail: that class is the
+// core crashing while offering (a recovered panic, offerSafely never even
+// reaching the handler's own reported outcome); this class is the handler
+// running to completion and reporting failure as an ordinary error return.
+// Per ADR 0056's "always reports acceptance," roleListener.Offer still
+// returns an ACCEPTED OfferResult for this case (eventqueue.Observer never
+// sees a decline or a panic for it), so before this class existed the error
+// was logged (emitResult) and otherwise dropped — pg_router_failures_total
+// never incremented. Its production call site is
+// orchestrator.HandlerFailureObserver.OnHandlerFailure, fed from Offer
+// whenever workOne's error is non-nil and NOT wireclient.ErrBusy (that case
+// stays on FailureClassDeclined, via the pre-accept eventqueue.Observer
+// path, to avoid double-counting).
+const FailureClassHandlerError = "handler-error"
 
 // Emitter emits the core's declared metric catalog over an OTel meter. It
 // implements eventqueue.Observer (the queue's own hooks), core.IngestObserver
@@ -442,6 +467,23 @@ func (e *Emitter) OnDispatchFailure(_ string) {
 	e.RecordFailure(FailureClassDispatchFail)
 }
 
+// OnHandlerFailure implements orchestrator.HandlerFailureObserver
+// (structurally — this package deliberately does not import
+// internal/orchestrator, the same decoupling eventqueue.Observer/
+// core.IngestObserver/discover.SourceFailureObserver already follow here).
+// It feeds the SAME failure-rate counter as OnDeclined/OnDispatchFailure,
+// labeled with the THIRD delivery-side class (bead pg2-97539): a genuine,
+// non-panic error the handler itself reported through roleListener.Offer's
+// synchronous wireclient.Dispatch call, a case neither OnDeclined nor
+// OnDispatchFailure's own call sites can ever observe (see
+// FailureClassHandlerError's own doc for why). eventID/evtType are accepted
+// for the same interface-symmetry reason OnDeclined/OnDispatchFailure's docs
+// give and are likewise not part of the label set; the class dimension is
+// FailureClassHandlerError.
+func (e *Emitter) OnHandlerFailure(_, _ string) {
+	e.RecordFailure(FailureClassHandlerError)
+}
+
 // OnDeduped implements both the extended core.IngestObserver contract AND
 // (Task 2.3, pg2-84o3m.22) eventqueue.Observer's identically-named
 // `OnDeduped(evtType string)` — one method necessarily answers both, since
@@ -472,11 +514,14 @@ func (e *Emitter) OnUnknownTypeRejected(evtType string) {
 }
 
 // RecordFailure increments the failure-rate counter for a DELIVERY-SIDE
-// failure class (INV-FAIL-1) — a pre-accept decline or a dispatch failure
-// where pg-router could not hand the event over at all. It is KEPT as the
-// production entry point (OnDeclined calls it with FailureClassDeclined) so
-// the instrument itself, and any future delivery-side class, has one place to
-// land; it is exported for direct use in tests.
+// failure class (INV-FAIL-1) — a pre-accept decline, a dispatch failure
+// where pg-router could not hand the event over at all, or (bead pg2-97539)
+// a non-panic error the handler itself reported. It is KEPT as the
+// production entry point (OnDeclined calls it with FailureClassDeclined,
+// OnDispatchFailure with FailureClassDispatchFail, OnHandlerFailure with
+// FailureClassHandlerError) so the instrument itself, and any future
+// delivery-side class, has one place to land; it is exported for direct use
+// in tests.
 //
 // It is scoped DOWN, not repurposed: retryable / resource-limit / critical —
 // everything POST-accept — is permanently out of pg-router's measurement scope

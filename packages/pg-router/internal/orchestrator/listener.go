@@ -59,6 +59,31 @@ type ResourceLimitObserver interface {
 	OnResourceLimit(eventID, evtType string)
 }
 
+// HandlerFailureObserver is notified when Offer's synchronous dispatch to
+// the registered handler participant returns a genuine, non-panic error the
+// handler itself reported — bead pg2-97539's gap. Per ADR 0056's "A
+// queue->executor Listener bridge" (this file's own package doc pointer),
+// Offer runs wireclient.Dispatch synchronously and "always reports
+// acceptance": a handler-internal error (e.g. wireclient: role "review"
+// exited 1: <bead>: session exited before completing) is neither the
+// pre-accept eventqueue.Observer.OnDeclined case (a graceful busy/
+// unavailable decline, checked BEFORE dispatch even runs) nor the
+// eventqueue.Observer.OnDispatchFailure case (fed ONLY from a panic
+// recovered by the queue's own offerSafely, never from this Offer's own
+// error return) — so before this hook existed, that error was logged by
+// emitResult and otherwise dropped: pg_router_failures_total never
+// incremented for it. errBusy (wireclient.ErrBusy, mapped to
+// eventqueue.DeclineBusy) is deliberately EXCLUDED from this hook — that
+// case already lands on FailureClassDeclined via the eventqueue.Observer
+// path, so routing it here too would double-count it under a second class.
+// eventID/evtType match ResourceLimitObserver's own signature and
+// capture-at-construction pattern (the same roleListener field group,
+// nil-safe: no configured observer is a no-op, matching every other hook in
+// this group).
+type HandlerFailureObserver interface {
+	OnHandlerFailure(eventID, evtType string)
+}
+
 // roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
 // a compile-time check that a future signature drift on either interface
 // fails the build here rather than silently degrading a role back to the
@@ -124,6 +149,13 @@ type roleListener struct {
 	// entirely: Offer still runs the identical errors.Is check but skips the
 	// call, matching this package's behavior before this field existed.
 	resourceLimitObs ResourceLimitObserver
+	// handlerFailureObs is notified of a genuine, non-panic handler error
+	// (this bead, pg2-97539) — captured once at construction from
+	// o.HandlerFailureObserver, the same capture-at-construction pattern
+	// reg/resourceLimitObs use. nil (the default, and every pre-this-bead
+	// test) disables the notification entirely: Offer still runs the
+	// identical error check but skips the call.
+	handlerFailureObs HandlerFailureObserver
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
@@ -136,10 +168,12 @@ type roleListener struct {
 // into eventqueue.WithRetryBackoff. o.Registry (Task 2.3) is captured the
 // same way: a nil o.Registry disables the availability check entirely.
 // o.ResourceLimitObserver (this bead, pg2-fm2gw) is captured identically.
+// o.HandlerFailureObserver (bead pg2-97539) is captured identically.
 func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqueue.Listener {
 	return &roleListener{
 		o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff,
 		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
+		handlerFailureObs: o.HandlerFailureObserver,
 	}
 }
 
@@ -236,6 +270,15 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 // field and the doc below describe the pre-Task-5.4 behavior this hook is
 // meant to widen back to once the wire protocol carries an equivalent
 // signal.
+//
+// bead pg2-97539 added a FOURTH signal, checked after the busy decline: any
+// OTHER non-nil err (not wireclient.ErrBusy) is a genuine, non-panic
+// handler-internal error — the offer is still an ACCEPT (this bridge's
+// "always reports acceptance," unchanged), but l.handlerFailureObs (nil-safe,
+// same idiom as l.resourceLimitObs) is notified so
+// pg_router_failures_total can record it under its own class rather than
+// falling through both existing failure classes uncounted, as it did before
+// this bead (see HandlerFailureObserver's own doc comment above).
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
@@ -250,6 +293,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// detect it from anymore — see ResourceLimitObserver's own doc comment
 	// above for why this is a widened, already-recorded gap rather than a
 	// regression this task introduces.
+	if err != nil && l.handlerFailureObs != nil {
+		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type)
+	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

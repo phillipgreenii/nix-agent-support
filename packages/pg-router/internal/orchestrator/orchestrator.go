@@ -112,6 +112,18 @@ type Orchestrator struct {
 	// NewListener call whose Offer should notify it. cmd/pg-router's bootCore
 	// is the one production site that wires a live activityObserver in here.
 	ResourceLimitObserver ResourceLimitObserver
+	// HandlerFailureObserver is notified when a role's dispatch (Offer, via
+	// workOne) returns a genuine, non-panic error the handler itself
+	// reported (this bead, pg2-97539; see HandlerFailureObserver's own doc
+	// in listener.go for the full story: the gap between the two existing
+	// eventqueue.Observer failure classes, FailureClassDeclined and
+	// FailureClassDispatchFail, that this hook closes). nil (the default,
+	// and every pre-this-bead test) disables the notification entirely —
+	// NewListener captures this field the same way it captures
+	// ResourceLimitObserver, so it must be set BEFORE any NewListener call
+	// whose Offer should notify it. cmd/pg-router's bootCore is the one
+	// production site that wires a live metrics.Emitter in here.
+	HandlerFailureObserver HandlerFailureObserver
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

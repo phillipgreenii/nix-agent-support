@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -152,6 +153,102 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 	}
 	if handler.callCount() != 0 {
 		t.Fatalf("Offer must not dispatch while self-status is unavailable; calls=%d", handler.callCount())
+	}
+}
+
+// fakeHandlerFailureObserver is a scripted orchestrator.HandlerFailureObserver
+// test double recording every OnHandlerFailure call.
+type fakeHandlerFailureObserver struct {
+	calls []struct{ eventID, evtType string }
+}
+
+func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType string) {
+	f.calls = append(f.calls, struct{ eventID, evtType string }{eventID, evtType})
+}
+
+// TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver is
+// bead pg2-97539's required RED test: a registered handler participant whose
+// dispatch returns a genuine, non-panic, non-busy error (e.g. wireclient:
+// role "review" exited 1: ...) must notify o.HandlerFailureObserver — the
+// gap this bead closes, since neither eventqueue.Observer.OnDeclined (a
+// pre-accept decline, never reached here) nor OnDispatchFailure (fed only
+// from a recovered panic, never a plain error return) can ever observe this
+// case. Offer must still report Accepted: true (ADR 0056's "always reports
+// acceptance" is unchanged by this bead).
+func TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	dispatchErr := fmt.Errorf(`wireclient: role "review" exited 1: bead zr-w1: session exited before completing`)
+	o.Handler = &fakeHandler{err: dispatchErr}
+	obs := &fakeHandlerFailureObserver{}
+	o.HandlerFailureObserver = obs
+	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v (a non-busy handler error is still an ACCEPT)", got, want)
+	}
+	if len(obs.calls) != 1 {
+		t.Fatalf("OnHandlerFailure call count = %d, want 1", len(obs.calls))
+	}
+	if obs.calls[0].eventID != evt.ID || obs.calls[0].evtType != evt.Type {
+		t.Fatalf("OnHandlerFailure(%+v), want eventID=%q evtType=%q", obs.calls[0], evt.ID, evt.Type)
+	}
+}
+
+// TestRoleListener_Offer_BusyHandlerErrorDoesNotNotifyHandlerFailureObserver
+// proves wireclient.ErrBusy is deliberately EXCLUDED from
+// HandlerFailureObserver (HandlerFailureObserver's own doc comment): that
+// case already lands on FailureClassDeclined via the pre-accept
+// eventqueue.Observer.OnDeclined path, so notifying HandlerFailureObserver
+// too would double-count it under a second class.
+func TestRoleListener_Offer_BusyHandlerErrorDoesNotNotifyHandlerFailureObserver(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{err: wireclient.ErrBusy}
+	obs := &fakeHandlerFailureObserver{}
+	o.HandlerFailureObserver = obs
+	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+	if len(obs.calls) != 0 {
+		t.Fatalf("OnHandlerFailure must not fire for wireclient.ErrBusy (already counted as FailureClassDeclined); calls=%+v", obs.calls)
+	}
+}
+
+// TestRoleListener_Offer_NoHandlerFailureObserverIsSafe proves the
+// nil-means-no-op idiom this hook follows (matching
+// TestRoleListener_Offer_NoResourceLimitObserverIsSafe's sibling pattern): a
+// role listener built with no HandlerFailureObserver configured must not
+// panic on a non-busy handler error.
+func TestRoleListener_Offer_NoHandlerFailureObserverIsSafe(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{err: fmt.Errorf("boom")}
+	// o.HandlerFailureObserver deliberately left nil.
+	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt}) // must not panic
+
+	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
 	}
 }
 

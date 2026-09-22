@@ -338,20 +338,52 @@ func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	}
 }
 
-// RecordFailure accepts both FailureClassDeclined and FailureClassDispatchFail
-// — see FailureClassDispatchFail's own doc for its production call site
-// (eventqueue.Observer.OnDispatchFailure).
-func TestRecordFailure_AcceptsBothClasses(t *testing.T) {
+// RecordFailure accepts all three delivery-side classes — FailureClassDeclined,
+// FailureClassDispatchFail, and FailureClassHandlerError (bead pg2-97539) —
+// see FailureClassDispatchFail/FailureClassHandlerError's own docs for their
+// respective production call sites.
+func TestRecordFailure_AcceptsThreeClasses(t *testing.T) {
 	h := newHarness(t)
 	h.emitter.RecordFailure(FailureClassDeclined)
 	h.emitter.RecordFailure(FailureClassDispatchFail)
 	h.emitter.RecordFailure(FailureClassDispatchFail)
+	h.emitter.RecordFailure(FailureClassHandlerError)
+	h.emitter.RecordFailure(FailureClassHandlerError)
+	h.emitter.RecordFailure(FailureClassHandlerError)
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassDeclined); got != 1 {
 		t.Fatalf("failures[%s] = %d, want 1", FailureClassDeclined, got)
 	}
 	if got := sumFor(m, "class", FailureClassDispatchFail); got != 2 {
 		t.Fatalf("failures[%s] = %d, want 2", FailureClassDispatchFail, got)
+	}
+	if got := sumFor(m, "class", FailureClassHandlerError); got != 3 {
+		t.Fatalf("failures[%s] = %d, want 3", FailureClassHandlerError, got)
+	}
+}
+
+// OnHandlerFailure (bead pg2-97539) feeds the SAME pg_router_failures
+// counter OnDeclined/OnDispatchFailure do, labeled with the THIRD
+// delivery-side class — the production call site is
+// orchestrator.HandlerFailureObserver.OnHandlerFailure, fed from
+// roleListener.Offer's own non-panic handler error return (see
+// FailureClassHandlerError's own doc). eventID/evtType are accepted for
+// interface symmetry only and are not part of the failure-rate label set.
+func TestOnHandlerFailureFeedsFailuresCounter(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnHandlerFailure("dsp-1", "review-requested")
+	h.emitter.OnHandlerFailure("dsp-2", "push-requested")
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	if got := sumFor(m, "class", FailureClassHandlerError); got != 2 {
+		t.Fatalf("failures[%s] = %d, want 2 (eventID/evtType are not part of the label set)", FailureClassHandlerError, got)
+	}
+	// Must not also bleed into either of the other two classes.
+	if got := sumFor(m, "class", FailureClassDeclined); got > 0 {
+		t.Fatalf("failures[%s] = %d, want 0 (OnHandlerFailure must not touch FailureClassDeclined)", FailureClassDeclined, got)
+	}
+	if got := sumFor(m, "class", FailureClassDispatchFail); got > 0 {
+		t.Fatalf("failures[%s] = %d, want 0 (OnHandlerFailure must not touch FailureClassDispatchFail)", FailureClassDispatchFail, got)
 	}
 }
 

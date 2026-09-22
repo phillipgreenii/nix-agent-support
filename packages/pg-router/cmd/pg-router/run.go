@@ -160,12 +160,15 @@ func warnHandlerCommandAmbiguity(cfg config.Config) {
 //
 // It also wires ONE metrics.Emitter into every production seam that can drive
 // it — eventqueue.WithObserver at queue construction, core.Options.Observer
-// at Listen, and o.SourceFailureObserver for ProduceTick's discover.Produce
-// call — so a single emitter answers eventqueue.Observer, core.IngestObserver,
-// and discover.SourceFailureObserver alike (INV-FAIL-3, register gap R21 /
+// at Listen, o.SourceFailureObserver for ProduceTick's discover.Produce
+// call, and o.HandlerFailureObserver for roleListener.Offer's own non-panic
+// handler-error return — so a single emitter answers eventqueue.Observer,
+// core.IngestObserver, discover.SourceFailureObserver, and
+// orchestrator.HandlerFailureObserver alike (INV-FAIL-3, register gap R21 /
 // bead pg2-00jpn: before this assignment, source failures were recorded to
 // logs only in the running binary — discover.WithSourceFailureObserver's seam
-// existed but no production call site ever passed it a live observer).
+// existed but no production call site ever passed it a live observer; bead
+// pg2-97539 closed the identical class of gap for handler-internal errors).
 // Matches internal/metrics/metrics_test.go's newHarness circular-construction
 // pattern: q is declared (as this function's named return) before New(mp,
 // depthFn) closes over it, then constructed for real with WithObserver(emitter).
@@ -242,6 +245,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the remaining seam
 	// discover.WithSourceFailureObserver's doc left for a follow-on to close.
 	o.SourceFailureObserver = emitter
+	// Wire the same emitter into roleListener.Offer's own non-panic
+	// handler-error hook (bead pg2-97539) — the gap where a handler-internal
+	// error surfaced through wireclient's synchronous Offer call fell through
+	// both existing failure classes uncounted (see
+	// orchestrator.HandlerFailureObserver's own doc for the full story).
+	o.HandlerFailureObserver = emitter
 	// ring is the dispatch-outcome activity buffer (Task 3.4): a SECOND
 	// eventqueue.Observer, fanned out alongside emitter at this one
 	// construction site rather than folded into a new composite-observer
