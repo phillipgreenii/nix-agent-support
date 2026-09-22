@@ -33,11 +33,15 @@ resolve_claude_settings_script() {
 
   # No packaged binary on PATH: build a lib-sourcing wrapper around the raw
   # source for a local dev run. Placed under BATS_RUN_TMPDIR so bats cleans it
-  # up; falls back to mktemp if that is not set.
+  # up; falls back to mktemp if that is not set. Always routed through mktemp
+  # (never a fixed name-keyed path): a runner that executes bats cases
+  # concurrently (e.g. pg-test-runner) can have multiple cases resolve the
+  # same script name at the same time, and a shared path races them on the
+  # same file.
   local raw wrapper
   raw="${BATS_TEST_DIRNAME}/../${name}.sh"
   if [ -n "${BATS_RUN_TMPDIR:-}" ]; then
-    wrapper="${BATS_RUN_TMPDIR}/run_with_lib-${name}"
+    wrapper="$(mktemp "${BATS_RUN_TMPDIR}/run_with_lib-${name}.XXXXXX")"
   else
     wrapper="$(mktemp)"
   fi
