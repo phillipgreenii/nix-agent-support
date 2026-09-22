@@ -15,6 +15,17 @@
 // applies to every consumer of this repo uniformly, so there is no per-consumer
 // verb list to inject.
 //
+// `rebase` and `workforest prune` were added later (bead pg2-tvdh3, folded
+// into pg2-amzvw's conformance-check wiring pass after confirming both are
+// no more dangerous than the already-approved `push`): `pn workspace
+// rebase [branch]` runs local-only `git fetch` + `git pull --rebase
+// --autostash` (or, with an explicit branch, `git rebase --autostash
+// <branch>`) — no push, and --autostash makes it recoverable the same way
+// `git stash` always is. `pn workspace workforest prune` runs `git worktree
+// prune` in every canonical repo — pure administrative bookkeeping (clears
+// stale `.git/worktrees` entries for already-removed worktrees) with no
+// arguments and no effect on any live worktree/branch.
+//
 // # Scope — do not widen this
 //
 // The ruling explicitly does NOT extend relief to two commands that are a
@@ -51,16 +62,19 @@ import (
 // approvedSubcommands are the routine, non-destructive `pn workspace <sub>`
 // spellings the 2026-09-17 operator ruling covers directly (i.e. every listed
 // subcommand EXCEPT the "workforest" family, which is handled separately
-// below because only two of its own subcommands are routine).
+// below because only two of its own subcommands are routine), plus `rebase`
+// (pg2-tvdh3 — see the package doc).
 var approvedSubcommands = map[string]bool{
 	"build": true, "status": true, "push": true, "doctor": true, "update": true,
+	"rebase": true,
 }
 
 // approvedWorkforestSubcommands are the routine `pn workspace workforest
 // <sub>` spellings. "remove" is DELIBERATELY ABSENT — see the package doc's
-// Scope section; it must keep its current (non-relaxed) scrutiny.
+// Scope section; it must keep its current (non-relaxed) scrutiny. "prune"
+// was added by pg2-tvdh3 — see the package doc.
 var approvedWorkforestSubcommands = map[string]bool{
-	"add": true, "list": true,
+	"add": true, "list": true, "prune": true,
 }
 
 type Rule struct{}

@@ -247,6 +247,17 @@
           claude-extended-tool-approver = final.callPackage ./packages/claude-extended-tool-approver {
             inherit (goBuilders) mkGoApp;
           };
+          # plugin-conformance-check: pg2-amzvw — the second binary out of the
+          # SAME claude-extended-tool-approver Go module (see that .nix file's
+          # doc comment). Built here, as its own overlay package, so the
+          # `checks.*` derivations below (and, via the phillipgreenii-nix-base
+          # input, repo-base's own flake) can reference a real built binary
+          # rather than each having its own `go run`/`go build` invocation.
+          plugin-conformance-check =
+            final.callPackage ./packages/claude-extended-tool-approver/plugin-conformance-check.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
           };
@@ -1682,6 +1693,100 @@
                   "integration"
                 ];
               };
+
+              # plugin-conformance — pg2-amzvw: wires pg2-z3u4f's
+              # plugin-conformance-check tool into `nix flake check` against
+              # THIS repo's own claude-marketplace/ tree. Every extracted
+              # command must resolve to a DECISIVE ceta verdict
+              # (Approve/Ask/Reject) except the explicitly named, tracked
+              # misses below.
+              #
+              # `--allow-reason "env assignments only"` exempts an EXISTING,
+              # documented engine classification (a bare `x="$(cmd)"`
+              # assignment statement, where the assignment itself is the only
+              # thing that "runs" at the statement's own top level) — not a
+              # coverage gap, and shared across many unrelated variable
+              # names, so one reason-substring entry covers the whole class
+              # (see cmd/plugin-conformance-check/main.go's doc comment).
+              #
+              # Every `--allow` entry below is either (a) a genuinely
+              # uncovered CETA-rule class this pass discovered, with NO
+              # tracking bead yet as of pg2-amzvw — `pg-ccaudit`,
+              # `pg-go-mutate`, `scripts/create-child-bead.sh`, a bare
+              # `shift` — these need a follow-up bead filed, the same shape
+              # as the sibling pg2-s4lzw/pg2-tvdh3 follow-ups this check's
+              # allowlist below (for repo-base and, one day, ziprecruiter)
+              # already tracks; or (b) a doc-formatting/extraction-limitation
+              # artifact the extractor cannot safely join on its own (a
+              # heredoc nested inside an unrecognized `"$(...` subshell-in-
+              # quote context, a stray case-pattern-list fragment, a bats
+              # `@test` block, prose that landed inside a ```bash fence by
+              # mistake, a lone leading-`|` pipeline continuation with no
+              # detectable trailing operator on its preceding line). See
+              # cmd/plugin-conformance-check/main.go's doc comment for
+              # exactly what the extractor does and does not join.
+              plugin-conformance = pkgs.runCommand "check-plugin-conformance" { } ''
+                ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
+                  --allow-reason "env assignments only" \
+                  --allow "pg-ccaudit" \
+                  --allow "pg-go-mutate" \
+                  --allow "scripts/create-child-bead.sh" \
+                  --allow "shift" \
+                  --allow "cat" \
+                  --allow "--actor" \
+                  --allow ")\"" \
+                  --allow "done" \
+                  --allow "EOF" \
+                  --allow "Context" \
+                  --allow "@test" \
+                  --allow "|" \
+                  --allow "phillipgreenii-nix-agent-support" \
+                  --allow "some_command" \
+                  --allow "--body-stdin" \
+                  ${./claude-marketplace}
+                touch $out
+              '';
+
+              # plugin-conformance-repo-base — pg2-amzvw: the SAME
+              # plugin-conformance-check tool, pointed at phillipg-nix-repo-
+              # base's own plugin dirs (pn-workspace-rules/, capability-
+              # model/), via the phillipgreenii-nix-base flake input this
+              # repo ALREADY depends on. This check deliberately lives HERE
+              # rather than in repo-base's own flake.nix: repo-base is the
+              # foundation of this pn-workspace's dependency graph (it has
+              # ZERO sibling nix-* inputs of its own — confirmed by reading
+              # its flake.nix), and this repo already depends on repo-base
+              # (`phillipgreenii-nix-base`), so adding the REVERSE edge
+              # (repo-base depending on this repo, just to reach this tool)
+              # would invert that layering — repo-base would gain a sibling
+              # input for the first time, and one that itself transitively
+              # depends back on repo-base. Putting the check on THIS side
+              # (agent-support depending on repo-base, the direction that
+              # already exists) reaches the exact same plugin dirs with no
+              # new dependency edge at all.
+              #
+              # The one PRIOR gap (`pn workspace rebase` / `pn workspace
+              # workforest prune` abstaining, tracked as pg2-tvdh3) was fixed
+              # in THIS same pass (internal/rules/pnworkspace's
+              # approvedSubcommands / approvedWorkforestSubcommands) — see
+              # that package's doc comment; confirmed by a real build of
+              # this check (both now resolve to Approve).
+              #
+              # One NEW gap surfaced by that same build, not yet tracked by
+              # any bead as of pg2-amzvw: `pnwf` (repo-base's own workforest
+              # helper script, invoked as `landing=$(pnwf land-plan
+              # "$BRANCH")` in validate-workforest's SKILL.md) is not
+              # recognized by any ceta rule — a genuine coverage gap, the
+              # same shape as agent-support's own `pg-ccaudit`/`pg-go-mutate`
+              # misses above, needing its own follow-up bead.
+              plugin-conformance-repo-base = pkgs.runCommand "check-plugin-conformance-repo-base" { } ''
+                ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
+                  --allow-reason "env assignments only" \
+                  --allow 'landing=$(pnwf' \
+                  ${phillipgreenii-nix-base}/pn-workspace-rules \
+                  ${phillipgreenii-nix-base}/capability-model
+                touch $out
+              '';
 
               # claude-hook-router — B2 (ADR 0071 Phase B, packet tc-rjzd3.7): the
               # dispatch/merge runtime's matcher/event-selection/priority-dispatch/
@@ -5983,6 +6088,7 @@
               pg-desk
               osx-bridge-api
               claude-hook-router
+              plugin-conformance-check
               ;
             # The two agent-activity-api wrappers, re-exported for the same
             # reason codeburn is: they are overlay-only attrs, so without this

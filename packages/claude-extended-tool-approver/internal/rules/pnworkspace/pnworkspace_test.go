@@ -14,7 +14,8 @@ func mustJSON(cmd string) json.RawMessage {
 
 // TestPnWorkspace_ApprovedSubcommands covers every routine subcommand the
 // 2026-09-17 operator ruling names (pg2-4zyqf/pg2-vlpe1's acceptance
-// criteria): build/status/push/doctor/update, plus workforest add/list.
+// criteria): build/status/push/doctor/update, plus workforest add/list —
+// and the two pg2-tvdh3 additions, rebase and workforest prune.
 func TestPnWorkspace_ApprovedSubcommands(t *testing.T) {
 	r := New()
 	tests := []struct {
@@ -28,6 +29,15 @@ func TestPnWorkspace_ApprovedSubcommands(t *testing.T) {
 		{"update", "pn workspace update"},
 		{"workforest add with set name", "pn workspace workforest add pn-workspace-sync"},
 		{"workforest list", "pn workspace workforest list"},
+		// pg2-tvdh3: rebase is local-only (fetch + pull --rebase --autostash,
+		// or --autostash rebase onto an explicit branch) — no push, and
+		// --autostash makes it as recoverable as a plain `git stash`.
+		{"rebase, no branch", "pn workspace rebase"},
+		{"rebase onto explicit branch", "pn workspace rebase main"},
+		// pg2-tvdh3: workforest prune is `git worktree prune` in every
+		// canonical repo — pure administrative bookkeeping, no arguments,
+		// no effect on any live worktree/branch.
+		{"workforest prune", "pn workspace workforest prune"},
 		// A leading compound leaf ("export && pn workspace push", from the bead's
 		// own reproduce sample) still approves: LeavesOf's typical production
 		// caller (the engine) has already split the expression and hands each
