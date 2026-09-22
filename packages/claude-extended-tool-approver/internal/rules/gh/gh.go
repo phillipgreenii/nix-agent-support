@@ -391,6 +391,21 @@ func ghCommandPath(args []string) (resource, subcmd string, resourceArgs, rest [
 	return resource, subcmd, resourceArgs, omitIndexes(args, words)
 }
 
+// CommandPath is the exported form of ghCommandPath, for reuse by sibling gh-EXTENSION
+// rule modules (bead pg2-s4lzw's internal/rules/ghstack) that need the identical
+// cobra-aware command-path resolution. gh registers each installed extension as a real
+// command at gh's cobra root (e.g. `stack`, for the `gh-stack` extension), so the SAME
+// pg2-by1ij bypass this package's doc block measures — a global flag preceding or sitting
+// inside the command path (`gh --repo o/r stack view`, `gh stack --remote x push`) —
+// applies to an extension's command path exactly as it does to gh's own built-in
+// resources; there is no reason for a second, independently-measured word-finder. Callers
+// outside this package get resource/subcmd/rest with the same semantics ghCommandPath's
+// own doc documents; resourceArgs exists only for gh.go's own `api` branch and has no use
+// outside it, but is returned anyway rather than adding a second, narrower wrapper.
+func CommandPath(args []string) (resource, subcmd string, resourceArgs, rest []string) {
+	return ghCommandPath(args)
+}
+
 // ghCommandWordIndexes returns the indexes in args of the first `want` COMMAND WORDS,
 // skipping flags the way cobra's own command search does: a long flag consumes the NEXT
 // token unless it is '='-glued or listed in ghNoValueLongFlags; a BARE short (`-R`,

@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/docker"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/envvars"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gh"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/ghstack"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/git"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/gitdir"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/killprobe"
@@ -234,6 +235,16 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		primarypush.New(primaryResolver),
 		git.New(pe),
 		gh.New(gh.NewExecResolver()),
+		// gh-stack approves/gates the `gh stack <verb> ...` GitHub CLI extension's
+		// command family per the per-subcommand design ruled in bead pg2-s4lzw — see
+		// that package's doc comment for the full classification and citations. It
+		// MUST come after gh (first-match-wins is not actually load-bearing here: gh's
+		// own resource/subcommand switch never matches "stack", so ordering relative
+		// to gh is inert today, but placing it immediately after its sibling keeps the
+		// gh-family rules together for readability). Like pnworkspace/killprobe/
+		// pgccaudit above and below, it takes no consumer config — the classification
+		// is fixed and applies uniformly.
+		ghstack.New(),
 		monorepo.New(pe, cfg.Monorepo),
 		nixRule,
 		dockerRule,

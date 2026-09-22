@@ -116,6 +116,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"primary-push":       true,
 		"git":                true,
 		"gh":                 true,
+		"gh-stack":           true,
 		"monorepo":           true,
 		"nix":                true,
 		"docker":             true,
