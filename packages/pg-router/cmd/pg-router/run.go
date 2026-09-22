@@ -400,14 +400,31 @@ func postStartupAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 	}
 }
 
-// preShutdownAll dispatches handler.preShutdown once to every ENABLED
-// role's registered handler participant, at the same point TeardownAll used
-// to fire (pg2-oju6w.15) — a zero-behavior-change RELOCATION of that
-// once-per-process sweep into the handler's own process (ccpool session
-// lifecycle is now entirely the handler's private business, not this
-// core's), never a redesign. A hook failure is logged and MUST NOT crash
-// shutdown. See postStartupAll's doc for the nil-Handler guard's own
-// rationale.
+// preShutdownAll dispatches handler.preShutdown ONCE per daemon shutdown —
+// to the first ENABLED role's registered handler participant only — at the
+// same point TeardownAll used to fire (pg2-oju6w.15).
+//
+// SUPERSEDES pg2-oju6w.15's original "dispatch once per enabled role"
+// shape (bead pg2-asr8z, 2026-09-22): that shape called this hook once per
+// enabled role, on the theory (recorded in
+// pg-router-ccpool-handler/cmd/pg-router-ccpool-handler/preshutdown.go's own
+// runPreShutdown doc, "decision #1") that N redundant sweeps were merely
+// harmless waste. Production evidence (pg2-1kq1x's verification, root-caused
+// as pg2-asr8z) proved that framing wrong: with N enabled roles, this used
+// to launch N sequential fresh "preShutdown" SUBPROCESSES, and every one of
+// them ran its own full ccpool-list-and-close sweep (measured ~0.74s per
+// `ccpool list --all` alone) — sequentially eating enough of launchd's 5s
+// ExitTimeOut that the daemon was SIGKILLed before even the FIRST sweep
+// finished, let alone the rest. Calling it once is safe because that sweep
+// is GLOBAL and invariant across roles: it keys only on the handler
+// process's own launch config (PG_ROUTER_CCPOOL_HANDLER_CONFIG, inherited
+// unchanged by every subprocess spawn) and never reads the per-role
+// --role-config path at all — so every enabled role's call would have
+// triggered the byte-for-byte identical sweep anyway. A hook failure is
+// logged and MUST NOT crash shutdown. See postStartupAll's doc for the
+// nil-Handler guard's own rationale — postStartupAll itself is UNCHANGED
+// and out of scope for pg2-asr8z (nothing consumes its outcome today, so it
+// carries none of preShutdown's timeout risk).
 func preShutdownAll(ctx context.Context, o *orchestrator.Orchestrator, cfg config.Config) {
 	if o.Handler == nil {
 		slog.Warn("preShutdown skipped: no Handler configured (internal/wireclient.HandlerClient)")
@@ -420,6 +437,11 @@ func preShutdownAll(ctx context.Context, o *orchestrator.Orchestrator, cfg confi
 		if _, err := o.Handler.PreShutdown(ctx, r); err != nil {
 			slog.Warn("preShutdown failed", "role", r.Name, "err", err)
 		}
+		// Dedup (pg2-asr8z): dispatch to exactly one enabled role's handler
+		// participant, never to every one of them — see this function's own
+		// doc above for why calling it more than once is redundant, not
+		// merely harmless.
+		return
 	}
 }
 

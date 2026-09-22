@@ -1180,21 +1180,28 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	if len(fh.dispatchedCalls()) != 0 {
 		t.Fatalf("gated run-until-idle must dispatch nothing; dispatched = %v", fh.dispatchedCalls())
 	}
-	// preShutdownAll fires at the same point TeardownAll used to, once per
-	// enabled role only.
+	// preShutdownAll fires at the same point TeardownAll used to, exactly
+	// once per shutdown (pg2-asr8z dedup) — with only one enabled role here,
+	// that single call must land on it, never on disabled r2.
 	if got := fh.preShutdownCalls(); len(got) != 1 || got[0] != "r1" {
 		t.Fatalf("preShutdown calls = %v, want exactly [r1] (disabled r2 must never get the hook)", got)
 	}
 }
 
-// TestPostStartupAll_onlyEnabledRoles and TestPreShutdownAll_onlyEnabledRoles
-// are pg2-oju6w.15's direct unit coverage for the two helpers run.go's three
-// entry points (runRun/runRunUntilIdle/runUntilIdleGated) share: each must
-// call Handler.PostStartup/PreShutdown exactly once per role with
-// r.Enabled == true (mirroring bootCore's own registration loop — never
-// declaredRoles, the full pre-selector superset), and skip silently (no
-// panic) when Handler is nil — the known, out-of-scope
+// TestPostStartupAll_onlyEnabledRoles and TestPreShutdownAll_* are
+// pg2-oju6w.15's direct unit coverage for the two helpers run.go's three
+// entry points (runRun/runRunUntilIdle/runUntilIdleGated) share, and skip
+// silently (no panic) when Handler is nil — the known, out-of-scope
 // CommandFor/bootCore-wiring gap (pg2-oju6w.15's own plan, Section 0).
+//
+// The two helpers now differ in per-role fan-out (pg2-asr8z, superseding
+// pg2-oju6w.15's original "both dispatch once per enabled role" shape):
+// postStartupAll still calls Handler.PostStartup exactly once per role with
+// r.Enabled == true (mirroring bootCore's own registration loop — never
+// declaredRoles, the full pre-selector superset). preShutdownAll instead
+// calls Handler.PreShutdown exactly ONCE per shutdown, for the first
+// enabled role only — see preShutdownAll's own doc (run.go) for why
+// dispatching it once per enabled role was redundant, not merely harmless.
 func TestPostStartupAll_onlyEnabledRoles(t *testing.T) {
 	fh := &fakeHandlerClient{}
 	o := &orchestrator.Orchestrator{Handler: fh}
@@ -1217,19 +1224,44 @@ func TestPostStartupAll_nilHandlerDoesNotPanic(t *testing.T) {
 	postStartupAll(context.Background(), o, cfg) // must not panic
 }
 
-func TestPreShutdownAll_onlyEnabledRoles(t *testing.T) {
+// TestPreShutdownAll_dedupesToOneCallForFirstEnabledRole is pg2-asr8z's
+// direct RED/GREEN coverage for the dedup fix: pre-fix, this asserted
+// exactly the OPPOSITE (want == []string{"enabled-1", "enabled-2"}, one call
+// per enabled role) — that shape is what let launchd's 5s ExitTimeOut
+// SIGKILL the daemon before preShutdownAll's sweep(s) could ever finish (see
+// preShutdownAll's own doc, run.go). A leading disabled role is included
+// specifically to prove the dedup call lands on the first ENABLED role, not
+// literally cfg.Roles[0].
+func TestPreShutdownAll_dedupesToOneCallForFirstEnabledRole(t *testing.T) {
 	fh := &fakeHandlerClient{}
 	o := &orchestrator.Orchestrator{Handler: fh}
 	cfg := config.Config{Roles: roles.RoleSet{
-		{Name: "enabled-1", Enabled: true},
 		{Name: "disabled-1", Enabled: false},
+		{Name: "enabled-1", Enabled: true},
 		{Name: "enabled-2", Enabled: true},
 	}}
 	preShutdownAll(context.Background(), o, cfg)
 	got := fh.preShutdownCalls()
-	want := []string{"enabled-1", "enabled-2"}
+	want := []string{"enabled-1"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("preShutdown calls = %v, want %v", got, want)
+		t.Fatalf("preShutdown calls = %v, want %v (pg2-asr8z: exactly one call per shutdown, never one per enabled role)", got, want)
+	}
+}
+
+// TestPreShutdownAll_noEnabledRolesDispatchesNothing proves the dedup fix's
+// loop-with-early-return shape still degrades to a no-op (never panics or
+// dispatches) when no role is enabled — the same case the pre-fix loop
+// handled by simply never entering its body.
+func TestPreShutdownAll_noEnabledRolesDispatchesNothing(t *testing.T) {
+	fh := &fakeHandlerClient{}
+	o := &orchestrator.Orchestrator{Handler: fh}
+	cfg := config.Config{Roles: roles.RoleSet{
+		{Name: "disabled-1", Enabled: false},
+		{Name: "disabled-2", Enabled: false},
+	}}
+	preShutdownAll(context.Background(), o, cfg)
+	if got := fh.preShutdownCalls(); len(got) != 0 {
+		t.Fatalf("preShutdown calls = %v, want none (no enabled role)", got)
 	}
 }
 

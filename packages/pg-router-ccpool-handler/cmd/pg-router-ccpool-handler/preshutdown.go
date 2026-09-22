@@ -34,19 +34,24 @@ var gitWorktreeOpener worktree.Opener = func(ctx context.Context, dir string) (g
 }
 
 // runPreShutdown implements the `preShutdown` INTF-HANDLER subcommand
-// (pg2-oju6w.15): dispatched once per process lifetime, at the same point
+// (pg2-oju6w.15): dispatched once per daemon shutdown, at the same point
 // pg-router's own core used to call the now-deleted Orchestrator.TeardownAll
 // — this is that same once-per-process sweep, relocated into this handler's
 // own process (ccpool session lifecycle is entirely this participant's own
 // business now, never the core's), not a redesign.
 //
-// Every enabled role gets its own preShutdown call (decision #1's no-dedup
-// ruling), but the sweep this triggers is GLOBAL (matches on SessionPrefix
-// only, no per-role scoping in ccpool.Session) — with N enabled roles
-// sharing this one handler process, shutdown runs N redundant full
-// list/close sweeps instead of one. Harmless (closing an already-gone
-// session is a no-op) and an accepted consequence of the no-dedup decision,
-// not something to "fix" here.
+// SUPERSEDED (bead pg2-asr8z, 2026-09-22 — Phillip Green II, drain session):
+// this subcommand used to get its own preShutdown call once PER ENABLED
+// ROLE ("decision #1"'s no-dedup ruling: "harmless [...] and an accepted
+// consequence of the no-dedup decision, not something to 'fix' here").
+// Production evidence disproved "harmless" — see
+// cmd/pg-router/run.go's preShutdownAll, whose own doc now carries the full
+// story. The sweep this subcommand triggers is GLOBAL (matches on
+// SessionPrefix only, no per-role scoping in ccpool.Session, and
+// --role-config is not even read by this subcommand — see below), so it is
+// invariant across roles regardless of which one's preShutdown call
+// triggered it; preShutdownAll now calls this exactly ONCE per shutdown,
+// never once per enabled role.
 func runPreShutdown(args []string) int {
 	fs := flag.NewFlagSet("preShutdown", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

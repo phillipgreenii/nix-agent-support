@@ -164,6 +164,21 @@ in
           # guard above), so this is a no-op merge on a machine without the
           # observability stack.
           EnvironmentVariables = emitterEnv;
+          # ExitTimeOut (pg2-asr8z stopgap; no prior precedent for this key
+          # anywhere in this pn-workspace — searched, none found): launchd's
+          # own default is 5s, which SIGKILLed this daemon mid-shutdown
+          # before preShutdownAll (cmd/pg-router/run.go) could finish its
+          # ccpool-handler sweep even once — direct log evidence in pg2-asr8z.
+          # 30s is deliberately generous, not tightly fitted: pg2-asr8z's own
+          # de-dup fix (preShutdownAll now calls the sweep exactly once, not
+          # once per enabled role) already removes the O(roles) multiplier
+          # that caused the timeout; this value is a safety margin over ONE
+          # completed sweep of the current ~25-session backlog (each
+          # `ccpool list --all` alone measured ~0.74s, plus per-session
+          # close/worktree-removal work), with headroom for the backlog to
+          # keep growing before the dedup fix's own effect and pg2-5sirm
+          # (tracked separately, out of scope here) catch up.
+          ExitTimeOut = 30;
         };
       };
     })
