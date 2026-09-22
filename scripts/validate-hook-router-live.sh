@@ -256,10 +256,20 @@ fi
 # --- 7. Confirm the router actually fired: look for the stub's marker file
 #     under the isolated config dir (its real CLAUDE_PLUGIN_DATA location)
 #     and under the router's documented no-CLAUDE_PLUGIN_DATA fallback. ---
+# `|| true`: under `set -euo pipefail`, `find` exits nonzero when either
+# candidate path doesn't exist (the CLAUDE_PLUGIN_DATA fallback location
+# normally doesn't, since CLAUDE_PLUGIN_DATA is set for a dispatched
+# delegate — see the header comment), and pipefail propagates that nonzero
+# status through `| head -1` even though `head` itself succeeded and
+# `$marker` was captured correctly. Without `|| true`, `set -e` would abort
+# the script right here on a SUCCESSFUL run — before ever reaching the
+# PASS/FAIL check below — discarding a correctly-found marker (verified
+# empirically: the marker was found but the script still exited 1 with no
+# PASS/FAIL output).
 marker="$(
   find "$config_dir" "${TMPDIR:-/tmp}/claude-hook-router" \
     -name fired.marker 2>/dev/null | head -1
-)"
+)" || true
 
 if [ -z "$marker" ]; then
   cat "$session_log" >&2
