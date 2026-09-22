@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
@@ -268,6 +269,17 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// matter (neither recognizes "pn" as a basename at all today), but it is
 		// placed alongside its command-aware-classifier siblings for readability.
 		pnworkspace.New(),
+		// pnwf approves/gates the repo-base `pnwf` workforest helper's own command
+		// family (pnwf <subcommand> ...) — a DIFFERENT executable than `pn`, invoked
+		// directly by phillipg-nix-repo-base's fork-workforest/validate-workforest/
+		// land-workforest/cleanup-workforest skills, so pnworkspace's basename check
+		// (requires the executable to BE "pn") never matches it. Per-subcommand
+		// classification (bead pg2-9w035) — see that package's doc comment. Like
+		// pnworkspace/ghstack/killprobe/pgccaudit, it takes no consumer config and
+		// ordering relative to its neighbours does not matter ("pnwf" is recognized
+		// by no other rule in this chain); placed alongside its sibling pnworkspace
+		// for readability.
+		pnwf.New(),
 		// kill-probe approves the narrow `kill -0`/`kill -s 0` null-signal
 		// liveness-probe idiom (pg2-z3u4f, ADR 0074) — a runtime-composed shape,
 		// not a plugin-prescribed one, so unlike pnworkspace above it needs no

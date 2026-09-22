@@ -1775,17 +1775,29 @@
               # that package's doc comment; confirmed by a real build of
               # this check (both now resolve to Approve).
               #
-              # One NEW gap surfaced by that same build, not yet tracked by
-              # any bead as of pg2-amzvw: `pnwf` (repo-base's own workforest
-              # helper script, invoked as `landing=$(pnwf land-plan
-              # "$BRANCH")` in validate-workforest's SKILL.md) is not
-              # recognized by any ceta rule — a genuine coverage gap, the
-              # same shape as agent-support's own `pg-ccaudit`/`pg-go-mutate`
-              # misses above, needing its own follow-up bead.
+              # The gap surfaced by that same build (`pnwf`, repo-base's own
+              # workforest helper script, invoked as `landing=$(pnwf
+              # land-plan "$BRANCH")` in validate-workforest's SKILL.md, and
+              # `canonical_root=$(pnwf resolve | jq -r '.canonical_root')`)
+              # was fixed in a later pass (bead pg2-9w035:
+              # internal/rules/pnwf) — see that package's doc comment for
+              # the per-subcommand classification. Every pnwf invocation this
+              # check extracts is now recognized directly (confirmed by a
+              # real build of this check: `pnwf resolve`/`pnwf land-plan`
+              # both now resolve to Approve). The two SKILL.md lines above
+              # still show up as "known/allowed" — but only via the
+              # PRE-EXISTING, generic `--allow-reason "env assignments
+              # only"` below (a bare `x=$(cmd)` assignment statement's own
+              # top-level leaf has no rule opinion regardless of what the
+              # substitution calls), the same mechanism the sibling check
+              # above already relies on for unrelated candidates. No
+              # pnwf-specific --allow entry is needed any more — omitting
+              # one here is what lets this check catch a FUTURE pnwf
+              # regression (e.g. a new subcommand this rule does not yet
+              # classify) inside a *non*-assignment invocation shape.
               plugin-conformance-repo-base = pkgs.runCommand "check-plugin-conformance-repo-base" { } ''
                 ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
                   --allow-reason "env assignments only" \
-                  --allow 'landing=$(pnwf' \
                   ${phillipgreenii-nix-base}/pn-workspace-rules \
                   ${phillipgreenii-nix-base}/capability-model
                 touch $out
