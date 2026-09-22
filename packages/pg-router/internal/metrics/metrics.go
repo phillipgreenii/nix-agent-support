@@ -1,7 +1,9 @@
 // Package metrics emits these members of the core's declared metric catalog
 // (INV-OBS-1), each named by INTF-MON, the interface that carries the catalog:
 // queue depth (gauge, per type), failure rate (counter, per DELIVERY-SIDE
-// failure class — see RecordFailure), unconsumed-expired (counter, per
+// failure class — see RecordFailure; the "declined" class ALSO carries a
+// second, additive "reason" label — see OnDeclined's own doc, bead
+// pg2-j4uwg), unconsumed-expired (counter, per
 // type — the "no event misses" signal, INV-DISP-3's
 // declared-but-inactive-this-run case), unknown-type-rejected (counter,
 // per type — INV-DISP-3's unknown-to-the-configuration case, which that
@@ -444,15 +446,30 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 // OnDeclined feeds the failure-rate counter from the queue's Dispatch path
 // (eventqueue.Observer): a graceful pre-accept decline, one of the two
 // delivery-side cases INV-FAIL-1 covers (the other, OnDispatchFailure below,
-// fires from the same Dispatch pass for the OTHER class). evtType/listenerID/
-// reason (the latter two widened in Task 2.3) are accepted for interface
-// symmetry with the queue's other per-type hooks but are not themselves part
-// of the failure-rate label set — the counter's "class" dimension is
-// FailureClassDeclined, the one class knowable at this call site. Adding
-// listenerID/reason as new labels would be metrics-catalog growth, out of
-// this task's scope (Task 3.0's packet).
-func (e *Emitter) OnDeclined(_, _, _ string) {
-	e.RecordFailure(FailureClassDeclined)
+// fires from the same Dispatch pass for the OTHER class). evtType/listenerID
+// (widened in Task 2.3) are accepted for interface symmetry with the queue's
+// other per-type hooks but are not themselves part of the failure-rate label
+// set — the counter's "class" dimension is FailureClassDeclined, the one
+// class knowable at this call site.
+//
+// reason (also widened in Task 2.3) WAS likewise discarded — that task's own
+// doc named this "metrics-catalog growth, out of this task's scope" rather
+// than forbidding it. Bead pg2-j4uwg is that growth: reason is now recorded
+// verbatim as a SECOND, additive "reason" label on the SAME counter/class
+// (never a new class — INV-OBS-1's "exactly two" delivery-side failure
+// classes is unaffected), opaque to this package exactly like
+// eventqueue.OfferResult.DeclineDetail's own doc describes — it is
+// DeclineReason's coarse text ("busy"/"unavailable"/"none") by default, or a
+// Listener-supplied detail when one was given (e.g. pg-router-ccpool-
+// handler's "at-capacity" / "capacity-unknown", forwarded through
+// orchestrator.roleListener.Offer). This is what makes
+// pg_router_failures_total{class="declined"} distinguishable by reason
+// rather than a single undifferentiated bucket.
+func (e *Emitter) OnDeclined(_, _, reason string) {
+	e.failures.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("class", FailureClassDeclined),
+		attribute.String("reason", reason),
+	))
 }
 
 // OnDispatchFailure feeds the SAME failure-rate counter as OnDeclined, from

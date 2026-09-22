@@ -48,6 +48,19 @@ type Offering struct {
 type OfferResult struct {
 	Accepted bool
 	Decline  DeclineReason
+	// DeclineDetail is an OPTIONAL, OPAQUE refinement of Decline a Listener
+	// MAY supply (bead pg2-j4uwg, extending Task 2.3's Observer widening):
+	// observability text only, exactly like Decline.String() itself — the
+	// queue's own re-offer/backoff treatment (INV-FAIL-1) NEVER reads it and
+	// it MUST NOT become a second control-flow signal. "" (the default)
+	// means the Listener had nothing more specific to add than Decline's own
+	// coarse classification, and Observer.OnDeclined's reason parameter
+	// falls back to Decline.String() in that case (fanOut, below). A
+	// Listener that DOES have something more specific (e.g.
+	// orchestrator.roleListener, forwarding a participant's own wire-level
+	// busy-decline reason tag verbatim, opaque to this package) sets this
+	// instead — the queue never interprets what it means, only forwards it.
+	DeclineDetail string
 }
 
 // DeclineReason classifies a pre-accept decline (an OfferResult with
@@ -798,6 +811,11 @@ type dispatchSignal struct {
 	eventID  string
 	listener string
 	reason   DeclineReason
+	// detail is OfferResult.DeclineDetail, carried forward from the SAME
+	// Offer call that produced reason above (bead pg2-j4uwg). "" for every
+	// pre-this-bead Listener, matching OfferResult.DeclineDetail's own "no
+	// detail" default.
+	detail string
 }
 
 // fanOut delivers each queued signal to q.obs, in the order phase 3 recorded
@@ -809,7 +827,16 @@ func (q *Queue) fanOut(sigs []dispatchSignal) {
 		case signalAccept:
 			q.obs.OnAccept(s.eventID, s.listener)
 		case signalDeclined:
-			q.obs.OnDeclined(s.evtType, s.listener, s.reason.String())
+			// reason defaults to DeclineReason's own coarse text
+			// ("busy"/"unavailable"/"none"); a Listener-supplied detail
+			// (bead pg2-j4uwg) overrides it — purely additive data for a
+			// consumer (Task 2.3's own framing), never a second control-flow
+			// signal.
+			reason := s.reason.String()
+			if s.detail != "" {
+				reason = s.detail
+			}
+			q.obs.OnDeclined(s.evtType, s.listener, reason)
 		case signalDispatchFailure:
 			q.obs.OnDispatchFailure(s.evtType)
 		}
@@ -1030,7 +1057,7 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 		} else {
 			p.ls.declined.Add(1)
 			q.declined.Add(1)
-			*signals = append(*signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline})
+			*signals = append(*signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline, detail: p.result.DeclineDetail})
 		}
 		if p.lastAttempt {
 			e.settled[lid] = true

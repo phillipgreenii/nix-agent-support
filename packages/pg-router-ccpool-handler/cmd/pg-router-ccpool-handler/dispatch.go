@@ -175,10 +175,25 @@ func runDispatch(args []string) int {
 		}
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
-	if errors.Is(err, executor.ErrPoolAtCapacity) {
-		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): no body. The
-		// core's listener re-offers the event with backoff; the activity ring
-		// records it as "declined", distinct from "dispatch_failed".
+	if reason, busy := busyDeclineReason(err); busy {
+		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core's
+		// listener re-offers the event with backoff; the activity ring
+		// records it as "declined", distinct from "dispatch_failed" — for
+		// EITHER reason, identically (INV-FAIL-1: every DeclineReason
+		// re-offers alike; bead pg2-j4uwg does not change this).
+		//
+		// The reply body is OPTIONAL on this exit (DEC-WIRE-1 / interfaces.md's
+		// "Coarse outcome, rich reply": "a reply body, where the participant
+		// supplies one, still carries which case applies") — before bead
+		// pg2-j4uwg this handler always omitted it (an empty body is equally
+		// legal). It now writes one carrying reason, a short, stable
+		// classification tag, so pg-router core's declined metric/status
+		// breakdown can tell ErrPoolCapacityUnknown's "genuinely worth
+		// investigating" apart from ErrPoolAtCapacity's "healthy, expected
+		// backpressure" — confirmed live 2026-09-22 as otherwise
+		// indistinguishable without manually cross-referencing ccpool
+		// capacity by hand.
+		writeBusyReply(os.Stdout, reason)
 		return conformance.ExitBusy
 	}
 	if err != nil {
@@ -260,4 +275,50 @@ func writeReply(w io.Writer, v any) {
 
 func writeErrorReply(w io.Writer, msg string) {
 	writeReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": msg})
+}
+
+// busyReasonCapacityUnknown / busyReasonAtCapacity are the short, stable
+// classification tags writeBusyReply carries for executor's two admission-
+// gate sentinels (bead pg2-j4uwg). Kept as constants, never a free-text
+// diagnostic sentence, so a wireclient caller on the other side of the wire
+// can classify on the exact string rather than pattern-match prose (the
+// slog.Warn/Info calls inside internal/executor/ccpool.go's run() already
+// carry the human-readable detail for the operator's own logs).
+const (
+	busyReasonCapacityUnknown = "capacity-unknown"
+	busyReasonAtCapacity      = "at-capacity"
+)
+
+// busyDeclineReason maps err to the wire's busy-decline reason tag when err
+// is one of executor's two admission-gate sentinels (bead pg2-j4uwg): ok is
+// false for any other err (including nil), matching neither. Both sentinels
+// still map to the SAME wire-level conformance.ExitBusy — the core's
+// retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
+// — reason exists purely so pg-router core's declined metric/status
+// breakdown can tell them apart (see this file's runDispatch call site and
+// ErrPoolCapacityUnknown/ErrPoolAtCapacity's own doc comments).
+func busyDeclineReason(err error) (reason string, ok bool) {
+	switch {
+	case errors.Is(err, executor.ErrPoolCapacityUnknown):
+		return busyReasonCapacityUnknown, true
+	case errors.Is(err, executor.ErrPoolAtCapacity):
+		return busyReasonAtCapacity, true
+	default:
+		return "", false
+	}
+}
+
+// writeBusyReply writes the OPTIONAL reply body DEC-WIRE-1 / interfaces.md's
+// "Coarse outcome, rich reply" allows a participant to accompany an exit-9
+// busy decline with ("a reply body, where the participant supplies one,
+// still carries which case applies") — reusing writeReply, the SAME
+// lowest-level body-writing helper writeErrorReply and the success path
+// both already use, rather than inventing a second one. No handler.dispatch-
+// reply schema branch covers this shape yet (that schema's oneOf enumerates
+// only the sync-outcome/deferred-ack success shapes); wireclient.Dispatch on
+// the core side reads this OPPORTUNISTICALLY on exit 9 and tolerates an
+// absent/empty body exactly as before this bead (DEC-WIRE-1: "no body
+// required").
+func writeBusyReply(w io.Writer, reason string) {
+	writeReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": reason})
 }

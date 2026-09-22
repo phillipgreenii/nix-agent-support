@@ -199,6 +199,43 @@ type Options struct {
 type ListenerCounts struct {
 	Delivered atomic.Int64
 	Declined  atomic.Int64
+	// DeclinedByReason breaks Declined down by the SAME reason string
+	// eventqueue.Observer.OnDeclined already carries (bead pg2-j4uwg widens
+	// this from "wired through, discarded" to "actually recorded"):
+	// DeclineReason's own coarse text ("busy"/"unavailable"/"none") by
+	// default, or a Listener-supplied eventqueue.OfferResult.DeclineDetail
+	// when one was given (e.g. pg-router-ccpool-handler's "at-capacity" /
+	// "capacity-unknown"). A sync.Map, not a plain map+mutex: the read side
+	// (statusListeners, via DeclinedByReasonSnapshot) must never block on a
+	// concurrent writer — the SAME zero-lock-cost intent Delivered/Declined
+	// already state, one level deeper than a single atomic.Int64 reaches.
+	// Values are always *atomic.Int64, inserted at most once per distinct
+	// reason string via LoadOrStore.
+	DeclinedByReason sync.Map
+}
+
+// BumpDeclinedReason increments c's DeclinedByReason tally for reason by 1,
+// creating that reason's own counter on first use (LoadOrStore, safe for
+// concurrent callers racing the SAME new reason). Exported so the
+// deployment's own eventqueue.Observer wiring (cmd/pg-router/run.go's
+// listenerCountObserver) can call it alongside c.Declined.Add(1) — the SAME
+// call site, never a second, independently-tracked count.
+func (c *ListenerCounts) BumpDeclinedReason(reason string) {
+	v, _ := c.DeclinedByReason.LoadOrStore(reason, new(atomic.Int64))
+	v.(*atomic.Int64).Add(1)
+}
+
+// DeclinedByReasonSnapshot reads back a plain map[string]int64 from c's
+// live sync.Map — for statusListeners to render into the wire reply. It is
+// a snapshot COPY, never the live map, matching this being a one-shot
+// render rather than a handle a caller could keep mutating underneath.
+func (c *ListenerCounts) DeclinedByReasonSnapshot() map[string]int64 {
+	out := map[string]int64{}
+	c.DeclinedByReason.Range(func(k, v any) bool {
+		out[k.(string)] = v.(*atomic.Int64).Load()
+		return true
+	})
+	return out
 }
 
 // Service holds the core's live state.
@@ -1415,18 +1452,26 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 		binds := make([]string, len(r.Binds))
 		copy(binds, r.Binds)
 		var delivered, declined int64
+		declinedByReason := map[string]int64{}
 		if c := counts[r.Name]; c != nil {
 			delivered = c.Delivered.Load()
 			declined = c.Declined.Load()
+			declinedByReason = c.DeclinedByReasonSnapshot()
 		}
 		out = append(out, map[string]any{
-			"role":      r.Name,
-			"binds":     binds,
-			"enabled":   r.Enabled,
-			"excluded":  excluded[r.Name],
-			"delivered": delivered,
-			"declined":  declined,
-			"backoff":   nil,
+			"role":     r.Name,
+			"binds":    binds,
+			"enabled":  r.Enabled,
+			"excluded": excluded[r.Name],
+			// declined stays the flat, pre-existing total (Task 4.1 Step
+			// 5) — declinedByReason is a SECOND, additive breakdown of the
+			// SAME tally (bead pg2-j4uwg), never a replacement: the two
+			// always sum to the same total, and a role with no declines at
+			// all reports an empty object here, never a missing key.
+			"delivered":        delivered,
+			"declined":         declined,
+			"declinedByReason": declinedByReason,
+			"backoff":          nil,
 		})
 	}
 	return out

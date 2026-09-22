@@ -119,6 +119,29 @@ func TestListenerOffer_HandlerBusyMapsToDeclineBusy(t *testing.T) {
 	}
 }
 
+// TestListenerOffer_HandlerBusyWithReasonForwardsDeclineDetail proves Offer
+// forwards a *wireclient.BusyDecline's Reason verbatim into
+// OfferResult.DeclineDetail (bead pg2-j4uwg), while Decline itself stays
+// eventqueue.DeclineBusy exactly as the bare-ErrBusy case above
+// (TestListenerOffer_HandlerBusyMapsToDeclineBusy) — this package interprets
+// nothing about what the reason string means.
+func TestListenerOffer_HandlerBusyWithReasonForwardsDeclineDetail(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{err: &wireclient.BusyDecline{Reason: "capacity-unknown"}}
+	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	got := l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	want := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: "capacity-unknown"}
+	if got != want {
+		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+}
+
 // TestListenerOffer_UnavailableSelfStatusDeclines is Task 2.3's required RED
 // test (Step 2.3.3): a role whose registry entry self-reports `unavailable`
 // must make Offer decline BEFORE doing any dispatch work at all (no wire

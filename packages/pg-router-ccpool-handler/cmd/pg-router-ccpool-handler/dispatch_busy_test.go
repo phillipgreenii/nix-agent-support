@@ -1,19 +1,27 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
-// TestRunDispatch_poolFullExitsBusyNoBody proves runDispatch maps the
-// admission gate's decline (executor.ErrPoolAtCapacity, added to
-// internal/executor/ccpool.go's run()) to the wire's pre-accept busy decline
-// — conformance.ExitBusy, with NO reply written to stdout at all (INV-CONC-1,
-// DEC-WIRE-1 exit 9; ADR 0072's Decision item 3).
+// TestRunDispatch_poolCapacityUnknownExitsBusyWithReason proves runDispatch
+// maps the admission gate's capacity-unknown decline
+// (executor.ErrPoolCapacityUnknown, internal/executor/ccpool.go's run()) to
+// the wire's pre-accept busy decline — conformance.ExitBusy — carrying the
+// OPTIONAL reply body bead pg2-j4uwg adds: {"schemaVersion":"1","reason":
+// "capacity-unknown"}. Before this bead the busy decline always wrote NO
+// body at all (INV-CONC-1, DEC-WIRE-1 exit 9 permits, but never required,
+// one — "no body required"); this proves the now-written body carries the
+// correct reason for THIS branch specifically, distinct from the
+// at-capacity branch TestRunDispatch_poolAtCapacityExitsBusyWithReason below
+// (ADR 0072's Decision item 3).
 //
 // runDispatch has no seam to inject a fake executor (it builds Deps itself
 // from loadRole/loadConfig/buildDeps), so this goes through the REAL
@@ -27,7 +35,7 @@ import (
 // the admission gate's fail-closed branch, reached deterministically and
 // without ever touching the real ccpool pool/tmux server/store.db (this
 // module's own unit-test isolation invariant).
-func TestRunDispatch_poolFullExitsBusyNoBody(t *testing.T) {
+func TestRunDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
 
 	dir := t.TempDir()
@@ -47,7 +55,41 @@ func TestRunDispatch_poolFullExitsBusyNoBody(t *testing.T) {
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, got)
 	}
-	if strings.TrimSpace(got) != "" {
-		t.Fatalf("stdout = %q, want an empty body on a busy decline (no reply written at all)", got)
+	var reply struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Reason        string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(got), &reply); err != nil {
+		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
+	}
+	if reply.Reason != busyReasonCapacityUnknown {
+		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonCapacityUnknown)
+	}
+}
+
+// TestRunDispatch_busyDeclineReasonAtCapacity is dispatch.go's own
+// busyDeclineReason mapping tested directly (unit-level, no process/CLI
+// faking needed): the at-capacity branch — the OTHER admission-gate
+// sentinel from the capacity-unknown case above — maps to
+// busyReasonAtCapacity, and neither sentinel matches the other's tag.
+func TestRunDispatch_busyDeclineReasonAtCapacity(t *testing.T) {
+	reason, busy := busyDeclineReason(executor.ErrPoolAtCapacity)
+	if !busy {
+		t.Fatalf("ErrPoolAtCapacity must be recognized as a busy decline")
+	}
+	if reason != busyReasonAtCapacity {
+		t.Fatalf("reason = %q, want %q", reason, busyReasonAtCapacity)
+	}
+}
+
+// TestRunDispatch_busyDeclineReasonNilAndOtherErrors proves busyDeclineReason
+// reports ok=false for nil and for an unrelated error — it must not
+// misclassify a genuine dispatch failure as a busy decline.
+func TestRunDispatch_busyDeclineReasonNilAndOtherErrors(t *testing.T) {
+	if _, busy := busyDeclineReason(nil); busy {
+		t.Fatal("nil err must not be classified as a busy decline")
+	}
+	if _, busy := busyDeclineReason(errors.New("some other failure")); busy {
+		t.Fatal("an unrelated error must not be classified as a busy decline")
 	}
 }

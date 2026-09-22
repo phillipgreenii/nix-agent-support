@@ -287,7 +287,21 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	d := discover.DeriveContextFromQueueEvent(l.role, evt)
 	reply, err := l.o.workOne(l.ctx, d, evt)
 	if errors.Is(err, wireclient.ErrBusy) {
-		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy}
+		// Decline stays eventqueue.DeclineBusy regardless of detail (INV-
+		// FAIL-1: every DeclineReason re-offers alike) — DeclineDetail is a
+		// SECOND, additive, OPAQUE field (bead pg2-j4uwg): whatever reason
+		// tag the participant's OPTIONAL exit-9 reply body carried
+		// (wireclient.BusyDecline.Reason — "" when it supplied none),
+		// forwarded verbatim. This package interprets nothing about what
+		// the tag means (GOAL-MIN-1: the core stays agnostic of any one
+		// handler's own busy-decline vocabulary); it only relays a string a
+		// downstream consumer (metrics/status) may show as-is.
+		var detail string
+		var bd *wireclient.BusyDecline
+		if errors.As(err, &bd) {
+			detail = bd.Reason
+		}
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineBusy, DeclineDetail: detail}
 	}
 	// A resource-limit hit (l.resourceLimitObs) has no wire-level signal to
 	// detect it from anymore — see ResourceLimitObserver's own doc comment

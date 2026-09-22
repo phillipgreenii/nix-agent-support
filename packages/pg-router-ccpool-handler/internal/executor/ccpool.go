@@ -29,13 +29,35 @@ func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps
 // (only o.X → r.deps.X). It exists per-Dispatch; no cross-dispatch state.
 type ccpoolRun struct{ deps Deps }
 
-// ErrPoolAtCapacity: the pool reported free == 0, or could not be queried. No
-// bead was mutated and no isolation prepared; the cmd layer maps this to the
-// transport's pre-accept busy decline so the core re-offers the event with
-// backoff (INV-CCH-6, ADR 0072's Decision item 3). Unknown capacity fails
-// CLOSED: launching blind is the failure mode the gate exists to stop, and a
-// re-offer costs nothing.
+// ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
+// backpressure signal (the pool is simply full). No bead was mutated and no
+// isolation prepared; the cmd layer maps this to the transport's pre-accept
+// busy decline so the core re-offers the event with backoff (INV-CCH-6, ADR
+// 0072's Decision item 3).
+//
+// Scoped to the capacity.Free == 0 case ONLY (bead pg2-j4uwg): before this
+// bead it ALSO covered the capErr != nil case below, so a genuinely
+// worth-investigating "the capacity query itself is failing" was
+// indistinguishable from this ordinary, expected case — confirmed live
+// 2026-09-22, declined counts climbing into the hundreds while ccpool
+// capacity showed a healthy, simply-full pool. See ErrPoolCapacityUnknown
+// for that now-separate sentinel.
 var ErrPoolAtCapacity = errors.New("ccpool: no free slot")
+
+// ErrPoolCapacityUnknown: the pool's capacity could not be queried at all
+// (capErr != nil) — split off ErrPoolAtCapacity by bead pg2-j4uwg because
+// this case is genuinely worth investigating, unlike ErrPoolAtCapacity's
+// healthy/expected backpressure. No bead was mutated and no isolation
+// prepared here either, and the cmd layer maps THIS sentinel to the SAME
+// transport pre-accept busy decline (INV-CCH-6, ADR 0072's Decision item
+// 3) — the wire-level exit code and the core's retry/backoff cadence are
+// IDENTICAL for either sentinel (INV-FAIL-1: every DeclineReason re-offers
+// alike); only cmd/pg-router-ccpool-handler/dispatch.go's OPTIONAL reply
+// body, and from there pg-router core's declined metric/status breakdown,
+// tell the two apart. Unknown capacity still fails CLOSED here: launching
+// blind is the failure mode the gate exists to stop, and a re-offer costs
+// nothing.
+var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
 
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
@@ -63,11 +85,13 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// Admission gate (INV-CCH-6, ADR 0072's Decision item 3): consult the
 	// pool's capacity before preparing isolation or launching anything. No
 	// bead is mutated and no worktree is prepared on this path. Unknown
-	// capacity fails CLOSED — treated as full, never as "launch anyway".
+	// capacity fails CLOSED — treated as full, never as "launch anyway" —
+	// but as its OWN sentinel (ErrPoolCapacityUnknown, bead pg2-j4uwg), kept
+	// distinct from the capacity.Free == 0 branch just below.
 	capacity, capErr := r.deps.CC.Capacity(ctx)
 	if capErr != nil {
 		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
-		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolAtCapacity, capErr)
+		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 	}
 	if capacity.Free == 0 {
 		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,

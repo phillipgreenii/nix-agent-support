@@ -119,6 +119,7 @@
           "excluded": { "type": "boolean" },
           "delivered": { "type": "integer", "minimum": 0 },
           "declined": { "type": "integer", "minimum": 0 },
+          "declinedByReason": { "type": "object" },
           "backoff": {
             "oneOf": [
               { "enum": [null] },

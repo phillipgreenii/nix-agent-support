@@ -96,8 +96,13 @@ type recordingObserver struct {
 	accepted          []string
 	unconsumedExpired []string
 	declined          []string
-	dispatchFailed    []string
-	duped             []string
+	// declinedReasons is the reason string OnDeclined's third parameter
+	// carried, one entry per o.declined entry, in the same order (bead
+	// pg2-j4uwg) — additive; every pre-existing assertion against o.declined
+	// checks evtType alone and is unaffected.
+	declinedReasons []string
+	dispatchFailed  []string
+	duped           []string
 }
 
 func (o *recordingObserver) OnEnqueue(e Event)       { o.enqueued = append(o.enqueued, e.ID) }
@@ -106,10 +111,14 @@ func (o *recordingObserver) OnUnconsumedExpired(t string) {
 	o.unconsumedExpired = append(o.unconsumedExpired, t)
 }
 
-// OnDeclined records only evtType (Task 2.3 widened the signature with
+// OnDeclined records evtType (Task 2.3 widened the signature with
 // listenerID/reason, but every existing assertion against o.declined checks
-// evtType alone, so this keeps their meaning unchanged).
-func (o *recordingObserver) OnDeclined(t, _, _ string) { o.declined = append(o.declined, t) }
+// evtType alone, so this keeps their meaning unchanged) and, as of bead
+// pg2-j4uwg, reason too (declinedReasons, above).
+func (o *recordingObserver) OnDeclined(t, _, reason string) {
+	o.declined = append(o.declined, t)
+	o.declinedReasons = append(o.declinedReasons, reason)
+}
 
 func (o *recordingObserver) OnDispatchFailure(t string) {
 	o.dispatchFailed = append(o.dispatchFailed, t)
@@ -359,6 +368,47 @@ func TestDispatchOfferPanicRecoveredAsDispatchFailure(t *testing.T) {
 	}
 	if !equal(obs.unconsumedExpired, []string{"T"}) {
 		t.Fatalf("unconsumed-expired = %v, want [T]", obs.unconsumedExpired)
+	}
+}
+
+// detailListener always declines busy, optionally carrying an
+// OfferResult.DeclineDetail (bead pg2-j4uwg) — a minimal fixture proving the
+// detail flows through Dispatch's fanOut to Observer.OnDeclined's reason
+// parameter, distinct from fakeListener's own (detail-less) busy decline.
+type detailListener struct {
+	id, typ, detail string
+}
+
+func (l *detailListener) ID() string           { return l.id }
+func (l *detailListener) Matches(e Event) bool { return e.Type == l.typ }
+func (l *detailListener) Offer(Offering) OfferResult {
+	return OfferResult{Accepted: false, Decline: DeclineBusy, DeclineDetail: l.detail}
+}
+
+// TestOnDeclinedReasonPrefersDeclineDetailOverCoarseReason proves fanOut's
+// reason string (Observer.OnDeclined's third parameter) falls back to
+// DeclineReason's own coarse text ("busy") when a Listener supplies no
+// DeclineDetail — the pre-this-bead behavior, unchanged — but uses the
+// Listener-supplied detail verbatim when one IS given (bead pg2-j4uwg): the
+// mechanism orchestrator.roleListener uses to forward a participant's own
+// wire-level busy-decline reason (e.g. pg-router-ccpool-handler's
+// "capacity-unknown" / "at-capacity") without this package ever
+// interpreting it.
+func TestOnDeclinedReasonPrefersDeclineDetailOverCoarseReason(t *testing.T) {
+	clk := newClock()
+	obs := &recordingObserver{}
+	q := newQueue(t, clk, WithObserver(obs))
+	q.Register(&detailListener{id: "plain", typ: "T"}) // no detail
+	q.Register(&detailListener{id: "detailed", typ: "U", detail: "capacity-unknown"})
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+	mustEnqueue(t, q, evtUntil("e2", "U", clk.in(time.Hour)))
+	q.Dispatch()
+
+	if !equal(obs.declined, []string{"T", "U"}) {
+		t.Fatalf("declined = %v, want [T U]", obs.declined)
+	}
+	if !equal(obs.declinedReasons, []string{"busy", "capacity-unknown"}) {
+		t.Fatalf("declinedReasons = %v, want [busy capacity-unknown]", obs.declinedReasons)
 	}
 }
 

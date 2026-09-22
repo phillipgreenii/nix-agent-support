@@ -723,9 +723,15 @@ func (l *listenerCountObserver) OnAccept(_, listenerID string) {
 
 func (l *listenerCountObserver) OnUnconsumedExpired(string) {}
 
-func (l *listenerCountObserver) OnDeclined(_, listenerID, _ string) {
+// OnDeclined bumps both the flat Declined tally (unchanged) and, as of bead
+// pg2-j4uwg, the SAME role's DeclinedByReason breakdown, keyed by reason —
+// eventqueue.Observer's own reason parameter, which by this bead is real,
+// additive data rather than discarded (see core.ListenerCounts'
+// BumpDeclinedReason doc).
+func (l *listenerCountObserver) OnDeclined(_, listenerID, reason string) {
 	if c := l.counts[listenerID]; c != nil {
 		c.Declined.Add(1)
+		c.BumpDeclinedReason(reason)
 	}
 }
 

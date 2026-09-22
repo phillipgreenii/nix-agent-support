@@ -2,12 +2,52 @@ package core
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
+
+// TestListenerCounts_BumpDeclinedReasonConcurrentSameReason proves
+// BumpDeclinedReason (bead pg2-j4uwg) is safe for concurrent callers
+// incrementing the SAME reason's counter — the race LoadOrStore's
+// "insert-at-most-once, then atomic.Int64.Add" design exists to avoid (two
+// goroutines racing the FIRST bump of a brand-new reason key).
+func TestListenerCounts_BumpDeclinedReasonConcurrentSameReason(t *testing.T) {
+	c := &ListenerCounts{}
+	var wg sync.WaitGroup
+	const n = 100
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.BumpDeclinedReason("at-capacity")
+		}()
+	}
+	wg.Wait()
+	got := c.DeclinedByReasonSnapshot()
+	if got["at-capacity"] != int64(n) {
+		t.Fatalf("declinedByReason[at-capacity] = %d, want %d", got["at-capacity"], n)
+	}
+}
+
+// TestListenerCounts_DeclinedByReasonSnapshotIsIndependentCopy proves
+// DeclinedByReasonSnapshot returns a plain map a caller may hold onto
+// without racing further Bump calls into the same reason key.
+func TestListenerCounts_DeclinedByReasonSnapshotIsIndependentCopy(t *testing.T) {
+	c := &ListenerCounts{}
+	c.BumpDeclinedReason("at-capacity")
+	snap := c.DeclinedByReasonSnapshot()
+	c.BumpDeclinedReason("at-capacity")
+	if snap["at-capacity"] != 1 {
+		t.Fatalf("snapshot[at-capacity] = %d, want 1 (a later Bump must not retroactively change an already-taken snapshot)", snap["at-capacity"])
+	}
+	if got := c.DeclinedByReasonSnapshot()["at-capacity"]; got != 2 {
+		t.Fatalf("a FRESH snapshot[at-capacity] = %d, want 2", got)
+	}
+}
 
 // TestGateStateNewerObservationWins is the red-first test for Task 3.5 Step 1's
 // compare rule: a concurrent tick-stat write with an OLDER observation MUST
@@ -222,6 +262,57 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 	}
 	if byRole["worker"]["delivered"] != int64(0) || byRole["worker"]["declined"] != int64(0) {
 		t.Fatalf("worker delivered/declined = %v/%v, want 0/0 (no ListenerCounts entry for it)", byRole["worker"]["delivered"], byRole["worker"]["declined"])
+	}
+}
+
+// TestStatusListeners_DeclinedByReasonBreaksDownDeclined proves
+// composeStatusReply's listeners[] carries the OPTIONAL declinedByReason
+// breakdown (bead pg2-j4uwg) alongside the pre-existing flat declined total
+// — additive, never a replacement, and empty (not absent) for a role with
+// no ListenerCounts entry at all.
+func TestStatusListeners_DeclinedByReasonBreaksDownDeclined(t *testing.T) {
+	reviewCounts := &ListenerCounts{}
+	reviewCounts.Delivered.Store(5)
+	reviewCounts.Declined.Store(3)
+	reviewCounts.BumpDeclinedReason("at-capacity")
+	reviewCounts.BumpDeclinedReason("at-capacity")
+	reviewCounts.BumpDeclinedReason("capacity-unknown")
+	svc := &Service{
+		q:        newQueue(t),
+		bindings: testBindings(),
+		reg:      NewRegistry(nil),
+		declaredRoles: []roles.Role{
+			{Name: "review", Binds: []string{"review-requested"}, Enabled: true},
+			{Name: "worker", Binds: []string{"work-ready"}, Enabled: true},
+		},
+		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
+	}
+	reply := svc.composeStatusReply(0)
+	listeners, ok := reply["listeners"].([]map[string]any)
+	if !ok || len(listeners) != 2 {
+		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
+	}
+	byRole := make(map[string]map[string]any, len(listeners))
+	for _, l := range listeners {
+		byRole[l["role"].(string)] = l
+	}
+	reviewByReason, ok := byRole["review"]["declinedByReason"].(map[string]int64)
+	if !ok {
+		t.Fatalf("review.declinedByReason = %v (%T), want map[string]int64", byRole["review"]["declinedByReason"], byRole["review"]["declinedByReason"])
+	}
+	if reviewByReason["at-capacity"] != 2 || reviewByReason["capacity-unknown"] != 1 {
+		t.Fatalf("review.declinedByReason = %v, want at-capacity=2 capacity-unknown=1", reviewByReason)
+	}
+	var sum int64
+	for _, v := range reviewByReason {
+		sum += v
+	}
+	if sum != byRole["review"]["declined"].(int64) {
+		t.Fatalf("declinedByReason sums to %d, want it to equal the flat declined total %v", sum, byRole["review"]["declined"])
+	}
+	workerByReason, ok := byRole["worker"]["declinedByReason"].(map[string]int64)
+	if !ok || len(workerByReason) != 0 {
+		t.Fatalf("worker.declinedByReason = %v, want an EMPTY (not absent/nil) map — no ListenerCounts entry for it", byRole["worker"]["declinedByReason"])
 	}
 }
 

@@ -72,6 +72,34 @@ type Reply struct {
 // exactly as the retired in-process executor.ErrBusy used to.
 var ErrBusy = errors.New("wireclient: handler busy")
 
+// BusyDecline refines the bare ErrBusy sentinel with the OPTIONAL reason tag
+// a participant's exit-9 reply body MAY carry (bead pg2-j4uwg; DEC-WIRE-1 /
+// interfaces.md's "Coarse outcome, rich reply": "a reply body, where the
+// participant supplies one, still carries which case applies"). Reason is
+// OPAQUE to this package — exactly like Reply.Outcome, never interpreted
+// here — and is "" when the participant supplied no body at all (DEC-WIRE-1:
+// "no body required"), which stays a fully legal decline.
+//
+// Every Dispatch on exit 9 now returns a *BusyDecline (never the bare
+// ErrBusy value) so Reason is always reachable via errors.As, but
+// errors.Is(err, ErrBusy) keeps matching it via the Is method below — no
+// EXISTING caller (roleListener.Offer, the only wireclient.ErrBusy check in
+// this module today) needs to change unless it wants Reason too.
+type BusyDecline struct {
+	Reason string
+}
+
+func (e *BusyDecline) Error() string {
+	if e.Reason == "" {
+		return ErrBusy.Error()
+	}
+	return ErrBusy.Error() + ": " + e.Reason
+}
+
+// Is makes errors.Is(err, ErrBusy) match a *BusyDecline exactly as it
+// matched the bare sentinel before this type existed.
+func (e *BusyDecline) Is(target error) bool { return target == ErrBusy }
+
 // Runner executes one dispatch subcommand invocation: argv (the handler's
 // own CommandFor-resolved command, with "dispatch" appended) fed stdin,
 // returning its stdout and coarse exit code. The production default
@@ -169,6 +197,11 @@ type dispatchReply struct {
 	Deferred      bool   `json:"deferred,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
 	Error         string `json:"error,omitempty"`
+	// Reason is the OPTIONAL busy-decline body's own field (bead pg2-j4uwg;
+	// see BusyDecline's doc) — read ONLY on exit 9, alongside Error, which a
+	// participant's OTHER non-zero exits already used before this field
+	// existed.
+	Reason string `json:"reason,omitempty"`
 }
 
 // SchemaVersion is the wire envelope version this client stamps on every
@@ -233,7 +266,19 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		}
 		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome}, nil
 	case 9: // DEC-WIRE-1's "Coarse exit codes": 9 is busy.
-		return Reply{}, ErrBusy
+		// The OPTIONAL busy-decline reply body (bead pg2-j4uwg): read
+		// opportunistically, exactly the same "peek at stdout on a non-zero
+		// exit" pattern the default branch below already uses for its own
+		// Error field. An absent/empty/malformed body still declines with
+		// Reason == "" — DEC-WIRE-1's "no body required" stays fully legal.
+		var reason string
+		if len(stdout) > 0 {
+			var reply dispatchReply
+			if err := json.Unmarshal(stdout, &reply); err == nil {
+				reason = reply.Reason
+			}
+		}
+		return Reply{}, &BusyDecline{Reason: reason}
 	default:
 		if len(stdout) > 0 {
 			var reply dispatchReply

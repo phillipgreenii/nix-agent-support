@@ -162,6 +162,43 @@ func TestDispatch_exitCode9IsBusy(t *testing.T) {
 	}
 }
 
+// TestDispatch_exitCode9WithReasonBodyExposesReason proves Dispatch reads an
+// OPTIONAL reply body on exit 9 (bead pg2-j4uwg; DEC-WIRE-1 / interfaces.md's
+// "Coarse outcome, rich reply") and exposes it via errors.As(err,
+// *BusyDecline), while errors.Is(err, ErrBusy) still matches exactly as it
+// did before this bead (TestDispatch_exitCode9IsBusy, unchanged).
+func TestDispatch_exitCode9WithReasonBodyExposesReason(t *testing.T) {
+	run := &fakeRunner{stdout: []byte(`{"schemaVersion":"1","reason":"capacity-unknown"}`), exitCode: 9}
+	c := &Client{Runner: run, Command: fixedCommand("h")}
+	_, err := c.Dispatch(context.Background(), roles.Role{Name: "r"}, eventqueue.Event{ID: "e", Type: "t"})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrBusy)", err)
+	}
+	var bd *BusyDecline
+	if !errors.As(err, &bd) {
+		t.Fatalf("err = %v, want errors.As(err, *BusyDecline)", err)
+	}
+	if bd.Reason != "capacity-unknown" {
+		t.Fatalf("Reason = %q, want %q", bd.Reason, "capacity-unknown")
+	}
+}
+
+// TestDispatch_exitCode9WithNoBodyLeavesReasonEmpty proves the pre-existing,
+// body-less busy decline (DEC-WIRE-1: "no body required") stays fully legal:
+// Reason reads back as "" rather than erroring or panicking.
+func TestDispatch_exitCode9WithNoBodyLeavesReasonEmpty(t *testing.T) {
+	run := &fakeRunner{exitCode: 9}
+	c := &Client{Runner: run, Command: fixedCommand("h")}
+	_, err := c.Dispatch(context.Background(), roles.Role{Name: "r"}, eventqueue.Event{ID: "e", Type: "t"})
+	var bd *BusyDecline
+	if !errors.As(err, &bd) {
+		t.Fatalf("err = %v, want errors.As(err, *BusyDecline)", err)
+	}
+	if bd.Reason != "" {
+		t.Fatalf("Reason = %q, want \"\" for a body-less busy decline", bd.Reason)
+	}
+}
+
 // TestDispatch_otherNonZeroExitIsError locks that any other coarse exit code
 // (1 unexpected error, 2 usage) is a plain error, never confused with busy.
 func TestDispatch_otherNonZeroExitIsError(t *testing.T) {

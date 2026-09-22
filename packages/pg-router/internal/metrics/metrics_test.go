@@ -89,6 +89,26 @@ func sumFor(m metricdata.Metrics, key, value string) int64 {
 	return -1
 }
 
+// sumForBoth is sumFor widened to match on TWO attribute key/value pairs at
+// once (bead pg2-j4uwg): once a counter carries more than one label
+// dimension (e.g. "class" AND "reason"), a single-key match can return the
+// wrong datapoint's value when several datapoints share that one key's
+// value but differ on the other.
+func sumForBoth(m metricdata.Metrics, key1, value1, key2, value2 string) int64 {
+	s, ok := m.Data.(metricdata.Sum[int64])
+	if !ok {
+		return -1
+	}
+	for _, dp := range s.DataPoints {
+		v1, ok1 := dp.Attributes.Value(attribute.Key(key1))
+		v2, ok2 := dp.Attributes.Value(attribute.Key(key2))
+		if ok1 && v1.AsString() == value1 && ok2 && v2.AsString() == value2 {
+			return dp.Value
+		}
+	}
+	return -1
+}
+
 // gaugeVal scans the whole collected set for the named gauge's datapoint with
 // the given attribute, returning -1 when the metric or datapoint is absent (an
 // observable gauge emits NO metric when its callback observes nothing, e.g. an
@@ -633,10 +653,15 @@ func TestOnEnqueue_FIFOCapEviction_OldestDropped(t *testing.T) {
 }
 
 // OnDeclined — the queue's pre-accept-decline / dispatch-failure signal
-// (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pg_router_failures counter
-// RecordFailure does, labeled with the one class knowable at that call site.
-// Task 2.3 widened the signature to 3 args (evtType, listenerID, reason);
-// none of the three is part of the failure-rate label set.
+// (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pg_router_failures
+// counter RecordFailure does, labeled with the one class knowable at that
+// call site (FailureClassDeclined) PLUS, as of bead pg2-j4uwg, a second
+// "reason" label carrying reason verbatim. evtType/listenerID are still not
+// part of the label set; reason itself widened from "wired through, no
+// consumer read it" (Task 2.3's own framing of this as deferred, not
+// forbidden, growth) to a real, additive metrics-catalog dimension — a
+// decline recorded with a DIFFERENT reason now lands on its OWN datapoint
+// rather than collapsing into one undifferentiated "declined" bucket.
 func TestOnDeclinedFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)
 	h.emitter.OnDeclined("review-requested", "h1", "busy")
@@ -644,8 +669,11 @@ func TestOnDeclinedFeedsFailuresCounter(t *testing.T) {
 	h.emitter.OnDeclined("push-requested", "h2", "unavailable")
 
 	m := findMetric(t, h.collect(t), MetricFailures)
-	if got := sumFor(m, "class", FailureClassDeclined); got != 3 {
-		t.Fatalf("failures[%s] = %d, want 3 (evtType/listenerID/reason are not part of the label set)", FailureClassDeclined, got)
+	if got := sumForBoth(m, "class", FailureClassDeclined, "reason", "busy"); got != 2 {
+		t.Fatalf("failures[declined,reason=busy] = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "class", FailureClassDeclined, "reason", "unavailable"); got != 1 {
+		t.Fatalf("failures[declined,reason=unavailable] = %d, want 1", got)
 	}
 }
 

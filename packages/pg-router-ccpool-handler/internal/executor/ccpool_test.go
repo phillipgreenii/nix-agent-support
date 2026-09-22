@@ -1193,6 +1193,9 @@ func TestRun_poolFullDeclinesBusy(t *testing.T) {
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("err = %v, want ErrPoolAtCapacity", err)
 	}
+	if errors.Is(err, ErrPoolCapacityUnknown) {
+		t.Fatalf("a healthy at-capacity decline must NOT also satisfy errors.Is(err, ErrPoolCapacityUnknown); err = %v", err)
+	}
 	if len(cc.Ensured) != 0 {
 		t.Fatal("Ensure must not be called when the pool is full")
 	}
@@ -1205,7 +1208,11 @@ func TestRun_poolFullDeclinesBusy(t *testing.T) {
 }
 
 // TestRun_poolCapacityErrorDeclinesBusy proves an unreadable pool fails
-// CLOSED as busy — never as "launch anyway".
+// CLOSED as busy — never as "launch anyway" — and as its OWN sentinel
+// (ErrPoolCapacityUnknown, bead pg2-j4uwg), NOT ErrPoolAtCapacity: before
+// this bead the two branches were indistinguishable (both wrapped
+// ErrPoolAtCapacity), which is exactly the confirmed-live incident this
+// bead splits apart.
 func TestRun_poolCapacityErrorDeclinesBusy(t *testing.T) {
 	cfg := fastCfg()
 	bd := &dtest.ScriptBD{}
@@ -1213,8 +1220,11 @@ func TestRun_poolCapacityErrorDeclinesBusy(t *testing.T) {
 	e := newExec(cc, bd, cfg)
 	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 	_, err := e.run(context.Background(), d)
-	if !errors.Is(err, ErrPoolAtCapacity) {
-		t.Fatalf("unknown pool must fail closed as busy; err = %v", err)
+	if !errors.Is(err, ErrPoolCapacityUnknown) {
+		t.Fatalf("unknown pool must fail closed as busy via ErrPoolCapacityUnknown; err = %v", err)
+	}
+	if errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("unknown-capacity decline must NOT also satisfy errors.Is(err, ErrPoolAtCapacity) (the two are now distinct sentinels); err = %v", err)
 	}
 	if len(cc.Ensured) != 0 || len(bd.Updates) != 0 {
 		t.Fatal("launched or mutated despite unknown capacity")
