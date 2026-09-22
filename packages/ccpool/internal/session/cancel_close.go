@@ -148,13 +148,21 @@ func (s *Service) recordCancelOutcome(externalID, outcome string) {
 	slog.Warn("ccpool: cancel outcome", args...)
 }
 
-// Close ends the local REPL: clear input, send /exit, wait briefly for the tmux
-// session to vanish, else force-kill. The row is NOT mutated on a non-purge
-// close — ccpool no longer fabricates a settled state (ADR 0015); the
-// row keeps its last OBSERVED state and is pruned later, once the Claude session
-// is gone from disk. --purge additionally deletes the store row immediately.
-func (s *Service) Close(ctx context.Context, externalID string, purge bool) error {
+// closeWithReason ends the local REPL and records WHY (ADR 0072, Decision 4).
+// The reason is stamped BEFORE the tmux teardown so any observer that sees the
+// session gone can already read it (the handler polls `ccpool list` every 10 s
+// and must never see live=false with an empty reason for a close ccpool made).
+// State is not touched (ADR 0015). If teardown then fails, the row carries a
+// reason for a session tmux still reports live; the next close attempt
+// re-stamps and retries. --purge skips the stamp entirely (it deletes the row
+// immediately, so there is nothing to read a reason off of).
+func (s *Service) closeWithReason(ctx context.Context, externalID, reason string, purge bool) error {
 	return s.withLock(externalID, func() error {
+		if !purge {
+			if err := s.d.Store.SetCloseReason(ctx, externalID, reason); err != nil {
+				return err
+			}
+		}
 		tmuxName := TmuxName(s.d.Prefix, externalID)
 		if s.d.Tmux.HasSession(tmuxName) {
 			// deliverCommand clears the input line itself, so no separate clear here.
@@ -173,6 +181,22 @@ func (s *Service) Close(ctx context.Context, externalID string, purge bool) erro
 		// Non-purge close: do nothing else. No fabricated state.
 		return nil
 	})
+}
+
+// Close is the operator/CLI entry point: closeWithReason with reason
+// "operator". The row is NOT mutated (beyond the close-reason stamp) on a
+// non-purge close — ccpool no longer fabricates a settled state (ADR 0015);
+// the row keeps its last OBSERVED state and is pruned later, once the Claude
+// session is gone from disk. --purge additionally deletes the store row
+// immediately.
+func (s *Service) Close(ctx context.Context, externalID string, purge bool) error {
+	return s.closeWithReason(ctx, externalID, "operator", purge)
+}
+
+// CloseReason is Close with an explicit reason (`ccpool close --reason`, or a
+// programmatic caller such as Reap's cap-eviction path).
+func (s *Service) CloseReason(ctx context.Context, externalID, reason string, purge bool) error {
+	return s.closeWithReason(ctx, externalID, reason, purge)
 }
 
 // deliverCommand sends a raw slash-command (e.g. /exit) — NOT space-guarded,

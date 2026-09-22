@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // cols is the non-id column order shared by Insert and the scanRow projection.
 // id is auto-assigned by SQLite, so it is read back separately (SELECT prepends
 // it) and never written by Insert.
-const cols = `external_id, claude_session_id, name, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags, pending_question, retry_count, retry_window_started_at`
+const cols = `external_id, claude_session_id, name, cwd, transcript_path, state, generation, created_at, last_activity_at, tmux_session, model, flags, pending_question, retry_count, retry_window_started_at, close_reason, closed_at`
 
 // selectCols prepends the surrogate id so scanRow can populate Session.ID.
 const selectCols = `id, ` + cols
@@ -20,7 +21,7 @@ func scanRow(sc interface{ Scan(...any) error }) (Session, error) {
 	var name sql.NullString
 	err := sc.Scan(&s.ID, &s.ExternalID, &csid, &name, &s.CWD, &s.TranscriptPath, &s.State, &s.Generation,
 		&s.CreatedAt, &s.LastActivityAt, &s.TmuxSession, &s.Model, &s.Flags, &s.PendingQuestion,
-		&s.RetryCount, &s.RetryWindowStartedAt)
+		&s.RetryCount, &s.RetryWindowStartedAt, &s.CloseReason, &s.ClosedAt)
 	s.ClaudeSessionID = csid.String
 	s.Name = name.String
 	return s, err
@@ -46,10 +47,10 @@ func (s *Store) Insert(ctx context.Context, in Session) error {
 	// claude_session_id and name are nullable; bind NULL when empty so the UNIQUE
 	// constraint on claude_session_id does not collide across rows that have none.
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO sessions (`+cols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.ExternalID, nullString(in.ClaudeSessionID), nullString(in.Name), in.CWD, in.TranscriptPath, in.State, in.Generation,
 		in.CreatedAt, in.LastActivityAt, in.TmuxSession, in.Model, in.Flags, in.PendingQuestion,
-		in.RetryCount, in.RetryWindowStartedAt)
+		in.RetryCount, in.RetryWindowStartedAt, in.CloseReason, in.ClosedAt)
 	if err != nil {
 		return fmt.Errorf("insert %q: %w", in.ExternalID, err)
 	}
@@ -199,6 +200,29 @@ func (s *Store) SetPendingQuestion(ctx context.Context, externalID, q string) er
 	if err != nil {
 		return fmt.Errorf("set pending_question %q: %w", externalID, err)
 	}
+	return nil
+}
+
+// CloseReasons is the closed vocabulary SetCloseReason accepts (ADR 0072,
+// Decision 4).
+var CloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true, "handler": true}
+
+// SetCloseReason stamps close_reason/closed_at and appends a "close" event. It
+// does NOT change State (ADR 0015: the row keeps its last observed state).
+func (s *Store) SetCloseReason(ctx context.Context, externalID, reason string) error {
+	if !CloseReasons[reason] {
+		return fmt.Errorf("close reason %q not one of idle_ttl|cap_eviction|operator|handler", reason)
+	}
+	now := s.clock.Now().Unix()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET close_reason = ?, closed_at = ? WHERE external_id = ?`, reason, now, externalID)
+	if err != nil {
+		return fmt.Errorf("set close reason: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set close reason: no row for %q", externalID)
+	}
+	s.events.Close(time.Unix(now, 0), externalID, reason) // nil-safe
 	return nil
 }
 

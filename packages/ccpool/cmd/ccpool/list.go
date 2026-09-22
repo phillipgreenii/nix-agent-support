@@ -181,18 +181,42 @@ func renderList(rows []store.Session, all bool, stateFilter string,
 	liveFn func(socket, target string) bool, socket string,
 	now time.Time, doneTTL, failedTTL time.Duration,
 ) string {
+	visible := visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL)
+	// The CLOSE_REASON column is shown only when at least one VISIBLE row has a
+	// non-empty reason (a legacy row, or one ccpool has never closed, always
+	// reports "") — so the common case (no reasons yet) keeps the narrower table.
+	showReason := false
+	for _, lr := range visible {
+		if lr.row.CloseReason != "" {
+			showReason = true
+			break
+		}
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n", "EXTERNAL_ID", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "CLAUDE_SESSION_ID")
-	for _, lr := range visibleRows(rows, all, stateFilter, liveFn, socket, now, doneTTL, failedTTL) {
+	if showReason {
+		fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %-12s %s\n",
+			"EXTERNAL_ID", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "CLOSE_REASON", "CLAUDE_SESSION_ID")
+	} else {
+		fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n", "EXTERNAL_ID", "NAME", "STATE", "LIVE", "LAST ACTIVITY", "CLAUDE_SESSION_ID")
+	}
+	for _, lr := range visible {
 		r := lr.row
 		liveStr := "no"
 		if lr.live {
 			liveStr = "yes"
 		}
-		fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n",
-			r.ExternalID, r.Name, r.State, liveStr,
-			time.Unix(r.LastActivityAt, 0).Format("2006-01-02 15:04:05"),
-			shortUUID(r.ClaudeSessionID))
+		if showReason {
+			fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %-12s %s\n",
+				r.ExternalID, r.Name, r.State, liveStr,
+				time.Unix(r.LastActivityAt, 0).Format("2006-01-02 15:04:05"),
+				r.CloseReason,
+				shortUUID(r.ClaudeSessionID))
+		} else {
+			fmt.Fprintf(&b, "%-24s %-16s %-12s %-5s %-20s %s\n",
+				r.ExternalID, r.Name, r.State, liveStr,
+				time.Unix(r.LastActivityAt, 0).Format("2006-01-02 15:04:05"),
+				shortUUID(r.ClaudeSessionID))
+		}
 	}
 	return b.String()
 }
@@ -244,6 +268,9 @@ type listJSON struct {
 	Worktree        *string           `json:"worktree,omitempty"`
 	Branch          *string           `json:"branch,omitempty"`
 	Meta            map[string]string `json:"meta,omitempty"`
+	// CloseReason is WHY ccpool closed this session (ADR 0072, Decision 4); ""
+	// for a live/never-closed row or a legacy row inserted before migration 008.
+	CloseReason string `json:"close_reason"`
 }
 
 // renderListJSON marshals the visible rows as a JSON array (one object per
@@ -278,6 +305,7 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 			ClaudeSessionID: r.ClaudeSessionID,
 			LaunchDir:       r.CWD,
 			CWD:             r.CWD, // default: fall back to launch dir
+			CloseReason:     r.CloseReason,
 		}
 		if lr.live {
 			// Resolve the LIVE pane cwd; fall back to launch dir on error.

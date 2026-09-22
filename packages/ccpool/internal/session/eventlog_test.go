@@ -162,3 +162,33 @@ func TestReap_evictionTearsDownTmux_noFabricatedTransition(t *testing.T) {
 		}
 	}
 }
+
+// TestSetCloseReason_appendsCloseEvent: SetCloseReason must append a "close"
+// event to the shared ordered log (ADR 0072, Decision 4), readable back via
+// eventlog.Read.
+func TestSetCloseReason_appendsCloseEvent(t *testing.T) {
+	dir := t.TempDir()
+	el, err := eventlog.Open(filepath.Join(dir, "events.jsonl"))
+	if err != nil {
+		t.Fatalf("eventlog.Open: %v", err)
+	}
+	st := newLoggedStore(t, el)
+	if err := st.Insert(context.Background(), store.Session{ExternalID: "s1", ClaudeSessionID: "csid-s1", State: store.Idle}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	if err := st.SetCloseReason(context.Background(), "s1", "idle_ttl"); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := eventlog.Read(filepath.Join(dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) == 0 {
+		t.Fatal("no events recorded")
+	}
+	last := evs[len(evs)-1]
+	if last.Kind != "close" || last.Reason != "idle_ttl" || last.Name != "s1" {
+		t.Fatalf("last event = %+v", last)
+	}
+}

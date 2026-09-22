@@ -82,4 +82,5 @@ func TestNilLogger_methodsAreNoOps(t *testing.T) {
 	if err := lg.Input(ts, "a", "enter", ""); err != nil {
 		t.Errorf("nil Input err = %v, want nil", err)
 	}
+	lg.Close(ts, "a", "operator") // must not panic
 }

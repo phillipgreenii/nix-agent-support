@@ -59,6 +59,12 @@ type Session struct {
 	// first retry of a run); 0 when no window is open. It anchors the overall
 	// retry-timeout. Resets to 0 on a successful turn.
 	RetryWindowStartedAt int64
+	// CloseReason records WHY ccpool itself ended this session — a fact about
+	// ccpool's own action (ADR 0015 permits facts, forbids work judgments): one
+	// of idle_ttl | cap_eviction | operator | handler; "" until ccpool closes it.
+	CloseReason string
+	// ClosedAt is the unix time CloseReason was stamped; 0 when unset.
+	ClosedAt int64
 }
 
 // TurnStatus is a fire-and-forget turn's lifecycle: pending at emit, resolved

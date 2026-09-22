@@ -490,3 +490,23 @@ func TestReap_ttlStillClosesHungWorkingSession(t *testing.T) {
 		t.Fatal("a working row idle past idle_ttl must still be closed by Pass 1")
 	}
 }
+
+// TestReap_stampsCloseReasonOnRow: a row closed by cap eviction must carry
+// close_reason "cap_eviction" (ADR 0072, Decision 4) — Reap's closure loop now
+// goes through closeWithReason instead of the reason-less Close.
+func TestReap_stampsCloseReasonOnRow(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	s, _ := reapFixtureStates(t, now,
+		map[string]int64{"idle-old": 3000, "idle-new": 10},
+		map[string]store.State{"idle-old": store.Idle, "idle-new": store.Idle})
+	if err := s.Reap(context.Background(), 1, 0); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	row, ok, err := s.d.Store.GetByExternalID(context.Background(), "idle-old")
+	if err != nil || !ok {
+		t.Fatalf("GetByExternalID: ok=%v err=%v", ok, err)
+	}
+	if row.CloseReason != "cap_eviction" {
+		t.Fatalf("close_reason = %q, want cap_eviction", row.CloseReason)
+	}
+}

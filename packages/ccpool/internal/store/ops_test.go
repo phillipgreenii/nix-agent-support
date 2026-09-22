@@ -181,6 +181,44 @@ func TestList_orderedByLastActivityDesc(t *testing.T) {
 	}
 }
 
+// --- close_reason (ADR 0072, Decision 4) ---
+
+func TestSetCloseReason_stampsReasonAndTime(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	mustInsert(t, st, "s1", "csid-1")
+	if err := st.SetCloseReason(ctx, "s1", "cap_eviction"); err != nil {
+		t.Fatal(err)
+	}
+	row, ok, err := st.GetByExternalID(ctx, "s1")
+	if err != nil || !ok {
+		t.Fatalf("GetByExternalID: ok=%v err=%v", ok, err)
+	}
+	if row.CloseReason != "cap_eviction" || row.ClosedAt == 0 {
+		t.Fatalf("row = reason %q closed_at %d", row.CloseReason, row.ClosedAt)
+	}
+}
+
+func TestSetCloseReason_rejectsUnknownReason(t *testing.T) {
+	st := newTestStore(t)
+	mustInsert(t, st, "s1", "csid-1")
+	if err := st.SetCloseReason(context.Background(), "s1", "because"); err == nil {
+		t.Fatal("unknown reason accepted")
+	}
+}
+
+func TestList_closeReasonEmptyForLegacyRows(t *testing.T) {
+	st := newTestStore(t)
+	mustInsert(t, st, "legacy", "csid-l")
+	row, ok, err := st.GetByExternalID(context.Background(), "legacy")
+	if err != nil || !ok {
+		t.Fatalf("GetByExternalID: ok=%v err=%v", ok, err)
+	}
+	if row.CloseReason != "" || row.ClosedAt != 0 {
+		t.Fatalf("legacy row: reason %q closed_at %d; defaults must be empty/0", row.CloseReason, row.ClosedAt)
+	}
+}
+
 // test helpers
 func mustInsert(t *testing.T, st *Store, externalID, csid string) {
 	t.Helper()

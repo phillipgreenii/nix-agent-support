@@ -1,6 +1,7 @@
 // Package eventlog is an append-only JSONL event log recording, per session, the
-// ordered sequence of (a) state transitions (from→to) and (b) input actions
-// (Escape bursts, paste, Enter, clear-input). It is distinct from the plain-text
+// ordered sequence of (a) state transitions (from→to), (b) input actions
+// (Escape bursts, paste, Enter, clear-input), and (c) close events (ccpool
+// itself ending a session, and why). It is distinct from the plain-text
 // hook.log: the store overwrites the current state (no history), but the ordered
 // sequence is recoverable from this log, and tests/contract asserts can parse it.
 //
@@ -12,9 +13,12 @@
 //	 "line_ref":"<transcript path / claude-session line ref>"}
 //	{"ts":"<RFC3339Nano UTC>","name":"<session>","kind":"input",
 //	 "action":"escape-burst|paste|enter|clear-input","detail":"<short note>"}
+//	{"ts":"<RFC3339Nano UTC>","name":"<session>","kind":"close",
+//	 "reason":"idle_ttl|cap_eviction|operator|handler"}
 //
 // Kind-specific fields are omitempty, so a transition line never carries
-// action/detail and an input line never carries from/to/uuid/line_ref.
+// action/detail/reason, an input line never carries from/to/uuid/line_ref/reason,
+// and a close line never carries from/to/uuid/line_ref/action/detail.
 //
 // Writes use O_APPEND|O_CREATE|O_WRONLY and the fd is NOT held open between
 // writes: O_APPEND keeps the small single-line writes atomic across processes
@@ -40,12 +44,13 @@ import (
 	"time"
 )
 
-// Event is one JSONL line. Kind is "transition" or "input"; the kind-specific
-// fields are omitempty so each line carries only the fields its kind uses.
+// Event is one JSONL line. Kind is "transition", "input", or "close"; the
+// kind-specific fields are omitempty so each line carries only the fields its
+// kind uses.
 type Event struct {
 	Ts   string `json:"ts"`   // RFC3339Nano, UTC
 	Name string `json:"name"` // session name
-	Kind string `json:"kind"` // "transition" | "input"
+	Kind string `json:"kind"` // "transition" | "input" | "close"
 
 	// Transition fields.
 	From    string `json:"from,omitempty"`
@@ -56,6 +61,9 @@ type Event struct {
 	// Input fields.
 	Action string `json:"action,omitempty"` // e.g. "escape-burst", "paste", "enter", "clear-input"
 	Detail string `json:"detail,omitempty"`
+
+	// Close fields.
+	Reason string `json:"reason,omitempty"` // idle_ttl | cap_eviction | operator | handler
 }
 
 // Logger appends Events to a JSONL file. The fd is opened per-write (O_APPEND),
@@ -123,6 +131,15 @@ func (l *Logger) Input(ts time.Time, name, action, detail string) error {
 		Ts: stamp(ts), Name: name, Kind: "input",
 		Action: action, Detail: detail,
 	})
+}
+
+// Close records that ccpool itself ended the session and why (ADR 0072,
+// Decision 4). Nil-safe no-op.
+func (l *Logger) Close(ts time.Time, name, reason string) {
+	if l == nil {
+		return
+	}
+	_ = l.Append(Event{Ts: stamp(ts), Name: name, Kind: "close", Reason: reason})
 }
 
 // stamp normalizes a timestamp to RFC3339Nano UTC.

@@ -89,6 +89,8 @@ type (
 		List(ctx context.Context) ([]store.Session, error)
 		// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
 		SetMeta(ctx context.Context, externalID, key, value string) error
+		// SetCloseReason stamps close_reason/closed_at (ADR 0072, Decision 4).
+		SetCloseReason(ctx context.Context, externalID, reason string) error
 	}
 )
 

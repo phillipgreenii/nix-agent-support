@@ -395,3 +395,66 @@ func TestRenderListJSON_includesMetaObject(t *testing.T) {
 		t.Errorf("meta not in JSON: %s", out)
 	}
 }
+
+// TestRenderList_showsCloseReasonColumnWhenSet: one row with a reason, one
+// without — the header must gain CLOSE_REASON, the first row's cell holds the
+// reason, and the second row's cell is blank (ADR 0072, Decision 5).
+func TestRenderList_showsCloseReasonColumnWhenSet(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	rows := []store.Session{
+		{ExternalID: "evicted", State: store.Idle, TmuxSession: "cc-evicted", LastActivityAt: now.Unix(), CloseReason: "cap_eviction"},
+		{ExternalID: "working", State: store.Working, TmuxSession: "cc-working", LastActivityAt: now.Unix()},
+	}
+	liveFn := func(_, target string) bool { return target == "cc-working" }
+	out := renderList(rows, false, "", liveFn, "ccpool", now, time.Hour, 24*time.Hour)
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3 (header + 2 rows):\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[0], "CLOSE_REASON") {
+		t.Errorf("header missing CLOSE_REASON: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "cap_eviction") {
+		t.Errorf("evicted row missing its close reason: %q", lines[1])
+	}
+	// The "working" row's fields, split on runs of whitespace: EXTERNAL_ID NAME
+	// STATE LIVE LAST_ACTIVITY(2 fields) CLOSE_REASON CLAUDE_SESSION_ID. With an
+	// empty CLOSE_REASON cell, "working" (the external_id) must be immediately
+	// followed by the empty NAME field then STATE "working" then LIVE "yes" —
+	// i.e. the row must NOT contain any cap_eviction/idle_ttl/operator/handler
+	// token bleeding in from the blank cell.
+	for _, reason := range []string{"cap_eviction", "idle_ttl", "operator", "handler"} {
+		if strings.Contains(lines[2], reason) {
+			t.Errorf("row with no close reason must have a blank cell, got %q", lines[2])
+		}
+	}
+}
+
+// TestRenderListJSON_includesCloseReason pins the "close_reason" JSON key
+// (ADR 0072, Decision 4) — packet 5's cli.List parses this exact key.
+func TestRenderListJSON_includesCloseReason(t *testing.T) {
+	rows := []store.Session{
+		{ExternalID: "evicted", State: store.Idle, CWD: "/w", CloseReason: "cap_eviction"},
+		{ExternalID: "legacy", State: store.Idle, CWD: "/w"},
+	}
+	liveFn := func(_, _ string) bool { return false }
+	out, err := renderListJSON(rows, true, "", liveFn, nil, nil, nil, "ccpool",
+		time.Unix(2000, 0), time.Hour, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("renderListJSON: %v", err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", out, err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2 (%q)", len(got), out)
+	}
+	if got[0]["close_reason"] != "cap_eviction" {
+		t.Errorf(`row[0]["close_reason"] = %#v, want "cap_eviction"`, got[0]["close_reason"])
+	}
+	if got[1]["close_reason"] != "" {
+		t.Errorf(`row[1]["close_reason"] = %#v, want "" (legacy row)`, got[1]["close_reason"])
+	}
+}

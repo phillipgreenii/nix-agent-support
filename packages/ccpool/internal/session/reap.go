@@ -147,7 +147,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		if !ok {
 			continue
 		}
-		if err := s.Close(ctx, r.ExternalID, false); err != nil {
+		if err := s.closeWithReason(ctx, r.ExternalID, reason, false); err != nil {
 			return err
 		}
 		recordReapClosure(reason)

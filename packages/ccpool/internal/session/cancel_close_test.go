@@ -18,10 +18,11 @@ type closeTmux struct {
 	killed    bool
 	keys      [][]string
 	pasted    []string
-	goneAfter int      // HasSession returns false after this many HasSession calls
-	calls     int      // HasSession call count
-	panes     []string // scripted CapturePane sequence; last element is sticky
-	capCalls  int      // CapturePane call count
+	goneAfter int               // HasSession returns false after this many HasSession calls
+	calls     int               // HasSession call count
+	panes     []string          // scripted CapturePane sequence; last element is sticky
+	capCalls  int               // CapturePane call count
+	onKill    func(name string) // observes the tmux name at the moment KillSession runs; nil-safe
 }
 
 func (c *closeTmux) HasSession(string) bool {
@@ -37,7 +38,13 @@ func (c *closeTmux) SendKeys(_ string, keys ...string) error {
 	return nil
 }
 func (c *closeTmux) Paste(_, body string) error { c.pasted = append(c.pasted, body); return nil }
-func (c *closeTmux) KillSession(string) error   { c.killed = true; return nil }
+func (c *closeTmux) KillSession(name string) error {
+	c.killed = true
+	if c.onKill != nil {
+		c.onKill(name)
+	}
+	return nil
+}
 
 // CapturePane returns the scripted panes in order; once exhausted it keeps
 // returning the LAST element (a stopped turn keeps rendering the same bytes).
@@ -394,5 +401,66 @@ func TestClose_nonPurgeDoesNotFabricateIdle(t *testing.T) {
 	}
 	if row, _, _ := st.GetByExternalID(ctx, "a"); row.State != store.Errored {
 		t.Errorf("state = %s, want errored (close must not overwrite the observed state)", row.State)
+	}
+}
+
+// --- close_reason stamping (ADR 0072, Decision 4) ---
+
+// TestClose_defaultReasonIsOperator: the operator/CLI entry point (Close) must
+// stamp reason "operator" by default.
+func TestClose_defaultReasonIsOperator(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "s1", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-s1"})
+	tm := &closeTmux{live: true, goneAfter: 1} // /exit lands; session vanishes fast
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.Close(ctx, "s1", false); err != nil {
+		t.Fatal(err)
+	}
+	row, _, _ := st.GetByExternalID(ctx, "s1")
+	if row.CloseReason != "operator" {
+		t.Fatalf("close_reason = %q, want operator", row.CloseReason)
+	}
+}
+
+// TestClose_stampsReasonBeforeTeardown: the tmux fake records the row's
+// close_reason at the moment KillSession runs (the force-kill teardown path,
+// since tm.live never flips here) — the assertion is "reason visible before
+// the session disappears".
+func TestClose_stampsReasonBeforeTeardown(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	var seen string
+	tm := &closeTmux{live: true} // never vanishes -> force kill after the wait budget
+	tm.onKill = func(string) {
+		row, _, _ := st.GetByExternalID(ctx, "s1")
+		seen = row.CloseReason
+	}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+	_ = st.Insert(ctx, store.Session{ExternalID: "s1", ClaudeSessionID: "csid", State: store.Working, TmuxSession: "cc-s1"})
+
+	if err := s.CloseReason(ctx, "s1", "cap_eviction", false); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "cap_eviction" {
+		t.Fatalf("reason at kill time = %q; must be stamped BEFORE teardown", seen)
+	}
+}
+
+// TestClose_purgeSkipsStamp: --purge deletes the row immediately, so the
+// close-reason stamp is skipped entirely (nothing survives to read it off of).
+func TestClose_purgeSkipsStamp(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "s1", ClaudeSessionID: "csid", State: store.Idle, TmuxSession: "cc-s1"})
+	tm := &closeTmux{live: false}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
+
+	if err := s.CloseReason(ctx, "s1", "operator", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "s1"); ok {
+		t.Fatal("purge must delete the row")
 	}
 }
