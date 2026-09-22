@@ -66,7 +66,18 @@ let
   # leak into pg-disk-reclaimer's own `pgdr_reclaim` function scope, since
   # dryRunCommand/removeCommand run via that function's own `eval` (not a
   # fresh `bash -c`, unlike displayCommand below).
+  #
+  # Leading `:` (pg2-2wu8d): pg-disk-reclaimer's pgdr_validate_commands_exist
+  # only checks the leading whitespace-delimited token of a command
+  # string's first line, and a bare `(` opening a subshell isn't a command
+  # name, so `validate` reported it as a nonexistent command "(". `:` is a
+  # real no-op builtin, satisfying that check as a harmless first
+  # statement before the actual subshell -- `eval` still runs it then the
+  # subshell as two ordinary sequential statements, so this doesn't change
+  # dryRunCommand/removeCommand's own exit status (that's the subshell's,
+  # since it's the LAST command run).
   mkWorktreeSweepScript = apply: ''
+    :
     (
       wtdir=${lib.escapeShellArg cfg.launchConfig.worktreeDir}
       n=0
@@ -119,7 +130,17 @@ let
     id = "pg-router-ccpool-handler-worktrees";
     description = "pg-router-ccpool-handler's per-bead git worktrees -- belt-and-suspenders net for pg2-4roho's primary dispatch-completion cleanup (internal/executor/ccpool.go's cleanupWorktree)";
     path = cfg.launchConfig.worktreeDir;
+    # Leading `:` (pg2-2wu8d): see mkWorktreeSweepScript's own doc comment
+    # above -- pgdr_validate_commands_exist's leading-token check trips on
+    # this string's first real statement being a bare `n=$(find ...)`
+    # assignment rather than a command name (reads as a nonexistent
+    # command "n=$(find"). `:` is a real no-op builtin satisfying that
+    # check first; this runs via a fresh `bash -c` (pgdr_display_output),
+    # not `eval`, but the reasoning is the same -- a leading no-op
+    # statement doesn't change the string's own exit status, which is
+    # still the final `echo`'s.
     displayCommand = ''
+      :
       n=$(find ${lib.escapeShellArg cfg.launchConfig.worktreeDir} -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
       sz=$(du -sh ${lib.escapeShellArg cfg.launchConfig.worktreeDir} 2>/dev/null | cut -f1)
       if [ -z "$sz" ]; then sz="0"; fi
