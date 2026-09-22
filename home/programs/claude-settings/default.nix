@@ -76,6 +76,24 @@ let
     ++ lib.optional (
       cfg.sandbox == null && cfg.sandboxEnabled != null
     ) ".sandbox.enabled = ${builtins.toJSON cfg.sandboxEnabled}"
+    # extraPermissionsAllow (bead pg2-seliy): ADDITIVE onto `.permissions.allow`
+    # (jq `|=` with a `// []` fallback and a trailing `unique`, mirroring the
+    # `extraAllowedTools`-onto-`allowedTools` additive pattern in the sibling
+    # pg-router-ccpool-handler module) rather than a `.` * `<json>` replace --
+    # `extraSettings`'s own generic merge above would silently REPLACE the
+    # whole array on a same-named key, clobbering anything a consuming machine
+    # flake (or a prior interactive `/permission` grant) already put there.
+    # `unique` also sorts, so re-activation is idempotent and stable-ordered
+    # regardless of how many times an entry is declared. This is DISTINCT from
+    # `phillipgreenii.programs.pg-router-ccpool-handler.launchConfig.allowedTools`
+    # /`.extraAllowedTools`, which grant ccpool's own `--allowed-tools` flag for
+    # autonomously DISPATCHED sessions -- this option instead governs Claude
+    # Code's own native permission system for INTERACTIVE sessions (and, by
+    # extension, whether the claude-extended-tool-approver auto-mode
+    # classifier even gets consulted for a matching command).
+    ++ lib.optional (
+      cfg.extraPermissionsAllow != [ ]
+    ) ".permissions.allow |= (((. // [ ]) + ${builtins.toJSON cfg.extraPermissionsAllow}) | unique)"
     ++ lib.optional (cfg.theme != null) ".theme = ${builtins.toJSON cfg.theme}"
     # cleanupPeriodDays is the one option in this list with a NON-NULL default, so
     # unlike its siblings it emits a filter on every machine that has not opted out
@@ -281,6 +299,45 @@ in
         deletes a top-level `.sandboxEnabled` key (only `.sandbox.enabled`),
         and a previously written `.sandbox.enabled` is left in place, not
         deleted (pg2-a6y3).
+      '';
+    };
+
+    extraPermissionsAllow = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = lib.literalExpression ''
+        [ "Bash(rc-publish:*)" ]
+      '';
+      description = ''
+        Extra `permissions.allow` rule strings (bead pg2-seliy) -- the same
+        syntax Claude Code's own `settings.json`/`settings.local.json` uses,
+        e.g. `"Bash(<cmd>:*)"`, `"Read(<glob>)"`, `"WebFetch(domain:<host>)"`.
+        Merged ADDITIVELY into `.permissions.allow` in
+        `~/.claude/settings.json` -- appended onto whatever the array already
+        holds (deduplicated and sorted via jq `unique`), never replacing it.
+
+        Exists so a consuming machine flake can grant an interactive
+        session's native permission system a rule for one more command (e.g.
+        a ZR-specific publish script blocked by the
+        claude-extended-tool-approver auto-mode classifier under "External
+        System Writes" even with live operator authorization) without
+        restating this module's entire allow list, and without hand-editing
+        `settings.json`/`settings.local.json` directly -- the operator
+        decision this option implements. Prefer this over routing the same
+        value through `extraSettings.permissions.allow`: that freeform
+        passthrough is merged via jq's generic `. * <json>` object merge,
+        which REPLACES an array wholesale on a same-named key rather than
+        appending to it, so a same-key `extraSettings` write would silently
+        clobber whatever this option (or a prior interactive `/permission`
+        grant) already put in `.permissions.allow`.
+
+        This is DISTINCT from
+        `phillipgreenii.programs.pg-router-ccpool-handler.launchConfig.allowedTools`
+        /`.extraAllowedTools`, which grant ccpool's own `--allowed-tools` flag
+        for autonomously DISPATCHED sessions -- this option instead governs
+        Claude Code's own native permission system for INTERACTIVE sessions.
+
+        `[ ]` (the default) adds nothing.
       '';
     };
 

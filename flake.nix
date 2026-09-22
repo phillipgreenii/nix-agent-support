@@ -5653,6 +5653,116 @@
                 assert !(hasSub "del(.cleanupPeriodDays)" cleanupNull);
                 pkgs.runCommand "claude-settings-nullor-noop-ok" { } "touch $out";
 
+              # Regression guard for pg2-seliy: extraPermissionsAllow must be
+              # ADDITIVE onto `.permissions.allow` (jq `|=` with a `// [ ]`
+              # fallback and a trailing `unique`), never a wholesale `. * <json>`
+              # replace — the failure mode extraSettings's own generic merge
+              # would have if a consumer routed the same value through it
+              # instead (see that option's own doc comment). Pure module eval
+              # inspecting the generated activation string, same harness as the
+              # sibling tests above — no HM harness, no real jq execution.
+              test-claude-settings-extra-permissions-allow =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  activationWith =
+                    settings:
+                    (evalActivation {
+                      phillipgreenii.programs.claude-code = {
+                        enable = true;
+                        inherit settings;
+                      };
+                    }).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+
+                  # Default ([ ]) must emit no `.permissions.allow` filter at all.
+                  allNull = activationWith { };
+
+                  # A single entry: the additive jq shape, with the entry JSON-
+                  # encoded into the RHS list literal.
+                  oneEntry = activationWith { extraPermissionsAllow = [ "Bash(rc-publish:*)" ]; };
+
+                  # Two entries render as one JSON array (comma-joined), not two
+                  # separate filters.
+                  twoEntries = activationWith {
+                    extraPermissionsAllow = [
+                      "Bash(rc-publish:*)"
+                      "WebFetch(domain:example.com)"
+                    ];
+                  };
+
+                  # ORDERING: extraSettings (a freeform passthrough colliding on
+                  # the SAME top-level `permissions` key) must be emitted BEFORE
+                  # this option's own additive filter, so jq's left-to-right pipe
+                  # means the additive `|=` runs against whatever extraSettings
+                  # just wrote — appending onto it rather than either clobbering
+                  # or being clobbered by it.
+                  ordered = activationWith {
+                    extraPermissionsAllow = [ "Bash(rc-publish:*)" ];
+                    extraSettings = {
+                      permissions = {
+                        additionalDirectories = [ "/tmp/example" ];
+                      };
+                    };
+                  };
+
+                  # Everything after the extraSettings merge; the additive
+                  # filter must appear here (i.e. later in the jq program).
+                  afterExtraSettings = lib.last (
+                    lib.splitString ''"additionalDirectories":["/tmp/example"]'' ordered
+                  );
+                in
+                # Default emits nothing.
+                assert !(hasSub ".permissions.allow" allNull);
+                # Positive control: the additive shape, with the JSON-encoded entry.
+                assert hasSub ''.permissions.allow |= (((. // [ ]) + ["Bash(rc-publish:*)"]) | unique)'' oneEntry;
+                # Two entries render as one JSON array.
+                assert hasSub ''["Bash(rc-publish:*)","WebFetch(domain:example.com)"]'' twoEntries;
+                # Ordering guarantee against a same-top-level-key extraSettings write:
+                # the additive filter must appear strictly AFTER the extraSettings
+                # merge in the generated jq program.
+                assert hasSub ''"additionalDirectories":["/tmp/example"]'' ordered;
+                assert hasSub ".permissions.allow |=" afterExtraSettings;
+                pkgs.runCommand "claude-settings-extra-permissions-allow-ok" { } "touch $out";
+
               # Regression guard for pg2-hpwww: extraSettings is the freeform
               # passthrough escape hatch for any Claude Code setting this module
               # does not enumerate (concrete trigger: skillListingBudgetFraction,
