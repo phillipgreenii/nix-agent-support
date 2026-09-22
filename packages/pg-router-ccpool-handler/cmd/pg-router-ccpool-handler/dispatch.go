@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
@@ -153,7 +154,27 @@ func runDispatch(args []string) int {
 	// call, so a caller that fakes Deps.Now for a deterministic test gets one
 	// consistent clock, not two.
 	deps.ExternalID = stampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
-	result, err := executor.For(role.Type).Dispatch(context.Background(), dctx, deps)
+	ctx := context.Background()
+	// Opportunistic reconciliation (pg2-hrppg): dispatch is this binary's own
+	// invocation that actually recurs frequently in production. query.go's
+	// own `query` subcommand was the first place this landed, but the live
+	// deployment never wires a [[query]] source at this handler (nothing
+	// sets --query-config there), so that hook never fires — this dispatch
+	// path, run once per queued item for every enabled ccpool role
+	// (review/feedback/worker), is the one that does. Scoped to
+	// role.CCPool != nil (mirrors overlayBudgetThresholds's own guard just
+	// above): a "command" role has no ccpool sessions to reconcile, and
+	// gating on it keeps a command-role dispatch (TestLiveDispatch_command)
+	// from touching ccpool/bd at all, exactly as it does today. Reuses
+	// deps.CC/deps.BD (buildDeps, above) rather than constructing a second
+	// pair of runners. Best effort: logged, never turned into a dispatch
+	// failure — the actual dispatch below is this subcommand's primary job.
+	if role.CCPool != nil {
+		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix); closed > 0 {
+			slog.Info("dispatch: reconciled sessions with closed beads", "closed", closed)
+		}
+	}
+	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
 	if errors.Is(err, executor.ErrPoolAtCapacity) {
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): no body. The
 		// core's listener re-offers the event with backoff; the activity ring

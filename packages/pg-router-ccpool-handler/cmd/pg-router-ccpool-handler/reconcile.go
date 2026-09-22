@@ -23,13 +23,27 @@ import (
 // shutdown (bead zr-50s7h.2: closed 2026-09-19, its own session still live
 // ~2.5 days later).
 //
-// Invoked from query.go's runQuery, this binary's own only invocation that
-// already recurs on a schedule WHILE THE DAEMON IS UP — postStartup and
-// preShutdown each fire exactly once (args.go's usageLine doc), and dispatch
-// fires only when the core has a NEW event to hand this role, never as a
-// pure timer — so query's own periodic pull (PeriodTrigger,
-// packages/pg-router/internal/query/trigger.go) is the existing mechanism
-// this reuses rather than inventing a second polling loop.
+// Invoked primarily from dispatch.go's runDispatch, once per queued item for
+// every enabled ccpool role (review/feedback/worker) — the invocation
+// actually GUARANTEED to recur frequently in the live deployment. An earlier
+// revision of this fix hooked query.go's runQuery instead (that subcommand's
+// own periodic PeriodTrigger pull, packages/pg-router/internal/query/
+// trigger.go, looked like the natural existing polling mechanism to reuse),
+// but production verification (the coordinator checking the live daemon
+// config and phillipg-nix-ziprecruiter's modules/zm/default.nix directly)
+// found this handler is never wired as a [[query]] source there at all —
+// PG_ROUTER_HANDLER_COMMAND only ever backs the `dispatch` subcommand for
+// review/feedback/worker, and nothing sets --query-config/
+// PG_ROUTER_CCPOOL_HANDLER_QUERY — so that hook was dead code as deployed.
+// query.go's own call is kept as defense-in-depth for a future deployment
+// that DOES configure a [[query]] source here, but dispatch.go's call is the
+// one that actually fires today.
+//
+// postStartup/preShutdown each fire exactly once (args.go's usageLine doc),
+// so neither is a candidate for a periodic-ish sweep either — dispatch is
+// the only remaining invocation, and it recurs as often as new work arrives
+// for this handler's roles, which is how the original zr-50s7h.2 incident
+// (bursty review/feedback dispatch) surfaced in the first place.
 //
 // Reuses closeSessionAndWorktree and beadAlreadyClosed (preshutdown.go)
 // unmodified for the actual purge and the bead-status check respectively —
