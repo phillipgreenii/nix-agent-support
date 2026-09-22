@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,28 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
 	"github.com/phillipgreenii/x/gitclient"
 )
+
+// wedgeSleepDuration matches the fixed sleep inside the wrapper script
+// writeWedgedGit generates below: how long the fake wedged git process
+// blocks when invoked with the wedged verb.
+const wedgeSleepDuration = 30 * time.Second
+
+// boundedCallMargin is subtracted from wedgeSleepDuration to build
+// boundedCallElapsedCeiling below. It is derived from gitCallTimeout (the
+// actual bound under test, defined in terminal.go) rather than a bare
+// literal, so the ceiling tracks gitCallTimeout instead of silently
+// diverging from it if that constant ever changes.
+const boundedCallMargin = gitCallTimeout / 3
+
+// boundedCallElapsedCeiling is the ceiling TestSafeToReset_boundsWedgedToplevelProbe
+// and TestTerminal_boundsWedgedReset assert elapsed time against: any value
+// under it (and therefore comfortably under wedgeSleepDuration) proves the
+// call was actually bounded by gitCallTimeout rather than merely fast, while
+// leaving enough headroom to absorb machine load (pg2-rz5ud: a genuinely
+// 10s-bounded call once measured over twenty seconds under load, which a
+// prior literal wall-clock-speed ceiling -- pinned to speed rather than the
+// wedge -- wrongly failed).
+const boundedCallElapsedCeiling = wedgeSleepDuration - boundedCallMargin
 
 // recGit records reset/clean calls without touching disk.
 type recGit struct{ ran [][]string }
@@ -204,15 +227,28 @@ func TestOSGitRun_ignoresLeakedGitDir(t *testing.T) {
 	}
 }
 
+// wedgeCompletionMarker returns the path writeWedgedGit's wrapper script
+// touches ONLY if its sleep runs for the full wedgeSleepDuration (i.e. the
+// process was never killed). A caller checks this marker's ABSENCE after a
+// bounded call returns to prove the wedged process was actually killed by
+// gitCallTimeout, not merely outrun by coincidence -- without this, an
+// elapsed-time bound alone cannot distinguish "bounded" from "happened to
+// be fast" (pg2-rz5ud).
+func wedgeCompletionMarker(wedgedGitPath string) string {
+	return filepath.Join(filepath.Dir(wedgedGitPath), "wedge-completed")
+}
+
 // writeWedgedGit writes a `git` wrapper script at a fresh temp dir that
-// sleeps far longer than any bound asserted below when invoked with
-// exactly verb as its first two arguments (e.g. "reset --hard" or
-// "rev-parse --show-toplevel"), and execs the REAL git (resolved via
-// exec.LookPath before this helper runs) for every other invocation --
+// sleeps wedgeSleepDuration -- far longer than any bound asserted below --
+// when invoked with exactly verb as its first two arguments (e.g. "reset
+// --hard" or "rev-parse --show-toplevel"), and execs the REAL git (resolved
+// via exec.LookPath before this helper runs) for every other invocation --
 // notably a client's own construction-time validation probe (`rev-parse
 // --path-format=absolute --git-common-dir`), which must stay fast so the
-// client this wrapper backs can still be constructed. Returns the
-// wrapper's absolute path, for gitclient.WithGit.
+// client this wrapper backs can still be constructed. If the sleep ever
+// runs to completion (the process was NOT killed), the script touches
+// wedgeCompletionMarker(<returned path>) before exec'ing the real git.
+// Returns the wrapper's absolute path, for gitclient.WithGit.
 func writeWedgedGit(t *testing.T, verb string) string {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -221,9 +257,11 @@ func writeWedgedGit(t *testing.T, verb string) string {
 	}
 	dir := t.TempDir()
 	script := filepath.Join(dir, "git")
-	content := "#!/bin/sh\n" +
-		`if [ "$1 $2" = "` + verb + `" ]; then sleep 30; fi` + "\n" +
-		`exec "` + realGit + `" "$@"` + "\n"
+	marker := wedgeCompletionMarker(script)
+	content := fmt.Sprintf(
+		"#!/bin/sh\nif [ \"$1 $2\" = \"%s\" ]; then sleep %d; touch \"%s\"; fi\nexec \"%s\" \"$@\"\n",
+		verb, int(wedgeSleepDuration.Seconds()), marker, realGit,
+	)
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatalf("writing wedged git wrapper: %v", err)
 	}
@@ -257,12 +295,18 @@ func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
 	if got {
 		t.Error("safeToReset must return false when the toplevel probe cannot complete within gitCallTimeout")
 	}
-	// Bound: gitCallTimeout (10s) plus gitclient's WaitDelay ceiling (5s) for
-	// the killed child's inherited pipes to close, with headroom -- well
-	// short of the wrapper's 30s sleep, which is what an unbounded
-	// regression would actually wait out.
-	if elapsed > 20*time.Second {
-		t.Errorf("safeToReset did not bound the wedged toplevel probe: took %s (want well under the 30s wedge)", elapsed)
+	// Bound: comfortably under wedgeSleepDuration (boundedCallElapsedCeiling,
+	// derived from gitCallTimeout) rather than a wall-clock-speed literal --
+	// any elapsed time under the wedge proves the probe was actually killed
+	// by gitCallTimeout, and the margin absorbs machine load that a tighter
+	// bound cannot (pg2-rz5ud).
+	if elapsed > boundedCallElapsedCeiling {
+		t.Errorf("safeToReset did not bound the wedged toplevel probe: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
+	}
+	// Outcome: the wedge must have been KILLED mid-sleep, not merely
+	// outrun -- see wedgeCompletionMarker's doc comment.
+	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
+		t.Error("safeToReset: wedged toplevel probe ran to completion instead of being killed by gitCallTimeout")
 	}
 }
 
@@ -295,8 +339,17 @@ func TestTerminal_boundsWedgedReset(t *testing.T) {
 	wd.terminal(context.Background(), "s", "zr-1")
 	elapsed := time.Since(start)
 
-	if elapsed > 20*time.Second {
-		t.Errorf("terminal did not bound a wedged reset --hard: took %s (want well under the 30s wedge)", elapsed)
+	// Bound: see TestSafeToReset_boundsWedgedToplevelProbe's identical
+	// comment above -- boundedCallElapsedCeiling is derived from
+	// gitCallTimeout rather than a wall-clock-speed literal, so it survives
+	// machine load (pg2-rz5ud).
+	if elapsed > boundedCallElapsedCeiling {
+		t.Errorf("terminal did not bound a wedged reset --hard: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
+	}
+	// Outcome: the wedged reset --hard must have been KILLED mid-sleep, not
+	// merely outrun -- see wedgeCompletionMarker's doc comment.
+	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
+		t.Error("terminal: wedged reset --hard ran to completion instead of being killed by gitCallTimeout")
 	}
 	if !bd.has("update zr-1 --status=open --assignee=") {
 		t.Errorf("terminal must still reach bd unclaim despite a wedged reset --hard: calls=%v", bd.calls)
