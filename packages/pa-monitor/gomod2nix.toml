@@ -186,11 +186,11 @@ schema = 3
     hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260917231906-eeb232e0883d'
-    hash = 'sha256-3Spx1Si0B5nQXEusgLPHt4rV5mRrFky0yP/cG3uSLeU='
+    version = 'v0.0.0-20260921155816-b14227669459'
+    hash = 'sha256-vFPDopJXc/dMuPxwrcc2zGxP3UyF8E7PzAs1YmBnlGo='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260917231906-eeb232e0883d'
+    version = 'v0.0.0-20260921155816-b14227669459'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -202,8 +202,8 @@ schema = 3
     hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
 
   [mod.'modernc.org/libc']
-    version = 'v1.76.0'
-    hash = 'sha256-D+oQKx7RCb+mECpA21Xyt8cSkS8HEAFNvjmvQxuOZJ4='
+    version = 'v1.77.1'
+    hash = 'sha256-XH7HBvMVe0lsBw0W+lkcRkItPL4//7c0p9RurXDcwqg='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
