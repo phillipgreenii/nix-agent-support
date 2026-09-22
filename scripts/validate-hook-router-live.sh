@@ -187,9 +187,25 @@ plugin_out="$(
 
 # --- 5. Wrap the generated plugin in a throwaway local-directory
 #     marketplace (Pattern 1, docs/claude-marketplaces.md) and register +
-#     install + enable it in an ISOLATED CLAUDE_CONFIG_DIR. ---
+#     install + enable it in an ISOLATED CLAUDE_CONFIG_DIR.
+#
+#     `source` MUST be a RELATIVE path (matching every real entry in this
+#     repo's own claude-marketplace/.claude-plugin/marketplace.json, e.g.
+#     "./bash-lsp") — the claude CLI's marketplace-entry schema rejects an
+#     absolute path with "This plugin's marketplace entry is invalid:
+#     source: Invalid input" (verified empirically against claude CLI
+#     2.1.269: an absolute `/nix/store/...` source fails `claude plugin
+#     install` even though `claude plugin marketplace add` accepts it; a
+#     symlink under the marketplace dir referenced by a relative "./<name>"
+#     source installs successfully and the plugin's real content — reached
+#     through the symlink — is what actually gets copied into the plugin
+#     cache). So symlink the nix store output into a name under the
+#     marketplace dir and reference it relatively, rather than passing
+#     $plugin_out directly. ---
 marketplace_dir="$workdir/marketplace"
 mkdir -p "$marketplace_dir/.claude-plugin"
+plugin_link_name="validate-hook-router-live-plugin"
+ln -s "$plugin_out" "$marketplace_dir/$plugin_link_name"
 cat >"$marketplace_dir/.claude-plugin/marketplace.json" <<JSON
 {
   "name": "validate-hook-router-live",
@@ -197,7 +213,7 @@ cat >"$marketplace_dir/.claude-plugin/marketplace.json" <<JSON
   "plugins": [
     {
       "name": "validate-hook-router-live-plugin",
-      "source": "$plugin_out",
+      "source": "./$plugin_link_name",
       "description": "Throwaway ADR 0071 Tier 3 live-validation plugin"
     }
   ]
