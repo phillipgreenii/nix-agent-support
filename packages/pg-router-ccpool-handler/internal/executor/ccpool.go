@@ -29,6 +29,14 @@ func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps
 // (only o.X → r.deps.X). It exists per-Dispatch; no cross-dispatch state.
 type ccpoolRun struct{ deps Deps }
 
+// ErrPoolAtCapacity: the pool reported free == 0, or could not be queried. No
+// bead was mutated and no isolation prepared; the cmd layer maps this to the
+// transport's pre-accept busy decline so the core re-offers the event with
+// backoff (INV-CCH-6, ADR 0072's Decision item 3). Unknown capacity fails
+// CLOSED: launching blind is the failure mode the gate exists to stop, and a
+// re-offer costs nothing.
+var ErrPoolAtCapacity = errors.New("ccpool: no free slot")
+
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
 // the role carries a finite budget. The session is addressed by ExternalID; the
@@ -50,6 +58,22 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
 	if existing, ok := r.findSessionByName(ctx, display); ok {
 		return r.absorbDuplicate(ctx, d, existing)
+	}
+
+	// Admission gate (INV-CCH-6, ADR 0072's Decision item 3): consult the
+	// pool's capacity before preparing isolation or launching anything. No
+	// bead is mutated and no worktree is prepared on this path. Unknown
+	// capacity fails CLOSED — treated as full, never as "launch anyway".
+	capacity, capErr := r.deps.CC.Capacity(ctx)
+	if capErr != nil {
+		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
+		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolAtCapacity, capErr)
+	}
+	if capacity.Free == 0 {
+		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,
+			"counted", capacity.Counted, "max", capacity.MaxSessions, "preserved", capacity.Preserved)
+		return report.Result{}, fmt.Errorf("%w: counted=%d max=%d preserved=%d",
+			ErrPoolAtCapacity, capacity.Counted, capacity.MaxSessions, capacity.Preserved)
 	}
 
 	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
@@ -101,6 +125,11 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// (the pg2-yukh incident). The session never did anything, so no other bead
 		// can have been touched.
 		if ccpool.IsNotIngested(err) {
+			// The session never took the task: close it (reason handler, via
+			// the CLI runner) so a ready-but-empty row does not hold a
+			// counted slot until idle_ttl — cap eviction no longer reclaims
+			// ready rows (ADR 0072's Decision item 2).
+			_ = r.deps.CC.Close(ctx, r.deps.ExternalID, false)
 			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
 			res = failureAction(report.Unclaimed, d.Item.ID)
 			return res, fmt.Errorf("send %s: prompt not ingested: %w", r.deps.ExternalID, err)

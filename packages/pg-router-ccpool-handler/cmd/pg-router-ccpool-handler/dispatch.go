@@ -154,6 +154,12 @@ func runDispatch(args []string) int {
 	// consistent clock, not two.
 	deps.ExternalID = stampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
 	result, err := executor.For(role.Type).Dispatch(context.Background(), dctx, deps)
+	if errors.Is(err, executor.ErrPoolAtCapacity) {
+		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): no body. The
+		// core's listener re-offers the event with backoff; the activity ring
+		// records it as "declined", distinct from "dispatch_failed".
+		return conformance.ExitBusy
+	}
 	if err != nil {
 		writeErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError

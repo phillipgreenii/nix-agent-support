@@ -893,6 +893,66 @@ func TestRegression_droppedNudge_noWriteToOtherBead_pg2yukh(t *testing.T) {
 	}
 }
 
+// --- admission gate (ADR 0072's Decision item 3) ---
+
+// TestRun_poolFullDeclinesBusy proves the gate declines busy — no Ensure, no
+// worktree, no bead mutation — when the pool reports free == 0.
+func TestRun_poolFullDeclinesBusy(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{Cap: ccpool.Capacity{MaxSessions: 6, Counted: 6, Free: 0}}
+	e := newExec(cc, bd, cfg)
+	g := &dtest.NoopGitOpener{}
+	e.deps.GitOpener = g.Open
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	_, err := e.run(context.Background(), d)
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("err = %v, want ErrPoolAtCapacity", err)
+	}
+	if len(cc.Ensured) != 0 {
+		t.Fatal("Ensure must not be called when the pool is full")
+	}
+	if len(g.Calls) != 0 {
+		t.Fatal("no worktree may be prepared when the pool is full")
+	}
+	if len(bd.Updates) != 0 {
+		t.Fatalf("bead mutated: %v", bd.Updates)
+	}
+}
+
+// TestRun_poolCapacityErrorDeclinesBusy proves an unreadable pool fails
+// CLOSED as busy — never as "launch anyway".
+func TestRun_poolCapacityErrorDeclinesBusy(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{CapErr: errors.New("capacity: store: disk I/O error")}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	_, err := e.run(context.Background(), d)
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("unknown pool must fail closed as busy; err = %v", err)
+	}
+	if len(cc.Ensured) != 0 || len(bd.Updates) != 0 {
+		t.Fatal("launched or mutated despite unknown capacity")
+	}
+}
+
+// TestRun_notIngestedClosesSession proves a never-ingested session is closed
+// (reason handler, via the CLI runner) before the bead is unclaimed, so a
+// ready-but-empty row does not hold a counted slot until idle_ttl.
+func TestRun_notIngestedClosesSession(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{Cap: ccpool.Capacity{Free: 3}, SendErr: ccpool.ErrPromptNotIngested}
+	_, _ = dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
+	if len(cc.Closed) != 1 {
+		t.Fatalf("a never-ingested session must be closed so it does not occupy a counted slot; closes=%v", cc.Closed)
+	}
+	if !dtest.HasUpdate(bd, "update zr-w --status=open --assignee=") {
+		t.Fatalf("bead must be unclaimed (existing behavior); updates=%v", bd.Updates)
+	}
+}
+
 func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	cfg := fastCfg() // worker on_failure = add-human
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}

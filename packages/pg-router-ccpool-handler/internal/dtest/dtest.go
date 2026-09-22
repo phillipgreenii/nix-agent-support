@@ -71,8 +71,12 @@ type FakeCC struct {
 	ListSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
 	ListIdx     int
 	ListErr     error // when set, every List call returns (nil, ListErr) instead of consuming ListSeq
-	// Cap/CapErr script Capacity(); zero value means Free==0 (full), so a test
-	// that dispatches through the admission gate (packet 6) MUST set Free>0.
+	// Cap/CapErr script Capacity(). Leaving BOTH unset (the zero Capacity{}
+	// and a nil CapErr) defaults to MaxSessions:1, Free:1 — "unset means
+	// free" — so the many pre-existing tests that never set Cap still
+	// dispatch through the admission gate (packet 6) unchanged. A test that
+	// wants the gate to decline MUST set Cap explicitly (e.g. Free: 0) or
+	// set CapErr.
 	Cap    ccpool.Capacity
 	CapErr error
 }
@@ -96,7 +100,16 @@ func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 	return nil
 }
 
-func (f *FakeCC) Capacity(_ context.Context) (ccpool.Capacity, error) { return f.Cap, f.CapErr }
+// Capacity serves the scripted Cap/CapErr, defaulting an entirely-unset
+// script (zero Capacity{}, nil CapErr) to MaxSessions:1, Free:1 so a test
+// that never mentions Cap still passes the admission gate (Cap field's own
+// doc comment).
+func (f *FakeCC) Capacity(_ context.Context) (ccpool.Capacity, error) {
+	if f.Cap == (ccpool.Capacity{}) && f.CapErr == nil {
+		return ccpool.Capacity{MaxSessions: 1, Free: 1}, nil
+	}
+	return f.Cap, f.CapErr
+}
 
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
