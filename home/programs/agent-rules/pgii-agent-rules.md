@@ -210,7 +210,10 @@
 ### Git Workflow
 
 - Always commit to the correct branch. Before committing, run `git branch --show-current` to verify. If changes were made on the wrong branch, alert the user before proceeding.
-- When pre-commit hooks exist, always run `git diff --cached` and address any formatting/lint issues before attempting to commit. If subagents generate changes, ensure files are properly staged.
+- When pre-commit hooks exist, always run `git diff --cached --no-ext-diff` and address any formatting/lint issues before attempting to commit. If subagents generate changes, ensure files are properly staged.
+- Agent-run `git diff`/`git show`/`git log -p` MUST pass `--no-ext-diff` because a configured
+  `diff.external` (difftastic here) replaces the unified diff; `--stat`, `--name-only`,
+  `--numstat`, `--check`, and the plumbing commands are unaffected.
 
 ### Git Worktree / Integration Discipline
 

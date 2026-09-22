@@ -32,7 +32,7 @@ Inputs are passed in the prompt by the orchestrator. Expect:
    ```
 2. For each file, fetch the diff:
    ```bash
-   git diff <BASE_REF>...HEAD -- <file>
+   git diff --no-ext-diff <BASE_REF>...HEAD -- <file>
    ```
 3. Review the diffs and identify problems (correctness, security,
    performance, readability, missing tests).
