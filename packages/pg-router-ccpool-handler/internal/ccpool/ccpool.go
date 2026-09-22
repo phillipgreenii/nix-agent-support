@@ -55,6 +55,22 @@ type Session struct {
 	TranscriptPath  string            `json:"transcript_path"` // consumed by chunk B (token observation)
 	CWD             string            `json:"cwd"`             // session working path (for the budget watchdog's guarded reset)
 	Meta            map[string]string `json:"meta,omitempty"`  // the pgrouter.* tags DispatchMeta stamps at dispatch (MetaKeyBead/MetaKeyRole/MetaKeyPool); absent/nil for a session ccpool never received meta for
+	// CloseReason is WHY ccpool closed this session (ADR 0072): "" (still open),
+	// idle_ttl, cap_eviction, operator, or handler (this module's own closes,
+	// stamped by CLIRunner.Close). Distinguishes an eviction/external close from
+	// one the handler itself initiated.
+	CloseReason string `json:"close_reason"`
+}
+
+// Capacity mirrors ccpool's session.Capacity (ADR 0072): the pool's occupancy
+// as `ccpool capacity --json` reports it. Free is what an admission gate
+// consults before dispatch (a later packet's concern, not this one's).
+type Capacity struct {
+	MaxSessions int `json:"max_sessions"`
+	Live        int `json:"live"`
+	Preserved   int `json:"preserved"`
+	Counted     int `json:"counted"`
+	Free        int `json:"free"`
 }
 
 type SendMode int
@@ -75,4 +91,7 @@ type Runner interface {
 	Cancel(ctx context.Context, externalID string) error
 	Close(ctx context.Context, externalID string, purge bool) error
 	List(ctx context.Context) ([]Session, error)
+	// Capacity reports the pool's current occupancy (ADR 0072), for an
+	// admission gate to consult before dispatch (a later packet's concern).
+	Capacity(ctx context.Context) (Capacity, error)
 }

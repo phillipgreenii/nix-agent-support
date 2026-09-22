@@ -54,6 +54,10 @@ func (f *fakeCC) List(context.Context) ([]ccpool.Session, error) {
 	return f.ListSeq[i], nil
 }
 
+func (f *fakeCC) Capacity(context.Context) (ccpool.Capacity, error) {
+	return ccpool.Capacity{Free: 1}, nil
+}
+
 var _ ccpool.Runner = (*fakeCC)(nil)
 
 // fakeWorktreeOpener is a worktree.Opener test double supporting per-path

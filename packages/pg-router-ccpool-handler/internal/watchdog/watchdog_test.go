@@ -50,6 +50,10 @@ func (f *fakeCC) Close(_ context.Context, n string, _ bool) error {
 }
 func (f *fakeCC) List(context.Context) ([]ccpool.Session, error) { return f.list, nil }
 
+func (f *fakeCC) Capacity(context.Context) (ccpool.Capacity, error) {
+	return ccpool.Capacity{Free: 1}, nil
+}
+
 type recBD struct{ calls []string }
 
 func (r *recBD) Run(_ context.Context, args ...string) (string, error) {

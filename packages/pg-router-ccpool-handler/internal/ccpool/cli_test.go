@@ -242,7 +242,7 @@ func TestCancelCloseList_argv(t *testing.T) {
 	if !reflect.DeepEqual((*got)[0], []string{"cancel", "s"}) {
 		t.Errorf("cancel argv = %v", (*got)[0])
 	}
-	if !reflect.DeepEqual((*got)[1], []string{"close", "s", "--purge"}) {
+	if !reflect.DeepEqual((*got)[1], []string{"close", "s", "--purge", "--reason", "handler"}) {
 		t.Errorf("close argv = %v", (*got)[1])
 	}
 	if !reflect.DeepEqual((*got)[2], []string{"list", "--all", "--json"}) {
@@ -256,12 +256,69 @@ func TestCancelCloseList_argv(t *testing.T) {
 	}
 }
 
-// Close without purge omits the --purge flag.
+// Close without purge omits the --purge flag but still carries --reason handler.
 func TestClose_noPurge_argv(t *testing.T) {
 	cli, got, _ := newSpy()
 	_ = cli.Close(context.Background(), "s", false)
-	if !reflect.DeepEqual((*got)[0], []string{"close", "s"}) {
+	if !reflect.DeepEqual((*got)[0], []string{"close", "s", "--reason", "handler"}) {
 		t.Errorf("close (no purge) argv = %v", (*got)[0])
+	}
+}
+
+// Task 5 (ADR 0072): List must decode the close_reason ccpool's own
+// `list --all --json` now emits.
+func TestCLI_ListParsesCloseReason(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"x","state":"working","live":false,"close_reason":"cap_eviction"}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].CloseReason != "cap_eviction" {
+		t.Fatalf("close_reason = %q", got[0].CloseReason)
+	}
+}
+
+// Task 5 (ADR 0072): Capacity shells out to `ccpool capacity --json` and
+// decodes field-for-field into the Capacity struct.
+func TestCLI_Capacity(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":6,"live":7,"preserved":5,"counted":2,"free":4}`))
+	got, err := cli.Capacity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Free != 4 || got.Preserved != 5 {
+		t.Fatalf("got %+v", got)
+	}
+	last := (*argv)[len(*argv)-1]
+	if strings.Join(last, " ") != "capacity --json" {
+		t.Fatalf("argv = %v", last)
+	}
+}
+
+// Task 5 (ADR 0072): a handler-initiated close must always carry --reason
+// handler, whether or not it purges.
+func TestCLI_ClosePassesHandlerReason(t *testing.T) {
+	cli, argv, _ := newSpy()
+	if err := cli.Close(context.Background(), "x", false); err != nil {
+		t.Fatal(err)
+	}
+	last := strings.Join((*argv)[len(*argv)-1], " ")
+	if !strings.Contains(last, "--reason handler") {
+		t.Fatalf("handler-initiated close must carry --reason handler; argv = %q", last)
+	}
+}
+
+// Task 5: a ccpool capacity failure (e.g. a store I/O error) must surface as
+// a non-nil error, not a zero-value Capacity.
+func TestCLI_CapacityErrorSurfaces(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("capacity: store: disk I/O error"), errors.New("exit status 1")
+	}
+	if _, err := cli.Capacity(context.Background()); err == nil {
+		t.Fatal("want non-nil error when ccpool capacity fails")
 	}
 }
 

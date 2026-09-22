@@ -71,6 +71,10 @@ type FakeCC struct {
 	ListSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
 	ListIdx     int
 	ListErr     error // when set, every List call returns (nil, ListErr) instead of consuming ListSeq
+	// Cap/CapErr script Capacity(); zero value means Free==0 (full), so a test
+	// that dispatches through the admission gate (packet 6) MUST set Free>0.
+	Cap    ccpool.Capacity
+	CapErr error
 }
 
 func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _, meta map[string]string) error {
@@ -91,6 +95,8 @@ func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 	f.ClosedPurge = append(f.ClosedPurge, purge)
 	return nil
 }
+
+func (f *FakeCC) Capacity(_ context.Context) (ccpool.Capacity, error) { return f.Cap, f.CapErr }
 
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()

@@ -208,15 +208,33 @@ func (c *CLIRunner) Cancel(ctx context.Context, externalID string) error {
 	return nil
 }
 
-// Close: ccpool close <external_id> [--purge]. purge deletes the session row so
-// the next dispatch is always brand-new (pg-router never resumes; ADR 0015).
+// Close: ccpool close <external_id> [--purge] --reason handler. Every close
+// this module initiates is stamped "handler" (ADR 0072) so it is
+// distinguishable later from an idle_ttl/cap_eviction/operator close; ccpool
+// discards the reason on purge (the row is deleted), but the flag is passed
+// regardless since a non-purge close still needs it stamped.
 func (c *CLIRunner) Close(ctx context.Context, externalID string, purge bool) error {
 	args := []string{"close", externalID}
 	if purge {
 		args = append(args, "--purge")
 	}
+	args = append(args, "--reason", "handler")
 	_, err := c.ccpool(ctx, quickCallTimeout, args...)
 	return err
+}
+
+// Capacity: ccpool capacity --json, decoded into the Capacity struct
+// (field-for-field identical to ccpool's own session.Capacity JSON shape).
+func (c *CLIRunner) Capacity(ctx context.Context) (Capacity, error) {
+	out, err := c.ccpool(ctx, quickCallTimeout, "capacity", "--json")
+	if err != nil {
+		return Capacity{}, err
+	}
+	var capacity Capacity
+	if err := json.Unmarshal(out, &capacity); err != nil {
+		return Capacity{}, fmt.Errorf("ccpool capacity --json decode: %w", err)
+	}
+	return capacity, nil
 }
 
 // List: ccpool list --all --json.
