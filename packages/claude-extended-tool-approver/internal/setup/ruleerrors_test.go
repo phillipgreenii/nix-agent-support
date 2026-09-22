@@ -124,6 +124,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"vault":              true,
 		"pn-workspace":       true,
 		"kill-probe":         true,
+		"pg-ccaudit":         true,
 		"safe-commands":      true,
 		"kubectl":            true,
 		"build-tools":        true,

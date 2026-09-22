@@ -248,6 +248,40 @@ func TestSafecmds_Set_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Shift_Approve is the pg2-xu4aq regression guard for shift's
+// membership in alwaysSafe: it only mutates the invoking shell's own
+// positional-parameter list, and its sole optional operand is a shift COUNT,
+// never a file/path — so it is unconditionally safe, the same class as
+// break/continue/return/exit (TestSafecmds_ReadAndControlFlow_AlwaysSafe).
+// Covers a bare form, an explicit count, and an if/then/fi control-flow
+// context (mirroring TestSafecmds_ReadAndControlFlow_AlwaysSafe's choice of
+// if/then/fi over case/while, which this rule engine's leaf-walker does not
+// see into — a pre-existing, unrelated cmdparse gap, not in scope here). The
+// bare form is the exact shape pg2-amzvw's plugin-conformance-check flagged,
+// extracted from the case-in-while argument-parsing loop this repo's
+// bash-scripting skill prescribes
+// (claude-marketplace/bash-scripting/skills/bash-scripting/SKILL.md).
+func TestSafecmds_Shift_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"shift",
+		"shift 2",
+		"if true; then shift; fi",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (shift is alwaysSafe)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestSafecmds_Bgrun_NotSafe confirms bgrun — the launcher bgcheck probes,
 // which unwraps at the cmdparse layer instead (commandRunnerPrefixes) — is
 // deliberately absent from every map this rule consults. If it were added

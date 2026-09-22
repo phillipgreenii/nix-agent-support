@@ -140,6 +140,57 @@ func TestBuildtools_Gogate_Approve(t *testing.T) {
 	}
 }
 
+// TestBuildtools_PgGoMutate_Approve pins the pg2-xu4aq base-tool approval for
+// pg-go-mutate — the plugin-prescribed mutation-testing driver
+// (claude-marketplace/pg-go-mutate's go-test-gaps skill) pg2-amzvw's
+// plugin-conformance-check flagged as unrecognized. Covers the bare
+// invocation and the skill's own documented invocations (--workers, --json).
+func TestBuildtools_PgGoMutate_Approve(t *testing.T) {
+	r := New(testPE(), zrBuildtoolsConfig(t))
+	commands := []string{
+		"pg-go-mutate",
+		"pg-go-mutate ./internal/collect --workers 1",
+		"pg-go-mutate ./internal/collect --workers 1 --json",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
+// TestBuildtools_CreateChildBeadSh_Approve pins the pg2-xu4aq base-tool
+// approval for create-child-bead.sh — the pg-pr-break-down-work skill's
+// bundled bd-create wrapper (claude-marketplace/pg-pr/skills/
+// pg-pr-break-down-work/scripts/create-child-bead.sh) pg2-amzvw's
+// plugin-conformance-check flagged as unrecognized. Covers the skill's own
+// documented invocation shape: a relative-path call with a parent id, a
+// quoted title/body, and multiple trailing "key: value" context args
+// (one of which interpolates a shell variable, exactly as the skill does
+// with $BRANCH).
+func TestBuildtools_CreateChildBeadSh_Approve(t *testing.T) {
+	r := New(testPE(), zrBuildtoolsConfig(t))
+	commands := []string{
+		`scripts/create-child-bead.sh zr-abc "test: unit tests for processingcycle.go" "Add table-driven tests for FindOpenProcessingCycle + CreateProcessingCycle. Done when the new test passes under nix flake check." "target file: packages/pg-pr/pkg/beads/processingcycle.go" "test file: packages/pg-pr/pkg/beads/processingcycle_test.go (create if absent)" "branch: $BRANCH"`,
+		`scripts/create-child-bead.sh zr-abc "test: unit tests for feedback.go" "Add table-driven tests for CreateFeedback. Done when the new test passes under nix flake check." "target file: packages/pg-pr/pkg/beads/feedback.go" "branch: $BRANCH"`,
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
 func TestBuildtools_Npm_Abstain(t *testing.T) {
 	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
@@ -1158,6 +1209,8 @@ func TestBuildtools_EmptyConfig_BaseGenericApproves(t *testing.T) {
 		"prek run", "bats tests/", "bd ready", "tilt up",
 		"cue vet ./x", "jar xf /tmp/a.jar",
 		"gogate", "gogate --pkg ./...", "gogate --quick", "gogate -- -run TestFoo",
+		"pg-go-mutate", "pg-go-mutate ./internal/collect --workers 1",
+		`scripts/create-child-bead.sh zr-abc "t" "b"`,
 	} {
 		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
 		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.Approve {

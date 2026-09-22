@@ -93,6 +93,16 @@ var alwaysSafe = map[string]bool{
 	// break/continue/return/exit (pg2-lpcpn): shell control-flow keywords with
 	// zero filesystem/network side effects of their own, same class as read.
 	"break": true, "continue": true, "return": true, "exit": true,
+	// shift (pg2-xu4aq): shell builtin that only mutates the invoking shell's
+	// own positional-parameter list ($1, $2, ... and $#); its sole optional
+	// operand is a shift COUNT (defaulting to 1), never a file/path — no
+	// filesystem or network access at all, same class as break/continue/
+	// return/exit immediately above. This repo's own bash-scripting skill
+	// prescribes the standard `case`-in-`while` argument-parsing loop
+	// (claude-marketplace/bash-scripting/skills/bash-scripting/SKILL.md),
+	// which uses a bare `shift` as its own statement — that is what pg2-amzvw's
+	// plugin-conformance-check flagged as unrecognized.
+	"shift": true,
 	// bgcheck: the bgrun background-job status probe — a read-only wrapper
 	// over `ps` + `tail` designed for blanket approval, the same class as
 	// ps/pgrep above. Unlike bgrun (its launcher sibling, which unwraps at the

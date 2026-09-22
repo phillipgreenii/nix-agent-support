@@ -1709,29 +1709,32 @@
               # names, so one reason-substring entry covers the whole class
               # (see cmd/plugin-conformance-check/main.go's doc comment).
               #
-              # Every `--allow` entry below is either (a) a genuinely
-              # uncovered CETA-rule class this pass discovered, with NO
-              # tracking bead yet as of pg2-amzvw — `pg-ccaudit`,
-              # `pg-go-mutate`, `scripts/create-child-bead.sh`, a bare
-              # `shift` — these need a follow-up bead filed, the same shape
-              # as the sibling pg2-s4lzw/pg2-tvdh3 follow-ups this check's
-              # allowlist below (for repo-base and, one day, ziprecruiter)
-              # already tracks; or (b) a doc-formatting/extraction-limitation
-              # artifact the extractor cannot safely join on its own (a
-              # heredoc nested inside an unrecognized `"$(...` subshell-in-
-              # quote context, a stray case-pattern-list fragment, a bats
-              # `@test` block, prose that landed inside a ```bash fence by
-              # mistake, a lone leading-`|` pipeline continuation with no
-              # detectable trailing operator on its preceding line). See
+              # pg2-amzvw's original pass also found four genuinely uncovered
+              # CETA-rule classes with no tracking bead yet at the time —
+              # `pg-ccaudit`, `pg-go-mutate`, `scripts/create-child-bead.sh`,
+              # a bare `shift` — and allowlisted them here as a stopgap.
+              # pg2-xu4aq (the follow-up bead pg2-amzvw's own doc comment
+              # named) fixed all four for real: internal/rules/pgccaudit (new
+              # module), internal/rules/buildtools' baseApprovedTools
+              # (pg-go-mutate, scripts/create-child-bead.sh), and
+              # internal/rules/safecmds' alwaysSafe (shift). None of the four
+              # need an --allow entry any more — removing them here is what
+              # makes this check catch a regression instead of silently
+              # permitting one forever.
+              #
+              # Every REMAINING `--allow` entry below is a doc-formatting/
+              # extraction-limitation artifact the extractor cannot safely
+              # join on its own (a heredoc nested inside an unrecognized
+              # `"$(...` subshell-in-quote context, a stray case-pattern-
+              # list fragment, a bats `@test` block, prose that landed
+              # inside a ```bash fence by mistake, a lone leading-`|`
+              # pipeline continuation with no detectable trailing operator
+              # on its preceding line). See
               # cmd/plugin-conformance-check/main.go's doc comment for
               # exactly what the extractor does and does not join.
               plugin-conformance = pkgs.runCommand "check-plugin-conformance" { } ''
                 ${pkgs.plugin-conformance-check}/bin/plugin-conformance-check \
                   --allow-reason "env assignments only" \
-                  --allow "pg-ccaudit" \
-                  --allow "pg-go-mutate" \
-                  --allow "scripts/create-child-bead.sh" \
-                  --allow "shift" \
                   --allow "cat" \
                   --allow "--actor" \
                   --allow ")\"" \

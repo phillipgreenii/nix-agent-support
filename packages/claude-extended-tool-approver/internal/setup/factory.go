@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarypush"
@@ -268,6 +269,14 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// excludes it) — it is placed here, alongside pnworkspace, because both
 		// are small fixed-allowlist Bash-command classifiers.
 		killprobe.New(),
+		// pg-ccaudit approves the first-party pg-ccaudit CLI's command family
+		// per its own main.go usage text's read-only/ingest split (bead
+		// pg2-xu4aq, follow-up to pg2-amzvw's plugin-conformance-check
+		// allowlisting it). Like pnworkspace/killprobe above it takes no
+		// consumer config — the classification is fixed and applies
+		// uniformly. Ordering relative to its neighbours does not matter:
+		// "pg-ccaudit" is recognized by no other rule in this chain.
+		pgccaudit.New(),
 		// safecmds takes the engine as its Evaluator (pg2-1zrup) so its
 		// `xargs sh|bash -c '<script>'` inner-command handling can delegate
 		// through the I13 structural entry point (EvaluateStructure) rather than

@@ -27,10 +27,46 @@ import (
 // above, and gogate's surface is strictly narrower than bare `go` (no
 // `go run`/`go generate`/arbitrary subcommand), so approving it here is no
 // more permissive than the existing `go` entry.
+//
+// pg-go-mutate (bead pg2-xu4aq, follow-up to pg2-amzvw's plugin-conformance-
+// check flagging it unrecognized) belongs here for the same "no more
+// permissive than bare `go`" reason as gogate immediately above. It is
+// prescribed by claude-marketplace/pg-go-mutate's go-test-gaps skill,
+// applies uniformly to every consumer (it takes no consumer-specific
+// config), and its surface is `pg-go-mutate <package-path> [--workers N]
+// [--json]` — a mutation-testing driver that repeatedly mutates a package's
+// AST and re-runs `go test` against it, reporting surviving mutants. That is
+// strictly narrower than bare `go` (already unconditionally approved above,
+// including arbitrary `go run`): it never runs arbitrary user code, only the
+// target package's own existing test suite, and it deletes its own engine
+// report on exit (see the skill's "Establishing that a named mutant was
+// killed"). It is not read-only — it writes the Go build/test cache the
+// same way `go test`/gogate already do — but that is the same cost profile
+// those two entries already carry.
+//
+// create-child-bead.sh (bead pg2-xu4aq, the same plugin-conformance-check
+// follow-up as pg-go-mutate above) is NOT the "consumer project script"
+// case the opening paragraph excludes — it is not a downstream repo's own
+// bespoke local script. It SHIPS as part of this repo's own pg-pr plugin
+// (claude-marketplace/pg-pr/skills/pg-pr-break-down-work/scripts/), so
+// every consumer of that plugin gets the identical file, with identical
+// behavior — the same "FIXED across every consumer" property gogate and
+// pg-go-mutate have. Its own source (55 lines, read in full for this
+// entry) does exactly one thing: build a `bd create --type task --parent
+// <id> --no-inherit-labels [--force] --title <title> --description <desc>`
+// call from its argv and print the new id. Every trailing arg the caller
+// passes becomes `--title`/`--description` TEXT, never additional shell
+// syntax — cmdparse has already tokenized the full Bash tool_input before
+// this rule ever sees the leaf, so an embedded `;`/`&&`/`|` in a context
+// string would already have been split into separate leaves upstream, not
+// smuggled into this one. Its entire effect surface is therefore a strict
+// SUBSET of bare `bd create`, which the already-unconditionally-approved
+// `bd` entry below covers regardless of flags — so approving this basename
+// is no more permissive than that existing entry.
 var baseApprovedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
-	"tilt": true, "gogate": true,
+	"tilt": true, "gogate": true, "pg-go-mutate": true, "create-child-bead.sh": true,
 }
 
 type Rule struct {
