@@ -44,8 +44,23 @@ func findChildArgs() []string {
 	return nil
 }
 
+// recordArgsIfRequested writes childArgs (space-joined) to the path named
+// by GO_HELPER_ARGS_RECORD_FILE, when set — lets a test assert on the
+// EXACT argv this probe passed pg-connector (e.g. that --backend
+// pg-connector-issue-beads is really present [design: Contract's
+// "pg-connector's issue capability" bullet]) rather than trusting a code
+// read of the hardcoded constant that builds it.
+func recordArgsIfRequested(childArgs []string) {
+	file := os.Getenv("GO_HELPER_ARGS_RECORD_FILE")
+	if file == "" {
+		return
+	}
+	_ = os.WriteFile(file, []byte(fmt.Sprint(childArgs)), 0o600)
+}
+
 func helperMain() {
 	childArgs := findChildArgs()
+	recordArgsIfRequested(childArgs)
 	behavior := os.Getenv("GO_HELPER_BEHAVIOR")
 
 	switch behavior {

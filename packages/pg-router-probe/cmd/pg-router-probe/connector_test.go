@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,60 @@ func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("listEscalated did not respect its context deadline: took %v", elapsed)
+	}
+}
+
+// recordedArgs runs fn with GO_HELPER_ARGS_RECORD_FILE pointed at a fresh
+// temp file and returns the exact argv the helper process observed
+// (recordArgsIfRequested, testmain_test.go), so a test can assert on the
+// REAL argv this probe built rather than trusting a code read of the
+// hardcoded --backend constant.
+func recordedArgs(t *testing.T, fn func()) string {
+	t.Helper()
+	path := t.TempDir() + "/args.txt"
+	t.Setenv("GO_HELPER_ARGS_RECORD_FILE", path)
+	fn()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read recorded args: %v", err)
+	}
+	return string(data)
+}
+
+func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {
+	withFactory(t, "list_ok_with_match")
+	got := recordedArgs(t, func() {
+		_, _ = listEscalated(context.Background(), noopWarn)
+	})
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
+		t.Fatalf("issue list: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	}
+	if !strings.Contains(got, "escalated-work") {
+		t.Fatalf("issue list: expected the escalated-work named query in argv, got %s", got)
+	}
+
+	withFactory(t, "create_ok")
+	got = recordedArgs(t, func() {
+		_, _ = createIssue(context.Background(), "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
+	})
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
+		t.Fatalf("issue create: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	}
+
+	withFactory(t, "update_ok")
+	got = recordedArgs(t, func() {
+		_ = updateIssueMetadata(context.Background(), "zr-1", map[string]string{"k": "v"}, noopWarn)
+	})
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
+		t.Fatalf("issue update: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	}
+
+	withFactory(t, "comment_ok")
+	got = recordedArgs(t, func() {
+		_ = commentIssue(context.Background(), "zr-1", "note", noopWarn)
+	})
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
+		t.Fatalf("issue comment: expected --backend %s in argv, got %s", pgConnectorBackend, got)
 	}
 }
 
