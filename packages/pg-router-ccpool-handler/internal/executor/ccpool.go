@@ -523,7 +523,12 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 // waitDone polls the bead status until DoneSignal fires (success) or MAX_WAIT
 // elapses / the session dies (failure). On detecting death it re-reads the bead
 // status once more before failing (a bead that closed in the same instant the
-// session ended is a success). On failure it applies the role's OnFailure.
+// session ended is a success), then — if that is still not a DoneSignal — gives
+// it ONE bounded extra poll interval and re-reads again before failing, so a
+// same-bead external mutation racing the exact instant of death (e.g. the
+// ACL's own head-advance reopen, pg2-qmltm) has a chance to become visible
+// before this is classified as an unexplained death. On failure it applies the
+// role's OnFailure.
 //
 // claimTerminal arbitrates the single-terminal race with the budget watchdog:
 // EVERY terminal outcome (success or failure) is gated through it, so exactly
@@ -571,6 +576,28 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		}
 		if !r.active(ctx, name) {
 			// re-check-after-death: the bead may have closed as the session ended.
+			status, _ = beads.Status(ctx, r.deps.BD, d.Item.ID)
+			if complete.DoneSignal(completion, status, seenClaimed) {
+				if won() {
+					return nil
+				}
+				return lose()
+			}
+			// pg2-qmltm: a legitimate concurrent external mutation of THIS SAME
+			// bead -- e.g. pg-router's ACL reopening a review-pr bead on PR
+			// head-advance (ReopenReview: status=open, assignee cleared;
+			// docs/pr-review-flow.md JR4) -- can land microseconds after the
+			// session is observed dead but before that write is visible to the
+			// read just above. One bounded re-read (mirrors closeReason's own
+			// bounded re-read just below, for the identical class of race) gives
+			// the write a chance to become visible before this branch commits to
+			// "unexplained death." seenClaimed still gates it exactly as it gates
+			// the ordinary DoneSignal check above, so a session that never
+			// claimed the bead before dying (the true startup-race failure
+			// DoneSignal's own seenClaimed guard exists for) is unaffected.
+			if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err != nil {
+				return err
+			}
 			status, _ = beads.Status(ctx, r.deps.BD, d.Item.ID)
 			if complete.DoneSignal(completion, status, seenClaimed) {
 				if won() {

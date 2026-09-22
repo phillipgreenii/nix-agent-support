@@ -502,6 +502,83 @@ func TestWaitDone_secondExternalCloseEscalates(t *testing.T) {
 	}
 }
 
+// --- pg2-qmltm: a same-bead external reopen racing session death is a
+// handback, not an unexplained death ---
+
+// TestWaitDone_reopenRacesDeath_recognizedAsHandback reproduces the exact race
+// pg2-qmltm documents (observed live against zr-n1abo.2, a review dispatch):
+// the bead is claimed (in_progress, latching seenClaimed), then a same-bead
+// external mutation reopens it (status -> open, e.g. pg-router's ACL
+// head-advance reopen, docs/pr-review-flow.md JR4) in the SAME instant the
+// ccpool session goes idle. The immediate re-check-after-death still observes
+// the stale "in_progress" read (the second StatusSeq entry below); only the
+// bounded retry's second read observes the reopen (the third entry, "open").
+// Before this bead's fix this fell into "unexplained death" and, for the
+// review role's on_failure=add-human, spuriously flagged the bead human.
+func TestWaitDone_reopenRacesDeath_recognizedAsHandback(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-rv": {"in_progress", "in_progress", "open"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{{ExternalID: "pg-router-review-zr-rv", Live: true, State: ccpool.StateWorking}},
+		{{ExternalID: "pg-router-review-zr-rv", Live: false, State: ccpool.StateIdle}},
+	}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: reviewRole(cfg), Item: item.Item{ID: "zr-rv"}}
+	if err := e.waitDone(context.Background(), nil, d, "pg-router-review-zr-rv"); err != nil {
+		t.Fatalf("a same-bead reopen racing session death must be a clean handback, not an unexplained death: got %v; updates=%v", err, bd.Updates)
+	}
+	if dtest.HasUpdate(bd, "update zr-rv --add-label human") {
+		t.Errorf("must NOT spuriously add-human on a legitimate reopen; updates=%v", bd.Updates)
+	}
+	if len(bd.Updates) != 0 {
+		t.Errorf("a recognized handback is not waitDone's mutation to make (the reopener already made it); updates=%v", bd.Updates)
+	}
+}
+
+// TestWaitDone_genuineDeathStillFailsAfterBoundedRetry is the negative-case
+// lock alongside the fix above: when the bead never reopens (a genuine
+// unexplained death — the session simply crashed), the new bounded retry must
+// NOT turn that into a false success. It costs exactly one extra poll
+// interval, then still classifies as death and applies the role's on_failure.
+func TestWaitDone_genuineDeathStillFailsAfterBoundedRetry(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-rv": {"in_progress"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{{ExternalID: "pg-router-review-zr-rv", Live: false, State: ccpool.StateErrored}},
+	}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: reviewRole(cfg), Item: item.Item{ID: "zr-rv"}}
+	if err := e.waitDone(context.Background(), nil, d, "pg-router-review-zr-rv"); err == nil {
+		t.Fatal("a genuine unexplained death (no reopen ever arrives) must still fail")
+	}
+	if !dtest.HasUpdate(bd, "update zr-rv --add-label human") {
+		t.Errorf("review role's on_failure=add-human must still apply; updates=%v", bd.Updates)
+	}
+}
+
+// TestWaitDone_neverClaimedDeath_stillFails locks in DoneSignal's own
+// seenClaimed guard against the new bounded retry: a session that dies before
+// ever claiming the bead (the "startup race" DoneSignal's seenClaimed exists
+// to reject) must still fail even though the bead is sitting at status=open
+// with no assignee — the exact shape a legitimate handback also has. Without
+// seenClaimed gating the retry the same way it gates the ordinary DoneSignal
+// check, this would be misread as success.
+func TestWaitDone_neverClaimedDeath_stillFails(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-rv": {"open"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{{ExternalID: "pg-router-review-zr-rv", Live: false, State: ccpool.StateErrored}},
+	}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: reviewRole(cfg), Item: item.Item{ID: "zr-rv"}}
+	if err := e.waitDone(context.Background(), nil, d, "pg-router-review-zr-rv"); err == nil {
+		t.Fatal("dying before ever claiming (never-seen in_progress) must still fail, per DoneSignal's own startup-race guard")
+	}
+	if !dtest.HasUpdate(bd, "update zr-rv --add-label human") {
+		t.Errorf("review role's on_failure=add-human must still apply; updates=%v", bd.Updates)
+	}
+}
+
 // --- pg2-04bf7: dead ccpool sessions must not block retries forever ---
 
 // TestWaitDone_deathClosesDeadRow proves waitDone's unexplained-death branch
