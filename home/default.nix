@@ -23,6 +23,7 @@
     ./programs/pg-router
     ./programs/pg-router-ccpool-handler
     ./programs/pg-router-probe
+    ./programs/ccpool-probe
     ./programs/pg-desk
     ./programs/pb
     ./programs/claude-extended-tool-approver

@@ -297,6 +297,16 @@
           pg-router-probe = final.callPackage ./packages/pg-router-probe {
             inherit (goBuilders) mkGoApp;
           };
+          # ccpool-probe: Pattern A (ADR 0008), same shape as
+          # pg-router-probe above — a standalone deterministic health
+          # probe over ccpool's own operational health from pg-router's
+          # point of view (docket pg2-93e5s, packet 2). It execs both
+          # `ccpool` and `pg-connector` as subprocesses (ambient $PATH)
+          # for every read/write, so it needs no local `replace`/modRoot
+          # either.
+          ccpool-probe = final.callPackage ./packages/ccpool-probe {
+            inherit (goBuilders) mkGoApp;
+          };
           pg-router = final.callPackage ./packages/pg-router {
             inherit (goBuilders) mkGoApp;
             # No top-level bd/beads overlay attr — resolve it directly here (mirrors pb below).
@@ -936,7 +946,12 @@
               # `pg-router-probe` added docket pg2-93e5s packet 1 — same
               # reentrant test-helper-process shape for its own
               # pg-connector wire double, verified via
-              # `grep -rln '^//go:build' packages/pg-router-probe`) is a
+              # `grep -rln '^//go:build' packages/pg-router-probe`;
+              # `ccpool-probe` added docket pg2-93e5s packet 2 — same
+              # reentrant test-helper-process shape, this time doubling
+              # for BOTH its ccpool and pg-connector subprocess wire
+              # doubles, verified via
+              # `grep -rln '^//go:build' packages/ccpool-probe`) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -994,6 +1009,7 @@
                 "pg-connector"
                 "pg-router-source-pg-connector"
                 "pg-router-probe"
+                "ccpool-probe"
                 # osx-bridge-api (bead pg2-p9ap3): Pattern A, no local
                 # replace. Its two `//go:build darwin`/`!darwin` files
                 # (internal/eventkitprovider) are platform-gated
@@ -1958,6 +1974,20 @@
                 pname = "pg-router-probe-go-tests";
                 src = lib.cleanSource ./packages/pg-router-probe; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-probe/gomod2nix.toml;
+              };
+
+              # ccpool-probe (docket pg2-93e5s, packet 2) — fixture-driven
+              # unit/integration suite (needs-input/zombie-drift checks,
+              # fingerprinting, "nothing new" dedup, snapshot robustness,
+              # the reentrant test-helper-process wire double covering
+              # BOTH ccpool and pg-connector). No testDeps: the suite
+              # execs no real ccpool/pg-connector; ccpoolExecCmdFactory
+              # and execCmdFactory are each independently swapped to
+              # re-exec the test binary itself.
+              ccpool-probe-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "ccpool-probe-go-tests";
+                src = lib.cleanSource ./packages/ccpool-probe; # matches default.nix
+                gomod2nixToml = ./packages/ccpool-probe/gomod2nix.toml;
               };
 
               # T-14 enforcement, mechanical rather than aspirational: the
@@ -6318,6 +6348,7 @@
               pg-ccaudit
               pg-router-source-pg-connector
               pg-router-probe
+              ccpool-probe
               integrate-branch-support
               pg-desk
               osx-bridge-api
