@@ -15,10 +15,13 @@ let
   # this handler needs its OWN pool at all: ccpool's default pool cap
   # (`max_sessions = 6`, packages/ccpool/internal/config/config.go) is shared
   # by every ccpool consumer, and this handler alone routinely runs 15-30
-  # concurrent dispatches against it -- cap eviction then force-closes
-  # actively-working sessions with no regard for in-progress work
-  # (packages/ccpool/internal/session/reap.go's Pass 2). Giving this handler
-  # its own registered pool (docs/adr/0014-ccpool-reap-all-pool-registry.md)
+  # concurrent dispatches against it -- before ADR 0072, cap eviction
+  # force-closed actively-working sessions; since then eviction spares
+  # working rows and the handler declines busy when the pool is full, so the
+  # dedicated pool's remaining purpose is isolation from other consumers'
+  # sessions and their reap cadence, not protection from eviction. Giving
+  # this handler its own registered pool
+  # (docs/adr/0014-ccpool-reap-all-pool-registry.md)
   # lets its cap be raised WITHOUT touching the shared default pool's cap for
   # every other ccpool consumer (interactive use, other handlers).
   tomlFormat = pkgs.formats.toml { };
@@ -861,7 +864,12 @@ in
           this one named pool instead of the shared default pool. The
           default (`max_sessions = 40`) is a generous-but-bounded cap in line
           with this handler's actual observed concurrency (15-30 concurrent
-          dispatches against ccpool's own shared-pool default of 6) --
+          dispatches against ccpool's own shared-pool default of 6).
+          Before ADR 0072, cap eviction force-closed actively-working
+          sessions; since then eviction spares working rows and the
+          handler declines busy when the pool is full, so the dedicated
+          pool's remaining purpose is isolation from other consumers'
+          sessions and their reap cadence, not protection from eviction.
           `packages/ccpool/internal/session/reap.go`'s cap-eviction pass
           still runs (this is a HIGHER cap, not reap disabled), it just no
           longer fires at a small fraction of real concurrency.

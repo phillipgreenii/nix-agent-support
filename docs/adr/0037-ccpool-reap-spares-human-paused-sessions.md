@@ -4,6 +4,11 @@
 **Date**: 2026-07-29
 **Deciders**: Phillip Green II
 
+> **Later note (2026-09-21, ADR 0072):** the Neutral consequence
+> "preserved sessions still count toward the cap" and the Context claim that the cap "cannot starve
+> new work" are superseded: capacity now counts non-preserved rows only, cap eviction spares `working`
+> rows, and the cap is consulted as an admission gate. Preservation itself is unchanged.
+
 ## Context
 
 ccpool's reaper (`packages/ccpool/internal/session/reap.go`) closes sessions in two passes over the

@@ -10,12 +10,15 @@ these interfaces.
 The four interfaces are described on **two axes** — the **kind** of party on the far side, and
 whether that party is an **essential or optional** participant in what ccpool exists to do:
 
-| Interface          | Boundary                           | Counterparty (kind)                       | Participation           | Initiator |
-| ------------------ | ---------------------------------- | ----------------------------------------- | ----------------------- | --------- |
-| `INTF-CALLER`      | dispatch, status, cancel, metadata | `ACTOR-CCP-CALLER` (actor)                | essential, driving port | caller    |
-| `INTF-AGENTSIGNAL` | the agent's own turn signals in    | the agent binary (owner)                  | essential               | agent     |
-| `INTF-DENY`        | a question denial out to the agent | `ACTOR-CCP-AGENT` (actor)                 | essential               | ccpool    |
-| `INTF-NOTIFY`      | a notifying event out              | notification sink (implementer, optional) | optional                | ccpool    |
+| Interface          | Boundary                                     | Counterparty (kind)                       | Participation           | Initiator |
+| ------------------ | -------------------------------------------- | ----------------------------------------- | ----------------------- | --------- |
+| `INTF-CALLER`      | dispatch, status, capacity, cancel, metadata | `ACTOR-CCP-CALLER` (actor)                | essential, driving port | caller    |
+| `INTF-AGENTSIGNAL` | the agent's own turn signals in              | the agent binary (owner)                  | essential               | agent     |
+| `INTF-DENY`        | a question denial out to the agent           | `ACTOR-CCP-AGENT` (actor)                 | essential               | ccpool    |
+| `INTF-NOTIFY`      | a notifying event out                        | notification sink (implementer, optional) | optional                | ccpool    |
+
+capacity reports free slots under ADR 0072's definition so a caller can decline to dispatch
+instead of launching into a full pool.
 
 `INTF-CALLER`, `INTF-AGENTSIGNAL` and `INTF-DENY` are **essential** — driving a session, learning
 what it did, and denying it a question it cannot ask are all core to what ccpool is for.
@@ -23,7 +26,7 @@ what it did, and denying it a question it cannot ask are all core to what ccpool
 
 ```mermaid
 flowchart LR
-    CALLER["dispatching caller"] -- "INTF-CALLER: dispatch / status / cancel / metadata" --> CC["ccpool"]
+    CALLER["dispatching caller"] -- "INTF-CALLER: dispatch / status / capacity / cancel / metadata" --> CC["ccpool"]
     CC -- "launch, route prompts" --> AGENT["the agent inside the session"]
     AGENT -- "INTF-AGENTSIGNAL: ready / turn-ended / turn-failed / needs-input" --> CC
     CC -- "INTF-DENY: question denied, with reason" --> AGENT

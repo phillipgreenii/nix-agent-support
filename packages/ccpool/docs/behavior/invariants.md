@@ -20,12 +20,11 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   reap every registered pool per its own policy — independent of whether anything is actively
   dispatching to it. A registry entry whose pool no longer exists MUST be discarded without
   touching any other pool's data.
-- **`INV-POOL-3`** <!-- uuid: 422e92cd-079c-430f-98b3-2bdc76f6fb7d --> — **Reap MUST spare a
-  human-awaited session** (one in `needs_input`) under both inactivity-bound and pool-cap
-  eviction, ordering eviction among the rest by **least-recent activity**, never by creation
-  order. The pool MAY sit above its cap when only spared sessions remain — that is accepted, not a
-  defect. A session belonging to a run that no longer exists MUST NOT accumulate across restarts;
-  the next sweep MUST reclaim it.
+- **`INV-POOL-3`** <!-- uuid: 422e92cd-079c-430f-98b3-2bdc76f6fb7d --> — Cap eviction MUST count
+  only live sessions not spared for a human, MUST close only sessions whose turn has ended (idle,
+  errored), oldest-activity first, and MUST leave the pool above its cap when only spared or
+  still-working sessions remain (ADR 0072). A session belonging to a run that no longer exists
+  MUST NOT accumulate across restarts; the next sweep MUST reclaim it.
 
 ## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 

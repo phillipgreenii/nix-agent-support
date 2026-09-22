@@ -28,3 +28,15 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   any operator-configured command) anywhere in `packages/pg-router`'s own contract surface (its
   `--help` text, config schema, or wire messages). Naming a backing tool is this module's own
   business, per the Floor stated in both this set's and pg-router's own `## Scope`.
+- **`INV-CCH-6`** — a handler MUST query pool capacity before preparing isolation or
+  launching a session and MUST NOT launch when the pool reports no free slot or cannot be
+  read. It signals this ONLY through the transport's pre-accept busy decline
+  (`conformance.ExitBusy`), so the core re-offers the event with backoff; it mutates no bead
+  and creates no worktree. This is consistent with `INV-CCH-3`: busy is a pre-accept signal,
+  not a post-accept outcome.
+- **`INV-CCH-7`** — when a session ends before its bead completes, the handler MUST read
+  ccpool's recorded close reason. An external close (`idle_ttl`, `cap_eviction`, `operator`)
+  MUST release the bead (status open, assignee cleared) with a comment naming the reason,
+  regardless of the role's `on_failure`, and MUST escalate to `human` on the second
+  consecutive external close of the same bead. Only an unexplained death, or a close the
+  handler itself requested (`handler`), applies `on_failure`.
