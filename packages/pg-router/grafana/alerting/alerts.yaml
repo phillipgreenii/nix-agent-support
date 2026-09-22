@@ -1,0 +1,243 @@
+# pg-router unified-alerting rules (pg2-02n5o): closes the "panels but no
+# alert rules" gap identified in a live incident (pg2-5sirm) -- none of
+# pg_router_liveness dropping to 0, pg_router_backlog/pg_router_queue_depth
+# growing unbounded for a specific type, or a sustained non-zero
+# pg_router_failures_total rate would have paged or otherwise surfaced to an
+# unattended operator before this file existed.
+#
+# Metric names and semantics verified against (not guessed):
+#   - phillipgreenii-nix-support-apps/darwin/modules/observability/
+#     dashboards/pg-router.json (the existing dashboard panels)
+#   - packages/pg-router/internal/metrics/metrics.go (this repo)
+#
+# Folder "pg-router" (deliberately NOT the shared "Daemon Health" folder
+# launchd-health/mysql-probe/logsource-health use in
+# phillipgreenii-nix-support-apps) converges BY TITLE with the existing
+# pg-router dashboard's own dashboardProviders folder, registered from
+# phillipgreenii-nix-support-apps/darwin/modules/observability/ui.nix (ADR
+# 0039's title-convergence mechanism -- no folderUid is ever pinned, since
+# Grafana's alerting file-provisioning has no folderUid field and
+# provisions before dashboards; see that repo's alerting.nix header comment
+# for the incident a pinned uid caused).
+#
+# Registered via phillipgreenii.observability.alertRuleFiles from
+# darwin/modules/pg-router/default.nix, gated on `obs.enable` only (mirrors
+# darwin/modules/pa-monitor/default.nix's own precedent: "wired
+# unconditionally ... no-op on machines without the observability stack"),
+# NOT on daemonEnabledByAnyUser -- registering this file is harmless even
+# when the daemon LaunchAgent isn't running; the rules below simply see no
+# data in that case.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-router-alerts
+    folder: pg-router
+    interval: 1m
+    rules:
+      # Liveness: pg_router_liveness reports 1 while the daemon's last tick
+      # is within its liveness window, else 0 (daemon-mode only --
+      # internal/metrics/metrics.go's WithLiveness/MetricLiveness).
+      # noDataState is Alerting, not OK: unlike a per-label registry rule
+      # where a label simply leaving the watch list is benign (see
+      # launchd-health's own per-label rules), this is pg-router's OWN
+      # single fixed liveness series. Once the daemon LaunchAgent is
+      # configured to run, an absent series means the metrics endpoint
+      # itself is unreachable (the daemon crashed or never started), which
+      # is exactly the failure this rule exists to catch -- the same
+      # reasoning mysql-probe/alerting-template.nix's per-target rule uses,
+      # not pa-monitor's daemon-connection.yaml (whose OK polarity fits a
+      # client-side "maybe nobody has a pane open right now" absence, which
+      # does not apply here).
+      - uid: pg-router-liveness-down
+        title: pg-router liveness is down
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-router daemon liveness has been down for over 5 minutes"
+          description: "pg_router_liveness has reported 0, or gone missing from Prometheus entirely, for over 5 minutes -- the daemon's last tick has fallen outside its liveness window, or its /metrics endpoint is unreachable. This is exactly the condition observed live in pg2-5sirm that no alert previously covered. Check `pg-router status` and the com.phillipg.pg-router-daemon LaunchAgent."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_router_liveness
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # Backlog (total, scalar): pg_router_backlog has no fixed capacity
+      # bound (per pg-router.json's own panel description: "no yellow/red
+      # threshold is set here -- a nonzero backlog is an expected steady
+      # state"), so this alerts on SUSTAINED GROWTH over a rolling window
+      # rather than an absolute value. delta(...) over a 30m window must
+      # stay positive continuously across the 15m `for` pending period --
+      # i.e. the backlog must be climbing across roughly the last 45
+      # minutes, not just a momentary blip. noDataState: OK -- total
+      # absence of the metric is already covered by the liveness rule
+      # above; this rule's own job is only to notice growth once the series
+      # exists.
+      - uid: pg-router-backlog-growing
+        title: pg-router backlog is growing
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router total backlog has been growing for a sustained period"
+          description: "delta(pg_router_backlog[30m]) has stayed positive for over 15 minutes -- events are being retained faster than they are dispatched. See also the per-type queue-depth rule below, which catches a single type growing even while the aggregate total looks flat."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: delta(pg_router_backlog[30m])
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Queue depth (per type): pg_router_queue_depth carries a `type`
+      # label (pg-router.json's "Queue depth (by type)" panel) -- this is
+      # the metric pg2-5sirm's own evidence names directly ("growing
+      # unbounded for a specific type"). Same sustained-growth shape as the
+      # backlog rule above, but evaluated per series: Grafana's unified
+      # alerting treats each unique label combination the query returns as
+      # an independent alert instance, so one type growing fires without
+      # needing every type enumerated in Nix -- unlike launchd-health's
+      # bounded label registry, pg-router's event types are not a static,
+      # known-in-advance list.
+      - uid: pg-router-queue-depth-growing
+        title: pg-router queue depth is growing (by type)
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router queue depth for type {{ $labels.type }} has been growing"
+          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: delta(pg_router_queue_depth[30m])
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Failure rate: pg_router_failures_total, aggregated by its only
+      # label (`class` -- declined | dispatch-failure | handler-error;
+      # there is no per-role breakdown in this metric today, so this cannot
+      # isolate a single failing role the way pg2-5sirm's incident
+      # described -- that would need a new label dimension, out of this
+      # bead's scope). Trustworthy as of pg2-97539 (closed): before that
+      # fix, a handler-internal dispatch error fell through both existing
+      # failure classes uncounted, so a real 100% failure burst could have
+      # read as a flat-zero rate here; FailureClassHandlerError closed that
+      # gap. noDataState: OK -- per pg-router.json's own panel description,
+      # an absent series means zero failures of any class have ever been
+      # recorded (OTel counters are lazily created per label set on first
+      # increment), which is the healthy state.
+      - uid: pg-router-failure-rate
+        title: pg-router failure rate is non-zero (by class)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router failure rate for class {{ $labels.class }} has been non-zero"
+          description: "sum by (class) (rate(pg_router_failures_total[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} -- deliveries are failing. See pg2-97539 for the failure-class catalog's provenance and known limitations (no per-role breakdown)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (class) (rate(pg_router_failures_total[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

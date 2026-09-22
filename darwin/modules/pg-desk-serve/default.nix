@@ -124,5 +124,14 @@ in
         StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
       };
     };
+
+    # pg2-02n5o: liveness/stale-snapshot/sync-failure-rate alert rules for
+    # the pg_desk_* metric catalog (see the file's own header for the
+    # incident context and the folder-convergence mechanism). Gated on this
+    # module's own `cfg.enable`, mirroring pg-router's darwin module's
+    # `obs.enable`-only gate for its own alertRuleFiles entry.
+    phillipgreenii.observability.alertRuleFiles = [
+      ../../../packages/pg-desk/grafana/alerting/alerts.yaml
+    ];
   };
 }

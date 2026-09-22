@@ -1,0 +1,181 @@
+# pg-desk unified-alerting rules (pg2-02n5o): counterpart to
+# packages/pg-router/grafana/alerting/alerts.yaml -- see that file's header
+# for the shared incident context (pg2-5sirm) and the folder-convergence
+# mechanism (ADR 0039, phillipgreenii-nix-support-apps).
+#
+# Metric names and semantics verified against (not guessed):
+#   - phillipgreenii-nix-support-apps/darwin/modules/observability/
+#     dashboards/pg-desk-metrics.json (the existing dashboard panels)
+#   - packages/pg-desk/internal/metrics/metrics.go (this repo)
+#
+# pg-desk has no queue/backlog metric of its own -- it serves a synced
+# snapshot rather than processing a queue like pg-router does.
+# pg_desk_dashboard_stale / pg_desk_dashboard_age_seconds are the closest
+# analog: a persistently stale snapshot IS pg-desk's version of an
+# unprocessed backlog that never drains.
+#
+# Folder "pg-desk" converges by TITLE with the existing pg-desk dashboards'
+# own dashboardProviders folder (phillipgreenii-nix-support-apps
+# darwin/modules/observability/ui.nix's `pg-desk = { folder = "pg-desk"; ... }`).
+#
+# Registered via phillipgreenii.observability.alertRuleFiles from
+# darwin/modules/pg-desk-serve/default.nix, gated on this module's own
+# `cfg.enable` -- registering the file is harmless even before the service
+# starts being scraped.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-desk-alerts
+    folder: pg-desk
+    interval: 1m
+    rules:
+      # Liveness: pg_desk_liveness reports 1 whenever pg-desk serve answers
+      # a scrape (internal/metrics/metrics.go's MetricLiveness -- the
+      # OTel-native successor to the old hand-written `pg_desk_up 1`).
+      # noDataState: Alerting for the same reason as pg-router's own
+      # liveness rule -- once pg-desk-serve is enabled, an absent series
+      # means the process itself is down or unreachable, which is the
+      # failure this rule exists to catch, not a benign "nobody's watching"
+      # absence.
+      - uid: pg-desk-liveness-down
+        title: pg-desk-serve liveness is down
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-desk-serve liveness has been down for over 5 minutes"
+          description: "pg_desk_liveness has reported 0, or gone missing from Prometheus entirely, for over 5 minutes -- pg-desk-serve's /metrics endpoint is unreachable. Check the com.phillipg.pg-desk-serve LaunchAgent."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_liveness
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+
+      # Backlog-equivalent: pg_desk_dashboard_stale is pg-desk's own
+      # explicit 0=fresh/1=stale flag (design doc section 8;
+      # staleAfterSeconds = syncIntervalSeconds * boundIntervals -- see
+      # pg-desk-metrics.json's "Stale" panel description for the exact
+      # polarity, which is pinned and deliberately the OPPOSITE of a
+      # presence-style panel). A sustained stale reading means the synced
+      # snapshot has stopped being refreshed -- the pg-desk analog of a
+      # growing, undrained backlog. noDataState: OK -- total absence of the
+      # metric (the process itself being down) is already covered by the
+      # dedicated liveness rule above.
+      - uid: pg-desk-sync-stale
+        title: pg-desk-serve dashboard snapshot is stale
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk-serve's dashboard snapshot has been stale for over 10 minutes"
+          description: "pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_dashboard_stale
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gte
+                    params: [1]
+
+      # Failure rate: pg_desk_sync_errors_total, by repo. NOTE (as of this
+      # writing, per pg-desk-metrics.json's own panel description): this
+      # counter is registered and exposed, but serve has no live call site
+      # wired for it yet -- serve never itself runs sync, so there is
+      # nowhere in its own request path to observe a sync failure the
+      # moment it happens (see packages/pg-desk/internal/metrics's
+      # MetricSyncErrors doc comment). This rule is therefore
+      # forward-looking/best-effort: it cannot fire today (the series stays
+      # permanently absent, which noDataState: OK correctly treats as
+      # healthy, not broken) until a future task wires the cross-process
+      # call site. Included now so the alert exists the moment that call
+      # site lands, rather than being a second, separately-remembered
+      # follow-up.
+      - uid: pg-desk-sync-errors
+        title: pg-desk sync failure rate is non-zero (by repo)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk sync error rate for repo {{ $labels.repo }} has been non-zero"
+          description: "sum by (repo) (rate(pg_desk_sync_errors_total[10m])) has stayed above 0 for over 10 minutes for repo {{ $labels.repo }}. NOTE: pg_desk_sync_errors_total has no live call site wired as of pg2-02n5o -- this rule cannot fire until a future task wires it (see pg-desk-metrics.json's 'Sync errors / sec' panel description)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (repo) (rate(pg_desk_sync_errors_total[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

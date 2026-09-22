@@ -2511,6 +2511,16 @@
                                     type = lib.types.attrsOf lib.types.anything;
                                     default = { };
                                   };
+                                  # pg2-02n5o: darwin/modules/pg-router/default.nix now
+                                  # also sets alertRuleFiles alongside logSources —
+                                  # this stub needs the same option shape as the real
+                                  # one (phillipgreenii-nix-support-apps's alerting.nix),
+                                  # or evalDarwin fails with "the option ... does not
+                                  # exist".
+                                  alertRuleFiles = lib.mkOption {
+                                    type = lib.types.listOf lib.types.path;
+                                    default = [ ];
+                                  };
                                 };
                                 system.launchdServices.userAgents = lib.mkOption {
                                   type = lib.types.attrsOf userAgentSubmodule;
@@ -2625,7 +2635,15 @@
                             };
                           }
                         )
-                        { home-manager.users.tester.phillipgreenii.programs.pg-router.daemon.enable = daemonEnable; }
+                        {
+                          home-manager.users.tester.phillipgreenii.programs.pg-router.daemon.enable = daemonEnable;
+                          # pg2-02n5o: force obs.enable so both darwinWithDaemon
+                          # and darwinWithoutDaemon exercise the
+                          # alertRuleFiles/logSources block below (independent of
+                          # daemonEnable, matching the real module's own
+                          # `lib.mkIf (obs.enable or false)` gate).
+                          phillipgreenii.observability.enable = true;
+                        }
                       ];
                     }).config;
 
@@ -2746,6 +2764,18 @@
                 assert lib.hasInfix "export CCPOOL_POOL=/tmp/fake-ccpool-pool"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
+                # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
+                # independent of daemonEnable -- both darwinWithDaemon and
+                # darwinWithoutDaemon force obs.enable = true above, so both
+                # must carry the pg-router alerting file. Path literal here is
+                # relative to flake.nix's own location (repo root), which
+                # resolves to the same absolute path as
+                # darwin/modules/pg-router/default.nix's own
+                # ../../../packages/... spelling (relative to ITS location).
+                assert lib.elem ./packages/pg-router/grafana/alerting/alerts.yaml
+                  darwinWithDaemon.phillipgreenii.observability.alertRuleFiles;
+                assert lib.elem ./packages/pg-router/grafana/alerting/alerts.yaml
+                  darwinWithoutDaemon.phillipgreenii.observability.alertRuleFiles;
                 pkgs.runCommand "test-pg-router-module-ok" { } "touch $out";
 
               # test-pg-router-ccpool-handler-module (this bead, pg2-pteab):
@@ -3477,6 +3507,18 @@
                                 type = lib.types.attrsOf userAgentSubmodule;
                                 default = { };
                               };
+                              # pg2-02n5o: darwin/modules/pg-desk-serve/default.nix
+                              # now also sets alertRuleFiles unconditionally when
+                              # cfg.enable -- this stub needs the same option shape
+                              # as the real one (phillipgreenii-nix-support-apps's
+                              # alerting.nix), or evalDarwin fails with "the option
+                              # ... does not exist" (same reasoning as pg-router's
+                              # own evalDarwin fixture, and the pg2-6e5h6 precedent
+                              # noted on that fixture).
+                              phillipgreenii.observability.alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
                               system.primaryUser = lib.mkOption {
                                 type = lib.types.nullOr lib.types.str;
                                 default = "tester";
@@ -3545,6 +3587,16 @@
                 # collapse them into one"].
                 assert lib.hasInfix "--port 9819"
                   darwinEnabledSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # alertRuleFiles (pg2-02n5o): gated on this module's own
+                # cfg.enable (same gate as the LaunchAgent above), so absent
+                # when disabled and present once enabled. Path literal here
+                # (relative to flake.nix at the repo root) resolves to the
+                # same absolute path as
+                # darwin/modules/pg-desk-serve/default.nix's own
+                # ../../../packages/... spelling (relative to ITS location).
+                assert darwinDisabled.phillipgreenii.observability.alertRuleFiles == [ ];
+                assert lib.elem ./packages/pg-desk/grafana/alerting/alerts.yaml
+                  darwinEnabledNoSoak.phillipgreenii.observability.alertRuleFiles;
                 # Home module: no consumer input required to evaluate
                 # (default enable = false, nothing installed/rendered).
                 assert hmDisabled.home.packages == [ ];

@@ -101,6 +101,16 @@ in
         serviceName = "pg-router-events";
         path = "\${env:XDG_STATE_HOME}/pg-router/events.jsonl";
       };
+
+      # pg2-02n5o: liveness/backlog/queue-depth/failure-rate alert rules for
+      # the pg_router_* metric catalog (see the file's own header for the
+      # incident context, folder-convergence mechanism, and why this is
+      # gated on `obs.enable` alone rather than `daemonEnabledByAnyUser` --
+      # mirrors darwin/modules/pa-monitor/default.nix's own
+      # alertRuleFiles precedent).
+      phillipgreenii.observability.alertRuleFiles = [
+        ../../../packages/pg-router/grafana/alerting/alerts.yaml
+      ];
     })
 
     # LaunchAgent registration via the canonical helper (ADR 0049, amended by
