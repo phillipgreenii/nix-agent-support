@@ -71,6 +71,7 @@
       "enabled": true,
       "excluded": false,
       "mode": "pull",
+      "expectedIntervalMs": 0,
       "lastTick": "2026-09-01T00:05:00Z",
       "failure": null
     },
@@ -80,6 +81,7 @@
       "enabled": true,
       "excluded": true,
       "mode": "pull",
+      "expectedIntervalMs": 0,
       "failure": null
     }
   ],

@@ -160,4 +160,7 @@ type Source struct {
 	Mode     string    `json:"mode"`
 	LastTick time.Time `json:"lastTick"`
 	Failure  *Failure  `json:"failure"`
+	// ExpectedIntervalMs is this source's own expected tick cadence in
+	// milliseconds (this task). 0 means unknown.
+	ExpectedIntervalMs int64 `json:"expectedIntervalMs"`
 }

@@ -12,8 +12,10 @@ import (
 
 // TestPanes_DerivedHealthTwoAxes is this packet's own acceptance bar:
 // derived health for listeners ranks disabled > excluded > cooling > ok;
-// for sources disabled > excluded > failing > stale > idle > ok; for the
-// pool, the no-core/paused checks happen before
+// for sources disabled > excluded > failing > idle > N/A (unknown interval)
+// > stale > ok (this task, pg2-mnf7t.1, widens sources to rank per-source
+// staleness against ExpectedIntervalMs rather than the pool-wide tick); for
+// the pool, the no-core/paused checks happen before
 // core-tick-wedged/degraded/ok [design: Task 4.6 Binding decisions].
 func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 	theme := render.NewTheme(false) // mono: plain text tokens, no ANSI noise
@@ -60,6 +62,7 @@ func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 	t.Run("source", func(t *testing.T) {
 		now := time.Now()
 		failing := &Failure{Count: 2}
+		minuteMs := time.Minute.Milliseconds()
 		cases := []struct {
 			name string
 			s    Source
@@ -67,18 +70,68 @@ func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 		}{
 			{"disabled wins over excluded+failing", Source{Enabled: false, Excluded: true, Failure: failing}, "disabled"},
 			{"excluded wins over failing", Source{Enabled: true, Excluded: true, Failure: failing}, "excluded"},
-			{"failing wins over stale", Source{Enabled: true, Failure: failing, LastTick: now.Add(-1 * time.Hour)}, "failing"},
-			{"stale when ticked long ago", Source{Enabled: true, LastTick: now.Add(-1 * time.Hour)}, "stale"},
+			{"failing wins over stale", Source{Enabled: true, Failure: failing, LastTick: now.Add(-1 * time.Hour), ExpectedIntervalMs: minuteMs}, "failing"},
+			{"stale when ticked long ago", Source{Enabled: true, LastTick: now.Add(-1 * time.Hour), ExpectedIntervalMs: minuteMs}, "stale"},
 			{"idle when never ticked", Source{Enabled: true}, "idle"},
-			{"ok when ticked recently", Source{Enabled: true, LastTick: now}, "ok"},
+			{"ok when ticked recently", Source{Enabled: true, LastTick: now, ExpectedIntervalMs: minuteMs}, "ok"},
 		}
 		for _, c := range cases {
-			got := sourceHealthText(c.s, 1000, now, theme)
+			got := sourceHealthText(c.s, now, theme)
 			if !strings.Contains(got, c.want) {
 				t.Errorf("%s: sourceHealthText = %q, want it to contain %q", c.name, got, c.want)
 			}
 		}
 	})
+}
+
+// --- per-source staleness uses the source's own interval (this task, pg2-mnf7t.1) ---
+//
+// These four cases use render.Theme{} (the zero value) rather than
+// render.NewTheme(...): Theme's own doc comment states "Zero-value renders
+// plain text", so sourceHealthText's output compares equal to the exact
+// expected string with no ANSI-stripping helper needed.
+
+// A source with ExpectedIntervalMs == 0 (unknown) renders N/A, never stale,
+// even though it last ticked long enough ago that a known interval would
+// flag it stale.
+func TestSourceHealthText_UnknownIntervalRendersNA(t *testing.T) {
+	s := Source{Enabled: true, LastTick: time.Now().Add(-10 * time.Minute), ExpectedIntervalMs: 0}
+	got := sourceHealthText(s, time.Now(), render.Theme{})
+	if got != "N/A" {
+		t.Fatalf("sourceHealthText() = %q, want %q", got, "N/A")
+	}
+}
+
+// A source that has never ticked renders idle regardless of whether its
+// interval is known -- idle outranks N/A, since "never started" and
+// "cadence unknown" are different facts.
+func TestSourceHealthText_NeverTickedIsIdleEvenWithKnownInterval(t *testing.T) {
+	s := Source{Enabled: true, LastTick: time.Time{}, ExpectedIntervalMs: 30_000}
+	got := sourceHealthText(s, time.Now(), render.Theme{})
+	if got != "idle" {
+		t.Fatalf("sourceHealthText() = %q, want %q (idle must outrank N/A)", got, "idle")
+	}
+}
+
+// A source ticking every 5 minutes must read ok 2 minutes after its own
+// last tick, even though a fast core tick would flag it stale under the
+// OLD (pool-wide) threshold.
+func TestSourceHealthText_UsesOwnIntervalNotCoreTick(t *testing.T) {
+	s := Source{Enabled: true, LastTick: time.Now().Add(-2 * time.Minute), ExpectedIntervalMs: (5 * time.Minute).Milliseconds()}
+	got := sourceHealthText(s, time.Now(), render.Theme{})
+	if got != "ok" {
+		t.Fatalf("sourceHealthText() = %q, want %q", got, "ok")
+	}
+}
+
+// A source ticking every 5 minutes but silent for 20 minutes reads stale,
+// judged against its OWN interval.
+func TestSourceHealthText_StaleUsesOwnInterval(t *testing.T) {
+	s := Source{Enabled: true, LastTick: time.Now().Add(-20 * time.Minute), ExpectedIntervalMs: (5 * time.Minute).Milliseconds()}
+	got := sourceHealthText(s, time.Now(), render.Theme{})
+	if !strings.HasPrefix(got, "stale") {
+		t.Fatalf("sourceHealthText() = %q, want prefix %q", got, "stale")
+	}
 }
 
 // TestRenderActivityOutcome_BudgetEscalationStylesDistinctlyFromOtherOutcomes

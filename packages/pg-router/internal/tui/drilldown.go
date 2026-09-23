@@ -206,7 +206,7 @@ func (m *Model) drillDetail() string {
 		if !ok {
 			return "(no sources configured)\n"
 		}
-		return renderSourceDetail(s, m.reply.TickIntervalMs, time.Now(), m.theme)
+		return renderSourceDetail(s, time.Now(), m.theme)
 	default:
 		return ""
 	}
@@ -222,12 +222,12 @@ func renderListenerDetail(l Listener, theme render.Theme) string {
 	return b.String()
 }
 
-func renderSourceDetail(s Source, tickIntervalMs int64, now time.Time, theme render.Theme) string {
+func renderSourceDetail(s Source, now time.Time, theme render.Theme) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Name:     %s\n", textsafe.Sanitize(s.Name))
 	fmt.Fprintf(&b, "Type:     %s\n", textsafe.Sanitize(s.Type))
 	fmt.Fprintf(&b, "Mode:     %s\n", textsafe.Sanitize(s.Mode))
-	fmt.Fprintf(&b, "Health:   %s\n", sourceHealthText(s, tickIntervalMs, now, theme))
+	fmt.Fprintf(&b, "Health:   %s\n", sourceHealthText(s, now, theme))
 	lastTick := "-"
 	if !s.LastTick.IsZero() {
 		lastTick = s.LastTick.Format("15:04:05")

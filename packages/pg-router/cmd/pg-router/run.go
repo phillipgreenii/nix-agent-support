@@ -294,6 +294,14 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// anything holding a RoleSet, not just this binary's bootCore.
 	bindings := core.NewBindings(cfg.Roles.DeclaredBindTypes()...)
 	o.Bindings = bindings
+	// sourceIntervalsMs (this task, pg2-mnf7t.1) resolves each configured
+	// source's own expected tick cadence ONCE, from the full configured
+	// query set, so the Sources pane can judge staleness per-source instead
+	// of against the pool-wide tick interval.
+	sourceIntervalsMs := make(map[string]int64, len(cfg.Queries))
+	for _, src := range cfg.Queries {
+		sourceIntervalsMs[src.Name] = config.ExpectedIntervalMsFor(src, cfg.ExpectedIntervalOverrides)
+	}
 	opts := core.Options{
 		LogDir:         cfg.LogDir,
 		Queue:          q,
@@ -308,10 +316,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		ConfigPath:   cfg.ConfigPath,
 		// DeclaredRoles/ExcludedRoles/ExcludedSources/ListenerCounts
 		// (Task 4.1): see this function's own doc comment above.
-		DeclaredRoles:   declaredRoles,
-		ExcludedRoles:   excluded.Roles,
-		ExcludedSources: excluded.Sources,
-		ListenerCounts:  listenerCounts,
+		DeclaredRoles:     declaredRoles,
+		ExcludedRoles:     excluded.Roles,
+		ExcludedSources:   excluded.Sources,
+		SourceIntervalsMs: sourceIntervalsMs,
+		ListenerCounts:    listenerCounts,
 	}
 	if metricsReader != nil {
 		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,

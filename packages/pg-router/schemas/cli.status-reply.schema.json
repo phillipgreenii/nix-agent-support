@@ -163,6 +163,7 @@
           "enabled": { "type": "boolean" },
           "excluded": { "type": "boolean" },
           "mode": { "enum": ["pull", "push"] },
+          "expectedIntervalMs": { "type": "integer", "minimum": 0 },
           "lastTick": { "type": "string" },
           "failure": {
             "oneOf": [

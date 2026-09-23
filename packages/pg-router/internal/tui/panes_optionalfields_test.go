@@ -42,8 +42,13 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 
 	t.Run("source with Failure == nil never renders failing", func(t *testing.T) {
 		now := time.Now()
-		sources := []Source{{Name: "gh-prs", Enabled: true, LastTick: now, Failure: nil}}
-		got := renderSourcesPane(sources, 1000, now, 0, theme, "(no sources configured)", "Sources")
+		// ExpectedIntervalMs is set explicitly (this task, pg2-mnf7t.1): under
+		// the new N/A-before-stale precedence, a Source with no interval set
+		// would render N/A rather than the "ok" this case's own name claims to
+		// exercise (an unrelated axis -- optional-field absence -- not the
+		// interval-unknown one).
+		sources := []Source{{Name: "gh-prs", Enabled: true, LastTick: now, Failure: nil, ExpectedIntervalMs: time.Minute.Milliseconds()}}
+		got := renderSourcesPane(sources, now, 0, theme, "(no sources configured)", "Sources")
 		if strings.Contains(got, "failing") {
 			t.Errorf("nil Failure still rendered a failing indicator; got:\n%s", got)
 		}
@@ -61,7 +66,7 @@ func TestPanes_OptionalFieldAbsenceRendersCleanly(t *testing.T) {
 
 		now := time.Now()
 		failing := &Failure{Count: 3}
-		got2 := renderSourcesPane([]Source{{Name: "flaky", Enabled: true, LastTick: now, Failure: failing}}, 1000, now, 0, theme, "", "Sources")
+		got2 := renderSourcesPane([]Source{{Name: "flaky", Enabled: true, LastTick: now, Failure: failing}}, now, 0, theme, "", "Sources")
 		if !strings.Contains(got2, "failing") {
 			t.Errorf("a set Failure should still render the failing indicator (control case); got:\n%s", got2)
 		}

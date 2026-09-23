@@ -488,7 +488,7 @@ func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 		return renderQueuesPane(m.reply.Queues, width, emptyStateText(es, "No events queued."), title)
 	case paneSources:
 		es := resolveEmptyState(false, false, len(m.reply.Sources) == 0)
-		content := renderSourcesPane(m.reply.Sources, m.reply.TickIntervalMs, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title)
+		content := renderSourcesPane(m.reply.Sources, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title)
 		return dimIfPaused(content, gated, m.theme)
 	case paneRegistry:
 		es := resolveEmptyState(false, false, len(m.reply.Registry) == 0)

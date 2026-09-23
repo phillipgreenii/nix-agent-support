@@ -93,11 +93,13 @@ func listenerHealthText(l Listener, theme render.Theme) string {
 	}
 }
 
-// sourceHealthText ranks a source's health: disabled > excluded > failing
-// > stale > idle > ok. A source that has never ticked (LastTick's zero
-// value) renders idle, never stale -- staleness names a source that WAS
-// ticking and has gone quiet, a different fact from "hasn't started yet."
-func sourceHealthText(s Source, tickIntervalMs int64, now time.Time, theme render.Theme) string {
+// sourceHealthText ranks a source's health: disabled > excluded > failing >
+// idle > unknown-interval (N/A) > stale > ok. A source that has never
+// ticked renders idle regardless of whether its interval is known -- idle
+// outranks N/A, since "never started" and "cadence unknown" are different
+// facts. Widened (this task) to use the source's OWN ExpectedIntervalMs
+// instead of the pool-wide tickIntervalMs.
+func sourceHealthText(s Source, now time.Time, theme render.Theme) string {
 	switch {
 	case !s.Enabled:
 		return theme.Disabled.Render("disabled")
@@ -107,7 +109,9 @@ func sourceHealthText(s Source, tickIntervalMs int64, now time.Time, theme rende
 		return theme.Failing.Render(fmt.Sprintf("failing ×%d", s.Failure.Count))
 	case s.LastTick.IsZero():
 		return theme.Muted.Render("idle")
-	case now.Sub(s.LastTick) > staleThreshold(tickIntervalMs):
+	case s.ExpectedIntervalMs <= 0:
+		return theme.Muted.Render("N/A")
+	case now.Sub(s.LastTick) > staleThreshold(s.ExpectedIntervalMs):
 		return theme.Stale.Render("stale " + formatMinutes(now.Sub(s.LastTick)))
 	default:
 		return theme.OK.Render("ok")
@@ -129,6 +133,43 @@ func formatMinutes(d time.Duration) string {
 		d = 0
 	}
 	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
+// formatCoarse renders d at second granularity below a minute, minute
+// granularity at or above -- the same coarse convention formatSeconds/
+// formatMinutes already establish, applied to whichever is appropriate.
+func formatCoarse(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return formatSeconds(d)
+	}
+	return formatMinutes(d)
+}
+
+// sourceNextCheckText renders the Sources pane's "NEXT CHECK IN" column: a
+// countdown when healthy and the interval is known, "overdue by <duration>"
+// when stale, or "-" for every other health state (disabled/excluded/
+// failing/idle/unknown-interval), since sourceHealthText's own column
+// already explains why there is nothing to count down.
+func sourceNextCheckText(s Source, now time.Time) string {
+	if !s.Enabled || s.Excluded || s.LastTick.IsZero() || s.ExpectedIntervalMs <= 0 {
+		return "-"
+	}
+	if s.Failure != nil && s.Failure.Count > 0 {
+		return "-"
+	}
+	elapsed := now.Sub(s.LastTick)
+	expected := time.Duration(s.ExpectedIntervalMs) * time.Millisecond
+	if elapsed > staleThreshold(s.ExpectedIntervalMs) {
+		return "overdue by " + formatCoarse(elapsed)
+	}
+	remaining := expected - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	return "~" + formatCoarse(remaining)
 }
 
 // --- Pane renderers [design: Task 4.6 Files (panes.go); §4.3 Tier mockups] ---
@@ -262,22 +303,26 @@ func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string 
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
-// renderSourcesPane renders the Sources pane: SOURCE/LAST TICK/STATE,
-// unchanged across tiers ("Sources", never "QUERY" -- ux-13). width is the
-// available terminal width, see renderListenersPane's doc [pg2-hlpuv].
-func renderSourcesPane(sources []Source, tickIntervalMs int64, now time.Time, width int, theme render.Theme, emptyMsg, title string) string {
-	headers := []string{"SOURCE", "LAST TICK", "STATE"}
-	widths := []int{12, 10, 16}
+// renderSourcesPane renders the Sources pane: SOURCE/STATUS/SINCE LAST
+// TICK/NEXT CHECK IN, unchanged across tiers ("Sources", never "QUERY" --
+// ux-13). width is the available terminal width, see renderListenersPane's
+// doc [pg2-hlpuv]. Widened (this task) to use each source's own
+// ExpectedIntervalMs rather than the pool-wide tickIntervalMs -- the
+// tickIntervalMs parameter is gone from this signature entirely.
+func renderSourcesPane(sources []Source, now time.Time, width int, theme render.Theme, emptyMsg, title string) string {
+	headers := []string{"SOURCE", "STATUS", "SINCE LAST TICK", "NEXT CHECK IN"}
+	widths := []int{12, 8, 16, 18}
 	rows := make([][]string, 0, len(sources))
 	for _, s := range sources {
-		lastTick := "-"
+		sinceLastTick := "-"
 		if !s.LastTick.IsZero() {
-			lastTick = s.LastTick.Format("15:04:05")
+			sinceLastTick = formatCoarse(now.Sub(s.LastTick))
 		}
 		rows = append(rows, []string{
 			textsafe.Sanitize(s.Name),
-			lastTick,
-			sourceHealthText(s, tickIntervalMs, now, theme),
+			sourceHealthText(s, now, theme),
+			sinceLastTick,
+			sourceNextCheckText(s, now),
 		})
 	}
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)

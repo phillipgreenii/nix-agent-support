@@ -179,6 +179,14 @@ type Options struct {
 	// run.
 	ExcludedRoles   []string
 	ExcludedSources []string
+	// SourceIntervalsMs is source name -> expected tick cadence in
+	// milliseconds (this task): resolved once by the caller
+	// (cmd/pg-router's bootCore, via config.ExpectedIntervalMsFor) from the
+	// FULL configured query set, so statusSources can report an
+	// interval-aware staleness state instead of the pool-wide tick. A
+	// missing or zero entry means "unknown" — statusSources renders that
+	// source's ExpectedIntervalMs as 0, and the TUI renders N/A.
+	SourceIntervalsMs map[string]int64
 	// ListenerCounts is delivered/declined per role name (Task 4.1 Step 5):
 	// bumped by the deployment's own eventqueue.Observer wiring, at the
 	// SAME (event, handler) acceptance/decline sites INV-EVT-1 already
@@ -276,10 +284,11 @@ type Service struct {
 	// matching fields for what each carries and why. All four are set once
 	// at Listen and never mutated afterward, so composeStatusReply reads
 	// them with no lock of Service's own mu.
-	declaredRoles   []roles.Role
-	excludedRoles   []string
-	excludedSources []string
-	listenerCounts  map[string]*ListenerCounts
+	declaredRoles     []roles.Role
+	excludedRoles     []string
+	excludedSources   []string
+	sourceIntervalsMs map[string]int64
+	listenerCounts    map[string]*ListenerCounts
 
 	// tick and gates are the two published-state cells Serve's handlers (this
 	// package) read with no cross-package import (Task 3.5 Objective):
@@ -511,27 +520,28 @@ func Listen(opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:           conformance.Starting,
-		q:               opts.Queue,
-		bindings:        opts.Bindings,
-		obs:             opts.Observer,
-		reg:             NewRegistry(now),
-		ln:              ln,
-		ref:             ref,
-		logDir:          opts.LogDir,
-		command:         command,
-		metricsReader:   opts.MetricsReader,
-		monitorSubsets:  opts.MonitorSubsets,
-		activityRing:    opts.ActivityRing,
-		configPath:      opts.ConfigPath,
-		startedAt:       now(),
-		readSem:         make(chan struct{}, readSemCapacity),
-		declaredRoles:   opts.DeclaredRoles,
-		excludedRoles:   opts.ExcludedRoles,
-		excludedSources: opts.ExcludedSources,
-		listenerCounts:  opts.ListenerCounts,
-		store:           kvstore.NewInMemory(),
-		storeCommand:    opts.StoreCommand,
+		state:             conformance.Starting,
+		q:                 opts.Queue,
+		bindings:          opts.Bindings,
+		obs:               opts.Observer,
+		reg:               NewRegistry(now),
+		ln:                ln,
+		ref:               ref,
+		logDir:            opts.LogDir,
+		command:           command,
+		metricsReader:     opts.MetricsReader,
+		monitorSubsets:    opts.MonitorSubsets,
+		activityRing:      opts.ActivityRing,
+		configPath:        opts.ConfigPath,
+		startedAt:         now(),
+		readSem:           make(chan struct{}, readSemCapacity),
+		declaredRoles:     opts.DeclaredRoles,
+		excludedRoles:     opts.ExcludedRoles,
+		excludedSources:   opts.ExcludedSources,
+		sourceIntervalsMs: opts.SourceIntervalsMs,
+		listenerCounts:    opts.ListenerCounts,
+		store:             kvstore.NewInMemory(),
+		storeCommand:      opts.StoreCommand,
 	}, nil
 }
 
@@ -1310,7 +1320,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts),
 		"gates":     statusGates(gates),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
-		"sources":   statusSources(nil, s.excludedSources),
+		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs),
 		"activity":  []any{},
 		// activityDropped defaults false (no ring, or since==0's "no cursor, no
 		// gap to report" case per Ring.Read's own doc) and is set true below
@@ -1336,7 +1346,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		core["version"] = tick.Version
 		reply["mode"] = tick.RunMode
 		reply["resolvedConfig"] = statusResolvedConfig(tick.Config)
-		reply["sources"] = statusSources(tick.Sources, s.excludedSources)
+		reply["sources"] = statusSources(tick.Sources, s.excludedSources, s.sourceIntervalsMs)
 		reply["lastTickAt"] = tick.LastTickAt.UTC().Format(time.RFC3339Nano)
 		reply["snapshotAt"] = tick.SnapshotAt.UTC().Format(time.RFC3339Nano)
 		if tick.Config.PollInterval != nil {
@@ -1499,16 +1509,17 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 //
 // `rejected` (the prior, unused field) is REMOVED per the schema-change
 // note — it was never part of the frozen tree and nothing rendered it.
-func statusSources(active []SourceReport, excludedSources []string) []map[string]any {
+func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64) []map[string]any {
 	out := make([]map[string]any, 0, len(active)+len(excludedSources))
 	for _, sr := range active {
 		row := map[string]any{
-			"name":     sr.Name,
-			"type":     "pull",
-			"enabled":  true,
-			"excluded": false,
-			"mode":     "pull",
-			"failure":  nil,
+			"name":               sr.Name,
+			"type":               "pull",
+			"enabled":            true,
+			"excluded":           false,
+			"mode":               "pull",
+			"failure":            nil,
+			"expectedIntervalMs": intervalsMs[sr.Name],
 		}
 		if !sr.LastTick.IsZero() {
 			row["lastTick"] = sr.LastTick.UTC().Format(time.RFC3339Nano)
@@ -1523,12 +1534,13 @@ func statusSources(active []SourceReport, excludedSources []string) []map[string
 	}
 	for _, name := range excludedSources {
 		out = append(out, map[string]any{
-			"name":     name,
-			"type":     "pull",
-			"enabled":  true,
-			"excluded": true,
-			"mode":     "pull",
-			"failure":  nil,
+			"name":               name,
+			"type":               "pull",
+			"enabled":            true,
+			"excluded":           true,
+			"mode":               "pull",
+			"failure":            nil,
+			"expectedIntervalMs": intervalsMs[name],
 		})
 	}
 	return out

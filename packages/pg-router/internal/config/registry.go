@@ -131,6 +131,13 @@ type queryTOML struct {
 	// ([pool].pull_failure_backoff). Absent: inherits the pool default verbatim
 	// (Retries: 0 unless the pool default itself opts in).
 	FailureBackoff *failureBackoffTOML `toml:"failure_backoff"`
+	// ExpectedInterval is an optional, explicit override for staleness
+	// display purposes (this task): unlike Trigger.Every, it carries no
+	// scheduling meaning — it exists so a future non-period-triggered or
+	// push-mode source can still declare its own expected cadence. An
+	// explicit value always wins over a period trigger's own resolved
+	// Every.
+	ExpectedInterval *duration `toml:"expected_interval"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -254,19 +261,23 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// Build the producer set from [[query]] (design M3). A config with [[role]]
 	// but no [[query]] leaves c.Queries empty; Validate then flags every role's
 	// Binds as an orphan consumer (a clear, aggregated diagnostic).
-	queries, qerrs := r.buildQueries(md, shape.Queries, *c)
+	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, *c)
 	errs = append(errs, qerrs...)
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
 	c.Queries = queries
+	c.ExpectedIntervalOverrides = overrides
 	return out, nil
 }
 
 // buildQueries decodes every [[query]] into a named producer (query.Source),
-// installing its emits + trigger. Duplicate query names are rejected.
-func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (query.SourceSet, []error) {
+// installing its emits + trigger, and collects each query's own explicit
+// expected_interval override (this task) into a name-keyed map. Duplicate
+// query names are rejected.
+func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (query.SourceSet, map[string]int64, []error) {
 	var out query.SourceSet
+	overrides := map[string]int64{}
 	var errs []error
 	seen := map[string]bool{}
 	for i, qt := range qts {
@@ -285,8 +296,26 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 			continue
 		}
 		out = append(out, query.Source{Name: qt.Name, Query: q})
+		if qt.ExpectedInterval != nil {
+			overrides[qt.Name] = qt.ExpectedInterval.D.Milliseconds()
+		}
 	}
-	return out, errs
+	return out, overrides, errs
+}
+
+// ExpectedIntervalMsFor returns, in milliseconds, src's expected tick
+// cadence: an explicit `expected_interval` config override (overrides,
+// keyed by src.Name) always wins; otherwise a `kind: "period"` query's own
+// resolved trigger interval; otherwise 0 (unknown — threshold/manual
+// triggers, or a period query with neither).
+func ExpectedIntervalMsFor(src query.Source, overrides map[string]int64) int64 {
+	if ms, ok := overrides[src.Name]; ok {
+		return ms
+	}
+	if pt, ok := src.Query.Trigger().(query.PeriodTrigger); ok && pt.Every > 0 {
+		return pt.Every.Milliseconds()
+	}
+	return 0
 }
 
 // buildMonitorSubsets decodes every [[monitor]] entry into the `id ->

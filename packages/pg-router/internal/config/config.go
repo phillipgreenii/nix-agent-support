@@ -160,6 +160,16 @@ type Config struct {
 	// producers/consumers.
 	Queries query.SourceSet
 
+	// ExpectedIntervalOverrides is query name -> an explicit `expected_interval`
+	// TOML override, in milliseconds (this task, pg2-mnf7t.1). Populated by
+	// Registry.buildQueries from each [[query]]'s own expected_interval key;
+	// config.ExpectedIntervalMsFor(src, this map) is the resolver
+	// cmd/pg-router's bootCore calls to build core.Options.SourceIntervalsMs.
+	// nil/absent (the default, and every query that declares no override)
+	// resolves to "fall back to the query's own trigger, or unknown" —
+	// ExpectedIntervalMsFor's own doc comment.
+	ExpectedIntervalOverrides map[string]int64
+
 	// Budget watchdog (chunk B). Token/Cost <= 0 means unlimited.
 	BudgetTokens int64
 	BudgetCost   int64 // cents

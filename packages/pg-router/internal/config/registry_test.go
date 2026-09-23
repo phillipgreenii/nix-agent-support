@@ -416,3 +416,100 @@ binds = ["e"]
 		t.Fatalf("Roles = %+v, want one role named feedback-worker", c.Roles)
 	}
 }
+
+// --- per-source expected tick cadence (this task, pg2-mnf7t.1) ---
+
+// An explicit [[query]].expected_interval override always wins over a period
+// trigger's own resolved `every`, even though the trigger's own interval is
+// also known here (10s) — the override is authored specifically to declare
+// staleness cadence and must take precedence.
+func TestExpectedIntervalMsFor_ExplicitOverrideWins(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[role]]
+name = "worker"
+binds = ["x"]
+
+[[query]]
+name = "push-ish"
+emits = ["x"]
+type = "command"
+expected_interval = "45s"
+[query.command]
+argv = ["true"]
+format = "jsonl"
+
+[query.trigger]
+every = "10s"
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ExpectedIntervalMsFor(c.Queries[0], c.ExpectedIntervalOverrides)
+	if want := int64(45_000); got != want {
+		t.Fatalf("ExpectedIntervalMsFor() = %d, want %d (override must beat the trigger's own 10s)", got, want)
+	}
+}
+
+// With no override, a kind:"period" query (the default kind) falls back to
+// its own resolved trigger Every.
+func TestExpectedIntervalMsFor_PeriodTriggerFallsBackToResolvedEvery(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[role]]
+name = "worker"
+binds = ["x"]
+
+[[query]]
+name = "period-source"
+emits = ["x"]
+type = "command"
+[query.command]
+argv = ["true"]
+format = "jsonl"
+
+[query.trigger]
+every = "90s"
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ExpectedIntervalMsFor(c.Queries[0], c.ExpectedIntervalOverrides)
+	if want := int64(90_000); got != want {
+		t.Fatalf("ExpectedIntervalMsFor() = %d, want %d", got, want)
+	}
+}
+
+// A threshold (or manual) trigger with no explicit override has no cadence
+// to derive from, so ExpectedIntervalMsFor returns 0 (unknown).
+func TestExpectedIntervalMsFor_ThresholdTriggerIsUnknown(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, `
+[[role]]
+name = "worker"
+binds = ["x"]
+
+[[query]]
+name = "threshold-source"
+emits = ["x"]
+type = "command"
+[query.command]
+argv = ["true"]
+format = "jsonl"
+
+[query.trigger]
+kind = "threshold"
+count = 5
+binds = ["x"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ExpectedIntervalMsFor(c.Queries[0], c.ExpectedIntervalOverrides)
+	if got != 0 {
+		t.Fatalf("ExpectedIntervalMsFor() = %d, want 0 (unknown)", got)
+	}
+}
