@@ -4,6 +4,9 @@
 - **Status**: Draft — pending operator review
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
+- **Depends on**: `pg2-2j5ac.46` (a new, external prerequisite design session — widening
+  pg-desk's gather/interpret/persist pipeline to support issue-type entities, discovered during
+  this session's own review — `blocked-by`-wired onto this bead; see §4.1)
 - **Amends**: `phillipgreenii-nix-agent-support`'s
   `docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md` (D19, D26, phase
   15's row in §9.5 — "designed in its own document", checkpoint "defined by that document"; this
@@ -37,7 +40,7 @@ not silently assumed settled.
 
 | #     | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-F1  | Daily-focus's PR candidate gathering reuses pg-desk's existing `pr-mine`/`pr-team` feeds (60s) unchanged — this half was already true: PR gather already persists `entity` rows. Jira/epic/bd-task candidate gathering reuses the existing feed _schedule_ (`issue-jira-mine` at 5m; two new feeds, §4) but requires new pg-desk code: `internal/gather.Gatherer` today only gathers `entityType == "pr"`, and `pg-desk run issue` never persists an issue's own `entity` row (it only re-interprets PRs already cross-referenced to it) — verified against `internal/gather/gather.go` and `docs/behavior/pg-desk/run-issue.md`. Phase 15 adds the missing capability (§4); it is not, as an earlier revision of this document claimed, already there.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| D-F1  | Daily-focus's PR candidate gathering reuses pg-desk's existing `pr-mine`/`pr-team` feeds (60s) unchanged — this half was already true: PR gather already persists `entity` rows. Jira/epic/bd-task candidate gathering reuses the existing feed _schedule_ (`issue-jira-mine` at 5m; two new feeds, §4) but requires new pg-desk code: `internal/gather.Gatherer` today only gathers `entityType == "pr"`, and `pg-desk run issue` never persists an issue's own `entity` row (it only re-interprets PRs already cross-referenced to it) — verified against `internal/gather/gather.go` and `docs/behavior/pg-desk/run-issue.md`. This is not, as an earlier revision of this document claimed, already there, and — per three review rounds finding the gap runs through `interpret`/`persist`/`run.go`'s dispatch/two hardcoded-kind readers too, deeper than a single missing method — building it is scoped OUT to its own external prerequisite bead, `pg2-2j5ac.46`, `blocked-by`-wired onto this bead (§4.1), rather than specified here.                                                                                                                                                                  |
 | D-F2  | `pg-connector-pr-github`'s `mine` query stays scoped to `repo:ZR-Private/ziprecruiter` (one repo), narrowing daily-focus's PR survey from today's cross-repo `gh search prs --author @me`. Recorded loss, same pattern as the design of record's D15.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D-F3  | `df-deferred`'s description-marker-section mechanism retires entirely. "Deferred" is derived: candidates the store already holds that are not `focus_selection`-selected for the period. No description grammar, no lost-update hazard, no size cost.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D-F4  | The per-day "focus bead" (one bead with wired blocking deps) retires. "Today's focus" becomes a `pg-desk` view/query (`focus_selection`/`focus_period`, §5), generalizing to week/sprint via a `period_type` column rather than a new bead type per level (not built this phase — schema-ready only). Beads stay reserved for actual agent-workable signals (D8), never for human plan-tracking.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -45,7 +48,7 @@ not silently assumed settled.
 | D-F6  | `focus_selection` and `focus_period` (§5) use an internal surrogate primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) with a `UNIQUE` constraint carrying the natural key, diverging deliberately from every existing pg-desk table (`entity`/`interpretation`/`xref`/`annotation`/`ledger`), which all use a composite natural-column primary key with no surrogate. `focus_selection` references `focus_period` by its surrogate `id` (a real foreign key, not a repeated `period_type`/`period_key` pair) and references `entity` by its own composite key (`repo, entity_type, entity_id`) — `entity` already is the table that establishes an `(entity_type, entity_id)` pair is valid, so `focus_selection` gets that validation from a real foreign key rather than untyped text columns.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | D-F7  | Epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence; flagged for revisit, §11.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | D-F8  | `schema.Issue` gains an `Owner` field (bd's `owner` key — the responsible human), mapped in `pg-connector-issue-beads`'s backend the same way `Assignee`/`Parent` were added by `pg2-akfw5`. `Owner` is distinct from the existing `Assignee` field, which carries bd's claim/actor identity, not ownership — verified live against this workspace's own `bd show`/`bd list --json` output, which return both `owner` and `assignee` as separate keys.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| D-F9  | There is no separate `focus split` verb. `pg-desk focus show` resolves each already-selected row's associated bead and current status unconditionally, folded into its existing per-item output. This is not a new PER-CALL live-lookup cost once §4's new issue-gather capability lands (D-F1): an epic's status sits in its own gathered `entity` row (the entity id already is the bead id); a PR anchor's closure is already inferred by pg-desk's own sync step from the PR's own entity state (this half was already true, unaffected by D-F1); a Jira-sourced item's minted/correlated bd task rides along in the `issue-beads-bulk` feed. None of this is true TODAY, before §4's gather work lands — D-F9 depends on D-F1, not on anything pre-existing. `close.md`'s survey step becomes a `focus show` call, not a dedicated verb.                                                                                                                                                                                                                                                                                                                                                                     |
+| D-F9  | There is no separate `focus split` verb. `pg-desk focus show` resolves each already-selected row's associated bead and current status unconditionally, folded into its existing per-item output. This is not a new PER-CALL live-lookup cost once `pg2-2j5ac.46` lands (D-F1): an epic's status sits in its own gathered `entity` row (the entity id already is the bead id); a PR anchor's closure is already inferred by pg-desk's own sync step from the PR's own entity state (this half was already true, unaffected by D-F1); a Jira-sourced item's minted/correlated bd task rides along in the `issue-beads-bulk` feed. None of this is true TODAY, before that prerequisite bead lands — D-F9 depends on D-F1's prerequisite, not on anything pre-existing. `close.md`'s survey step becomes a `focus show` call, not a dedicated verb.                                                                                                                                                                                                                                                                                                                                                                  |
 | D-F10 | `focus close`'s per-bead progress note is appended via `pg-connector issue comment` (→ `bd comment`), not today's `bd update --append-notes` (→ bd's separate NOTES field) — a deliberate, named change, not an accidental substitution. Verified both `pg-connector-issue-beads` and `pg-connector-issue-jira` implement `Comment` today (real, tested code on both backends, not a stub), so this needs no new pg-connector capability. Comments are also the better mechanism for this content: bd captures `created_at`/`author` on each comment natively, where NOTES is one unstructured, unbounded-growth text field the caller must manually date-tag (exactly what `df-close-focus.sh`'s `[daily-focus <date>] <progress>` prefix exists to work around). Relatedly: the `[daily-focus <date>]` tag's own PURPOSE splits in two — recording that a bead was part of a day's focus (now redundant; `focus_selection` already durably and queryably records this) vs. carrying forward what actually happened for whoever reads the bead next (not redundant; pg-desk's store holds no narrative text). Only the first purpose retires; the comment's actual content is not a tracking artifact and stays. |
 
 ## 3. Architecture overview
@@ -59,8 +62,8 @@ flowchart LR
         F4["issue-beads-bulk (NEW, ~30m):\nlist --status open,in_progress, no type filter"]
     end
     subgraph gather["pg-desk gather"]
-        GPR["Gatherer.Gather\n(existing, pr only)"]
-        GISS["Gatherer.GatherIssue\n(NEW, §4.1 -- Jira + bd,\nvia pg-connector 'issue show')"]
+        GPR["existing PR gather\n(pr only)"]
+        GISS["pg2-2j5ac.46's own capability\n(external prereq, section 4.1 --\nJira + bd, mechanism TBD)"]
     end
     subgraph store["pg-desk store"]
         E["entity + interpretation\n(existing, unchanged schema)"]
@@ -102,47 +105,42 @@ flowchart LR
 
 ## 4. Gather
 
-### 4.1 The missing capability: issue-entity gather (new, prerequisite for everything else here)
+### 4.1 The missing capability: issue-entity gather (external prerequisite, `pg2-2j5ac.46`)
 
 Checked directly against the code rather than assumed: `internal/gather.Gatherer.Gather` accepts
 only `entityType == "pr"` — any other value is rejected outright ("gather: entity type %q not
-supported in Phase 9 (pr-triggered gather only)", `internal/gather/gather.go`), and its `Facts`
-type is itself PR-shaped (`PRShow`/`PRFiles`/`PRCommits`/`CI`/...). `pg-desk run issue`'s existing
-dispatch (`cmd/pg-desk/run.go`) never calls this gather path for the triggering issue at all — for
-a Jira ticket it re-interprets PRs already cross-referenced to it (`runJiraIssue`); for a bead id
-it resolves the bead's linked PR and calls `RunInterpretOnly` (interpret-only, no gather) on that
-PR. `docs/behavior/pg-desk/run-issue.md` states this current, narrower behavior explicitly. There
-is no existing path, today, by which a Jira ticket's, an epic's, or a bd task's own facts (state,
-priority, due date, owner, parent) land in the `entity` table. The parent design's own §8
-language — "`entity` and `xref` tables are type-agnostic... PR-shaped in phase 1" — always framed
-this as buildable later; phase 15 is what actually builds it, not something it can assume.
+supported in Phase 9 (pr-triggered gather only)", `internal/gather/gather.go`). `pg-desk run
+issue`'s existing dispatch never persists an issue's own facts as an `entity` row — it only
+re-interprets PRs already cross-referenced to it, or resolves a bead's linked PR and interprets
+that. There is no existing path, today, by which a Jira ticket's, an epic's, or a bd task's own
+facts land in the `entity` table.
 
-**The addition**: a new `Gatherer.GatherIssue(ctx, entityType, entityID, change)` method,
-parallel to (not replacing) `Gather`, fetching `issue show <id>` from whichever backend owns
-`entityID` (Jira or beads — pg-connector's own backend registry already dispatches this) and
-producing an issue-shaped facts value `internal/pipeline` persists via the exact same
-`UpsertEntity`/`AsOf`/content-hash mechanism the PR path already uses (`persist`'s signature is
-already type-parameterized by `entityType`). `cmd/pg-desk/run.go`'s issue dispatch gains a third,
-**additive** step: call `GatherIssue` and persist the triggering issue's own `entity` row,
-unconditionally, alongside whatever it already does. Today's cross-referencing/re-interpret
-behavior (PR urgency layering via Jira/Slack, phase 13) is unaffected — this only adds the
-missing "and also remember this issue's own facts" step. The existing `entityType == "pr"` gate
-on `internal/pipeline`'s SYNC stage (`internal/sync.Syncer`) is untouched: daily-focus's own
-minting (§7.2 step 6) goes through a new, separate `internal/focus` package, never through
-`internal/sync`.
+Three review rounds during this design session progressively found that this gap runs through
+every layer pg-desk built PR-only — not just `gather`, but also `interpret` (gated on `PRShow`
+being populated), `persist`'s interpretation-table half (built from PR-shaped fields), the issue
+dispatch's control flow (two branches that both return immediately, no seam to extend), two
+operator-facing surfaces that hardcode the `ledger` table's three existing sync `kind` values,
+and the behavior doc that currently documents the opposite of what's needed. Pinning all of that
+down to exact Go seams and struct changes is implementation-decomposition work, not something
+this design document should carry — the same way the parent design names capabilities like "PR
+v3" without specifying their diff.
 
-This capability is backend-agnostic by construction (both `pg-connector-issue-jira` and
-`pg-connector-issue-beads` already implement the `issue show` op pg-connector's `Provider`
-interface requires), so it covers Jira tickets, epics, and bd tasks uniformly — one addition,
-not a Jira-specific one and a bd-specific one.
+**This document therefore treats issue-entity gather as an external prerequisite**, tracked as
+its own design-session bead, `pg2-2j5ac.46` ("pg-desk: design session — widen gather/interpret/
+persist pipeline to support issue-type entities"), wired `blocked-by` onto this bead
+(`pg2-2j5ac.27`) so phase 15's decomposition cannot proceed ahead of it. Everything below in §4
+and §6 **assumes `pg2-2j5ac.46` has landed**: that pg-desk can persist and interpret an issue's
+own facts, backend-agnostically (Jira and bd), without breaking existing PR-side behavior. The
+exact mechanism — new gather method vs. something else, how `run.go`'s dispatch changes, how the
+ledger-kind readers widen — is `pg2-2j5ac.46`'s own design to make, not this one's.
 
 ### 4.2 Feeds
 
-`issue-jira-mine` (5m, existing) needs no NEW feed wiring — its schedule and query are unchanged
-— but the code it triggers (`pg-desk run issue`) now does more, per §4.1: a Jira ticket's own
-facts get persisted as an `entity` row for the first time, not just used to re-interpret linked
-PRs. Two genuinely new feeds, both on `pg-connector-issue-beads`, both `emits = [ "issue.changed"
-]` triggering that same widened `pg-desk run issue` dispatch:
+Once `pg2-2j5ac.46` lands: `issue-jira-mine` (5m, existing) needs no NEW feed wiring — its
+schedule and query are unchanged — but the code it triggers persists a Jira ticket's own facts as
+an `entity` row for the first time, not just using them to re-interpret linked PRs. Two genuinely
+new feeds, both on `pg-connector-issue-beads`, both `emits = [ "issue.changed" ]`, triggering that
+same widened dispatch:
 
 - **`epics-mine`** (~30m, D21-style tunable default): query `list --type epic --status
 open,in_progress`. No owner filter at the query layer — `bd list` has none — ownership is
@@ -155,6 +153,12 @@ open,in_progress`. No owner filter at the query layer — `bd list` has none —
   no per-epic query.
 
 PR candidate gathering (`pr-mine`/`pr-team`) needs no new feed and no new code — D-F1.
+
+`issue-beads-bulk`'s volume is not budgeted here and should be sized during `pg2-2j5ac.46`'s own
+work: unlike the existing label-scoped bead feeds (`feedback-ready`/`worker-ready`/
+`review-ready`), an unfiltered `list --status open,in_progress` fires one gather event per every
+open/in_progress bd issue in the whole tracker, every ~30 minutes. Likely fine at this operator's
+actual bead volume, but untested against it.
 
 ## 5. Store schema
 
@@ -221,9 +225,10 @@ shape as the existing `Assignee`/`Parent` fields (D-F8).
 Unlike every other pg-desk interpret step (ownership, enrichment, urgency, category — each a pure
 function of ONE entity's own gathered facts), focus-rank is a **sweep**: it operates over the
 whole candidate set at once, computed fresh on every read (`show`/`select`/`pull`), never cached.
-It reads `entity` rows exactly the way every other interpret step does — the only thing new here
-is that issue-type rows now exist to read, per §4.1's gather addition; this step itself is pure
-computation over facts, unchanged in kind from the rest of pg-desk's interpret layer.
+It reads `entity` rows exactly the way every other interpret step does — this step itself is pure
+computation over facts, unchanged in kind from the rest of pg-desk's interpret layer. What it
+reads depends entirely on `pg2-2j5ac.46` (§4.1): issue-type `entity` rows only exist once that
+prerequisite lands.
 
 **Candidate set** = current `entity` rows where:
 
@@ -440,10 +445,11 @@ without checking `modules/daily-focus/` directly), `df-pull`, `df-resolve-focus`
 Unchanged: `df-attention`, `df-search`.
 
 **Testing moves with the logic**, into a new `internal/focus` package plus `cmd/pg-desk/focus*.go`
-— a genuine rewrite of `df-survey`'s bats-tested ranking/gate-apply suites, not a file move —
-plus a new `Gatherer.GatherIssue` test suite (§4.1) parallel to the existing PR-gather tests.
-Named test targets, called out specifically because they're what changed across this document's
-own review rounds and are the easiest to leave unspecified by accident: ranking (the 7-day due
+— a genuine rewrite of `df-survey`'s bats-tested ranking/gate-apply suites, not a file move.
+`pg2-2j5ac.46`'s own issue-gather capability (§4.1) gets its own test suite, scoped by that
+design's own session, not this one. Named test targets for THIS document's own scope, called out
+specifically because they're what changed across this document's own review rounds and are the
+easiest to leave unspecified by accident: ranking (the 7-day due
 horizon and priority-inheritance rules, §6); the cap/select/pull recompute-from-scratch and
 additive-only semantics respectively; `show`'s resolved-status join (D-F9) for all three
 candidate types; the `--merge` flag (§7.2 step 3); `sync.mode` gating (`off`/`plan`/`apply`) on
@@ -461,6 +467,9 @@ both live, not just a clean flake check.
 
 ## 11. Phase 15 checkpoint (operator-run by hand, D16)
 
+- `pg2-2j5ac.46` (§4.1) is closed, with its own design's checkpoint met — pg-desk can persist and
+  interpret issue-type entities, backend-agnostically, without regressing PR-side behavior. This
+  precedes everything below; none of it is meaningful until this prerequisite lands.
 - `pg-desk focus show --date <today>` produces the same candidate set `df-survey` would have,
   modulo the two recorded narrowings (D-F2's PR repo scope, D-F7's dropped closed-child epic
   signal).
@@ -468,9 +477,9 @@ both live, not just a clean flake check.
   equivalent) with a confirmed non-trivial outcome — real `entity` rows landing for an epic and a
   plain bd task, not just a clean `nix flake check`.
 - `issue-jira-mine`'s existing tick is confirmed to now ALSO persist the triggering Jira ticket's
-  own `entity` row (§4.1) — this is a behavior change to existing, already-running code, not just
-  the two new feeds, and is easy to miss verifying since nothing about the feed's own config
-  changed.
+  own `entity` row (via whatever `pg2-2j5ac.46` builds) — this is a behavior change to existing,
+  already-running code, not just the two new feeds, and is easy to miss verifying since nothing
+  about the feed's own config changed.
 - A full `select --apply` → `pull` → `show` (resolved status) → `close` cycle runs end-to-end
   against the live tracker for one real day.
 - `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
@@ -478,6 +487,9 @@ both live, not just a clean flake check.
 
 ## 12. Open items for operator review
 
+- **`pg2-2j5ac.46`** (§4.1) is a hard, `blocked-by`-wired dependency: phase 15's own decomposition
+  cannot start until it closes. Its own design session decides the exact mechanism this document
+  deliberately leaves unspecified.
 - **D-F7** (epic candidacy drops the closed-child signal) was decided in the operator's absence.
   If the operator wants the closed-child half preserved, §4/§6 need revisiting — the
   new-pg-connector-capability alternative sketched during design (a purpose-built
@@ -510,11 +522,11 @@ both live, not just a clean flake check.
   `focus show` instead.
 - **A daily-focus-specific issue-ingest path, bypassing `internal/gather` entirely** (writing
   `entity` rows for Jira/epic/bd-task candidates from a bespoke `internal/focus`-package call
-  rather than extending the shared gather layer) — rejected; the parent design already frames
-  `entity`/`xref` as type-agnostic infrastructure other consumers may eventually need too, and a
-  bypass would leave two different code paths writing the same table for the same reason.
-  Extending `internal/gather` (§4.1) is more code this phase, but it's the generalization the
-  program's own architecture already pointed at, not scope creep.
+  rather than extending the shared gather layer) — leaned against, not finally settled here: the
+  parent design already frames `entity`/`xref` as type-agnostic infrastructure other consumers
+  may eventually need too, and a bypass would leave two different code paths writing the same
+  table for the same reason. But the exact mechanism is `pg2-2j5ac.46`'s own design to make
+  (§4.1), not this document's — that session may find a reason to bypass after all.
 - **A new pg-connector notes-append capability**, to preserve `df-close-focus.sh`'s exact
   `bd update --append-notes` mechanism — rejected; `Comment` already exists, tested, on both
   issue backends today, and is arguably the better mechanism for this content anyway (D-F10).
