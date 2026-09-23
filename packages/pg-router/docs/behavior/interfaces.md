@@ -232,8 +232,12 @@ smoke affordance only, `USECASE-VERIFY-PARTICIPANT`). The reply carries events i
 and delivers them later on the callback (the `ingest-event` target).
 
 **Push mode.** The core never calls `query`; the source invokes the `ingest-event` callback as
-external facts arrive. A push-only source still **registers** so it appears in the registry and its
-lifecycle is known.
+external facts arrive. No source, push or pull, registers into the self-report registry today — a
+source's liveness is reported entirely through its own `lastTick`/staleness fields (`INTF-CLI`,
+below), never registry membership. Self-report registration stays **handler-only** (the common
+manager contract's "Registry & lifecycle", above): the standalone Registry pane this line once
+implied no longer exists as a separate operator-facing surface, and self-report state, when
+present, renders instead as a column on the Listeners pane.
 
 **The query trigger belongs to the core, and stays.** Deciding **when to poll** is pg-router's own
 scheduling decision, taken from pg-router's own state; it is not part of the source's configuration and
@@ -669,12 +673,28 @@ Inspection's **MUST** set has widened to also offer:
 - Every configured **listener**'s own role, its binds, **enabled** and **excluded** as two
   **independent** booleans computed over the **full configured participant set** — before any
   **run-scoped selector** (`STORY-OP-3`) narrows it, never from the already-filtered active set,
-  which is what makes a selector-excluded participant observable at all — its delivered and declined
-  counts, and its backoff state (or absent, when none is running). See the glossary's **excluded**
-  vs **disabled** entry for the distinction the two booleans draw.
+  which is what makes a selector-excluded participant observable at all — its delivered count, its
+  declined count, and its backoff state (or absent, when none is running). The declined count is
+  now also offered broken down by reason — a pre-accept **busy** decline, an **unavailable**
+  self-report, or an **other** bucket that also absorbs any non-canonical override string a handler
+  supplies in place of a reason (a `DeclineDetail` override) — and the three always sum to the flat
+  declined count, so the breakdown decodes the same figure rather than counting a second, divergent
+  one. A **resource-limit** hard-stop is never part of this count at all: it is a post-accept class
+  the core already treats as an accept, not a decline ("Failure class" above). See the glossary's
+  **excluded** vs **disabled** entry for the distinction the two booleans draw.
+- Every configured **listener**'s own **handler-failure** count (`HandlerFailureObserver`): a
+  genuine business-logic rejection the handler itself reports, tracked per listener and rendered on
+  the `tui` subcommand's Listeners display as its own `FAIL` column — kept separate from both the
+  declined-count breakdown above and a **dispatch failure** (the core's own inability to hand the
+  event over at all); the three are counted independently and never folded into one another.
 - Every configured **source**'s own name and type, the same independent enabled/excluded booleans
   over the same full configured set, its mode (**pull** or **push**), its last tick, and its failure
-  state (or absent).
+  state (or absent). A source's staleness/health reading is judged against **that source's own**
+  resolved expected interval — an explicit `expected_interval` override, or a `kind: "period"`
+  query's own resolved trigger interval — **never** the pool's own tick cadence applied uniformly to
+  every source, which is the behavior this corrects. A source whose interval cannot be resolved this
+  way reads **N/A**, distinct from **stale**; a source that has never ticked (`LastTick` unset) reads
+  **idle**, which outranks both — `idle > N/A > stale/ok`.
 - The core's own **delivery-side counters**, per `type` — the unconsumed-expired count, the
   unknown-type-rejected count, and the deduped count — the same members `INTF-MON`'s metric catalog
   declares (`INV-OBS-1`); inspection offers them as a **point-in-time reading of the same facts** the
