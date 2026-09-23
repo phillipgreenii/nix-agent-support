@@ -1,0 +1,415 @@
+# Daily focus, store-first: phase 15 of the pg-desk/connector program
+
+- **Date**: 2026-09-23
+- **Status**: Draft — pending operator review
+- **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
+  `blocked-by` it)
+- **Amends**: `phillipgreenii-nix-agent-support`'s
+  `docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md` (D19, D26, phase
+  15's row in §9.5 — "designed in its own document", checkpoint "defined by that document"; this
+  is that document) and `phillipg-nix-ziprecruiter`'s
+  `docs/superpowers/specs/2026-09-02-daily-focus-v2-design.md` (decides what of v2 survives —
+  answer: `df-attention`/`df-search`, untouched; everything else in v2's `df-survey`/`df-deferred`/
+  `df-wire`/`df-pull`/`df-resolve-focus`/`df-find-pr-bead`/`df-split-blockers` family retires,
+  §9 below).
+
+## 1. Purpose and scope
+
+Phase 15 retires daily-focus's beads-as-primary-store architecture (v2, fully implemented and
+live in `phillipg-nix-ziprecruiter` today) in favor of the store-first pattern the rest of the
+pg-desk/connector program already uses: everything surveyed lands uncapped in `pg-desk`'s SQLite
+store; focus ranking is a compute-only interpret step over `entity` rows; a capped step mints
+beads only where an agent actually needs one; "pulling more work" is selecting more from the
+store, not a separate mechanism (D19, D26).
+
+This document is scoped to daily-focus's own retirement (`df-survey`, `df-deferred`, `df-wire`,
+`df-verify-wiring`, `df-pull`, `df-resolve-focus`, `df-find-pr-bead`, `df-split-blockers`,
+`df-close-focus`, and the three command files that orchestrate them). It does not touch `df-attention`/`df-search`/`df-categorize`/`df-feedback`
+(already retired into `pg-desk` in earlier phases per D10, or — for attention/search — deliberately
+unrelated per the v2 doc's own §0 cross-reference) or any PR-side pg-desk behavior.
+
+## 2. Decisions ledger
+
+Operator rulings from the 2026-09-23 design session that produced this document. D-F7 was made
+in the operator's absence (a 10-minute `AskUserQuestion` timeout) on the session's best judgment,
+per precedent already set twice earlier in the same session — it is flagged for revisit in §11,
+not silently assumed settled.
+
+| #    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-F1 | Daily-focus's PR/Jira candidate gathering reuses pg-desk's existing continuous feeds (`pr-mine`/`pr-team` at 60s, `issue-jira-mine` at 5m) rather than doing its own on-demand gather. `focus rank` (§6) becomes a pure interpret step over rows those feeds already keep fresh for the dashboard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| D-F2 | `pg-connector-pr-github`'s `mine` query stays scoped to `repo:ZR-Private/ziprecruiter` (one repo), narrowing daily-focus's PR survey from today's cross-repo `gh search prs --author @me`. Recorded loss, same pattern as the design of record's D15.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| D-F3 | `df-deferred`'s description-marker-section mechanism retires entirely. "Deferred" is derived: candidates the store already holds that are not `focus_selection`-selected for the period. No description grammar, no lost-update hazard, no size cost.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| D-F4 | The per-day "focus bead" (one bead with wired blocking deps) retires. "Today's focus" becomes a `pg-desk` view/query (`focus_selection`/`focus_period`, §5), generalizing to week/sprint via a `period_type` column rather than a new bead type per level (not built this phase — schema-ready only). Beads stay reserved for actual agent-workable signals (D8), never for human plan-tracking.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| D-F5 | Gate replies and pull selections reference candidates by their own `(entity_type, entity_id)` — the same key already exists for a PR/Jira/bead item — never a derived positional handle. `focus show`/`focus select`/`focus pull` always recompute live from current `entity`/`interpretation` rows; nothing is cached or frozen between a `show` and the `select --apply`/`pull` that follows it, so a priority or due-date change is never hidden from the operator.                                                                                                                                                                                                                                                                                                                              |
+| D-F6 | `focus_selection` and `focus_period` (§5) use an internal surrogate primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) with a `UNIQUE` constraint carrying the natural key, diverging deliberately from every existing pg-desk table (`entity`/`interpretation`/`xref`/`annotation`/`ledger`), which all use a composite natural-column primary key with no surrogate. `focus_selection` references `focus_period` by its surrogate `id` (a real foreign key, not a repeated `period_type`/`period_key` pair) and references `entity` by its own composite key (`repo, entity_type, entity_id`) — `entity` already is the table that establishes an `(entity_type, entity_id)` pair is valid, so `focus_selection` gets that validation from a real foreign key rather than untyped text columns. |
+| D-F7 | Epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence; flagged for revisit, §11.**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| D-F8 | `schema.Issue` gains an `Owner` field (bd's `owner` key — the responsible human), mapped in `pg-connector-issue-beads`'s backend the same way `Assignee`/`Parent` were added by `pg2-akfw5`. `Owner` is distinct from the existing `Assignee` field, which carries bd's claim/actor identity, not ownership — verified live against this workspace's own `bd show`/`bd list --json` output, which return both `owner` and `assignee` as separate keys.                                                                                                                                                                                                                                                                                                                                              |
+
+## 3. Architecture overview
+
+```mermaid
+flowchart LR
+    subgraph feeds["Continuous feeds (pr-pool)"]
+        F1["pr-mine / pr-team (60s, existing)"]
+        F2["issue-jira-mine (5m, existing)"]
+        F3["epics-mine (NEW, ~30m)"]
+        F4["issue-beads-bulk (NEW, ~30m):\nlist --status open,in_progress, no type filter"]
+    end
+    subgraph store["pg-desk store"]
+        E["entity + interpretation\n(existing, unchanged schema)"]
+        FS["focus_selection (NEW)"]
+        FP["focus_period (NEW)"]
+        L["ledger (existing, reused)"]
+    end
+    F1 --> E
+    F2 --> E
+    F3 --> E
+    F4 --> E
+    E -->|"focus rank: live interpret,\nno caching"| SHOW["pg-desk focus show"]
+    SHOW -->|"operator gate reply:\nok / -key / +key / cap=N"| SELECT["pg-desk focus select --apply"]
+    SELECT --> FS
+    SELECT -->|"mint only if agent work\nneeded; no wiring"| L
+    FS --> SPLIT["pg-desk focus split"]
+    SPLIT --> FP
+```
+
+### Retirement map
+
+| Component                   | Fate                                  | Replaced by                                                               |
+| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
+| `df-survey` (shallow)       | Retires                               | Live read of `entity`/`interpretation` rows (§6)                          |
+| `df-survey` (gate-apply)    | Retires                               | `pg-desk focus select --apply` (§7.2)                                     |
+| `df-survey` (deep)          | Retires                               | Not needed — `focus show`/`select` are always live, no separate deep pass |
+| `df-deferred`               | Retires                               | `focus_selection` absence = deferred (D-F3)                               |
+| `df-wire`                   | Retires (logic shrinks into sync, §8) | Mint-only-if-needed in `focus select --apply`                             |
+| `df-pull`                   | Retires                               | `pg-desk focus pull` (§7.3)                                               |
+| `df-resolve-focus`          | Retires                               | `pg-desk focus show`/existence check via `period_key`                     |
+| `df-find-pr-bead`           | Retires                               | `ledger` lookup (already exists)                                          |
+| `df-split-blockers`         | Retires                               | `pg-desk focus split` (§7.4)                                              |
+| `df-verify-wiring`          | Retires                               | Not needed — nothing is wired (§8)                                        |
+| `df-close-focus`            | Retires                               | `pg-desk focus close` (§7.5) — including its per-bead progress notes      |
+| `df-attention`, `df-search` | Unchanged                             | n/a — unrelated (pure `pg-connector` clients already)                     |
+
+## 4. Gather
+
+Two new feeds, both on `pg-connector-issue-beads`, both `emits = [ "issue.changed" ]` triggering
+`pg-desk run issue` exactly like `issue-jira-mine` does today:
+
+- **`epics-mine`** (~30m, D21-style tunable default): query `list --type epic --status
+open,in_progress`. No owner filter at the query layer — `bd list` has none — ownership is
+  computed in interpret (§6) against the new `Owner` field (D-F8).
+- **`issue-beads-bulk`** (~30m): query `list --status open,in_progress` with no type filter. This
+  is the same "one bulk bead query, deduped by id" trick `df-survey` already uses today (§4.1 of
+  the v2 doc) for `unblocks` and correlation, just running continuously. Its purpose here is
+  narrower than that: landing every child issue's `parent` field in the store so the focus-rank
+  step (§6) can answer "does this epic have an open/in_progress child" with a pure in-store join,
+  no per-epic query.
+
+PR (`pr-mine`/`pr-team`) and Jira (`issue-jira-mine`) candidate gathering needs no new feed —
+D-F1.
+
+## 5. Store schema
+
+New tables, alongside pg-desk's existing `entity`/`interpretation`/`xref`/`annotation`/`ledger`
+(unchanged):
+
+```sql
+CREATE TABLE focus_period (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_type   TEXT NOT NULL,      -- 'day' this phase; schema allows 'week'/'sprint' later
+    period_key    TEXT NOT NULL,      -- e.g. '2026-09-23' for period_type='day'
+    closed_at     TEXT,
+    close_note    TEXT,
+    UNIQUE (period_type, period_key)
+);
+
+CREATE TABLE focus_selection (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    focus_period_id INTEGER NOT NULL,
+    repo            TEXT NOT NULL,    -- same repo constant pg-desk already uses for every
+                                       -- entity it gathers (§8's "single configured repo" in
+                                       -- the parent design), not a per-issue attribute
+    entity_type     TEXT NOT NULL,    -- 'pr' | 'issue' (Jira or bd; disambiguated by entity_id shape)
+    entity_id       TEXT NOT NULL,
+    selected_at     TEXT NOT NULL,
+    UNIQUE (focus_period_id, repo, entity_type, entity_id),
+    FOREIGN KEY (focus_period_id) REFERENCES focus_period (id),
+    FOREIGN KEY (repo, entity_type, entity_id) REFERENCES entity (repo, entity_type, entity_id)
+);
+```
+
+Both tables use an internal surrogate primary key with the natural key expressed as a `UNIQUE`
+constraint (D-F6) — a deliberate divergence from every other pg-desk table, called out here so a
+later reader does not mistake it for drift. `focus_selection` references `focus_period` by its
+surrogate id rather than repeating `period_type`/`period_key`, and — per the operator's own
+question during design, "do we have a table which would ensure `entity_type`/`entity_id` is
+valid" — it also carries a real foreign key into pg-desk's existing `entity` table, so a
+selection can never name an entity pg-desk never actually gathered. Both foreign keys are
+genuinely enforced: pg-desk's store already opens every connection with `_pragma=foreign_keys(ON)`
+(`internal/store/store.go`), so this isn't a documentation-only intent.
+
+Consequence: `focus_period` is no longer written only by `focus close` (§7.5). Every verb that
+writes a selection (`focus select --apply`, `focus pull`) must first get-or-create the
+`focus_period` row for `(period_type, period_key)` — `closed_at`/`close_note` left `NULL` on
+creation — so it has an `id` to insert `focus_selection` rows against. `focus close` becomes the
+verb that sets `closed_at`/`close_note` on a row that, in practice, already exists by the time a
+day is closed.
+
+`schema.Issue` (pg-connector, not pg-desk) gains:
+
+```go
+// Owner is the issue's owning human, in whatever identity form its tracker
+// uses (a bd owner email, a Jira reporter/owner field). Distinct from
+// Assignee, which carries claim/actor identity, not ownership. Empty when
+// unassigned or the backend does not supply one.
+Owner string `json:"owner,omitempty"`
+```
+
+mapped in `pg-connector-issue-beads`'s `bdIssue`/`toSchemaIssue` from bd's `owner` key, the same
+shape as the existing `Assignee`/`Parent` fields (D-F8).
+
+## 6. Interpret: the focus-rank step
+
+Unlike every other pg-desk interpret step (ownership, enrichment, urgency, category — each a pure
+function of ONE entity's own gathered facts), focus-rank is a **sweep**: it operates over the
+whole candidate set at once, computed fresh on every read (`show`/`select`/`pull`), never cached.
+
+**Candidate set** = current `entity` rows where:
+
+- `entity_type = 'pr'` and the row was surfaced by the `pr-mine` or `pr-team` query, **or**
+- `entity_type = 'issue'`, `Tracker` is the Jira backend, and the row was surfaced by
+  `issue-jira-mine`, **or**
+- `entity_type = 'issue'`, `IssueType = 'epic'`, `Owner` equals the configured operator identity,
+  **and** an `entity` row of type `issue` exists with `Parent` equal to this epic's id and
+  `State = 'in_progress'` (joined in-process against the `issue-beads-bulk` rows — no query).
+
+**Rank**: the exact §4.4 lexicographic tuple from the v2 design, ported unchanged, including its
+two load-bearing details that are easy to drop by paraphrase and are called out explicitly here so
+this document remains the correct standalone reference once the v2 doc retires:
+
+1. Due-date urgency: only a due date within a **7-day horizon from `--date`** (including overdue)
+   sorts ahead of one without; a due date outside the horizon is deliberately equivalent to no due
+   date for this key (v2 doc §4.4). Source: Jira `duedate` or bd's due date, correlated items
+   inherit the earliest across the group.
+2. Priority: bead P0-P4 directly, Jira priority via the same data-driven mapping table (unmapped
+   values, including `Needs Priority`, sort after P4). **A PR with no priority of its own inherits
+   the highest priority among its correlated items, else P2** (v2 doc §4.4) — this inheritance
+   rule is part of the port, not an incidental detail.
+3. Unblocks (descending), then age (descending), then kind+key tiebreak.
+
+No arithmetic, no weights — this logic is pure computation over facts the store already has, so
+it ports unchanged; the risk this section guards against is a _description_ of the port silently
+dropping the horizon/inheritance clauses, not the logic itself changing.
+
+**Cap line**: first `cap` (default 6, `--cap N` override) ranked items are `in_plan: true` for
+_display_ only. Nothing is written by `focus rank` itself — `focus_selection` is written only by
+`select`/`pull` (§7).
+
+## 7. The `focus` verb family
+
+All four verbs take `--period day` (the only implemented value this phase; `week`/`sprint` are
+schema-ready, not wired) and operate on `period_key` = a date, defaulting to today.
+
+### 7.1 `pg-desk focus show [--date YYYY-MM-DD] [--cap N]`
+
+Computes the candidate set and rank fresh (§6), cross-references existing `focus_selection` rows
+for the period so already-selected items display as selected, and prints the ranked table —
+same shape as today's gate table (§4.2/§4.5 of the v2 doc: category status/truncation, per-item
+signals, PR `status_phrase`). Exit `0` all categories ok; `4` partial (a category failed or was
+truncated — shown, never silently omitted, per the v2 doc's own §4.8 invariant); `3` total
+failure, no candidates computable.
+
+This is also the mitigation for losing "browse today's plan via plain `bd show`" (there is no
+more focus bead to `bd show`, D-F4): `focus show` with no pending gate reply is exactly that
+browse — and, longer-term, pg-desk's existing `serve` dashboard (parent design §7.7) is the
+natural place to surface `focus_selection` alongside the PR panels it already renders, though
+that wiring is not designed here.
+
+### 7.2 `pg-desk focus select --date YYYY-MM-DD --apply [--merge <keepKey>=<absorbedKey>,...]` (reply on stdin)
+
+1. Recompute the candidate table live (identical to `show`) and **print it** — this is what the
+   reply gets applied against, always current, never more than one round trip stale (D-F5).
+2. Parse the reply: `ok`/empty (accept as shown), `-<key>` (strike — this is also v2's "drop": a
+   struck item is simply absent from `focus_selection`, so under this design there is no separate
+   drop-vs-strike distinction to preserve), `+<key>` (force-pull an existing candidate, or — if
+   `<key>` matches no candidate — attempt a hand-add: resolve it as a real lookup), `cap=N`
+   (re-cap). **Parsing is atomic and happens entirely before any application**, matching v2's own
+   gate-apply pipeline (v2 doc §4.6: "parse ALL tokens ... NOTHING applied" on any problem): a
+   conflicting pair for one key (`-X +X`), an unrecognized token, or a hand-add that resolves to a
+   nonexistent or closed id are ALL usage errors — exit `2` naming the problem, nothing applied,
+   the caller re-prompts. There is no partial-application case at the reply-parsing stage.
+3. Separately, `--merge <keepKey>=<absorbedKey>` (repeatable, comma-separated) is an LLM-supplied
+   flag, not part of the operator's typed reply — this is v2's residual-fuzzy-correlation judgment
+   (v2 doc §5 step 4, §9.1): two candidates the mechanical §4.3 correlation missed but that
+   represent the same real work. `absorbedKey` is dropped from consideration entirely (as if
+   struck) and never gets its own `focus_selection` row; whatever bead resolution `absorbedKey`
+   would have contributed (e.g. a PR link) folds into `keepKey`'s own minting/ledger step (6,
+   below) — mirroring v2's "`e4` is not wired separately; its `wire_targets` union into `j2`'s."
+4. Recompute `in_plan` from scratch: non-struck, non-absorbed items ranked, top `cap` in-plan;
+   force-pulled/hand-added items in-plan additionally (each raises the effective cap by one,
+   matching the v2 doc's own rule).
+5. Replace `focus_selection` rows for this period wholesale with the final in-plan set (rewrite,
+   never accumulate — the same "rewrite, never append" discipline the retired `df-deferred` used).
+   Get-or-create the `focus_period` row first if absent (§5).
+6. For each selected item lacking an associated bead (checked via `ledger` and the existing §4.3
+   correlation rules before assuming none exists) — **including any row left over from a prior
+   run whose mint never succeeded** (step 6's own partial-failure case, not just newly-selected
+   ones, so a previously orphaned selection is retried automatically rather than staying
+   permanently unminted): if `pg-desk`'s own `sync.mode` (parent design D17,
+   `internal/sync/sync.go`) is `off` or `plan`, record what _would_ be minted in `ledger` without
+   calling `pg-connector issue` — the same plan-mode discipline the rest of pg-desk's sync package
+   already uses, so focus-minting never becomes a second live writer ahead of the program's own
+   cutover (phase 11). In `apply`, mint for real: same type-map (Jira `Bug` → `bug`, else →
+   `task`) and priority-map `df-wire` uses today, record `entity → bead-id` in `ledger`. Epics
+   need nothing here — the entity id already is a bead id.
+7. Print the echo table, naming the resolved entity for every applied token explicitly (e.g.
+   `-ZR-Private/ziprecruiter#108526 → struck`), so a token that resolved to something other than
+   intended is visible immediately rather than silently wrong.
+
+Exit `0` applied; `2` usage (a parse-stage problem — nothing applied, per step 2); `3` a
+`focus_selection` write or a `ledger` write failed outright; `4` partial — `focus_selection`
+committed (step 5 succeeded), but the mint sub-step (step 6) failed for some, not all, of the
+items needing one; the echo names which.
+
+**Dependency note**: the tracking bead `pg2-2j5ac.27` states phase 15 depends on phase 11
+("`focus` sync step mints beads, which needs `sync.mode: apply`"), but the parent design's own
+phase table (`2026-09-09-...md` §9.5) lists phase 15's dependency as phase 13 only. Step 6's
+`sync.mode` gate above makes this safe either way — focus-minting cannot write real beads before
+`apply` regardless of decompose ordering — but the two source documents disagree and neither is
+corrected by this one; whoever decomposes phase 15 should reconcile them explicitly rather than
+inherit the discrepancy silently.
+
+**UX cost, named rather than left implicit**: typing a full `OWNER/REPO#NUMBER` or Jira/bd key in
+a reply is more keystrokes than v2's short `p3`/`j5`/`e2` handles. §13 records why the handle
+mechanism was rejected (it required freezing exactly the data the operator wants live); this is
+the real, day-to-day price of that trade, not a cost-free simplification.
+
+### 7.3 `pg-desk focus pull [--date YYYY-MM-DD] [k | key...] [--dry-run]`
+
+Same live-recompute-then-print discipline as `select`, but strictly additive: no strike, no
+re-cap, no recompute-from-scratch. Bare invocation previews (recompute, print, change nothing —
+also "what's left today?"). A count `k` selects the top-`k` not-yet-selected candidates by current
+rank; named keys select those specifically (already selected, or no longer a candidate — e.g.
+merged/closed since — reported and skipped). Selected items union into `focus_selection`
+(get-or-create the `focus_period` row first, same as `select`) and go through the same
+`sync.mode`-gated mint-only-if-needed step as `select` (§7.2 step 6, including its orphaned-row
+retry). No re-survey, no cap — "pull more" is deliberately uncapped, same as today.
+
+Exit `0` done (including "nothing left to pull"); `2` usage; `3` a tool call failed; `4` partial
+(named items skipped/stale, or nothing named resolves); `6` the period is closed (`focus_period`
+has `closed_at` set) — terminal, matching today's df-pull's "pulling into a closed day is always
+wrong."
+
+### 7.4 `pg-desk focus split --date YYYY-MM-DD`
+
+For each `focus_selection` row: resolve to a bead (epic → itself; PR/Jira → `ledger` lookup, or
+the existing correlation match if adopted instead of minted), classify by that bead's current
+status (`closed` → `closed` bucket; anything else → `carried-over`), return
+`{"closed": [...], "carried-over": [...]}` — the exact shape `df-split-blockers` returns today.
+Exit `0` ok (including an empty `focus_selection` — "nothing was selected" is not an error); `3` a
+bead resolution/lookup failed.
+
+### 7.5 `pg-desk focus close --date YYYY-MM-DD --notes-file FILE [--note TEXT] [--dry-run]`
+
+Writes `closed_at`/`close_note` onto the `focus_period` row (creating it if absent) — the
+`close_note` is where today's day-summary-onto-the-focus-bead text goes, since there is no more
+focus bead to carry it. This does **not**, by itself, cover everything `df-close-focus` does
+today: that script also appends a `[daily-focus <date>] <progress>` note to **every touched
+bead**, closed or carried over (`df-close-focus.sh`'s own `--notes-file`, one JSONL line per
+bead), which is real, currently-used behavior for carrying context onto individual beads across
+sessions — not a bead-artifact concern the retiring focus bead itself created. `focus close`
+therefore also takes `--notes-file FILE` (same JSONL shape: one `{"id", "note"}` line per
+resolved bead from `focus split`'s output) and appends each note via `pg-connector issue comment`
+before writing `focus_period`. Fails fast on the first append failure, same as today's script (no
+rollback of notes already appended). Exit `0` closed; `2` usage (missing `--notes-file` when
+`focus split` returned at least one resolved bead); `6` already closed (idempotent no-op,
+reported); `3` a note append or store write failed.
+
+## 8. Sync
+
+Folded into `focus select --apply` step 5 and `focus pull`'s equivalent step (§7.2/§7.3) — there
+is no separate sync pass. What's gone compared to today's `df-wire`: no `wire_targets`
+resolution, no epic-vs-task blocking-edge distinction, no bulk `bd dep add`, no
+`df-verify-wiring`. There is nothing to wire to (no per-day focus bead, D-F4), so the class of
+defect that produced today's retro finding 4 (undocumented epic-vs-task wiring constraint) cannot
+recur — not handled, structurally absent.
+
+## 9. Consumer rewrites (`phillipg-nix-ziprecruiter`)
+
+| Consumer                          | Today                                                                                                                              | Rewritten to                                                                                                                                                                                                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create.md` duplicate guard       | `df-resolve-focus <date> --status all`                                                                                             | `pg-desk focus show --date X`; nonempty selection ⇒ same use-as-is/amend operator decision                                                                                                                                                                                |
+| `create.md` gate                  | `df-survey` shallow → table → reply → `--apply-gate`                                                                               | `pg-desk focus show` → table → reply → `pg-desk focus select --apply`                                                                                                                                                                                                     |
+| `create.md` deep/mint/wire        | `df-survey --deep` → LLM drop/merge → `df-wire`                                                                                    | `-<key>` covers "drop"; `--merge <key>=<key>` on `focus select` (§7.2 step 3) covers "merge"; folded into step 7.2                                                                                                                                                        |
+| `pull.md`                         | invokes `df-pull` verbatim, including its exit-`5` multi-candidate branch                                                          | invokes `pg-desk focus pull` verbatim — **not** the same exit codes: `focus pull` has no exit `5`, for the same reason `close.md` resolve (below) loses its multi-candidate case. `pull.md`'s own exit-5 handling prose is dead and should be removed, not left in place. |
+| `close.md` resolve                | `df-resolve-focus <date>`, exit-5 multi-candidate handling                                                                         | `pg-desk focus show --date X` existence check — no multi-candidate case exists (`period_key` is the date, exactly; the ambiguity class retires with it)                                                                                                                   |
+| `close.md` survey                 | `df-split-blockers <focus-id>`                                                                                                     | `pg-desk focus split --date X` — identical `{closed, carried-over}` shape                                                                                                                                                                                                 |
+| `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `pg-desk focus close --date X --notes-file FILE [--note TEXT]` (§7.5) — same per-bead notes, day summary now in `close_note`, no bead closed                                                                                                                              |
+
+`close.md` steps 3-5 (summarize, judge real progress, Jira comment gate) are unaffected — they
+consume the `{closed, carried-over}` item list either way and still produce the same
+`--notes-file`/`--summary-file` inputs step 6 (now `focus close`) consumes.
+
+## 10. Retirement, testing, and validation
+
+**Retires** (script, nix wiring in `scripts.nix`/`default.nix`, and bats tests, together):
+`df-survey`, `df-deferred`, `df-wire`, `df-verify-wiring` (a step inside `df-wire`, but its own
+top-level script/nix-module/bats-test entry — easy to miss if this list is read as exhaustive
+without checking `modules/daily-focus/` directly), `df-pull`, `df-resolve-focus`,
+`df-find-pr-bead`, `df-split-blockers`, `df-close-focus` (folds into `focus close`, §7.5).
+Unchanged: `df-attention`, `df-search`.
+
+**Testing moves with the logic.** Ranking, cap/select/pull/split semantics, and mint-only-if-
+needed all become pg-desk Go code (a new `internal/focus` package plus `cmd/pg-desk/focus*.go`),
+so their tests become Go tests against pg-desk's existing fixture conventions — a genuine rewrite
+of `df-survey`'s bats-tested ranking/gate-apply suites, not a file move. What remains bash/bats in
+`phillipg-nix-ziprecruiter`: nothing of substance for daily-focus's own logic — `create.md`/
+`pull.md`/`close.md` become LLM command prose invoking `pg-desk`, same as they already invoke
+`pg-connector` post-phase-9.
+
+**New feed/query validation.** Per this session's own live incident
+(`pg2-93e5s`/`pg2-cjwfu`, recorded in `phillipgreenii-nix-agent-support`'s `CLAUDE.md`):
+`nix flake check` passing on `epics-mine`/`issue-beads-bulk` proves the config evaluates, not that
+it produces real rows when actually triggered. The phase 15 checkpoint below requires exercising
+both live, not just a clean flake check.
+
+## 11. Phase 15 checkpoint (operator-run by hand, D16)
+
+- `pg-desk focus show --date <today>` produces the same candidate set `df-survey` would have,
+  modulo the two recorded narrowings (D-F2's PR repo scope, D-F7's dropped closed-child epic
+  signal).
+- `epics-mine` and `issue-beads-bulk` are each run live at least once (`pg-router run-query` or
+  equivalent) with a confirmed non-trivial outcome — real `entity` rows landing — not just a clean
+  `nix flake check`.
+- A full `select --apply` → `pull` → `split` → `close` cycle runs end-to-end against the live
+  tracker for one real day.
+- `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
+  without modification.
+
+## 12. Open items for operator review
+
+- **D-F7** (epic candidacy drops the closed-child signal) was decided in the operator's absence.
+  If the operator wants the closed-child half preserved, §4/§6 need revisiting — the
+  new-pg-connector-capability alternative sketched during design (a purpose-built
+  `pg-connector-issue-beads` verb doing the owner+children-including-closed lookup in one call,
+  rather than the generic named-query model) is the fallback if so.
+- Whether `week`/`sprint` period types are worth building now or genuinely deferred (the schema
+  is ready either way; no verb currently implements them).
+
+## 13. Rejected alternatives
+
+- **A per-day focus bead with wired dependencies** (today's model) — rejected; see D-F4. Beads
+  stay reserved for agent-workable signals per D8, and a per-period bead-wiring convention does
+  not generalize to week/sprint without new mechanism per level.
+- **Positional handles + a persisted candidate snapshot** (an earlier draft of this design) —
+  rejected; froze exactly the information (rank, signals) the operator needs live, to solve a
+  narrower identity-stability problem that a direct `(entity_type, entity_id)` reference solves
+  without freezing anything (D-F5).
+- **Composite natural-key primary keys for the new tables**, matching every existing pg-desk
+  table — rejected for `focus_selection`/`focus_period` specifically, per operator preference
+  (D-F6).
+- **A dedicated `pg-connector-issue-beads` capability for exact epic candidacy** (owner +
+  active-or-recently-closed-child, in one call) — not rejected outright, deferred: the simpler
+  recorded-narrowing path (D-F7) ships without new backend code; this is the documented fallback
+  if D-F7 doesn't hold up on review (§12).
