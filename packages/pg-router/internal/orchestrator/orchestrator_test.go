@@ -363,7 +363,44 @@ func TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries(t *testin
 func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testing.T) {
 	cfg := fastCfg()
 	workerEvts := []event.Event{event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"})}
-	o := newOrch(cfg, testQuerySet(nil, workerEvts))
+	// Deliberately NOT testQuerySet (which leaves worker-source's trigger at
+	// its zero value, falling back to cfg.PollInterval -- 1ms under
+	// fastCfg): this test's own tick loop below calls ProduceTick ~35 times
+	// back-to-back with no per-tick real-time wait (unlike a real `run`
+	// ticker), and ProduceWithCadence's cadenceDue gate is keyed to genuine
+	// wall-clock time.Now() (discover.go), never to this test's injected
+	// ManualClock (o.now/newOrch) or the Queue's own clock -- so NEITHER
+	// clock seam holds the cadence gate shut. Once real time -- not virtual
+	// time -- has advanced 1ms since worker-source's first fire, cadenceDue
+	// reopens and ProduceTick re-runs the query, which keeps returning the
+	// SAME fixed workerEvts id ("zr-w1") every call.
+	//
+	// That re-emit is not itself the bug: eventqueue's own retention model
+	// (event.go's Resolve/Expired, DEC-EVENT-1 "re-emission, not
+	// resurrection") means a born-expired event settles the instant its one
+	// bound listener has had its attempt, after which retainedLocked
+	// correctly treats a same-id re-emit as fresh work, not a duplicate
+	// (Queue.Enqueue's stale-retire branch; see
+	// TestEnqueueStaleReplaceCountsTheMissAndRecordsTheEvict for the
+	// vacuous/no-listener variant of the identical mechanism). On a fast,
+	// idle CPU the whole ~35-call loop finishes in far under 1ms, so
+	// cadence never reopens and worker-source fires exactly once; under a
+	// loaded/throttled CPU (this bead, pg2-dp12o) enough real time can pass
+	// for cadence to reopen WHILE the blocked offer is settling, so the
+	// re-emitted "zr-w1" gets legitimately redelivered a second time --
+	// callCount=2 -- with no race anywhere near o.lastTick/Kick, which is
+	// this test's actual, and only, subject (see its own doc comment
+	// above). Pinning worker-source's trigger to an hour-long period keeps
+	// cadence shut for the test's entire (sub-second) real run, regardless
+	// of how much real time a loaded CPU burns per iteration, without
+	// changing any production cadence/clock behavior.
+	o := newOrch(cfg, query.SourceSet{
+		{Name: "feedback-source", Query: &fakeQuery{Meta: query.Meta{EmitTypes: []string{"feedback.ready"}}}},
+		{Name: "worker-source", Query: &fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"work.ready"}, Trig: query.PeriodTrigger{Every: time.Hour}},
+			events: workerEvts,
+		}},
+	})
 	handler := o.Handler.(*fakeHandler)
 	handler.blockRole = "worker"
 	handler.unblock = make(chan struct{})
