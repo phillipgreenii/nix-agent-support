@@ -316,7 +316,12 @@ Exit `0` done (including "nothing left to pull"); `2` usage; `3` a tool call fai
 has `closed_at` set) — terminal, matching today's df-pull's "pulling into a closed day is always
 wrong."
 
-### 7.4 `pg-desk focus close --date YYYY-MM-DD --notes-file FILE [--note TEXT] [--dry-run]`
+`--dry-run` runs the same resolution and reports exactly what would be selected and what would be
+minted, writing nothing to `focus_selection` or `ledger` and calling no `pg-connector issue` —
+worth having natively (not left to the caller simply not invoking the verb) because minting is a
+real, visible, not-cheaply-undone action.
+
+### 7.4 `pg-desk focus close --date YYYY-MM-DD [--dry-run]` (day summary + per-bead notes on stdin)
 
 Writes `closed_at`/`close_note` onto the `focus_period` row (creating it if absent) — the
 `close_note` is where today's day-summary-onto-the-focus-bead text goes, since there is no more
@@ -324,13 +329,25 @@ focus bead to carry it. This does **not**, by itself, cover everything `df-close
 today: that script also appends a `[daily-focus <date>] <progress>` note to **every touched
 bead**, closed or carried over (`df-close-focus.sh`'s own `--notes-file`, one JSONL line per
 bead), which is real, currently-used behavior for carrying context onto individual beads across
-sessions — not a bead-artifact concern the retiring focus bead itself created. `focus close`
-therefore also takes `--notes-file FILE` (same JSONL shape: one `{"id", "note"}` line per
-resolved bead from `focus show`'s resolved-status output, D-F9) and appends each note via
-`pg-connector issue comment` before writing `focus_period`. Fails fast on the first append
-failure, same as today's script (no rollback of notes already appended). Exit `0` closed; `2`
-usage (missing `--notes-file` when `focus show` resolved at least one selected row to a bead);
-`6` already closed (idempotent no-op, reported); `3` a note append or store write failed.
+sessions — not a bead-artifact concern the retiring focus bead itself created.
+
+`focus close` therefore reads **one JSON object on stdin**, not a `--notes-file`/`--note` flag
+pair: `{"summary": "<day summary text>", "notes": [{"id": "<bead-id>", "note": "<progress
+text>"}, ...]}`, one `notes` entry per resolved bead from `focus show`'s resolved-status output
+(D-F9). Both fields are free-form text that can contain quotes and newlines — the same reason
+`select --apply`'s reply is read from stdin rather than argv (v2 doc §4.6): a `--notes-file FILE`
+flag would just be a second convention for a problem this design already solved once. `summary`
+becomes `close_note`; each `notes` entry is appended to its bead via `pg-connector issue comment`
+before `focus_period` is written. Fails fast on the first append failure, same as today's script
+(no rollback of notes already appended).
+
+`--dry-run` reports the resolved `close_note` and the per-bead notes that would be appended,
+writing nothing and appending nothing — same rationale as `pull`'s `--dry-run` above: posting a
+bead comment is visible and not cheaply undone.
+
+Exit `0` closed; `2` usage (malformed stdin, or a `notes` entry naming a bead `focus show` didn't
+actually resolve); `6` already closed (idempotent no-op, reported); `3` a note append or store
+write failed.
 
 ## 8. Sync
 
@@ -351,13 +368,13 @@ recur — not handled, structurally absent.
 | `pull.md`                         | invokes `df-pull` verbatim, including its exit-`5` multi-candidate branch                                                          | invokes `pg-desk focus pull` verbatim — **not** the same exit codes: `focus pull` has no exit `5`, for the same reason `close.md` resolve (below) loses its multi-candidate case. `pull.md`'s own exit-5 handling prose is dead and should be removed, not left in place. |
 | `close.md` resolve                | `df-resolve-focus <date>`, exit-5 multi-candidate handling                                                                         | `pg-desk focus show --date X` existence check — no multi-candidate case exists (`period_key` is the date, exactly; the ambiguity class retires with it)                                                                                                                   |
 | `close.md` survey                 | `df-split-blockers <focus-id>`                                                                                                     | `pg-desk focus show --date X` — resolved bead+status for each selected row (D-F9), grouped by `close.md` itself                                                                                                                                                           |
-| `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `pg-desk focus close --date X --notes-file FILE [--note TEXT]` (§7.4) — same per-bead notes, day summary now in `close_note`, no bead closed                                                                                                                              |
+| `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `pg-desk focus close --date X` — same per-bead notes and day summary, both on stdin as one JSON object (§7.4), no bead closed                                                                                                                                             |
 
 `close.md` steps 3-5 (summarize, judge real progress, Jira comment gate) are unaffected — they
 consume the resolved item list either way (grouping it into closed/carried-over, or whatever
 grouping it needs, is now `close.md`'s own job rather than a dedicated verb's output shape) and
-still produce the same `--notes-file`/`--summary-file` inputs step 6 (now `focus close`)
-consumes.
+still produce the same summary/per-bead-notes content step 6 (now `focus close`, reading it from
+stdin instead of `--notes-file`/`--summary-file`) consumes.
 
 ## 10. Retirement, testing, and validation
 
