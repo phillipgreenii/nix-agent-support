@@ -182,11 +182,11 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 // fakeHandlerFailureObserver is a scripted orchestrator.HandlerFailureObserver
 // test double recording every OnHandlerFailure call.
 type fakeHandlerFailureObserver struct {
-	calls []struct{ eventID, evtType string }
+	calls []struct{ eventID, evtType, listenerID string }
 }
 
-func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType string) {
-	f.calls = append(f.calls, struct{ eventID, evtType string }{eventID, evtType})
+func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+	f.calls = append(f.calls, struct{ eventID, evtType, listenerID string }{eventID, evtType, listenerID})
 }
 
 // TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver is
@@ -221,6 +221,32 @@ func TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver(t 
 	}
 	if obs.calls[0].eventID != evt.ID || obs.calls[0].evtType != evt.Type {
 		t.Fatalf("OnHandlerFailure(%+v), want eventID=%q evtType=%q", obs.calls[0], evt.ID, evt.Type)
+	}
+}
+
+// TestRoleListener_Offer_HandlerFailurePassesListenerID is this task's
+// required RED test: OnHandlerFailure's newly widened listenerID parameter
+// (mirroring eventqueue.Observer.OnDeclined's own listenerID) must carry the
+// role name that produced the failure, so pg-router can attribute a handler
+// failure to the listener that dispatched it.
+func TestRoleListener_Offer_HandlerFailurePassesListenerID(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{err: fmt.Errorf("boom")}
+	obs := &fakeHandlerFailureObserver{}
+	o.HandlerFailureObserver = obs
+	role := roles.Role{Name: "df-feedback", Binds: []string{"work-ready"}}
+	ctx := context.Background()
+	l := o.NewListener(ctx, role)
+
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	_ = l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+
+	if len(obs.calls) != 1 {
+		t.Fatalf("OnHandlerFailure call count = %d, want 1", len(obs.calls))
+	}
+	if obs.calls[0].listenerID != "df-feedback" {
+		t.Fatalf("OnHandlerFailure listenerID = %q, want %q", obs.calls[0].listenerID, "df-feedback")
 	}
 }
 

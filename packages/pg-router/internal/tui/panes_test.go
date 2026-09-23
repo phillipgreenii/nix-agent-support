@@ -573,6 +573,28 @@ func TestRenderListenersPane_NeverDispatchedRoleRendersCleanZeroState(t *testing
 	}
 }
 
+// TestRenderListenersPane_WideTierIncludesFailColumn is this task's required
+// RED test: the Wide tier must render a FAIL column carrying the per-role
+// handler-failure count (this task's HandlerFailures field).
+func TestRenderListenersPane_WideTierIncludesFailColumn(t *testing.T) {
+	listeners := []Listener{{Role: "df-feedback", HandlerFailures: 3}}
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	if !strings.Contains(out, "FAIL") || !strings.Contains(out, "3") {
+		t.Fatalf("rendered pane missing FAIL column/value:\n%s", out)
+	}
+}
+
+// TestRenderListenersPane_NeverFailedRoleShowsCleanZero closes the Review
+// Focus gap the earlier plan review found: a never-dispatched/never-failed
+// role must render "0" in FAIL, not a blank cell.
+func TestRenderListenersPane_NeverFailedRoleShowsCleanZero(t *testing.T) {
+	listeners := []Listener{{Role: "idle-role", Enabled: true}}
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	if !strings.Contains(out, "0") {
+		t.Fatalf("expected a clean 0 in FAIL for a never-failed role, got:\n%s", out)
+	}
+}
+
 // TestRenderRegistryPane_OmittedEntirelyWhenEmpty pins v1's own carried
 // decision (§3, restated at §4.3 for Narrow): the Registry pane is
 // omitted entirely -- not shown as an empty box -- when the registry has

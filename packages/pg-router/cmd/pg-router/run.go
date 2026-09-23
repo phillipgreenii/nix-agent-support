@@ -245,12 +245,6 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the remaining seam
 	// discover.WithSourceFailureObserver's doc left for a follow-on to close.
 	o.SourceFailureObserver = emitter
-	// Wire the same emitter into roleListener.Offer's own non-panic
-	// handler-error hook (bead pg2-97539) — the gap where a handler-internal
-	// error surfaced through wireclient's synchronous Offer call fell through
-	// both existing failure classes uncounted (see
-	// orchestrator.HandlerFailureObserver's own doc for the full story).
-	o.HandlerFailureObserver = emitter
 	// ring is the dispatch-outcome activity buffer (Task 3.4): a SECOND
 	// eventqueue.Observer, fanned out alongside emitter at this one
 	// construction site rather than folded into a new composite-observer
@@ -280,6 +274,16 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	for _, r := range declaredRoles {
 		listenerCounts[r.Name] = &core.ListenerCounts{}
 	}
+	// Wire the same emitter into roleListener.Offer's own non-panic
+	// handler-error hook (bead pg2-97539) — the gap where a handler-internal
+	// error surfaced through wireclient's synchronous Offer call fell through
+	// both existing failure classes uncounted (see
+	// orchestrator.HandlerFailureObserver's own doc for the full story) — now
+	// fanned out (this task) to ALSO bump a per-role handlerFailureCountObserver,
+	// the same listenerCounts map listenerCountObserver already tallies
+	// delivered/declined into, so composeStatusReply's listeners[] can render
+	// a per-role FAIL count alongside DLVD/DECL.
+	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
 	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
 	if err != nil {
 		_ = store.Close()
@@ -752,6 +756,32 @@ func (l *listenerCountObserver) OnDeclined(_, listenerID, reason string) {
 func (l *listenerCountObserver) OnDispatchFailure(string) {}
 
 func (l *listenerCountObserver) OnDeduped(string) {}
+
+// handlerFailureCountObserver implements orchestrator.HandlerFailureObserver
+// to bump a per-role handler-failure tally (this task), the same pattern
+// listenerCountObserver already uses for delivered/declined.
+type handlerFailureCountObserver struct {
+	counts map[string]*core.ListenerCounts
+}
+
+func (h *handlerFailureCountObserver) OnHandlerFailure(_, _, listenerID string) {
+	if c := h.counts[listenerID]; c != nil {
+		c.HandlerFailures.Add(1)
+	}
+}
+
+// fanOutHandlerFailureObserver calls every observer in order -- this task's
+// counterpart to eventqueue's own fanOutObserver, needed because
+// o.HandlerFailureObserver was previously a single assignment (emitter
+// alone), and this task adds a second, independent consumer of the same
+// signal.
+type fanOutHandlerFailureObserver []orchestrator.HandlerFailureObserver
+
+func (f fanOutHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+	for _, o := range f {
+		o.OnHandlerFailure(eventID, evtType, listenerID)
+	}
+}
 
 // preparedRun is the config/precheck/eventlog setup shared by `run` and
 // `run-until-idle` — the same setup runDrain used to do before this bead

@@ -569,6 +569,53 @@ func TestListenerCountObserver_OnAccept_RecordsLastDeliveredAt(t *testing.T) {
 	}
 }
 
+// recordingHandlerFailureObserver is a minimal
+// orchestrator.HandlerFailureObserver test double recording every
+// OnHandlerFailure call -- cmd/pg-router's own package-local copy (it
+// cannot import package orchestrator's identically-named test-only type
+// declared in an internal/orchestrator _test.go file across packages).
+type recordingHandlerFailureObserver struct {
+	eventID, evtType, listenerID string
+	calls                        int
+}
+
+func (r *recordingHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+	r.eventID, r.evtType, r.listenerID = eventID, evtType, listenerID
+	r.calls++
+}
+
+// TestHandlerFailureCountObserver_OnHandlerFailure_BumpsNamedListener is
+// this task's required RED test: handlerFailureCountObserver must bump the
+// named listener's HandlerFailures tally, the same lookup-by-listenerID
+// pattern listenerCountObserver.OnAccept/OnDeclined already use.
+func TestHandlerFailureCountObserver_OnHandlerFailure_BumpsNamedListener(t *testing.T) {
+	counts := map[string]*core.ListenerCounts{"df-feedback": {}}
+	obs := &handlerFailureCountObserver{counts: counts}
+
+	obs.OnHandlerFailure("evt-1", "x", "df-feedback")
+
+	if got := counts["df-feedback"].HandlerFailures.Load(); got != 1 {
+		t.Fatalf("HandlerFailures = %d, want 1", got)
+	}
+}
+
+// TestFanOutHandlerFailureObserver_CallsEveryObserver is this task's
+// required RED test: fanOutHandlerFailureObserver must call every fanned-out
+// orchestrator.HandlerFailureObserver, in order -- bootCore's own
+// construction site relies on this to feed both the metrics.Emitter and the
+// new per-role handlerFailureCountObserver from the same
+// o.HandlerFailureObserver hook.
+func TestFanOutHandlerFailureObserver_CallsEveryObserver(t *testing.T) {
+	a, b := &recordingHandlerFailureObserver{}, &recordingHandlerFailureObserver{}
+	f := fanOutHandlerFailureObserver{a, b}
+
+	f.OnHandlerFailure("evt-1", "x", "df-feedback")
+
+	if a.calls != 1 || b.calls != 1 {
+		t.Fatalf("calls = (%d,%d), want (1,1)", a.calls, b.calls)
+	}
+}
+
 // flakySourceQuery is a minimal pull-source query.Query stand-in (mirrors
 // internal/discover's own unexported flakyQuery, copied here since that one is
 // package-private, the same convention selTestQuery above already follows):

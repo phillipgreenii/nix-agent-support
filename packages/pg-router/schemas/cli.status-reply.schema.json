@@ -121,6 +121,7 @@
           "declined": { "type": "integer", "minimum": 0 },
           "declinedByReason": { "type": "object" },
           "lastDeliveredAtMs": { "type": "integer", "minimum": 0 },
+          "handlerFailures": { "type": "integer", "minimum": 0 },
           "selfReportState": { "type": "string" },
           "backoff": {
             "oneOf": [

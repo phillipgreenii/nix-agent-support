@@ -155,7 +155,11 @@ type Listener struct {
 	// (this task is the first decoder of it) -- keys are DeclineReason's
 	// own text or an arbitrary DeclineDetail override.
 	DeclinedByReason map[string]int64 `json:"declinedByReason"`
-	Backoff          *Backoff         `json:"backoff"`
+	// HandlerFailures counts genuine business-logic rejections (this task)
+	// -- NOT a decline, since the item was accepted; see
+	// core.ListenerCounts.HandlerFailures' own doc.
+	HandlerFailures int64    `json:"handlerFailures"`
+	Backoff         *Backoff `json:"backoff"`
 	// SelfReportState is this task's fold-in of the retired Registry pane:
 	// the Registration.State whose ID equals this Listener's Role, or ""
 	// if this listener has never self-reported.

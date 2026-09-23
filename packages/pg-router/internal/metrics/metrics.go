@@ -496,8 +496,10 @@ func (e *Emitter) OnDispatchFailure(_ string) {
 // FailureClassHandlerError's own doc for why). eventID/evtType are accepted
 // for the same interface-symmetry reason OnDeclined/OnDispatchFailure's docs
 // give and are likewise not part of the label set; the class dimension is
-// FailureClassHandlerError.
-func (e *Emitter) OnHandlerFailure(_, _ string) {
+// FailureClassHandlerError. listenerID (this task, widening the interface
+// for a per-role handler-failure tally) is likewise not part of this
+// pool-wide metric's label set, so it is accepted and ignored here too.
+func (e *Emitter) OnHandlerFailure(_, _, _ string) {
 	e.RecordFailure(FailureClassHandlerError)
 }
 

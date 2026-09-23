@@ -79,9 +79,12 @@ type ResourceLimitObserver interface {
 // eventID/evtType match ResourceLimitObserver's own signature and
 // capture-at-construction pattern (the same roleListener field group,
 // nil-safe: no configured observer is a no-op, matching every other hook in
-// this group).
+// this group). listenerID is the role name (roleListener.ID()) that
+// produced the failure -- added by this task so a per-listener failure
+// count can be recorded, mirroring eventqueue.Observer.OnDeclined's own
+// listenerID parameter.
 type HandlerFailureObserver interface {
-	OnHandlerFailure(eventID, evtType string)
+	OnHandlerFailure(eventID, evtType, listenerID string)
 }
 
 // roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
@@ -308,7 +311,7 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// above for why this is a widened, already-recorded gap rather than a
 	// regression this task introduces.
 	if err != nil && l.handlerFailureObs != nil {
-		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type)
+		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type, l.role.Name)
 	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}

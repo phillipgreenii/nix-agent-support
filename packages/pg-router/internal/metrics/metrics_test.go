@@ -391,8 +391,8 @@ func TestRecordFailure_AcceptsThreeClasses(t *testing.T) {
 // interface symmetry only and are not part of the failure-rate label set.
 func TestOnHandlerFailureFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.OnHandlerFailure("dsp-1", "review-requested")
-	h.emitter.OnHandlerFailure("dsp-2", "push-requested")
+	h.emitter.OnHandlerFailure("dsp-1", "review-requested", "role-a")
+	h.emitter.OnHandlerFailure("dsp-2", "push-requested", "role-b")
 
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassHandlerError); got != 2 {

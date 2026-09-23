@@ -266,9 +266,9 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 	var widths []int
 	switch tier {
 	case render.TierWide:
-		headers, widths = []string{"ROLE", "BINDS", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)", "SELF"}, []int{10, 14, 16, 14, 6, 14, 10}
+		headers, widths = []string{"ROLE", "BINDS", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)", "SELF", "FAIL"}, []int{10, 14, 16, 14, 6, 14, 10, 6}
 	case render.TierNarrow:
-		headers, widths = []string{"ROLE", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)"}, []int{10, 16, 14, 6, 14}
+		headers, widths = []string{"ROLE", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)", "FAIL"}, []int{10, 16, 14, 6, 14, 6}
 	default:
 		headers, widths = []string{"ROLE", "HEALTH", "DLVD"}, []int{10, 14, 6}
 	}
@@ -292,13 +292,14 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 				self = theme.Cooling.Render(self)
 			}
 		}
+		fail := fmt.Sprintf("%d", l.HandlerFailures)
 		var row []string
 		switch tier {
 		case render.TierWide:
 			binds := textsafe.Sanitize(strings.Join(l.Binds, ","))
-			row = []string{role, binds, health, lastDelivered, dlvd, decl, self}
+			row = []string{role, binds, health, lastDelivered, dlvd, decl, self, fail}
 		case render.TierNarrow:
-			row = []string{role, health, lastDelivered, dlvd, decl}
+			row = []string{role, health, lastDelivered, dlvd, decl, fail}
 		default:
 			row = []string{role, health, dlvd}
 		}

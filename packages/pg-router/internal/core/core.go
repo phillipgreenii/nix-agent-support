@@ -212,6 +212,10 @@ type ListenerCounts struct {
 	// listenerCountObserver.OnAccept, the same call site Delivered already
 	// increments at.
 	LastDeliveredAtNanos atomic.Int64
+	// HandlerFailures counts genuine business-logic rejections
+	// (HandlerFailureObserver) -- NOT a decline, since the item was
+	// accepted. Bumped by cmd/pg-router's handlerFailureCountObserver.
+	HandlerFailures atomic.Int64
 	// DeclinedByReason breaks Declined down by the SAME reason string
 	// eventqueue.Observer.OnDeclined already carries (bead pg2-j4uwg widens
 	// this from "wired through, discarded" to "actually recorded"):
@@ -1478,7 +1482,7 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 	for _, r := range declared {
 		binds := make([]string, len(r.Binds))
 		copy(binds, r.Binds)
-		var delivered, declined, lastDeliveredAtMs int64
+		var delivered, declined, lastDeliveredAtMs, handlerFailures int64
 		declinedByReason := map[string]int64{}
 		if c := counts[r.Name]; c != nil {
 			delivered = c.Delivered.Load()
@@ -1487,6 +1491,7 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			if nanos := c.LastDeliveredAtNanos.Load(); nanos != 0 {
 				lastDeliveredAtMs = nanos / int64(time.Millisecond)
 			}
+			handlerFailures = c.HandlerFailures.Load()
 		}
 		out = append(out, map[string]any{
 			"role":     r.Name,
@@ -1502,8 +1507,12 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			"declined":          declined,
 			"declinedByReason":  declinedByReason,
 			"lastDeliveredAtMs": lastDeliveredAtMs,
-			"selfReportState":   selfState[r.Name],
-			"backoff":           nil,
+			// handlerFailures counts genuine business-logic rejections
+			// (this task) -- NOT a decline, since the item was accepted; see
+			// ListenerCounts.HandlerFailures' own doc.
+			"handlerFailures": handlerFailures,
+			"selfReportState": selfState[r.Name],
+			"backoff":         nil,
 		})
 	}
 	return out
