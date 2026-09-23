@@ -77,6 +77,18 @@ let
       "/Users/${primaryUser}/.local/state"
     else
       "/tmp/pg-router-ccpool-handler";
+
+  # The primary user's nix-darwin/home-manager profile bin dir (bug
+  # pg2-se8rv), mirroring darwin/modules/pg-router/default.nix's own
+  # `hmProfileBin` precedent (bead pg2-gt3ju) exactly: a launchd UserAgent's
+  # process starts from launchd's own bare default PATH
+  # (`/usr/bin:/bin:/usr/sbin:/sbin`), which never includes this profile --
+  # unlike an interactive login shell, which always has it. The poolMetrics
+  # LaunchAgent below runs `mkPoolMetricsScript`
+  # (home/programs/pg-router-ccpool-handler/default.nix), which shells out
+  # to bare `ccpool`/`bd`/`git`; without this on PATH every run fails with
+  # "executable file not found in $PATH" (confirmed live, 36/36 runs).
+  hmProfileBin = if primaryUser != null then "/etc/profiles/per-user/${primaryUser}/bin" else null;
 in
 {
   options.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = lib.mkOption {
@@ -159,6 +171,9 @@ in
       phillipgreenii.system.launchdServices.userAgents.pg-router-ccpool-handler-pool-metrics = {
         label = "com.phillipg.pg-router-ccpool-handler-pool-metrics";
         script = ''
+          ${lib.optionalString (
+            hmProfileBin != null
+          ) ''export PATH=${lib.escapeShellArg hmProfileBin}:"$PATH"''}
           exec ${poolMetricsCfg.script}
         '';
         runAtLoad = true;
