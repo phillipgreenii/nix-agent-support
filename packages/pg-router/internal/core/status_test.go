@@ -311,6 +311,42 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 	}
 }
 
+// TestStatusListeners_DescriptionAlwaysPresent is pg2-ec754's red-first test:
+// composeStatusReply's listeners[] carries the ALWAYS-present `description`
+// key, sourced straight from the declared roles.Role.Description — never
+// omitted, and "" (not a missing key) for a role that never set one, matching
+// this reply's existing always-present-key convention (e.g. binds).
+func TestStatusListeners_DescriptionAlwaysPresent(t *testing.T) {
+	svc := &Service{
+		q:        newQueue(t),
+		bindings: testBindings(),
+		reg:      NewRegistry(nil),
+		declaredRoles: []roles.Role{
+			{Name: "review", Binds: []string{"review-requested"}, Enabled: true, Description: "reviews incoming PRs"},
+			{Name: "worker", Binds: []string{"work-ready"}, Enabled: true},
+		},
+	}
+	reply := svc.composeStatusReply(0)
+	listeners, ok := reply["listeners"].([]map[string]any)
+	if !ok || len(listeners) != 2 {
+		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
+	}
+	byRole := make(map[string]map[string]any, len(listeners))
+	for _, l := range listeners {
+		byRole[l["role"].(string)] = l
+	}
+	if got := byRole["review"]["description"]; got != "reviews incoming PRs" {
+		t.Fatalf("review.description = %v, want %q", got, "reviews incoming PRs")
+	}
+	got, present := byRole["worker"]["description"]
+	if !present {
+		t.Fatal("worker.description absent, want an always-present key")
+	}
+	if got != "" {
+		t.Fatalf("worker.description = %v, want empty string (unset in config)", got)
+	}
+}
+
 // TestStatusListeners_DeclinedByReasonBreaksDownDeclined proves
 // composeStatusReply's listeners[] carries the OPTIONAL declinedByReason
 // breakdown (bead pg2-j4uwg) alongside the pre-existing flat declined total
@@ -494,7 +530,7 @@ func TestStatusSources_MergedAndSortedByName(t *testing.T) {
 	}
 	excludedSources := []string{"alpha-excluded", "beta-excluded"}
 
-	rows := statusSources(active, excludedSources, nil, nil)
+	rows := statusSources(active, excludedSources, nil, nil, nil)
 	if len(rows) != 4 {
 		t.Fatalf("len(rows) = %d, want 4", len(rows))
 	}
@@ -532,7 +568,7 @@ func TestStatusSources_InFlight(t *testing.T) {
 	excludedSources := []string{"fetching-now"} // deliberately same name as an active source: proves exclusion wins without consulting inFlight
 	inFlight := map[string]bool{"fetching-now": true}
 
-	rows := statusSources(active, nil, nil, inFlight)
+	rows := statusSources(active, nil, nil, inFlight, nil)
 	byName := make(map[string]map[string]any, len(rows))
 	for _, r := range rows {
 		byName[r["name"].(string)] = r
@@ -544,7 +580,7 @@ func TestStatusSources_InFlight(t *testing.T) {
 		t.Fatalf("idle inFlight = %v, want false", got)
 	}
 
-	excludedRows := statusSources(nil, excludedSources, nil, inFlight)
+	excludedRows := statusSources(nil, excludedSources, nil, inFlight, nil)
 	if got := excludedRows[0]["inFlight"]; got != false {
 		t.Fatalf("excluded source inFlight = %v, want false unconditionally, even though its name is present in the inFlight set", got)
 	}
@@ -586,6 +622,47 @@ func TestStatusQueues_SortedByType(t *testing.T) {
 	want := []string{"alpha-type", "mid-type", "zeta-type"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("type order = %v, want alphabetical %v", got, want)
+	}
+}
+
+// TestStatusSources_DescriptionAlwaysPresent is pg2-ec754's red-first test:
+// composeStatusReply's sources[] carries the ALWAYS-present `description`
+// key, sourced from Options.SourceDescriptions (resolved once at boot from
+// the full configured query set, mirroring SourceIntervalsMs) — never
+// omitted, and "" (not a missing key) for a source with no entry in that
+// map, whether it's active this pass or selector-excluded.
+func TestStatusSources_DescriptionAlwaysPresent(t *testing.T) {
+	svc := &Service{
+		q:                  newQueue(t),
+		bindings:           testBindings(),
+		reg:                NewRegistry(nil),
+		excludedSources:    []string{"disabled-src"},
+		sourceDescriptions: map[string]string{"active-src": "polls the tracker for active-src items"},
+	}
+	now := time.Date(2026, 9, 1, 0, 5, 0, 0, time.UTC)
+	svc.PublishTick(TickSnapshot{
+		Sources: []SourceReport{
+			{Name: "active-src", Type: "pull", LastTick: now},
+		},
+	})
+	reply := svc.composeStatusReply(0)
+	sources, ok := reply["sources"].([]map[string]any)
+	if !ok || len(sources) != 2 {
+		t.Fatalf("sources = %v, want 2 entries (1 active + 1 selector-excluded)", reply["sources"])
+	}
+	byName := make(map[string]map[string]any, len(sources))
+	for _, s := range sources {
+		byName[s["name"].(string)] = s
+	}
+	if got := byName["active-src"]["description"]; got != "polls the tracker for active-src items" {
+		t.Fatalf("active-src.description = %v, want %q", got, "polls the tracker for active-src items")
+	}
+	got, present := byName["disabled-src"]["description"]
+	if !present {
+		t.Fatal("disabled-src.description absent, want an always-present key")
+	}
+	if got != "" {
+		t.Fatalf("disabled-src.description = %v, want empty string (no SourceDescriptions entry)", got)
 	}
 }
 

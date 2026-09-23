@@ -61,6 +61,12 @@ type Role struct {
 	// backoff.Policy.Duration sanitizes it against backoff.Default() — so a role
 	// that never sets it (e.g. every built-in role) still gets a sane cadence.
 	RetryBackoff backoff.Policy
+	// Description is an optional, operator-authored free-text note about
+	// this role (pg2-ec754) — purely informational, surfaced in the TUI
+	// drill-down details so an operator can record why a listener exists
+	// without having to remember it. Empty ("") means unset; nothing in this
+	// package interprets its content.
+	Description string
 }
 
 // ExternalID builds the per-attempt ccpool external_id:

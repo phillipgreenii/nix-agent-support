@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/tui"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -182,6 +183,125 @@ func TestBootCore_InProcessParticipantAvailableImmediately(t *testing.T) {
 
 	if !svc.Registry().Available("r1") {
 		t.Fatal("registered in-process handler r1 must be Available immediately after bootCore")
+	}
+}
+
+// TestBootCore_DescriptionRoundTripsToWireAndTUI is pg2-ec754's own
+// end-to-end acceptance test: a role's and a query's operator-authored
+// Description — the same field a [[role]]/[[query]] TOML `description` key
+// decodes onto (internal/config/registry_test.go covers that leg) — survives
+// unchanged through bootCore's real Options wiring (run.go's
+// sourceDescriptions map, mirroring sourceIntervalsMs), the live `status`
+// wire reply (core.go's statusListeners/statusSources), and the TUI's own
+// json-tagged decode (internal/tui.Listener/Source) — landing on the exact
+// struct fields renderListenerDetail/renderSourceDetail render (covered by
+// internal/tui/drilldown_test.go's own Description tests). A role/query
+// that never sets one round-trips to the empty string, never a missing key
+// (schema's `additionalProperties: false` would otherwise reject the reply
+// outright once description was declared required).
+func TestBootCore_DescriptionRoundTripsToWireAndTUI(t *testing.T) {
+	cfg := config.Config{
+		LogDir: shortDir(t),
+		Roles: roles.RoleSet{
+			{Name: "review", Enabled: true, Binds: []string{"review-requested"}, Description: "reviews incoming PRs for policy violations"},
+			{Name: "worker", Enabled: true, Binds: []string{"work-ready"}},
+		},
+		Queries: query.SourceSet{
+			{
+				Name:        "feedback-ready",
+				Description: "polls the tracker for feedback-ready items",
+				Query: query.CommandQuery{
+					Meta:   query.Meta{EmitTypes: []string{"feedback-ready"}},
+					Argv:   []string{"noop"},
+					Format: query.FormatJSONL,
+				},
+			},
+			{
+				Name: "urgent-ready",
+				Query: query.CommandQuery{
+					Meta:   query.Meta{EmitTypes: []string{"urgent-ready"}},
+					Argv:   []string{"noop"},
+					Format: query.FormatJSONL,
+				},
+			},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	svc, _, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	// Serve refuses every subcommand until the core has transitioned out of
+	// `starting` (INV-INTF-1's lifecycle gate) — Accept makes that transition
+	// as its own first statement, then blocks on the real socket listener, so
+	// it must run in the background; this test only needs the in-process
+	// Serve call below, never a real socket dial.
+	accepted := make(chan error, 1)
+	go func() { accepted <- svc.Accept(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-accepted
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for svc.State() != conformance.Started && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if svc.State() != conformance.Started {
+		t.Fatal("core never reached started")
+	}
+
+	// statusSources only renders a source that either fired THIS pass
+	// (TickSnapshot.Sources) or was selector-excluded (Options.
+	// ExcludedSources's own doc, core.go) — neither applies pre-first-tick,
+	// so simulate one real pass having fired both configured sources, the
+	// same seam TestStatusSources_TypeModeLastTickFailure (status_test.go)
+	// uses from inside package core.
+	svc.PublishTick(core.TickSnapshot{
+		Sources: []core.SourceReport{
+			{Name: "feedback-ready", Type: "pull"},
+			{Name: "urgent-ready", Type: "pull"},
+		},
+	})
+
+	var out strings.Builder
+	if code := svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != conformance.ExitOK {
+		t.Fatalf("status Serve exit = %d, want %d; body=%s", code, conformance.ExitOK, out.String())
+	}
+
+	var reply tui.StatusReply
+	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
+		t.Fatalf("decode status reply into tui.StatusReply: %v; body=%s", err, out.String())
+	}
+
+	listenersByRole := make(map[string]tui.Listener, len(reply.Listeners))
+	for _, l := range reply.Listeners {
+		listenersByRole[l.Role] = l
+	}
+	if got := listenersByRole["review"].Description; got != "reviews incoming PRs for policy violations" {
+		t.Errorf("tui.Listener[review].Description = %q, want the configured text", got)
+	}
+	if got, ok := listenersByRole["worker"]; !ok {
+		t.Error("tui.Listener[worker] missing from decoded reply")
+	} else if got.Description != "" {
+		t.Errorf("tui.Listener[worker].Description = %q, want empty (unset in config)", got.Description)
+	}
+
+	sourcesByName := make(map[string]tui.Source, len(reply.Sources))
+	for _, s := range reply.Sources {
+		sourcesByName[s.Name] = s
+	}
+	if got := sourcesByName["feedback-ready"].Description; got != "polls the tracker for feedback-ready items" {
+		t.Errorf("tui.Source[feedback-ready].Description = %q, want the configured text", got)
+	}
+	if got, ok := sourcesByName["urgent-ready"]; !ok {
+		t.Error("tui.Source[urgent-ready] missing from decoded reply")
+	} else if got.Description != "" {
+		t.Errorf("tui.Source[urgent-ready].Description = %q, want empty (unset in config)", got.Description)
 	}
 }
 

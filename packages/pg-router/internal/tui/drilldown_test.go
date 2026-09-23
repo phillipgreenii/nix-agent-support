@@ -721,3 +721,80 @@ func TestRenderListenerDetail_SelfDimmedOnlyWhenDegraded(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderListenerDetail_Description is pg2-ec754's red-first test: the
+// listener drill-down renders the operator-authored Description on its own
+// line, sanitized like every other operator-supplied string this file
+// renders, and "-" (matching configString's own absent-value convention,
+// not an empty line or a missing field) when unset.
+func TestRenderListenerDetail_Description(t *testing.T) {
+	theme := render.NewTheme(false)
+
+	t.Run("set description renders verbatim", func(t *testing.T) {
+		l := Listener{Role: "review", Binds: []string{"review-requested"}, Description: "reviews incoming PRs for policy violations"}
+
+		got := renderListenerDetail(l, theme, nil)
+
+		if !strings.Contains(got, "Description:") || !strings.Contains(got, "reviews incoming PRs for policy violations") {
+			t.Errorf("renderListenerDetail() = %q, want it to contain the Description line with the configured text", got)
+		}
+	})
+
+	t.Run("unset description renders as -", func(t *testing.T) {
+		l := Listener{Role: "worker", Binds: []string{"work-ready"}}
+
+		got := renderListenerDetail(l, theme, nil)
+
+		lines := strings.Split(got, "\n")
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Description:") {
+				found = true
+				if strings.TrimSpace(strings.TrimPrefix(line, "Description:")) != "-" {
+					t.Errorf("renderListenerDetail() Description line = %q, want it to render exactly \"-\"", line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("renderListenerDetail() = %q, want a Description line even when unset (never a missing field)", got)
+		}
+	})
+}
+
+// TestRenderSourceDetail_Description is pg2-ec754's red-first test: the
+// source drill-down renders the operator-authored Description on its own
+// line, "-" when unset, matching renderListenerDetail's own convention.
+func TestRenderSourceDetail_Description(t *testing.T) {
+	theme := render.NewTheme(false)
+	now := time.Now()
+
+	t.Run("set description renders verbatim", func(t *testing.T) {
+		s := Source{Name: "gh-prs", Type: "github", Mode: "poll", Description: "polls the tracker for gh-prs items"}
+
+		got := renderSourceDetail(s, now, theme, nil)
+
+		if !strings.Contains(got, "Description:") || !strings.Contains(got, "polls the tracker for gh-prs items") {
+			t.Errorf("renderSourceDetail() = %q, want it to contain the Description line with the configured text", got)
+		}
+	})
+
+	t.Run("unset description renders as -", func(t *testing.T) {
+		s := Source{Name: "gh-issues", Type: "github", Mode: "poll"}
+
+		got := renderSourceDetail(s, now, theme, nil)
+
+		lines := strings.Split(got, "\n")
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Description:") {
+				found = true
+				if strings.TrimSpace(strings.TrimPrefix(line, "Description:")) != "-" {
+					t.Errorf("renderSourceDetail() Description line = %q, want it to render exactly \"-\"", line)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("renderSourceDetail() = %q, want a Description line even when unset (never a missing field)", got)
+		}
+	})
+}

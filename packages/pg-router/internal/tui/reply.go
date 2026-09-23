@@ -181,6 +181,10 @@ type Listener struct {
 	// Type, empty when InFlight is false.
 	InFlight          bool   `json:"inFlight"`
 	InFlightEventType string `json:"inFlightEventType"`
+	// Description is the operator-authored free-text note (pg2-ec754), or
+	// "" if unset. Rendered as "-" by renderListenerDetail (drilldown.go),
+	// matching this package's existing absent-value convention.
+	Description string `json:"description"`
 }
 
 // DeclinedBucketed buckets DeclinedByReason into (busy, unavailable,
@@ -219,4 +223,8 @@ type Source struct {
 	// InFlight (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's "processing now"
 	// signal) is true exactly while this source has a fetch in progress.
 	InFlight bool `json:"inFlight"`
+	// Description is the operator-authored free-text note (pg2-ec754), or
+	// "" if unset. Rendered as "-" by renderSourceDetail (drilldown.go),
+	// matching this package's existing absent-value convention.
+	Description string `json:"description"`
 }

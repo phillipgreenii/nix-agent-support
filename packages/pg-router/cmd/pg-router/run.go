@@ -314,8 +314,14 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// query set, so the Sources pane can judge staleness per-source instead
 	// of against the pool-wide tick interval.
 	sourceIntervalsMs := make(map[string]int64, len(cfg.Queries))
+	// sourceDescriptions (pg2-ec754) resolves each configured source's own
+	// operator-authored free-text description ONCE, from the full
+	// configured query set — mirroring sourceIntervalsMs's own resolve-
+	// once-at-boot pattern immediately above.
+	sourceDescriptions := make(map[string]string, len(cfg.Queries))
 	for _, src := range cfg.Queries {
 		sourceIntervalsMs[src.Name] = config.ExpectedIntervalMsFor(src, cfg.ExpectedIntervalOverrides)
+		sourceDescriptions[src.Name] = src.Description
 	}
 	opts := core.Options{
 		LogDir:         cfg.LogDir,
@@ -335,11 +341,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		ConfigPath:     cfg.ConfigPath,
 		// DeclaredRoles/ExcludedRoles/ExcludedSources/ListenerCounts
 		// (Task 4.1): see this function's own doc comment above.
-		DeclaredRoles:     declaredRoles,
-		ExcludedRoles:     excluded.Roles,
-		ExcludedSources:   excluded.Sources,
-		SourceIntervalsMs: sourceIntervalsMs,
-		ListenerCounts:    listenerCounts,
+		DeclaredRoles:      declaredRoles,
+		ExcludedRoles:      excluded.Roles,
+		ExcludedSources:    excluded.Sources,
+		SourceIntervalsMs:  sourceIntervalsMs,
+		SourceDescriptions: sourceDescriptions,
+		ListenerCounts:     listenerCounts,
 	}
 	if metricsReader != nil {
 		// Assigned only when non-nil: metricsReader is a typed *metrics.Reader,

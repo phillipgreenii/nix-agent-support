@@ -283,6 +283,11 @@ func renderListenerDetail(l Listener, theme render.Theme, activity []ActivityEnt
 	var b strings.Builder
 	fmt.Fprintf(&b, "Role:           %s\n", textsafe.Sanitize(l.Role))
 	fmt.Fprintf(&b, "Binds:          %s\n", textsafe.Sanitize(strings.Join(l.Binds, ",")))
+	// Description (pg2-ec754): an operator-authored free-text note,
+	// sanitized like every other operator-supplied string this file
+	// renders, "-" when empty per configString's own absent-value
+	// convention.
+	fmt.Fprintf(&b, "Description: %s\n", configString(l.Description))
 	fmt.Fprintf(&b, "Health:         %s\n", listenerHealthText(l, theme))
 	lastDelivered := "-"
 	if l.LastDeliveredAtMs > 0 {
@@ -323,6 +328,11 @@ func renderSourceDetail(s Source, now time.Time, theme render.Theme, activity []
 	fmt.Fprintf(&b, "%-14s %s\n", "Name:", textsafe.Sanitize(s.Name))
 	fmt.Fprintf(&b, "%-14s %s\n", "Type:", textsafe.Sanitize(s.Type))
 	fmt.Fprintf(&b, "%-14s %s\n", "Mode:", textsafe.Sanitize(s.Mode))
+	// Description (pg2-ec754): an operator-authored free-text note,
+	// sanitized like every other operator-supplied string this file
+	// renders, "-" when empty per configString's own absent-value
+	// convention.
+	fmt.Fprintf(&b, "%-14s %s\n", "Description:", configString(s.Description))
 	fmt.Fprintf(&b, "%-14s %s\n", "Health:", sourceHealthText(s, now, theme))
 	fmt.Fprintf(&b, "%-14s %t\n", "Excluded:", s.Excluded)
 	lastTick := "-"

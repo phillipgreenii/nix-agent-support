@@ -195,6 +195,14 @@ type Options struct {
 	// missing or zero entry means "unknown" — statusSources renders that
 	// source's ExpectedIntervalMs as 0, and the TUI renders N/A.
 	SourceIntervalsMs map[string]int64
+	// SourceDescriptions is source name -> operator-authored free-text
+	// description (pg2-ec754): resolved once by the caller (cmd/pg-router's
+	// bootCore) from the FULL configured query set's own query.Source.
+	// Description, mirroring SourceIntervalsMs's own resolve-once-at-boot
+	// pattern. A missing entry (or this map being nil) means "unset" —
+	// statusSources renders that source's description as "" (always
+	// present, never omitted).
+	SourceDescriptions map[string]string
 	// ListenerCounts is delivered/declined per role name (Task 4.1 Step 5):
 	// bumped by the deployment's own eventqueue.Observer wiring, at the
 	// SAME (event, handler) acceptance/decline sites INV-EVT-1 already
@@ -305,11 +313,12 @@ type Service struct {
 	// matching fields for what each carries and why. All four are set once
 	// at Listen and never mutated afterward, so composeStatusReply reads
 	// them with no lock of Service's own mu.
-	declaredRoles     []roles.Role
-	excludedRoles     []string
-	excludedSources   []string
-	sourceIntervalsMs map[string]int64
-	listenerCounts    map[string]*ListenerCounts
+	declaredRoles      []roles.Role
+	excludedRoles      []string
+	excludedSources    []string
+	sourceIntervalsMs  map[string]int64
+	sourceDescriptions map[string]string
+	listenerCounts     map[string]*ListenerCounts
 
 	// tick and gates are the two published-state cells Serve's handlers (this
 	// package) read with no cross-package import (Task 3.5 Objective):
@@ -552,29 +561,30 @@ func Listen(opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:             conformance.Starting,
-		q:                 opts.Queue,
-		bindings:          opts.Bindings,
-		obs:               opts.Observer,
-		reg:               NewRegistry(now),
-		ln:                ln,
-		ref:               ref,
-		logDir:            opts.LogDir,
-		command:           command,
-		metricsReader:     opts.MetricsReader,
-		monitorSubsets:    opts.MonitorSubsets,
-		activityRing:      opts.ActivityRing,
-		sourceInFlight:    opts.SourceInFlight,
-		configPath:        opts.ConfigPath,
-		startedAt:         now(),
-		readSem:           make(chan struct{}, readSemCapacity),
-		declaredRoles:     opts.DeclaredRoles,
-		excludedRoles:     opts.ExcludedRoles,
-		excludedSources:   opts.ExcludedSources,
-		sourceIntervalsMs: opts.SourceIntervalsMs,
-		listenerCounts:    opts.ListenerCounts,
-		store:             kvstore.NewInMemory(),
-		storeCommand:      opts.StoreCommand,
+		state:              conformance.Starting,
+		q:                  opts.Queue,
+		bindings:           opts.Bindings,
+		obs:                opts.Observer,
+		reg:                NewRegistry(now),
+		ln:                 ln,
+		ref:                ref,
+		logDir:             opts.LogDir,
+		command:            command,
+		metricsReader:      opts.MetricsReader,
+		monitorSubsets:     opts.MonitorSubsets,
+		activityRing:       opts.ActivityRing,
+		sourceInFlight:     opts.SourceInFlight,
+		configPath:         opts.ConfigPath,
+		startedAt:          now(),
+		readSem:            make(chan struct{}, readSemCapacity),
+		declaredRoles:      opts.DeclaredRoles,
+		excludedRoles:      opts.ExcludedRoles,
+		excludedSources:    opts.ExcludedSources,
+		sourceIntervalsMs:  opts.SourceIntervalsMs,
+		sourceDescriptions: opts.SourceDescriptions,
+		listenerCounts:     opts.ListenerCounts,
+		store:              kvstore.NewInMemory(),
+		storeCommand:       opts.StoreCommand,
 	}, nil
 }
 
@@ -1377,7 +1387,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners()),
 		"gates":     statusGates(gates),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
-		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources),
+		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
 		"activity":  []any{},
 		// activityDropped defaults false (no ring, or since==0's "no cursor, no
 		// gap to report" case per Ring.Read's own doc) and is set true below
@@ -1403,7 +1413,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		core["version"] = tick.Version
 		reply["mode"] = tick.RunMode
 		reply["resolvedConfig"] = statusResolvedConfig(tick.Config)
-		reply["sources"] = statusSources(tick.Sources, s.excludedSources, s.sourceIntervalsMs, inFlightSources)
+		reply["sources"] = statusSources(tick.Sources, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions)
 		reply["lastTickAt"] = tick.LastTickAt.UTC().Format(time.RFC3339Nano)
 		reply["snapshotAt"] = tick.SnapshotAt.UTC().Format(time.RFC3339Nano)
 		if tick.Config.PollInterval != nil {
@@ -1571,6 +1581,11 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			// role absent from inFlight has none right now.
 			"inFlight":          inFlightNow,
 			"inFlightEventType": inFlightType,
+			// description (pg2-ec754) is ALWAYS present, even "" — an
+			// operator-authored free-text note, matching this reply's
+			// existing always-present-key convention (e.g. binds, mode),
+			// never an omitted-when-empty key.
+			"description": r.Description,
 			// declined stays the flat, pre-existing total (Task 4.1 Step
 			// 5) — declinedByReason is a SECOND, additive breakdown of the
 			// SAME tally (bead pg2-j4uwg), never a replacement: the two
@@ -1627,7 +1642,7 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 // — nil is a valid, common value (no SourceInFlight reader configured) and
 // reads as "nothing in flight" via a plain absent-key lookup, same as every
 // other nil-map read in this file.
-func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64, inFlight map[string]bool) []map[string]any {
+func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64, inFlight map[string]bool, descriptions map[string]string) []map[string]any {
 	out := make([]map[string]any, 0, len(active)+len(excludedSources))
 	for _, sr := range active {
 		row := map[string]any{
@@ -1639,6 +1654,12 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			"failure":            nil,
 			"expectedIntervalMs": intervalsMs[sr.Name],
 			"inFlight":           inFlight[sr.Name],
+			// description (pg2-ec754) is ALWAYS present, even "" — an
+			// operator-authored free-text note, matching this reply's
+			// existing always-present-key convention (e.g. mode), never
+			// an omitted-when-empty key. A missing map entry reads as ""
+			// (unset), same as intervalsMs's own missing-entry convention.
+			"description": descriptions[sr.Name],
 		}
 		if !sr.LastTick.IsZero() {
 			row["lastTick"] = sr.LastTick.UTC().Format(time.RFC3339Nano)
@@ -1663,7 +1684,8 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			// An excluded source cannot be mid-fetch (its query never runs
 			// this run — STORY-OP-3), so this is always false, never a
 			// lookup into inFlight.
-			"inFlight": false,
+			"inFlight":    false,
+			"description": descriptions[name],
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {

@@ -101,6 +101,10 @@ type roleTOML struct {
 	// pg2-0c8yz), overlaid onto the pool-wide default ([pool].retry). Absent:
 	// inherits the pool default verbatim.
 	Retry *backoffTOML `toml:"retry"`
+	// Description is an optional, operator-authored free-text note
+	// (pg2-ec754), threaded verbatim onto roles.Role.Description and
+	// surfaced in the TUI drill-down details. Absent: empty default.
+	Description string `toml:"description"`
 }
 
 // queryTOML is one top-level [[query]]: a named producer. It carries its config
@@ -140,6 +144,10 @@ type queryTOML struct {
 	// explicit value always wins over a period trigger's own resolved
 	// Every.
 	ExpectedInterval *duration `toml:"expected_interval"`
+	// Description is an optional, operator-authored free-text note
+	// (pg2-ec754), threaded verbatim onto query.Source.Description and
+	// surfaced in the TUI drill-down details. Absent: empty default.
+	Description string `toml:"description"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -301,7 +309,7 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 			errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
 			continue
 		}
-		out = append(out, query.Source{Name: qt.Name, Query: q})
+		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description})
 		if qt.ExpectedInterval != nil {
 			overrides[qt.Name] = qt.ExpectedInterval.D.Milliseconds()
 		}
@@ -394,7 +402,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("retry: %w", err)
 	}
-	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff}, nil
+	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, Description: rt.Description}, nil
 }
 
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its

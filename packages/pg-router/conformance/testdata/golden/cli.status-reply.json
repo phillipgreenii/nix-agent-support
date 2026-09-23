@@ -72,7 +72,8 @@
       "lastDeliveredAtMs": 0,
       "handlerFailures": 0,
       "selfReportState": "",
-      "backoff": null
+      "backoff": null,
+      "description": "reviews incoming PRs for policy violations"
     },
     {
       "role": "worker",
@@ -84,7 +85,8 @@
       "lastDeliveredAtMs": 0,
       "handlerFailures": 0,
       "selfReportState": "",
-      "backoff": null
+      "backoff": null,
+      "description": ""
     }
   ],
   "registry": [
@@ -104,7 +106,8 @@
       "mode": "pull",
       "expectedIntervalMs": 0,
       "lastTick": "2026-09-01T00:05:00Z",
-      "failure": null
+      "failure": null,
+      "description": "polls the tracker for feedback-ready items"
     },
     {
       "name": "urgent-ready",
@@ -113,7 +116,8 @@
       "excluded": true,
       "mode": "pull",
       "expectedIntervalMs": 0,
-      "failure": null
+      "failure": null,
+      "description": ""
     }
   ],
   "unmatchedBindings": ["declared-but-inactive-this-run"],

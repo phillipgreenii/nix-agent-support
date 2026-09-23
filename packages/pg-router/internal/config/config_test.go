@@ -1136,6 +1136,77 @@ argv = ["y"]
 	}
 }
 
+// TestLoad_descriptionDecodes is pg2-ec754's own red-first test for the first
+// leg of the config -> wire -> TUI chain: a [[role]]'s and a [[query]]'s
+// optional `description` key decodes verbatim onto roles.Role.Description /
+// query.Source.Description, and a role/query that never sets it decodes to
+// the empty string rather than erroring or defaulting to something else.
+func TestLoad_descriptionDecodes(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "up"
+emits = ["up.ready"]
+type = "command"
+description = "polls the tracker for up.ready items"
+[query.command]
+argv = ["a"]
+format = "jsonl"
+
+[[query]]
+name = "down"
+emits = ["down.ready"]
+type = "command"
+[query.command]
+argv = ["b"]
+format = "jsonl"
+
+[[role]]
+name = "ur"
+binds = ["up.ready"]
+description = "handles up.ready events"
+
+[[role]]
+name = "dr"
+binds = ["down.ready"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("config must load: %v", err)
+	}
+
+	var ur, dr roles.Role
+	for _, r := range c.Roles {
+		switch r.Name {
+		case "ur":
+			ur = r
+		case "dr":
+			dr = r
+		}
+	}
+	if ur.Description != "handles up.ready events" {
+		t.Errorf("role[ur].Description = %q, want %q", ur.Description, "handles up.ready events")
+	}
+	if dr.Description != "" {
+		t.Errorf("role[dr].Description = %q, want empty (unset in config)", dr.Description)
+	}
+
+	var up, down query.Source
+	for _, s := range c.Queries {
+		switch s.Name {
+		case "up":
+			up = s
+		case "down":
+			down = s
+		}
+	}
+	if up.Description != "polls the tracker for up.ready items" {
+		t.Errorf("query[up].Description = %q, want %q", up.Description, "polls the tracker for up.ready items")
+	}
+	if down.Description != "" {
+		t.Errorf("query[down].Description = %q, want empty (unset in config)", down.Description)
+	}
+}
+
 func TestConfigHome_xdgWins(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
 	if got := configHome(); got != "/xdg/config" {

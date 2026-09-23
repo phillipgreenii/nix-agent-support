@@ -133,6 +133,13 @@ type metaSetter interface{ setMeta(Meta) }
 type Source struct {
 	Name  string
 	Query Query
+	// Description is an optional, operator-authored free-text note about
+	// this source (pg2-ec754) — the source-side counterpart to
+	// roles.Role.Description, surfaced in the TUI drill-down details.
+	// Empty ("") means unset; nothing in this package interprets its
+	// content. Carried on Source rather than the Query interface itself
+	// since Query is a typed union with no shared field for it.
+	Description string
 }
 
 // SourceSet is the ordered set of producers a drain fires (config order).
