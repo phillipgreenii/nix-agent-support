@@ -385,6 +385,23 @@ func TestRenderDrillDown_ShowsSiblingSteppingHint(t *testing.T) {
 			t.Fatalf("renderDrillDown() = %q, want it to surface a \"[ / ]\" sibling-stepping hint", got)
 		}
 	})
+
+	t.Run("queue", func(t *testing.T) {
+		m := newTestModel(nil)
+		m.width, m.height = 80, 24
+		m.screen = screenDrillDown
+		m.drillKind = rowQueue
+		m.reply = StatusReply{Queues: []Queue{{Type: "issue", Depth: 3}}}
+
+		got := m.renderDrillDown()
+
+		if !strings.Contains(got, "[ / ]") {
+			t.Fatalf("renderDrillDown() = %q, want it to surface a \"[ / ]\" sibling-stepping hint", got)
+		}
+		if !strings.Contains(got, "issue") {
+			t.Fatalf("renderDrillDown() = %q, want it to name the drilled queue's Type", got)
+		}
+	})
 }
 
 // TestRenderConfigSection_LegacyFieldsPlusNote covers Task 4.7 Step 4's
