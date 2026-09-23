@@ -130,6 +130,15 @@ in
         # on every clean exit would just spam re-registrations. runAtLoad above
         # still re-announces this participant on every login/boot.
         keepAlive = false;
+        # healthCheck = false (bug pg2-c6l6g; matches -pool-metrics below):
+        # confirmed by reading register.go's runRegister -- it dials the core
+        # socket, sends one register request, relays the single reply, and
+        # returns, so the process exits almost immediately after registering.
+        # A one-shot that exits right after runAtLoad never sustains
+        # state = running, which is what the post-activation health check
+        # polls for; without this it can make darwin-rebuild switch fail that
+        # poll for a daemon that is actually behaving correctly.
+        healthCheck = false;
         serviceConfig = {
           StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router-ccpool-handler/launchd-stdout.log";
