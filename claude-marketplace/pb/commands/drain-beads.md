@@ -317,22 +317,32 @@ proceeding on currently loaded text (direct interactive invocation).`)
    forbids the two mechanisms that would normally pull a bead out of this race
    (a `--blocked-by` edge onto its own child, a `--defer`), so before routing
    to STUCK, take the one D-9-compliant lever left: demote the container's own
-   priority to match its children's (read it off the check-2 listing, or run
-   that query now if only check 1 fired) — `bd update <id> --priority <n>
-   --actor "ID"`. This is neither a blocking edge nor a defer, is
-   non-destructive and reversible, and stops the container from dominating the
-   same priority tie next pass. Release it (as above) and return to CLAIM —
-   this alone resolves the common case without ever reaching STUCK. Do NOT
-   loop a third round of the budget-of-3 on the same container waiting for it
-   to recur that many times again — a SINGLE post-demotion hit is what routes
-   it to STUCK, not a fresh budget of 3: the very next time the SAME container
-   hits this guard after its priority was already demoted, report the bead id,
-   whichever check fired (the note verbatim for check 1, the child ids and
-   statuses for check 2), and the priority already applied, rather than
-   looping (P-4: a blocked precondition MUST bound its repeats and name the
-   escalation). A bead surfaced to STUCK this way is a candidate for having
-   the container-note marker added to its `notes` by whoever resolves it, so
-   the same parent does not need check 2 again on its next claim.
+   priority to match its children's — but check BEFORE spending the write,
+   not after: read the child priority `<n>` off the check-2 listing (or run
+   that query now if only check 1 fired) and compare it to the container's
+   OWN current priority. If they already MATCH, the write is a known no-op —
+   it would read `<n>` and write that same `<n>` straight back, changing
+   nothing and guaranteeing the container re-wins the very next claim's
+   tie-break exactly as before — so skip it and route directly to STUCK now,
+   with a comment noting demotion was a no-op (same-priority) rather than
+   performing a self-priority write that changes nothing and waiting for a
+   4th hit to discover that. Only when the priorities DIFFER is the write
+   worth spending: `bd update <id> --priority <n> --actor "ID"`. This is
+   neither a blocking edge nor a defer, is non-destructive and reversible,
+   and stops the container from dominating the same priority tie next pass.
+   Release it (as above) and return to CLAIM — this alone resolves the common
+   case without ever reaching STUCK. Do NOT loop a third round of the
+   budget-of-3 on the same container waiting for it to recur that many times
+   again — a SINGLE post-demotion hit (or the same-priority no-op detected
+   above) is what routes it to STUCK, not a fresh budget of 3: report the
+   bead id, whichever check fired (the note verbatim for check 1, the child
+   ids and statuses for check 2), and either the priority already applied or
+   the same-priority no-op finding, rather than looping (P-4: a blocked
+   precondition MUST bound its repeats and name the escalation). A bead
+   surfaced to STUCK this way — whether after a genuine post-demotion hit or
+   via the same-priority no-op shortcut — is a candidate for having the
+   container-note marker added to its `notes` by whoever resolves it, so the
+   same parent does not need check 2 again on its next claim.
 
    **Epic drill-down — when the CLAIMED bead genuinely IS type `epic` with
    open children** (provenance: `tc-b02v`, live instance `tc-soml9`). The
