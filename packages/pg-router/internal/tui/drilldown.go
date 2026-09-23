@@ -1,9 +1,17 @@
 // Package tui implements pg-router's operator-facing terminal UI. This file
 // (Task 4.7) carries the drill-down full-screen detail view + breadcrumb
 // (k9s-describe-style), [ / ] sibling stepping restricted to the same row
-// kind, non-focusable queue/activity rows (comp-6), and the Config section
+// kind, non-focusable activity rows (comp-6), and the Config section
 // rendering resolvedConfig's existing legacy-scalar fields [design: Task
 // 4.7 Files; Task 4.7 Objective].
+//
+// pg2-yza6s (phase 1) widens comp-6's queue exclusion: Queues IS one of the
+// three tab-cycled panes (model.go's paneQueues), so a dead Enter key on it
+// was discoverable/confusing rather than merely undocumented. rowQueue is
+// now a focusableRowKind member; only activity rows remain excluded --
+// Activity is never one of the three tab-cycled panes at all, so it has no
+// path to focus in the first place. Phase 2 (queue current-items / richer
+// recent-events, pg2-ugcrb) is out of scope here.
 package tui
 
 import (
@@ -18,16 +26,19 @@ import (
 )
 
 // focusableRowKind selects which row kind screenDrillDown is currently
-// showing. Queue rows and activity rows are deliberately NOT members of
-// this enum -- pressing enter on either is a no-op, never a screen
-// transition (comp-6) [design: Task 4.7 Interfaces; Step 1].
+// showing. Activity rows are deliberately NOT a member of this enum --
+// pressing enter on one is a no-op, never a screen transition (comp-6)
+// [design: Task 4.7 Interfaces; Step 1]. rowQueue (pg2-yza6s) widens this:
+// queue rows are now focusable too, phase 1 of a two-phase docket (drilling
+// in over the existing Type/Depth wire fields only -- see this file's own
+// package doc).
 type focusableRowKind int
 
 const (
 	rowListener focusableRowKind = iota
 	rowSource
-	// queue rows and activity rows are deliberately NOT members of this
-	// enum -- comp-6.
+	rowQueue
+	// activity rows are deliberately NOT a member of this enum -- comp-6.
 )
 
 // enterDrillDown implements the design's enter row: only rowListener/
@@ -59,9 +70,16 @@ func (m *Model) enterDrillDown() tea.Cmd {
 		}
 		m.drillKind = rowSource
 		m.drillIndex = 0
+	case paneQueues:
+		// pg2-yza6s: queue rows are now focusable (comp-6 no longer
+		// excludes them) -- guarded the same way listener/source are, a
+		// no-op only when there are no configured queue types at all.
+		if len(m.reply.Queues) == 0 {
+			return nil
+		}
+		m.drillKind = rowQueue
+		m.drillIndex = 0
 	default:
-		// paneQueues: comp-6 -- not a member of focusableRowKind, so
-		// entering it is a no-op.
 		return nil
 	}
 	m.screen = screenDrillDown
@@ -101,6 +119,8 @@ func (m *Model) drillSiblingCount() int {
 		return len(m.reply.Listeners)
 	case rowSource:
 		return len(m.reply.Sources)
+	case rowQueue:
+		return len(m.reply.Queues)
 	default:
 		return 0
 	}
@@ -135,6 +155,23 @@ func (m *Model) drillSource() (Source, bool) {
 	return m.reply.Sources[i], true
 }
 
+// drillQueue returns the row m.drillIndex currently selects out of
+// reply.Queues -- see drillListener/drillSource's shared doc for the
+// clamp-against-a-shrunk-slice contract this mirrors. reply.Queues already
+// carries one entry per CONFIGURED queue type regardless of current depth
+// (core.go's statusQueues), so every queue type -- including one currently
+// at depth 0 -- is reachable here with no backend change.
+func (m *Model) drillQueue() (Queue, bool) {
+	if len(m.reply.Queues) == 0 {
+		return Queue{}, false
+	}
+	i := m.drillIndex
+	if i >= len(m.reply.Queues) {
+		i = len(m.reply.Queues) - 1
+	}
+	return m.reply.Queues[i], true
+}
+
 // drillBreadcrumb renders the k9s-describe-style breadcrumb naming the
 // currently drilled row's kind and identity. The exact text format beyond
 // "k9s-describe-style" is left to this packet's own freedom boundary
@@ -148,6 +185,10 @@ func (m *Model) drillBreadcrumb() string {
 	case rowSource:
 		if s, ok := m.drillSource(); ok {
 			return fmt.Sprintf("pg-router ▸ Sources ▸ %s", textsafe.Sanitize(s.Name))
+		}
+	case rowQueue:
+		if q, ok := m.drillQueue(); ok {
+			return fmt.Sprintf("pg-router ▸ Queues ▸ %s", textsafe.Sanitize(q.Type))
 		}
 	}
 	return "pg-router ▸ (nothing selected)"
@@ -207,6 +248,12 @@ func (m *Model) drillDetail() string {
 			return "(no sources configured)\n"
 		}
 		return renderSourceDetail(s, time.Now(), m.theme)
+	case rowQueue:
+		q, ok := m.drillQueue()
+		if !ok {
+			return "(no queues configured)\n"
+		}
+		return renderQueueDetail(q)
 	default:
 		return ""
 	}
@@ -246,6 +293,25 @@ func renderSourceDetail(s Source, now time.Time, theme render.Theme) string {
 	if s.Failure != nil {
 		fmt.Fprintf(&b, "%-14s %s\n", "next eligible:", s.Failure.NextEligible.Format("15:04:05"))
 	}
+	return b.String()
+}
+
+// renderQueueDetail renders the currently drilled queue row's own fields:
+// Type, Depth, and the heartbeat-vs-incremental classification
+// (isHeartbeatQueueType, panes.go) already used by renderQueuesPane's own
+// depth-bar rendering -- kept identical here so a queue's drill-down detail
+// never disagrees with the pane row it drilled from. Current pending
+// items / richer recent-events content is phase 2 (pg2-ugcrb), out of
+// scope for this file -- Queue (reply.go) carries only Type+Depth today.
+func renderQueueDetail(q Queue) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Type:  %s\n", textsafe.Sanitize(q.Type))
+	fmt.Fprintf(&b, "Depth: %d\n", q.Depth)
+	kind := "incremental"
+	if isHeartbeatQueueType(q.Type) {
+		kind = "heartbeat (monitored-universe count, not an actionable backlog)"
+	}
+	fmt.Fprintf(&b, "Kind:  %s\n", kind)
 	return b.String()
 }
 

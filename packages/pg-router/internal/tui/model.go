@@ -176,7 +176,8 @@ type Model struct {
 	// -- Task 4.7: drill-down screens + sibling stepping --
 
 	// drillKind / drillIndex select which row screenDrillDown is currently
-	// showing: drillKind picks the Listeners or Sources slice, drillIndex
+	// showing: drillKind picks the Listeners, Sources, or Queues slice
+	// (pg2-yza6s widened this from Listeners/Sources only), drillIndex
 	// is the position within it. Set by enterDrillDown (drilldown.go),
 	// moved by stepSibling ([ / ]); survives a poll refresh the same way
 	// the screen itself does (applyPollResult's own screenDrillDown guard,
@@ -198,10 +199,9 @@ type Model struct {
 	// screenMain's own starting focus. keybindings.go's tab/shift+tab
 	// handlers (Model.stepFocus, pg2-ctqpj) cycle this field through the
 	// three panes, wrapping at either end -- Enter then targets whichever
-	// pane is currently focused (enterDrillDown, drilldown.go), which is
-	// exactly how an operator reaches Queues too (a no-op on Enter, per
-	// comp-6, but IS reachable via tab so that fact is observable rather
-	// than merely documented).
+	// pane is currently focused (enterDrillDown, drilldown.go); Queues is
+	// reachable and focusable via tab exactly like Listeners/Sources, and
+	// (pg2-yza6s) Enter on it now opens a drill-down the same way.
 	focusedPane int
 }
 

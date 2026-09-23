@@ -10,19 +10,36 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
-// TestDrillDown_QueueAndActivityRowsAreNonFocusable is this packet's own
-// red-first test [design: Task 4.7 Step 1]: pressing enter with the cursor
-// on a queue row or an activity row must be a no-op -- no screen
-// transition. Only rowListener/rowSource are members of focusableRowKind
-// (comp-6); Queues is reachable via m.focusedPane and is asserted
-// directly, while Activity is never reachable via m.focusedPane at all (it
-// is rendered as its own zone, never one of the three tab-cycled panes) --
-// the "only listeners/sources with actual rows can ever transition"
-// sub-case below covers that structurally: with Activity the only
-// populated field, m.focusedPane's zero value (paneListeners) has nothing
-// to drill into, so enter is a no-op the same way.
-func TestDrillDown_QueueAndActivityRowsAreNonFocusable(t *testing.T) {
-	t.Run("queue row", func(t *testing.T) {
+// TestDrillDown_ActivityRowsAreNonFocusable covers comp-6's remaining
+// exclusion after pg2-yza6s widened focusableRowKind to admit rowQueue:
+// Activity is never reachable via m.focusedPane at all (it is rendered as
+// its own zone, never one of the three tab-cycled panes), so pressing enter
+// with only activity data present is still a no-op -- no screen
+// transition. With Listeners/Sources/Queues/Registry all empty and only
+// Activity populated, m.focusedPane's zero value (paneListeners) has
+// nothing to drill into, so enter is a no-op the same way a real "activity
+// row" selection would produce if one existed.
+func TestDrillDown_ActivityRowsAreNonFocusable(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenMain
+	m.reply = StatusReply{Activity: []ActivityEntry{{Seq: 1, Type: "produce"}}}
+
+	m.enterDrillDown()
+
+	if m.screen != screenMain {
+		t.Fatalf("screen = %v, want screenMain (enter with only activity data present must be a no-op)", m.screen)
+	}
+}
+
+// TestDrillDown_QueueRowIsFocusable covers pg2-yza6s's phase 1 fix: Enter
+// on a focused Queues pane now opens a drill-down (rowQueue), no longer the
+// comp-6 no-op the doc comment used to describe. Both the direct method
+// call and the real keybinding dispatch path (Update) are exercised, since
+// pg2-cjwfu's own class of bug ("evaluates clean but the real invocation
+// never matches source") is exactly what a direct-call-only test would
+// miss.
+func TestDrillDown_QueueRowIsFocusable(t *testing.T) {
+	t.Run("direct call", func(t *testing.T) {
 		m := newTestModel(nil)
 		m.screen = screenMain
 		m.focusedPane = paneQueues
@@ -33,27 +50,11 @@ func TestDrillDown_QueueAndActivityRowsAreNonFocusable(t *testing.T) {
 		if cmd != nil {
 			t.Errorf("enterDrillDown() cmd = %v, want nil", cmd)
 		}
-		if m.screen != screenMain {
-			t.Fatalf("screen = %v, want screenMain (enter on a queue row must be a no-op)", m.screen)
+		if m.screen != screenDrillDown {
+			t.Fatalf("screen = %v, want screenDrillDown (enter on a focused queue row must open a drill-down)", m.screen)
 		}
-	})
-
-	t.Run("activity-only state", func(t *testing.T) {
-		// Activity has no focus mechanism in the current Model at all: it
-		// is never one of the three tab-cycled panes, so m.focusedPane can
-		// never select it. With Listeners/Sources/Queues/Registry all
-		// empty and only Activity populated, m.focusedPane's zero value
-		// (paneListeners) has nothing to drill into -- enter is a no-op,
-		// the same observable outcome a real "activity row" selection
-		// would produce if one existed.
-		m := newTestModel(nil)
-		m.screen = screenMain
-		m.reply = StatusReply{Activity: []ActivityEntry{{Seq: 1, Type: "produce"}}}
-
-		m.enterDrillDown()
-
-		if m.screen != screenMain {
-			t.Fatalf("screen = %v, want screenMain (enter with only activity data present must be a no-op)", m.screen)
+		if m.drillKind != rowQueue || m.drillIndex != 0 {
+			t.Fatalf("drillKind/drillIndex = %v/%d, want rowQueue/0", m.drillKind, m.drillIndex)
 		}
 	})
 
@@ -66,10 +67,127 @@ func TestDrillDown_QueueAndActivityRowsAreNonFocusable(t *testing.T) {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		mm := updated.(*Model)
 
-		if mm.screen != screenMain {
-			t.Fatalf("screen = %v, want screenMain (enter dispatched through Update on a queue row must be a no-op)", mm.screen)
+		if mm.screen != screenDrillDown {
+			t.Fatalf("screen = %v, want screenDrillDown (enter dispatched through Update on a focused queue row must open a drill-down)", mm.screen)
 		}
 	})
+
+	t.Run("empty Queues pane is still a no-op", func(t *testing.T) {
+		m := newTestModel(nil)
+		m.screen = screenMain
+		m.focusedPane = paneQueues
+		m.reply = StatusReply{}
+
+		m.enterDrillDown()
+
+		if m.screen != screenMain {
+			t.Fatalf("screen = %v, want screenMain (no configured queue types at all must still be a no-op)", m.screen)
+		}
+	})
+}
+
+// TestDrillDown_QueueEsc covers the design's existing listener/source
+// drill-down convention (Task 4.7's screen transition table: drill-down is
+// "Exited by: esc") applying identically to the new Queues drill-down --
+// handleEsc (keybindings.go) has no per-kind special-casing, so this mostly
+// guards against a future regression narrowing it back to
+// rowListener/rowSource only.
+func TestDrillDown_QueueEsc(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenMain
+	m.focusedPane = paneQueues
+	m.reply = StatusReply{Queues: []Queue{{Type: "issue", Depth: 3}}}
+
+	m.enterDrillDown()
+	if m.screen != screenDrillDown {
+		t.Fatalf("screen = %v, want screenDrillDown before esc", m.screen)
+	}
+
+	handleEsc(m)
+	if m.screen != screenMain {
+		t.Fatalf("screen = %v, want screenMain after esc", m.screen)
+	}
+}
+
+// TestDrillDown_QueueSiblingStepping covers ux-12 for the new rowQueue kind:
+// "[" / "]" step through every configured queue type, INCLUDING one
+// currently at depth 0 -- reply.Queues already carries one entry per
+// configured type regardless of depth (core.go's statusQueues), so a
+// depth-0 queue is reachable with no backend change. Stepping past either
+// end clamps, matching rowListener/rowSource's own behavior (asserted
+// above in TestDrillDown_SiblingStepping).
+func TestDrillDown_QueueSiblingStepping(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenDrillDown
+	m.reply = StatusReply{
+		Queues: []Queue{
+			{Type: "issue", Depth: 3},
+			{Type: "empty-type", Depth: 0},
+			{Type: "pr.reconcile", Depth: 7},
+		},
+	}
+	m.drillKind = rowQueue
+	m.drillIndex = 0
+
+	if got := m.drillBreadcrumb(); !strings.Contains(got, "issue") {
+		t.Fatalf("breadcrumb = %q, want it to name issue (index 0)", got)
+	}
+
+	m.stepSibling(1)
+	if m.drillIndex != 1 {
+		t.Fatalf("drillIndex after +1 = %d, want 1", m.drillIndex)
+	}
+	if got := m.drillBreadcrumb(); !strings.Contains(got, "empty-type") {
+		t.Fatalf("breadcrumb = %q, want it to name empty-type (index 1, depth 0)", got)
+	}
+	if got := m.drillDetail(); !strings.Contains(got, "Depth: 0") {
+		t.Fatalf("drillDetail() = %q, want it to show the depth-0 queue's own Depth: 0", got)
+	}
+
+	m.stepSibling(1)
+	if m.drillIndex != 2 {
+		t.Fatalf("drillIndex after second +1 = %d, want 2", m.drillIndex)
+	}
+	if got := m.drillBreadcrumb(); !strings.Contains(got, "pr.reconcile") {
+		t.Fatalf("breadcrumb = %q, want it to name pr.reconcile (index 2)", got)
+	}
+
+	// Past the end: clamps at the last index, never wraps to 0.
+	m.stepSibling(1)
+	if m.drillIndex != 2 {
+		t.Fatalf("drillIndex after stepping past the end = %d, want clamped at 2 (no wrap)", m.drillIndex)
+	}
+
+	// Back down, past the start: clamps at 0, never goes negative.
+	m.stepSibling(-1)
+	m.stepSibling(-1)
+	m.stepSibling(-1)
+	if m.drillIndex != 0 {
+		t.Fatalf("drillIndex after stepping past the start = %d, want clamped at 0 (no wrap)", m.drillIndex)
+	}
+}
+
+// TestRenderQueueDetail covers renderQueueDetail directly: it names the
+// queue's Type/Depth verbatim, and classifies a heartbeat-prefixed type
+// (panes.go's isHeartbeatQueueType) distinctly from an ordinary incremental
+// one, matching renderQueuesPane's own depth-bar-vs-"(heartbeat)" split so
+// the drill-down detail never disagrees with the pane row it drilled from.
+func TestRenderQueueDetail(t *testing.T) {
+	incremental := renderQueueDetail(Queue{Type: "issue", Depth: 3})
+	if !strings.Contains(incremental, "issue") || !strings.Contains(incremental, "Depth: 3") {
+		t.Errorf("renderQueueDetail(incremental) = %q, want it to name the type and depth verbatim", incremental)
+	}
+	if strings.Contains(incremental, "heartbeat") {
+		t.Errorf("renderQueueDetail(incremental) = %q, want no heartbeat classification for a non-heartbeat type", incremental)
+	}
+
+	heartbeat := renderQueueDetail(Queue{Type: "pr.reconcile", Depth: 0})
+	if !strings.Contains(heartbeat, "pr.reconcile") || !strings.Contains(heartbeat, "Depth: 0") {
+		t.Errorf("renderQueueDetail(heartbeat) = %q, want it to name the type and depth verbatim (depth 0 included)", heartbeat)
+	}
+	if !strings.Contains(heartbeat, "heartbeat") {
+		t.Errorf("renderQueueDetail(heartbeat) = %q, want a heartbeat classification for pr.reconcile", heartbeat)
+	}
 }
 
 // TestDrillDown_SiblingStepping covers ux-12: [ / ] inside drill-down moves

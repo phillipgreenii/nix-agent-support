@@ -40,7 +40,7 @@ var Bindings = []Binding{
 	{Keys: []string{"?"}, Description: "Help", Handle: handleOpenHelp},
 	{Keys: []string{"tab"}, Description: "Focus next pane", Handle: handleFocusNext},
 	{Keys: []string{"shift+tab"}, Description: "Focus previous pane", Handle: handleFocusPrev},
-	{Keys: []string{"enter"}, Description: "Drill into the focused listener/source row", Handle: handleEnterDrillDown},
+	{Keys: []string{"enter"}, Description: "Drill into the focused listener/source/queue row", Handle: handleEnterDrillDown},
 	{Keys: []string{"["}, Description: "Previous sibling row (drill-down)", Handle: handlePrevSibling},
 	{Keys: []string{"]"}, Description: "Next sibling row (drill-down)", Handle: handleNextSibling},
 	{Keys: []string{"esc"}, Description: "Close modal / back one level (never quits at root)", Handle: handleEsc},
