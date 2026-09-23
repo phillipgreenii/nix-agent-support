@@ -43,8 +43,27 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// LedgerKey identifies one persisted ledger file.
-type LedgerKey struct{ Type, Backend, Query string }
+// LedgerKey identifies one persisted ledger file. Instance additionally
+// disambiguates two invocations of the identically-named (Type, Backend,
+// Query) triple that nonetheless target two independent underlying data
+// sources via a per-invocation environment override (bead pg2-84i8o's root
+// cause) — e.g. the "issue" type's pg-connector-issue-beads backend,
+// registered ONCE under connector.issue but invoked once per bd tracker
+// via $PG_CONNECTOR_ISSUE_BEADS_DIR, with the SAME backend name and query
+// for every tracker (modules/zm/default.nix's "Two trackers, one role"
+// design, phillipg-nix-ziprecruiter). Without this field, two trackers
+// sharing one ledger file meant each tracker's own Refresh call saw the
+// OTHER tracker's previously-indexed entries as "removed" (an id absent
+// from THIS call's own presentIDs, because it was never this tracker's
+// entity to begin with) and reported a spurious cross-tracker change —
+// the confirmed root cause of a bead created in one tracker triggering a
+// dispatch under the OTHER tracker's own emitted event type. Empty for
+// every (Type, Backend, Query) combination that has no such per-invocation
+// override (every backend besides pg-connector-issue-beads, today), so
+// this is a zero-behavior-change addition for them — see
+// ledgerInstanceDiscriminator (changes.go) for where a non-empty value
+// comes from.
+type LedgerKey struct{ Type, Backend, Query, Instance string }
 
 // ConsumerState is one consumer's position within a ledger.
 type ConsumerState struct {
@@ -109,27 +128,49 @@ func ledgerDir() (string, error) {
 	return filepath.Join(home, ".local", "state", ledgerSubdir, ledgerDirName), nil
 }
 
-// ledgerFileName is key's on-disk filename: "<type>__<backend>__<query>.json".
-// See this file's header comment for why "__" is a safe separator.
+// ledgerFileName is key's on-disk filename: "<type>__<backend>__<query>.json"
+// when key.Instance is empty (every pre-existing key shape, unchanged), or
+// "<type>__<backend>__<query>__<hex(instance)>.json" when it is not. The
+// instance component is hex-encoded (never the raw value) because Instance
+// today carries an arbitrary filesystem path (bead pg2-84i8o's
+// $PG_CONNECTOR_ISSUE_BEADS_DIR) that may itself contain "/", which would
+// otherwise be misread as a directory separator inside what must stay a
+// single flat filename. See this file's header comment for why "__" is a
+// safe separator between the OTHER components, none of which can contain
+// it.
 func ledgerFileName(key LedgerKey) string {
-	return strings.Join([]string{key.Type, key.Backend, key.Query}, ledgerKeySeparator) + ".json"
+	parts := []string{key.Type, key.Backend, key.Query}
+	if key.Instance != "" {
+		parts = append(parts, hex.EncodeToString([]byte(key.Instance)))
+	}
+	return strings.Join(parts, ledgerKeySeparator) + ".json"
 }
 
 // ledgerKeyFromFileName decodes a filename produced by ledgerFileName back
 // into a LedgerKey. Returns (_, false) for anything that doesn't match the
-// exact "<type>__<backend>__<query>.json" shape (e.g. a stray non-ledger
-// file dropped into the same directory) — ListLedgerKeys skips those rather
-// than erroring.
+// exact 3-part "<type>__<backend>__<query>.json" or 4-part
+// "<type>__<backend>__<query>__<hex(instance)>.json" shape (e.g. a stray
+// non-ledger file dropped into the same directory, or a 4th segment that
+// fails to decode as hex) — ListLedgerKeys skips those rather than
+// erroring.
 func ledgerKeyFromFileName(name string) (LedgerKey, bool) {
 	if !strings.HasSuffix(name, ".json") {
 		return LedgerKey{}, false
 	}
 	trimmed := strings.TrimSuffix(name, ".json")
 	parts := strings.Split(trimmed, ledgerKeySeparator)
-	if len(parts) != 3 {
+	switch len(parts) {
+	case 3:
+		return LedgerKey{Type: parts[0], Backend: parts[1], Query: parts[2]}, true
+	case 4:
+		instance, err := hex.DecodeString(parts[3])
+		if err != nil {
+			return LedgerKey{}, false
+		}
+		return LedgerKey{Type: parts[0], Backend: parts[1], Query: parts[2], Instance: string(instance)}, true
+	default:
 		return LedgerKey{}, false
 	}
-	return LedgerKey{Type: parts[0], Backend: parts[1], Query: parts[2]}, true
 }
 
 // ledgerPath resolves the on-disk path for key under

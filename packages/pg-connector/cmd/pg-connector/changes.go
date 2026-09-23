@@ -282,14 +282,45 @@ func newChangesCmd(entityType string) *cobra.Command {
 	return cmd
 }
 
+// envIssueBeadsDir mirrors pg-connector-issue-beads's own EnvWorkspaceDir
+// constant (cmd/pg-connector-issue-beads/internal/runner.go) — duplicated
+// rather than imported, matching this module's established "no
+// compile-time dependency on a Tier-2 backend's own internal package"
+// convention (e.g. pg-router-source-pg-connector's own changesWire, which
+// duplicates pg-connector's changes wire shape for the identical reason).
+// Read here, on pg-connector's OWN process environment — inherited
+// unchanged from whatever invoked pg-connector, see
+// pg-router-source-pg-connector's beadsDirEnv — to recover the SAME
+// per-invocation tracker override the exec'd backend itself resolves,
+// purely to disambiguate this call's own LedgerKey (see
+// ledgerInstanceDiscriminator below); pg-connector itself never resolves
+// bd workspaces and still doesn't.
+const envIssueBeadsDir = "PG_CONNECTOR_ISSUE_BEADS_DIR"
+
+// ledgerInstanceDiscriminator returns the LedgerKey.Instance value
+// fanOutChanges uses for entityType's own ledger (bead pg2-84i8o's root
+// cause fix; see LedgerKey's own doc comment for the full mechanism).
+// Every entityType other than "issue" returns "" (today's pre-existing
+// behavior, unchanged): no other type's own registered backend varies
+// which underlying data source it targets by a per-invocation environment
+// override the way pg-connector-issue-beads does via
+// $PG_CONNECTOR_ISSUE_BEADS_DIR.
+func ledgerInstanceDiscriminator(entityType string) string {
+	if entityType != "issue" {
+		return ""
+	}
+	return os.Getenv(envIssueBeadsDir)
+}
+
 // fanOutChanges runs this packet's per-backend changes algorithm (this
 // file's own header comment, steps 1-3) across every backend in
 // backends, one independent Ledger per backend.
 func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backends []string, query, consumerID string, cached, reset bool) []changesBackendResult {
 	pruneAfter := resolveConsumerPruneAfter(reg)
+	instance := ledgerInstanceDiscriminator(entityType)
 	results := make([]changesBackendResult, 0, len(backends))
 	for _, b := range backends {
-		key := LedgerKey{Type: entityType, Backend: b, Query: query}
+		key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
 		res := changesBackendResult{backend: b, key: key}
 
 		l, err := loadLedger(key)

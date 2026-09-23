@@ -471,6 +471,93 @@ func TestRun_IssueChanges_Wired(t *testing.T) {
 	}
 }
 
+// writeTrackerAwareFakeIssueBackend creates an executable shell script
+// that replies to "list" with a DIFFERENT canned response depending on its
+// own $PG_CONNECTOR_ISSUE_BEADS_DIR — the same env var
+// pg-connector-issue-beads itself resolves (mirrored here as
+// envIssueBeadsDir, changes.go) — simulating two independent bd trackers
+// behind the one registered "connector.issue" backend name, the exact
+// shape bead pg2-84i8o's regression test below needs.
+func writeTrackerAwareFakeIssueBackend(t *testing.T, name string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, name)
+	content := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"if [ \"$" + envIssueBeadsDir + "\" = \"/pg2-tracker\" ]; then\n" +
+		"  printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"entities\":[{\"id\":\"pg2-amu5y\",\"title\":\"t\",\"state\":\"open\"}],\"present_ids\":[\"pg2-amu5y\"],\"cursor\":null,\"truncated\":false}}\\n'\n" +
+		"else\n" +
+		"  printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"entities\":[],\"present_ids\":[],\"cursor\":null,\"truncated\":false}}\\n'\n" +
+		"fi\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write tracker-aware fake backend: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestRun_IssueChanges_TwoBeadsDirsShareOneBackend_DoNotCrossContaminate is
+// the regression test for bead pg2-84i8o's confirmed root cause: the
+// "issue" type's pg-connector-issue-beads backend is registered ONCE under
+// connector.issue but invoked once per bd tracker via
+// $PG_CONNECTOR_ISSUE_BEADS_DIR, with the SAME backend name and query for
+// every tracker (modules/zm/default.nix's "Two trackers, one role" design,
+// phillipg-nix-ziprecruiter). Before this bead's fix, both invocations
+// shared one ledger file keyed only on (Type, Backend, Query), so the
+// SECOND tracker's own Refresh call saw the FIRST tracker's
+// already-indexed entity as "removed" (absent from the second tracker's
+// own presentIDs — an id that was never that tracker's entity to begin
+// with) and reported a spurious cross-tracker change carrying the FIRST
+// tracker's own bead id — exactly the observed production defect
+// (pg2-amu5y, a pg2-tracker-only bead, triggering dispatch under the zr
+// tracker's own escalated.zr event type; see ~/.local/state/pg-router/
+// events.jsonl, 2026-09-23T16:53:29Z-16:57:07Z). This test drives the
+// exact same two-invocation sequence against a fake backend whose own
+// "list" reply depends on $PG_CONNECTOR_ISSUE_BEADS_DIR, and asserts the
+// second (zr) call reports NO changes at all — with LedgerKey.Instance in
+// place, its own ledger is fresh and has never heard of the first
+// tracker's item, so there is nothing to misclassify as removed.
+func TestRun_IssueChanges_TwoBeadsDirsShareOneBackend_DoNotCrossContaminate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+
+	backend := "backend-issue-cross-tracker"
+	writeTrackerAwareFakeIssueBackend(t, backend)
+
+	dirCfg := t.TempDir()
+	cfg := filepath.Join(dirCfg, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("connector:\n  issue:\n    - "+backend+"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+
+	// First call: the pg2 tracker's own invocation (its own --beads-dir,
+	// forwarded to the backend as $PG_CONNECTOR_ISSUE_BEADS_DIR exactly as
+	// production's pg-router-source-pg-connector beadsDirEnv does).
+	t.Setenv(envIssueBeadsDir, "/pg2-tracker")
+	stdout1, _, code1 := executePr(t, []string{"issue", "changes", "--query", "escalated-work", "--consumer", "pg-router"})
+	if code1 != 0 {
+		t.Fatalf("pg2 call: exit code = %d, want 0; stdout=%s", code1, stdout1)
+	}
+	w1 := decodeChangesWire(t, stdout1)
+	if len(w1.Changes) != 1 || string(w1.Changes[0].Change) != "added" {
+		t.Fatalf("pg2 call: Changes = %+v, want exactly one 'added' entry for pg2-amu5y", w1.Changes)
+	}
+
+	// Second call: the zr tracker's own invocation, a DIFFERENT
+	// --beads-dir, same backend/query/consumer. Its own backend reply
+	// carries no entities at all — the zr tracker has never heard of
+	// pg2-amu5y.
+	t.Setenv(envIssueBeadsDir, "/zr-tracker")
+	stdout2, _, code2 := executePr(t, []string{"issue", "changes", "--query", "escalated-work", "--consumer", "pg-router"})
+	if code2 != 0 {
+		t.Fatalf("zr call: exit code = %d, want 0; stdout=%s", code2, stdout2)
+	}
+	w2 := decodeChangesWire(t, stdout2)
+	if len(w2.Changes) != 0 {
+		t.Fatalf("zr call: Changes = %+v, want NONE — a non-empty result here means the pg2 tracker's own bead leaked into the zr tracker's own ledger (bead pg2-84i8o's cross-tracker leak)", w2.Changes)
+	}
+}
+
 // TestRun_ThreadChanges_Wired proves "changes" is wired for thread too
 // (bead pg2-955py: pg-router's "thread-me" source called
 // `pg-connector thread changes --query <query>` every tick, but thread

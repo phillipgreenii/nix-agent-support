@@ -63,10 +63,16 @@ func newLedgerCmd() *cobra.Command {
 // the four facts this packet's own Contract requires ledger show to
 // print per matching key [design: section 5.1]. Exact text/JSON layout
 // beyond carrying all four is this packet's own freedom-boundary choice.
+// Instance is omitempty (bead pg2-84i8o): "" for every key today except
+// the pg-connector-issue-beads cross-tracker case (LedgerKey's own doc
+// comment) — carried here so two matching ledgers that would otherwise
+// print an identical type/backend/query line (one per tracker) stay
+// distinguishable.
 type ledgerShowRow struct {
 	Type      string                   `json:"type"`
 	Backend   string                   `json:"backend"`
 	Query     string                   `json:"query"`
+	Instance  string                   `json:"instance,omitempty"`
 	Cursor    json.RawMessage          `json:"cursor"`
 	IndexSize int                      `json:"index_size"`
 	Version   int64                    `json:"version"`
@@ -114,6 +120,7 @@ func buildLedgerShowRow(k LedgerKey, l *Ledger, consumer string) ledgerShowRow {
 		Type:      k.Type,
 		Backend:   k.Backend,
 		Query:     k.Query,
+		Instance:  k.Instance,
 		Cursor:    l.Cursor,
 		IndexSize: len(l.Entries),
 		Version:   l.Version,
@@ -140,7 +147,11 @@ func humanizeLedgerShowRows(rows []ledgerShowRow) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "%s/%s/%s: cursor=%s index_size=%d version=%d\n", r.Type, r.Backend, r.Query, cursorText(r.Cursor), r.IndexSize, r.Version)
+		label := fmt.Sprintf("%s/%s/%s", r.Type, r.Backend, r.Query)
+		if r.Instance != "" {
+			label += " (instance=" + r.Instance + ")"
+		}
+		fmt.Fprintf(&b, "%s: cursor=%s index_size=%d version=%d\n", label, cursorText(r.Cursor), r.IndexSize, r.Version)
 		if len(r.Consumers) == 0 {
 			b.WriteString("  consumers: (none)")
 			continue
@@ -161,10 +172,16 @@ func cursorText(cursor json.RawMessage) string {
 }
 
 // ledgerClearRow reports one ledger file this call actually removed.
+// Instance is omitempty: it is "" for every key today except the
+// pg-connector-issue-beads cross-tracker case bead pg2-84i8o's fix
+// introduced (LedgerKey's own doc comment), so an unaffected "ledger
+// clear" caller's JSON output is byte-identical to before this field
+// existed.
 type ledgerClearRow struct {
-	Type    string `json:"type"`
-	Backend string `json:"backend"`
-	Query   string `json:"query"`
+	Type     string `json:"type"`
+	Backend  string `json:"backend"`
+	Query    string `json:"query"`
+	Instance string `json:"instance,omitempty"`
 }
 
 // ledgerClearResult reports both sets of keys "ledger clear" actually
@@ -172,7 +189,7 @@ type ledgerClearRow struct {
 // AND, as of phase 14 (bead pg2-2j5ac.42.4), every matching cache key
 // dropped alongside them (ClearedCache) — a second, distinct field
 // rather than folding CacheKey's two fields into ledgerClearRow/
-// LedgerKey's three-field shape, which cannot represent a two-field
+// LedgerKey's four-field shape, which cannot represent a two-field
 // CacheKey without a schema lie [design: docket design field, "Contract",
 // "Produces"].
 type ledgerClearResult struct {
@@ -238,6 +255,10 @@ func humanizeLedgerClearResult(result ledgerClearResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "cleared ledgers (%d):\n", len(result.Cleared))
 	for _, c := range result.Cleared {
+		if c.Instance != "" {
+			fmt.Fprintf(&b, "  %s/%s/%s (instance=%s)\n", c.Type, c.Backend, c.Query, c.Instance)
+			continue
+		}
 		fmt.Fprintf(&b, "  %s/%s/%s\n", c.Type, c.Backend, c.Query)
 	}
 	fmt.Fprintf(&b, "cleared caches (%d):\n", len(result.ClearedCache))
