@@ -263,6 +263,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// capture-at-construction pattern o.Registry already uses).
 	activityObs := newActivityObserver(ring)
 	o.ResourceLimitObserver = activityObs
+	// activityObs ALSO implements discover.SourceActivityObserver and
+	// core.SourceInFlightReader (DEC-OBS-2, bead pg2-ugcrb) — the SAME
+	// instance already wired above/below as the ring's own writer picks up
+	// each pull source's fetch-window/outcome signal too, exactly like the
+	// ResourceLimitObserver wiring just above reuses one instance across two
+	// roles rather than constructing a second object.
+	o.SourceActivityObserver = activityObs
 	// listenerCounts is Task 4.1 Step 5's per-role delivered/declined tally
 	// (core.ListenerCounts): pre-populated for every DECLARED role (not
 	// only the enabled ones) so a lookup in statusListeners always hits,
@@ -317,7 +324,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// live, and the resolved config path the verb echoes back informationally
 		// under its `core.configPath` field.
 		ActivityRing: ring,
-		ConfigPath:   cfg.ConfigPath,
+		// SourceInFlight (DEC-OBS-2, bead pg2-ugcrb): activityObs again, as
+		// core.SourceInFlightReader — see the doc at its o.SourceActivityObserver
+		// assignment above for why one instance covers both roles.
+		SourceInFlight: activityObs,
+		ConfigPath:     cfg.ConfigPath,
 		// DeclaredRoles/ExcludedRoles/ExcludedSources/ListenerCounts
 		// (Task 4.1): see this function's own doc comment above.
 		DeclaredRoles:     declaredRoles,
@@ -633,10 +644,21 @@ type activityObserver struct {
 	mu      sync.Mutex
 	pending map[string]pendingActivity // eventID -> {Type, resource-limit flag}
 	order   []string                   // insertion order, for FIFO eviction
+
+	// sourceInFlight tracks, per source name, how many of THIS observer's
+	// own OnSourceFetchStart calls have not yet been matched by an
+	// OnSourceFetchEnd (DEC-OBS-2, bead pg2-ugcrb) — a COUNT, not a bool,
+	// because runAndEnqueue's retry loop re-enters the bracket per attempt
+	// (discover.SourceActivityObserver's own doc); a count survives that
+	// without ever going negative or reporting "not in flight" between two
+	// back-to-back attempts. Guarded by the SAME mu as pending/order above:
+	// cardinality is the configured source count (small, static), so one
+	// mutex serving both concerns costs nothing extra.
+	sourceInFlight map[string]int
 }
 
 func newActivityObserver(ring *activity.Ring) *activityObserver {
-	return &activityObserver{ring: ring, pending: make(map[string]pendingActivity)}
+	return &activityObserver{ring: ring, pending: make(map[string]pendingActivity), sourceInFlight: make(map[string]int)}
 }
 
 func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
@@ -653,7 +675,7 @@ func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
 	a.mu.Unlock()
 }
 
-func (a *activityObserver) OnAccept(eventID, _ string) {
+func (a *activityObserver) OnAccept(eventID, listenerID string) {
 	a.mu.Lock()
 	p := a.pending[eventID]
 	a.mu.Unlock()
@@ -661,7 +683,10 @@ func (a *activityObserver) OnAccept(eventID, _ string) {
 	if p.resourceLimit {
 		outcome = "budget_escalation"
 	}
-	a.ring.Append(activity.Entry{Type: p.typ, Outcome: outcome})
+	// Participant (DEC-OBS-2, bead pg2-ugcrb): listenerID was already a
+	// parameter here, previously discarded — the accepting listener's own
+	// identity is exactly INV-OBS-2's per-listener history key.
+	a.ring.Append(activity.Entry{Type: p.typ, Outcome: outcome, Participant: listenerID})
 }
 
 // OnResourceLimit implements orchestrator.ResourceLimitObserver (this bead,
@@ -694,8 +719,11 @@ func (a *activityObserver) OnUnconsumedExpired(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "missed"})
 }
 
-func (a *activityObserver) OnDeclined(evtType, _, _ string) {
-	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
+func (a *activityObserver) OnDeclined(evtType, listenerID, _ string) {
+	// Participant (DEC-OBS-2, bead pg2-ugcrb): listenerID was already a
+	// parameter here too, previously discarded — see OnAccept's identical
+	// note above.
+	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined", Participant: listenerID})
 }
 
 func (a *activityObserver) OnDispatchFailure(evtType string) {
@@ -707,6 +735,66 @@ func (a *activityObserver) OnDispatchFailure(evtType string) {
 // directly, so it needs no eventID->Type lookup the way OnAccept does.
 func (a *activityObserver) OnDeduped(evtType string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "deduped"})
+}
+
+// OnSourceFetchStart/OnSourceFetchEnd implement
+// discover.SourceActivityObserver's fetch-window bracket (DEC-OBS-2, bead
+// pg2-ugcrb): sourceInFlight is a per-source COUNT rather than a bool
+// specifically so a retrying source's per-attempt re-entry (discover's own
+// doc on this interface) never dips to "not in flight" between two
+// back-to-back attempts, and so a stray double-End (which should not
+// happen, but costs nothing to guard) cannot drive the count negative.
+func (a *activityObserver) OnSourceFetchStart(source string) {
+	a.mu.Lock()
+	a.sourceInFlight[source]++
+	a.mu.Unlock()
+}
+
+func (a *activityObserver) OnSourceFetchEnd(source string) {
+	a.mu.Lock()
+	if a.sourceInFlight[source] > 0 {
+		a.sourceInFlight[source]--
+	}
+	a.mu.Unlock()
+}
+
+// InFlightSources implements core.SourceInFlightReader (DEC-OBS-2, bead
+// pg2-ugcrb): the names of every source with a positive fetch count right
+// now, read live under a.mu — never cached, exactly like
+// eventqueue.Queue.InFlightListeners' own read-live posture.
+func (a *activityObserver) InFlightSources() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	for source, n := range a.sourceInFlight {
+		if n > 0 {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+// OnSourceProduced implements discover.SourceActivityObserver's per-pass
+// success outcome (DEC-OBS-2, bead pg2-ugcrb): recorded into the SAME
+// pool-wide activity ring a handler's own delivered/declined entries go
+// into, Participant-tagged with the source's name so a drill-down can
+// filter to it — Entry.Type carries no single event type for a whole pass
+// (a pass may emit several), so it is left empty here. The Outcome is the
+// plain literal "produced" — matching every existing Outcome verb's own
+// single-word shape (Entry's doc) — never emitted/rejected embedded into
+// the string; those two counts already have a home of their own
+// (ProduceReport, and the `sources[]` wire rows), so duplicating them here
+// would just be a second, driftable copy for no reader this bead adds.
+func (a *activityObserver) OnSourceProduced(source string, _, _ int) {
+	a.ring.Append(activity.Entry{Outcome: "produced", Participant: source})
+}
+
+// OnSourceGaveUp implements discover.SourceActivityObserver's per-pass
+// final-failure outcome (DEC-OBS-2, bead pg2-ugcrb) — the source-side
+// analogue of OnDispatchFailure above, Participant-tagged the same way
+// OnSourceProduced is.
+func (a *activityObserver) OnSourceGaveUp(source string) {
+	a.ring.Append(activity.Entry{Outcome: "source_failed", Participant: source})
 }
 
 // listenerCountObserver implements eventqueue.Observer to bump a per-role

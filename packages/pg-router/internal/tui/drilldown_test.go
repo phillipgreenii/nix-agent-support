@@ -459,7 +459,7 @@ func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
 			ExpectedIntervalMs: 5 * time.Minute.Milliseconds(),
 		}
 
-		got := renderSourceDetail(s, now, theme)
+		got := renderSourceDetail(s, now, theme, nil)
 
 		want := sourceNextCheckText(s, now)
 		if !strings.Contains(got, "NEXT CHECK IN:") || !strings.Contains(got, want) {
@@ -484,7 +484,7 @@ func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
 			Failure:  &Failure{Count: 3, NextEligible: nextEligible},
 		}
 
-		got := renderSourceDetail(s, now, theme)
+		got := renderSourceDetail(s, now, theme, nil)
 
 		if !strings.Contains(got, "failing") {
 			t.Errorf("renderSourceDetail() = %q, want the Health line to still show \"failing\" (unchanged existing behavior)", got)
@@ -505,7 +505,7 @@ func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
 			Excluded: true,
 		}
 
-		got := renderSourceDetail(s, now, theme)
+		got := renderSourceDetail(s, now, theme, nil)
 
 		if !strings.Contains(got, "Excluded:") || !strings.Contains(got, "true") {
 			t.Errorf("renderSourceDetail() = %q, want an explicit \"Excluded: true\" line (not just folded into the \"excluded\" health string)", got)
@@ -516,12 +516,108 @@ func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
 		now := time.Now()
 		s := Source{Name: "gh-prs", Type: "github", Mode: "poll", Enabled: true, Excluded: false}
 
-		got := renderSourceDetail(s, now, theme)
+		got := renderSourceDetail(s, now, theme, nil)
 
 		if !strings.Contains(got, "Excluded:") || !strings.Contains(got, "false") {
 			t.Errorf("renderSourceDetail() = %q, want an explicit \"Excluded: false\" line", got)
 		}
 	})
+}
+
+// TestRecentActivityFor_FiltersByParticipantAndCapsWindow proves DEC-OBS-2's
+// (bead pg2-ugcrb) filter helper: it keeps only entries naming participant,
+// out of a mixed pool-wide feed, and caps the result at
+// recentActivityWindow, keeping the NEWEST ones (the tail of the
+// oldest-first input) when there are more matches than the window allows.
+func TestRecentActivityFor_FiltersByParticipantAndCapsWindow(t *testing.T) {
+	var feed []ActivityEntry
+	for i := 0; i < recentActivityWindow+3; i++ {
+		feed = append(feed, ActivityEntry{Seq: uint64(i), Outcome: "delivered", Participant: "role-a"})
+	}
+	feed = append(feed, ActivityEntry{Seq: 999, Outcome: "declined", Participant: "role-b"}) // a different participant, must never appear
+
+	got := recentActivityFor(feed, "role-a")
+	if len(got) != recentActivityWindow {
+		t.Fatalf("len(recentActivityFor) = %d, want %d (capped at the window)", len(got), recentActivityWindow)
+	}
+	for _, e := range got {
+		if e.Participant != "role-a" {
+			t.Fatalf("recentActivityFor(..., %q) returned an entry for a different participant: %+v", "role-a", e)
+		}
+	}
+	// The KEPT entries must be the NEWEST 3 (seqs 3..2+recentActivityWindow),
+	// not the oldest -- confirming the tail, not the head, was kept.
+	if got[0].Seq != 3 {
+		t.Fatalf("recentActivityFor kept seq %d as its oldest retained entry, want 3 (the newest window, not the oldest)", got[0].Seq)
+	}
+}
+
+// TestRenderListenerDetail_ShowsProcessingAndRecentActivity proves the
+// DEC-OBS-2 (bead pg2-ugcrb) widening: Processing renders "no"/"yes (type)"
+// from InFlight/InFlightEventType, and Recent activity is filtered to
+// ONLY this role's own entries out of a mixed feed -- a sibling role's
+// entry must never leak in, and a role with none reports that plainly.
+func TestRenderListenerDetail_ShowsProcessingAndRecentActivity(t *testing.T) {
+	theme := render.NewTheme(false)
+	feed := []ActivityEntry{
+		{Outcome: "delivered", Participant: "df-feedback"},
+		{Outcome: "declined", Participant: "other-role"}, // must not leak into df-feedback's section
+	}
+
+	busy := Listener{Role: "df-feedback", Enabled: true, InFlight: true, InFlightEventType: "pr.changed"}
+	got := renderListenerDetail(busy, theme, feed)
+	if !strings.Contains(got, "Processing:     yes (pr.changed)") {
+		t.Errorf("renderListenerDetail() = %q, want a Processing line showing yes (pr.changed)", got)
+	}
+	if !strings.Contains(got, "Recent activity:") || !strings.Contains(got, "delivered") {
+		t.Errorf("renderListenerDetail() = %q, want a Recent activity section containing this role's own delivered entry", got)
+	}
+	if strings.Contains(got, "other-role") {
+		t.Errorf("renderListenerDetail() = %q, must not contain another role's own participant name", got)
+	}
+
+	idle := Listener{Role: "no-history-role", Enabled: true}
+	got = renderListenerDetail(idle, theme, feed)
+	if !strings.Contains(got, "Processing:     no") {
+		t.Errorf("renderListenerDetail() = %q, want a Processing line showing no", got)
+	}
+	if !strings.Contains(got, "(no recent activity)") {
+		t.Errorf("renderListenerDetail() = %q, want the plain (no recent activity) marker for a role with none", got)
+	}
+}
+
+// TestRenderSourceDetail_ShowsProcessingAndRecentActivity mirrors
+// TestRenderListenerDetail_ShowsProcessingAndRecentActivity for the source
+// side (DEC-OBS-2, bead pg2-ugcrb) -- a source's Processing carries no
+// event type (processingText's own doc: a pass may emit several).
+func TestRenderSourceDetail_ShowsProcessingAndRecentActivity(t *testing.T) {
+	theme := render.NewTheme(false)
+	now := time.Now()
+	feed := []ActivityEntry{
+		{Outcome: "produced", Participant: "beads-source"},
+		{Outcome: "source_failed", Participant: "other-source"}, // must not leak in
+	}
+
+	busy := Source{Name: "beads-source", Enabled: true, InFlight: true}
+	got := renderSourceDetail(busy, now, theme, feed)
+	if !strings.Contains(got, "Processing:    yes") {
+		t.Errorf("renderSourceDetail() = %q, want a Processing line showing yes", got)
+	}
+	if !strings.Contains(got, "Recent activity:") || !strings.Contains(got, "produced") {
+		t.Errorf("renderSourceDetail() = %q, want a Recent activity section containing this source's own produced entry", got)
+	}
+	if strings.Contains(got, "other-source") {
+		t.Errorf("renderSourceDetail() = %q, must not contain another source's own participant name", got)
+	}
+
+	idle := Source{Name: "no-history-source", Enabled: true}
+	got = renderSourceDetail(idle, now, theme, feed)
+	if !strings.Contains(got, "Processing:    no") {
+		t.Errorf("renderSourceDetail() = %q, want a Processing line showing no", got)
+	}
+	if !strings.Contains(got, "(no recent activity)") {
+		t.Errorf("renderSourceDetail() = %q, want the plain (no recent activity) marker for a source with none", got)
+	}
 }
 
 // TestRenderListenerDetail_MatchesListenersPaneParity is pg2-v6y9l's own
@@ -551,7 +647,7 @@ func TestRenderListenerDetail_MatchesListenersPaneParity(t *testing.T) {
 		SelfReportState:   "degraded",
 	}
 
-	got := renderListenerDetail(l, theme)
+	got := renderListenerDetail(l, theme, nil)
 
 	wantLastDelivered := formatCoarse(time.Since(time.UnixMilli(l.LastDeliveredAtMs))) + " ago"
 	busy, unavailable, other := l.DeclinedBucketed()
@@ -612,7 +708,7 @@ func TestRenderListenerDetail_SelfDimmedOnlyWhenDegraded(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			l := Listener{Role: "reviewer", SelfReportState: tt.state}
 
-			got := renderListenerDetail(l, theme)
+			got := renderListenerDetail(l, theme, nil)
 
 			self := tt.state
 			if selfReportDegraded(tt.state) {

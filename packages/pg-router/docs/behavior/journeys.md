@@ -1075,7 +1075,7 @@ observability snapshot to read.
 **Intent:** see what a run is doing, and narrow it until a cause is visible — the metric catalog
 through a sink, an injected test event, and the run-scoped selectors.
 _Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-3`, `INV-FAIL-1`, `INV-LIFE-1`,
-`INV-LIFE-2`, `INV-OBS-1`, `GOAL-MIN-1`.
+`INV-LIFE-2`, `INV-OBS-1`, `INV-OBS-2`, `GOAL-MIN-1`.
 
 **Flow — the metric catalog (steady-state reading).** The core **owns the metric catalog** — a
 declared set of metrics, each with `name`, `kind` (counter / gauge / histogram), `unit`, and label
@@ -1120,6 +1120,15 @@ reversible act. It is **not** a config defect (`USECASE-VALIDATE-CONFIG`): a dis
 events are still accepted and enqueued, offered to nobody, and dropped **unconsumed-expired** — the
 **declared but inactive this run** case of `INV-DISP-3`, which is expected rather than a finding.
 
+**Flow — per-participant history and in-flight status.** Beyond the aggregate catalog, the operator
+MAY drill into **one** configured source or handler at a time and see that participant's own recent
+attempts — a bounded window, each entry a timestamp plus an outcome — and whether it currently has an
+attempt **in flight** (`INV-OBS-2`). This is inspection layered on the same delivery-side facts the
+aggregate catalog already counts (`INV-OBS-1`), narrowed to one participant instead of summed across
+all of them; it adds no new participant obligation and no new delivery semantics. A quiet participant
+with no recent history, or one with nothing currently in flight, reports that plainly — never a stale
+carry-over from a different participant or a prior run.
+
 **Flow — "this binding matched nothing this run."** A binding's narrowing **payload path** cannot be
 checked when the configuration is authored, because no per-`type` payload shape is declared anywhere
 (`OQ-EVT-CATALOG`); while that open question stands, a mistyped path narrows to nothing and no
@@ -1158,6 +1167,8 @@ Extensions:
   event this run, the sole available signal against a mistyped path today.
 - A source infrastructure failure occurs: it is recorded as an error rather than a quiet zero,
   keeping it distinguishable from a genuinely idle reading (`USECASE-CREATE-SOURCE`, `STORY-OBS-2`).
+- The operator drills into one source or handler and asks for its own recent history and current
+  in-flight status, rather than reading the pool-wide aggregate (`INV-OBS-2`).
 
 ## Open questions
 

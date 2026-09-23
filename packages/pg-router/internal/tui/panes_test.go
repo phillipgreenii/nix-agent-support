@@ -86,6 +86,49 @@ func TestPanes_DerivedHealthTwoAxes(t *testing.T) {
 	})
 }
 
+// TestHealthText_ProcessingSuffix proves DEC-OBS-2's (bead pg2-ugcrb)
+// InFlight marker is ORTHOGONAL to the health ranking, not a new rung in
+// it: it appends onto whatever health text the ranking already picked
+// (cooling/failing/ok/etc.), and is a no-op (identical output) when
+// InFlight is false -- the byte-identical-when-false half of this claim is
+// already covered by every pre-existing case in TestPanes_DerivedHealthTwoAxes
+// above (none of which sets InFlight), so this test only needs to cover the
+// true side.
+func TestHealthText_ProcessingSuffix(t *testing.T) {
+	theme := render.NewTheme(false)
+
+	t.Run("listener", func(t *testing.T) {
+		cooling := &Backoff{NextEligible: time.Now().Add(42 * time.Second)}
+		withoutFlag := listenerHealthText(Listener{Enabled: true, Backoff: cooling}, theme)
+		withFlag := listenerHealthText(Listener{Enabled: true, Backoff: cooling, InFlight: true}, theme)
+		if withFlag == withoutFlag {
+			t.Fatalf("InFlight=true rendered identically to InFlight=false: %q", withFlag)
+		}
+		if !strings.Contains(withFlag, "cooling") {
+			t.Fatalf("listenerHealthText with InFlight=true = %q, want it to still contain the underlying health (%q)", withFlag, "cooling")
+		}
+		if !strings.Contains(withFlag, "processing") {
+			t.Fatalf("listenerHealthText with InFlight=true = %q, want it to contain a processing marker", withFlag)
+		}
+	})
+
+	t.Run("source", func(t *testing.T) {
+		now := time.Now()
+		minuteMs := time.Minute.Milliseconds()
+		withoutFlag := sourceHealthText(Source{Enabled: true, LastTick: now, ExpectedIntervalMs: minuteMs}, now, theme)
+		withFlag := sourceHealthText(Source{Enabled: true, LastTick: now, ExpectedIntervalMs: minuteMs, InFlight: true}, now, theme)
+		if withFlag == withoutFlag {
+			t.Fatalf("InFlight=true rendered identically to InFlight=false: %q", withFlag)
+		}
+		if !strings.Contains(withFlag, "ok") {
+			t.Fatalf("sourceHealthText with InFlight=true = %q, want it to still contain the underlying health (%q)", withFlag, "ok")
+		}
+		if !strings.Contains(withFlag, "processing") {
+			t.Fatalf("sourceHealthText with InFlight=true = %q, want it to contain a processing marker", withFlag)
+		}
+	})
+}
+
 // --- per-source staleness uses the source's own interval (this task, pg2-mnf7t.1) ---
 //
 // These four cases use render.Theme{} (the zero value) rather than

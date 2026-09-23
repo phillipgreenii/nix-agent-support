@@ -714,6 +714,16 @@ Inspection's **MUST** set has widened to also offer:
   an additive schema change discovered **after** the widening above, and carries the explicit
   operator note this section's own rule requires: **operator-approved** as part of
   `phillipgreenii-nix-agent-support` bead `pg2-3brwx.5` (2026-09-16).
+- **Per-participant recent history and in-flight status** (`INV-OBS-2`): drilling into ONE
+  configured listener or source, rather than reading the pool-wide readings above, offers that
+  participant's own bounded window of recent delivery/fetch attempts (a timestamp and an outcome
+  each) and whether it currently has an attempt in flight — naming the event type where available
+  for a listener, though not for a source (a pull source's own pass may emit several event types,
+  so no single one is named). This is **inspection only** (`INV-OBS-2`'s own clause): it adds no
+  member to the metric catalog and no new participant obligation. This reading is itself an
+  additive schema change discovered **after** the widenings above, and carries the explicit
+  operator note this section's own rule requires: **operator-approved** as part of
+  `phillipgreenii-nix-agent-support` bead `pg2-ugcrb` (2026-09-23).
 
 A **fourth** reading beyond this now-wider **MUST** set is still a **MAY**: a core **MAY** also
 report **which configured bindings have matched no event this run**, which is a debugging

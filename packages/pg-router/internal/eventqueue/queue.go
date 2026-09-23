@@ -375,7 +375,13 @@ type Queue struct {
 	// inside its own Offer) is exercised by any shipped caller today, so no
 	// machinery distinguishes them — skip handles both identically. custody
 	// alone cannot do this job since it is keyed per-attempt, not per-listener.
-	inFlight map[string]struct{}
+	//
+	// The value is the offered event's Type, not an empty struct (widened by
+	// DEC-OBS-2, bead pg2-ugcrb): this map's span already IS the real
+	// "currently has an outstanding attempt" window INV-OBS-2's per-listener
+	// in-flight signal wants, so InFlightListeners exposes it read-only
+	// rather than tracking that fact a second time.
+	inFlight map[string]string
 
 	// delivered/declined are Task 2.3's POOL-WIDE delivery counters (Step
 	// 2.3.6) — the aggregate counterpart to each listenerState's own
@@ -487,7 +493,7 @@ func New(store Store, opts ...Option) (*Queue, error) {
 		retryBackoff: backoff.Default(),
 		entries:      map[string]*entry{},
 		custody:      map[string]custody{},
-		inFlight:     map[string]struct{}{},
+		inFlight:     map[string]string{},
 	}
 	q.cell.Store(&depthCell{depth: map[string]int{}, everSeen: map[string]struct{}{}})
 	for _, opt := range opts {
@@ -971,7 +977,7 @@ func (q *Queue) snapshotPending() (pending []pendingOffer, now time.Time) {
 		}
 		id := takeID()
 		q.custody[id] = custody{}
-		q.inFlight[lid] = struct{}{}
+		q.inFlight[lid] = e.evt.Type
 		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, lastAttempt: e.evt.Expired(now)})
 	}
 	return pending, now
@@ -1557,6 +1563,27 @@ func (q *Queue) SessionsInFlight() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.custody)
+}
+
+// InFlightListeners reports, per listener id, the Type of the event that
+// listener currently has an outstanding offer for (DEC-OBS-2, bead
+// pg2-ugcrb; INV-OBS-2's per-listener "processing now" signal) — a
+// read-only snapshot of q.inFlight, the SAME index snapshotPending already
+// mints/clears to enforce INV-CONC-1's "one outstanding offer per handler."
+// A listener id absent from the returned map has no offer outstanding right
+// now. Like SessionsInFlight, this is read LIVE under q.mu and never
+// cached: a listener id present here reflects an offer genuinely in
+// progress at the moment of the call, for however long that listener's own
+// Offer call actually takes, whether reached via Dispatch or one of Kick's
+// detached goroutines. Caller must NOT hold q.mu.
+func (q *Queue) InFlightListeners() map[string]string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make(map[string]string, len(q.inFlight))
+	for lid, typ := range q.inFlight {
+		out[lid] = typ
+	}
+	return out
 }
 
 // WaitForInFlightDrain blocks until no offer is outstanding

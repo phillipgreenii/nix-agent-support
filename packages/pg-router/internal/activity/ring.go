@@ -49,11 +49,24 @@ type Entry struct {
 	// Outcome is an opaque verb sourced from report today, carrying no UI-
 	// chrome vocabulary (ADR 0026): "delivered", "missed", "rejected",
 	// "declined", "dispatch_failed", "deduped", "needs_input",
-	// "budget_escalation". This package places no constraint on the value —
-	// which of these a given production wiring can actually PRODUCE is that
-	// wiring's own call-site decision (see cmd/pg-router/run.go's
-	// activityObserver for Task 3.4's own choice here).
+	// "budget_escalation" — plus, since DEC-OBS-2 (bead pg2-ugcrb), a
+	// pull source's own per-pass outcomes, "produced" and "source_failed".
+	// This package places no constraint on the value — which of these a
+	// given production wiring can actually PRODUCE is that wiring's own
+	// call-site decision (see cmd/pg-router/run.go's activityObserver for
+	// Task 3.4's own choice here).
 	Outcome string
+	// Participant names WHICH configured participant this entry is about —
+	// a listener's role name or a source's own name — so a reader can
+	// filter one participant's own history out of the single pool-wide ring
+	// (DEC-OBS-2, `phillipgreenii-nix-agent-support ·
+	// packages/pg-router/docs/behavior · INV-OBS-2`; bead pg2-ugcrb).
+	// Empty for an entry no single participant settled — e.g. an
+	// unconsumed-expired or a dispatch-failure outcome, neither of which any
+	// one handler accepted or declined. This package places no constraint
+	// on the value beyond "caller-supplied string", exactly like Type and
+	// Outcome above.
+	Participant string
 }
 
 // Ring is a fixed-size, concurrency-safe ring buffer of Entry records.

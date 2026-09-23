@@ -79,6 +79,16 @@ type Orchestrator struct {
 	// existing construction site that does not set it; cmd/pg-router's bootCore
 	// is the one production site that wires a live metrics.Emitter in here.
 	SourceFailureObserver discover.SourceFailureObserver
+	// SourceActivityObserver is notified of every pull source's own
+	// per-pass fetch window and outcome (DEC-OBS-2, bead pg2-ugcrb;
+	// INV-OBS-2's per-source recent-history and "processing now" signal) —
+	// threaded into ProduceTick's discover.Produce call exactly like
+	// SourceFailureObserver above, alongside it rather than instead of it.
+	// nil (the default, and every pre-this-bead test) disables the
+	// notification entirely, matching discover.WithSourceActivityObserver's
+	// own safe-no-op doc. cmd/pg-router's bootCore is the one production
+	// site that wires a live activityObserver in here.
+	SourceActivityObserver discover.SourceActivityObserver
 	// Bindings is the CONFIGURED role-binding set (core.NewBindings over every
 	// role's Binds, INCLUDING a role disabled for this run — INV-DISP-3's
 	// configuration-wide view). bootCore sets this from the SAME value it passes
@@ -207,7 +217,8 @@ func (o *Orchestrator) queryEnv() query.Env {
 func (o *Orchestrator) ProduceTick(ctx context.Context, q *eventqueue.Queue) (discover.ProduceReport, error) {
 	rpt, err := discover.ProduceWithCadence(ctx, o.queryEnv(), o.Cfg.Queries, q, o.Bindings,
 		discover.Cadence{LastTick: o.lastTick, PollInterval: o.Cfg.PollInterval},
-		discover.WithSourceFailureObserver(o.SourceFailureObserver))
+		discover.WithSourceFailureObserver(o.SourceFailureObserver),
+		discover.WithSourceActivityObserver(o.SourceActivityObserver))
 	for name, t := range rpt.LastTick {
 		if o.lastTick == nil {
 			o.lastTick = make(map[string]time.Time, len(rpt.LastTick))

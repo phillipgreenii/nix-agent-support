@@ -121,12 +121,44 @@ type SourceFailureObserver interface {
 	OnSourceFailure(source string)
 }
 
+// SourceActivityObserver is notified of a pull source's own per-pass
+// activity (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's per-source recent-history
+// and "processing now" signal) — a second, purely-observational seam
+// alongside SourceFailureObserver, not a replacement for it:
+// SourceFailureObserver fires on each RETRY within a pass's backoff loop,
+// while this one brackets the pass's underlying s.Query.Run call itself
+// (OnSourceFetchStart/OnSourceFetchEnd, the "currently fetching" window) and
+// reports that call's own final outcome (OnSourceProduced on success,
+// OnSourceGaveUp when the retry budget this pass is exhausted — mirroring
+// ProduceReport.Emitted/Rejected and SourceErrors respectively). A nil
+// observer (Produce's default when no option is given) is a safe no-op.
+type SourceActivityObserver interface {
+	// OnSourceFetchStart fires immediately before s.Query.Run is invoked for
+	// this pass's attempt; OnSourceFetchEnd fires immediately after it
+	// returns, whatever the outcome. The two bracket the window a source is
+	// "currently fetching" — a RETRY re-enters this same bracket for each
+	// attempt, so a caller tracking "in flight" as a simple counter (rather
+	// than a boolean) handles a retrying source correctly without extra work.
+	OnSourceFetchStart(source string)
+	OnSourceFetchEnd(source string)
+	// OnSourceProduced fires once, after a pass's query succeeded (on the
+	// first attempt or after retrying), reporting how many events THIS pass
+	// emitted and rejected for source.
+	OnSourceProduced(source string, emitted, rejected int)
+	// OnSourceGaveUp fires once, when this pass's retry budget is exhausted
+	// and the failure is recorded into ProduceReport.SourceErrors — the
+	// source-side final-failure outcome, distinct from
+	// SourceFailureObserver.OnSourceFailure's per-retry signal.
+	OnSourceGaveUp(source string)
+}
+
 // ProduceOption configures an optional capability on Produce (functional
 // options, so every existing call site keeps compiling unchanged).
 type ProduceOption func(*produceOptions)
 
 type produceOptions struct {
-	obs SourceFailureObserver
+	obs         SourceFailureObserver
+	activityObs SourceActivityObserver
 }
 
 // WithSourceFailureObserver registers obs to be notified of every pull-source
@@ -138,6 +170,16 @@ type produceOptions struct {
 // failures were recorded to logs only in the running binary.
 func WithSourceFailureObserver(obs SourceFailureObserver) ProduceOption {
 	return func(o *produceOptions) { o.obs = obs }
+}
+
+// WithSourceActivityObserver registers obs to be notified of every pull
+// source's own per-pass fetch window and outcome (DEC-OBS-2, bead
+// pg2-ugcrb). The production call site mirrors WithSourceFailureObserver's:
+// cmd/pg-router's bootCore assigns its activityObserver to
+// orchestrator.Orchestrator.SourceActivityObserver, and ProduceTick passes it
+// to this option on every discover.Produce call.
+func WithSourceActivityObserver(obs SourceActivityObserver) ProduceOption {
+	return func(o *produceOptions) { o.activityObs = obs }
 }
 
 // ProduceReport summarizes one Produce pass so a single failing pull source no
@@ -252,7 +294,7 @@ func Produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	for _, opt := range opts {
 		opt(&po)
 	}
-	return produce(ctx, env, sources, q, declared, Cadence{}, realSleep, time.Now, po.obs)
+	return produce(ctx, env, sources, q, declared, Cadence{}, realSleep, time.Now, po.obs, po.activityObs)
 }
 
 // ProduceWithCadence is Produce, additionally honoring cad — the per-source
@@ -266,7 +308,7 @@ func ProduceWithCadence(ctx context.Context, env query.Env, sources query.Source
 	for _, opt := range opts {
 		opt(&po)
 	}
-	return produce(ctx, env, sources, q, declared, cad, realSleep, time.Now, po.obs)
+	return produce(ctx, env, sources, q, declared, cad, realSleep, time.Now, po.obs, po.activityObs)
 }
 
 // sleepFunc waits for d, honoring ctx cancellation — the seam produce's
@@ -320,7 +362,7 @@ func cadenceDue(nowT time.Time, name string, t query.Trigger, cad Cadence) bool 
 // loop without waiting real time) and the clock seam now (so a cadence test
 // can drive successive passes without waiting real time either). Produce and
 // ProduceWithCadence are the production entry points (realSleep, time.Now).
-func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, cad Cadence, sleep sleepFunc, now func() time.Time, obs SourceFailureObserver) (ProduceReport, error) {
+func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eventqueue.Queue, declared core.Bindings, cad Cadence, sleep sleepFunc, now func() time.Time, obs SourceFailureObserver, activityObs SourceActivityObserver) (ProduceReport, error) {
 	rpt := newProduceReport()
 	fired := make([]bool, len(sources))
 	nowT := now()
@@ -337,7 +379,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if !cadenceDue(nowT, s.Name, t, cad) {
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt, now); err != nil {
+		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
 			return rpt, err
 		}
 		fired[i] = true
@@ -363,7 +405,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, &rpt, now); err != nil {
+				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
 					return rpt, err
 				}
 				fired[i] = true
@@ -417,14 +459,24 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // REJECTED — counted in rpt.Rejected[s.Name], never enqueued — rather than
 // entering the durable queue only to wait, unconsumed, until it expires. A
 // rejection is per-event and does not abort the source's other events.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, rpt *ProduceReport, now func() time.Time) error {
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, activityObs SourceActivityObserver, rpt *ProduceReport, now func() time.Time) error {
 	rpt.LastTick[s.Name] = now()
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error
 	var lastWait time.Duration // zero for a fail-fast query's single, wait-less attempt
 	for attempt := 0; ; attempt++ {
+		// OnSourceFetchStart/OnSourceFetchEnd bracket EACH attempt (DEC-OBS-2,
+		// bead pg2-ugcrb): a retrying source re-enters this bracket per
+		// attempt, so a caller tracking "currently fetching" observes it
+		// fetching again on each retry rather than missing the window.
+		if activityObs != nil {
+			activityObs.OnSourceFetchStart(s.Name)
+		}
 		evts, err = s.Query.Run(ctx, env)
+		if activityObs != nil {
+			activityObs.OnSourceFetchEnd(s.Name)
+		}
 		if err == nil {
 			break
 		}
@@ -439,6 +491,9 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			// SourceErrors above — see FailureInfo's own doc for why
 			// NextEligible is simply `now` for a fail-fast (Retries==0) query.
 			rpt.Failure[s.Name] = FailureInfo{Count: attempt + 1, NextEligible: now().Add(lastWait)}
+			if activityObs != nil {
+				activityObs.OnSourceGaveUp(s.Name)
+			}
 			return nil
 		}
 		wait := fb.Policy.Duration(attempt + 1)
@@ -465,6 +520,9 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			return fmt.Errorf("enqueue %s: %w", s.Name, err)
 		}
 		rpt.Emitted[s.Name]++
+	}
+	if activityObs != nil {
+		activityObs.OnSourceProduced(s.Name, rpt.Emitted[s.Name], rpt.Rejected[s.Name])
 	}
 	return nil
 }

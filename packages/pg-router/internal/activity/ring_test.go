@@ -19,6 +19,33 @@ func TestAppendZeroAllocs(t *testing.T) {
 	}
 }
 
+// TestAppend_participantRoundTripsThroughRead proves Entry.Participant
+// (DEC-OBS-2, bead pg2-ugcrb) survives Append/Read exactly like Type and
+// Outcome — it is caller-supplied and Append/Read never touch it, so two
+// entries with different Participant values must come back distinguishable
+// by that field alone.
+func TestAppend_participantRoundTripsThroughRead(t *testing.T) {
+	r := New(8)
+	r.Append(Entry{Type: "t", Outcome: "delivered", Participant: "role-a"})
+	r.Append(Entry{Type: "t", Outcome: "declined", Participant: "role-b"})
+	r.Append(Entry{Type: "t", Outcome: "missed"}) // no single participant settled this one
+
+	buf := make([]Entry, 10)
+	n, dropped := r.Read(0, buf)
+	if n != 3 || dropped {
+		t.Fatalf("n=%d dropped=%v, want 3,false", n, dropped)
+	}
+	if buf[0].Participant != "role-a" {
+		t.Fatalf("buf[0].Participant = %q, want %q", buf[0].Participant, "role-a")
+	}
+	if buf[1].Participant != "role-b" {
+		t.Fatalf("buf[1].Participant = %q, want %q", buf[1].Participant, "role-b")
+	}
+	if buf[2].Participant != "" {
+		t.Fatalf("buf[2].Participant = %q, want empty (no single participant settled it)", buf[2].Participant)
+	}
+}
+
 // --- the 7-case since-cursor matrix (Task 3.4 Binding decisions / Step 4) ---
 
 // Case: since omitted (the zero value) returns the newest held entries when

@@ -88,17 +88,41 @@ func selfReportDegraded(state string) bool {
 // selector fact) both outrank any runtime observation; disabled outranks
 // excluded because it is the more durable fact [design: Task 4.6 Binding
 // decisions].
+//
+// InFlight (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's "processing now" signal)
+// is ORTHOGONAL to this ranking, not a new rung in it: a listener can be
+// "ok" and processing, or "cooling" and processing (a backoff streak is
+// about the NEXT offer, not whatever this one is doing right now) -- so it
+// is appended as a suffix onto whichever health text the switch above
+// already picked, never inserted into the switch itself. Appending is a
+// no-op (empty string) when InFlight is false, so every pre-existing call
+// site and test -- none of which can set InFlight on a Listener value built
+// before this field existed -- renders byte-identically to before.
 func listenerHealthText(l Listener, theme render.Theme) string {
+	base := ""
 	switch {
 	case !l.Enabled:
-		return theme.Disabled.Render("disabled")
+		base = theme.Disabled.Render("disabled")
 	case l.Excluded:
-		return theme.Excluded.Render("excluded")
+		base = theme.Excluded.Render("excluded")
 	case l.Backoff != nil:
-		return theme.Cooling.Render("cooling " + formatSeconds(time.Until(l.Backoff.NextEligible)))
+		base = theme.Cooling.Render("cooling " + formatSeconds(time.Until(l.Backoff.NextEligible)))
 	default:
-		return theme.OK.Render("ok")
+		base = theme.OK.Render("ok")
 	}
+	return base + processingSuffix(l.InFlight)
+}
+
+// processingSuffix renders DEC-OBS-2's (bead pg2-ugcrb) "processing now"
+// marker -- a plain, unthemed literal (not a new render.Theme field) kept
+// deliberately terse so it reads at a glance in a fixed-width pane column,
+// shared verbatim by listenerHealthText and sourceHealthText so the two
+// surfaces can never spell "processing" two different ways.
+func processingSuffix(inFlight bool) string {
+	if !inFlight {
+		return ""
+	}
+	return " [processing]"
 }
 
 // sourceHealthText ranks a source's health: disabled > excluded > failing >
@@ -107,23 +131,28 @@ func listenerHealthText(l Listener, theme render.Theme) string {
 // outranks N/A, since "never started" and "cadence unknown" are different
 // facts. Widened (this task) to use the source's OWN ExpectedIntervalMs
 // instead of the pool-wide tickIntervalMs.
+// InFlight (DEC-OBS-2, bead pg2-ugcrb) is appended the same way
+// listenerHealthText's own doc explains -- an orthogonal suffix, not a new
+// rung in this ranking, and a no-op when false.
 func sourceHealthText(s Source, now time.Time, theme render.Theme) string {
+	base := ""
 	switch {
 	case !s.Enabled:
-		return theme.Disabled.Render("disabled")
+		base = theme.Disabled.Render("disabled")
 	case s.Excluded:
-		return theme.Excluded.Render("excluded")
+		base = theme.Excluded.Render("excluded")
 	case s.Failure != nil && s.Failure.Count > 0:
-		return theme.Failing.Render(fmt.Sprintf("failing ×%d", s.Failure.Count))
+		base = theme.Failing.Render(fmt.Sprintf("failing ×%d", s.Failure.Count))
 	case s.LastTick.IsZero():
-		return theme.Muted.Render("idle")
+		base = theme.Muted.Render("idle")
 	case s.ExpectedIntervalMs <= 0:
-		return theme.Muted.Render("N/A")
+		base = theme.Muted.Render("N/A")
 	case now.Sub(s.LastTick) > staleThreshold(s.ExpectedIntervalMs):
-		return theme.Stale.Render("stale " + formatMinutes(now.Sub(s.LastTick)))
+		base = theme.Stale.Render("stale " + formatMinutes(now.Sub(s.LastTick)))
 	default:
-		return theme.OK.Render("ok")
+		base = theme.OK.Render("ok")
 	}
+	return base + processingSuffix(s.InFlight)
 }
 
 // formatSeconds/formatMinutes render a non-negative duration coarsely (no

@@ -57,6 +57,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   delivers at-least-once with per-handler serial FIFO.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
+- [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the
+  in-flight signal is read from existing dispatch/produce state, not newly tracked.
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit

@@ -187,7 +187,7 @@ func TestProduce_queryErrorIsolatedImmediatelyWithoutOptIn(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil, nil)
 	if err != nil {
 		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
 	}
@@ -227,7 +227,7 @@ func TestProduce_pullSourceRetriesThenSucceeds(t *testing.T) {
 	q.Register(wk)
 	obs := &recordingSourceFailureObserver{}
 
-	rpt, err := produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"), Cadence{}, recordingSleep(&waits), time.Now, obs)
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, core.NewBindings("work.ready"), Cadence{}, recordingSleep(&waits), time.Now, obs, nil)
 	if err != nil {
 		t.Fatalf("failure must NOT propagate once a retry succeeds: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestProduce_pullSourceIsolatedAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil, nil)
 	if err != nil {
 		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
 	}
@@ -443,6 +443,103 @@ func TestProduce_WithSourceFailureObserverOption(t *testing.T) {
 	}
 }
 
+// recordingSourceActivityObserver is a SourceActivityObserver test double
+// (DEC-OBS-2, bead pg2-ugcrb): it records every call, in order, as a short
+// tag per method so a test can assert both WHICH hooks fired and in what
+// sequence relative to each other.
+type recordingSourceActivityObserver struct {
+	calls    []string
+	emitted  map[string]int
+	rejected map[string]int
+}
+
+func (r *recordingSourceActivityObserver) OnSourceFetchStart(source string) {
+	r.calls = append(r.calls, "start:"+source)
+}
+
+func (r *recordingSourceActivityObserver) OnSourceFetchEnd(source string) {
+	r.calls = append(r.calls, "end:"+source)
+}
+
+func (r *recordingSourceActivityObserver) OnSourceProduced(source string, emitted, rejected int) {
+	r.calls = append(r.calls, "produced:"+source)
+	if r.emitted == nil {
+		r.emitted = map[string]int{}
+		r.rejected = map[string]int{}
+	}
+	r.emitted[source] = emitted
+	r.rejected[source] = rejected
+}
+
+func (r *recordingSourceActivityObserver) OnSourceGaveUp(source string) {
+	r.calls = append(r.calls, "gaveup:"+source)
+}
+
+// TestProduce_SourceActivityObserver_bracketsEachAttemptAndReportsCounts
+// proves the fetch-start/fetch-end bracket re-enters on every retry attempt
+// (not just once per pass) and that OnSourceProduced fires exactly once,
+// after the loop, with THIS pass's final emitted/rejected counts — mirroring
+// TestProduce_pullSourceRetriesThenSucceeds's own retry-then-succeed shape.
+func TestProduce_SourceActivityObserver_bracketsEachAttemptAndReportsCounts(t *testing.T) {
+	calls := 0
+	sources := query.SourceSet{
+		{Name: "flaky", Query: flakyQuery{
+			Meta: query.Meta{
+				EmitTypes: []string{"work.ready"},
+				FB: query.FailureBackoff{
+					Policy:  backoff.Policy{Initial: time.Millisecond, Factor: 1, Max: time.Millisecond},
+					Retries: 2,
+				},
+			},
+			failTimes: 2, // fails twice, succeeds on the 3rd Run
+			events:    []event.Event{itemEvt("work.ready", "wk-1")},
+			calls:     &calls,
+		}},
+	}
+	obs := &recordingSourceActivityObserver{}
+	rpt, err := Produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("work.ready"), WithSourceActivityObserver(obs))
+	if err != nil {
+		t.Fatalf("Produce: %v", err)
+	}
+	want := []string{"start:flaky", "end:flaky", "start:flaky", "end:flaky", "start:flaky", "end:flaky", "produced:flaky"}
+	if !equalStrings(obs.calls, want) {
+		t.Fatalf("observer.calls = %v, want %v (start/end per attempt, produced once at the end)", obs.calls, want)
+	}
+	if obs.emitted["flaky"] != rpt.Emitted["flaky"] || obs.rejected["flaky"] != rpt.Rejected["flaky"] {
+		t.Fatalf("OnSourceProduced counts (%d emitted, %d rejected) must match rpt.Emitted/Rejected (%d, %d)",
+			obs.emitted["flaky"], obs.rejected["flaky"], rpt.Emitted["flaky"], rpt.Rejected["flaky"])
+	}
+}
+
+// TestProduce_SourceActivityObserver_gaveUpFiresInsteadOfProduced mirrors
+// TestProduce_pullSourceIsolatedAfterRetriesExhausted's give-up shape:
+// OnSourceGaveUp fires exactly once and OnSourceProduced never fires at all
+// for a source whose retry budget this pass exhausted.
+func TestProduce_SourceActivityObserver_gaveUpFiresInsteadOfProduced(t *testing.T) {
+	calls := 0
+	sources := query.SourceSet{
+		{Name: "down", Query: flakyQuery{
+			Meta: query.Meta{
+				EmitTypes: []string{"x"},
+				FB: query.FailureBackoff{
+					Policy:  backoff.Policy{Initial: time.Millisecond, Factor: 1, Max: time.Millisecond},
+					Retries: 1,
+				},
+			},
+			failTimes: 100, // never recovers within the retry budget
+			calls:     &calls,
+		}},
+	}
+	obs := &recordingSourceActivityObserver{}
+	if _, err := Produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), WithSourceActivityObserver(obs)); err != nil {
+		t.Fatalf("Produce: %v", err)
+	}
+	want := []string{"start:down", "end:down", "start:down", "end:down", "gaveup:down"}
+	if !equalStrings(obs.calls, want) {
+		t.Fatalf("observer.calls = %v, want %v (start/end per attempt, gaveup once, never produced)", obs.calls, want)
+	}
+}
+
 func TestProduce_thresholdFiresOnlyWhenEnough(t *testing.T) {
 	// upstream (period) emits one "up" event; downstream (threshold Count=1 on
 	// "up") should fire and emit a "down" event.
@@ -522,7 +619,7 @@ func TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed(t *testing.T
 
 	// Tick @ t0: this cadence has never fired this source before -> due
 	// immediately (preserves the pre-Task-1.3 always-fire-first-pass behavior).
-	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil)
 	if err != nil {
 		t.Fatalf("produce (t0): %v", err)
 	}
@@ -534,7 +631,7 @@ func TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed(t *testing.T
 	// Tick @ t0+10s (a 10s poll tick): the source's own 30s period is NOT yet
 	// due -> its query must not run at all.
 	clockT = clockT.Add(10 * time.Second)
-	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil); err != nil {
 		t.Fatalf("produce (t0+10s): %v", err)
 	}
 	if calls != 1 {
@@ -543,7 +640,7 @@ func TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed(t *testing.T
 
 	// Tick @ t0+20s: still not due (20s < 30s).
 	clockT = clockT.Add(10 * time.Second)
-	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil); err != nil {
 		t.Fatalf("produce (t0+20s): %v", err)
 	}
 	if calls != 1 {
@@ -552,7 +649,7 @@ func TestProduceWithCadence_periodSourceSkippedUntilOwnEveryElapsed(t *testing.T
 
 	// Tick @ t0+30s: now due (30s elapsed since the t0 fire) -> runs again.
 	clockT = clockT.Add(10 * time.Second)
-	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil); err != nil {
 		t.Fatalf("produce (t0+30s): %v", err)
 	}
 	if calls != 2 {
@@ -582,7 +679,7 @@ func TestProduceWithCadence_zeroEveryFallsBackToPollInterval(t *testing.T) {
 	q := newQueue(t)
 	cad := Cadence{PollInterval: 20 * time.Second}
 
-	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil)
+	rpt, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil)
 	if err != nil {
 		t.Fatalf("produce (t0): %v", err)
 	}
@@ -592,7 +689,7 @@ func TestProduceWithCadence_zeroEveryFallsBackToPollInterval(t *testing.T) {
 	cad.LastTick = rpt.LastTick
 
 	clockT = clockT.Add(10 * time.Second)
-	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil); err != nil {
 		t.Fatalf("produce (t0+10s): %v", err)
 	}
 	if calls != 1 {
@@ -600,7 +697,7 @@ func TestProduceWithCadence_zeroEveryFallsBackToPollInterval(t *testing.T) {
 	}
 
 	clockT = clockT.Add(10 * time.Second)
-	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil); err != nil {
+	if _, err := produce(context.Background(), query.Env{}, sources, q, declared, cad, realSleep, clock, nil, nil); err != nil {
 		t.Fatalf("produce (t0+20s): %v", err)
 	}
 	if calls != 2 {

@@ -323,6 +323,51 @@ func TestDispatch_CustodyPinnedDuringBlockingOffer(t *testing.T) {
 	}
 }
 
+// TestInFlightListeners_ReportsListenerAndTypeWhileBlocked proves
+// InFlightListeners (DEC-OBS-2, bead pg2-ugcrb) surfaces the SAME
+// mid-pass-outstanding window TestDispatch_CustodyPinnedDuringBlockingOffer
+// already pins for SessionsInFlight/custody: a blocked Offer must show up,
+// keyed by listener id and carrying the offered event's Type, and must be
+// gone once that offer settles.
+func TestInFlightListeners_ReportsListenerAndTypeWhileBlocked(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := &blockingListener{id: "h", binds: map[string]bool{"T": true}, proceed: make(chan struct{}), entered: make(chan struct{})}
+	q.Register(l)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.Dispatch()
+	}()
+
+	select {
+	case <-l.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Offer never entered its blocking wait (timeout)")
+	}
+
+	inFlight := q.InFlightListeners()
+	if got, ok := inFlight["h"]; !ok || got != "T" {
+		t.Fatalf("InFlightListeners() = %v while listener h's offer is still blocked mid-pass, want {\"h\":\"T\"}", inFlight)
+	}
+	if len(inFlight) != 1 {
+		t.Fatalf("InFlightListeners() = %v, want exactly one entry", inFlight)
+	}
+
+	close(l.proceed)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dispatch did not return after Offer unblocked (timeout)")
+	}
+
+	if inFlight := q.InFlightListeners(); len(inFlight) != 0 {
+		t.Fatalf("InFlightListeners() = %v after Dispatch returned, want empty (settled in phase 3)", inFlight)
+	}
+}
+
 // boundedCustodyListener declines (busy) every offer and, from INSIDE its own
 // Offer call, asserts that custody never exceeds the registered listener
 // count — a pass-boundary read would see it vacuously at 0 (before the pass)

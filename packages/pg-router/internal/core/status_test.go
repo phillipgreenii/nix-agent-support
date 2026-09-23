@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -236,7 +237,7 @@ func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 	// String()`).
 	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started}}
 
-	rows := statusListeners(declared, nil, counts, regs)
+	rows := statusListeners(declared, nil, counts, regs, nil)
 	if got := rows[0]["selfReportState"]; got != "started" {
 		t.Fatalf("selfReportState = %v, want %q", got, "started")
 	}
@@ -249,7 +250,7 @@ func TestStatusListeners_SelfReportStateEmptyWhenNeverRegistered(t *testing.T) {
 	declared := []roles.Role{{Name: "df-feedback", Enabled: true, Binds: []string{"pr.changed"}}}
 	counts := map[string]*ListenerCounts{"df-feedback": {}}
 
-	rows := statusListeners(declared, nil, counts, nil)
+	rows := statusListeners(declared, nil, counts, nil, nil)
 	if got := rows[0]["selfReportState"]; got != "" {
 		t.Fatalf("selfReportState = %v, want empty string", got)
 	}
@@ -373,7 +374,7 @@ func TestStatusListeners_SortedByRoleName(t *testing.T) {
 		{Name: "mid", Enabled: true},
 	}
 
-	rows := statusListeners(declared, nil, nil, nil)
+	rows := statusListeners(declared, nil, nil, nil, nil)
 	if len(rows) != 3 {
 		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
@@ -381,6 +382,38 @@ func TestStatusListeners_SortedByRoleName(t *testing.T) {
 	want := []string{"alpha", "mid", "zeta"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("role order = %v, want alphabetical %v", got, want)
+	}
+}
+
+// TestStatusListeners_InFlight proves the DEC-OBS-2 (bead pg2-ugcrb)
+// inFlight/inFlightEventType widening: a role present in the inFlight map
+// (keyed by role name, eventqueue.Queue.InFlightListeners' own contract)
+// reports inFlight=true and the offered event's Type; a role absent from it
+// reports inFlight=false and an empty inFlightEventType, never a missing
+// key either way.
+func TestStatusListeners_InFlight(t *testing.T) {
+	declared := []roles.Role{
+		{Name: "busy-role", Enabled: true},
+		{Name: "idle-role", Enabled: true},
+	}
+	inFlight := map[string]string{"busy-role": "pr.changed"}
+
+	rows := statusListeners(declared, nil, nil, nil, inFlight)
+	byRole := map[string]map[string]any{}
+	for _, r := range rows {
+		byRole[r["role"].(string)] = r
+	}
+	if got := byRole["busy-role"]["inFlight"]; got != true {
+		t.Fatalf("busy-role inFlight = %v, want true", got)
+	}
+	if got := byRole["busy-role"]["inFlightEventType"]; got != "pr.changed" {
+		t.Fatalf("busy-role inFlightEventType = %v, want %q", got, "pr.changed")
+	}
+	if got := byRole["idle-role"]["inFlight"]; got != false {
+		t.Fatalf("idle-role inFlight = %v, want false", got)
+	}
+	if got := byRole["idle-role"]["inFlightEventType"]; got != "" {
+		t.Fatalf("idle-role inFlightEventType = %v, want empty string", got)
 	}
 }
 
@@ -461,7 +494,7 @@ func TestStatusSources_MergedAndSortedByName(t *testing.T) {
 	}
 	excludedSources := []string{"alpha-excluded", "beta-excluded"}
 
-	rows := statusSources(active, excludedSources, nil)
+	rows := statusSources(active, excludedSources, nil, nil)
 	if len(rows) != 4 {
 		t.Fatalf("len(rows) = %d, want 4", len(rows))
 	}
@@ -483,6 +516,54 @@ func TestStatusSources_MergedAndSortedByName(t *testing.T) {
 	}
 	if byName["zeta-active"]["excluded"] != false {
 		t.Fatalf("zeta-active.excluded = %v, want false", byName["zeta-active"]["excluded"])
+	}
+}
+
+// TestStatusSources_InFlight proves the DEC-OBS-2 (bead pg2-ugcrb) inFlight
+// widening: an ACTIVE source present in the inFlight set reports true, an
+// active source absent from it reports false, and an EXCLUDED source
+// reports false unconditionally — never consulting inFlight at all, since a
+// selector-excluded source's query never runs this run (STORY-OP-3).
+func TestStatusSources_InFlight(t *testing.T) {
+	active := []SourceReport{
+		{Name: "fetching-now", Type: "pull"},
+		{Name: "idle", Type: "pull"},
+	}
+	excludedSources := []string{"fetching-now"} // deliberately same name as an active source: proves exclusion wins without consulting inFlight
+	inFlight := map[string]bool{"fetching-now": true}
+
+	rows := statusSources(active, nil, nil, inFlight)
+	byName := make(map[string]map[string]any, len(rows))
+	for _, r := range rows {
+		byName[r["name"].(string)] = r
+	}
+	if got := byName["fetching-now"]["inFlight"]; got != true {
+		t.Fatalf("fetching-now (active) inFlight = %v, want true", got)
+	}
+	if got := byName["idle"]["inFlight"]; got != false {
+		t.Fatalf("idle inFlight = %v, want false", got)
+	}
+
+	excludedRows := statusSources(nil, excludedSources, nil, inFlight)
+	if got := excludedRows[0]["inFlight"]; got != false {
+		t.Fatalf("excluded source inFlight = %v, want false unconditionally, even though its name is present in the inFlight set", got)
+	}
+}
+
+// TestStatusActivity_ParticipantField proves the DEC-OBS-2 (bead pg2-ugcrb)
+// participant widening: statusActivity carries Entry.Participant through
+// verbatim, always as a present key (never omitted), including the empty
+// string for an entry no single participant settled.
+func TestStatusActivity_ParticipantField(t *testing.T) {
+	rows := statusActivity([]activity.Entry{
+		{Type: "pr.changed", Outcome: "delivered", Participant: "df-feedback"},
+		{Type: "pr.changed", Outcome: "missed"},
+	})
+	if got := rows[0]["participant"]; got != "df-feedback" {
+		t.Fatalf("rows[0].participant = %v, want %q", got, "df-feedback")
+	}
+	if got := rows[1]["participant"]; got != "" {
+		t.Fatalf("rows[1].participant = %v, want empty string (no single participant settled it)", got)
 	}
 }
 

@@ -332,6 +332,20 @@ sequenceDiagram
   holds). The core is unaware of any concrete monitoring backend, and an **observer** reads the sink,
   never the core. A daemon emits continuously, and a **drain-and-exit run DOES emit a final snapshot**
   before it exits.
+- **`INV-OBS-2`** <!-- uuid: 83a98350-7344-4e10-a911-8f1bcccb340c --> — **Per-participant inspection.**
+  Beyond the aggregate metric catalog (`INV-OBS-1`), the core's inspection surface (`INTF-CLI`) **MUST**
+  let `ACTOR-OP` see, for **each** configured event source and **each** configured event handler
+  **individually**, that one participant's own **recent history** — a bounded window of its most
+  recent delivery (handler) or fetch (source) attempts, each carrying at minimum a **timestamp** and an
+  **outcome** — and **MUST** indicate when that **same** participant currently has an attempt **in
+  flight** (an outstanding offer awaiting the handler's reply, or an in-progress source fetch), naming
+  the event type where the implementation has it available. This is **inspection only**: it creates no
+  new state the core acts on, changes no delivery or fetch semantics, and **MUST NOT** be read as a
+  per-participant capacity signal — capacity stays declared nowhere and enforced only by the handler
+  (`INV-CONC-1`). A participant with no recent history yet, or none currently in flight, reports that
+  plainly rather than a stale or guessed value. The bound on "recent," the concrete windowing
+  mechanism, and how an in-flight moment is detected are realization choices, not restated here
+  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-OBS-2`).
 - **`INV-LIFE-1`** <!-- uuid: d3d2dbc8-e260-42cc-a6d3-204aaf8dbc59 --> — The core runs in either of
   **two modes**: a long-running **daemon** that routes events until it is stopped, and a one-off
   **drain-and-exit** run, which exits when the **queue is drained and no offer is outstanding** (every

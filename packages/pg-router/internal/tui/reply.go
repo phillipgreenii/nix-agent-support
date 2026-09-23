@@ -126,6 +126,12 @@ type ActivityEntry struct {
 	StartedAt time.Time `json:"startedAt"`
 	Type      string    `json:"type"`
 	Outcome   string    `json:"outcome"`
+	// Participant (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2) names which
+	// configured listener or source this entry is about -- empty for an
+	// entry no single participant settled (activity.Entry.Participant's own
+	// doc). Drill-down's own per-participant history filter (drilldown.go)
+	// reads this field.
+	Participant string `json:"participant"`
 }
 
 // Backoff mirrors a Listener's `backoff` object (nil/null when the listener
@@ -169,6 +175,12 @@ type Listener struct {
 	// the Registration.State whose ID equals this Listener's Role, or ""
 	// if this listener has never self-reported.
 	SelfReportState string `json:"selfReportState"`
+	// InFlight/InFlightEventType (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's
+	// "processing now" signal) -- InFlight is true exactly while this role
+	// has an outstanding offer; InFlightEventType is the offered event's
+	// Type, empty when InFlight is false.
+	InFlight          bool   `json:"inFlight"`
+	InFlightEventType string `json:"inFlightEventType"`
 }
 
 // DeclinedBucketed buckets DeclinedByReason into (busy, unavailable,
@@ -204,4 +216,7 @@ type Source struct {
 	// ExpectedIntervalMs is this source's own expected tick cadence in
 	// milliseconds (this task). 0 means unknown.
 	ExpectedIntervalMs int64 `json:"expectedIntervalMs"`
+	// InFlight (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's "processing now"
+	// signal) is true exactly while this source has a fetch in progress.
+	InFlight bool `json:"inFlight"`
 }

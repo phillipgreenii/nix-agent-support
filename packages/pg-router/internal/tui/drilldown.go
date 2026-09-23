@@ -233,7 +233,11 @@ const drillDownHint = "[ / ] prev/next sibling"
 // drillDetail renders the currently drilled row's own fields -- reusing
 // panes.go's own health-text functions (listenerHealthText/
 // sourceHealthText) so the health grammar shown here always matches the
-// pane row it drilled from.
+// pane row it drilled from. m.reply.Activity (the pool-wide ring's own
+// wire-decoded window) is threaded into the listener/source cases so each
+// can filter to its OWN recent history by Participant (DEC-OBS-2, bead
+// pg2-ugcrb; INV-OBS-2) -- rowQueue gets nothing here, unchanged: a queue
+// is not a participant activity.Entry.Participant ever names.
 func (m *Model) drillDetail() string {
 	switch m.drillKind {
 	case rowListener:
@@ -241,13 +245,13 @@ func (m *Model) drillDetail() string {
 		if !ok {
 			return "(no listeners configured)\n"
 		}
-		return renderListenerDetail(l, m.theme)
+		return renderListenerDetail(l, m.theme, m.reply.Activity)
 	case rowSource:
 		s, ok := m.drillSource()
 		if !ok {
 			return "(no sources configured)\n"
 		}
-		return renderSourceDetail(s, time.Now(), m.theme)
+		return renderSourceDetail(s, time.Now(), m.theme, m.reply.Activity)
 	case rowQueue:
 		q, ok := m.drillQueue()
 		if !ok {
@@ -270,7 +274,12 @@ func (m *Model) drillDetail() string {
 // can never drift out of sync in how they render the same fields -- see
 // this function's own doc history in renderListenersPane (panes.go) for the
 // pane-side counterpart of each line below.
-func renderListenerDetail(l Listener, theme render.Theme) string {
+// activity is m.reply.Activity, the pool-wide ring's own wire-decoded
+// window (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2) -- widened by this bead to
+// additionally show whether this role currently has an offer in flight
+// (Processing) and its own recent history, filtered from the shared pool-
+// wide feed by Participant == l.Role.
+func renderListenerDetail(l Listener, theme render.Theme, activity []ActivityEntry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Role:           %s\n", textsafe.Sanitize(l.Role))
 	fmt.Fprintf(&b, "Binds:          %s\n", textsafe.Sanitize(strings.Join(l.Binds, ",")))
@@ -293,6 +302,8 @@ func renderListenerDetail(l Listener, theme render.Theme) string {
 	}
 	fmt.Fprintf(&b, "Self:           %s\n", self)
 	fmt.Fprintf(&b, "Fail:           %d\n", l.HandlerFailures)
+	fmt.Fprintf(&b, "Processing:     %s\n", processingText(l.InFlight, l.InFlightEventType))
+	b.WriteString(renderRecentActivity(activity, l.Role))
 	return b.String()
 }
 
@@ -304,7 +315,10 @@ func renderListenerDetail(l Listener, theme render.Theme) string {
 // own explicit value: whether the source is Excluded, and -- when
 // Failure != nil -- the failure's own NextEligible retry time ("next
 // eligible: ", per this bead's own fix design).
-func renderSourceDetail(s Source, now time.Time, theme render.Theme) string {
+// activity is m.reply.Activity (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2) --
+// see renderListenerDetail's identical doc note above; here filtered by
+// Participant == s.Name instead of the role name.
+func renderSourceDetail(s Source, now time.Time, theme render.Theme, activity []ActivityEntry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-14s %s\n", "Name:", textsafe.Sanitize(s.Name))
 	fmt.Fprintf(&b, "%-14s %s\n", "Type:", textsafe.Sanitize(s.Type))
@@ -319,6 +333,70 @@ func renderSourceDetail(s Source, now time.Time, theme render.Theme) string {
 	fmt.Fprintf(&b, "%-14s %s\n", "NEXT CHECK IN:", sourceNextCheckText(s, now))
 	if s.Failure != nil {
 		fmt.Fprintf(&b, "%-14s %s\n", "next eligible:", s.Failure.NextEligible.Format("15:04:05"))
+	}
+	fmt.Fprintf(&b, "%-14s %s\n", "Processing:", processingText(s.InFlight, ""))
+	b.WriteString(renderRecentActivity(activity, s.Name))
+	return b.String()
+}
+
+// processingText renders DEC-OBS-2's (bead pg2-ugcrb) "processing now"
+// drill-down line: "no" when idle, "yes" when in flight, plus the event
+// type in parens when the caller has one available (a listener's own
+// InFlightEventType) -- a source's InFlight carries no per-fetch event
+// type (discover.SourceActivityObserver's own doc: a pass may emit several
+// types, so there is no single one to name), so its call site passes "".
+func processingText(inFlight bool, eventType string) string {
+	if !inFlight {
+		return "no"
+	}
+	if eventType == "" {
+		return "yes"
+	}
+	return "yes (" + textsafe.Sanitize(eventType) + ")"
+}
+
+// recentActivityWindow bounds how many of a participant's own recent
+// activity.Entry rows a drill-down detail shows (DEC-OBS-2, bead pg2-ugcrb;
+// INV-OBS-2's "recent history" clause) -- a realization choice (this
+// packet's own freedom boundary, DEC-OBS-2's own "not decided here" note),
+// not restated in behavior docs.
+const recentActivityWindow = 8
+
+// recentActivityFor filters activity to the entries naming participant,
+// then returns at most the newest recentActivityWindow of them. activity is
+// oldest-first (ActivityEntry's own doc, the wire's Read order) and
+// filtering preserves relative order, so "the newest window" is simply
+// this filtered slice's own tail.
+func recentActivityFor(activity []ActivityEntry, participant string) []ActivityEntry {
+	var matched []ActivityEntry
+	for _, e := range activity {
+		if e.Participant == participant {
+			matched = append(matched, e)
+		}
+	}
+	if len(matched) > recentActivityWindow {
+		matched = matched[len(matched)-recentActivityWindow:]
+	}
+	return matched
+}
+
+// renderRecentActivity renders participant's own recent-history section --
+// "(no recent activity)" when there is none, so a quiet participant reports
+// that plainly rather than a heading with nothing under it (INV-OBS-2's own
+// "reports that plainly" clause). Rendered newest-first (the reverse of the
+// wire's own oldest-first order): a detail view is scanned top-down, and
+// the most recent entry is what a reader wants first.
+func renderRecentActivity(activity []ActivityEntry, participant string) string {
+	entries := recentActivityFor(activity, participant)
+	var b strings.Builder
+	b.WriteString("Recent activity:\n")
+	if len(entries) == 0 {
+		b.WriteString("  (no recent activity)\n")
+		return b.String()
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		fmt.Fprintf(&b, "  %s ago  %s\n", formatCoarse(time.Since(e.StartedAt)), textsafe.Sanitize(e.Outcome))
 	}
 	return b.String()
 }

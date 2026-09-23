@@ -124,6 +124,8 @@
           "lastDeliveredAtMs": { "type": "integer", "minimum": 0 },
           "handlerFailures": { "type": "integer", "minimum": 0 },
           "selfReportState": { "type": "string" },
+          "inFlight": { "type": "boolean" },
+          "inFlightEventType": { "type": "string" },
           "backoff": {
             "oneOf": [
               { "enum": [null] },
@@ -169,6 +171,7 @@
           "mode": { "enum": ["pull", "push"] },
           "expectedIntervalMs": { "type": "integer", "minimum": 0 },
           "lastTick": { "type": "string" },
+          "inFlight": { "type": "boolean" },
           "failure": {
             "oneOf": [
               { "enum": [null] },
@@ -200,7 +203,8 @@
           "seq": { "type": "integer", "minimum": 0 },
           "startedAt": { "type": "string" },
           "type": { "type": "string" },
-          "outcome": { "type": "string" }
+          "outcome": { "type": "string" },
+          "participant": { "type": "string" }
         }
       }
     },

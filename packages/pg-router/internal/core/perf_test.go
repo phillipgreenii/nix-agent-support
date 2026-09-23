@@ -64,8 +64,17 @@ func (c *countingStore) Close() error {
 // authoring this test), and freeze a small rounded-up margin (9000) as the
 // asserted budget — matching Step 1's own "confirm the current... then
 // assert the budget" discovery pattern.
+//
+// Rebudgeted by DEC-OBS-2 (bead pg2-ugcrb): widening every one of the
+// 512 activity entries with a new `participant` field, plus the small,
+// per-call inFlight lookups statusListeners/statusSources now do, moved the
+// observed count to 9322 allocs/op — re-measured while authoring THIS
+// change, the same discovery pattern as the original 8284->9000 freeze — so
+// the budget is rebudgeted to 9500 (the same small rounded-up margin) rather
+// than either loosened without a real cause or held against a feature that
+// legitimately costs more.
 func TestStatusVerbAllocBudget(t *testing.T) {
-	const budget = 9000.0
+	const budget = 9500.0
 
 	ring := activity.New(activity.DefaultSize)
 	for i := 0; i < 2*activity.DefaultSize; i++ {

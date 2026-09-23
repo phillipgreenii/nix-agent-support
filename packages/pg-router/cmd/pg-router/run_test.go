@@ -1028,6 +1028,91 @@ func TestActivityObserver_OnAcceptWithoutOnResourceLimitStillRendersDelivered(t 
 	}
 }
 
+// TestActivityObserver_OnAcceptAndOnDeclinedStampParticipant proves the
+// DEC-OBS-2 (bead pg2-ugcrb) widening: the listenerID parameter OnAccept and
+// OnDeclined already received — previously discarded — now lands on the
+// appended Entry.Participant, so a later per-listener drill-down filter can
+// find it.
+func TestActivityObserver_OnAcceptAndOnDeclinedStampParticipant(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnEnqueue(eventqueue.Event{ID: "evt-4", Type: "review-requested"})
+	a.OnAccept("evt-4", "worker-a")
+	a.OnDeclined("review-requested", "worker-b", "busy")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 2 {
+		t.Fatalf("ring entries = %d, want 2", n)
+	}
+	if buf[0].Outcome != "delivered" || buf[0].Participant != "worker-a" {
+		t.Fatalf("entry[0] = %+v, want {Outcome: delivered, Participant: worker-a}", buf[0])
+	}
+	if buf[1].Outcome != "declined" || buf[1].Participant != "worker-b" {
+		t.Fatalf("entry[1] = %+v, want {Outcome: declined, Participant: worker-b}", buf[1])
+	}
+}
+
+// TestActivityObserver_SourceFetchBracketTracksInFlightAcrossRetries proves
+// OnSourceFetchStart/OnSourceFetchEnd (DEC-OBS-2, bead pg2-ugcrb) track a
+// per-source COUNT, not a bool: InFlightSources must report the source
+// while ANY start is unmatched, including across a retrying source's
+// several re-entries of the bracket, and must stop reporting it only once
+// every start has a matching end.
+func TestActivityObserver_SourceFetchBracketTracksInFlightAcrossRetries(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	if got := a.InFlightSources(); len(got) != 0 {
+		t.Fatalf("InFlightSources() = %v before any start, want empty", got)
+	}
+
+	a.OnSourceFetchStart("flaky")
+	if got := a.InFlightSources(); len(got) != 1 || got[0] != "flaky" {
+		t.Fatalf("InFlightSources() = %v after one start, want [flaky]", got)
+	}
+
+	// A retry re-enters the bracket while the first attempt's own end has
+	// not fired yet in this test's deliberately adversarial ordering —
+	// proving the count, not a bool, is what keeps "flaky" reported.
+	a.OnSourceFetchStart("flaky")
+	a.OnSourceFetchEnd("flaky")
+	if got := a.InFlightSources(); len(got) != 1 || got[0] != "flaky" {
+		t.Fatalf("InFlightSources() = %v after one of two starts ended, want still [flaky]", got)
+	}
+
+	a.OnSourceFetchEnd("flaky")
+	if got := a.InFlightSources(); len(got) != 0 {
+		t.Fatalf("InFlightSources() = %v after both starts ended, want empty", got)
+	}
+}
+
+// TestActivityObserver_OnSourceProducedAndOnSourceGaveUpAppendParticipantTaggedEntries
+// proves OnSourceProduced/OnSourceGaveUp (DEC-OBS-2, bead pg2-ugcrb) append
+// to the SAME pool-wide ring a handler's own outcomes go into, Participant-
+// tagged with the source's name so a per-source drill-down can filter to
+// just these.
+func TestActivityObserver_OnSourceProducedAndOnSourceGaveUpAppendParticipantTaggedEntries(t *testing.T) {
+	ring := activity.New(4)
+	a := newActivityObserver(ring)
+
+	a.OnSourceProduced("beads-source", 3, 1)
+	a.OnSourceGaveUp("down-source")
+
+	buf := make([]activity.Entry, 4)
+	n, _ := ring.Read(0, buf)
+	if n != 2 {
+		t.Fatalf("ring entries = %d, want 2", n)
+	}
+	if buf[0].Outcome != "produced" || buf[0].Participant != "beads-source" {
+		t.Fatalf("entry[0] = %+v, want {Outcome: produced, Participant: beads-source}", buf[0])
+	}
+	if buf[1].Outcome != "source_failed" || buf[1].Participant != "down-source" {
+		t.Fatalf("entry[1] = %+v, want {Outcome: source_failed, Participant: down-source}", buf[1])
+	}
+}
+
 // TestResolvedConfigFor_drainAndExitOmitsPollInterval is the run-mode gating
 // test [design: Task 3.5 Step 7]: "drain-and-exit" omits PollInterval
 // (Task 3.8's eventual tickIntervalMs) from the composed view entirely — a

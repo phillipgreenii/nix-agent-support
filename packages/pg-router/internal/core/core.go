@@ -127,6 +127,14 @@ type Options struct {
 	// is always empty, the same nil-means-absent idiom MetricsReader uses.
 	// cmd/pg-router's bootCore is the production wiring site.
 	ActivityRing *activity.Ring
+	// SourceInFlight reports which configured pull sources currently have a
+	// fetch in progress (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's per-source
+	// "processing now" signal) — read live by composeStatusReply, never
+	// cached. Optional: nil means every source's `inFlight` reports false,
+	// the same nil-means-absent idiom MetricsReader/ActivityRing use.
+	// cmd/pg-router's bootCore is the production wiring site (its
+	// activityObserver implements this interface too).
+	SourceInFlight SourceInFlightReader
 	// ConfigPath is the resolved config file path (internal/config.Config.
 	// ConfigPath) the `status` verb echoes back under its `core.configPath`
 	// field (Task 3.8) — informational only; the core itself never reads
@@ -285,8 +293,12 @@ type Service struct {
 	// seam, not time.Now, so a test can control it the same way NewRegistry
 	// already does).
 	activityRing *activity.Ring
-	configPath   string
-	startedAt    time.Time
+	// sourceInFlight is Options.SourceInFlight (DEC-OBS-2, bead pg2-ugcrb);
+	// nil when unset, in which case statusSources reports every source's
+	// `inFlight` as false — see composeStatusReply's own call site.
+	sourceInFlight SourceInFlightReader
+	configPath     string
+	startedAt      time.Time
 
 	// declaredRoles, excludedRoles, excludedSources and listenerCounts are
 	// Task 4.1's listeners[]/sources[] widening seams — see Options'
@@ -455,6 +467,17 @@ type MetricsReader interface {
 // Options.MonitorSubsets.
 type MonitorSubsetResolver func(id string) []string
 
+// SourceInFlightReader reports which configured pull sources currently have
+// a fetch in progress (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's per-source
+// "processing now" signal) — see Options.SourceInFlight. Read live at
+// composeStatusReply time, the same posture eventqueue.Queue.InFlightListeners
+// already takes for the listener side.
+type SourceInFlightReader interface {
+	// InFlightSources returns the names of every source currently between
+	// an OnSourceFetchStart and its matching OnSourceFetchEnd.
+	InFlightSources() []string
+}
+
 // noopObserver is what a Service without an Observer uses, so the ingest path
 // never branches on nil.
 type noopObserver struct{}
@@ -541,6 +564,7 @@ func Listen(opts Options) (*Service, error) {
 		metricsReader:     opts.MetricsReader,
 		monitorSubsets:    opts.MonitorSubsets,
 		activityRing:      opts.ActivityRing,
+		sourceInFlight:    opts.SourceInFlight,
 		configPath:        opts.ConfigPath,
 		startedAt:         now(),
 		readSem:           make(chan struct{}, readSemCapacity),
@@ -1311,6 +1335,21 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		legacyHandlers = tick.Config.ActiveRoles
 	}
 
+	// inFlightSources is DEC-OBS-2's (bead pg2-ugcrb) per-source "processing
+	// now" signal: a set, not a list, since every call site below only ever
+	// asks "is THIS source in it" — s.sourceInFlight is nil unless
+	// Options.SourceInFlight was set (SourceInFlightReader's own nil-means-
+	// absent idiom), so a Service built without it reports every source as
+	// not in flight rather than panicking.
+	var inFlightSources map[string]bool
+	if s.sourceInFlight != nil {
+		names := s.sourceInFlight.InFlightSources()
+		inFlightSources = make(map[string]bool, len(names))
+		for _, n := range names {
+			inFlightSources[n] = true
+		}
+	}
+
 	reply := map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"deliveries":    []any{}, // see handleStatus's doc: no tracking-id source this docket phase
@@ -1335,10 +1374,10 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"configPath": s.configPath,
 		},
 		"registry":  statusRegistrations(regs),
-		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs),
+		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners()),
 		"gates":     statusGates(gates),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
-		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs),
+		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources),
 		"activity":  []any{},
 		// activityDropped defaults false (no ring, or since==0's "no cursor, no
 		// gap to report" case per Ring.Read's own doc) and is set true below
@@ -1364,7 +1403,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		core["version"] = tick.Version
 		reply["mode"] = tick.RunMode
 		reply["resolvedConfig"] = statusResolvedConfig(tick.Config)
-		reply["sources"] = statusSources(tick.Sources, s.excludedSources, s.sourceIntervalsMs)
+		reply["sources"] = statusSources(tick.Sources, s.excludedSources, s.sourceIntervalsMs, inFlightSources)
 		reply["lastTickAt"] = tick.LastTickAt.UTC().Format(time.RFC3339Nano)
 		reply["snapshotAt"] = tick.SnapshotAt.UTC().Format(time.RFC3339Nano)
 		if tick.Config.PollInterval != nil {
@@ -1487,7 +1526,14 @@ func statusRegistrations(regs []Registration) []map[string]any {
 // renders in a stable, predictable order regardless of the config's own
 // role-declaration order -- matching the sort.Strings pattern
 // statusQueues/statusGates already use.
-func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration) []map[string]any {
+//
+// inFlight is s.q.InFlightListeners() (DEC-OBS-2, bead pg2-ugcrb):
+// eventqueue.Listener.ID() is the role name (roleListener.ID(), listener.go),
+// the SAME key this map is keyed by, so a plain lookup by r.Name is exact —
+// no join table needed the way selfState above needs one (Registration.ID
+// happens to also equal the role name, but that field's own doc does not
+// promise it the way Listener.ID's contract does).
+func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration, inFlight map[string]string) []map[string]any {
 	excluded := make(map[string]bool, len(excludedRoles))
 	for _, n := range excludedRoles {
 		excluded[n] = true
@@ -1514,11 +1560,17 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			}
 			handlerFailures = c.HandlerFailures.Load()
 		}
+		inFlightType, inFlightNow := inFlight[r.Name]
 		out = append(out, map[string]any{
 			"role":     r.Name,
 			"binds":    binds,
 			"enabled":  r.Enabled,
 			"excluded": excluded[r.Name],
+			// inFlight/inFlightEventType (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2):
+			// true exactly while this role has an outstanding offer -- a
+			// role absent from inFlight has none right now.
+			"inFlight":          inFlightNow,
+			"inFlightEventType": inFlightType,
 			// declined stays the flat, pre-existing total (Task 4.1 Step
 			// 5) — declinedByReason is a SECOND, additive breakdown of the
 			// SAME tally (bead pg2-j4uwg), never a replacement: the two
@@ -1569,7 +1621,13 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 // pg2-d1sem), never two sequential unsorted groups (active then excluded)
 // — matching the sort.Strings pattern statusQueues/statusGates already
 // use.
-func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64) []map[string]any {
+//
+// inFlight (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2) is a set of source names
+// currently between an OnSourceFetchStart and its matching OnSourceFetchEnd
+// — nil is a valid, common value (no SourceInFlight reader configured) and
+// reads as "nothing in flight" via a plain absent-key lookup, same as every
+// other nil-map read in this file.
+func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64, inFlight map[string]bool) []map[string]any {
 	out := make([]map[string]any, 0, len(active)+len(excludedSources))
 	for _, sr := range active {
 		row := map[string]any{
@@ -1580,6 +1638,7 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			"mode":               "pull",
 			"failure":            nil,
 			"expectedIntervalMs": intervalsMs[sr.Name],
+			"inFlight":           inFlight[sr.Name],
 		}
 		if !sr.LastTick.IsZero() {
 			row["lastTick"] = sr.LastTick.UTC().Format(time.RFC3339Nano)
@@ -1601,6 +1660,10 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			"mode":               "pull",
 			"failure":            nil,
 			"expectedIntervalMs": intervalsMs[name],
+			// An excluded source cannot be mid-fetch (its query never runs
+			// this run — STORY-OP-3), so this is always false, never a
+			// lookup into inFlight.
+			"inFlight": false,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -1657,6 +1720,11 @@ func statusActivity(entries []activity.Entry) []map[string]any {
 			"startedAt": e.StartedAt.UTC().Format(time.RFC3339Nano),
 			"type":      e.Type,
 			"outcome":   e.Outcome,
+			// participant (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2) is "" for
+			// an entry no single participant settled (Entry.Participant's
+			// own doc) — always present, never omitted, matching every
+			// other field here.
+			"participant": e.Participant,
 		})
 	}
 	return out
