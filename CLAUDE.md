@@ -179,6 +179,28 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through
   the nix wrapper is vacuous (the wrapper injects the tools onto PATH).
 
+- **A role's real invocation lives in a separate rendered file, not `config.toml`**: a `[[role]]`
+  entry in `.pg-router/config.toml` (or `pg-router config --show`'s "roles" listing) carries ONLY
+  `name`/`binds`/`enabled` — never the command argv (command-type) or actor/prompt/completion
+  policy (ccpool-type). Those render into one JSON file per role under
+  `pg-router-ccpool-handler`'s `handlerCommandDir` (a `linkFarm`, consumed via
+  `pg-router-ccpool-handler dispatch --role-config <dir>/<role>.json`; find the live dir from a
+  running handler process's argv, e.g. `ps aux | grep pg-router-ccpool-handler`). Reading
+  `config.toml`/`config --show` alone CANNOT tell you what a role actually executes — cat the
+  role's own `<role>.json`.
+
+- **`nix build`/`nix flake check` passing proves the config EVALUATES, not that a wired
+  dispatch produces its intended effect when actually triggered** (verified 2026-09-23,
+  `pg2-93e5s`/`pg2-cjwfu`: a landed, evaluating, flake-check-clean role wiring passed `run` with
+  zero of its three required flags, so every scheduled tick silently exited 3 — "total failure,
+  writes nothing" — with no crash, no alert, and nothing to grep for; two real production ticks
+  fired before anyone noticed). A NEW or CHANGED `[[query]]`/`[[role]]` pair, or a new/changed
+  ccpool-handler role, MUST be exercised live at least once — `pg-router run-query`/`run-role`
+  against a forced/realistic input, checked for an actual non-trivial OUTCOME, not just exit 0 —
+  as part of THAT change's OWN validation, before it is considered done. Do not defer this to a
+  separate, later review/smoke-test step: the gap between a silently-broken wiring landing and a
+  deferred check catching it is exactly the window it runs live, unnoticed, in production.
+
 ## Claude Code Rule / Skill / Plugin Delivery
 
 Verified against Claude Code 2.1.186:

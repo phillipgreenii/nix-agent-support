@@ -121,7 +121,18 @@ cite their source section once for the block.
    implementation code is not. State the freedom boundary explicitly: anything the design did
    not decide is the implementer's choice.
 6. **Validation (change-scoped)** — exact commands, timeouts, expected results for THIS
-   change. NEVER the full pre-landing/pre-push gate.
+   change. NEVER the full pre-landing/pre-push gate. If this packet wires a new or changed
+   scheduled/dispatched consumer (a cron/launchd trigger, an event-router query/role pair, a
+   message-queue handler, etc.), Validation MUST include one live, end-to-end trigger of the
+   wiring itself, confirming a real non-trivial outcome — a build/eval check alone (`nix build`,
+   `nix flake check`, compile) proves the config evaluates, not that the wired invocation does
+   anything when actually dispatched. Do not defer this live check to a separate, later
+   review/smoke-test packet: this class of wiring bug typically fails silently (no crash, no
+   alert), so deferring it lets a broken wiring run unnoticed in production for however long the
+   later packet takes to land (incident: `pg2-93e5s`/`pg2-cjwfu`, 2026-09-23 — a landed,
+   flake-check-clean role wiring passed its command zero of the flags it needed, so every
+   scheduled tick silently no-op'd, undetected until a much later smoke-test packet forced a
+   live run).
 7. **Acceptance criteria** — independently verifiable checklist (bead-grooming altitude for
    the issue type); stored in the medium's dedicated acceptance field.
 8. **Out of scope** — names the sibling packet holding each neighboring concern.
