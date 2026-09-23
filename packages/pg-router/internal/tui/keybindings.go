@@ -100,11 +100,17 @@ func handleFocusNext(m *Model) tea.Cmd { return m.stepFocus(1) }
 func handleFocusPrev(m *Model) tea.Cmd { return m.stepFocus(-1) }
 
 // stepFocus moves m.focusedPane to the next (delta +1) or previous (delta
-// -1) of the three zone-ladder panes (model.go's paneListeners/paneQueues/
-// paneSources, in that order -- the same order renderMain's own zone loop
-// uses), wrapping at either end rather than clamping: unlike
+// -1) of the three zone-ladder panes (model.go's paneListeners/paneSources/
+// paneQueues, in that declaration order -- deliberately kept in sync with
+// renderMain's own actual visual top-to-bottom order, model.go's pane enum
+// doc), wrapping at either end rather than clamping: unlike
 // stepSibling's row stepping (ux-12, drilldown.go), the design gives pane
 // focus no "past the end" edge to stop at -- it is a ring, not a list.
+// pg2-ygtwl: before this fix the enum order (Listeners, Queues, Sources)
+// had drifted out of sync with renderMain's visual order (Listeners,
+// Sources, Queues) after the Task 4 two-tier redesign, so tab jumped
+// Listeners -> Queues (skipping visually-nearer Sources) and the reverse
+// step read as moving "up" instead of consistently down.
 // Pane focus is only ever rendered on screenMain (renderPaneContent's own
 // "(focused)" title suffix), so moving it anywhere else would change state
 // with no observable effect; a no-op there instead matches

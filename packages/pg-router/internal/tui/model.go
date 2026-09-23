@@ -192,16 +192,18 @@ type Model struct {
 	drillKind  focusableRowKind
 	drillIndex int
 
-	// focusedPane selects which of the Listeners/Queues/Sources panes is
+	// focusedPane selects which of the Listeners/Sources/Queues panes is
 	// the zone ladder's one FILL zone (zones.go's drop-order table: "Fill
 	// (the focused pane)") -- the other two are non-fill, non-pinned
 	// "unfocused panes" zones. Its zero value (paneListeners) is
 	// screenMain's own starting focus. keybindings.go's tab/shift+tab
 	// handlers (Model.stepFocus, pg2-ctqpj) cycle this field through the
-	// three panes, wrapping at either end -- Enter then targets whichever
-	// pane is currently focused (enterDrillDown, drilldown.go); Queues is
-	// reachable and focusable via tab exactly like Listeners/Sources, and
-	// (pg2-yza6s) Enter on it now opens a drill-down the same way.
+	// three panes in Listeners -> Sources -> Queues order -- matching
+	// renderMain's own visual top-to-bottom order (pg2-ygtwl) -- wrapping
+	// at either end; Enter then targets whichever pane is currently
+	// focused (enterDrillDown, drilldown.go); Queues is reachable and
+	// focusable via tab exactly like Listeners/Sources, and (pg2-yza6s)
+	// Enter on it now opens a drill-down the same way.
 	focusedPane int
 }
 
@@ -210,10 +212,21 @@ type Model struct {
 // id) naming how many of them stepFocus (keybindings.go) cycles through --
 // declared here, beside the enum it counts, rather than as a magic 3 at the
 // call site.
+//
+// Declared in this order -- Listeners, Sources, Queues -- to MATCH
+// renderMain's own actual visual top-to-bottom order (the static tier's
+// []int{paneListeners, paneSources} loop, then the dynamic tier's Queues,
+// below). stepFocus (keybindings.go) cycles through these values by plain
+// arithmetic (delta on the int, mod paneCount) with no separate ordering
+// table of its own, so this declaration order IS the tab/shift+tab cycle
+// order -- keeping the two in sync is a MUST, not a coincidence (pg2-ygtwl:
+// they had drifted apart after the Task 4 two-tier redesign moved Queues
+// below Sources here without this enum being reordered to match, so tab
+// visited Queues before Sources even though Sources renders first).
 const (
 	paneListeners int = iota
-	paneQueues
 	paneSources
+	paneQueues
 	paneCount
 )
 

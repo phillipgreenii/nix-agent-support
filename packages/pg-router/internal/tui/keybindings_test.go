@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -168,10 +169,16 @@ func TestOpenModal_SwitchingModalsKeepsTheOriginalPriorScreen(t *testing.T) {
 // (paneListeners) -- Enter could therefore only ever drill into Listeners,
 // which is exactly the live bug report's "operator could not select
 // anything else ... stuck on one path." tab must visit all three panes in
-// the same order renderMain's own zone loop uses (Listeners, Queues,
-// Sources) and wrap rather than clamp -- pane focus is a ring, unlike
+// the same order renderMain actually renders them (Listeners, Sources,
+// Queues -- pg2-ygtwl fixed the pane enum's own declaration order to match
+// this, after it had drifted out of sync with the Task 4 two-tier
+// redesign) and wrap rather than clamp -- pane focus is a ring, unlike
 // stepSibling's row clamp (ux-12). Renamed and narrowed from 4 to 3 panes
-// (this docket's Registry-pane removal, Task 2).
+// (this docket's Registry-pane removal, Task 2). See also
+// TestStepFocus_MatchesRenderMainVisualOrder below, which derives this
+// same expectation from renderMain's actual rendered output rather than
+// hardcoding it here, so a future re-reorder of renderMain's zones is
+// caught even if this literal table is not updated.
 func TestStepFocus_CyclesAllThreePanesAndWraps(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain
@@ -179,7 +186,7 @@ func TestStepFocus_CyclesAllThreePanesAndWraps(t *testing.T) {
 		t.Fatalf("focusedPane = %v before any tab, want the documented zero-value default paneListeners", m.focusedPane)
 	}
 
-	wantForward := []int{paneQueues, paneSources, paneListeners}
+	wantForward := []int{paneSources, paneQueues, paneListeners}
 	for _, want := range wantForward {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		if cmd != nil {
@@ -190,7 +197,7 @@ func TestStepFocus_CyclesAllThreePanesAndWraps(t *testing.T) {
 		}
 	}
 
-	wantBackward := []int{paneSources, paneQueues, paneListeners}
+	wantBackward := []int{paneQueues, paneSources, paneListeners}
 	for _, want := range wantBackward {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 		if cmd != nil {
@@ -198,6 +205,68 @@ func TestStepFocus_CyclesAllThreePanesAndWraps(t *testing.T) {
 		}
 		if m.focusedPane != want {
 			t.Fatalf("focusedPane after shift+tab = %v, want %v", m.focusedPane, want)
+		}
+	}
+}
+
+// TestStepFocus_MatchesRenderMainVisualOrder is pg2-ygtwl's own red-first
+// test (the original bug: enum-order tab cycling had drifted out of sync
+// with renderMain's actual visual pane order after the Task 4 two-tier
+// redesign moved Queues below Sources without stepFocus's own cycle being
+// reordered to match). Unlike TestStepFocus_CyclesAllThreePanesAndWraps
+// above -- which hardcodes the paneListeners/paneSources/paneQueues
+// literals -- this test derives the expected tab order by actually
+// rendering screenMain (m.renderMain()) and reading off which pane's box
+// title appears on the earliest line, so a FUTURE reorder of renderMain's
+// zones (e.g. moving Queues back above Sources) fails THIS test even if
+// nobody remembers to touch the pane enum/stepFocus to match.
+func TestStepFocus_MatchesRenderMainVisualOrder(t *testing.T) {
+	m := newTestModel(nil)
+	m.screen = screenMain
+	m.width = 100
+	m.height = 60 // tall enough that no zone -- including the focused fill pane -- drops
+	m.reply = StatusReply{
+		Listeners: []Listener{{Role: "feedback"}},
+		Sources:   []Source{{Name: "queue-src"}},
+		Queues:    []Queue{{Type: "pr.review"}},
+	}
+
+	rendered := m.renderMain()
+	lines := map[int]int{
+		paneListeners: lineContaining(rendered, "┌ Listeners"),
+		paneSources:   lineContaining(rendered, "┌ Sources"),
+		paneQueues:    lineContaining(rendered, "┌ Queues"),
+	}
+	names := map[int]string{paneListeners: "Listeners", paneSources: "Sources", paneQueues: "Queues"}
+	for id, line := range lines {
+		if line < 0 {
+			t.Fatalf("%s pane box not found in rendered screenMain:\n%s", names[id], rendered)
+		}
+	}
+
+	visualOrder := []int{paneListeners, paneSources, paneQueues}
+	sort.Slice(visualOrder, func(i, j int) bool { return lines[visualOrder[i]] < lines[visualOrder[j]] })
+
+	// tab from Listeners must walk the panes in exactly the ACTUAL visual
+	// order derived above, wrapping back to Listeners.
+	startIdx := 0
+	for i, id := range visualOrder {
+		if id == paneListeners {
+			startIdx = i
+		}
+	}
+	wantForward := make([]int, 0, len(visualOrder))
+	for i := 1; i <= len(visualOrder); i++ {
+		wantForward = append(wantForward, visualOrder[(startIdx+i)%len(visualOrder)])
+	}
+
+	m2 := newTestModel(nil)
+	m2.screen = screenMain
+	for _, want := range wantForward {
+		m2.stepFocus(1)
+		if m2.focusedPane != want {
+			t.Fatalf("focusedPane after tab = %v (%s), want %v (%s) -- renderMain's actual visual order was %v",
+				m2.focusedPane, names[m2.focusedPane], want, names[want], visualOrder)
 		}
 	}
 }
@@ -262,15 +331,14 @@ func TestOperatorRepro_EnterThenTabThenShiftTab(t *testing.T) {
 		t.Fatalf("after tab/shift+tab inside drill-down: screen/focusedPane = %v/%v, want unchanged screenDrillDown/paneListeners", m.screen, m.focusedPane)
 	}
 
-	// esc back to main, then tab twice: Listeners -> Queues -> Sources.
+	// esc back to main, then tab once: Listeners -> Sources (the visually
+	// next pane down, matching renderMain's actual render order).
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(*Model)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(*Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(*Model)
 	if m.focusedPane != paneSources {
-		t.Fatalf("focusedPane after esc+tab+tab = %v, want paneSources (no longer stuck on Listeners)", m.focusedPane)
+		t.Fatalf("focusedPane after esc+tab = %v, want paneSources (no longer stuck on Listeners)", m.focusedPane)
 	}
 
 	// A second Enter now reaches Sources, not Listeners: the operator can
