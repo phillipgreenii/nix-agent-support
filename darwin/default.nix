@@ -8,6 +8,7 @@
     ./modules/pg-router
     ./modules/pg-desk-serve
     ./modules/ccpool
+    ./modules/pg-router-ccpool-handler
     ./modules/pg-ccaudit
     ./modules/ollama
     ./modules/codeburn
