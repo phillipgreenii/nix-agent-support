@@ -361,6 +361,29 @@ func TestStatusListeners_DeclinedByReasonBreaksDownDeclined(t *testing.T) {
 	}
 }
 
+// TestStatusListeners_SortedByRoleName is bead pg2-d1sem's regression test:
+// statusListeners must sort its output by Role.Name, never leave it in the
+// config's own declaration order. declared is deliberately given "zeta"
+// before "alpha" (and a middle "mid") to prove the fix, not just an
+// already-sorted input.
+func TestStatusListeners_SortedByRoleName(t *testing.T) {
+	declared := []roles.Role{
+		{Name: "zeta", Enabled: true},
+		{Name: "alpha", Enabled: true},
+		{Name: "mid", Enabled: true},
+	}
+
+	rows := statusListeners(declared, nil, nil, nil)
+	if len(rows) != 3 {
+		t.Fatalf("len(rows) = %d, want 3", len(rows))
+	}
+	got := []string{rows[0]["role"].(string), rows[1]["role"].(string), rows[2]["role"].(string)}
+	want := []string{"alpha", "mid", "zeta"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("role order = %v, want alphabetical %v", got, want)
+	}
+}
+
 // TestStatusSources_TypeModeLastTickFailure is Task 4.1 Step 7's red-first
 // test: composeStatusReply's sources[] carries type/mode ("pull", always —
 // no push query type exists), lastTick (present only for a source THIS
@@ -421,6 +444,67 @@ func TestStatusSources_TypeModeLastTickFailure(t *testing.T) {
 	}
 	if excluded["failure"] != nil {
 		t.Fatalf("disabled-src.failure = %v, want nil", excluded["failure"])
+	}
+}
+
+// TestStatusSources_MergedAndSortedByName is bead pg2-d1sem's regression
+// test: statusSources must merge active and excluded sources into ONE
+// alphabetical-by-name list, never two sequential unsorted groups (active
+// then excluded). The excluded source "alpha-excluded" is deliberately
+// alphabetically BEFORE the active "zeta-active" (and vice versa for
+// "beta-excluded" after "yankee-active"), so a naive active-then-excluded
+// concatenation would fail this ordering check.
+func TestStatusSources_MergedAndSortedByName(t *testing.T) {
+	active := []SourceReport{
+		{Name: "zeta-active", Type: "pull"},
+		{Name: "yankee-active", Type: "pull"},
+	}
+	excludedSources := []string{"alpha-excluded", "beta-excluded"}
+
+	rows := statusSources(active, excludedSources, nil)
+	if len(rows) != 4 {
+		t.Fatalf("len(rows) = %d, want 4", len(rows))
+	}
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		got[i] = r["name"].(string)
+	}
+	want := []string{"alpha-excluded", "beta-excluded", "yankee-active", "zeta-active"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("name order = %v, want alphabetical (active+excluded merged) %v", got, want)
+	}
+	// The excluded/active flags travel with the right row through the sort.
+	byName := make(map[string]map[string]any, len(rows))
+	for _, r := range rows {
+		byName[r["name"].(string)] = r
+	}
+	if byName["alpha-excluded"]["excluded"] != true {
+		t.Fatalf("alpha-excluded.excluded = %v, want true", byName["alpha-excluded"]["excluded"])
+	}
+	if byName["zeta-active"]["excluded"] != false {
+		t.Fatalf("zeta-active.excluded = %v, want false", byName["zeta-active"]["excluded"])
+	}
+}
+
+// TestStatusQueues_SortedByType is bead pg2-d1sem's regression-only test:
+// statusQueues already sorts its output by type via sort.Strings — this
+// pins that behavior so a future change can't silently regress it (no
+// production code change made for this function).
+func TestStatusQueues_SortedByType(t *testing.T) {
+	depth := map[string]int{
+		"zeta-type":  3,
+		"alpha-type": 1,
+		"mid-type":   2,
+	}
+
+	rows := statusQueues(depth)
+	if len(rows) != 3 {
+		t.Fatalf("len(rows) = %d, want 3", len(rows))
+	}
+	got := []string{rows[0]["type"].(string), rows[1]["type"].(string), rows[2]["type"].(string)}
+	want := []string{"alpha-type", "mid-type", "zeta-type"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("type order = %v, want alphabetical %v", got, want)
 	}
 }
 

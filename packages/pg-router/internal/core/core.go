@@ -1466,6 +1466,11 @@ func statusRegistrations(regs []Registration) []map[string]any {
 // role by Registration.ID == role name, so `selfReportState` reports a
 // handler's own self-reported lifecycle state, or the empty string for a
 // role that has never self-reported.
+//
+// The output is sorted by Role.Name (bead pg2-d1sem) so the Listeners pane
+// renders in a stable, predictable order regardless of the config's own
+// role-declaration order -- matching the sort.Strings pattern
+// statusQueues/statusGates already use.
 func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration) []map[string]any {
 	excluded := make(map[string]bool, len(excludedRoles))
 	for _, n := range excludedRoles {
@@ -1515,6 +1520,9 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			"backoff":         nil,
 		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i]["role"].(string) < out[j]["role"].(string)
+	})
 	return out
 }
 
@@ -1540,6 +1548,11 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 //
 // `rejected` (the prior, unused field) is REMOVED per the schema-change
 // note — it was never part of the frozen tree and nothing rendered it.
+//
+// The output merges active and excluded into ONE name-sorted list (bead
+// pg2-d1sem), never two sequential unsorted groups (active then excluded)
+// — matching the sort.Strings pattern statusQueues/statusGates already
+// use.
 func statusSources(active []SourceReport, excludedSources []string, intervalsMs map[string]int64) []map[string]any {
 	out := make([]map[string]any, 0, len(active)+len(excludedSources))
 	for _, sr := range active {
@@ -1574,6 +1587,9 @@ func statusSources(active []SourceReport, excludedSources []string, intervalsMs 
 			"expectedIntervalMs": intervalsMs[name],
 		})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i]["name"].(string) < out[j]["name"].(string)
+	})
 	return out
 }
 
