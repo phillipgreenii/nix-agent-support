@@ -259,13 +259,40 @@ func (m *Model) drillDetail() string {
 	}
 }
 
+// renderListenerDetail renders the drilled Listener's own fields for
+// screenDrillDown. Widened by pg2-v6y9l to bring the detail view up to
+// parity with renderListenersPane's own Wide-tier row, which already showed
+// LAST DELIVERED, the DECL busy/unavailable/other breakdown, SELF (dimmed
+// when degraded/unavailable), and FAIL -- this view previously showed only
+// Role/Binds/Health/Delivered/Declined (the flat total). Every added field
+// reuses the EXACT SAME helper the pane row already calls (formatCoarse,
+// l.DeclinedBucketed(), selfReportDegraded, theme.Cooling) so the two views
+// can never drift out of sync in how they render the same fields -- see
+// this function's own doc history in renderListenersPane (panes.go) for the
+// pane-side counterpart of each line below.
 func renderListenerDetail(l Listener, theme render.Theme) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Role:      %s\n", textsafe.Sanitize(l.Role))
-	fmt.Fprintf(&b, "Binds:     %s\n", textsafe.Sanitize(strings.Join(l.Binds, ",")))
-	fmt.Fprintf(&b, "Health:    %s\n", listenerHealthText(l, theme))
-	fmt.Fprintf(&b, "Delivered: %d\n", l.Delivered)
-	fmt.Fprintf(&b, "Declined:  %d\n", l.Declined)
+	fmt.Fprintf(&b, "Role:           %s\n", textsafe.Sanitize(l.Role))
+	fmt.Fprintf(&b, "Binds:          %s\n", textsafe.Sanitize(strings.Join(l.Binds, ",")))
+	fmt.Fprintf(&b, "Health:         %s\n", listenerHealthText(l, theme))
+	lastDelivered := "-"
+	if l.LastDeliveredAtMs > 0 {
+		lastDelivered = formatCoarse(time.Since(time.UnixMilli(l.LastDeliveredAtMs))) + " ago"
+	}
+	fmt.Fprintf(&b, "Last Delivered: %s\n", lastDelivered)
+	fmt.Fprintf(&b, "Delivered:      %d\n", l.Delivered)
+	fmt.Fprintf(&b, "Declined:       %d\n", l.Declined)
+	busy, unavailable, other := l.DeclinedBucketed()
+	fmt.Fprintf(&b, "Decl (busy/unavailable/other): %d / %d / %d\n", busy, unavailable, other)
+	self := "—"
+	if l.SelfReportState != "" {
+		self = textsafe.Sanitize(l.SelfReportState)
+		if selfReportDegraded(l.SelfReportState) {
+			self = theme.Cooling.Render(self)
+		}
+	}
+	fmt.Fprintf(&b, "Self:           %s\n", self)
+	fmt.Fprintf(&b, "Fail:           %d\n", l.HandlerFailures)
 	return b.String()
 }
 

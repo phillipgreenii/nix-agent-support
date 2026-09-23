@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -521,4 +522,106 @@ func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
 			t.Errorf("renderSourceDetail() = %q, want an explicit \"Excluded: false\" line", got)
 		}
 	})
+}
+
+// TestRenderListenerDetail_MatchesListenersPaneParity is pg2-v6y9l's own
+// red-first coverage: before this bead, renderListenerDetail rendered only
+// Role/Binds/Health/Delivered/Declined, omitting LAST DELIVERED, the DECL
+// busy/unavailable/other breakdown, SELF, and FAIL -- all four of which
+// renderListenersPane's own Wide-tier row (panes.go) already showed. This
+// pins parity going forward: every field name the Wide-tier header set
+// carries (ROLE/BINDS/HEALTH/LAST DELIVERED/DLVD/DECL/SELF/FAIL --
+// panes.go's renderListenersPane render.TierWide case) has a corresponding
+// rendered value here, computed via the SAME helpers the pane row uses
+// (formatCoarse, l.DeclinedBucketed(), selfReportDegraded, theme.Cooling)
+// so the two views cannot drift out of sync.
+func TestRenderListenerDetail_MatchesListenersPaneParity(t *testing.T) {
+	theme := render.NewTheme(false) // mono: plain text tokens, no ANSI noise, so substring checks are exact
+
+	lastDeliveredAt := time.Now().Add(-90 * time.Second)
+	l := Listener{
+		Role:              "reviewer",
+		Binds:             []string{"pr.new", "pr.updated"},
+		Enabled:           true,
+		Delivered:         42,
+		Declined:          6,
+		LastDeliveredAtMs: lastDeliveredAt.UnixMilli(),
+		DeclinedByReason:  map[string]int64{"busy": 3, "unavailable": 2, "some-other-reason": 1},
+		HandlerFailures:   5,
+		SelfReportState:   "degraded",
+	}
+
+	got := renderListenerDetail(l, theme)
+
+	wantLastDelivered := formatCoarse(time.Since(time.UnixMilli(l.LastDeliveredAtMs))) + " ago"
+	busy, unavailable, other := l.DeclinedBucketed()
+	wantDecl := fmt.Sprintf("%d / %d / %d", busy, unavailable, other)
+	wantSelf := l.SelfReportState
+	if selfReportDegraded(l.SelfReportState) {
+		wantSelf = theme.Cooling.Render(wantSelf)
+	}
+
+	// Wide-tier pane header name -> the value renderListenerDetail must
+	// render for it, computed the same way the pane row itself computes
+	// that value.
+	tests := []struct {
+		header string
+		want   string
+	}{
+		{"ROLE", l.Role},
+		{"BINDS", strings.Join(l.Binds, ",")},
+		{"HEALTH", listenerHealthText(l, theme)},
+		{"LAST DELIVERED", wantLastDelivered},
+		{"DLVD", fmt.Sprintf("%d", l.Delivered)},
+		{"DECL", wantDecl},
+		{"SELF", wantSelf},
+		{"FAIL", fmt.Sprintf("%d", l.HandlerFailures)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.header, func(t *testing.T) {
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("renderListenerDetail() = %q, want it to contain %q (the value for Wide-tier header %q)", got, tt.want, tt.header)
+			}
+		})
+	}
+}
+
+// TestRenderListenerDetail_SelfDimmedOnlyWhenDegraded proves the SELF
+// line's dimming is conditional on selfReportDegraded's own two-state
+// ("degraded"/"unavailable") definition, not applied unconditionally
+// whenever SelfReportState is non-empty -- mirroring
+// renderListenersPane's identical guard (panes.go). Compared against
+// theme.Cooling.Render(...) computed the same way for each case (never a
+// raw ANSI literal), per the same convention
+// TestRenderActivityOutcome_BudgetEscalationStylesDistinctlyFromOtherOutcomes
+// (panes_test.go) already documents: Render()'s literal escape-code output
+// depends on the ambient color-profile detection of the test process, so
+// only a same-computation comparison is a reliable regression guard.
+func TestRenderListenerDetail_SelfDimmedOnlyWhenDegraded(t *testing.T) {
+	theme := render.NewTheme(true) // color: styling actually applies
+
+	tests := []struct {
+		name  string
+		state string
+	}{
+		{"healthy state renders plain", "ok"},
+		{"degraded state is dimmed", "degraded"},
+		{"unavailable state is dimmed", "unavailable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := Listener{Role: "reviewer", SelfReportState: tt.state}
+
+			got := renderListenerDetail(l, theme)
+
+			self := tt.state
+			if selfReportDegraded(tt.state) {
+				self = theme.Cooling.Render(self)
+			}
+			wantLine := "Self:           " + self + "\n"
+			if !strings.Contains(got, wantLine) {
+				t.Errorf("renderListenerDetail() = %q, want SELF line %q (selfReportDegraded(%q) = %v)", got, wantLine, tt.state, selfReportDegraded(tt.state))
+			}
+		})
+	}
 }
