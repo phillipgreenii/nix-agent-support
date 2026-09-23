@@ -33,27 +33,49 @@
 # /tmp/single) are deliberately NOT created here: that fixture is
 # exercised only via pgdr_select_variants directly, never through
 # cmd_list/cmd_reclaim, so the new guard never applies to it.
-# /tmp/real-item is this bead's own addition (cmd_reclaim's
-# path-existence guard, pg2-eqniv.2): the "real, existing path" half of
-# the mixed missing/real registry used by the guard tests below.
+# real-item (under SHARED_TMPDIR below) is this bead's own addition
+# (cmd_reclaim's path-existence guard, pg2-eqniv.2): the "real, existing
+# path" half of the mixed missing/real registry used by the guard tests
+# below.
 #
 # Deliberately setup_file/teardown_file, NOT per-test setup()/teardown():
 # this suite runs under this repo's real commit-time gate with bats
 # parallel jobs enabled (pg-test-runner, backed by GNU parallel), so
-# per-test mkdir/rm of these SHARED, fixed /tmp paths races -- one test's
-# teardown() removing a directory while another concurrently-running
-# test's cmd_list is still reading it (confirmed empirically: `bats --jobs
-# 4` on this file intermittently failed cmd_list assertions that pass
-# every time under `--jobs 1`). None of the registry fixtures' dryRunCommand/
-# removeCommand actually touch these directories (they're `echo` stubs), so
-# creating them once for the whole file and leaving them in place for every
-# test to read is safe and race-free.
+# per-test mkdir/rm of these SHARED paths races -- one test's teardown()
+# removing a directory while another concurrently-running test's cmd_list
+# is still reading it (confirmed empirically: `bats --jobs 4` on this file
+# intermittently failed cmd_list assertions that pass every time under
+# `--jobs 1`). None of the registry fixtures' dryRunCommand/removeCommand
+# actually touch these directories (they're `echo` stubs), so creating
+# them once for the whole file and leaving them in place for every test to
+# read is safe and race-free.
+#
+# SHARED_TMPDIR (bug fix pg2-aun3f): a per-run `mktemp -d` directory,
+# matching test-pg-disk-reclaimer-completions.bats's TEST_DIR pattern --
+# NOT the literal /tmp/cache-a et al. paths this file used to mkdir/rm
+# directly. Those fixed names collided across concurrent nix-sandboxed
+# runs of this same suite: one run's leftover fixture dirs, owned by a
+# different nix build user, blocked a later run's own teardown_file with
+# `rm -rf: Permission denied` (see the bead for the repro). setup_file
+# exports SHARED_TMPDIR; each @test's process forks from the same parent
+# that ran setup_file (and teardown_file runs in that same parent
+# process), so the exported value is visible everywhere it's needed --
+# verified empirically against this bats version. The committed fixture
+# JSON files under tests/fixtures/ still hardcode their own /tmp/* `path`
+# values (left untouched, so they stay valid standalone fixtures);
+# install_list_registry / install_reclaim_registry /
+# install_list_resilience_registry below rewrite those literal paths to
+# their SHARED_TMPDIR equivalent via retarget_fixture_paths (jq) instead
+# of a plain `cp`, so cmd_list/cmd_reclaim's path-existence guard checks a
+# real, run-isolated directory rather than a fixed /tmp name.
 setup_file() {
-  mkdir -p /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item /tmp/real-item
+  SHARED_TMPDIR="$(mktemp -d)"
+  export SHARED_TMPDIR
+  mkdir -p "$SHARED_TMPDIR"/{cache-a,cache-b,info-only,failing-item,slow-item,ok-item,low-item,high-item,real-item}
 }
 
 teardown_file() {
-  rm -rf /tmp/cache-a /tmp/cache-b /tmp/info-only /tmp/failing-item /tmp/slow-item /tmp/ok-item /tmp/low-item /tmp/high-item /tmp/real-item
+  rm -rf "$SHARED_TMPDIR"
 }
 
 setup() {
@@ -79,32 +101,71 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
-# install_reclaim_registry: copies tests/fixtures/reclaim.json to the
-# default (XDG) registry path, matching the "defaults to the XDG
+# retarget_fixture_paths <fixture-file> <dest-file> <old-path>=<new-path>...:
+# copies <fixture-file> to <dest-file>, rewriting each item's `path` field
+# from a fixture's committed literal /tmp/* value to this run's
+# SHARED_TMPDIR-based equivalent (see setup_file's doc comment above) --
+# used instead of a plain `cp` so cmd_list/cmd_reclaim's path-existence
+# guard sees a real, per-run-isolated directory rather than a fixed name
+# shared across concurrent nix-sandboxed runs of this suite.
+retarget_fixture_paths() {
+  local fixture="$1" dest="$2"
+  shift 2
+  local filter='.'
+  local -a jq_args=()
+  local i=0
+  local pair old new
+  for pair in "$@"; do
+    old="${pair%%=*}"
+    new="${pair#*=}"
+    jq_args+=(--arg "old$i" "$old" --arg "new$i" "$new")
+    filter="$filter | map(.path |= (if . == \$old$i then \$new$i else . end))"
+    i=$((i + 1))
+  done
+  jq "${jq_args[@]}" "$filter" "$fixture" >"$dest"
+}
+
+# install_reclaim_registry: installs tests/fixtures/reclaim.json (path
+# fields retargeted to SHARED_TMPDIR, see retarget_fixture_paths above) to
+# the default (XDG) registry path, matching the "defaults to the XDG
 # registry path when none is given" pattern already used above for
 # pgdr_read_registry -- cmd_reclaim has no registry-path positional of
 # its own, so its tests always exercise the default-path lookup.
 install_reclaim_registry() {
   mkdir -p "$HOME/.config/pg-disk-reclaimer"
-  cp "$FIXTURES_DIR/reclaim.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  retarget_fixture_paths "$FIXTURES_DIR/reclaim.json" \
+    "$HOME/.config/pg-disk-reclaimer/registry.json" \
+    "/tmp/low-item=$SHARED_TMPDIR/low-item" \
+    "/tmp/high-item=$SHARED_TMPDIR/high-item" \
+    "/tmp/failing-item=$SHARED_TMPDIR/failing-item"
 }
 
-# install_list_registry: copies tests/fixtures/list.json to the default
-# (XDG) registry path, matching install_reclaim_registry above --
-# cmd_list has no registry-path positional of its own either, so its
-# tests always exercise the default-path lookup.
+# install_list_registry: installs tests/fixtures/list.json (path fields
+# retargeted to SHARED_TMPDIR) to the default (XDG) registry path,
+# matching install_reclaim_registry above -- cmd_list has no
+# registry-path positional of its own either, so its tests always
+# exercise the default-path lookup.
 install_list_registry() {
   mkdir -p "$HOME/.config/pg-disk-reclaimer"
-  cp "$FIXTURES_DIR/list.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  retarget_fixture_paths "$FIXTURES_DIR/list.json" \
+    "$HOME/.config/pg-disk-reclaimer/registry.json" \
+    "/tmp/cache-a=$SHARED_TMPDIR/cache-a" \
+    "/tmp/cache-b=$SHARED_TMPDIR/cache-b" \
+    "/tmp/info-only=$SHARED_TMPDIR/info-only"
 }
 
-# install_list_resilience_registry: copies tests/fixtures/list-resilience.json
-# (failing-item, then slow-item, then ok-item -- in that registry order) to
-# the default XDG registry path, for exercising pgdr_display_output's
-# failure/timeout handling from cmd_list.
+# install_list_resilience_registry: installs
+# tests/fixtures/list-resilience.json (failing-item, then slow-item, then
+# ok-item -- in that registry order; path fields retargeted to
+# SHARED_TMPDIR) to the default XDG registry path, for exercising
+# pgdr_display_output's failure/timeout handling from cmd_list.
 install_list_resilience_registry() {
   mkdir -p "$HOME/.config/pg-disk-reclaimer"
-  cp "$FIXTURES_DIR/list-resilience.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  retarget_fixture_paths "$FIXTURES_DIR/list-resilience.json" \
+    "$HOME/.config/pg-disk-reclaimer/registry.json" \
+    "/tmp/failing-item=$SHARED_TMPDIR/failing-item" \
+    "/tmp/slow-item=$SHARED_TMPDIR/slow-item" \
+    "/tmp/ok-item=$SHARED_TMPDIR/ok-item"
 }
 
 @test "cmd_validate fails loudly when the registry file is missing" {
@@ -712,14 +773,15 @@ JSON
 }
 
 # install_reclaim_mixed_path_registry: one missing-path item plus one item
-# whose path (/tmp/real-item) genuinely exists (mkdir'd/rm'd in
+# whose path ($SHARED_TMPDIR/real-item) genuinely exists (mkdir'd/rm'd in
 # setup_file/teardown_file above, alongside this file's other shared
 # fixture paths -- see that comment for why NOT per-test setup()/
 # teardown()) -- for confirming the guard applies per-item, not to the
-# whole run.
+# whole run. Unlike malformed.json's inline fixture below, this heredoc
+# is UNQUOTED (<<JSON, not <<'JSON') so $SHARED_TMPDIR expands.
 install_reclaim_mixed_path_registry() {
   mkdir -p "$HOME/.config/pg-disk-reclaimer"
-  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<'JSON'
+  cat >"$HOME/.config/pg-disk-reclaimer/registry.json" <<JSON
 [
   {
     "id": "missing-path-item",
@@ -738,7 +800,7 @@ install_reclaim_mixed_path_registry() {
   {
     "id": "real-item",
     "description": "item whose path exists on this machine",
-    "path": "/tmp/real-item",
+    "path": "$SHARED_TMPDIR/real-item",
     "displayCommand": "echo real-item",
     "variants": [
       {
