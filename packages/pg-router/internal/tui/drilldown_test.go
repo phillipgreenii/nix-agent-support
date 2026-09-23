@@ -3,8 +3,11 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
 // TestDrillDown_QueueAndActivityRowsAreNonFocusable is this packet's own
@@ -295,4 +298,92 @@ func TestRenderConfigSection_LegacyFieldsPlusNote(t *testing.T) {
 			t.Errorf("populated Config section = %q, want it to render %q verbatim", populated, want)
 		}
 	}
+}
+
+// TestRenderSourceDetail_MatchesSourcesPaneParity covers pg2-v6ojj: the
+// Source drill-down detail view (renderSourceDetail) previously showed only
+// Name/Type/Mode/Health/LastTick -- omitting the NEXT CHECK IN countdown
+// renderSourcesPane's own row already shows (sourceNextCheckText), and
+// never rendering a source's Excluded flag or its Failure.NextEligible
+// retry time as their own explicit values (both were only ever folded into
+// sourceHealthText's short "excluded"/"failing xN" string). This test pins
+// all three gaps closed.
+func TestRenderSourceDetail_MatchesSourcesPaneParity(t *testing.T) {
+	theme := render.NewTheme(false) // mono: plain text tokens, no ANSI noise
+
+	t.Run("healthy source shows the NEXT CHECK IN countdown", func(t *testing.T) {
+		now := time.Now()
+		s := Source{
+			Name:               "gh-prs",
+			Type:               "github",
+			Mode:               "poll",
+			Enabled:            true,
+			Excluded:           false,
+			LastTick:           now,
+			ExpectedIntervalMs: 5 * time.Minute.Milliseconds(),
+		}
+
+		got := renderSourceDetail(s, now, theme)
+
+		want := sourceNextCheckText(s, now)
+		if !strings.Contains(got, "NEXT CHECK IN:") || !strings.Contains(got, want) {
+			t.Errorf("renderSourceDetail() = %q, want it to contain \"NEXT CHECK IN:\" and the countdown %q (matching renderSourcesPane's own row)", got, want)
+		}
+		// A healthy source has no Failure, so no "next eligible:" line should
+		// appear at all.
+		if strings.Contains(got, "next eligible:") {
+			t.Errorf("renderSourceDetail() = %q, want no \"next eligible:\" line for a healthy source with Failure == nil", got)
+		}
+	})
+
+	t.Run("failing source shows Failure.NextEligible explicitly, not just folded into the health string", func(t *testing.T) {
+		now := time.Now()
+		nextEligible := now.Add(2 * time.Minute)
+		s := Source{
+			Name:     "gh-issues",
+			Type:     "github",
+			Mode:     "poll",
+			Enabled:  true,
+			LastTick: now,
+			Failure:  &Failure{Count: 3, NextEligible: nextEligible},
+		}
+
+		got := renderSourceDetail(s, now, theme)
+
+		if !strings.Contains(got, "failing") {
+			t.Errorf("renderSourceDetail() = %q, want the Health line to still show \"failing\" (unchanged existing behavior)", got)
+		}
+		wantTime := nextEligible.Format("15:04:05")
+		if !strings.Contains(got, "next eligible:") || !strings.Contains(got, wantTime) {
+			t.Errorf("renderSourceDetail() = %q, want an explicit \"next eligible: %s\" line naming Failure.NextEligible", got, wantTime)
+		}
+	})
+
+	t.Run("excluded source shows Excluded explicitly", func(t *testing.T) {
+		now := time.Now()
+		s := Source{
+			Name:     "gh-prs",
+			Type:     "github",
+			Mode:     "poll",
+			Enabled:  true,
+			Excluded: true,
+		}
+
+		got := renderSourceDetail(s, now, theme)
+
+		if !strings.Contains(got, "Excluded:") || !strings.Contains(got, "true") {
+			t.Errorf("renderSourceDetail() = %q, want an explicit \"Excluded: true\" line (not just folded into the \"excluded\" health string)", got)
+		}
+	})
+
+	t.Run("non-excluded source's Excluded line reads false", func(t *testing.T) {
+		now := time.Now()
+		s := Source{Name: "gh-prs", Type: "github", Mode: "poll", Enabled: true, Excluded: false}
+
+		got := renderSourceDetail(s, now, theme)
+
+		if !strings.Contains(got, "Excluded:") || !strings.Contains(got, "false") {
+			t.Errorf("renderSourceDetail() = %q, want an explicit \"Excluded: false\" line", got)
+		}
+	})
 }

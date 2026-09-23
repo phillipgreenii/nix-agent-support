@@ -222,17 +222,30 @@ func renderListenerDetail(l Listener, theme render.Theme) string {
 	return b.String()
 }
 
+// renderSourceDetail renders the drilled Source's own fields for
+// screenDrillDown. Widened by pg2-v6ojj to bring the detail view up to
+// parity with renderSourcesPane's own row (which additionally shows a
+// NEXT CHECK IN countdown), and to surface two facts sourceHealthText
+// folds into its own short health string without ever rendering as their
+// own explicit value: whether the source is Excluded, and -- when
+// Failure != nil -- the failure's own NextEligible retry time ("next
+// eligible: ", per this bead's own fix design).
 func renderSourceDetail(s Source, now time.Time, theme render.Theme) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Name:     %s\n", textsafe.Sanitize(s.Name))
-	fmt.Fprintf(&b, "Type:     %s\n", textsafe.Sanitize(s.Type))
-	fmt.Fprintf(&b, "Mode:     %s\n", textsafe.Sanitize(s.Mode))
-	fmt.Fprintf(&b, "Health:   %s\n", sourceHealthText(s, now, theme))
+	fmt.Fprintf(&b, "%-14s %s\n", "Name:", textsafe.Sanitize(s.Name))
+	fmt.Fprintf(&b, "%-14s %s\n", "Type:", textsafe.Sanitize(s.Type))
+	fmt.Fprintf(&b, "%-14s %s\n", "Mode:", textsafe.Sanitize(s.Mode))
+	fmt.Fprintf(&b, "%-14s %s\n", "Health:", sourceHealthText(s, now, theme))
+	fmt.Fprintf(&b, "%-14s %t\n", "Excluded:", s.Excluded)
 	lastTick := "-"
 	if !s.LastTick.IsZero() {
 		lastTick = s.LastTick.Format("15:04:05")
 	}
-	fmt.Fprintf(&b, "LastTick: %s\n", lastTick)
+	fmt.Fprintf(&b, "%-14s %s\n", "LastTick:", lastTick)
+	fmt.Fprintf(&b, "%-14s %s\n", "NEXT CHECK IN:", sourceNextCheckText(s, now))
+	if s.Failure != nil {
+		fmt.Fprintf(&b, "%-14s %s\n", "next eligible:", s.Failure.NextEligible.Format("15:04:05"))
+	}
 	return b.String()
 }
 
