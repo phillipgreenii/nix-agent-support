@@ -696,3 +696,60 @@ func TestView_WidensPaneContentAcrossAllThreeTiers(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel is this packet's own
+// acceptance bar: a queue type in the heartbeat set (pr.reconcile today)
+// renders with a (heartbeat) label and no depth bar [design: Task 5, Step 1;
+// Global Constraints].
+func TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel(t *testing.T) {
+	out := renderQueuesPane([]Queue{{Type: "pr.reconcile", Depth: 70}}, 0, "", "Queues")
+	if strings.ContainsAny(out, "█░") {
+		t.Fatalf("heartbeat queue row rendered a depth bar:\n%s", out)
+	}
+	if !strings.Contains(out, "(heartbeat)") {
+		t.Fatalf("heartbeat queue row missing label:\n%s", out)
+	}
+}
+
+// TestRenderQueuesPane_IncrementalTypeHasBarNoLabel is this packet's own
+// acceptance bar: any other queue type renders a depthBar and no (heartbeat)
+// label [design: Task 5, Step 1].
+func TestRenderQueuesPane_IncrementalTypeHasBarNoLabel(t *testing.T) {
+	out := renderQueuesPane([]Queue{{Type: "pr.changed", Depth: 3}}, 0, "", "Queues")
+	if !strings.Contains(out, "█") {
+		t.Fatalf("incremental queue row missing a depth bar:\n%s", out)
+	}
+	if strings.Contains(out, "(heartbeat)") {
+		t.Fatalf("incremental queue row should not carry the heartbeat label:\n%s", out)
+	}
+}
+
+// TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch closes the round-1
+// semantic post-check finding: the Global Constraint says the heartbeat set
+// matches queue types that "start with" pr.reconcile, not only the exact
+// string, so a dot-delimited prefixed variant must also render the
+// heartbeat label.
+func TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch(t *testing.T) {
+	out := renderQueuesPane([]Queue{{Type: "pr.reconcile.detail", Depth: 5}}, 0, "", "Queues")
+	if strings.ContainsAny(out, "█░") {
+		t.Fatalf("prefixed heartbeat queue row rendered a depth bar:\n%s", out)
+	}
+	if !strings.Contains(out, "(heartbeat)") {
+		t.Fatalf("prefixed heartbeat queue row missing label:\n%s", out)
+	}
+}
+
+// TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded closes the round-2
+// semantic post-check finding: a plain (non-dot-delimited) strings.HasPrefix
+// check would also match "pr.reconciled" -- a plausible distinct future
+// queue type name ("reconcile completed" event), not itself a heartbeat --
+// so the match must require the dot boundary, not bare prefix.
+func TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded(t *testing.T) {
+	out := renderQueuesPane([]Queue{{Type: "pr.reconciled", Depth: 4}}, 0, "", "Queues")
+	if strings.Contains(out, "(heartbeat)") {
+		t.Fatalf("\"pr.reconciled\" must not be misclassified as a heartbeat type via bare prefix match:\n%s", out)
+	}
+	if !strings.Contains(out, "█") {
+		t.Fatalf("\"pr.reconciled\" should render an ordinary depth bar:\n%s", out)
+	}
+}

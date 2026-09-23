@@ -311,15 +311,77 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
 
+// heartbeatQueuePrefixes names queue-type prefixes whose depth is a
+// reconciliation heartbeat (a monitored-universe count), not an
+// incremental/actionable backlog -- pr.reconcile today. pg-router has no
+// per-type metadata to derive this from, so it is a hardcoded set; promote
+// to config if a second heartbeat-style prefix is ever added. Matched by
+// EXACT string or by prefix at a dot boundary, per the docket's Global
+// Constraints ("starts with pr.reconcile") -- this docket's semantic
+// post-check found the design's own Task 5 Step 3 code sample used an
+// exact-match lookup (round 1), then found a naive prefix fix would
+// misclassify a same-prefix sibling like "pr.reconciled" (round 2); the
+// dot-boundary check here closes both.
+var heartbeatQueuePrefixes = []string{
+	"pr.reconcile",
+}
+
+// isHeartbeatQueueType reports whether t equals a heartbeat prefix exactly,
+// or starts with one immediately followed by "." -- never a bare
+// character-level prefix match, which would also match an unrelated
+// same-prefix type name like "pr.reconciled".
+func isHeartbeatQueueType(t string) bool {
+	for _, prefix := range heartbeatQueuePrefixes {
+		if t == prefix || strings.HasPrefix(t, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// depthBar renders a coarse, fixed-width bar for depth out of an assumed
+// max (this task uses 100 as a generous ceiling -- there is no configured
+// per-type max to scale against, and a bar that never fills for a
+// reasonable depth is more honest than a false sense of precision). Any
+// nonzero depth floors to at least 1 filled cell -- integer scaling against
+// the 100 ceiling would otherwise round a small-but-real depth (e.g. 3) down
+// to 0 filled cells, rendering identically to an empty queue, which is LESS
+// honest than the false-precision this bar avoids, not more.
+func depthBar(depth int) string {
+	const width = 20
+	const assumedMax = 100
+	filled := depth * width / assumedMax
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled == 0 && depth > 0 {
+		filled = 1
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
 // renderQueuesPane renders the Queues pane: TYPE/DEPTH, unchanged across
 // tiers. width is the available terminal width, see renderListenersPane's
-// doc [pg2-hlpuv].
+// doc [pg2-hlpuv]. DEPTH renders a coarse depth bar for ordinary
+// incremental queue types, or a (heartbeat) label with no bar for a queue
+// type in the heartbeat set (pr.reconcile today) -- that depth is a
+// monitored-universe count, not an actionable backlog [design: Task 5,
+// "pr.reconcile relabeling"; Global Constraints].
 func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string {
 	headers := []string{"TYPE", "DEPTH"}
-	widths := []int{18, 8}
+	widths := []int{18, 30}
 	rows := make([][]string, 0, len(queues))
 	for _, q := range queues {
-		rows = append(rows, []string{textsafe.Sanitize(q.Type), fmt.Sprintf("%d", q.Depth)})
+		depthCell := fmt.Sprintf("%d", q.Depth)
+		if isHeartbeatQueueType(q.Type) {
+			depthCell += "  (heartbeat)"
+		} else {
+			depthCell += "  " + depthBar(q.Depth)
+		}
+		rows = append(rows, []string{textsafe.Sanitize(q.Type), depthCell})
 	}
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }
