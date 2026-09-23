@@ -418,33 +418,43 @@ func renderSourcesPane(sources []Source, now time.Time, width int, theme render.
 // defect, and the handler will be able again once the ceiling lifts").
 const outcomeBudgetEscalation = "budget_escalation"
 
-// renderActivityPane renders the full-width Activity row: one line per
-// entry, oldest-first per the ring's own Read order reversed here so the
-// newest entry renders first (matching the mockup's own top-to-bottom
-// recency). ActivityEntry (reply.go, Task 4.4) carries only
-// Seq/StartedAt/Type/Outcome -- no role/binding fields exist to render the
-// mockup's fuller line, so this renders exactly what the frozen wire shape
-// carries. theme (this bead) styles ONLY the budget_escalation outcome
-// distinctly from every other outcome in this same pane -- see
+// activityDisplayCap is the most recent N Activity entries actually
+// rendered (pg2-mnf7t.6) -- a Go constant, not configurable, for phase 1.
+const activityDisplayCap = 8
+
+// renderActivityPane renders the full-width Activity row: at most
+// activityDisplayCap entries, newest-first per the ring's own Read order
+// reversed here so the newest entry renders first (matching the mockup's
+// own top-to-bottom recency), each with a relative "Xs ago"/"Xm ago"
+// timestamp (formatCoarse, Task 1) rather than an absolute HH:MM:SS one --
+// relative recency at a glance, and a bounded render regardless of the
+// ring's own size [design: Task 6]. ActivityEntry (reply.go, Task 4.4)
+// carries only Seq/StartedAt/Type/Outcome -- no role/binding fields exist to
+// render the mockup's fuller line, so this renders exactly what the frozen
+// wire shape carries. theme (this bead) styles ONLY the budget_escalation
+// outcome distinctly from every other outcome in this same pane -- see
 // renderActivityOutcome's own doc for why, and for how that reads distinctly
 // from the operator-pause gate's own rendering (banner.go's
 // renderPausedBanner).
 func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string, theme render.Theme) string {
-	rows := make([]string, 0, len(activity)+1)
+	rows := make([]string, 0, activityDisplayCap+1)
 	if dropped {
 		rows = append(rows, "(older entries dropped -- ring capacity exceeded)")
 	}
-	for i := len(activity) - 1; i >= 0; i-- {
+	now := time.Now()
+	shown := 0
+	for i := len(activity) - 1; i >= 0 && shown < activityDisplayCap; i-- {
 		a := activity[i]
 		ts := "-"
 		if !a.StartedAt.IsZero() {
-			ts = a.StartedAt.Format("15:04:05")
+			ts = formatCoarse(now.Sub(a.StartedAt)) + " ago"
 		}
-		line := fmt.Sprintf("%s  %-10s", ts, textsafe.Sanitize(a.Type))
+		line := fmt.Sprintf("%-10s %-10s", ts, textsafe.Sanitize(a.Type))
 		if a.Outcome != "" {
 			line += " → " + renderActivityOutcome(a.Outcome, theme)
 		}
 		rows = append(rows, line)
+		shown++
 	}
 	return renderPaneBoxPlain("Activity", rows, emptyMsg)
 }

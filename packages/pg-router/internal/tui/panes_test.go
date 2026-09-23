@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -751,5 +752,54 @@ func TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded(t *testing.T) {
 	}
 	if !strings.Contains(out, "█") {
 		t.Fatalf("\"pr.reconciled\" should render an ordinary depth bar:\n%s", out)
+	}
+}
+
+// TestRenderActivityPane_CapsToLastEightNewestFirst is this packet's own
+// acceptance bar: renderActivityPane renders at most activityDisplayCap (8)
+// entries, newest first -- the 4 oldest of 12 entries must be dropped
+// [design: Task 6, Step 1; Global Constraints].
+func TestRenderActivityPane_CapsToLastEightNewestFirst(t *testing.T) {
+	now := time.Now()
+	entries := make([]ActivityEntry, 12)
+	for i := range entries {
+		entries[i] = ActivityEntry{Seq: uint64(i), StartedAt: now.Add(time.Duration(i) * time.Second), Type: fmt.Sprintf("t%d", i)}
+	}
+	out := renderActivityPane(entries, false, "", render.Theme{})
+	if strings.Contains(out, "t0") || strings.Contains(out, "t3") {
+		t.Fatalf("expected the 4 oldest entries dropped, got:\n%s", out)
+	}
+	if !strings.Contains(out, "t11") {
+		t.Fatalf("expected the newest entry present, got:\n%s", out)
+	}
+}
+
+// TestRenderActivityPane_FewerThanCapDoesNotPanicOrPad is this packet's own
+// acceptance bar: a ring holding fewer than 8 entries renders exactly what
+// it has -- no panic, no padding with fake rows [design: Task 6, Step 1;
+// Review Focus].
+func TestRenderActivityPane_FewerThanCapDoesNotPanicOrPad(t *testing.T) {
+	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "x"}}, false, "", render.Theme{})
+	// paneFrame (panes.go) emits exactly one line per content row plus a
+	// top and bottom border line -- 1 activity entry means 3 total lines,
+	// i.e. 2 newline separators. Padding toward activityDisplayCap would
+	// add more; this asserts the exact count rather than "at least one
+	// line," which would pass even if the implementation padded.
+	if got := strings.Count(out, "\n"); got != 2 {
+		t.Fatalf("expected exactly 2 newlines (1 row + top/bottom border, no padding) for a single entry, got %d:\n%s", got, out)
+	}
+}
+
+// TestRenderActivityPane_RelativeTimestampNotAbsolute is this packet's own
+// acceptance bar: every rendered entry's timestamp is relative (Xs ago/Xm
+// ago), never an absolute HH:MM:SS string [design: Task 6, Step 1; Global
+// Constraints].
+func TestRenderActivityPane_RelativeTimestampNotAbsolute(t *testing.T) {
+	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now().Add(-5 * time.Second), Type: "x"}}, false, "", render.Theme{})
+	if strings.Contains(out, ":") {
+		t.Fatalf("expected a relative timestamp with no ':' (no HH:MM:SS), got:\n%s", out)
+	}
+	if !strings.Contains(out, "ago") {
+		t.Fatalf("expected a relative 'ago' timestamp, got:\n%s", out)
 	}
 }
