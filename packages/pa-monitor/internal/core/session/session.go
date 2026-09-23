@@ -1,6 +1,7 @@
 package session
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -200,11 +201,20 @@ func (s *Session) TranscriptPath(claudeHome string) string {
 	return claudeHome + "/projects/" + slugify(s.Cwd) + "/" + s.SessionID + ".jsonl"
 }
 
-// slugify mirrors Claude Code's on-disk project-directory naming: both "/" and
-// "_" in the cwd become "-". Example: "/Users/a/b_c" → "-Users-a-b-c".
+// slugify mirrors Claude Code's on-disk project-directory naming: every
+// character other than a letter or digit becomes "-". Example:
+// "/Users/a/b_c.d" → "-Users-a-b-c-d". Verified against this machine's
+// ~/.claude/projects tree (2026-09-23): "/", "_", and "." each map to "-",
+// and no directory name there contains any other non-alnum character. "."
+// matters in practice because ccpool worktree paths are always
+// "<slot>.<n>" (e.g. "zr-0t0z7.3") — missing it makes ResolveTranscript look
+// in a directory that never exists, so every transcript-derived stat for a
+// ccpool session silently stays zero.
 func slugify(cwd string) string {
-	return strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	return nonAlnum.ReplaceAllString(cwd, "-")
 }
+
+var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 // Classify maps an mtime age to a coarse activity bucket for the dead-pid
 // fallback: Working when within the working window, else Idle. Dormancy is no

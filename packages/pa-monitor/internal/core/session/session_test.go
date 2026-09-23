@@ -115,6 +115,28 @@ func TestTranscriptPathSlugReplacesUnderscores(t *testing.T) {
 	}
 }
 
+// TestTranscriptPathSlugReplacesDots covers ccpool worktree paths, whose last
+// path segment is always "<slot>.<n>" (e.g. "zr-0t0z7.3"). Claude Code's own
+// on-disk project-dir naming replaces "." with "-" like every other non-
+// alnum separator; slugify must match or ResolveTranscript looks in a
+// directory that never exists, and every transcript-derived stat (tokens,
+// model, burn rate, first prompt) silently stays zero.
+func TestTranscriptPathSlugReplacesDots(t *testing.T) {
+	cases := []struct {
+		cwd, want string
+	}{
+		{"/Volumes/ziprecruiter/pg-router/worktrees/zr-0t0z7.3", "/home/.claude/projects/-Volumes-ziprecruiter-pg-router-worktrees-zr-0t0z7-3"},
+		{"/Users/phil/repo/.claude/worktrees/pg2-2j5ac.27-daily-focus-design", "/home/.claude/projects/-Users-phil-repo--claude-worktrees-pg2-2j5ac-27-daily-focus-design"},
+	}
+	for _, c := range cases {
+		s := &Session{Cwd: c.cwd, SessionID: "id"}
+		want := c.want + "/id.jsonl"
+		if got := s.TranscriptPath("/home/.claude"); got != want {
+			t.Errorf("TranscriptPath(%q) = %q, want %q", c.cwd, got, want)
+		}
+	}
+}
+
 func TestClassifyLiveness(t *testing.T) {
 	now := time.Now()
 	working := 10 * time.Second
