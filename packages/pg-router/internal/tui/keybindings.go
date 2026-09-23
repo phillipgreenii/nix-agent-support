@@ -38,6 +38,7 @@ var Bindings = []Binding{
 	{Keys: []string{"l"}, Description: "Legend", Handle: handleOpenLegend},
 	{Keys: []string{"!"}, Description: "Problems (aggregated diagnostics)", Handle: handleOpenProblems},
 	{Keys: []string{"?"}, Description: "Help", Handle: handleOpenHelp},
+	{Keys: []string{"a"}, Description: "Activity history (full ring window, not just the pane's 8)", Handle: handleOpenActivityHistory},
 	{Keys: []string{"tab"}, Description: "Focus next pane", Handle: handleFocusNext},
 	{Keys: []string{"shift+tab"}, Description: "Focus previous pane", Handle: handleFocusPrev},
 	{Keys: []string{"enter"}, Description: "Drill into the focused listener/source/queue row", Handle: handleEnterDrillDown},

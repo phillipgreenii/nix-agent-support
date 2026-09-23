@@ -39,6 +39,12 @@ const coreStateStarted = "started"
 // view: a superset/detail modal, additive to every mechanism above --
 // nothing here replaces the banner (banner.go), the Gates modal, the
 // Legend modal, or per-row drilldown.
+//
+// ModalActivityHistory (bead pg2-gb21e) is the Activity pane's own full
+// history screen, opened by the dedicated "a" key (activityhistory.go) --
+// additive the same way ModalProblems is: it does not touch the Activity
+// zone's own pane rendering (panes.go's renderActivityPane), only adds a
+// second, wider view onto the same underlying data.
 type ModalKind int
 
 const (
@@ -47,6 +53,7 @@ const (
 	ModalLegend
 	ModalGates
 	ModalProblems
+	ModalActivityHistory
 )
 
 // Options configures Run, the exported entry point cmd/pg-router/tui_cmd.go
@@ -124,6 +131,24 @@ type Model struct {
 	// activityNoFreshEntries when that poll brought nothing new, so every
 	// buffered entry -- even one added just one cycle ago -- dims.
 	activityFreshFloor uint64
+
+	// activityHistory is the Activity History modal's own content (bead
+	// pg2-gb21e, activityhistory.go): the "a" key's dedicated
+	// Snapshot(ctx, activityHistoryReadSince) call's Activity slice.
+	// Deliberately never routed through applyPollResult/
+	// updateActivityBuffer -- doing so would advance m.sinceCursor from
+	// THIS reply's own Activity slice and corrupt the regular polling
+	// loop's own since-cursor bookkeeping (poll.go's pollNow always
+	// carries forward m.sinceCursor, never this field). nil until that
+	// dedicated fetch's first result lands; renderActivityHistoryModal
+	// falls back to m.activityBuffer/m.reply.Activity until then, the same
+	// fallback order renderActivityZoneContent (below) already uses.
+	activityHistory []ActivityEntry
+	// activityHistoryDropped mirrors that SAME dedicated fetch's own
+	// reply.ActivityDropped -- always false for a since=0 request per
+	// activity.Ring.Read's own doc, kept here anyway so a future non-zero
+	// since request from this same screen needs no new field.
+	activityHistoryDropped bool
 
 	lastErr error
 	// pollErrFlagged is set by a poll failure that does NOT wrap
@@ -231,11 +256,20 @@ const (
 )
 
 // paneActivity is not a real config-derived pane -- Activity is its own
-// always-present zone in renderMain, never focusable and never cycled by
-// stepFocus (paneCount above stays 3) -- but giving it a value lets
-// unfocusedPaneDropOrder rank Activity's drop priority uniformly alongside
-// the three real panes rather than via a hardcoded dropOrder literal at the
-// activity zone's own call site (this task's two-tier redesign).
+// always-present zone in renderMain, never part of the tab/shift+tab
+// pane-focus cycle and never the zone ladder's fill zone (paneCount above
+// stays 3) -- but giving it a value lets unfocusedPaneDropOrder rank
+// Activity's drop priority uniformly alongside the three real panes rather
+// than via a hardcoded dropOrder literal at the activity zone's own call
+// site (this task's two-tier redesign).
+//
+// Bead pg2-gb21e makes Activity focusable/openable WITHOUT folding it into
+// this cycle: the dedicated "a" key (keybindings.go/activityhistory.go)
+// opens its own full history screen directly, never touching m.focusedPane
+// or paneCount -- the design's own freedom boundary between "fold into the
+// tab cycle" and "a dedicated keybinding," resolved here in favor of the
+// latter since Activity has no per-row cursor to step between the way
+// Listeners/Sources/Queues do.
 const paneActivity = -1
 
 // NewModel constructs a Model in its pre-first-poll state (screenLoading).
@@ -331,6 +365,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPollErr(msg.err)
 	case gateToggleResultMsg:
 		return m, m.applyGateToggleResult(msg)
+	case activityHistoryResultMsg:
+		m.applyActivityHistoryResult(msg)
+	case activityHistoryErrMsg:
+		m.applyActivityHistoryErr(msg)
 	case flashClearMsg:
 		m.applyFlashClear()
 	}

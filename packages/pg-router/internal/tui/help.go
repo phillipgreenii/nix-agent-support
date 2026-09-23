@@ -41,6 +41,8 @@ func (m *Model) renderModal() string {
 		return m.renderGatesModal()
 	case ModalProblems:
 		return m.renderProblemsModal()
+	case ModalActivityHistory:
+		return m.renderActivityHistoryModal()
 	default:
 		return ""
 	}
