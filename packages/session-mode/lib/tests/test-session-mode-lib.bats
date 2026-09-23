@@ -77,6 +77,45 @@ load_lib() {
   [ "$output" = "/Users/phillipg/.claude/projects/-Users-phillipg-repo" ]
 }
 
+# --- session_mode_find_transcript ---
+
+@test "session_mode_find_transcript locates the transcript by session id under HOME" {
+  load_lib
+  mkdir -p "$HOME/.claude/projects/-Users-phillipg-repo"
+  : >"$HOME/.claude/projects/-Users-phillipg-repo/sess-1.jsonl"
+  run session_mode_find_transcript "sess-1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.claude/projects/-Users-phillipg-repo/sess-1.jsonl" ]
+}
+
+@test "session_mode_find_transcript fails when no transcript exists for this session id" {
+  load_lib
+  mkdir -p "$HOME/.claude/projects/-Users-phillipg-repo"
+  : >"$HOME/.claude/projects/-Users-phillipg-repo/other-sess.jsonl"
+  run session_mode_find_transcript "sess-1"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "session_mode_find_transcript fails cleanly when ~/.claude/projects doesn't exist" {
+  load_lib
+  run session_mode_find_transcript "sess-1"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "session_mode_find_transcript finds the transcript even when \$PWD points elsewhere (pg2-3pg4v regression)" {
+  load_lib
+  # The transcript lives under the directory matching the session's ORIGINAL
+  # cwd, which need not match $PWD at call time (Bash tool calls routinely
+  # `cd`/`git -C` elsewhere mid-session).
+  mkdir -p "$HOME/.claude/projects/-Users-phillipg-phillipg-mbp"
+  : >"$HOME/.claude/projects/-Users-phillipg-phillipg-mbp/sess-1.jsonl"
+  PWD="/Users/phillipg/phillipg_mbp/some-other-repo" run session_mode_find_transcript "sess-1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$HOME/.claude/projects/-Users-phillipg-phillipg-mbp/sess-1.jsonl" ]
+}
+
 # --- session_mode_file_path ---
 
 @test "session_mode_file_path composes DIR/SESSION_ID.session-mode.json" {

@@ -34,8 +34,10 @@ Subcommands:
 
 The session is identified by $CLAUDE_SESSION_ID, falling back to
 $CLAUDE_CODE_SESSION_ID (start/set-status/show); the record directory is
-derived from the transcript path (hook) or $PWD (everything else),
-overridable via $SESSION_MODE_STATE_DIR for testing.
+derived from the transcript path (hook), or, for start/set-status/show, by
+locating that same transcript file via the session id (falling back to $PWD
+only if it can't be found yet) -- overridable via $SESSION_MODE_STATE_DIR for
+testing.
 
 Options:
   -h, --help     Show this help message
@@ -73,21 +75,28 @@ resolve_session_id() {
   fi
 }
 
-# resolve_file — the record path for THIS session, derived from $PWD (no
-# transcript_path available outside the hook: see session_mode_state_dir).
-# sid is captured into a variable on its own assignment line (not passed as
-# a nested "$(resolve_session_id)" function ARGUMENT) — a failing command
-# substitution used as an argument never fails the caller. That alone is
-# still not enough: resolve_file() itself runs inside the subshell that
-# "$(resolve_file)" spawns for its caller, and bash disables `set -e`
-# inside a command-substitution subshell by default (no `inherit_errexit`
-# here), so a bare `sid="$(resolve_session_id)"` would silently continue
-# with sid empty rather than aborting. The explicit `|| return 1` makes the
-# failure check independent of that errexit nesting quirk.
+# resolve_file — the record path for THIS session. No hook-supplied
+# transcript_path is available here (that's the hook's case: see
+# session_mode_state_dir), so this locates the session's actual transcript
+# file by session id (session_mode_find_transcript) -- a FIXED path for the
+# session's whole lifetime, unlike $PWD, which drifts mid-session as Bash
+# tool calls `cd`/`git -C` around (bead pg2-3pg4v). $PWD is used only as a
+# last resort when that lookup comes up empty (e.g. no transcript written
+# yet). sid is resolved first and captured into a variable on its own
+# assignment line (not passed as a nested "$(resolve_session_id)" function
+# ARGUMENT) — a failing command substitution used as an argument never fails
+# the caller. That alone is still not enough: resolve_file() itself runs
+# inside the subshell that "$(resolve_file)" spawns for its caller, and bash
+# disables `set -e` inside a command-substitution subshell by default (no
+# `inherit_errexit` here), so a bare `sid="$(resolve_session_id)"` would
+# silently continue with sid empty rather than aborting. The explicit
+# `|| return 1` makes the failure check independent of that errexit nesting
+# quirk.
 resolve_file() {
-  local dir sid
-  dir="$(session_mode_state_dir)"
+  local sid transcript dir
   sid="$(resolve_session_id)" || return 1
+  transcript="$(session_mode_find_transcript "$sid" 2>/dev/null || true)"
+  dir="$(session_mode_state_dir "$transcript")"
   session_mode_file_path "$dir" "$sid"
 }
 

@@ -19,12 +19,17 @@
 # record lives in. Precedence:
 #   1. $SESSION_MODE_STATE_DIR override (bats isolation; mirrors bg-tools-lib's
 #      BG_DIR pattern).
-#   2. dirname(TRANSCRIPT_PATH), when given — the hooks' case: hook stdin JSON
-#      always carries a transcript_path.
-#   3. Derived from $PWD via session_mode_encode_cwd — the three markdown
-#      commands' case, which gets no stdin JSON at all, so it recreates the
-#      same ~/.claude/projects/<encoded-cwd>/ directory Claude Code itself
-#      writes the transcript into.
+#   2. dirname(TRANSCRIPT_PATH), when given — the hooks' case (hook stdin JSON
+#      always carries a transcript_path), and also the CLI's case once
+#      session_mode_find_transcript (below) has located the session's real
+#      transcript file: its caller passes that file's path in here.
+#   3. Derived from $PWD via session_mode_encode_cwd — the last-resort
+#      fallback when no transcript_path is available AND the session's
+#      transcript could not be located by session id either (e.g. it has not
+#      been written yet). $PWD is NOT stable across a session's lifetime (see
+#      session_mode_find_transcript), so this path recreates the
+#      ~/.claude/projects/<encoded-cwd>/ directory Claude Code writes the
+#      transcript into only as a guess, not a reliable resolution.
 session_mode_state_dir() {
   local transcript_path="${1:-}"
   if [[ -n ${SESSION_MODE_STATE_DIR:-} ]]; then
@@ -51,6 +56,37 @@ session_mode_encode_cwd() {
     esac
   done
   printf '%s' "$out"
+}
+
+# session_mode_find_transcript SESSION_ID — locate the session's actual
+# transcript file by globbing ~/.claude/projects/*/SESSION_ID.jsonl. Unlike
+# $PWD (which drifts mid-session as Bash tool calls `cd`/`git -C` around a
+# multi-repo pn-workspace — bead pg2-3pg4v), the transcript lives at a FIXED
+# path for the session's whole lifetime, so this is the reliable way for a
+# caller with no hook-supplied transcript_path (i.e. every CLI subcommand) to
+# find the same directory the hook path already resolves correctly.
+#
+# Prints the matched path and returns 0 on a match; prints nothing and
+# returns 1 when ~/.claude/projects doesn't exist or no transcript for this
+# session id is found yet (e.g. called before Claude Code has written one) —
+# callers fall back to session_mode_state_dir's $PWD-derived guess in that
+# case. On more than one match (unexpected; session ids are unique) the first
+# glob-order match is used.
+session_mode_find_transcript() {
+  local session_id="$1" projects_dir="$HOME/.claude/projects"
+  [[ -d $projects_dir ]] || return 1
+  local -a matches
+  local restore_nullglob=0
+  if ! shopt -q nullglob; then
+    shopt -s nullglob
+    restore_nullglob=1
+  fi
+  matches=("$projects_dir"/*/"$session_id.jsonl")
+  if ((restore_nullglob)); then
+    shopt -u nullglob
+  fi
+  [[ ${#matches[@]} -gt 0 ]] || return 1
+  printf '%s' "${matches[0]}"
 }
 
 # session_mode_file_path DIR SESSION_ID — the record path for SESSION_ID.

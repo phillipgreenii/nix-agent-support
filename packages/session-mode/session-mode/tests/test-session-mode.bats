@@ -368,3 +368,59 @@ _hook_payload() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.state' "$other_record")" = "finished" ]
 }
+
+# =====================================================================================
+# CLI record-directory resolution without $SESSION_MODE_STATE_DIR (pg2-3pg4v)
+# =====================================================================================
+#
+# Regression coverage for pg2-3pg4v: resolve_file() (used by start/set-status/
+# show) must locate the record via the session's actual, FIXED transcript
+# file -- found by globbing for the session id -- rather than re-deriving a
+# directory from $PWD on every call, which drifts as Bash tool calls `cd`/
+# `git -C` around mid-session.
+
+@test "start: locates the record dir via the session's transcript file, not \$PWD, when SESSION_MODE_STATE_DIR is unset" {
+  create_cmd_wrapper session-mode
+  local transcript_dir="$HOME/.claude/projects/-some-other-encoded-dir"
+  mkdir -p "$transcript_dir"
+  : >"$transcript_dir/$CLAUDE_SESSION_ID.jsonl"
+  local unrelated_cwd="$TEST_DIR/unrelated"
+  mkdir -p "$unrelated_cwd"
+  run bash -c "cd '$unrelated_cwd' && env -u SESSION_MODE_STATE_DIR '$TEST_DIR/run_session-mode' start drain-beads"
+  [ "$status" -eq 0 ]
+  local f="$transcript_dir/$CLAUDE_SESSION_ID.session-mode.json"
+  [ -f "$f" ]
+  [ "$(jq -r '.kind' "$f")" = "drain-beads" ]
+}
+
+@test "start then set-status resolve to the SAME record even after \$PWD changes mid-session (pg2-3pg4v regression)" {
+  create_cmd_wrapper session-mode
+  local transcript_dir="$HOME/.claude/projects/-fixed-project-dir"
+  mkdir -p "$transcript_dir"
+  : >"$transcript_dir/$CLAUDE_SESSION_ID.jsonl"
+
+  local start_cwd="$TEST_DIR/repo-a" other_cwd="$TEST_DIR/repo-b"
+  mkdir -p "$start_cwd" "$other_cwd"
+
+  # Before the fix, this second call -- from a DIFFERENT cwd than the first
+  # -- would re-derive a different $PWD-based directory and fail with "no
+  # session-mode record found", even though the record from `start` exists.
+  ( cd "$start_cwd" && env -u SESSION_MODE_STATE_DIR "$TEST_DIR/run_session-mode" start drain-beads )
+  run bash -c "cd '$other_cwd' && env -u SESSION_MODE_STATE_DIR '$TEST_DIR/run_session-mode' set-status finished"
+  [ "$status" -eq 0 ]
+  local f="$transcript_dir/$CLAUDE_SESSION_ID.session-mode.json"
+  [ -f "$f" ]
+  [ "$(jq -r '.state' "$f")" = "finished" ]
+}
+
+@test "start: falls back to the \$PWD-derived dir when no transcript exists for this session yet" {
+  create_cmd_wrapper session-mode
+  local cwd="$TEST_DIR/repo-c"
+  mkdir -p "$cwd"
+  run bash -c "cd '$cwd' && env -u SESSION_MODE_STATE_DIR '$TEST_DIR/run_session-mode' start drain-beads"
+  [ "$status" -eq 0 ]
+  local encoded_cwd expected_dir
+  encoded_cwd="$(printf '%s' "$cwd" | tr -c 'A-Za-z0-9' '-')"
+  expected_dir="$HOME/.claude/projects/$encoded_cwd"
+  [ -f "$expected_dir/$CLAUDE_SESSION_ID.session-mode.json" ]
+}
