@@ -258,9 +258,21 @@ func unmatchedRowMarker(types []string, theme render.Theme) string {
 // unmatchedBindings is reply.UnmatchedBindings, threaded in so a row whose
 // bound type maps to exactly one row (its "partner", unmatchedPartners
 // above) can carry the inline marker [pg2-7ezqt] -- an extra trailing cell
-// appended only to rows that need it, past the declared headers/widths;
-// formatPaneRow already renders any cell index beyond len(widths) unstyled
-// and unclipped, so this needs no header/width changes for any tier.
+// appended only to rows that need it, past the declared headers/widths.
+//
+// That marker cell is clipped to whatever width remains in the pane's own
+// width budget after its declared columns [pg2-clgbb] -- formatPaneRow
+// renders any cell index beyond len(widths) unstyled AND unclipped (by
+// design, for the ordinary case where no such budget exists to blow), so
+// leaving the marker unclipped here let one row's rendered line grow
+// arbitrarily wide, uncapped by paneColumnWidths' own budget accounting.
+// paneFrame then sized the WHOLE box to that one overflowing line, and the
+// outer zone-ladder clip truncated every line of the box -- including its
+// right border -- instead of just the marker. Clipping it here, against
+// the SAME budget/overhead accounting paneColumnWidths uses for the
+// declared columns, keeps the fix local to this one extra cell without
+// touching paneColumnWidths/formatPaneRow's shared machinery (also used by
+// renderQueuesPane/renderSourcesPane, which have no such trailing cell).
 func renderListenersPane(listeners []Listener, tier, width int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string) string {
 	var headers []string
 	var widths []int
@@ -275,6 +287,7 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 
 	_, perRow := unmatchedPartners(unmatchedBindings, listeners)
 	rows := make([][]string, 0, len(listeners))
+	markers := make([]string, len(listeners))
 	for i, l := range listeners {
 		role := textsafe.Sanitize(l.Role)
 		health := listenerHealthText(l, theme)
@@ -303,10 +316,42 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 		default:
 			row = []string{role, health, dlvd}
 		}
-		if types := perRow[i]; len(types) > 0 {
-			row = append(row, unmatchedRowMarker(types, theme))
-		}
 		rows = append(rows, row)
+		if types := perRow[i]; len(types) > 0 {
+			markers[i] = unmatchedRowMarker(types, theme)
+		}
+	}
+
+	// Resolve the declared columns' widths exactly as renderPaneBox will
+	// (paneColumnWidths only ever looks at cell indices < len(widths), so
+	// computing it here -- before any marker cell is appended below --
+	// yields output byte-identical to renderPaneBox's own later call on
+	// these same (marker-appended) rows).
+	resolved := paneColumnWidths(headers, rows, widths, width)
+	if width > 0 {
+		used := paneBoxOverhead + len(widths) // declared cells' widths, plus one separator per cell including the marker's own leading space
+		for _, w := range resolved {
+			used += w
+		}
+		remaining := width - used
+		if remaining < 0 {
+			remaining = 0
+		}
+		for i, m := range markers {
+			if m == "" {
+				continue
+			}
+			if remaining == 0 {
+				markers[i] = ""
+			} else {
+				markers[i] = render.Line(m, remaining)
+			}
+		}
+	}
+	for i, m := range markers {
+		if m != "" {
+			rows[i] = append(rows[i], m)
+		}
 	}
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
 }

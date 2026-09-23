@@ -519,6 +519,134 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 	})
 }
 
+// listenersBoxLines splits a renderListenersPane result into its physical
+// lines and asserts the box-well-formedness invariant every caller below
+// needs: every line (top border, header, each data row, bottom border) is
+// the same visual width, and that width does not exceed budget when budget
+// is bounded (budget <= 0 means "unbounded" throughout this package, see
+// paneColumnWidths' own doc).
+func listenersBoxLines(t *testing.T, got string, budget int) []string {
+	t.Helper()
+	lines := strings.Split(got, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least a top border, one data row, and a bottom border; got:\n%s", got)
+	}
+	boxWidth := lipgloss.Width(lines[0])
+	if budget > 0 && boxWidth > budget {
+		t.Errorf("box width %d exceeds the %d-column terminal budget; got:\n%s", boxWidth, budget, got)
+	}
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w != boxWidth {
+			t.Errorf("line %d (%q) has width %d, want %d (every line of the box must align); got:\n%s", i, l, w, boxWidth, got)
+		}
+	}
+	return lines
+}
+
+// TestRenderListenersPane_MarkerRowStaysWithinWidthBudget is pg2-clgbb's
+// own acceptance bar: a Listeners row carrying an unmatched-binding marker
+// (unmatchedRowMarker, pg2-7ezqt) must stay within the pane's own width
+// budget, with its right border intact and no real column data lost, even
+// when the marker's own natural (unclipped) width would not have fit.
+//
+// Before this fix, renderListenersPane appended the marker cell past
+// len(widths), which formatPaneRow renders unstyled and UNCLIPPED by
+// design (the ordinary case, where no such budget exists to blow) --
+// paneColumnWidths never accounted for that extra cell either, so a
+// marker row's rendered line could grow arbitrarily wide, uncapped by any
+// budget. paneFrame then sized the WHOLE box to that one overflowing
+// line, wider than the terminal, and the outer zone-ladder clip
+// (zones.go's concatZones) truncated every line of the box -- including
+// its own right border -- rather than just the marker.
+//
+// width=45 is deliberately narrower than this row's natural total width
+// (69 columns: the 3 declared Tiny columns, their separators, the box's
+// own border overhead, and the marker's full, unclipped text) -- proven
+// below via the width=0 (unbounded) sibling case, which renders the exact
+// same row with the marker's full text and a wider box.
+func TestRenderListenersPane_MarkerRowStaysWithinWidthBudget(t *testing.T) {
+	theme := render.NewTheme(false)
+	listeners := []Listener{
+		{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}, Delivered: 3},
+		{Role: "triager", Enabled: true, Binds: []string{"bead.new"}, Delivered: 5},
+	}
+
+	const width = 45
+	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", []string{"pr.new"})
+	lines := listenersBoxLines(t, got, width)
+
+	// The right border ("│") must survive on every content line -- every
+	// line but the top/bottom borders, which end in "┐"/"┘" instead.
+	for i, l := range lines[1 : len(lines)-1] {
+		if !strings.HasSuffix(l, "│") {
+			t.Errorf("content line %d (%q) lost its right border", i+1, l)
+		}
+	}
+
+	// Real column data (ROLE/DLVD, both rows) must survive -- only the
+	// marker, never a declared column, may be clipped.
+	for _, want := range []string{"reviewer", "triager", "3", "5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("real column data %q lost; got:\n%s", want, got)
+		}
+	}
+
+	// Confirm the marker itself was actually clipped (not silently
+	// dropped, and not left at its full natural width) -- an ellipsis
+	// present but the full marker phrase absent.
+	if !strings.Contains(got, "…") {
+		t.Errorf("expected the overflowing marker to be ellipsis-truncated; got:\n%s", got)
+	}
+	if strings.Contains(got, "not seen yet this run") {
+		t.Errorf("expected the marker's full text to be clipped away at width=%d, not shown in full; got:\n%s", width, got)
+	}
+
+	// Sibling case at the SAME rows/tier with no width budget: the marker
+	// renders in full and the box is correspondingly wider -- proving
+	// width=45 above was genuinely narrower than this row's natural width,
+	// not just a case where there was never anything to clip.
+	unbounded := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", []string{"pr.new"})
+	if !strings.Contains(unbounded, "not seen yet this run") {
+		t.Fatalf("unbounded sibling should render the marker's full text; got:\n%s", unbounded)
+	}
+	unboundedLines := listenersBoxLines(t, unbounded, 0)
+	if lipgloss.Width(unboundedLines[0]) <= width {
+		t.Fatalf("unbounded sibling's box (width %d) should be wider than the %d-column budget above -- otherwise width=%d never genuinely constrained anything", lipgloss.Width(unboundedLines[0]), width, width)
+	}
+}
+
+// TestRenderListenersPane_NoMarkerRowsUnaffectedAtSameConstrainedWidth is
+// this fix's own regression check (pg2-clgbb's third acceptance
+// criterion): the SAME constrained width, with no unmatched-binding
+// marker present at all, must keep rendering exactly as it always did --
+// an intact right border, every real column value present, and no
+// change to normal-row rendering from this fix.
+func TestRenderListenersPane_NoMarkerRowsUnaffectedAtSameConstrainedWidth(t *testing.T) {
+	theme := render.NewTheme(false)
+	listeners := []Listener{
+		{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}, Delivered: 3},
+		{Role: "triager", Enabled: true, Binds: []string{"bead.new"}, Delivered: 5},
+	}
+
+	const width = 45
+	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", nil)
+	lines := listenersBoxLines(t, got, width)
+
+	for i, l := range lines[1 : len(lines)-1] {
+		if !strings.HasSuffix(l, "│") {
+			t.Errorf("content line %d (%q) lost its right border", i+1, l)
+		}
+	}
+	for _, want := range []string{"reviewer", "triager", "3", "5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("real column data %q lost; got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "not seen yet this run") {
+		t.Errorf("no unmatchedBindings were supplied; expected no marker anywhere; got:\n%s", got)
+	}
+}
+
 // TestListener_DeclinedBucketed_KnownReasons is Task 2's own red-first
 // test: the two known DeclineReason strings ("busy"/"unavailable") bucket
 // into their own named return values.
