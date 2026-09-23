@@ -45,6 +45,7 @@ not silently assumed settled.
 | D-F6 | `focus_selection` and `focus_period` (§5) use an internal surrogate primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) with a `UNIQUE` constraint carrying the natural key, diverging deliberately from every existing pg-desk table (`entity`/`interpretation`/`xref`/`annotation`/`ledger`), which all use a composite natural-column primary key with no surrogate. `focus_selection` references `focus_period` by its surrogate `id` (a real foreign key, not a repeated `period_type`/`period_key` pair) and references `entity` by its own composite key (`repo, entity_type, entity_id`) — `entity` already is the table that establishes an `(entity_type, entity_id)` pair is valid, so `focus_selection` gets that validation from a real foreign key rather than untyped text columns. |
 | D-F7 | Epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence; flagged for revisit, §11.**                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D-F8 | `schema.Issue` gains an `Owner` field (bd's `owner` key — the responsible human), mapped in `pg-connector-issue-beads`'s backend the same way `Assignee`/`Parent` were added by `pg2-akfw5`. `Owner` is distinct from the existing `Assignee` field, which carries bd's claim/actor identity, not ownership — verified live against this workspace's own `bd show`/`bd list --json` output, which return both `owner` and `assignee` as separate keys.                                                                                                                                                                                                                                                                                                                                              |
+| D-F9 | There is no separate `focus split` verb. `pg-desk focus show` resolves each already-selected row's associated bead and current status unconditionally, folded into its existing per-item output — this is not a new live-lookup cost for any candidate type (an epic's status is already in its own gathered `entity` row; a PR anchor's closure is already inferred by pg-desk's own sync step; a Jira-sourced item's minted/correlated bd task is already kept fresh by the `issue-beads-bulk` feed, §4, gathered for epic-child detection but incidentally covering this too). `close.md`'s survey step becomes a `focus show` call, not a dedicated verb.                                                                                                                                       |
 
 ## 3. Architecture overview
 
@@ -66,30 +67,32 @@ flowchart LR
     F2 --> E
     F3 --> E
     F4 --> E
-    E -->|"focus rank: live interpret,\nno caching"| SHOW["pg-desk focus show"]
+    E -->|"focus rank: live interpret,\nno caching"| SHOW["pg-desk focus show\n(resolves bead+status for\nalready-selected rows too)"]
+    FS -.->|"cross-reference:\nwhich rows are selected"| SHOW
+    L -.->|"resolve selected row\n-> bead id"| SHOW
     SHOW -->|"operator gate reply:\nok / -key / +key / cap=N"| SELECT["pg-desk focus select --apply"]
     SELECT --> FS
     SELECT -->|"mint only if agent work\nneeded; no wiring"| L
-    FS --> SPLIT["pg-desk focus split"]
-    SPLIT --> FP
+    SHOW -->|"resolved status +\nper-bead notes"| CLOSE["pg-desk focus close"]
+    CLOSE --> FP
 ```
 
 ### Retirement map
 
-| Component                   | Fate                                  | Replaced by                                                               |
-| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------- |
-| `df-survey` (shallow)       | Retires                               | Live read of `entity`/`interpretation` rows (§6)                          |
-| `df-survey` (gate-apply)    | Retires                               | `pg-desk focus select --apply` (§7.2)                                     |
-| `df-survey` (deep)          | Retires                               | Not needed — `focus show`/`select` are always live, no separate deep pass |
-| `df-deferred`               | Retires                               | `focus_selection` absence = deferred (D-F3)                               |
-| `df-wire`                   | Retires (logic shrinks into sync, §8) | Mint-only-if-needed in `focus select --apply`                             |
-| `df-pull`                   | Retires                               | `pg-desk focus pull` (§7.3)                                               |
-| `df-resolve-focus`          | Retires                               | `pg-desk focus show`/existence check via `period_key`                     |
-| `df-find-pr-bead`           | Retires                               | `ledger` lookup (already exists)                                          |
-| `df-split-blockers`         | Retires                               | `pg-desk focus split` (§7.4)                                              |
-| `df-verify-wiring`          | Retires                               | Not needed — nothing is wired (§8)                                        |
-| `df-close-focus`            | Retires                               | `pg-desk focus close` (§7.5) — including its per-bead progress notes      |
-| `df-attention`, `df-search` | Unchanged                             | n/a — unrelated (pure `pg-connector` clients already)                     |
+| Component                   | Fate                                  | Replaced by                                                                |
+| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------- |
+| `df-survey` (shallow)       | Retires                               | Live read of `entity`/`interpretation` rows (§6)                           |
+| `df-survey` (gate-apply)    | Retires                               | `pg-desk focus select --apply` (§7.2)                                      |
+| `df-survey` (deep)          | Retires                               | Not needed — `focus show`/`select` are always live, no separate deep pass  |
+| `df-deferred`               | Retires                               | `focus_selection` absence = deferred (D-F3)                                |
+| `df-wire`                   | Retires (logic shrinks into sync, §8) | Mint-only-if-needed in `focus select --apply`                              |
+| `df-pull`                   | Retires                               | `pg-desk focus pull` (§7.3)                                                |
+| `df-resolve-focus`          | Retires                               | `pg-desk focus show`/existence check via `period_key`                      |
+| `df-find-pr-bead`           | Retires                               | `ledger` lookup (already exists)                                           |
+| `df-split-blockers`         | Retires                               | `pg-desk focus show`'s resolved bead+status for selected rows (§7.1, D-F9) |
+| `df-verify-wiring`          | Retires                               | Not needed — nothing is wired (§8)                                         |
+| `df-close-focus`            | Retires                               | `pg-desk focus close` (§7.4) — including its per-bead progress notes       |
+| `df-attention`, `df-search` | Unchanged                             | n/a — unrelated (pure `pg-connector` clients already)                      |
 
 ## 4. Gather
 
@@ -149,7 +152,7 @@ selection can never name an entity pg-desk never actually gathered. Both foreign
 genuinely enforced: pg-desk's store already opens every connection with `_pragma=foreign_keys(ON)`
 (`internal/store/store.go`), so this isn't a documentation-only intent.
 
-Consequence: `focus_period` is no longer written only by `focus close` (§7.5). Every verb that
+Consequence: `focus_period` is no longer written only by `focus close` (§7.4). Every verb that
 writes a selection (`focus select --apply`, `focus pull`) must first get-or-create the
 `focus_period` row for `(period_type, period_key)` — `closed_at`/`close_note` left `NULL` on
 creation — so it has an `id` to insert `focus_selection` rows against. `focus close` becomes the
@@ -226,6 +229,18 @@ browse — and, longer-term, pg-desk's existing `serve` dashboard (parent design
 natural place to surface `focus_selection` alongside the PR panels it already renders, though
 that wiring is not designed here.
 
+**Resolved status for already-selected rows (D-F9, replaces `df-split-blockers`/`focus split`).**
+For every row already in `focus_selection` for the period, `show` additionally resolves it to a
+bead and reports that bead's current status, unconditionally — no separate verb, no flag, and no
+new live-lookup cost: an epic's status is already sitting in its own gathered `entity` row (the
+entity id already is the bead id); a PR anchor's closure is already inferred by pg-desk's own
+sync step from the PR's own entity state; a Jira-sourced item's minted or correlated bd task rides
+along in the `issue-beads-bulk` feed (§4) — gathered for epic-child detection, but it sweeps up
+every open/in_progress bead, including a focus-minted one, for free. `close.md`'s survey step
+(today's `df-split-blockers`) becomes a plain `focus show` call, grouping the resolved rows into
+whatever buckets it needs (its own per-item "real progress" judgment, §9, already operates at a
+finer grain than closed/carried-over anyway).
+
 ### 7.2 `pg-desk focus select --date YYYY-MM-DD --apply [--merge <keepKey>=<absorbedKey>,...]` (reply on stdin)
 
 1. Recompute the candidate table live (identical to `show`) and **print it** — this is what the
@@ -301,16 +316,7 @@ Exit `0` done (including "nothing left to pull"); `2` usage; `3` a tool call fai
 has `closed_at` set) — terminal, matching today's df-pull's "pulling into a closed day is always
 wrong."
 
-### 7.4 `pg-desk focus split --date YYYY-MM-DD`
-
-For each `focus_selection` row: resolve to a bead (epic → itself; PR/Jira → `ledger` lookup, or
-the existing correlation match if adopted instead of minted), classify by that bead's current
-status (`closed` → `closed` bucket; anything else → `carried-over`), return
-`{"closed": [...], "carried-over": [...]}` — the exact shape `df-split-blockers` returns today.
-Exit `0` ok (including an empty `focus_selection` — "nothing was selected" is not an error); `3` a
-bead resolution/lookup failed.
-
-### 7.5 `pg-desk focus close --date YYYY-MM-DD --notes-file FILE [--note TEXT] [--dry-run]`
+### 7.4 `pg-desk focus close --date YYYY-MM-DD --notes-file FILE [--note TEXT] [--dry-run]`
 
 Writes `closed_at`/`close_note` onto the `focus_period` row (creating it if absent) — the
 `close_note` is where today's day-summary-onto-the-focus-bead text goes, since there is no more
@@ -320,11 +326,11 @@ bead**, closed or carried over (`df-close-focus.sh`'s own `--notes-file`, one JS
 bead), which is real, currently-used behavior for carrying context onto individual beads across
 sessions — not a bead-artifact concern the retiring focus bead itself created. `focus close`
 therefore also takes `--notes-file FILE` (same JSONL shape: one `{"id", "note"}` line per
-resolved bead from `focus split`'s output) and appends each note via `pg-connector issue comment`
-before writing `focus_period`. Fails fast on the first append failure, same as today's script (no
-rollback of notes already appended). Exit `0` closed; `2` usage (missing `--notes-file` when
-`focus split` returned at least one resolved bead); `6` already closed (idempotent no-op,
-reported); `3` a note append or store write failed.
+resolved bead from `focus show`'s resolved-status output, D-F9) and appends each note via
+`pg-connector issue comment` before writing `focus_period`. Fails fast on the first append
+failure, same as today's script (no rollback of notes already appended). Exit `0` closed; `2`
+usage (missing `--notes-file` when `focus show` resolved at least one selected row to a bead);
+`6` already closed (idempotent no-op, reported); `3` a note append or store write failed.
 
 ## 8. Sync
 
@@ -344,12 +350,14 @@ recur — not handled, structurally absent.
 | `create.md` deep/mint/wire        | `df-survey --deep` → LLM drop/merge → `df-wire`                                                                                    | `-<key>` covers "drop"; `--merge <key>=<key>` on `focus select` (§7.2 step 3) covers "merge"; folded into step 7.2                                                                                                                                                        |
 | `pull.md`                         | invokes `df-pull` verbatim, including its exit-`5` multi-candidate branch                                                          | invokes `pg-desk focus pull` verbatim — **not** the same exit codes: `focus pull` has no exit `5`, for the same reason `close.md` resolve (below) loses its multi-candidate case. `pull.md`'s own exit-5 handling prose is dead and should be removed, not left in place. |
 | `close.md` resolve                | `df-resolve-focus <date>`, exit-5 multi-candidate handling                                                                         | `pg-desk focus show --date X` existence check — no multi-candidate case exists (`period_key` is the date, exactly; the ambiguity class retires with it)                                                                                                                   |
-| `close.md` survey                 | `df-split-blockers <focus-id>`                                                                                                     | `pg-desk focus split --date X` — identical `{closed, carried-over}` shape                                                                                                                                                                                                 |
-| `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `pg-desk focus close --date X --notes-file FILE [--note TEXT]` (§7.5) — same per-bead notes, day summary now in `close_note`, no bead closed                                                                                                                              |
+| `close.md` survey                 | `df-split-blockers <focus-id>`                                                                                                     | `pg-desk focus show --date X` — resolved bead+status for each selected row (D-F9), grouped by `close.md` itself                                                                                                                                                           |
+| `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `pg-desk focus close --date X --notes-file FILE [--note TEXT]` (§7.4) — same per-bead notes, day summary now in `close_note`, no bead closed                                                                                                                              |
 
 `close.md` steps 3-5 (summarize, judge real progress, Jira comment gate) are unaffected — they
-consume the `{closed, carried-over}` item list either way and still produce the same
-`--notes-file`/`--summary-file` inputs step 6 (now `focus close`) consumes.
+consume the resolved item list either way (grouping it into closed/carried-over, or whatever
+grouping it needs, is now `close.md`'s own job rather than a dedicated verb's output shape) and
+still produce the same `--notes-file`/`--summary-file` inputs step 6 (now `focus close`)
+consumes.
 
 ## 10. Retirement, testing, and validation
 
@@ -357,10 +365,11 @@ consume the `{closed, carried-over}` item list either way and still produce the 
 `df-survey`, `df-deferred`, `df-wire`, `df-verify-wiring` (a step inside `df-wire`, but its own
 top-level script/nix-module/bats-test entry — easy to miss if this list is read as exhaustive
 without checking `modules/daily-focus/` directly), `df-pull`, `df-resolve-focus`,
-`df-find-pr-bead`, `df-split-blockers`, `df-close-focus` (folds into `focus close`, §7.5).
+`df-find-pr-bead`, `df-split-blockers`, `df-close-focus` (folds into `focus close`, §7.4).
 Unchanged: `df-attention`, `df-search`.
 
-**Testing moves with the logic.** Ranking, cap/select/pull/split semantics, and mint-only-if-
+**Testing moves with the logic.** Ranking, cap/select/pull semantics, `show`'s resolved-status
+join (D-F9), and mint-only-if-
 needed all become pg-desk Go code (a new `internal/focus` package plus `cmd/pg-desk/focus*.go`),
 so their tests become Go tests against pg-desk's existing fixture conventions — a genuine rewrite
 of `df-survey`'s bats-tested ranking/gate-apply suites, not a file move. What remains bash/bats in
@@ -382,8 +391,8 @@ both live, not just a clean flake check.
 - `epics-mine` and `issue-beads-bulk` are each run live at least once (`pg-router run-query` or
   equivalent) with a confirmed non-trivial outcome — real `entity` rows landing — not just a clean
   `nix flake check`.
-- A full `select --apply` → `pull` → `split` → `close` cycle runs end-to-end against the live
-  tracker for one real day.
+- A full `select --apply` → `pull` → `show` (resolved status) → `close` cycle runs end-to-end
+  against the live tracker for one real day.
 - `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
   without modification.
 
@@ -413,3 +422,8 @@ both live, not just a clean flake check.
   active-or-recently-closed-child, in one call) — not rejected outright, deferred: the simpler
   recorded-narrowing path (D-F7) ships without new backend code; this is the documented fallback
   if D-F7 doesn't hold up on review (§12).
+- **A separate `focus split` verb** (an earlier draft of this design, matching `df-split-blockers`
+  1:1) — rejected; the bead-resolution it performed is real and needed, but bucketing it into
+  `closed`/`carried-over` was a shape carried over from the retiring script rather than something
+  any consumer actually required, and the lookup itself was initially assumed to be an expensive
+  live call before checking — it isn't (D-F9). Folded into `focus show` instead.
