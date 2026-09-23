@@ -201,6 +201,14 @@ const (
 	paneCount
 )
 
+// paneActivity is not a real config-derived pane -- Activity is its own
+// always-present zone in renderMain, never focusable and never cycled by
+// stepFocus (paneCount above stays 3) -- but giving it a value lets
+// unfocusedPaneDropOrder rank Activity's drop priority uniformly alongside
+// the three real panes rather than via a hardcoded dropOrder literal at the
+// activity zone's own call site (this task's two-tier redesign).
+const paneActivity = -1
+
 // NewModel constructs a Model in its pre-first-poll state (screenLoading).
 // theme is resolved by the caller: Run detects it against the real output;
 // a test may hand in any render.Theme directly.
@@ -391,12 +399,14 @@ func (m *Model) View() string {
 }
 
 // renderMain composes screenMain's full pinned zone ladder: the top zone
-// (header or PAUSED banner), the droppable attention/poll-error zones, the
-// full-width Activity row, the three Listeners/Queues/Sources panes (one
-// of them the fill zone, per m.focusedPane), and the pinned footer -- all
-// through layoutZones, so the SAME drop-order/pinned rules zones_test.go
-// exercises directly also govern the real screen [design: Task 4.6 Step 8;
-// Task 4.6 Interfaces].
+// (header or PAUSED banner), the droppable attention/poll-error zones, a
+// static tier (Listeners, Sources -- one of them the fill zone, per
+// m.focusedPane) that never changes position or size as the dynamic tier
+// below it changes, a dynamic tier (Queues, then the full-width Activity
+// row) that changes every poll, and the pinned footer -- all through
+// layoutZones, so the SAME drop-order/pinned rules zones_test.go exercises
+// directly also govern the real screen [design: Task 4: Two-tier layout
+// (static above dynamic), Interfaces; Task 4.6 Interfaces].
 func (m *Model) renderMain() string {
 	now := time.Now()
 	gated := anyGateSet(m.reply.Gates)
@@ -419,13 +429,10 @@ func (m *Model) renderMain() string {
 	if p := pollErrorZone(m.pollErrFlagged, m.lastErr, m.theme); p != "" {
 		zones = append(zones, zoneSpec{name: "poll-error", content: p, dropOrder: 2})
 	}
-	zones = append(zones, zoneSpec{
-		name:      "activity",
-		content:   m.renderActivityZoneContent(gated),
-		dropOrder: 3,
-	})
 
-	for _, p := range []int{paneListeners, paneQueues, paneSources} {
+	// Static tier: Listeners, Sources -- fixed membership for the run, never
+	// reordered/resized by the dynamic tier below (this task).
+	for _, p := range []int{paneListeners, paneSources} {
 		content := m.renderPaneContent(p, gated, now)
 		if p == m.focusedPane {
 			zones = append(zones, zoneSpec{
@@ -437,6 +444,26 @@ func (m *Model) renderMain() string {
 		}
 		zones = append(zones, zoneSpec{name: paneName(p), content: content, dropOrder: unfocusedPaneDropOrder(p)})
 	}
+
+	// Dynamic tier: Queues, then Activity -- both change every poll.
+	{
+		p := paneQueues
+		content := m.renderPaneContent(p, gated, now)
+		if p == m.focusedPane {
+			zones = append(zones, zoneSpec{
+				name:       paneName(p),
+				fill:       true,
+				renderFill: func(int) string { return content },
+			})
+		} else {
+			zones = append(zones, zoneSpec{name: paneName(p), content: content, dropOrder: unfocusedPaneDropOrder(p)})
+		}
+	}
+	zones = append(zones, zoneSpec{
+		name:      "activity",
+		content:   m.renderActivityZoneContent(gated),
+		dropOrder: unfocusedPaneDropOrder(paneActivity),
+	})
 
 	zones = append(zones, zoneSpec{name: "footer", content: footer, pinned: true})
 
@@ -514,20 +541,19 @@ func paneTitle(p int) string {
 	}
 }
 
-// unfocusedPaneDropOrder gives the zone ladder's "Unfocused panes | 4-5"
-// range a concrete, deterministic split: Queues (typically the
-// emptiest/least critical pane) drops first; Listeners/Sources drop last.
-// A disambiguation this packet is free to make -- the design names two
-// priority buckets without saying which pane occupies which [design: Task
-// 4.6 Interfaces (zone ladder table)]. This packet's sibling packet for
-// "Task 4: Two-tier layout" rewrites this function's body anyway (this
-// docket's planned ordering); left as the sole non-default case for now.
+// unfocusedPaneDropOrder ranks every non-focused pane's drop priority under
+// height pressure (this task's two-tier redesign): Activity drops first
+// (1), then Queues (2); Listeners/Sources -- the static tier -- never drop
+// before both dynamic-tier panes are already gone (3) [design: Task 4:
+// Two-tier layout (static above dynamic), Step 3].
 func unfocusedPaneDropOrder(p int) int {
 	switch p {
+	case paneActivity:
+		return 1
 	case paneQueues:
-		return 4
+		return 2
 	default:
-		return 5
+		return 3
 	}
 }
 

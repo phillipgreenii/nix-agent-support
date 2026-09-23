@@ -317,3 +317,97 @@ func TestRun_NonTerminalOutputFailsFastOnThemeDetection(t *testing.T) {
 		t.Errorf("Run error = %v, want it to name the NoTTY profile (render.Detect's own error)", err)
 	}
 }
+
+// lineContaining returns the index of the first line of s containing sub,
+// or -1 if no line does [design: Task 4: Two-tier layout (static above
+// dynamic), Binding decisions].
+func lineContaining(s, sub string) int {
+	for i, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestRenderMain_StaticTierPositionUnaffectedByActivitySize is this
+// packet's own red-first test [design: Task 4: Two-tier layout (static
+// above dynamic), Step 1]: the static tier (Listeners, Sources) sits above
+// the dynamic tier (Queues, Activity) in renderMain's zone list, so
+// growing the Activity pane's content never moves the Listeners line.
+// Focus is pinned to Sources (rather than left at the zero-value
+// paneListeners) so Listeners renders as an ordinary dropOrder-based zone
+// with real content, not the one FILL zone whose content a headless
+// (m.height == 0) render would otherwise omit entirely.
+func TestRenderMain_StaticTierPositionUnaffectedByActivitySize(t *testing.T) {
+	base := func(activityEntries int) *Model {
+		m := newTestModel(nil)
+		m.focusedPane = paneSources
+		activity := make([]ActivityEntry, activityEntries)
+		for i := range activity {
+			activity[i] = ActivityEntry{Seq: uint64(i), Type: "x", Outcome: "delivered"}
+		}
+		m.reply = StatusReply{
+			Listeners: []Listener{{Role: "df-feedback"}},
+			Sources:   []Source{{Name: "pr-sweep"}},
+			Activity:  activity,
+		}
+		return m
+	}
+
+	small := base(1).renderMain()
+	large := base(20).renderMain()
+
+	listenersLineSmall := lineContaining(small, "Listeners")
+	listenersLineLarge := lineContaining(large, "Listeners")
+	if listenersLineSmall < 0 {
+		t.Fatalf("Listeners pane not found in small-activity render:\n%s", small)
+	}
+	if listenersLineSmall != listenersLineLarge {
+		t.Fatalf("Listeners pane moved from line %d to %d as Activity grew", listenersLineSmall, listenersLineLarge)
+	}
+}
+
+// TestUnfocusedPaneDropOrder_StaticTierNeverDropsBeforeDynamicTier is a
+// direct unit test on the pure ordering function, rather than driving
+// layoutZones through an actual height-constrained render -- Review Focus:
+// under height pressure, Activity and Queues must be fully gone before
+// Listeners or Sources drops even one row [design: Task 4: Two-tier layout
+// (static above dynamic), Step 1].
+func TestUnfocusedPaneDropOrder_StaticTierNeverDropsBeforeDynamicTier(t *testing.T) {
+	if unfocusedPaneDropOrder(paneActivity) >= unfocusedPaneDropOrder(paneQueues) {
+		t.Fatalf("Activity (%d) must drop before Queues (%d)", unfocusedPaneDropOrder(paneActivity), unfocusedPaneDropOrder(paneQueues))
+	}
+	if unfocusedPaneDropOrder(paneQueues) >= unfocusedPaneDropOrder(paneListeners) {
+		t.Fatalf("Queues (%d) must drop before Listeners (%d)", unfocusedPaneDropOrder(paneQueues), unfocusedPaneDropOrder(paneListeners))
+	}
+	if unfocusedPaneDropOrder(paneQueues) >= unfocusedPaneDropOrder(paneSources) {
+		t.Fatalf("Queues (%d) must drop before Sources (%d)", unfocusedPaneDropOrder(paneQueues), unfocusedPaneDropOrder(paneSources))
+	}
+}
+
+// TestRenderMain_ExtremeHeightPressureDropsDynamicTierBeforeStatic drives
+// the REAL layoutZones algorithm through renderMain (not just the pure
+// ordering function above) at a deliberately short m.height, closing the
+// gap an earlier plan review found: the pure-function test alone cannot
+// catch a bug in layoutZones' own height-budget logic [design: Task 4:
+// Two-tier layout (static above dynamic), Step 1; Review Focus].
+func TestRenderMain_ExtremeHeightPressureDropsDynamicTierBeforeStatic(t *testing.T) {
+	m := newTestModel(nil)
+	m.reply = StatusReply{
+		Listeners: []Listener{{Role: "df-feedback"}},
+		Sources:   []Source{{Name: "pr-sweep"}},
+		Queues:    []Queue{{Type: "pr.changed", Depth: 1}},
+		Activity:  []ActivityEntry{{Seq: 1, Type: "x"}},
+	}
+	m.height = 6 // deliberately too short for every zone to fit
+
+	out := m.renderMain()
+
+	if !strings.Contains(out, "Listeners") {
+		t.Fatalf("static tier (Listeners) must survive extreme height pressure, got:\n%s", out)
+	}
+	if strings.Contains(out, "Activity") && strings.Contains(out, "Queues") {
+		t.Fatalf("expected at least one dynamic-tier pane already dropped before the static tier would ever drop, got:\n%s", out)
+	}
+}
