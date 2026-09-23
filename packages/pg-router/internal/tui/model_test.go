@@ -257,6 +257,89 @@ func TestApplyPollResult_AdvancesSinceCursorFromLastActivitySeq(t *testing.T) {
 	}
 }
 
+// TestActivityBuffer_EntryPersistsDimmedAcrossAPollWithNoNewActivity is
+// this bead's (pg2-gafbd) own headline acceptance test: it drives two real
+// poll cycles through Update -- the first delivering a brand-new Activity
+// entry, the second delivering none (exactly what the ring returns once
+// sinceCursor has advanced past that entry's Seq) -- and asserts the
+// cycle-1 entry is STILL present, and rendered dimmed, after cycle 2. This
+// is the exact "flashes for one poll cycle then disappears" bug the bead
+// describes: before this bead's fix, applyPollResult's wholesale
+// m.reply = reply replacement meant the second cycle's near-empty Activity
+// silently erased the entry from view.
+func TestActivityBuffer_EntryPersistsDimmedAcrossAPollWithNoNewActivity(t *testing.T) {
+	forceColorProfile(t)           // see its own doc (panes_test.go): needed to make dimming actually observable
+	theme := render.NewTheme(true) // color: styling actually applies, needed to assert dimming
+	m := NewModel(Options{}, theme)
+	m.screen = screenMain
+
+	// Cycle 1: a new entry arrives.
+	cycle1 := StatusReply{
+		Core:     CoreInfo{State: coreStateStarted},
+		Activity: []ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "produce"}},
+	}
+	updated, _ := m.Update(pollResultMsg{reply: cycle1})
+	m = updated.(*Model)
+
+	out1 := m.renderActivityZoneContent(false)
+	if !strings.Contains(out1, "produce") {
+		t.Fatalf("cycle 1: entry missing from render:\n%s", out1)
+	}
+	plainLine := fmt.Sprintf("%-10s %-10s", formatCoarse(0)+" ago", "produce")
+	if strings.Contains(out1, theme.Muted.Render(plainLine)) {
+		t.Fatalf("cycle 1: brand-new entry must render fresh (undimmed), got:\n%s", out1)
+	}
+
+	// Cycle 2: no new activity -- the ring returns nothing new since
+	// sinceCursor has already advanced past Seq 1 (advanceSinceCursor's own
+	// contract).
+	cycle2 := StatusReply{Core: CoreInfo{State: coreStateStarted}}
+	updated, _ = m.Update(pollResultMsg{reply: cycle2})
+	m = updated.(*Model)
+
+	out2 := m.renderActivityZoneContent(false)
+	if !strings.Contains(out2, "produce") {
+		t.Fatalf("cycle-1 entry disappeared after a poll with no new activity -- want it still present:\n%s", out2)
+	}
+	if !strings.Contains(out2, theme.Muted.Render(plainLine)) {
+		t.Fatalf("cycle-1 entry must render DIMMED once stale (a poll cycle passed with no new activity), got:\n%s", out2)
+	}
+}
+
+// TestActivityBuffer_RetainsAtLeastMinDisplayAcrossMultipleEmptyPollCycles
+// is this bead's (pg2-gafbd) own acceptance criterion 1, driven further
+// than the required two-cycle test: activityMinDisplay (5) entries all
+// arrive in one poll, then activityMinDisplay-1 further polls each bring
+// nothing new -- every one of the original 5 entries must still be present
+// (dimmed) at the end, never evicted just because cycles passed with no
+// new activity (only activityBufferCap being exceeded by NEWER entries may
+// evict one, which never happens here).
+func TestActivityBuffer_RetainsAtLeastMinDisplayAcrossMultipleEmptyPollCycles(t *testing.T) {
+	forceColorProfile(t)
+	theme := render.NewTheme(true)
+	m := NewModel(Options{}, theme)
+	m.screen = screenMain
+
+	entries := make([]ActivityEntry, activityMinDisplay)
+	for i := range entries {
+		entries[i] = ActivityEntry{Seq: uint64(i + 1), StartedAt: time.Now(), Type: fmt.Sprintf("entry-%d", i)}
+	}
+	updated, _ := m.Update(pollResultMsg{reply: StatusReply{Core: CoreInfo{State: coreStateStarted}, Activity: entries}})
+	m = updated.(*Model)
+
+	for cycle := 1; cycle < activityMinDisplay; cycle++ {
+		updated, _ = m.Update(pollResultMsg{reply: StatusReply{Core: CoreInfo{State: coreStateStarted}}})
+		m = updated.(*Model)
+	}
+
+	out := m.renderActivityZoneContent(false)
+	for i, e := range entries {
+		if !strings.Contains(out, e.Type) {
+			t.Errorf("entry %d (%s) missing after %d empty poll cycles, want it still present:\n%s", i, e.Type, activityMinDisplay-1, out)
+		}
+	}
+}
+
 // TestView_ScreenLoadingIsLiteralRegardlessOfWidth: Binding Decision (Step
 // 4) -- screenLoading's View is the literal "loading…" string no matter
 // what width is, reusing pa-monitor's own width=0 contract for the pre-

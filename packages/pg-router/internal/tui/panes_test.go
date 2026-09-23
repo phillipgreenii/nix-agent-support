@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -184,7 +185,7 @@ func TestRenderActivityPane_BudgetEscalationEntryCarriesTheStyledOutcome(t *test
 	theme := render.NewTheme(true)
 	entries := []ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "worker-ready", Outcome: "budget_escalation"}}
 
-	got := renderActivityPane(entries, false, "(none)", theme)
+	got := renderActivityPane(entries, false, "(none)", 0, theme)
 
 	if !strings.Contains(got, "worker-ready") {
 		t.Errorf("renderActivityPane lost the entry's Type; got:\n%s", got)
@@ -893,7 +894,7 @@ func TestRenderActivityPane_CapsToLastEightNewestFirst(t *testing.T) {
 	for i := range entries {
 		entries[i] = ActivityEntry{Seq: uint64(i), StartedAt: now.Add(time.Duration(i) * time.Second), Type: fmt.Sprintf("t%d", i)}
 	}
-	out := renderActivityPane(entries, false, "", render.Theme{})
+	out := renderActivityPane(entries, false, "", 0, render.Theme{})
 	if strings.Contains(out, "t0") || strings.Contains(out, "t3") {
 		t.Fatalf("expected the 4 oldest entries dropped, got:\n%s", out)
 	}
@@ -907,7 +908,7 @@ func TestRenderActivityPane_CapsToLastEightNewestFirst(t *testing.T) {
 // it has -- no panic, no padding with fake rows [design: Task 6, Step 1;
 // Review Focus].
 func TestRenderActivityPane_FewerThanCapDoesNotPanicOrPad(t *testing.T) {
-	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "x"}}, false, "", render.Theme{})
+	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "x"}}, false, "", 0, render.Theme{})
 	// paneFrame (panes.go) emits exactly one line per content row plus a
 	// top and bottom border line -- 1 activity entry means 3 total lines,
 	// i.e. 2 newline separators. Padding toward activityDisplayCap would
@@ -923,11 +924,80 @@ func TestRenderActivityPane_FewerThanCapDoesNotPanicOrPad(t *testing.T) {
 // ago), never an absolute HH:MM:SS string [design: Task 6, Step 1; Global
 // Constraints].
 func TestRenderActivityPane_RelativeTimestampNotAbsolute(t *testing.T) {
-	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now().Add(-5 * time.Second), Type: "x"}}, false, "", render.Theme{})
+	out := renderActivityPane([]ActivityEntry{{Seq: 1, StartedAt: time.Now().Add(-5 * time.Second), Type: "x"}}, false, "", 0, render.Theme{})
 	if strings.Contains(out, ":") {
 		t.Fatalf("expected a relative timestamp with no ':' (no HH:MM:SS), got:\n%s", out)
 	}
 	if !strings.Contains(out, "ago") {
 		t.Fatalf("expected a relative 'ago' timestamp, got:\n%s", out)
+	}
+}
+
+// forceColorProfile makes lipgloss's default renderer -- the one every
+// lipgloss.NewStyle() value (render.Theme's own styles included) renders
+// through -- actually emit ANSI codes for the duration of t, restoring
+// whatever profile was previously in effect on cleanup. Needed because
+// render/theme_test.go's and this file's OWN established convention of
+// comparing against theme.X.Render(...) directly (rather than a raw ANSI
+// string) is not enough on its own to distinguish "wrapped" from "plain"
+// output: under `go test`'s own default ambient detection (no real
+// terminal), lipgloss's default renderer resolves to termenv.Ascii, under
+// which Render() is the identity function for every style in this package
+// (no bold/underline/color survives either) -- so a dimmed line and a
+// plain line would render byte-identical and no test could tell them
+// apart. lipgloss.SetColorProfile exists, per its own doc, "mostly for
+// testing purposes" for exactly this reason.
+func forceColorProfile(t *testing.T) {
+	t.Helper()
+	orig := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(orig) })
+}
+
+// TestRenderActivityPane_DimsEntriesBelowFreshFloor is this bead's
+// (pg2-gafbd) unit-level acceptance bar for dimming: an entry whose Seq is
+// below freshFloor renders wrapped in theme.Muted (the same style
+// dimIfPaused already uses -- see renderActivityPane's own doc for why a
+// per-line wrap is used here instead), while an entry at or above
+// freshFloor renders completely plain. Compared against
+// theme.Muted.Render(...) directly, matching this file's own established
+// convention (TestRenderActivityOutcome_BudgetEscalationStylesDistinctlyFromOtherOutcomes).
+func TestRenderActivityPane_DimsEntriesBelowFreshFloor(t *testing.T) {
+	forceColorProfile(t)
+	theme := render.NewTheme(true) // color: styling actually applies
+	entries := []ActivityEntry{
+		{Seq: 1, StartedAt: time.Now(), Type: "stale-one"},
+		{Seq: 2, StartedAt: time.Now(), Type: "fresh-one"},
+	}
+
+	out := renderActivityPane(entries, false, "", 2, theme)
+
+	staleLine := fmt.Sprintf("%-10s %-10s", formatCoarse(0)+" ago", "stale-one")
+	if !strings.Contains(out, theme.Muted.Render(staleLine)) {
+		t.Errorf("renderActivityPane did not dim the below-freshFloor entry; got:\n%s", out)
+	}
+	freshLine := fmt.Sprintf("%-10s %-10s", formatCoarse(0)+" ago", "fresh-one")
+	if !strings.Contains(out, freshLine) || strings.Contains(out, theme.Muted.Render(freshLine)) {
+		t.Errorf("renderActivityPane must render the at/above-freshFloor entry plain (undimmed); got:\n%s", out)
+	}
+}
+
+// TestRenderActivityPane_ZeroFreshFloorDimsNothing confirms the
+// freshFloor==0 default (a caller with no prior poll to compare against,
+// e.g. a direct m.reply assignment bypassing applyPollResult) renders every
+// entry plain -- no real Seq is ever < 1, so 0 must never dim anything.
+func TestRenderActivityPane_ZeroFreshFloorDimsNothing(t *testing.T) {
+	forceColorProfile(t)
+	theme := render.NewTheme(true)
+	entries := []ActivityEntry{{Seq: 1, StartedAt: time.Now(), Type: "x"}}
+
+	out := renderActivityPane(entries, false, "", 0, theme)
+
+	line := fmt.Sprintf("%-10s %-10s", formatCoarse(0)+" ago", "x")
+	if strings.Contains(out, theme.Muted.Render(line)) {
+		t.Errorf("freshFloor=0 must never dim; got:\n%s", out)
+	}
+	if !strings.Contains(out, line) {
+		t.Errorf("expected the plain entry line present; got:\n%s", out)
 	}
 }

@@ -467,6 +467,28 @@ const outcomeBudgetEscalation = "budget_escalation"
 // rendered (pg2-mnf7t.6) -- a Go constant, not configurable, for phase 1.
 const activityDisplayCap = 8
 
+// activityMinDisplay is the minimum number of Activity entries the pane
+// keeps showing (dimmed once stale) even after a poll cycle brings no new
+// activity (bead pg2-gafbd, operator: "keep at least X items (start with
+// 5)") -- named alongside activityDisplayCap per that bead's own fix
+// design. Model.activityBuffer (model.go) is the mechanism that actually
+// keeps entries around across polls; this constant, together with
+// activityBufferCap below, is what guarantees the buffer never shrinks
+// below this floor while it has that many entries to offer.
+const activityMinDisplay = 5
+
+// activityBufferCap bounds Model.activityBuffer's size (bead pg2-gafbd):
+// the buffer never needs to hold more than renderActivityPane could ever
+// display, so it is simply activityDisplayCap itself -- which the
+// compile-time array-length assertion just below pins at >= activityMinDisplay,
+// so that guarantee can never silently regress if either constant changes.
+const activityBufferCap = activityDisplayCap
+
+// Compile-time guarantee that activityBufferCap never regresses below
+// activityMinDisplay: an array with a negative constant length is a
+// compile error, not merely a failing test.
+var _ [activityBufferCap - activityMinDisplay]struct{}
+
 // renderActivityPane renders the full-width Activity row: at most
 // activityDisplayCap entries, newest-first per the ring's own Read order
 // reversed here so the newest entry renders first (matching the mockup's
@@ -476,12 +498,24 @@ const activityDisplayCap = 8
 // ring's own size [design: Task 6]. ActivityEntry (reply.go, Task 4.4)
 // carries only Seq/StartedAt/Type/Outcome -- no role/binding fields exist to
 // render the mockup's fuller line, so this renders exactly what the frozen
-// wire shape carries. theme (this bead) styles ONLY the budget_escalation
-// outcome distinctly from every other outcome in this same pane -- see
+// wire shape carries. theme styles ONLY the budget_escalation outcome
+// distinctly from every other outcome in this same pane -- see
 // renderActivityOutcome's own doc for why, and for how that reads distinctly
 // from the operator-pause gate's own rendering (banner.go's
 // renderPausedBanner).
-func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string, theme render.Theme) string {
+//
+// freshFloor (bead pg2-gafbd) is the lowest Seq considered still "new" --
+// Model.updateActivityBuffer's own doc explains how the caller derives it,
+// as the lowest Seq the immediately preceding poll itself contributed. Any
+// entry with Seq < freshFloor is dimmed via theme.Muted, the SAME style
+// dimIfPaused (empty_state.go) already uses for "this content is real but
+// not currently live" -- applied per-line here (rather than to the whole
+// pane, as dimIfPaused does) since a mix of fresh and stale entries can
+// legitimately render side by side in the same pane. freshFloor==0 (the
+// zero value) dims nothing -- every real Seq is >= 1 (activity.Ring.Append
+// starts at 1), so this is the correct "everything is fresh" default for a
+// caller with no prior poll to compare against.
+func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string, freshFloor uint64, theme render.Theme) string {
 	rows := make([]string, 0, activityDisplayCap+1)
 	if dropped {
 		rows = append(rows, "(older entries dropped -- ring capacity exceeded)")
@@ -497,6 +531,9 @@ func renderActivityPane(activity []ActivityEntry, dropped bool, emptyMsg string,
 		line := fmt.Sprintf("%-10s %-10s", ts, textsafe.Sanitize(a.Type))
 		if a.Outcome != "" {
 			line += " → " + renderActivityOutcome(a.Outcome, theme)
+		}
+		if a.Seq < freshFloor {
+			line = theme.Muted.Render(line)
 		}
 		rows = append(rows, line)
 		shown++

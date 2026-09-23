@@ -109,6 +109,22 @@ type Model struct {
 	// Interfaces).
 	sinceCursor uint64
 
+	// activityBuffer is the Activity pane's own rolling history (bead
+	// pg2-gafbd): updateActivityBuffer APPENDS each successful poll's new
+	// reply.Activity entries onto this slice -- deduped by Seq, trimmed to
+	// activityBufferCap (panes.go) -- instead of the pane reading
+	// m.reply.Activity directly, which is what let an entry flash for
+	// exactly one poll cycle before m.reply got wholesale-replaced out
+	// from under it. Oldest-first, matching reply.Activity's own
+	// convention.
+	activityBuffer []ActivityEntry
+	// activityFreshFloor is the lowest Seq the MOST RECENT successful poll
+	// itself contributed (updateActivityBuffer's own doc) --
+	// renderActivityPane dims any buffered entry whose Seq is below it.
+	// activityNoFreshEntries when that poll brought nothing new, so every
+	// buffered entry -- even one added just one cycle ago -- dims.
+	activityFreshFloor uint64
+
 	lastErr error
 	// pollErrFlagged is set by a poll failure that does NOT wrap
 	// core.ErrNoRunningCore -- the poll-error zone the sibling packet
@@ -334,6 +350,7 @@ func (m *Model) applyPollResult(reply StatusReply) {
 	m.lastErr = nil
 	m.pollErrFlagged = false
 	m.advanceSinceCursor(reply)
+	m.updateActivityBuffer(reply)
 	if m.screen == screenModal || m.screen == screenDrillDown {
 		return
 	}
@@ -352,6 +369,54 @@ func (m *Model) advanceSinceCursor(reply StatusReply) {
 	if n := len(reply.Activity); n > 0 {
 		m.sinceCursor = reply.Activity[n-1].Seq
 	}
+}
+
+// activityNoFreshEntries is m.activityFreshFloor's sentinel meaning "this
+// poll contributed nothing new" (bead pg2-gafbd): every buffered entry,
+// including one added by the immediately preceding poll, is stale as of
+// this render. The zero value cannot serve as that sentinel -- it instead
+// means "everything is fresh" (see renderActivityPane's own doc), since no
+// real Seq is ever < 1 (activity.Ring.Append starts at 1).
+const activityNoFreshEntries = ^uint64(0)
+
+// updateActivityBuffer is this bead's (pg2-gafbd) fix for the Activity
+// pane's flash-then-disappear bug: it APPENDS reply.Activity's new entries
+// onto m.activityBuffer rather than the pane reading m.reply.Activity
+// (wholesale-replaced every poll by applyPollResult) directly.
+//
+// reply.Activity and m.activityBuffer are both oldest-first with Seq
+// strictly increasing (activity.Ring's own invariant, unaffected by this
+// bead), so comparing an incoming entry's Seq against the buffer's own
+// highest already-held Seq is sufficient dedup -- no set/map needed. The
+// buffer is then trimmed to activityBufferCap (panes.go) so it never grows
+// unbounded.
+//
+// It also records activityFreshFloor: the lowest Seq THIS poll itself
+// contributed, or activityNoFreshEntries when this poll brought nothing
+// new. renderActivityPane dims every buffered entry below that floor --
+// i.e. every entry NOT part of the immediately preceding poll -- which is
+// this bead's "still fresh" threshold of one poll interval [design: bead
+// pg2-gafbd fix, "dim ... once it passes a still fresh threshold"].
+func (m *Model) updateActivityBuffer(reply StatusReply) {
+	highest := uint64(0)
+	if n := len(m.activityBuffer); n > 0 {
+		highest = m.activityBuffer[n-1].Seq
+	}
+	freshFloor := activityNoFreshEntries
+	for _, e := range reply.Activity {
+		if e.Seq <= highest {
+			continue // already buffered (or a replayed/out-of-order reply) -- skip rather than duplicate
+		}
+		m.activityBuffer = append(m.activityBuffer, e)
+		highest = e.Seq
+		if freshFloor == activityNoFreshEntries {
+			freshFloor = e.Seq
+		}
+	}
+	if over := len(m.activityBuffer) - activityBufferCap; over > 0 {
+		m.activityBuffer = m.activityBuffer[over:]
+	}
+	m.activityFreshFloor = freshFloor
 }
 
 // applyPollErr implements the no-core transition and the poll-error flag
@@ -473,9 +538,24 @@ func (m *Model) renderMain() string {
 // renderActivityZoneContent applies the three-way empty-state precedence to
 // the Activity pane: suppressed while gated (dispatch halted), "No activity
 // yet." otherwise when empty [design: Task 4.6 Step 6].
+//
+// Renders from m.activityBuffer -- the rolling history updateActivityBuffer
+// maintains (bead pg2-gafbd) -- rather than m.reply.Activity directly, so
+// an entry keeps showing (dimmed once stale) across poll cycles that bring
+// no new activity instead of flashing for a single cycle. A nil buffer (no
+// poll has yet gone through the real Update/applyPollResult path -- true
+// only for pre-existing tests that set m.reply directly to exercise
+// unrelated rendering concerns, never for a real Run) falls back to
+// m.reply.Activity itself, rendered fully fresh (m.activityFreshFloor is
+// also still its zero value in that case): with no prior poll to compare
+// against, nothing is yet "stale".
 func (m *Model) renderActivityZoneContent(gated bool) string {
-	es := resolveEmptyState(false, gated, len(m.reply.Activity) == 0)
-	return renderActivityPane(m.reply.Activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."), m.theme)
+	activity := m.activityBuffer
+	if activity == nil {
+		activity = m.reply.Activity
+	}
+	es := resolveEmptyState(false, gated, len(activity) == 0)
+	return renderActivityPane(activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."), m.activityFreshFloor, m.theme)
 }
 
 // renderPaneContent renders one of the three Listeners/Queues/Sources
