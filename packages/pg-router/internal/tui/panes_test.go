@@ -215,7 +215,7 @@ func TestPanes_ThreeTierMockups(t *testing.T) {
 		m.reply = reply
 		got := m.View()
 
-		for _, want := range []string{"Listeners", "Queues", "Sources", "Registry", "Activity", "ROLE", "BINDS", "HEALTH", "DLVD", "DECL"} {
+		for _, want := range []string{"Listeners", "Queues", "Sources", "Activity", "ROLE", "BINDS", "HEALTH", "DLVD", "DECL"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("Wide: missing %q; got:\n%s", want, got)
 			}
@@ -256,7 +256,7 @@ func TestPanes_ThreeTierMockups(t *testing.T) {
 		if strings.Contains(got, "DECL") {
 			t.Errorf("Tiny: DECL column should be dropped; got:\n%s", got)
 		}
-		for _, dropped := range []string{"Queues", "Sources", "Registry"} {
+		for _, dropped := range []string{"Queues", "Sources"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("Tiny: unfocused pane %q should have dropped under height pressure; got:\n%s", dropped, got)
 			}
@@ -516,6 +516,61 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 			t.Errorf("nil unmatchedBindings must render no marker; got:\n%s", got)
 		}
 	})
+}
+
+// TestListener_DeclinedBucketed_KnownReasons is Task 2's own red-first
+// test: the two known DeclineReason strings ("busy"/"unavailable") bucket
+// into their own named return values.
+func TestListener_DeclinedBucketed_KnownReasons(t *testing.T) {
+	l := Listener{Declined: 3, DeclinedByReason: map[string]int64{"busy": 2, "unavailable": 1}}
+	busy, unavailable, other := l.DeclinedBucketed()
+	if busy != 2 || unavailable != 1 || other != 0 {
+		t.Fatalf("DeclinedBucketed() = (%d,%d,%d), want (2,1,0)", busy, unavailable, other)
+	}
+}
+
+// TestListener_DeclinedBucketed_OverrideStringFoldsIntoOther proves an
+// arbitrary DeclineDetail override string (e.g. "at-capacity") folds into
+// other, and that the three-way sum still equals the flat Declined total.
+func TestListener_DeclinedBucketed_OverrideStringFoldsIntoOther(t *testing.T) {
+	l := Listener{Declined: 2, DeclinedByReason: map[string]int64{"busy": 1, "at-capacity": 1}}
+	busy, unavailable, other := l.DeclinedBucketed()
+	if busy != 1 || unavailable != 0 || other != 1 {
+		t.Fatalf("DeclinedBucketed() = (%d,%d,%d), want (1,0,1)", busy, unavailable, other)
+	}
+	if busy+unavailable+other != l.Declined {
+		t.Fatalf("bucketed sum %d != Declined %d", busy+unavailable+other, l.Declined)
+	}
+}
+
+// TestListener_DeclinedBucketed_SumInvariantHoldsEvenOnCollidingOverrideText
+// documents the one genuine ambiguity this bucketing has (spec's Review
+// Focus): a DeclineDetail override that happens to equal "busy" verbatim is
+// indistinguishable from a genuine DeclineBusy at this layer. The invariant
+// this test actually guarantees is the sum, not which bucket it lands in.
+func TestListener_DeclinedBucketed_SumInvariantHoldsEvenOnCollidingOverrideText(t *testing.T) {
+	l := Listener{Declined: 5, DeclinedByReason: map[string]int64{"busy": 5}}
+	busy, unavailable, other := l.DeclinedBucketed()
+	if busy+unavailable+other != l.Declined {
+		t.Fatalf("bucketed sum %d != Declined %d", busy+unavailable+other, l.Declined)
+	}
+}
+
+// TestRenderListenersPane_NeverDispatchedRoleRendersCleanZeroState is Task
+// 2's Review Focus: a declared role with zero delivered/declined, no
+// self-report, must render clean placeholders, never a blank cell.
+func TestRenderListenersPane_NeverDispatchedRoleRendersCleanZeroState(t *testing.T) {
+	listeners := []Listener{{Role: "idle-role", Enabled: true}}
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	if !strings.Contains(out, "0 / 0 / 0") {
+		t.Fatalf("expected a zero decline breakdown, got:\n%s", out)
+	}
+	if !strings.Contains(out, "—") {
+		t.Fatalf("expected an em-dash for never-self-reported SELF, got:\n%s", out)
+	}
+	if !strings.Contains(out, "-") {
+		t.Fatalf("expected a dash for never-delivered LAST DELIVERED, got:\n%s", out)
+	}
 }
 
 // TestRenderRegistryPane_OmittedEntirelyWhenEmpty pins v1's own carried

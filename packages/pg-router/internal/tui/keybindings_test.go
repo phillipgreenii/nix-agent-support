@@ -162,23 +162,24 @@ func TestOpenModal_SwitchingModalsKeepsTheOriginalPriorScreen(t *testing.T) {
 	}
 }
 
-// TestStepFocus_CyclesAllFourPanesAndWraps is pg2-ctqpj's own red-first
+// TestStepFocus_CyclesAllThreePanesAndWraps is pg2-ctqpj's own red-first
 // test: before the fix, handleFocusNext/handleFocusPrev were literal
 // no-ops (`return nil`), so m.focusedPane could never leave its zero value
 // (paneListeners) -- Enter could therefore only ever drill into Listeners,
 // which is exactly the live bug report's "operator could not select
-// anything else ... stuck on one path." tab must visit all four panes in
+// anything else ... stuck on one path." tab must visit all three panes in
 // the same order renderMain's own zone loop uses (Listeners, Queues,
-// Sources, Registry) and wrap rather than clamp -- pane focus is a ring,
-// unlike stepSibling's row clamp (ux-12).
-func TestStepFocus_CyclesAllFourPanesAndWraps(t *testing.T) {
+// Sources) and wrap rather than clamp -- pane focus is a ring, unlike
+// stepSibling's row clamp (ux-12). Renamed and narrowed from 4 to 3 panes
+// (this docket's Registry-pane removal, Task 2).
+func TestStepFocus_CyclesAllThreePanesAndWraps(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain
 	if m.focusedPane != paneListeners {
 		t.Fatalf("focusedPane = %v before any tab, want the documented zero-value default paneListeners", m.focusedPane)
 	}
 
-	wantForward := []int{paneQueues, paneSources, paneRegistry, paneListeners}
+	wantForward := []int{paneQueues, paneSources, paneListeners}
 	for _, want := range wantForward {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		if cmd != nil {
@@ -189,7 +190,7 @@ func TestStepFocus_CyclesAllFourPanesAndWraps(t *testing.T) {
 		}
 	}
 
-	wantBackward := []int{paneRegistry, paneSources, paneQueues, paneListeners}
+	wantBackward := []int{paneSources, paneQueues, paneListeners}
 	for _, want := range wantBackward {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 		if cmd != nil {

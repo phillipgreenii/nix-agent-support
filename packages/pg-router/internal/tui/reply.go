@@ -146,8 +146,40 @@ type Listener struct {
 	Enabled   bool     `json:"enabled"`
 	Excluded  bool     `json:"excluded"`
 	Delivered int64    `json:"delivered"`
-	Declined  int64    `json:"declined"`
-	Backoff   *Backoff `json:"backoff"`
+	// Declined stays the existing flat total (backward compatible).
+	Declined int64 `json:"declined"`
+	// LastDeliveredAtMs is Unix millis of the most recent delivery (this
+	// task); 0 means never delivered.
+	LastDeliveredAtMs int64 `json:"lastDeliveredAtMs"`
+	// DeclinedByReason decodes the wire's existing declinedByReason object
+	// (this task is the first decoder of it) -- keys are DeclineReason's
+	// own text or an arbitrary DeclineDetail override.
+	DeclinedByReason map[string]int64 `json:"declinedByReason"`
+	Backoff          *Backoff         `json:"backoff"`
+	// SelfReportState is this task's fold-in of the retired Registry pane:
+	// the Registration.State whose ID equals this Listener's Role, or ""
+	// if this listener has never self-reported.
+	SelfReportState string `json:"selfReportState"`
+}
+
+// DeclinedBucketed buckets DeclinedByReason into (busy, unavailable,
+// other). Any key other than the two known DeclineReason strings --
+// including a DeclineDetail override -- folds into other, so
+// busy+unavailable+other always sums to len(DeclinedByReason)'s total,
+// which always sums to Declined (core.go's own invariant, ListenerCounts'
+// doc).
+func (l Listener) DeclinedBucketed() (busy, unavailable, other int64) {
+	for reason, n := range l.DeclinedByReason {
+		switch reason {
+		case "busy":
+			busy += n
+		case "unavailable":
+			unavailable += n
+		default:
+			other += n
+		}
+	}
+	return busy, unavailable, other
 }
 
 // Source mirrors one entry of the WIDENED `sources` array (Task 4.1): the

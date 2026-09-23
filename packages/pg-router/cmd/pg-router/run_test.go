@@ -552,6 +552,23 @@ func TestFanOutObserver_OnDispatchFailureCallsBoth(t *testing.T) {
 	}
 }
 
+// TestListenerCountObserver_OnAccept_RecordsLastDeliveredAt proves
+// listenerCountObserver.OnAccept (Task 2) records the delivery timestamp
+// via its own injectable clock seam (now), rather than time.Now directly,
+// so the assertion below is deterministic.
+func TestListenerCountObserver_OnAccept_RecordsLastDeliveredAt(t *testing.T) {
+	counts := map[string]*core.ListenerCounts{"df-feedback": {}}
+	fixedNow := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	obs := &listenerCountObserver{counts: counts, now: func() time.Time { return fixedNow }}
+
+	obs.OnAccept("evt-1", "df-feedback")
+
+	got := counts["df-feedback"].LastDeliveredAtNanos.Load()
+	if want := fixedNow.UnixNano(); got != want {
+		t.Fatalf("LastDeliveredAtNanos = %d, want %d", got, want)
+	}
+}
+
 // flakySourceQuery is a minimal pull-source query.Query stand-in (mirrors
 // internal/discover's own unexported flakyQuery, copied here since that one is
 // package-private, the same convention selTestQuery above already follows):

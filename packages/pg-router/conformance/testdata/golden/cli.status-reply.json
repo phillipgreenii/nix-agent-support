@@ -49,6 +49,8 @@
       "excluded": false,
       "delivered": 5,
       "declined": 1,
+      "lastDeliveredAtMs": 0,
+      "selfReportState": "",
       "backoff": null
     },
     {
@@ -58,6 +60,8 @@
       "excluded": true,
       "delivered": 0,
       "declined": 0,
+      "lastDeliveredAtMs": 0,
+      "selfReportState": "",
       "backoff": null
     }
   ],

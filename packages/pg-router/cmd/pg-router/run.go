@@ -716,10 +716,14 @@ func (a *activityObserver) OnDeduped(evtType string) {
 // declared) is simply dropped rather than panicking.
 type listenerCountObserver struct {
 	counts map[string]*core.ListenerCounts
+	// now is a clock seam (this task), defaulting to time.Now in
+	// newListenerCountObserver -- overridable in tests for a deterministic
+	// LastDeliveredAtNanos assertion.
+	now func() time.Time
 }
 
 func newListenerCountObserver(counts map[string]*core.ListenerCounts) *listenerCountObserver {
-	return &listenerCountObserver{counts: counts}
+	return &listenerCountObserver{counts: counts, now: time.Now}
 }
 
 func (l *listenerCountObserver) OnEnqueue(eventqueue.Event) {}
@@ -727,6 +731,7 @@ func (l *listenerCountObserver) OnEnqueue(eventqueue.Event) {}
 func (l *listenerCountObserver) OnAccept(_, listenerID string) {
 	if c := l.counts[listenerID]; c != nil {
 		c.Delivered.Add(1)
+		c.LastDeliveredAtNanos.Store(l.now().UnixNano())
 	}
 }
 

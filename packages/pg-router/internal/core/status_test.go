@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -207,6 +208,50 @@ func TestGateSnapshot_returnsIndependentCopy(t *testing.T) {
 	gates2, _ := svc.GateSnapshot()
 	if got := gates2["operator_paused"]; !got.Set {
 		t.Fatalf("operator_paused = %+v, want the caller's mutation of the returned map to not affect the cache", got)
+	}
+}
+
+// TestListenerCounts_LastDeliveredAtNanos_ZeroUntilSet proves the zero
+// value of ListenerCounts' new LastDeliveredAtNanos field (Task 2) is 0 --
+// "never delivered" -- until listenerCountObserver.OnAccept sets it.
+func TestListenerCounts_LastDeliveredAtNanos_ZeroUntilSet(t *testing.T) {
+	c := &ListenerCounts{}
+	if got := c.LastDeliveredAtNanos.Load(); got != 0 {
+		t.Fatalf("zero value LastDeliveredAtNanos = %d, want 0", got)
+	}
+}
+
+// TestStatusListeners_SelfReportStateJoinsByRoleName proves statusListeners'
+// new selfReportState key (Task 2, folding in the retired Registry pane's
+// one useful signal) joins a Registration onto its matching declared role
+// by Registration.ID == role name.
+func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
+	declared := []roles.Role{{Name: "df-feedback", Enabled: true, Binds: []string{"pr.changed"}}}
+	counts := map[string]*ListenerCounts{"df-feedback": {}}
+	// Registration.State is conformance.Lifecycle (an int-based Stringer,
+	// internal/conformance's top-level conformance package,
+	// conformance/transport.go:14), not a plain string -- conformance.
+	// Started is the constant whose .String() is "started" (matching the
+	// existing pattern at statusRegistrations' own `"state": r.State.
+	// String()`).
+	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started}}
+
+	rows := statusListeners(declared, nil, counts, regs)
+	if got := rows[0]["selfReportState"]; got != "started" {
+		t.Fatalf("selfReportState = %v, want %q", got, "started")
+	}
+}
+
+// TestStatusListeners_SelfReportStateEmptyWhenNeverRegistered proves a
+// declared role with no matching Registration reports the empty string,
+// never a missing key.
+func TestStatusListeners_SelfReportStateEmptyWhenNeverRegistered(t *testing.T) {
+	declared := []roles.Role{{Name: "df-feedback", Enabled: true, Binds: []string{"pr.changed"}}}
+	counts := map[string]*ListenerCounts{"df-feedback": {}}
+
+	rows := statusListeners(declared, nil, counts, nil)
+	if got := rows[0]["selfReportState"]; got != "" {
+		t.Fatalf("selfReportState = %v, want empty string", got)
 	}
 }
 

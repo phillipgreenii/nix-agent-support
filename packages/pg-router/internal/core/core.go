@@ -207,6 +207,11 @@ type Options struct {
 type ListenerCounts struct {
 	Delivered atomic.Int64
 	Declined  atomic.Int64
+	// LastDeliveredAtNanos is UnixNano of the most recent successful
+	// delivery (this task) -- 0 means never delivered. Set by
+	// listenerCountObserver.OnAccept, the same call site Delivered already
+	// increments at.
+	LastDeliveredAtNanos atomic.Int64
 	// DeclinedByReason breaks Declined down by the SAME reason string
 	// eventqueue.Observer.OnDeclined already carries (bead pg2-j4uwg widens
 	// this from "wired through, discarded" to "actually recorded"):
@@ -1317,7 +1322,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"configPath": s.configPath,
 		},
 		"registry":  statusRegistrations(regs),
-		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts),
+		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs),
 		"gates":     statusGates(gates),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs),
@@ -1452,21 +1457,36 @@ func statusRegistrations(regs []Registration) []map[string]any {
 // streak; see orchestrator/listener.go's BackoffState for the identical
 // conclusion from that side, added for schema generality per spec §5 but
 // left unconnected for exactly this reason).
-func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts) []map[string]any {
+// regs is the registry's live participant list (Task 2 fold-in of the
+// retired Registry pane's one useful signal): joined onto each declared
+// role by Registration.ID == role name, so `selfReportState` reports a
+// handler's own self-reported lifecycle state, or the empty string for a
+// role that has never self-reported.
+func statusListeners(declared []roles.Role, excludedRoles []string, counts map[string]*ListenerCounts, regs []Registration) []map[string]any {
 	excluded := make(map[string]bool, len(excludedRoles))
 	for _, n := range excludedRoles {
 		excluded[n] = true
+	}
+	selfState := make(map[string]string, len(regs))
+	for _, r := range regs {
+		// r.State is conformance.Lifecycle (int-based Stringer), not a
+		// string -- .String() matches the existing pattern this file
+		// already uses at statusRegistrations above.
+		selfState[r.ID] = r.State.String()
 	}
 	out := make([]map[string]any, 0, len(declared))
 	for _, r := range declared {
 		binds := make([]string, len(r.Binds))
 		copy(binds, r.Binds)
-		var delivered, declined int64
+		var delivered, declined, lastDeliveredAtMs int64
 		declinedByReason := map[string]int64{}
 		if c := counts[r.Name]; c != nil {
 			delivered = c.Delivered.Load()
 			declined = c.Declined.Load()
 			declinedByReason = c.DeclinedByReasonSnapshot()
+			if nanos := c.LastDeliveredAtNanos.Load(); nanos != 0 {
+				lastDeliveredAtMs = nanos / int64(time.Millisecond)
+			}
 		}
 		out = append(out, map[string]any{
 			"role":     r.Name,
@@ -1478,10 +1498,12 @@ func statusListeners(declared []roles.Role, excludedRoles []string, counts map[s
 			// SAME tally (bead pg2-j4uwg), never a replacement: the two
 			// always sum to the same total, and a role with no declines at
 			// all reports an empty object here, never a missing key.
-			"delivered":        delivered,
-			"declined":         declined,
-			"declinedByReason": declinedByReason,
-			"backoff":          nil,
+			"delivered":         delivered,
+			"declined":          declined,
+			"declinedByReason":  declinedByReason,
+			"lastDeliveredAtMs": lastDeliveredAtMs,
+			"selfReportState":   selfState[r.Name],
+			"backoff":           nil,
 		})
 	}
 	return out

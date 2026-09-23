@@ -26,7 +26,7 @@ type Binding struct {
 // match wins in dispatch, and rows render in this order in the help modal.
 //
 // tab/shift+tab delegate to Model.stepFocus (below), which cycles
-// Model.focusedPane through the four zone-ladder panes -- pg2-ctqpj's fix:
+// Model.focusedPane through the three zone-ladder panes -- pg2-ctqpj's fix:
 // Task 4.6 had delivered only the RENDERING side of pane focus, leaving
 // these two keys dead (no screen ever showed anything but the Listeners
 // pane focused, and Enter could therefore only ever drill into Listeners).
@@ -100,9 +100,9 @@ func handleFocusNext(m *Model) tea.Cmd { return m.stepFocus(1) }
 func handleFocusPrev(m *Model) tea.Cmd { return m.stepFocus(-1) }
 
 // stepFocus moves m.focusedPane to the next (delta +1) or previous (delta
-// -1) of the four zone-ladder panes (model.go's paneListeners/paneQueues/
-// paneSources/paneRegistry, in that order -- the same order renderMain's
-// own zone loop uses), wrapping at either end rather than clamping: unlike
+// -1) of the three zone-ladder panes (model.go's paneListeners/paneQueues/
+// paneSources, in that order -- the same order renderMain's own zone loop
+// uses), wrapping at either end rather than clamping: unlike
 // stepSibling's row stepping (ux-12, drilldown.go), the design gives pane
 // focus no "past the end" edge to stop at -- it is a ring, not a list.
 // Pane focus is only ever rendered on screenMain (renderPaneContent's own

@@ -11,13 +11,13 @@ import (
 // red-first test [design: Task 4.7 Step 1]: pressing enter with the cursor
 // on a queue row or an activity row must be a no-op -- no screen
 // transition. Only rowListener/rowSource are members of focusableRowKind
-// (comp-6); Queues/Registry are reachable via m.focusedPane and are
-// asserted directly, while Activity is never reachable via m.focusedPane at
-// all (it is rendered as its own zone, never one of the four
-// tab-cycled panes) -- the "only listeners/sources with actual rows can
-// ever transition" sub-case below covers that structurally: with Activity
-// the only populated field, m.focusedPane's zero value (paneListeners) has
-// nothing to drill into, so enter is a no-op the same way.
+// (comp-6); Queues is reachable via m.focusedPane and is asserted
+// directly, while Activity is never reachable via m.focusedPane at all (it
+// is rendered as its own zone, never one of the three tab-cycled panes) --
+// the "only listeners/sources with actual rows can ever transition"
+// sub-case below covers that structurally: with Activity the only
+// populated field, m.focusedPane's zero value (paneListeners) has nothing
+// to drill into, so enter is a no-op the same way.
 func TestDrillDown_QueueAndActivityRowsAreNonFocusable(t *testing.T) {
 	t.Run("queue row", func(t *testing.T) {
 		m := newTestModel(nil)
@@ -35,25 +35,9 @@ func TestDrillDown_QueueAndActivityRowsAreNonFocusable(t *testing.T) {
 		}
 	})
 
-	t.Run("registry row", func(t *testing.T) {
-		// Registry is not a member of focusableRowKind either -- only
-		// rowListener/rowSource exist (Task 4.7 Interfaces) -- so it gets
-		// the same no-op treatment as Queues, exercised here directly.
-		m := newTestModel(nil)
-		m.screen = screenMain
-		m.focusedPane = paneRegistry
-		m.reply = StatusReply{Registry: []Registration{{ID: "p1", Kind: "handler", State: "active"}}}
-
-		m.enterDrillDown()
-
-		if m.screen != screenMain {
-			t.Fatalf("screen = %v, want screenMain (enter on a registry row must be a no-op)", m.screen)
-		}
-	})
-
 	t.Run("activity-only state", func(t *testing.T) {
 		// Activity has no focus mechanism in the current Model at all: it
-		// is never one of the four tab-cycled panes, so m.focusedPane can
+		// is never one of the three tab-cycled panes, so m.focusedPane can
 		// never select it. With Listeners/Sources/Queues/Registry all
 		// empty and only Activity populated, m.focusedPane's zero value
 		// (paneListeners) has nothing to drill into -- enter is a no-op,

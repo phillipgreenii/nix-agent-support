@@ -75,6 +75,14 @@ func poolDegraded(registry []Registration) bool {
 	return false
 }
 
+// selfReportDegraded reports whether state (a Listener's own
+// SelfReportState) is one of the two states poolDegraded already treats as
+// unhealthy at the pool axis -- reused here so a listener's OWN self-report
+// gets the identical warning treatment, not a silently plainer rendering.
+func selfReportDegraded(state string) bool {
+	return state == "degraded" || state == "unavailable"
+}
+
 // listenerHealthText ranks a listener's health: disabled > excluded >
 // cooling > ok. disabled (a config fact) and excluded (a run-scoped
 // selector fact) both outrank any runtime observation; disabled outranks
@@ -258,9 +266,9 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 	var widths []int
 	switch tier {
 	case render.TierWide:
-		headers, widths = []string{"ROLE", "BINDS", "HEALTH", "DLVD", "DECL"}, []int{10, 14, 16, 6, 6}
+		headers, widths = []string{"ROLE", "BINDS", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)", "SELF"}, []int{10, 14, 16, 14, 6, 14, 10}
 	case render.TierNarrow:
-		headers, widths = []string{"ROLE", "HEALTH", "DLVD", "DECL"}, []int{10, 16, 6, 6}
+		headers, widths = []string{"ROLE", "HEALTH", "LAST DELIVERED", "DLVD", "DECL(busy/unavail/other)"}, []int{10, 16, 14, 6, 14}
 	default:
 		headers, widths = []string{"ROLE", "HEALTH", "DLVD"}, []int{10, 14, 6}
 	}
@@ -271,14 +279,26 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 		role := textsafe.Sanitize(l.Role)
 		health := listenerHealthText(l, theme)
 		dlvd := fmt.Sprintf("%d", l.Delivered)
-		decl := fmt.Sprintf("%d", l.Declined)
+		busy, unavailable, other := l.DeclinedBucketed()
+		decl := fmt.Sprintf("%d / %d / %d", busy, unavailable, other)
+		lastDelivered := "-"
+		if l.LastDeliveredAtMs > 0 {
+			lastDelivered = formatCoarse(time.Since(time.UnixMilli(l.LastDeliveredAtMs))) + " ago"
+		}
+		self := "—"
+		if l.SelfReportState != "" {
+			self = textsafe.Sanitize(l.SelfReportState)
+			if selfReportDegraded(l.SelfReportState) {
+				self = theme.Cooling.Render(self)
+			}
+		}
 		var row []string
 		switch tier {
 		case render.TierWide:
 			binds := textsafe.Sanitize(strings.Join(l.Binds, ","))
-			row = []string{role, binds, health, dlvd, decl}
+			row = []string{role, binds, health, lastDelivered, dlvd, decl, self}
 		case render.TierNarrow:
-			row = []string{role, health, dlvd, decl}
+			row = []string{role, health, lastDelivered, dlvd, decl}
 		default:
 			row = []string{role, health, dlvd}
 		}
@@ -323,27 +343,6 @@ func renderSourcesPane(sources []Source, now time.Time, width int, theme render.
 			sourceHealthText(s, now, theme),
 			sinceLastTick,
 			sourceNextCheckText(s, now),
-		})
-	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
-}
-
-// renderRegistryPane renders the Registry pane: ID/KIND/STATE. Rendered
-// only when non-empty per v1's own carried decision -- emptyMsg is still
-// accepted so a caller CAN show a placeholder (matching the Wide/Narrow
-// mockups' "(no participants registered)"), but the sibling composing
-// this into the zone ladder (model.go) is free to omit the zone entirely
-// instead. width is the available terminal width, see renderListenersPane's
-// doc [pg2-hlpuv].
-func renderRegistryPane(registry []Registration, width int, emptyMsg, title string) string {
-	headers := []string{"ID", "KIND", "STATE"}
-	widths := []int{16, 10, 10}
-	rows := make([][]string, 0, len(registry))
-	for _, r := range registry {
-		rows = append(rows, []string{
-			textsafe.Sanitize(r.ID),
-			textsafe.Sanitize(r.Kind),
-			textsafe.Sanitize(r.State),
 		})
 	}
 	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)

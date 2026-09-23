@@ -60,8 +60,8 @@ func (m *Model) enterDrillDown() tea.Cmd {
 		m.drillKind = rowSource
 		m.drillIndex = 0
 	default:
-		// paneQueues / paneRegistry: comp-6 -- not members of
-		// focusableRowKind, so entering from either is a no-op.
+		// paneQueues: comp-6 -- not a member of focusableRowKind, so
+		// entering it is a no-op.
 		return nil
 	}
 	m.screen = screenDrillDown

@@ -175,30 +175,29 @@ type Model struct {
 	drillKind  focusableRowKind
 	drillIndex int
 
-	// focusedPane selects which of the Listeners/Queues/Sources/Registry
-	// panes is the zone ladder's one FILL zone (zones.go's drop-order
-	// table: "Fill (the focused pane)") -- the other three are non-fill,
-	// non-pinned "unfocused panes" zones. Its zero value (paneListeners) is
+	// focusedPane selects which of the Listeners/Queues/Sources panes is
+	// the zone ladder's one FILL zone (zones.go's drop-order table: "Fill
+	// (the focused pane)") -- the other two are non-fill, non-pinned
+	// "unfocused panes" zones. Its zero value (paneListeners) is
 	// screenMain's own starting focus. keybindings.go's tab/shift+tab
-	// handlers (Model.stepFocus, pg2-ctqpj) cycle this field through all
-	// four panes, wrapping at either end -- Enter then targets whichever
+	// handlers (Model.stepFocus, pg2-ctqpj) cycle this field through the
+	// three panes, wrapping at either end -- Enter then targets whichever
 	// pane is currently focused (enterDrillDown, drilldown.go), which is
-	// exactly how an operator reaches Queues/Registry too (both no-op on
-	// Enter, per comp-6, but ARE reachable via tab so that fact is
-	// observable rather than merely documented).
+	// exactly how an operator reaches Queues too (a no-op on Enter, per
+	// comp-6, but IS reachable via tab so that fact is observable rather
+	// than merely documented).
 	focusedPane int
 }
 
-// Pane identifies one of the four zone-ladder panes this packet renders --
+// Pane identifies one of the three zone-ladder panes this packet renders --
 // see Model.focusedPane's doc. paneCount is a sentinel (never a real pane
 // id) naming how many of them stepFocus (keybindings.go) cycles through --
-// declared here, beside the enum it counts, rather than as a magic 4 at the
+// declared here, beside the enum it counts, rather than as a magic 3 at the
 // call site.
 const (
 	paneListeners int = iota
 	paneQueues
 	paneSources
-	paneRegistry
 	paneCount
 )
 
@@ -393,11 +392,11 @@ func (m *Model) View() string {
 
 // renderMain composes screenMain's full pinned zone ladder: the top zone
 // (header or PAUSED banner), the droppable attention/poll-error zones, the
-// full-width Activity row, the four Listeners/Queues/Sources/Registry
-// panes (one of them the fill zone, per m.focusedPane), and the pinned
-// footer -- all through layoutZones, so the SAME drop-order/pinned rules
-// zones_test.go exercises directly also govern the real screen [design:
-// Task 4.6 Step 8; Task 4.6 Interfaces].
+// full-width Activity row, the three Listeners/Queues/Sources panes (one
+// of them the fill zone, per m.focusedPane), and the pinned footer -- all
+// through layoutZones, so the SAME drop-order/pinned rules zones_test.go
+// exercises directly also govern the real screen [design: Task 4.6 Step 8;
+// Task 4.6 Interfaces].
 func (m *Model) renderMain() string {
 	now := time.Now()
 	gated := anyGateSet(m.reply.Gates)
@@ -426,15 +425,7 @@ func (m *Model) renderMain() string {
 		dropOrder: 3,
 	})
 
-	for _, p := range []int{paneListeners, paneQueues, paneSources, paneRegistry} {
-		// The Registry pane is omitted entirely (not shown as an empty
-		// box) when the registry has no entries -- v1's own carried
-		// decision (§3), restated for Narrow at §4.3 -- UNLESS it is the
-		// currently-focused pane, in which case it stays as the ladder's
-		// one required fill zone.
-		if p == paneRegistry && len(m.reply.Registry) == 0 && p != m.focusedPane {
-			continue
-		}
+	for _, p := range []int{paneListeners, paneQueues, paneSources} {
 		content := m.renderPaneContent(p, gated, now)
 		if p == m.focusedPane {
 			zones = append(zones, zoneSpec{
@@ -460,12 +451,12 @@ func (m *Model) renderActivityZoneContent(gated bool) string {
 	return renderActivityPane(m.reply.Activity, m.reply.ActivityDropped, emptyStateText(es, "No activity yet."), m.theme)
 }
 
-// renderPaneContent renders one of the four Listeners/Queues/Sources/
-// Registry panes' content. Listeners/Sources/Registry are config-derived:
-// never suppressed, only dimmed while gated (dimIfPaused). Queues is
-// activity-adjacent (a depth is meaningless while dispatch is halted) and
-// IS suppressed while gated, per resolveEmptyState's own doc [design: Task
-// 4.6 Step 6; §5 Derived health].
+// renderPaneContent renders one of the three Listeners/Queues/Sources
+// panes' content. Listeners/Sources are config-derived: never suppressed,
+// only dimmed while gated (dimIfPaused). Queues is activity-adjacent (a
+// depth is meaningless while dispatch is halted) and IS suppressed while
+// gated, per resolveEmptyState's own doc [design: Task 4.6 Step 6; §5
+// Derived health].
 func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 	tier := render.Tier(m.width)
 	// width is the pane box's own available budget: panes are stacked
@@ -490,10 +481,6 @@ func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 		es := resolveEmptyState(false, false, len(m.reply.Sources) == 0)
 		content := renderSourcesPane(m.reply.Sources, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title)
 		return dimIfPaused(content, gated, m.theme)
-	case paneRegistry:
-		es := resolveEmptyState(false, false, len(m.reply.Registry) == 0)
-		content := renderRegistryPane(m.reply.Registry, width, emptyStateText(es, "(no participants registered)"), title)
-		return dimIfPaused(content, gated, m.theme)
 	default:
 		return ""
 	}
@@ -509,8 +496,6 @@ func paneName(p int) string {
 		return "queues"
 	case paneSources:
 		return "sources"
-	case paneRegistry:
-		return "registry"
 	default:
 		return "pane"
 	}
@@ -524,22 +509,22 @@ func paneTitle(p int) string {
 		return "Queues"
 	case paneSources:
 		return "Sources"
-	case paneRegistry:
-		return "Registry"
 	default:
 		return ""
 	}
 }
 
 // unfocusedPaneDropOrder gives the zone ladder's "Unfocused panes | 4-5"
-// range a concrete, deterministic split: Registry and Queues (typically
-// the emptiest/least critical panes) drop first; Listeners/Sources drop
-// last among the four. A disambiguation this packet is free to make -- the
-// design names two priority buckets without saying which pane occupies
-// which [design: Task 4.6 Interfaces (zone ladder table)].
+// range a concrete, deterministic split: Queues (typically the
+// emptiest/least critical pane) drops first; Listeners/Sources drop last.
+// A disambiguation this packet is free to make -- the design names two
+// priority buckets without saying which pane occupies which [design: Task
+// 4.6 Interfaces (zone ladder table)]. This packet's sibling packet for
+// "Task 4: Two-tier layout" rewrites this function's body anyway (this
+// docket's planned ordering); left as the sole non-default case for now.
 func unfocusedPaneDropOrder(p int) int {
 	switch p {
-	case paneRegistry, paneQueues:
+	case paneQueues:
 		return 4
 	default:
 		return 5

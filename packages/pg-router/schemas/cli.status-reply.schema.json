@@ -120,6 +120,8 @@
           "delivered": { "type": "integer", "minimum": 0 },
           "declined": { "type": "integer", "minimum": 0 },
           "declinedByReason": { "type": "object" },
+          "lastDeliveredAtMs": { "type": "integer", "minimum": 0 },
+          "selfReportState": { "type": "string" },
           "backoff": {
             "oneOf": [
               { "enum": [null] },
