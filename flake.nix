@@ -3486,6 +3486,22 @@
                   };
                   darwinWithoutPoolMetrics = evalDarwin { enable = true; };
 
+                  # daemon darwin mirror healthCheck regression test (bug
+                  # pg2-c6l6g): before this bead, the -daemon LaunchAgent set
+                  # keepAlive = false (a one-shot register-then-exit, per
+                  # register.go's runRegister) but never healthCheck = false,
+                  # so it silently inherited the serviceSubmodule stub's own
+                  # default = true above -- unlike -pool-metrics just below,
+                  # which was already covered. This is the first eval-level
+                  # coverage of the -daemon mkIf branch at all (it was
+                  # previously untested here, exercising only keepAlive/
+                  # healthCheck since those are the two fields this bead's
+                  # fix touches).
+                  darwinWithDaemon = evalDarwin {
+                    enable = true;
+                    daemon.enable = true;
+                  };
+
                   # File-content verification is done at BUILD time via a
                   # runCommand + jq (code-file-standards' "Structured Data
                   # Files MUST use jq" rule), not via builtins.readFile at
@@ -3608,6 +3624,17 @@
                     darwinWithoutPoolMetrics.phillipgreenii.system.launchdServices.userAgents
                       ? "pg-router-ccpool-handler-pool-metrics"
                   );
+                # daemon LaunchAgent (bug pg2-c6l6g): keepAlive = false
+                # because `register` is a one-shot request/reply, and
+                # healthCheck = false to match -- a process that exits right
+                # after registering never sustains state = running, which is
+                # what the post-activation health check polls for.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-daemon".keepAlive
+                  == false;
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-daemon".healthCheck
+                  == false;
                 # launchConfigFile (this bead, pg2-qsred): disabled resolves
                 # to null rather than throwing -- proves the module stays
                 # inert (repoRoot/worktreeDir never forced) for a consumer
