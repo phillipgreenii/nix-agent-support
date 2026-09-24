@@ -845,7 +845,7 @@ func newExecWithOpener(cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config) 
 func TestCleanupWorktree_emptyPathNoop(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}}}
 	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
-	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "")
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", "")
 	if len(opener.WTM.Calls) != 0 || cc.ListIdx != 0 {
 		t.Errorf("empty wt must short-circuit before any List/RemoveWorktree call; listIdx=%d calls=%v", cc.ListIdx, opener.WTM.Calls)
 	}
@@ -856,7 +856,7 @@ func TestCleanupWorktree_nonWorktreeIsolationNoop(t *testing.T) {
 		t.Run(typ, func(t *testing.T) {
 			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateWorking}}}}
 			e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
-			e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{Isolation: roles.IsolationConfig{Type: typ}}, "s", "/some/shared/path")
+			e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{Isolation: roles.IsolationConfig{Type: typ}}, "s", "zr-w", "/some/shared/path")
 			if len(opener.WTM.Calls) != 0 {
 				t.Errorf("isolation %q must never be removed by cleanupWorktree; calls=%v", typ, opener.WTM.Calls)
 			}
@@ -864,17 +864,30 @@ func TestCleanupWorktree_nonWorktreeIsolationNoop(t *testing.T) {
 	}
 }
 
+// TestCleanupWorktree_removesWhenSessionGone covers pg2-ci75j's own fix on top
+// of pg2-4roho's original worktree removal: once RemoveWorktree succeeds, the
+// bead's pg-router/<beadID> anchor branch (worktree.Ensure's own naming
+// convention) must ALSO be deleted, via a SECOND Open anchored at RepoRoot
+// (not at wt, which no longer exists once removed) and force=true (these
+// throwaway anchor branches are rarely merged into anything).
 func TestCleanupWorktree_removesWhenSessionGone(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}} // no sessions at all — definitively gone
 	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
 	wt := "/tmp/pg2-4roho/zr-w"
-	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", wt)
-	if len(opener.WTM.Calls) != 1 {
-		t.Fatalf("expected exactly one RemoveWorktree call, got %v", opener.WTM.Calls)
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", wt)
+	if len(opener.WTM.Calls) != 2 {
+		t.Fatalf("expected a RemoveWorktree call followed by a DeleteBranch call, got %v", opener.WTM.Calls)
 	}
-	got := opener.WTM.Calls[0]
-	if got[0] != "remove" || got[1] != wt || got[2] != "false" {
-		t.Errorf("RemoveWorktree call = %v, want [remove %s false] (force=false is decision item 5's own guard)", got, wt)
+	gotRemove := opener.WTM.Calls[0]
+	if gotRemove[0] != "remove" || gotRemove[1] != wt || gotRemove[2] != "false" {
+		t.Errorf("RemoveWorktree call = %v, want [remove %s false] (force=false is decision item 5's own guard)", gotRemove, wt)
+	}
+	gotDelete := opener.WTM.Calls[1]
+	if gotDelete[0] != "branch-delete" || gotDelete[1] != "pg-router/zr-w" || gotDelete[2] != "true" {
+		t.Errorf("DeleteBranch call = %v, want [branch-delete pg-router/zr-w true]", gotDelete)
+	}
+	if len(opener.Calls) != 2 || opener.Calls[0] != wt || opener.Calls[1] != e.deps.Cfg.RepoRoot {
+		t.Errorf("expected Open(wt) then Open(RepoRoot), got %v", opener.Calls)
 	}
 }
 
@@ -885,7 +898,7 @@ func TestCleanupWorktree_removesWhenSessionGone(t *testing.T) {
 func TestCleanupWorktree_skipsWhileNeedsInput(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "s", Live: true, State: ccpool.StateNeedsInput}}}}
 	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
-	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", "/tmp/pg2-4roho/zr-w")
 	if len(opener.WTM.Calls) != 0 {
 		t.Errorf("needs_input session's worktree must NOT be removed; calls=%v", opener.WTM.Calls)
 	}
@@ -894,7 +907,7 @@ func TestCleanupWorktree_skipsWhileNeedsInput(t *testing.T) {
 func TestCleanupWorktree_skipsOnListError(t *testing.T) {
 	cc := &dtest.FakeCC{ListErr: errors.New("ccpool list: transient")}
 	e, opener := newExecWithOpener(cc, &dtest.ScriptBD{}, fastCfg())
-	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", "/tmp/pg2-4roho/zr-w")
 	if len(opener.WTM.Calls) != 0 {
 		t.Errorf("a can't-tell List error must fail toward NOT deleting; calls=%v", opener.WTM.Calls)
 	}
@@ -911,8 +924,41 @@ func TestCleanupWorktree_removeFailsSoft(t *testing.T) {
 		return nil, errors.New("open failed")
 	}
 	// Should not panic; failure is swallowed (fail-soft).
-	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "/tmp/pg2-4roho/zr-w")
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", "/tmp/pg2-4roho/zr-w")
 }
+
+// TestCleanupWorktree_removeFailureNeverDeletesBranch proves the branch-delete
+// step never runs at all (no second Open) when RemoveWorktree itself fails —
+// the worktree is presumably still there (e.g. dirty), so its anchor branch
+// must not be deleted out from under it either.
+func TestCleanupWorktree_removeFailureNeverDeletesBranch(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}}
+	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+	var opens []string
+	e.deps.GitOpener = func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+		opens = append(opens, dir)
+		return failingRemoveWTM{}, nil
+	}
+	e.cleanupWorktree(context.Background(), &roles.CCPoolConfig{}, "s", "zr-w", "/tmp/pg2-4roho/zr-w")
+	if len(opens) != 1 {
+		t.Errorf("a failed RemoveWorktree must short-circuit before any branch-delete Open; opens=%v", opens)
+	}
+}
+
+// failingRemoveWTM is a gitclient.WorktreeManager (deliberately NOT a
+// BranchManager) whose RemoveWorktree always fails, for
+// TestCleanupWorktree_removeFailureNeverDeletesBranch.
+type failingRemoveWTM struct{}
+
+func (failingRemoveWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
+	return nil
+}
+
+func (failingRemoveWTM) RemoveWorktree(context.Context, string, bool) error {
+	return errors.New("dirty worktree")
+}
+
+func (failingRemoveWTM) PruneWorktrees(context.Context) error { return nil }
 
 // --- end pg2-4roho unit tests; dispatch-level end-to-end coverage lives near
 // the other TestDispatch_* cases below (TestDispatch_success_removesWorktree,
@@ -1462,6 +1508,9 @@ func TestDispatch_success_removesWorktree(t *testing.T) {
 	if !hasRemoveCall(opener, wantWT, false) {
 		t.Errorf("expected a RemoveWorktree(force=false) call for %s; calls=%v", wantWT, opener.WTM.Calls)
 	}
+	if !hasDeleteBranchCall(opener, "pg-router/zr-w", true) {
+		t.Errorf("expected a DeleteBranch(force=true) call for pg-router/zr-w (pg2-ci75j); calls=%v", opener.WTM.Calls)
+	}
 }
 
 // TestDispatch_needsInputTimeout_doesNotRemoveWorktree is the pg2-lyriv
@@ -1488,6 +1537,9 @@ func TestDispatch_needsInputTimeout_doesNotRemoveWorktree(t *testing.T) {
 	}
 	if anyRemoveCall(opener) {
 		t.Errorf("needs_input session's worktree must NOT be removed; calls=%v", opener.WTM.Calls)
+	}
+	if anyDeleteBranchCall(opener) {
+		t.Errorf("needs_input session's branch must NOT be deleted; calls=%v", opener.WTM.Calls)
 	}
 }
 
@@ -1529,6 +1581,9 @@ func TestDispatch_watchdogHardStop_removesWorktree(t *testing.T) {
 	if !hasRemoveCall(opener, wantWT, false) {
 		t.Errorf("expected a RemoveWorktree(force=false) call for %s after budget hard-stop; calls=%v", wantWT, opener.WTM.Calls)
 	}
+	if !hasDeleteBranchCall(opener, "pg-router/zr-w", true) {
+		t.Errorf("expected a DeleteBranch(force=true) call for pg-router/zr-w after budget hard-stop (pg2-ci75j); calls=%v", opener.WTM.Calls)
+	}
 }
 
 // hasRemoveCall reports whether opener's WTM recorded a "remove" call for
@@ -1547,6 +1602,29 @@ func hasRemoveCall(opener *dtest.NoopGitOpener, path string, force bool) bool {
 func anyRemoveCall(opener *dtest.NoopGitOpener) bool {
 	for _, c := range opener.WTM.Calls {
 		if len(c) > 0 && c[0] == "remove" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDeleteBranchCall reports whether opener's WTM recorded a "branch-delete"
+// call for branch with exactly the given force value (bead pg2-ci75j).
+func hasDeleteBranchCall(opener *dtest.NoopGitOpener, branch string, force bool) bool {
+	want := strconv.FormatBool(force)
+	for _, c := range opener.WTM.Calls {
+		if len(c) == 3 && c[0] == "branch-delete" && c[1] == branch && c[2] == want {
+			return true
+		}
+	}
+	return false
+}
+
+// anyDeleteBranchCall reports whether opener's WTM recorded any
+// "branch-delete" call at all.
+func anyDeleteBranchCall(opener *dtest.NoopGitOpener) bool {
+	for _, c := range opener.WTM.Calls {
+		if len(c) > 0 && c[0] == "branch-delete" {
 			return true
 		}
 	}

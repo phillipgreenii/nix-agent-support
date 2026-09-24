@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/watchdog"
+	"github.com/phillipgreenii/x/gitclient"
 )
 
 type ccpoolExecutor struct{}
@@ -220,7 +221,7 @@ func budgetUnlimited(b budget.Budget) bool {
 // cleanupWorktree call here covers all three, rather than three separate call
 // sites.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
-	r.cleanupWorktree(ctx, cc, name, wt)
+	r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
 	if werr == nil {
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
@@ -270,7 +271,7 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // for the next sweep (a future dispatch of the same bead reusing the same
 // worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
 // sweep, decision item 4) rather than force-removing.
-func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) {
+func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, beadID, wt string) {
 	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
 		return
 	}
@@ -291,6 +292,55 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 		return
 	}
 	slog.Info("dispatch: worktree removed", "session", name, "worktree", wt)
+	r.deleteBranch(ctx, name, beadID)
+}
+
+// deleteBranch removes this bead's own throwaway pg-router/<beadID> anchor
+// branch (worktree.Ensure's own doc comment: "a dedicated branch
+// pg-router/<beadID>") now that cleanupWorktree has confirmed its worktree is
+// gone. x/gitclient's RemoveWorktree runs only `git worktree remove` and
+// never touches the branch (bead pg2-ci75j's root cause) -- without this
+// call, the branch is orphaned in RepoRoot forever, which is exactly the
+// ~100+-stray-branch state pg2-ci75j found in the ZR monorepo.
+//
+// Deliberately reopens the gitclient at r.deps.Cfg.RepoRoot rather than
+// reusing wm/wt from the caller: wt was just removed by RemoveWorktree above,
+// so a client anchored there (cmd.Dir) can no longer spawn git at all, and a
+// branch is a repo-level ref that must be deleted from a still-existing
+// checkout anyway -- the same anchor worktree.Ensure itself uses to create
+// the branch in the first place (CreateWorktree is likewise called with wm
+// opened at repoRoot, not at the not-yet-created worktree path).
+//
+// These are pg-router's own internal per-dispatch anchor branches, reset at
+// HEAD on every dispatch (CreateWorktree's ResetBranch/-B) -- never a user
+// branch with independent value -- so once the worktree is confirmed removed
+// the branch has fully served its purpose. Most are never merged into
+// anything (they are throwaway checkout anchors, not feature branches), so
+// deletion uses force (`git branch -D`) rather than plain `-d`, which would
+// refuse constantly for exactly that reason (pg2-ci75j's own comments).
+//
+// Fails soft exactly like RemoveWorktree above: any error here (open
+// failure, the branch already gone, a client that isn't a BranchManager, a
+// transient git error) is logged and left for the next sweep, never
+// escalated -- an orphaned branch costs disk, not correctness.
+func (r *ccpoolRun) deleteBranch(ctx context.Context, name, beadID string) {
+	branch := "pg-router/" + beadID
+	root, err := r.deps.gitOpener()(ctx, r.deps.Cfg.RepoRoot)
+	if err != nil {
+		slog.Warn("dispatch: worktree cleanup: branch delete: open repo root failed (left for next sweep)",
+			"session", name, "branch", branch, "err", err)
+		return
+	}
+	bm, ok := root.(gitclient.BranchManager)
+	if !ok {
+		return
+	}
+	if err := bm.DeleteBranch(ctx, branch, true); err != nil {
+		slog.Warn("dispatch: worktree cleanup: branch delete failed (left for next sweep)",
+			"session", name, "branch", branch, "err", err)
+		return
+	}
+	slog.Info("dispatch: branch deleted", "session", name, "branch", branch)
 }
 
 // needsInputAlive reports whether the session addressed by externalID is

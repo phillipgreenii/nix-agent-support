@@ -111,6 +111,7 @@ let
   mkWorktreeSweepScript = apply: ''
     :
     (
+      repo=${lib.escapeShellArg cfg.launchConfig.repoRoot}
       wtdir=${lib.escapeShellArg cfg.launchConfig.worktreeDir}
       n=0
       skipped=0
@@ -134,12 +135,39 @@ let
           skipped=$((skipped + 1))
           continue
         fi
+        # branch derives from wt's own basename: internal/worktree's Ensure
+        # (packages/pg-router-ccpool-handler/internal/worktree/worktree.go)
+        # names the worktree dir <worktreeDir>/<beadID> and its anchor branch
+        # pg-router/<beadID> deterministically from the SAME beadID, so the
+        # dir's basename recovers it here without needing beads/ccpool state.
+        beadid=$(basename "$wt")
+        branch="pg-router/$beadid"
         ${
           if apply then
             ''
               if git -C "$wt" worktree remove "$wt" 2>&1; then
                 echo "pg-router-ccpool-handler-worktrees: removed: $wt"
                 n=$((n + 1))
+                # Branch delete (bead pg2-ci75j): x/gitclient's RemoveWorktree
+                # (mirrored here at the shell level) only ever ran `git
+                # worktree remove` and never touched the branch, orphaning it
+                # in $repo forever -- the ~100+-stray-branch state pg2-ci75j
+                # found in the ZR monorepo. Anchored at $repo, never at $wt:
+                # $wt no longer exists once removed above, and a branch is a
+                # repo-level ref anyway (the same anchor CreateWorktree itself
+                # used to create it). These are pg-router's own throwaway
+                # per-dispatch anchor branches, reset at HEAD every dispatch
+                # -- never a user branch with independent value -- so once
+                # the worktree is confirmed removed the branch has served its
+                # purpose; most are never merged into anything, so `-D`
+                # (force) is used rather than `-d`, which would refuse
+                # constantly for exactly that reason. Fails soft like the
+                # removal above: left for the next sweep, never escalated.
+                if git -C "$repo" branch -D "$branch" 2>&1; then
+                  echo "pg-router-ccpool-handler-worktrees: branch deleted: $branch"
+                else
+                  echo "pg-router-ccpool-handler-worktrees: skip (branch delete failed -- left for next sweep): $branch"
+                fi
               else
                 echo "pg-router-ccpool-handler-worktrees: skip (remove failed -- left for next sweep): $wt"
                 skipped=$((skipped + 1))
@@ -148,6 +176,7 @@ let
           else
             ''
               echo "pg-router-ccpool-handler-worktrees: would remove: $wt"
+              echo "pg-router-ccpool-handler-worktrees: would delete branch: $branch"
               n=$((n + 1))
             ''
         }

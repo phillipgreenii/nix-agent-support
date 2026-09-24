@@ -30,6 +30,7 @@ var (
 	_ ccpool.Runner             = (*FakeCC)(nil)
 	_ beads.Runner              = (*ScriptBD)(nil)
 	_ gitclient.WorktreeManager = (*NoopWorktreeManager)(nil)
+	_ gitclient.BranchManager   = (*NoopWorktreeManager)(nil)
 )
 
 // TestStamp is the fixed per-attempt stamp injected in tests so external_ids are
@@ -212,9 +213,13 @@ func (g *NoopGit) Run(_ context.Context, dir string, args ...string) error {
 	return nil
 }
 
-// NoopWorktreeManager is a recording gitclient.WorktreeManager that performs
-// no real git commands — the CreateWorktree/RemoveWorktree/PruneWorktrees
-// half of NoopGitOpener's fake.
+// NoopWorktreeManager is a recording gitclient.WorktreeManager AND
+// gitclient.BranchManager that performs no real git commands — the
+// CreateWorktree/RemoveWorktree/PruneWorktrees/DeleteBranch half of
+// NoopGitOpener's fake. It satisfies both roles (like the real
+// *gitclient.Client does) so executor.cleanupWorktree's own
+// wm.(gitclient.BranchManager) type assertion succeeds against this fake too
+// (bead pg2-ci75j), letting tests exercise the branch-delete path for real.
 type NoopWorktreeManager struct {
 	mu    sync.Mutex
 	Calls [][]string
@@ -238,6 +243,13 @@ func (m *NoopWorktreeManager) PruneWorktrees(context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Calls = append(m.Calls, []string{"prune"})
+	return nil
+}
+
+func (m *NoopWorktreeManager) DeleteBranch(_ context.Context, branch string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls = append(m.Calls, []string{"branch-delete", branch, strconv.FormatBool(force)})
 	return nil
 }
 
