@@ -137,6 +137,17 @@ func Check(ctx context.Context, d CheckDeps, p CheckParams) (CheckResult, error)
 			}
 			// Choose scan range: baseline..applied_ref when baseline is an
 			// ancestor, else the last-N commits of applied_ref.
+			//
+			// baseline is a scan LOWER BOUND, not a claim about which commit will
+			// resolve the gate — it is the repo's applied_ref recorded AT GATE-CREATE
+			// TIME (ADR 0018), before the gated change went through its own apply. A
+			// gate that resolves here will therefore typically find its patch-id on a
+			// commit SEVERAL STEPS INTO baseline..applied_ref, i.e. baseline is
+			// expected to be a strict ancestor of (never required to equal) the
+			// resolving commit. Investigated and confirmed by pg2-q61in: a real gate's
+			// recorded baseline was a strict ancestor of its landing commit, and the
+			// awaited patch-id was independently verified to match that landing commit
+			// exactly (no collision) — the designed behaviour, not a bug.
 			rng := fmt.Sprintf("-n %d %s", p.LastN, repo.AppliedRef)
 			if base := g.Metadata["applied_baseline"]; base != "" && d.PatchID.IsAncestor(ctx, repo.Path, base, repo.AppliedRef) {
 				rng = base + ".." + repo.AppliedRef

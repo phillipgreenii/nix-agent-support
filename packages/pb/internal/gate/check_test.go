@@ -1072,6 +1072,50 @@ func TestCheck_resolvesWhenPatchIDInHistory(t *testing.T) {
 	}
 }
 
+// TestCheck_baselineSeveralCommitsBehindResolvingCommitStillResolves pins the
+// pg2-q61in investigation as a passing case, not a bug. That bead observed a REAL
+// gate (support-apps, await patch-id b691cc29..., landed as commit 292ef884...)
+// whose `applied_baseline` metadata was b7cb8cef... — verified via `git merge-base
+// --is-ancestor` (both directions) to be a STRICT ancestor of the landing commit,
+// three commits back, not equal to it. That is exactly what ADR 0018 documents:
+// `applied_baseline` is "the repo's applied_ref AT CREATE TIME" — a scan
+// lower-bound snapshot taken BEFORE the gated change was applied — so it is
+// EXPECTED to be an ancestor of (not equal to) whatever commit later satisfies the
+// gate. It was also independently confirmed the awaited patch-id
+// (b691cc292a0d9fa7898841ed64dadebc0432bfdd) exactly matches
+// `git patch-id --stable` of the real landing commit, i.e. condition 1 resolved the
+// gate against the CORRECT commit, not a collision.
+//
+// This test reproduces that shape with three unrelated intervening commits between
+// baseline and the resolving commit (mirroring the real 3-commit gap), only the
+// LAST of which carries the gated patch-id, and asserts Check still resolves
+// correctly using it. If this test ever fails, `pb gate check` has regressed into
+// requiring baseline equality (or otherwise mishandling a multi-commit scan range),
+// which would be the actual bug pg2-q61in speculated about — but is not what was
+// found.
+func TestCheck_baselineSeveralCommitsBehindResolvingCommitStillResolves(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: checkInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "list", "--limit", "0", "--json"},
+		run.Result{Stdout: `{"data":[{"id":"g-1","issue_type":"gate","await_type":"pn:applied",
+			"await_id":"home:repo-a:b691cc29","created_at":"2026-06-26T00:00:00Z","metadata":{"applied_baseline":"b7cb8cef"}}]}`}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "merge-base", "--is-ancestor", "b7cb8cef", "tip"}, run.Result{}, nil)
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "log", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--no-merges", "b7cb8cef..tip"}, run.Result{Stdout: "diff"}, nil)
+	// Three commits in the scanned range, none of them equal to the baseline —
+	// only the third (the actual landing commit) carries the gated patch-id.
+	f.AddResponse("git", []string{"-C", "/ws/repo-a", "patch-id", "--stable"}, run.Result{
+		Stdout: "unrelated1 d4dd972\nunrelated2 0960967\nb691cc29 292ef884\n",
+	}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "gate", "resolve", "g-1"}, run.Result{}, nil)
+
+	out := runCheck(t, f)
+	if len(out.Resolved) != 1 || out.Resolved[0] != "g-1" {
+		t.Fatalf("resolved = %v skipped=%+v blocked=%+v; a baseline several commits "+
+			"behind the resolving commit must still resolve — that gap is expected, per ADR 0018, "+
+			"not a defect", out.Resolved, out.Skipped, out.Blocked)
+	}
+}
+
 // TestCheck_rawSHARepairResolvesWhenPatchIDAlreadyApplied pins the tc-htcum
 // mechanism fix's happy path: a gate created OUTSIDE `pb gate create` (an ad-hoc
 // `bd gate create --await-id "...:<raw-sha>"`) carries a raw commit SHA instead of

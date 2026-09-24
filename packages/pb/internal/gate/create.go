@@ -31,10 +31,19 @@ type CreateParams struct {
 }
 
 type CreatedGate struct {
-	GateID          string `json:"gate-id"`
-	AwaitID         string `json:"await_id"`
-	Repo            string `json:"repo"`
-	PatchID         string `json:"patch-id"`
+	GateID  string `json:"gate-id"`
+	AwaitID string `json:"await_id"`
+	Repo    string `json:"repo"`
+	PatchID string `json:"patch-id"`
+	// AppliedBaseline is the repo's applied_ref AT CREATE TIME (ADR 0018) — a scan
+	// lower-bound snapshot, not a claim about which commit will eventually resolve
+	// the gate. Because the gated commit is (almost always) not yet applied when
+	// the gate is created, this is EXPECTED to be a strict ancestor of — never
+	// required to equal — whatever commit later satisfies the gate at check time.
+	// Investigated in pg2-q61in: a real gate's baseline was verified to be a strict
+	// ancestor of its landing commit, several commits back, with the patch-id
+	// itself independently confirmed to match the correct commit. That is the
+	// designed behaviour, not a staleness bug.
 	AppliedBaseline string `json:"applied_baseline"`
 }
 
@@ -91,6 +100,12 @@ func Create(ctx context.Context, d CreateDeps, p CreateParams) (CreateResult, er
 		if err != nil {
 			return result, err
 		}
+		// repo.AppliedRef is fetched once, above, at the top of Create — the repo's
+		// applied_ref AS OF THIS INVOCATION, before the commit(s) being gated here
+		// have gone through their own apply. See CreatedGate.AppliedBaseline's doc
+		// comment for why it is normal (per ADR 0018, confirmed by pg2-q61in) for
+		// this value to end up several commits behind whatever eventually resolves
+		// the gate.
 		if err := d.BD.SetMetadata(ctx, dbDir, gid, "applied_baseline", repo.AppliedRef); err != nil {
 			return result, fmt.Errorf("gate %s created but baseline write failed: %w", gid, err)
 		}
