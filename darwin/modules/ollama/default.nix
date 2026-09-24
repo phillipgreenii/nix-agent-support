@@ -167,6 +167,21 @@ in
         errorAlert.threshold = 3;
         errorAlert.window = "10m";
       };
+
+      # pg2-fdtvv: the MAIN ollama daemon's own log stream, distinct from the
+      # functional probe's JSONL above. `ollama serve` is a third-party
+      # binary whose log format we do not control (plain text, not JSON), so
+      # format = "raw" per the option's own doc -- same category as
+      # beads-dolt-server's raw registration one repo over. `path` MUST be
+      # set explicitly (the default glob assumes a JSONL file under
+      # ${env:XDG_STATE_HOME}/ollama/*.jsonl, which is not where this
+      # userAgent's StandardOutPath/StandardErrorPath actually write); the
+      # glob covers both ollama.out.log and ollama.err.log set on the
+      # userAgents.ollama entry above.
+      phillipgreenii.observability.logSources.ollama = {
+        path = "/Users/${primaryUser}/Library/Logs/ollama.*.log";
+        format = "raw";
+      };
     })
   ];
 }

@@ -61,6 +61,32 @@ let
       (lib.head pgDeskUsers).xdg.configFile."pg-desk/config.yaml".source
     else
       null;
+
+  # pg2-fdtvv: the enabled user's serve.log override, if any (same
+  # cross-module read pattern as pgDeskConfigSource just above). Falls back
+  # to cmd/pg-desk/serve.go's own defaultServeLogPathSuffix
+  # (~/Library/Logs/pg-desk-serve.log) when unset -- the exact default the
+  # `pg-desk serve` binary itself uses when serve.log is null
+  # (openServeLogFile). serve writes real slog.NewTextHandler records here
+  # (packages/pg-desk/cmd/pg-desk/serve.go's telemetry.Fanout call) in
+  # ADDITION to its direct OTLP log push, so unlike pa-monitor-daemon/
+  # pg-desk-serve's own OTel-only siblings, there IS a real file worth a
+  # logSources entry.
+  pgDeskServeLogOverride =
+    if pgDeskUsers != [ ] then
+      (lib.head pgDeskUsers).phillipgreenii.programs.pg-desk.serve.log
+    else
+      null;
+  pgDeskServeLogPath =
+    if pgDeskServeLogOverride != null then
+      pgDeskServeLogOverride
+    else if primaryUser != null then
+      "/Users/${primaryUser}/Library/Logs/pg-desk-serve.log"
+    else
+      # path's type is a plain (non-nullable) string -- fall back to the same
+      # /tmp shape stateHome above uses when primaryUser is unresolved,
+      # rather than passing null through to the logSources submodule.
+      "/tmp/pg-desk-serve/pg-desk-serve.log";
 in
 {
   # A generic darwin module running `pg-desk serve` as a launchd user agent
@@ -107,31 +133,48 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    phillipgreenii.system.launchdServices.userAgents.pg-desk-serve = {
-      label = "com.phillipg.pg-desk-serve";
-      script = ''
-        exec ${cfg.package}/bin/pg-desk serve${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}
-      '';
-      runAtLoad = true;
-      keepAlive = true;
-      serviceConfig = {
-        EnvironmentVariables =
-          emitterEnv
-          // lib.optionalAttrs (pgDeskConfigSource != null) {
-            PG_DESK_CONFIG = toString pgDeskConfigSource;
-          };
-        StandardOutPath = "${stateHome}/pg-desk/launchd-stdout.log";
-        StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
+    phillipgreenii = {
+      system.launchdServices.userAgents.pg-desk-serve = {
+        label = "com.phillipg.pg-desk-serve";
+        script = ''
+          exec ${cfg.package}/bin/pg-desk serve${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}
+        '';
+        runAtLoad = true;
+        keepAlive = true;
+        serviceConfig = {
+          EnvironmentVariables =
+            emitterEnv
+            // lib.optionalAttrs (pgDeskConfigSource != null) {
+              PG_DESK_CONFIG = toString pgDeskConfigSource;
+            };
+          StandardOutPath = "${stateHome}/pg-desk/launchd-stdout.log";
+          StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
+        };
+      };
+
+      observability = {
+        # pg2-02n5o: liveness/stale-snapshot/sync-failure-rate alert rules for
+        # the pg_desk_* metric catalog (see the file's own header for the
+        # incident context and the folder-convergence mechanism). Gated on this
+        # module's own `cfg.enable`, mirroring pg-router's darwin module's
+        # `obs.enable`-only gate for its own alertRuleFiles entry.
+        alertRuleFiles = [
+          ../../../packages/pg-desk/grafana/alerting/alerts.yaml
+        ];
+
+        # pg2-fdtvv: `path` MUST be set explicitly -- serve.log is a plain-text
+        # slog.NewTextHandler stream (packages/pg-desk/cmd/pg-desk/serve.go), not
+        # the ADR 0038 JSONL contract the option's own default glob assumes, and
+        # it lives under ~/Library/Logs, not ${env:XDG_STATE_HOME}/pg-desk-serve/.
+        # Set unconditionally on cfg.enable (no separate obs.enable gate), same
+        # convention as this module's own alertRuleFiles entry just above --
+        # both are "safe to set when observability is disabled" per the option's
+        # own doc.
+        logSources.pg-desk-serve = {
+          path = pgDeskServeLogPath;
+          format = "raw";
+        };
       };
     };
-
-    # pg2-02n5o: liveness/stale-snapshot/sync-failure-rate alert rules for
-    # the pg_desk_* metric catalog (see the file's own header for the
-    # incident context and the folder-convergence mechanism). Gated on this
-    # module's own `cfg.enable`, mirroring pg-router's darwin module's
-    # `obs.enable`-only gate for its own alertRuleFiles entry.
-    phillipgreenii.observability.alertRuleFiles = [
-      ../../../packages/pg-desk/grafana/alerting/alerts.yaml
-    ];
   };
 }

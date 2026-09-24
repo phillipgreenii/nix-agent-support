@@ -89,6 +89,13 @@ let
   # to bare `ccpool`/`bd`/`git`; without this on PATH every run fails with
   # "executable file not found in $PATH" (confirmed live, 36/36 runs).
   hmProfileBin = if primaryUser != null then "/etc/profiles/per-user/${primaryUser}/bin" else null;
+
+  # phillipgreenii.observability is declared at darwin/system scope in
+  # phillipgreenii-nix-support-apps; this repo does not declare that flake as
+  # an input, so the option only exists once a consuming machine flake
+  # imports both -- same defensive pattern as darwin/modules/pa-monitor's/
+  # pg-router's own `obs` binding.
+  obs = config.phillipgreenii.observability;
 in
 {
   options.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = lib.mkOption {
@@ -157,6 +164,21 @@ in
         };
       };
     })
+    # pg2-fdtvv: this binary has no OTel/JSONL logging -- cmd/pg-router-
+    # ccpool-handler's register/preShutdown/reconcile/query/dispatch paths
+    # log via bare `log/slog` calls (slog.Info/slog.Warn) with no custom
+    # handler installed, so Go's default text handler writes plain
+    # `key=value` lines to stderr, captured by the -daemon userAgent's own
+    # StandardErrorPath above. format = "raw": plain text, not the ADR 0038
+    # JSONL contract. Guarded on obs.enable so it is a no-op on machines
+    # without the stack (phillipgreenii.observability.logSources is declared
+    # at darwin/system scope in phillipgreenii-nix-support-apps).
+    (lib.mkIf (daemonEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.pg-router-ccpool-handler-daemon = {
+        path = "${stateHome}/pg-router-ccpool-handler/launchd-*.log";
+        format = "raw";
+      };
+    })
     (lib.mkIf poolMetricsEnabledByAnyUser {
       # poolMetrics LaunchAgent (bead pg2-mr0sl): the periodic pool-capacity
       # pass, via the SAME canonical helper the daemon LaunchAgent above
@@ -184,6 +206,19 @@ in
           StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stdout.log";
         };
+      };
+    })
+    # pg2-fdtvv: same "no OTel/JSONL logging, default slog to stderr, format
+    # = raw" reasoning as the -daemon logSources entry above -- `pool-
+    # capacity`'s own stdout is redirected into the .prom output file by
+    # mkPoolMetricsScript (home/programs/pg-router-ccpool-handler's own
+    # atomic-write wrapper), so this userAgent's StandardOutPath/
+    # StandardErrorPath carry only the wrapping script's/subcommand's
+    # stderr diagnostics -- still this agent's real (and only) log signal.
+    (lib.mkIf (poolMetricsEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.pg-router-ccpool-handler-pool-metrics = {
+        path = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-*.log";
+        format = "raw";
       };
     })
   ];

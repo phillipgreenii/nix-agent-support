@@ -42,6 +42,11 @@ in
       # dashboard with no other consumers, so a silent failure has low consequence. Revisit with
       # category (a) (metrics) or (c) (log-based alert on the plain-text logs below) on the same
       # trigger as the healthCheck comment above: once the trial graduates to permanent.
+      #
+      # logCollection.enable = false (pg2-fdtvv): encodes the same category-(d) exemption in
+      # config, not just prose — this service is deliberately not expected to have a matching
+      # `phillipgreenii.observability.logSources` entry while the trial stays low-consequence.
+      logCollection.enable = false;
       serviceConfig = {
         StandardOutPath = "/Users/${primaryUser}/Library/Logs/codeburn-web.out.log";
         StandardErrorPath = "/Users/${primaryUser}/Library/Logs/codeburn-web.err.log";

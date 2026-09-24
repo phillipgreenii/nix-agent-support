@@ -113,6 +113,16 @@ in
           # source of truth), written from obs via home-manager.sharedModules
           # above — no longer injected as plist env.
         };
+        # logCollection.enable = false (pg2-fdtvv): ADR 0011 ("Persist transitions to a JSONL
+        # file, tail with the OTel collector" was explicitly REJECTED) means this daemon's real
+        # log stream (internal/otel/emitter.go's LogEvent calls — block.usage.limit_hit,
+        # nudge.sent, etc.) is pushed directly over OTLP via otlploggrpc, never written to a
+        # local file. There is therefore no file for a filelog-based `logSources` entry to tail;
+        # the StandardOutPath/StandardErrorPath above only ever carry occasional
+        # failed-to-start diagnostics (daemon.go's fmt.Fprintf(os.Stderr, ...) calls), not this
+        # daemon's real signal — same "launchd's raw process output, not the app's structured
+        # log" distinction ccpool-reap's own StandardOutPath/StandardErrorPath comment draws.
+        logCollection.enable = false;
       };
     })
   ];

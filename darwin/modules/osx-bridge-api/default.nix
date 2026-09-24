@@ -23,6 +23,14 @@ let
   stateHome =
     if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/osx-bridge-api";
   socketPath = "${stateHome}/osx-bridge-api/osx-bridge-api.sock";
+
+  # phillipgreenii.observability is declared at darwin/system scope in
+  # phillipgreenii-nix-support-apps (darwin/modules/observability/
+  # registration.nix); this repo does not declare that flake as an input, so
+  # the option only exists once a consuming machine flake imports both --
+  # same defensive pattern as darwin/modules/pa-monitor's/pg-router's own
+  # `obs` binding.
+  obs = config.phillipgreenii.observability;
 in
 {
   # LaunchAgent registration via the canonical helper (`phillipgreenii-nix-personal`
@@ -52,19 +60,42 @@ in
   # what this registration makes possible to verify live — none of it can
   # be exercised or faked from this Nix module or from an automated test;
   # it requires a human applying this configuration on a real machine.
-  config = lib.mkIf daemonEnabledByAnyUser {
-    phillipgreenii.system.launchdServices.userAgents.osx-bridge-api-daemon = {
-      label = "com.phillipg.osx-bridge-api-daemon";
-      execPath = "${pkg}/bin/osx-bridge-api";
-      runAtLoad = true;
-      keepAlive = true;
-      serviceConfig = {
-        StandardErrorPath = "${stateHome}/osx-bridge-api/launchd-stderr.log";
-        StandardOutPath = "${stateHome}/osx-bridge-api/launchd-stdout.log";
-        EnvironmentVariables = {
-          OSX_BRIDGE_API_SOCKET = socketPath;
+  config = lib.mkMerge [
+    (lib.mkIf daemonEnabledByAnyUser {
+      phillipgreenii.system.launchdServices.userAgents.osx-bridge-api-daemon = {
+        label = "com.phillipg.osx-bridge-api-daemon";
+        execPath = "${pkg}/bin/osx-bridge-api";
+        runAtLoad = true;
+        keepAlive = true;
+        serviceConfig = {
+          StandardErrorPath = "${stateHome}/osx-bridge-api/launchd-stderr.log";
+          StandardOutPath = "${stateHome}/osx-bridge-api/launchd-stdout.log";
+          EnvironmentVariables = {
+            OSX_BRIDGE_API_SOCKET = socketPath;
+          };
         };
       };
-    };
-  };
+    })
+
+    # phillipgreenii.observability.logSources is declared at darwin/system scope
+    # in phillipgreenii-nix-support-apps, so this lives in darwin, not the
+    # home-manager module -- same reasoning as ccpool's/pg-router's own
+    # logSources registration. Guarded on obs.enable so it is a no-op on
+    # machines without the stack.
+    #
+    # osx-bridge-api has no OTel/JSONL logging at all (cmd/osx-bridge-api/
+    # main.go logs entirely via plain fmt.Println/fmt.Fprintf to stdout/
+    # stderr -- "osx-bridge-api: listening on %s", "calendar provider
+    # unavailable: %v", etc.), so the launchd-captured StandardOutPath/
+    # StandardErrorPath ARE this daemon's real (and only) log stream, unlike
+    # pa-monitor-daemon's own launchd captures (which are secondary to a
+    # direct OTLP push and got logCollection.enable = false instead). format
+    # = "raw": plain text, not the ADR 0038 JSONL contract.
+    (lib.mkIf (daemonEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.osx-bridge-api-daemon = {
+        path = "${stateHome}/osx-bridge-api/launchd-*.log";
+        format = "raw";
+      };
+    })
+  ];
 }

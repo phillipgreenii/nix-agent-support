@@ -27,6 +27,13 @@ let
   # under the primary user; mirror the resolution the sibling agents use.
   primaryUser = config.system.primaryUser or null;
   stateHome = if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pg-ccaudit";
+
+  # phillipgreenii.observability is declared at darwin/system scope in
+  # phillipgreenii-nix-support-apps; this repo does not declare that flake as
+  # an input, so the option only exists once a consuming machine flake
+  # imports both -- same defensive pattern as darwin/modules/pa-monitor's/
+  # pg-router's own `obs` binding.
+  obs = config.phillipgreenii.observability;
 in
 {
   # The scheduled transcript sweep, as a nix-declared launchd USER agent following
@@ -57,32 +64,54 @@ in
   #      racing on the same transcript's resume offset is the one way this design
   #      could corrupt its own coverage accounting, and an overlapping tick is an
   #      expected event at a ~15 minute cadence, not an error worth logging.
-  config = lib.mkIf sweepEnabledByAnyUser {
-    phillipgreenii.system.launchdServices.userAgents.pg-ccaudit-ingest = {
-      label = "com.phillipg.pg-ccaudit-ingest";
-      script = ''
-        exec ${pkg}/bin/pg-ccaudit ingest${lib.optionalString thinking " --thinking"}
-      '';
-      runAtLoad = true;
-      # `pg-ccaudit ingest` is a periodic short task (StartInterval), not a
-      # long-running daemon — it sweeps and exits. keepAlive defaults to true in
-      # the helper, which would make launchd RESTART it on every exit (a ~10s
-      # respawn loop). Disable keepAlive so StartInterval is the only re-trigger,
-      # and exempt it from the health check, which expects state=running — a state
-      # a one-shot never reaches.
-      keepAlive = false;
-      healthCheck = false;
-      serviceConfig = {
-        StartInterval = interval; # the periodic re-trigger
-        # Surface runtime failures: the agent is keepAlive-off and health-check
-        # exempt, so without logs a crashing sweep would be silent — and a silently
-        # dead sweep is worse than none, because the index would go stale while
-        # every query kept answering from it. The staleness note on the query path
-        # is the second line of defence; these logs are the first. launchd creates
-        # the parent dir if it is missing.
-        StandardErrorPath = "${stateHome}/pg-ccaudit/ingest.err.log";
-        StandardOutPath = "${stateHome}/pg-ccaudit/ingest.out.log";
+  config = lib.mkMerge [
+    (lib.mkIf sweepEnabledByAnyUser {
+      phillipgreenii.system.launchdServices.userAgents.pg-ccaudit-ingest = {
+        label = "com.phillipg.pg-ccaudit-ingest";
+        script = ''
+          exec ${pkg}/bin/pg-ccaudit ingest${lib.optionalString thinking " --thinking"}
+        '';
+        runAtLoad = true;
+        # `pg-ccaudit ingest` is a periodic short task (StartInterval), not a
+        # long-running daemon — it sweeps and exits. keepAlive defaults to true in
+        # the helper, which would make launchd RESTART it on every exit (a ~10s
+        # respawn loop). Disable keepAlive so StartInterval is the only re-trigger,
+        # and exempt it from the health check, which expects state=running — a state
+        # a one-shot never reaches.
+        keepAlive = false;
+        healthCheck = false;
+        serviceConfig = {
+          StartInterval = interval; # the periodic re-trigger
+          # Surface runtime failures: the agent is keepAlive-off and health-check
+          # exempt, so without logs a crashing sweep would be silent — and a silently
+          # dead sweep is worse than none, because the index would go stale while
+          # every query kept answering from it. The staleness note on the query path
+          # is the second line of defence; these logs are the first. launchd creates
+          # the parent dir if it is missing.
+          StandardErrorPath = "${stateHome}/pg-ccaudit/ingest.err.log";
+          StandardOutPath = "${stateHome}/pg-ccaudit/ingest.out.log";
+        };
       };
-    };
-  };
+    })
+
+    # phillipgreenii.observability.logSources is declared at darwin/system
+    # scope in phillipgreenii-nix-support-apps -- same reasoning as ccpool's/
+    # pg-router's own logSources registration. Guarded on obs.enable so it is
+    # a no-op on machines without the stack.
+    #
+    # pg-ccaudit has no OTel/JSONL logging -- cmd/pg-ccaudit/ingest_cmd.go
+    # writes plain human-readable text via fmt.Fprintf to stdout/stderr
+    # ("ingest skipped: another ingest holds %s", "%d file(s) could not be
+    # indexed", the Summary() line), exactly the runtime-failure signal this
+    # module's own StandardOutPath/StandardErrorPath comment above already
+    # calls out as load-bearing ("these logs are the first [line of
+    # defence]"). format = "raw": plain text, not the ADR 0038 JSONL
+    # contract.
+    (lib.mkIf (sweepEnabledByAnyUser && (obs.enable or false)) {
+      phillipgreenii.observability.logSources.pg-ccaudit-ingest = {
+        path = "${stateHome}/pg-ccaudit/ingest.*.log";
+        format = "raw";
+      };
+    })
+  ];
 }

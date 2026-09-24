@@ -3398,6 +3398,23 @@
                                 type = lib.types.attrsOf userAgentSubmodule;
                                 default = { };
                               };
+                              # pg2-fdtvv: darwin/modules/pg-router-ccpool-handler/default.nix
+                              # now also reads obs.enable and sets logSources.pg-router-ccpool-
+                              # handler-{daemon,pool-metrics} -- this stub needs the same option
+                              # shape as the real one (phillipgreenii-nix-support-apps's
+                              # registration.nix), or evalDarwin fails with "the option ... does
+                              # not exist" (same reasoning as darwin/modules/pg-router's own
+                              # evalDarwin fixture, pg2-6e5h6/pg2-02n5o precedent).
+                              phillipgreenii.observability = {
+                                enable = lib.mkOption {
+                                  type = lib.types.bool;
+                                  default = false;
+                                };
+                                logSources = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.anything;
+                                  default = { };
+                                };
+                              };
                               home-manager.users = lib.mkOption {
                                 type = lib.types.attrsOf (
                                   lib.types.submodule {
@@ -3460,7 +3477,15 @@
                             };
                           }
                         )
-                        { home-manager.users.tester.phillipgreenii.programs.pg-router-ccpool-handler = hmModuleCfg; }
+                        {
+                          home-manager.users.tester.phillipgreenii.programs.pg-router-ccpool-handler = hmModuleCfg;
+                          # pg2-fdtvv: force obs.enable so darwinWithDaemon/darwinWithPoolMetrics
+                          # exercise the new logSources block independent of hmModuleCfg,
+                          # matching the real module's own `lib.mkIf (obs.enable or false)` gate
+                          # (same technique as darwin/modules/pg-router's own evalDarwin fixture,
+                          # pg2-02n5o).
+                          phillipgreenii.observability.enable = true;
+                        }
                       ];
                     }).config;
 
@@ -3709,6 +3734,26 @@
                 # disabled module: zero behavior change (no registry entry
                 # contributed at all).
                 assert disabledWorktreeReclaimEntries == [ ];
+                # logSources.pg-router-ccpool-handler-{daemon,pool-metrics} (pg2-fdtvv):
+                # each entry appears only alongside its OWN userAgent, never the other's, and
+                # both are raw (this binary's default `log/slog` handler is plain text, not
+                # JSONL).
+                assert
+                  darwinWithDaemon.phillipgreenii.observability.logSources.pg-router-ccpool-handler-daemon.format
+                  == "raw";
+                assert
+                  !(darwinWithDaemon.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-pool-metrics);
+                assert
+                  darwinWithPoolMetrics.phillipgreenii.observability.logSources.pg-router-ccpool-handler-pool-metrics.format
+                  == "raw";
+                assert
+                  !(darwinWithPoolMetrics.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-daemon);
+                assert
+                  !(darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-daemon);
+                assert
+                  !(
+                    darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-pool-metrics
+                  );
                 renderCheck;
 
               # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's
@@ -3898,21 +3943,33 @@
                           { lib, ... }:
                           {
                             options = {
-                              phillipgreenii.system.launchdServices.userAgents = lib.mkOption {
-                                type = lib.types.attrsOf userAgentSubmodule;
-                                default = { };
-                              };
-                              # pg2-02n5o: darwin/modules/pg-desk-serve/default.nix
-                              # now also sets alertRuleFiles unconditionally when
-                              # cfg.enable -- this stub needs the same option shape
-                              # as the real one (phillipgreenii-nix-support-apps's
-                              # alerting.nix), or evalDarwin fails with "the option
-                              # ... does not exist" (same reasoning as pg-router's
-                              # own evalDarwin fixture, and the pg2-6e5h6 precedent
-                              # noted on that fixture).
-                              phillipgreenii.observability.alertRuleFiles = lib.mkOption {
-                                type = lib.types.listOf lib.types.path;
-                                default = [ ];
+                              phillipgreenii = {
+                                system.launchdServices.userAgents = lib.mkOption {
+                                  type = lib.types.attrsOf userAgentSubmodule;
+                                  default = { };
+                                };
+                                observability = {
+                                  # pg2-02n5o: darwin/modules/pg-desk-serve/default.nix
+                                  # now also sets alertRuleFiles unconditionally when
+                                  # cfg.enable -- this stub needs the same option shape
+                                  # as the real one (phillipgreenii-nix-support-apps's
+                                  # alerting.nix), or evalDarwin fails with "the option
+                                  # ... does not exist" (same reasoning as pg-router's
+                                  # own evalDarwin fixture, and the pg2-6e5h6 precedent
+                                  # noted on that fixture).
+                                  alertRuleFiles = lib.mkOption {
+                                    type = lib.types.listOf lib.types.path;
+                                    default = [ ];
+                                  };
+                                  # pg2-fdtvv: darwin/modules/pg-desk-serve/default.nix now
+                                  # also sets logSources.pg-desk-serve unconditionally when
+                                  # cfg.enable -- same "stub needs the real option's shape or
+                                  # evalDarwin fails" reasoning as alertRuleFiles just above.
+                                  logSources = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.anything;
+                                    default = { };
+                                  };
+                                };
                               };
                               system.primaryUser = lib.mkOption {
                                 type = lib.types.nullOr lib.types.str;
@@ -3992,6 +4049,15 @@
                 assert darwinDisabled.phillipgreenii.observability.alertRuleFiles == [ ];
                 assert lib.elem ./packages/pg-desk/grafana/alerting/alerts.yaml
                   darwinEnabledNoSoak.phillipgreenii.observability.alertRuleFiles;
+                # logSources.pg-desk-serve (pg2-fdtvv): absent when disabled, present once
+                # enabled, pointed at the real Go default (serve.go's defaultServeLogPathSuffix)
+                # since no HM user is stubbed here (pgDeskUsers is always []), and correctly
+                # tagged raw (serve.go's slog.NewTextHandler is plain text, not JSONL).
+                assert !(darwinDisabled.phillipgreenii.observability.logSources ? pg-desk-serve);
+                assert
+                  darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-desk-serve.path
+                  == "/Users/tester/Library/Logs/pg-desk-serve.log";
+                assert darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-desk-serve.format == "raw";
                 # Home module: no consumer input required to evaluate
                 # (default enable = false, nothing installed/rendered).
                 assert hmDisabled.home.packages == [ ];
