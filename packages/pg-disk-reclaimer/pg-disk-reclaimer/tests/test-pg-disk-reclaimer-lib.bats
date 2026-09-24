@@ -3,6 +3,10 @@
 # (pg-disk-reclaimer.bash). list, validate, and reclaim are all now
 # implemented (beads pg2-txxyj.4/.5/.6) -- only the scaffold task
 # (pg2-txxyj.1) ever left them as stubs.
+# `run --separate-stderr` (bats >= 1.5.0, precedent: pg-wi-flow's lib tests)
+# is used below wherever a case mixes a stderr error message with stdout
+# JSON/text, so the error line is never mistaken for part of stdout.
+bats_require_minimum_version 1.5.0
 # The registry loading + schema validation engine (pgdr_default_registry_path
 # / pgdr_validate_registry / pgdr_read_registry) is exercised below against
 # fixtures under tests/fixtures/ (bead pg2-txxyj.2). The variant-selection
@@ -396,11 +400,15 @@ JSON
   [ "$(echo "$output" | jq -r '[.[].id] | join(",")')" = "multi-variant-item,single-variant-item" ]
 }
 
-@test "pgdr_select_variants fails fast on a mix of one valid and one invalid id, with no partial output for the valid one" {
-  run pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 single-variant-item does-not-exist
+@test "pgdr_select_variants on a mix of one valid and one invalid id still selects the valid one, reporting the bad one and returning 1 (bug fix, bead pg2-qt7ep: previously failed fast with no partial output at all)" {
+  # --separate-stderr (bats >= 1.5.0, precedent: pg-wi-flow's lib tests):
+  # this case's stdout is a pure JSON selection AND stderr carries the bad-id
+  # error, both non-empty -- $output alone (stdout+stderr combined) is not
+  # valid JSON, so it must be parsed separately from $stderr.
+  run --separate-stderr pgdr_select_variants "$FIXTURES_DIR/selection.json" 5 single-variant-item does-not-exist
   [ "$status" -eq 1 ]
-  [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
-  [[ ! "$output" =~ "single-variant-item" ]]
+  [[ "$stderr" =~ "unknown item id 'does-not-exist'" ]]
+  [ "$(echo "$output" | jq -c '[.[].id]')" = '["single-variant-item"]' ]
 }
 
 # cmd_list (bead pg2-txxyj.4), exercised against tests/fixtures/list.json:
@@ -735,6 +743,32 @@ JSON
   run cmd_reclaim --aggressiveness 5 does-not-exist
   [ "$status" -ne 0 ]
   [[ "$output" =~ "unknown item id 'does-not-exist'" ]]
+}
+
+# Regression test, bead pg2-qt7ep: a real reclaim run was observed to stop
+# partway through instead of attempting every registry item. Reproduced
+# directly against the pre-fix code: `cmd_reclaim --aggressiveness N id1
+# bad-id id2` never ran id1 or id2's commands at all, because
+# pgdr_select_variants' Case B (explicit ids) failed fast on the FIRST bad
+# id and returned before producing any selection -- registry validation
+# (pgdr_read_registry) was confirmed NOT to be the culprit (it passes fine
+# on a well-formed registry regardless of which explicit ids are given).
+# This test mixes one unknown id with THREE good ids -- including
+# failing-item, whose own command also exits non-zero -- so it proves both
+# halves of the fix at once: a bad id must not block ANY good id (this is
+# the regression), and a good id's own failing command must still not
+# block any OTHER good id (pre-existing per-item-loop behavior, still
+# exercised end-to-end here). The final exit status must reflect the
+# mixed outcome (bad id + one failing command) without ever having
+# stopped short.
+@test "cmd_reclaim attempts every valid id when one explicit id among several is bad, and the mixed outcome is still reflected in the exit status" {
+  install_reclaim_registry
+  run --separate-stderr cmd_reclaim --aggressiveness 5 low-item does-not-exist high-item failing-item
+  [ "$status" -ne 0 ]
+  [[ "$stderr" =~ "unknown item id 'does-not-exist'" ]]
+  [[ "$output" =~ "dry-run-low" ]]
+  [[ "$output" =~ "dry-run-high" ]]
+  [[ "$output" =~ "dry-run-fail" ]]
 }
 
 # cmd_reclaim path-existence guard (this bead, pg2-eqniv.2, mirroring

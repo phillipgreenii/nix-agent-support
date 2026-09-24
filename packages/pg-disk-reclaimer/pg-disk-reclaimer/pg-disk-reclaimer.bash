@@ -168,16 +168,24 @@ pgdr_read_registry() {
 # With one or more explicit ids (Case B): processes ONLY those ids. Each
 # requested id is checked, IN THE ORDER GIVEN ON THE COMMAND LINE, for three
 # failure categories -- unknown id, informational-only (empty variants[]),
-# and every variant's aggressiveness exceeding MAX_AGGRESSIVENESS -- and
-# this function fails fast (one message to stderr, no stdout, return 1) on
-# the FIRST id that hits any of them. If every requested id passes, the
-# selection output is built in REGISTRY order (not command-line order),
-# using the same "highest qualifying variant" rule as Case A.
+# and every variant's aggressiveness exceeding MAX_AGGRESSIVENESS. A bad id
+# is reported (one stderr message each, in command-line order) and then
+# SKIPPED -- it does NOT stop the other requested ids from being checked and
+# selected (bug fix, bead pg2-qt7ep: the previous fail-fast-on-first-bad-id
+# behavior meant one bad id among several valid ones produced no selection
+# at all, so `reclaim --aggressiveness N id1 bad-id id2` never attempted
+# id1 or id2 either). The selection output for every GOOD id is built in
+# REGISTRY order (not command-line order), using the same "highest
+# qualifying variant" rule as Case A. If ANY requested id was bad, this
+# function still prints the good ids' selection to stdout but returns 1, so
+# a caller (cmd_reclaim) can still attempt every good id while the overall
+# exit status reflects the partial failure.
 #
-# On success, prints a JSON array to stdout: one flattened object per
-# selected item -- the item's own id/description/path plus the CHOSEN
-# variant's aggressiveness/variantDescription/dryRunCommand/removeCommand
-# merged in directly (no nested variants[], no displayCommand). Returns 0.
+# On success (every requested id good, or no ids given), prints a JSON
+# array to stdout: one flattened object per selected item -- the item's own
+# id/description/path plus the CHOSEN variant's
+# aggressiveness/variantDescription/dryRunCommand/removeCommand merged in
+# directly (no nested variants[], no displayCommand). Returns 0.
 pgdr_select_variants() {
   local path="$1"
   local max_aggressiveness="$2"
@@ -203,33 +211,45 @@ pgdr_select_variants() {
   fi
 
   # Case B: explicit ids. Check every requested id, IN THE ORDER GIVEN ON
-  # THE COMMAND LINE, before producing any output -- fail fast (one stderr
-  # message, no stdout, return 1) on the first one that is unknown,
-  # informational-only, or entirely above the aggressiveness ceiling.
+  # THE COMMAND LINE -- a bad one (unknown, informational-only, or entirely
+  # above the aggressiveness ceiling) gets its own stderr message and is
+  # SKIPPED, but does NOT stop the remaining requested ids from being
+  # checked (bug fix, bead pg2-qt7ep -- see the doc comment above).
   local id
+  local -a good_ids=()
+  local had_bad_id=0
   for id in "$@"; do
     local item_json
     item_json=$(jq --arg id "$id" '[.[] | select(.id == $id)][0] // empty' "$path")
     if [[ -z $item_json ]]; then
       echo "pg-disk-reclaimer: unknown item id '$id'" >&2
-      return 1
+      had_bad_id=1
+      continue
     fi
 
     if [[ $(jq '(.variants // []) | length' <<<"$item_json") -eq 0 ]]; then
       echo "pg-disk-reclaimer: item '$id' is informational-only (no variants) and cannot be selected" >&2
-      return 1
+      had_bad_id=1
+      continue
     fi
 
     if [[ $(jq --argjson n "$max_aggressiveness" '(.variants | map(.aggressiveness) | min) <= $n' <<<"$item_json") != "true" ]]; then
       local min_aggressiveness
       min_aggressiveness=$(jq '.variants | map(.aggressiveness) | min' <<<"$item_json")
       echo "pg-disk-reclaimer: item '$id' requires aggressiveness >= $min_aggressiveness, but --aggressiveness $max_aggressiveness was given" >&2
-      return 1
+      had_bad_id=1
+      continue
     fi
+
+    good_ids+=("$id")
   done
 
   local ids_json
-  ids_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+  if [[ ${#good_ids[@]} -eq 0 ]]; then
+    ids_json='[]'
+  else
+    ids_json=$(printf '%s\n' "${good_ids[@]}" | jq -R . | jq -s .)
+  fi
 
   jq --argjson n "$max_aggressiveness" --argjson ids "$ids_json" '
     [
@@ -244,6 +264,11 @@ pgdr_select_variants() {
         + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
     ]
   ' "$path"
+
+  if [[ $had_bad_id -eq 1 ]]; then
+    return 1
+  fi
+  return 0
 }
 
 # pgdr_path_exists: true if PATH (a trusted, operator-authored registry `path`
@@ -622,7 +647,13 @@ pgdr_confirm() {
 #     see its doc comment above for the no-ids/explicit-ids semantics.
 #     cmd_reclaim does NOT re-validate ids itself; pgdr_select_variants's
 #     errors (unknown id, informational-only id, id above the ceiling)
-#     surface as-is.
+#     surface as-is. A bad id among several explicit ids does NOT prevent
+#     the other (good) ids from being attempted -- pgdr_select_variants
+#     itself still returns a selection for the good ones (see its own doc
+#     comment); cmd_reclaim runs that selection regardless of
+#     pgdr_select_variants' own return status, folding a bad-id failure
+#     into overall_status alongside any command failure below (bug fix,
+#     bead pg2-qt7ep).
 #   [id...]: explicit item ids narrowing the selection (also passed
 #     straight through to pgdr_select_variants).
 #   --apply: switches from the default dry run (each selected variant's
@@ -661,10 +692,12 @@ pgdr_confirm() {
 # (e.g. claude-status-line's scripts.nix, agent-script.nix).
 #
 # Exit status: 0 if every dry-run/remove command that actually ran
-# exited 0 (an item skipped via decline does not count against this); 1
-# if --aggressiveness was missing, selection failed, or any command that
-# ran exited non-zero. One failing item's command does NOT stop the
-# other selected items from being attempted.
+# exited 0 AND every explicitly-requested id was valid (an item skipped
+# via decline does not count against this); 1 if --aggressiveness was
+# missing, at least one explicitly-requested id was bad (unknown,
+# informational-only, or above the ceiling), or any command that ran
+# exited non-zero. Neither a bad id nor a failing item's command stops
+# any OTHER selected item from being attempted.
 cmd_reclaim() {
   local max_aggressiveness=""
   local apply=0
@@ -717,12 +750,19 @@ cmd_reclaim() {
     return 1
   fi
 
+  # NOT `if ! selected=$(...); then return 1; fi` -- pgdr_select_variants
+  # now returns 1 for a bad explicit id while STILL printing a selection
+  # for the good ones (see its doc comment); returning early here on that
+  # non-zero status would throw away that selection and reproduce the
+  # exact bug this fix addresses (bead pg2-qt7ep). overall_status is
+  # seeded from pgdr_select_variants' status instead, and the loop below
+  # always runs over whatever selection it produced.
   local selected
+  local overall_status=0
   if ! selected=$(pgdr_select_variants "$registry_path" "$max_aggressiveness" "${ids[@]}"); then
-    return 1
+    overall_status=1
   fi
 
-  local overall_status=0
   local item
   while IFS= read -r item; do
     local id aggressiveness dry_run_command remove_command path
