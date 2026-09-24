@@ -894,13 +894,15 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	return preparedRun{cfg: cfg, o: o, cleanup: cleanup, declaredRoles: declaredRoles, excluded: excluded}, exitOK
 }
 
-// gateTickKeyOperatorPaused / gateTickKeyCICDDown are the two file-direct gate names (Task
-// 1.2b, ADR 0036) this run's config declares — the map keys
+// gateTickKeyOperatorPaused / gateTickKeyCICDDown / gateTickKeyDiskSpaceLow
+// are the three file-direct gate names (Task 1.2b, ADR 0036; disk-space-low
+// added by bead pg2-af5ur) this run's config declares — the map keys
 // currentGateFiles/svc.ObserveGateFromTick use, one per
-// config.Config.OperatorPaused/CICDDown gate-file path.
+// config.Config.OperatorPaused/CICDDown/DiskSpaceLow gate-file path.
 const (
 	gateTickKeyOperatorPaused = "operator_paused"
 	gateTickKeyCICDDown       = "cicd_down"
+	gateTickKeyDiskSpaceLow   = "disk_space_low"
 )
 
 // gateFileInfo stats path and reports whether the gate is currently set
@@ -918,7 +920,7 @@ func gateFileInfo(path string) core.GateInfo {
 	return core.GateInfo{Set: true, Mtime: fi.ModTime()}
 }
 
-// currentGateFiles reads both file-direct gates cfg declares — the drive
+// currentGateFiles reads every file-direct gate cfg declares — the drive
 // loop's periodic input to svc.ObserveGateFromTick (Task 3.5 Files: gates_cmd.go
 // itself needs no code change, since file-direct pause/resume never touches a
 // running core; this is the OTHER half — the drive loop's own read of that
@@ -927,6 +929,7 @@ func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
 	return map[string]core.GateInfo{
 		gateTickKeyOperatorPaused: gateFileInfo(cfg.OperatorPaused),
 		gateTickKeyCICDDown:       gateFileInfo(cfg.CICDDown),
+		gateTickKeyDiskSpaceLow:   gateFileInfo(cfg.DiskSpaceLow),
 	}
 }
 

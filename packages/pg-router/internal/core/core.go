@@ -956,16 +956,17 @@ const (
 	ResumeReplySchema   = "cli.resume-reply"
 )
 
-// GateOperatorPaused / GateCICDDown are the two named gates INV-LIFE-2 defines,
-// spelled to match the wire-level vocabulary the drive loop's own gate
-// observation already uses (cmd/pg-router's gateTickKeyOperatorPaused /
-// gateTickKeyCICDDown, and this package's own status_test.go literal
-// "operator_paused") — the SAME two gates cmd/pg-router/gates_cmd.go's
-// file-direct pause/resume subcommands manage under their own,
-// differently-spelled CLI vocabulary (gateOperatorPaused = "operator-paused" /
-// gateCICDDown = "cicd-down"). This package never imports that one (no
-// cross-package reach, Task 3.5 Contract), so the two vocabularies are kept
-// in sync by convention and tests, not a shared constant.
+// GateOperatorPaused / GateCICDDown / GateDiskSpaceLow are the three named
+// gates INV-LIFE-2 defines, spelled to match the wire-level vocabulary the
+// drive loop's own gate observation already uses (cmd/pg-router's
+// gateTickKeyOperatorPaused / gateTickKeyCICDDown / gateTickKeyDiskSpaceLow,
+// and this package's own status_test.go literal "operator_paused") — the
+// SAME three gates cmd/pg-router/gates_cmd.go's file-direct pause/resume
+// subcommands manage under their own, differently-spelled CLI vocabulary
+// (gateOperatorPaused = "operator-paused" / gateCICDDown = "cicd-down" /
+// gateDiskSpaceLow = "disk-space-low"). This package never imports that one
+// (no cross-package reach, Task 3.5 Contract), so the three vocabularies are
+// kept in sync by convention and tests, not a shared constant.
 //
 // GateCICDDown is SUPERSEDED (bead pg2-h410q) by pg-router's per-connector CI
 // health command-source recipe (MIGRATION.md), which consumes pg-connector's
@@ -973,9 +974,17 @@ const (
 // global, never-produced gate; see cmd/pg-router/gates_cmd.go's gateCICDDown
 // doc comment for the full rationale. Kept, unremoved, for backward
 // compatibility.
+//
+// GateDiskSpaceLow (bead pg2-af5ur) is manually settable/clearable ONLY —
+// like GateOperatorPaused and GateCICDDown before any producer existed for
+// them, nothing in this codebase writes or clears this file on its own yet.
+// An automatic disk-space check that flips it is a deliberately deferred,
+// separate concern (tracked: bead pg2-zwdwf for the trigger/producer, bead
+// pg2-hipf0 for an external enable/disable path) — do not wire one here.
 const (
 	GateOperatorPaused = "operator_paused"
 	GateCICDDown       = "cicd_down"
+	GateDiskSpaceLow   = "disk_space_low"
 )
 
 // defaultGate is the gate a pause/resume request names when it omits

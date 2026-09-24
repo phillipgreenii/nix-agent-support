@@ -50,6 +50,7 @@ func (m *Model) renderProblemsModal() string {
 		rows,
 		m.gateModalRow("operator-paused", core.GateOperatorPaused),
 		m.gateModalRow("cicd-down", core.GateCICDDown),
+		m.gateModalRow("disk-space-low", core.GateDiskSpaceLow),
 	)
 	rows = append(rows, m.recentErrorLogRows()...)
 	return render.Modal("Problems", rows, m.problemsModalFooter(), m.width, m.height, m.modalScrollOffset)

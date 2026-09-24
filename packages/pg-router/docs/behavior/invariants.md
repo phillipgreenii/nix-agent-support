@@ -355,13 +355,15 @@ sequenceDiagram
   the queue as drained, because without this rule a gated drain-and-exit run would spin forever on an
   idle predicate a suspended dispatch can never satisfy.
 
-  **Gate identity.** There are exactly **two** named gates, **OR-effective** — the core is halted while
-  **either** is set: `operator-paused`, which is `ACTOR-OP`'s own to set and clear, and `cicd-down`, which
-  belongs to an **automation actor** rather than the human operator. Every surface that reports gate
-  state **MUST label an automation-owned gate as such**, because an automation actor **MAY re-assert**
-  a gate it owns on its own initiative (e.g. on every failed health check) in a way a human operator's
-  own gate never does, and a reader conflating the two would not know which one clearing depends on a
-  human action.
+  **Gate identity.** There are exactly **three** named gates, **OR-effective** — the core is halted
+  while **any** is set: `operator-paused`, which is `ACTOR-OP`'s own to set and clear; `cicd-down`,
+  which belongs to an **automation actor** rather than the human operator; and `disk-space-low`
+  (added by bead `pg2-af5ur`), which today is **manually settable/clearable only** — no producer in
+  this codebase sets or clears it on its own — pending a deliberately deferred automatic trigger
+  (tracked separately). Every surface that reports gate state **MUST label an automation-owned gate
+  as such**, because an automation actor **MAY re-assert** a gate it owns on its own initiative (e.g.
+  on every failed health check) in a way a human operator's own gate never does, and a reader
+  conflating the two would not know which one clearing depends on a human action.
 
   **A gate is not a run-scoped selector.** A run-scoped selector (`STORY-OP-3`) is scoped to a single
   run and never outlives it; a gate is **global** and **persists across runs**, taking effect at the

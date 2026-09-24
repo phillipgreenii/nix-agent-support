@@ -215,23 +215,24 @@ func TestResumeAllGates_ResumesInsideGatesModal(t *testing.T) {
 	}
 }
 
-// TestRenderGatesModal_ListsBothGatesByName: the gates modal must name
-// BOTH of INV-LIFE-2's two OR-effective gates, by their ADR-0026-safe
-// hyphenated display names, with state/since/owner -- even one never
-// observed by the core. The never-observed gate (cicd-down here) renders
-// as "not set" [pg2-y6sy5], not the ambiguous "clear since - (owner: -)"
-// this test used to assert.
-func TestRenderGatesModal_ListsBothGatesByName(t *testing.T) {
+// TestRenderGatesModal_ListsAllGatesByName: the gates modal must name
+// ALL THREE of INV-LIFE-2's OR-effective gates (disk-space-low added by
+// bead pg2-af5ur), by their ADR-0026-safe hyphenated display names, with
+// state/since/owner -- even ones never observed by the core. A
+// never-observed gate (cicd-down / disk-space-low here) renders as "not
+// set" [pg2-y6sy5], not the ambiguous "clear since - (owner: -)" this test
+// used to assert.
+func TestRenderGatesModal_ListsAllGatesByName(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
 		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
-		// cicd_down deliberately absent -- never observed yet.
+		// cicd_down / disk_space_low deliberately absent -- never observed yet.
 	}}
 	m.activeModal = ModalGates
 
 	got := m.renderGatesModal()
-	for _, want := range []string{"operator-paused", "cicd-down", "SET", "not set", "operator", "resume all"} {
+	for _, want := range []string{"operator-paused", "cicd-down", "disk-space-low", "SET", "not set", "operator", "resume all"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("gates modal missing %q; got:\n%s", want, got)
 		}

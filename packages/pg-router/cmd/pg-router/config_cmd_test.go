@@ -43,13 +43,14 @@ func TestRenderConfigShow_includesDispatchScalars(t *testing.T) {
 	}
 }
 
-// config --show prints both gate paths, and each one's "paused since" mtime
-// when set, or an explicit not-paused state when absent.
+// config --show prints all three gate paths, and each one's "paused since"
+// mtime when set, or an explicit not-paused state when absent.
 func TestRenderConfigShow_gatesPathsStateMtime(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
 	cfg.CICDDown = filepath.Join(dir, "cicd-down")
+	cfg.DiskSpaceLow = filepath.Join(dir, "disk-space-low")
 	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestRenderConfigShow_gatesPathsStateMtime(t *testing.T) {
 	renderConfigShow(&b, cfg)
 	out := b.String()
 
-	for _, want := range []string{cfg.OperatorPaused, cfg.CICDDown, "paused since", "not paused"} {
+	for _, want := range []string{cfg.OperatorPaused, cfg.CICDDown, cfg.DiskSpaceLow, "paused since", "not paused"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -115,14 +116,15 @@ func TestRenderConfigShowJSON_includesDispatchScalars(t *testing.T) {
 }
 
 // TestRenderConfigShowJSON_gatesPathsStateMtime is renderConfigShowJSON's
-// counterpart to TestRenderConfigShow_gatesPathsStateMtime: both gate paths,
-// and each one's paused state + "since" mtime (or its absence when unset), as
-// typed JSON fields instead of a rendered string.
+// counterpart to TestRenderConfigShow_gatesPathsStateMtime: all three gate
+// paths, and each one's paused state + "since" mtime (or its absence when
+// unset), as typed JSON fields instead of a rendered string.
 func TestRenderConfigShowJSON_gatesPathsStateMtime(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
 	cfg.CICDDown = filepath.Join(dir, "cicd-down")
+	cfg.DiskSpaceLow = filepath.Join(dir, "disk-space-low")
 	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +148,9 @@ func TestRenderConfigShowJSON_gatesPathsStateMtime(t *testing.T) {
 	}
 	if got.Gates.CICDDown.Path != cfg.CICDDown || got.Gates.CICDDown.Paused || got.Gates.CICDDown.Since != "" {
 		t.Errorf("cicdDown gate = %+v, want path=%q paused=false since=\"\"", got.Gates.CICDDown, cfg.CICDDown)
+	}
+	if got.Gates.DiskSpaceLow.Path != cfg.DiskSpaceLow || got.Gates.DiskSpaceLow.Paused || got.Gates.DiskSpaceLow.Since != "" {
+		t.Errorf("diskSpaceLow gate = %+v, want path=%q paused=false since=\"\"", got.Gates.DiskSpaceLow, cfg.DiskSpaceLow)
 	}
 }
 

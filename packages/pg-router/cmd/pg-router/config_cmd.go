@@ -70,7 +70,8 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	}
 	_, _ = fmt.Fprintln(w, "gates (INV-LIFE-2):")
 	_, _ = fmt.Fprintf(w, "  operator-paused: %s\n", gateShowLine(cfg.OperatorPaused))
-	_, _ = fmt.Fprintf(w, "  cicd-down:    %s\n", gateShowLine(cfg.CICDDown))
+	_, _ = fmt.Fprintf(w, "  cicd-down:       %s\n", gateShowLine(cfg.CICDDown))
+	_, _ = fmt.Fprintf(w, "  disk-space-low:  %s\n", gateShowLine(cfg.DiskSpaceLow))
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
 	_, _ = fmt.Fprintf(w, "  allowed-tools:   %s\n", cfg.AllowedTools)
@@ -167,6 +168,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		Gates: configShowGates{
 			OperatorPaused: gateShowJSON(cfg.OperatorPaused),
 			CICDDown:       gateShowJSON(cfg.CICDDown),
+			DiskSpaceLow:   gateShowJSON(cfg.DiskSpaceLow),
 		},
 		Dispatch: configShowDispatch{
 			PermissionMode: cfg.PermissionMode,
@@ -232,6 +234,7 @@ type configShowQuery struct {
 type configShowGates struct {
 	OperatorPaused configShowGate `json:"operatorPaused"`
 	CICDDown       configShowGate `json:"cicdDown"`
+	DiskSpaceLow   configShowGate `json:"diskSpaceLow"`
 }
 
 // configShowGate is one gate's `--json` row (INV-LIFE-2): Since is the RFC3339

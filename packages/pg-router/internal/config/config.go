@@ -61,13 +61,17 @@ type Config struct {
 	// (the default) marks nothing, so an existing deployment's dispatch is
 	// unchanged.
 	SerializeTypes []string
-	// OperatorPaused / CICDDown are the two named INV-LIFE-2 gate file paths (Gate
-	// identity: operator-paused is ACTOR-OP's own; cicd-down belongs to an
-	// automation actor). Load() fills both with <LogDir>/gates/{operator-paused,
-	// cicd-down} AFTER the repo-TOML layer and only when still empty, so the
-	// precedence is [pool] key (operator_paused_path / cicd_down_path) > PG_ROUTER_*
-	// env > this default. GatePaths() resolves the identical precedence WITHOUT
-	// calling Load() — see its doc comment for why pause/resume need that.
+	// OperatorPaused / CICDDown / DiskSpaceLow are the three named INV-LIFE-2
+	// gate file paths (Gate identity: operator-paused is ACTOR-OP's own;
+	// cicd-down belongs to an automation actor; disk-space-low is manually
+	// settable only for now — bead pg2-af5ur — pending its own automatic
+	// trigger, tracked separately as bead pg2-zwdwf). Load() fills all three
+	// with <LogDir>/gates/{operator-paused, cicd-down, disk-space-low} AFTER
+	// the repo-TOML layer and only when still empty, so the precedence is
+	// [pool] key (operator_paused_path / cicd_down_path / disk_space_low_path)
+	// > PG_ROUTER_* env > this default. GatePaths() resolves the identical
+	// precedence WITHOUT calling Load() — see its doc comment for why
+	// pause/resume need that.
 	//
 	// CICDDown is SUPERSEDED (bead pg2-h410q): no producer for this gate has
 	// ever existed. Prefer pg-router's per-connector CI health command-source
@@ -76,6 +80,7 @@ type Config struct {
 	// cmd/pg-router/gates_cmd.go's gateCICDDown doc comment.
 	OperatorPaused string
 	CICDDown       string
+	DiskSpaceLow   string
 	Effort         string
 	Model          string
 	// PermissionMode is an OPAQUE, un-validated string on this side of the wire
@@ -334,6 +339,7 @@ func Default() Config {
 		PullFailureRetries: 0,
 		OperatorPaused:     "",
 		CICDDown:           "",
+		DiskSpaceLow:       "",
 		Effort:             "max",
 		Model:              "",
 		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
@@ -377,6 +383,7 @@ func Load() (Config, error) {
 	c.PollInterval = envSecs("PG_ROUTER_POLL_INTERVAL", c.PollInterval)
 	c.OperatorPaused = envStr("PG_ROUTER_OPERATOR_PAUSED", c.OperatorPaused)
 	c.CICDDown = envStr("PG_ROUTER_CICD_DOWN", c.CICDDown)
+	c.DiskSpaceLow = envStr("PG_ROUTER_DISK_SPACE_LOW", c.DiskSpaceLow)
 	c.Effort = envStr("PG_ROUTER_EFFORT", c.Effort)
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
@@ -442,6 +449,9 @@ func Load() (Config, error) {
 	}
 	if c.CICDDown == "" {
 		c.CICDDown = filepath.Join(c.LogDir, "gates", "cicd-down")
+	}
+	if c.DiskSpaceLow == "" {
+		c.DiskSpaceLow = filepath.Join(c.LogDir, "gates", "disk-space-low")
 	}
 	// The built-in feedback/worker/review role+query fallback (roles.
 	// BuiltinRoleSet/BuiltinQuerySet) is DELETED here (docket pg2-oju6w's
@@ -783,16 +793,18 @@ func LogDir() string {
 	return envStr("PG_ROUTER_LOG_DIR", Default().LogDir)
 }
 
-// GatePaths resolves the two INV-LIFE-2 gate file paths (operator-paused,
-// cicd-down) with the SAME precedence Load() fills them with — [pool] key
-// (operator_paused_path / cicd_down_path, read directly from the repo config file
-// when it parses) > PG_ROUTER_* env > <LogDir>/gates/{operator-paused,cicd-down} —
-// but WITHOUT loading, parsing role/query wiring, or calling Validate().
+// GatePaths resolves the three INV-LIFE-2 gate file paths (operator-paused,
+// cicd-down, disk-space-low) with the SAME precedence Load() fills them
+// with — [pool] key (operator_paused_path / cicd_down_path /
+// disk_space_low_path, read directly from the repo config file when it
+// parses) > PG_ROUTER_* env > <LogDir>/gates/{operator-paused,cicd-down,
+// disk-space-low} — but WITHOUT loading, parsing role/query wiring, or
+// calling Validate().
 //
 // It exists so `pause`/`resume` never call Load(): Validate() hard-fails on an
 // unrunnable backing command (INV-WORKFLOW-1 check 5), and interfaces.md's
 // "Operator pause/resume" requires pause/resume to succeed even with no core
-// running and even against a config that could never itself Load() — the two
+// running and even against a config that could never itself Load() — the
 // subcommands act on gate-file state directly and never Discover or Dial a
 // core, so nothing else in the config need be valid.
 //
@@ -800,7 +812,7 @@ func LogDir() string {
 // back to the env/default resolution SILENTLY rather than erroring — mirroring
 // LogDir()'s own "must not be able to fail on unrelated config" contract, which
 // this function is the gate-path sibling of.
-func GatePaths() (operatorPaused, cicdDown string) {
+func GatePaths() (operatorPaused, cicdDown, diskSpaceLow string) {
 	// Mirror Default()'s "" -> env overlay exactly (config.go's own Load() does
 	// this in two separate steps too — env first, against a "" base, THEN a
 	// still-empty fill below): envStr treats an env var explicitly SET to ""
@@ -808,6 +820,7 @@ func GatePaths() (operatorPaused, cicdDown string) {
 	// through to the pool-key overlay and then the LogDir-based fill below.
 	operatorPaused = envStr("PG_ROUTER_OPERATOR_PAUSED", "")
 	cicdDown = envStr("PG_ROUTER_CICD_DOWN", "")
+	diskSpaceLow = envStr("PG_ROUTER_DISK_SPACE_LOW", "")
 
 	cwd, _ := os.Getwd()
 	repoRoot := envStr("PG_ROUTER_REPO_ROOT", cwd)
@@ -824,6 +837,9 @@ func GatePaths() (operatorPaused, cicdDown string) {
 			if shape.Pool.CICDDownPath != "" {
 				cicdDown = shape.Pool.CICDDownPath
 			}
+			if shape.Pool.DiskSpaceLowPath != "" {
+				diskSpaceLow = shape.Pool.DiskSpaceLowPath
+			}
 		}
 		// A malformed file falls through silently (env/default resolution
 		// stands) — this function must never fail.
@@ -838,7 +854,10 @@ func GatePaths() (operatorPaused, cicdDown string) {
 	if cicdDown == "" {
 		cicdDown = filepath.Join(logDir, "gates", "cicd-down")
 	}
-	return operatorPaused, cicdDown
+	if diskSpaceLow == "" {
+		diskSpaceLow = filepath.Join(logDir, "gates", "disk-space-low")
+	}
+	return operatorPaused, cicdDown, diskSpaceLow
 }
 
 func stateHome() string {

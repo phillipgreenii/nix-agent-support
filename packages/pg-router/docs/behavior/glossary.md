@@ -15,13 +15,16 @@ their own terms in a downstream deployment set.
   Contrast a **run-scoped selector** (`STORY-OP-3`), which selects the **active** subset of
   sources/handlers for a **single run** and never outlives it — a selector is scoped to one run and
   changes no persisted state; a gate is scoped to nothing narrower than the whole deployment and
-  outlives every run until explicitly cleared. The two named gates, **OR-effective**, are
-  `operator-paused` (the operator's own) and `cicd-down` (an automation actor's, and labeled as such on
-  every surface).
+  outlives every run until explicitly cleared. The three named gates, **OR-effective**, are
+  `operator-paused` (the operator's own), `cicd-down` (an automation actor's, and labeled as such on
+  every surface), and `disk-space-low` (bead `pg2-af5ur`; manually settable/clearable only today —
+  no automatic producer exists yet, see `INV-LIFE-2`'s "Gate identity").
 - **Gate owner** — the field that carries that labeling per gate: `"operator"` for `operator-paused` or
   `"automation"` for `cicd-down`. Realizes `INV-LIFE-2`'s requirement that every surface reporting
   gate state label an automation-owned gate as such, because it MAY re-assert itself on its own
-  initiative in a way the human-owned gate never does.
+  initiative in a way the human-owned gate never does. `disk-space-low` carries no owner label yet
+  (like both other gates, no writer in this codebase sets `Owner` today) — it will get one once its
+  automatic trigger is defined.
 - **Quiescing** — the reading a client gives an inspected core whose own lifecycle state (the
   `starting → started → stopping → stopped` diagram, `INV-LIFE-1`) has left `started` for `stopping`
   while it is not failing — the orderly-shutdown leg of that lifecycle, most visibly a

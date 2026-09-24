@@ -1,6 +1,6 @@
 // Package tui implements pg-router's operator-facing terminal UI. This file
 // (Task 4.8) carries the command-pattern P gate toggle, its R = resume-all
-// sub-binding, and the gates modal (g) that lists both of INV-LIFE-2's
+// sub-binding, and the gates modal (g) that lists all of INV-LIFE-2's
 // named gates.
 package tui
 
@@ -161,10 +161,11 @@ func (m *Model) setGate(name string, set bool) {
 	m.reply.Gates = append(m.reply.Gates, Gate{Name: name, Set: set})
 }
 
-// renderGatesModal lists BOTH of INV-LIFE-2's two OR-effective named gates
-// (operator-paused, cicd-down -- ADR 0026's hyphenated display form) with
-// state/since/owner, regardless of whether the core has ever reported
-// either [design: Task 4.8 Files]. R = resume-all is named in the modal's
+// renderGatesModal lists ALL THREE of INV-LIFE-2's OR-effective named gates
+// (operator-paused, cicd-down, disk-space-low -- ADR 0026's hyphenated
+// display form; disk-space-low added by bead pg2-af5ur) with
+// state/since/owner, regardless of whether the core has ever reported any
+// of them [design: Task 4.8 Files]. R = resume-all is named in the modal's
 // own footer.
 //
 // The Left column's guaranteed gap from the status text in Right is
@@ -181,6 +182,7 @@ func (m *Model) renderGatesModal() string {
 	rows := []render.ModalRow{
 		m.gateModalRow("operator-paused", core.GateOperatorPaused),
 		m.gateModalRow("cicd-down", core.GateCICDDown),
+		m.gateModalRow("disk-space-low", core.GateDiskSpaceLow),
 	}
 	return render.Modal("Gates", rows, "[R] resume all", m.width, m.height, m.modalScrollOffset)
 }
@@ -188,7 +190,7 @@ func (m *Model) renderGatesModal() string {
 // gateModalRow renders one gate's name/state/since/owner line. displayName
 // is the ADR-0026-safe, hyphenated form the operator-facing docs use;
 // wireName is the underscored wire name reply.go's Gate.Name actually
-// carries (core.GateOperatorPaused / core.GateCICDDown).
+// carries (core.GateOperatorPaused / core.GateCICDDown / core.GateDiskSpaceLow).
 //
 // A gate that has never been observed by the core, or has been observed
 // and is currently clear, is rendered as the unambiguous "not set" --

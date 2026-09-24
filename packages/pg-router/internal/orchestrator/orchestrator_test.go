@@ -615,10 +615,12 @@ func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 	}
 }
 
-// TestGated_operatorPausedAndCICDDown locks the Gated() predicate `run` /
-// `run-until-idle` consult before registering any Listener or running a
-// producer tick (the exported form of the retired DrainOnce's own gate check).
-func TestGated_operatorPausedAndCICDDown(t *testing.T) {
+// TestGated_operatorPausedAndCICDDownAndDiskSpaceLow locks the Gated()
+// predicate `run` / `run-until-idle` consult before registering any
+// Listener or running a producer tick (the exported form of the retired
+// DrainOnce's own gate check). DiskSpaceLow (bead pg2-af5ur) is checked the
+// same way as the pre-existing two gates.
+func TestGated_operatorPausedAndCICDDownAndDiskSpaceLow(t *testing.T) {
 	o := newOrch(fastCfg(), testQuerySet(nil, nil))
 	if o.Gated() {
 		t.Fatal("an ungated config must report Gated() == false")
@@ -632,6 +634,11 @@ func TestGated_operatorPausedAndCICDDown(t *testing.T) {
 	o.Cfg.CICDDown = f
 	if !o.Gated() {
 		t.Fatal("CICDDown sentinel present must report Gated() == true")
+	}
+	o.Cfg.CICDDown = ""
+	o.Cfg.DiskSpaceLow = f
+	if !o.Gated() {
+		t.Fatal("DiskSpaceLow sentinel present must report Gated() == true")
 	}
 }
 

@@ -156,9 +156,10 @@ func (o *Orchestrator) commander() query.Commander {
 }
 
 // Gated reports whether dispatch is currently paused by an operator-managed
-// gate file (PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN). A gated caller MUST NOT
-// register listeners or run a producer tick — no sessions are created, so
-// nothing needs tearing down either.
+// gate file (PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN /
+// PG_ROUTER_DISK_SPACE_LOW). A gated caller MUST NOT register listeners or
+// run a producer tick — no sessions are created, so nothing needs tearing
+// down either.
 func (o *Orchestrator) Gated() bool { return o.gated() }
 
 // queryEnv builds the capability bag passed to each role's query.
@@ -391,6 +392,9 @@ func (o *Orchestrator) gated() bool {
 		return true
 	}
 	if o.Cfg.CICDDown != "" && fileExists(o.Cfg.CICDDown) {
+		return true
+	}
+	if o.Cfg.DiskSpaceLow != "" && fileExists(o.Cfg.DiskSpaceLow) {
 		return true
 	}
 	return false

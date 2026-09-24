@@ -47,12 +47,14 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 #
 # Gate file paths (INV-LIFE-2; "pg-router pause"/"pg-router resume" act on these
 # directly, file-direct, without a running core) default to
-# <LogDir>/gates/{operator-paused,cicd-down} — run 'pg-router config --show' to see the
-# actual resolved paths for THIS environment (LogDir varies with XDG_STATE_HOME /
-# PG_ROUTER_LOG_DIR). Override with [pool].operator_paused_path / cicd_down_path
+# <LogDir>/gates/{operator-paused,cicd-down,disk-space-low} — run 'pg-router
+# config --show' to see the actual resolved paths for THIS environment (LogDir
+# varies with XDG_STATE_HOME / PG_ROUTER_LOG_DIR). Override with
+# [pool].operator_paused_path / cicd_down_path / disk_space_low_path
 # (uncomment and set an absolute path), e.g.:
 # operator_paused_path = "/home/example/.local/state/pg-router/gates/operator-paused"
 # cicd_down_path = "/home/example/.local/state/pg-router/gates/cicd-down"
+# disk_space_low_path = "/home/example/.local/state/pg-router/gates/disk-space-low"
 #
 # Monitoring sinks (INTF-MON, optional; no built-in default): a [[monitor]]
 # entry resolves the "id" a kind=monitor sink registers with over the common

@@ -39,13 +39,14 @@ func pgRouterModuleRoot(t *testing.T) string {
 // could otherwise supply at deterministic, isolated values (unit tests MUST
 // be isolated) — a fresh LogDir under t.TempDir(), and no repo-local/XDG
 // config file — so config.GatePaths() resolves to <tmp>/gates/{operator-paused,
-// cicd-down} regardless of the host machine's real XDG state.
+// cicd-down,disk-space-low} regardless of the host machine's real XDG state.
 func isolateGateEnv(t *testing.T) string {
 	t.Helper()
 	logDir := t.TempDir()
 	t.Setenv("PG_ROUTER_LOG_DIR", logDir)
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "")
+	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "")
 	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 	return logDir
 }
@@ -89,7 +90,7 @@ func TestPauseGate_rePausePreservesMtime(t *testing.T) {
 	if code := pauseGate(&out1, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("first pause exit = %d", code)
 	}
-	operatorPaused, _ := config.GatePaths()
+	operatorPaused, _, _ := config.GatePaths()
 	fi1, err := os.Stat(operatorPaused)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +137,7 @@ func TestResumeGate_clearsGate(t *testing.T) {
 	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
 		t.Fatalf("pause exit = %d", code)
 	}
-	operatorPaused, _ := config.GatePaths()
+	operatorPaused, _, _ := config.GatePaths()
 	stdout.Reset()
 	if code := resumeGate(&stdout, &stderr, gateOperatorPaused, false); code != exitOK {
 		t.Fatalf("resume exit = %d, want 0; stderr:\n%s", code, stderr.String())
@@ -149,8 +150,8 @@ func TestResumeGate_clearsGate(t *testing.T) {
 	}
 }
 
-// A bare resume clears ONLY the default gate (operator-paused); cicd-down (an
-// automation-owned gate) is untouched.
+// A bare resume clears ONLY the default gate (operator-paused); cicd-down
+// and disk-space-low (neither the default gate) are untouched.
 func TestResumeGate_bareResumeClearsOnlyDefaultGate(t *testing.T) {
 	isolateGateEnv(t)
 	var buf, stderr bytes.Buffer
@@ -160,19 +161,25 @@ func TestResumeGate_bareResumeClearsOnlyDefaultGate(t *testing.T) {
 	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
 		t.Fatalf("pause cicd-down exit = %d", code)
 	}
+	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
+		t.Fatalf("pause disk-space-low exit = %d", code)
+	}
 	if code := resumeGate(&buf, &stderr, gateOperatorPaused, false); code != exitOK {
 		t.Fatalf("resume exit = %d", code)
 	}
-	operatorPaused, cicdDown := config.GatePaths()
+	operatorPaused, cicdDown, diskSpaceLow := config.GatePaths()
 	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
 		t.Errorf("operator-paused must be cleared, got err=%v", err)
 	}
 	if _, err := os.Stat(cicdDown); err != nil {
 		t.Errorf("cicd-down must survive a bare resume (not the default gate), got err=%v", err)
 	}
+	if _, err := os.Stat(diskSpaceLow); err != nil {
+		t.Errorf("disk-space-low must survive a bare resume (not the default gate), got err=%v", err)
+	}
 }
 
-func TestResumeGate_allClearsBothGates(t *testing.T) {
+func TestResumeGate_allClearsEveryGate(t *testing.T) {
 	isolateGateEnv(t)
 	var buf, stderr bytes.Buffer
 	if code := pauseGate(&buf, &stderr, gateOperatorPaused); code != exitOK {
@@ -181,16 +188,56 @@ func TestResumeGate_allClearsBothGates(t *testing.T) {
 	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
 		t.Fatalf("pause cicd-down exit = %d", code)
 	}
+	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
+		t.Fatalf("pause disk-space-low exit = %d", code)
+	}
 	buf.Reset()
 	if code := resumeGate(&buf, &stderr, "", true); code != exitOK {
 		t.Fatalf("resume --all exit = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
-	operatorPaused, cicdDown := config.GatePaths()
+	operatorPaused, cicdDown, diskSpaceLow := config.GatePaths()
 	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
 		t.Errorf("operator-paused must be cleared by --all, got err=%v", err)
 	}
 	if _, err := os.Stat(cicdDown); !os.IsNotExist(err) {
 		t.Errorf("cicd-down must be cleared by --all, got err=%v", err)
+	}
+	if _, err := os.Stat(diskSpaceLow); !os.IsNotExist(err) {
+		t.Errorf("disk-space-low must be cleared by --all, got err=%v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, gateDiskSpaceLow) {
+		t.Errorf("resume --all output must name disk-space-low among the cleared gates; got %q", got)
+	}
+}
+
+// TestPauseResumeGate_diskSpaceLow is disk-space-low's own dedicated
+// pause/resume round trip (bead pg2-af5ur), mirroring
+// TestPauseGate_createsFileExitsZero/TestResumeGate_clearsGate for the two
+// pre-existing gates: it must be settable/clearable manually via the SAME
+// generic verbs, with no automatic trigger involved.
+func TestPauseResumeGate_diskSpaceLow(t *testing.T) {
+	logDir := isolateGateEnv(t)
+	var stdout, stderr bytes.Buffer
+	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	path := filepath.Join(logDir, "gates", "disk-space-low")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("gate file %q must exist after pause: %v", path, err)
+	}
+	if !strings.Contains(stdout.String(), gateDiskSpaceLow) || !strings.Contains(stdout.String(), "since") {
+		t.Errorf("pause output must name the gate and report a set time; got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := resumeGate(&stdout, &stderr, gateDiskSpaceLow, false); code != exitOK {
+		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("gate file must be gone after resume, got err=%v", err)
+	}
+	if !strings.Contains(stdout.String(), gateDiskSpaceLow) {
+		t.Errorf("resume output must name the gate; got %q", stdout.String())
 	}
 }
 
@@ -232,6 +279,7 @@ func TestHelpText_gateEnvVarsAndFileDirectNote(t *testing.T) {
 	for _, want := range []string{
 		"PG_ROUTER_OPERATOR_PAUSED",
 		"PG_ROUTER_CICD_DOWN",
+		"PG_ROUTER_DISK_SPACE_LOW",
 		"PG_ROUTER_LOG_DIR",
 		"FILE-DIRECT",
 		"NEVER Discover or Dial",

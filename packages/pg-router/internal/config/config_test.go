@@ -635,14 +635,17 @@ func TestLoad_worktreeDir_envWhenConfigOmitsKey(t *testing.T) {
 	}
 }
 
-// OperatorPaused/CICDDown (INV-LIFE-2, Task 1.2b) layer Default() ("") ->
-// PG_ROUTER_OPERATOR_PAUSED/PG_ROUTER_CICD_DOWN (env) -> [pool].operator_paused_path/
-// cicd_down_path (config, repo), filled AFTER the repo-TOML layer. Config is
-// the highest priority, mirroring WorktreeDir's own precedence.
+// OperatorPaused/CICDDown/DiskSpaceLow (INV-LIFE-2, Task 1.2b;
+// disk-space-low added by bead pg2-af5ur) layer Default() ("") ->
+// PG_ROUTER_OPERATOR_PAUSED/PG_ROUTER_CICD_DOWN/PG_ROUTER_DISK_SPACE_LOW (env) ->
+// [pool].operator_paused_path/cicd_down_path/disk_space_low_path (config, repo),
+// filled AFTER the repo-TOML layer. Config is the highest priority, mirroring
+// WorktreeDir's own precedence.
 func TestLoad_gatePaths_configWinsOverEnv(t *testing.T) {
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "/env/operator-paused")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "/env/cicd-down")
-	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\ncicd_down_path = \"/config/cicd-down\"\n")
+	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "/env/disk-space-low")
+	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\ncicd_down_path = \"/config/cicd-down\"\ndisk_space_low_path = \"/config/disk-space-low\"\n")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -653,12 +656,16 @@ func TestLoad_gatePaths_configWinsOverEnv(t *testing.T) {
 	if c.CICDDown != "/config/cicd-down" {
 		t.Errorf("CICDDown = %q, want /config/cicd-down ([pool].cicd_down_path must override the env var)", c.CICDDown)
 	}
+	if c.DiskSpaceLow != "/config/disk-space-low" {
+		t.Errorf("DiskSpaceLow = %q, want /config/disk-space-low ([pool].disk_space_low_path must override the env var)", c.DiskSpaceLow)
+	}
 }
 
 // A [pool] table that omits the gate keys must NOT clobber the env values.
 func TestLoad_gatePaths_envWhenConfigOmitsKeys(t *testing.T) {
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "/env/operator-paused")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "/env/cicd-down")
+	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "/env/disk-space-low")
 	writeCfg(t, "[pool]\nself_login = \"someone\"\n")
 	c, err := Load()
 	if err != nil {
@@ -670,11 +677,15 @@ func TestLoad_gatePaths_envWhenConfigOmitsKeys(t *testing.T) {
 	if c.CICDDown != "/env/cicd-down" {
 		t.Errorf("CICDDown = %q, want /env/cicd-down (absent [pool].cicd_down_path must not override the env var)", c.CICDDown)
 	}
+	if c.DiskSpaceLow != "/env/disk-space-low" {
+		t.Errorf("DiskSpaceLow = %q, want /env/disk-space-low (absent [pool].disk_space_low_path must not override the env var)", c.DiskSpaceLow)
+	}
 }
 
-// With neither env nor [pool] key set, both gate paths default to
-// <LogDir>/gates/{operator-paused,cicd-down} — filled AFTER the repo-TOML layer,
-// so PG_ROUTER_LOG_DIR moves them exactly the way it moves LogDir itself.
+// With neither env nor [pool] key set, all three gate paths default to
+// <LogDir>/gates/{operator-paused,cicd-down,disk-space-low} — filled AFTER
+// the repo-TOML layer, so PG_ROUTER_LOG_DIR moves them exactly the way it
+// moves LogDir itself.
 func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
@@ -687,6 +698,9 @@ func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 	}
 	if want := "/override/dir/gates/cicd-down"; c.CICDDown != want {
 		t.Errorf("CICDDown = %q, want %q", c.CICDDown, want)
+	}
+	if want := "/override/dir/gates/disk-space-low"; c.DiskSpaceLow != want {
+		t.Errorf("DiskSpaceLow = %q, want %q", c.DiskSpaceLow, want)
 	}
 }
 
@@ -1175,18 +1189,21 @@ func TestConfig_Meter_returnsConfiguredProvider(t *testing.T) {
 // file parses cleanly.
 func TestGatePaths_agreesWithLoad(t *testing.T) {
 	absentGlobalConfig(t)
-	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\n")
+	writeCfg(t, "[pool]\noperator_paused_path = \"/config/operator-paused\"\ndisk_space_low_path = \"/config/disk-space-low\"\n")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "/env/cicd-down")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	qp, cd := GatePaths()
+	qp, cd, dsl := GatePaths()
 	if qp != c.OperatorPaused {
 		t.Errorf("GatePaths operatorPaused = %q, Load = %q, want equal", qp, c.OperatorPaused)
 	}
 	if cd != c.CICDDown {
 		t.Errorf("GatePaths cicdDown = %q, Load = %q, want equal", cd, c.CICDDown)
+	}
+	if dsl != c.DiskSpaceLow {
+		t.Errorf("GatePaths diskSpaceLow = %q, Load = %q, want equal", dsl, c.DiskSpaceLow)
 	}
 }
 
@@ -1213,12 +1230,15 @@ format = "jsonl"
 		t.Fatal("premise: this config must fail Load() (absent backing command)")
 	}
 	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
-	qp, cd := GatePaths()
+	qp, cd, dsl := GatePaths()
 	if want := "/override/dir/gates/operator-paused"; qp != want {
 		t.Errorf("GatePaths operatorPaused = %q, want %q (must resolve even though Load() fails)", qp, want)
 	}
 	if want := "/override/dir/gates/cicd-down"; cd != want {
 		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
+	}
+	if want := "/override/dir/gates/disk-space-low"; dsl != want {
+		t.Errorf("GatePaths diskSpaceLow = %q, want %q", dsl, want)
 	}
 }
 
@@ -1232,12 +1252,15 @@ func TestGatePaths_worksWhenConfigIsMalformed(t *testing.T) {
 		t.Fatal("premise: malformed config must fail Load()")
 	}
 	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
-	qp, cd := GatePaths()
+	qp, cd, dsl := GatePaths()
 	if want := "/override/dir/gates/operator-paused"; qp != want {
 		t.Errorf("GatePaths operatorPaused = %q, want %q", qp, want)
 	}
 	if want := "/override/dir/gates/cicd-down"; cd != want {
 		t.Errorf("GatePaths cicdDown = %q, want %q", cd, want)
+	}
+	if want := "/override/dir/gates/disk-space-low"; dsl != want {
+		t.Errorf("GatePaths diskSpaceLow = %q, want %q", dsl, want)
 	}
 }
 
@@ -1245,12 +1268,15 @@ func TestGatePaths_worksWhenConfigIsMalformed(t *testing.T) {
 func TestGatePaths_respectsLogDirEnv(t *testing.T) {
 	absentConfig(t)
 	t.Setenv("XDG_STATE_HOME", "/xdg/state")
-	qp, cd := GatePaths()
+	qp, cd, dsl := GatePaths()
 	if want := "/xdg/state/pg-router/gates/operator-paused"; qp != want {
 		t.Errorf("operatorPaused = %q, want %q", qp, want)
 	}
 	if want := "/xdg/state/pg-router/gates/cicd-down"; cd != want {
 		t.Errorf("cicdDown = %q, want %q", cd, want)
+	}
+	if want := "/xdg/state/pg-router/gates/disk-space-low"; dsl != want {
+		t.Errorf("diskSpaceLow = %q, want %q", dsl, want)
 	}
 }
 

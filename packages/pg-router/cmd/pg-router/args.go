@@ -152,6 +152,9 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
                            (default: the XDG state dir, e.g. ~/.local/state/pg-router)
   PG_ROUTER_OPERATOR_PAUSED  operator-paused gate file path override (default <PG_ROUTER_LOG_DIR>/gates/operator-paused)
   PG_ROUTER_CICD_DOWN        cicd-down gate file path override (default <PG_ROUTER_LOG_DIR>/gates/cicd-down)
+  PG_ROUTER_DISK_SPACE_LOW   disk-space-low gate file path override (default <PG_ROUTER_LOG_DIR>/gates/disk-space-low);
+                           manually settable/clearable only today (pg-router run does not check
+                           disk space itself — see 'pause'/'resume' below)
   PG_ROUTER_ONLY             comma-separated run-scoped allow-list, each entry role:<name> or
                            query:<name> (DEC-CLI-1); unioned with any --only flags on
                            run/run-until-idle; run-role/run-query respect it too (no flags of
@@ -166,7 +169,7 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
                            the core neither requires nor inspects how, or whether, it responds.
                            Not meant to be set by an operator directly.
 
-Precedence for every scalar above that a [pool] key can also set (including the two gate
+Precedence for every scalar above that a [pool] key can also set (including the three gate
 paths): [pool] wins over PG_ROUTER_* env, which wins over the built-in default — matching
 internal/config's package doc and 'config --print-defaults's header. The XDG-global config
 ($XDG_CONFIG_HOME/pg-router/config.toml, else ~/.config/pg-router/config.toml) contributes
@@ -456,7 +459,7 @@ func parsePauseArgs(args []string) routeResult {
 	if gate == "" {
 		gate = gateOperatorPaused
 	} else if !validGate(gate) {
-		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s or %s)", gate, gateOperatorPaused, gateCICDDown)}
+		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s, %s, or %s)", gate, gateOperatorPaused, gateCICDDown, gateDiskSpaceLow)}
 	}
 	return routeResult{kind: routePause, gate: gate}
 }
@@ -488,7 +491,7 @@ func parseResumeArgs(args []string) routeResult {
 		if gate == "" {
 			gate = gateOperatorPaused
 		} else if !validGate(gate) {
-			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s or %s)", gate, gateOperatorPaused, gateCICDDown)}
+			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s, %s, or %s)", gate, gateOperatorPaused, gateCICDDown, gateDiskSpaceLow)}
 		}
 	}
 	return routeResult{kind: routeResume, gate: gate, allGates: allGates}

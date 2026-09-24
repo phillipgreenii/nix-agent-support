@@ -227,6 +227,7 @@ func TestParsePauseArgs(t *testing.T) {
 		{"no-args-defaults-operator-paused", nil, routePause, gateOperatorPaused},
 		{"explicit-operator-paused", []string{"operator-paused"}, routePause, gateOperatorPaused},
 		{"explicit-cicd-down", []string{"cicd-down"}, routePause, gateCICDDown},
+		{"explicit-disk-space-low", []string{"disk-space-low"}, routePause, gateDiskSpaceLow},
 		{"unknown-gate-is-usage-error", []string{"bogus"}, routeUsageErr, ""},
 		{"flag-like-token-is-usage-error", []string{"--bogus"}, routeUsageErr, ""},
 		{"extra-arg-is-usage-error", []string{"operator-paused", "extra"}, routeUsageErr, ""},
@@ -257,6 +258,7 @@ func TestParseResumeArgs(t *testing.T) {
 	}{
 		{"no-args-defaults-operator-paused", nil, routeResume, gateOperatorPaused, false},
 		{"explicit-cicd-down", []string{"cicd-down"}, routeResume, gateCICDDown, false},
+		{"explicit-disk-space-low", []string{"disk-space-low"}, routeResume, gateDiskSpaceLow, false},
 		{"all-flag", []string{"--all"}, routeResume, "", true},
 		{"all-and-gate-is-usage-error", []string{"--all", "operator-paused"}, routeUsageErr, "", false},
 		{"gate-and-all-is-usage-error", []string{"operator-paused", "--all"}, routeUsageErr, "", false},

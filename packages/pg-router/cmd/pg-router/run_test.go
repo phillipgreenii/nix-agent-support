@@ -1149,17 +1149,22 @@ func TestGateFileInfo_unsetWhenPathEmptyOrAbsent(t *testing.T) {
 	}
 }
 
-// TestCurrentGateFiles_namesBothFileDirectGates proves currentGateFiles
-// reports both file-direct gates (Task 1.2b, ADR 0036) under the fixed
-// gateTickKeyOperatorPaused/gateTickKeyCICDDown keys svc.ObserveGateFromTick's caller and,
-// eventually, Task 3.9's socket verbs must agree on.
-func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
+// TestCurrentGateFiles_namesAllFileDirectGates proves currentGateFiles
+// reports every file-direct gate (Task 1.2b, ADR 0036; disk-space-low added
+// by bead pg2-af5ur) under the fixed gateTickKeyOperatorPaused/
+// gateTickKeyCICDDown/gateTickKeyDiskSpaceLow keys svc.ObserveGateFromTick's
+// caller and, eventually, Task 3.9's socket verbs must agree on.
+func TestCurrentGateFiles_namesAllFileDirectGates(t *testing.T) {
 	dir := t.TempDir()
 	operatorPaused := dir + "/operator-paused"
 	if err := os.WriteFile(operatorPaused, nil, 0o644); err != nil {
 		t.Fatalf("write gate file: %v", err)
 	}
-	cfg := config.Config{OperatorPaused: operatorPaused, CICDDown: dir + "/cicd-down-absent"}
+	cfg := config.Config{
+		OperatorPaused: operatorPaused,
+		CICDDown:       dir + "/cicd-down-absent",
+		DiskSpaceLow:   dir + "/disk-space-low-absent",
+	}
 
 	gates := currentGateFiles(cfg)
 	if got := gates[gateTickKeyOperatorPaused]; !got.Set {
@@ -1167,6 +1172,9 @@ func TestCurrentGateFiles_namesBothFileDirectGates(t *testing.T) {
 	}
 	if got := gates[gateTickKeyCICDDown]; got.Set {
 		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateTickKeyCICDDown, got)
+	}
+	if got := gates[gateTickKeyDiskSpaceLow]; got.Set {
+		t.Fatalf("gates[%q] = %+v, want unset (file absent)", gateTickKeyDiskSpaceLow, got)
 	}
 }
 

@@ -115,9 +115,11 @@ func TestGatesSummary_ChecksboxReflectsSetState(t *testing.T) {
 	}
 }
 
-// TestAnyGateSet_ORsBothNamedGates checks the effective-aggregate
-// semantics (ux-7): either gate being set is enough.
-func TestAnyGateSet_ORsBothNamedGates(t *testing.T) {
+// TestAnyGateSet_ORsAllNamedGates checks the effective-aggregate semantics
+// (ux-7): any gate being set is enough — anyGateSet iterates the reply's
+// []Gate slice generically, so a THIRD named gate (disk-space-low, bead
+// pg2-af5ur) is OR'd in automatically with no code change of its own.
+func TestAnyGateSet_ORsAllNamedGates(t *testing.T) {
 	cases := []struct {
 		name  string
 		gates []Gate
@@ -126,7 +128,8 @@ func TestAnyGateSet_ORsBothNamedGates(t *testing.T) {
 		{"none", nil, false},
 		{"operator only", []Gate{{Name: core.GateOperatorPaused, Set: true}}, true},
 		{"cicd only", []Gate{{Name: core.GateCICDDown, Set: true}}, true},
-		{"both clear", []Gate{{Name: core.GateOperatorPaused}, {Name: core.GateCICDDown}}, false},
+		{"disk-space-low only", []Gate{{Name: core.GateDiskSpaceLow, Set: true}}, true},
+		{"all clear", []Gate{{Name: core.GateOperatorPaused}, {Name: core.GateCICDDown}, {Name: core.GateDiskSpaceLow}}, false},
 	}
 	for _, c := range cases {
 		if got := anyGateSet(c.gates); got != c.want {

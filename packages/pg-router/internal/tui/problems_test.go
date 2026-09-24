@@ -97,20 +97,21 @@ func TestRenderProblemsModal_NoUnmatchedBindingsIsUnambiguous(t *testing.T) {
 	}
 }
 
-// TestRenderProblemsModal_ListsBothGatesByName is the bead's second
+// TestRenderProblemsModal_ListsAllGatesByName is the bead's second
 // "at minimum" item: current gate state, reusing gateModalRow (gates.go) so
 // this view and the Gates modal never drift into two different renderings
-// of the same fact.
-func TestRenderProblemsModal_ListsBothGatesByName(t *testing.T) {
+// of the same fact. All three named gates (disk-space-low added by bead
+// pg2-af5ur) must appear.
+func TestRenderProblemsModal_ListsAllGatesByName(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
 		{Name: core.GateOperatorPaused, Set: true, Owner: "operator"},
-		// cicd_down deliberately absent -- never observed yet.
+		// cicd_down / disk_space_low deliberately absent -- never observed yet.
 	}}
 
 	got := m.renderProblemsModal()
-	for _, want := range []string{"operator-paused", "cicd-down", "SET", "not set", "operator"} {
+	for _, want := range []string{"operator-paused", "cicd-down", "disk-space-low", "SET", "not set", "operator"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Problems modal missing %q; got:\n%s", want, got)
 		}

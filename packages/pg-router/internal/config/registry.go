@@ -54,13 +54,15 @@ type poolTOML struct {
 	// one event of a marked type at a time, across every bound handler, until
 	// it is released. Absent/empty: marks nothing (unchanged from today).
 	SerializeTypes []string `toml:"serialize_types"`
-	// OperatorPausedPath / CICDDownPath override the two INV-LIFE-2 gate file
-	// paths `pause`/`resume` act on. Absent: PG_ROUTER_OPERATOR_PAUSED /
-	// PG_ROUTER_CICD_DOWN env, then <LogDir>/gates/{operator-paused,cicd-down}
+	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath override the three
+	// INV-LIFE-2 gate file paths `pause`/`resume` act on. Absent:
+	// PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN / PG_ROUTER_DISK_SPACE_LOW
+	// env, then <LogDir>/gates/{operator-paused,cicd-down,disk-space-low}
 	// (config.Load()'s post-repo-TOML fill; config.GatePaths() resolves the
 	// identical precedence without Load()).
 	OperatorPausedPath string `toml:"operator_paused_path"`
 	CICDDownPath       string `toml:"cicd_down_path"`
+	DiskSpaceLowPath   string `toml:"disk_space_low_path"`
 }
 
 type budgetTOML struct {
@@ -194,16 +196,20 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	if shape.Pool.WorktreeDir != "" {
 		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
-	// [pool].operator_paused_path / cicd_down_path overlay after the env overlay in
-	// Load() the same way worktree_dir does — config (repo) wins over
-	// PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN (env), which already won over
-	// Default()'s "". An absent key leaves the env/default value intact; Load()
-	// fills either still-empty field from <LogDir>/gates/... AFTER this returns.
+	// [pool].operator_paused_path / cicd_down_path / disk_space_low_path overlay
+	// after the env overlay in Load() the same way worktree_dir does — config
+	// (repo) wins over PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN /
+	// PG_ROUTER_DISK_SPACE_LOW (env), which already won over Default()'s "". An
+	// absent key leaves the env/default value intact; Load() fills any still-
+	// empty field from <LogDir>/gates/... AFTER this returns.
 	if shape.Pool.OperatorPausedPath != "" {
 		c.OperatorPaused = shape.Pool.OperatorPausedPath
 	}
 	if shape.Pool.CICDDownPath != "" {
 		c.CICDDown = shape.Pool.CICDDownPath
+	}
+	if shape.Pool.DiskSpaceLowPath != "" {
+		c.DiskSpaceLow = shape.Pool.DiskSpaceLowPath
 	}
 	overlayConfigBudget(c, shape.Pool.Budget)
 	// serialize_types (INV-CONC-1, pg2-cl9jz): a present, non-empty list REPLACES

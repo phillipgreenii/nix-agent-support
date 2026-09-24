@@ -44,6 +44,7 @@ func TestExampleTOML_gateKeysDocumented(t *testing.T) {
 		"config --show",
 		"# operator_paused_path =",
 		"# cicd_down_path =",
+		"# disk_space_low_path =",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ExampleTOML() missing %q in:\n%s", want, out)
