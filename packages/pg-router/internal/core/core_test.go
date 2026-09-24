@@ -648,6 +648,61 @@ func TestSocketResumeIdempotent(t *testing.T) {
 	}
 }
 
+// TestSocketPauseResumeDiskSpaceLowGate proves the socket pause/resume verbs
+// accept "disk_space_low" as a named gate, not just the two originally wired
+// ("operator_paused"/"cicd_down") — pg2-6thut widened cli.pause/cli.resume/
+// cli.pause-reply/cli.resume-reply's `gate` enum to match the file-based CLI
+// path (cmd/pg-router/gates_cmd.go's isValidGateName), which already treated
+// all three uniformly. Before that widening, servePause/serveResume with
+// gate="disk_space_low" would fail conformance.CheckBytes against the
+// request schema (exit conformance.ExitError, an errorReply body) instead of
+// ever reaching handleGateToggle.
+func TestSocketPauseResumeDiskSpaceLowGate(t *testing.T) {
+	svc := startedServiceForStatus(t, nil)
+	const diskSpaceLowRequest = `{"schemaVersion":"1","gate":"disk_space_low"}`
+
+	reply, code := servePause(t, svc, diskSpaceLowRequest)
+	if code != conformance.ExitOK {
+		t.Fatalf("pause exit = %d, want 0; reply=%v", code, reply)
+	}
+	if err := conformance.Check(PauseReplySchema, reply); err != nil {
+		t.Fatalf("reply failed cli.pause-reply schema: %v", err)
+	}
+	if reply["gate"] != GateDiskSpaceLow {
+		t.Fatalf("gate = %v, want %q", reply["gate"], GateDiskSpaceLow)
+	}
+	if reply["set"] != true {
+		t.Fatalf("set = %v, want true", reply["set"])
+	}
+
+	gates, _ := svc.GateSnapshot()
+	if got := gates[GateDiskSpaceLow]; !got.Set {
+		t.Fatalf("disk_space_low = %+v, want Set=true after the socket pause verb", got)
+	}
+	// The other two named gates must be untouched by targeting this one.
+	if got := gates[GateOperatorPaused]; got.Set {
+		t.Fatalf("operator_paused = %+v, want unaffected by pausing disk_space_low", got)
+	}
+
+	reply2, code2 := serveResume(t, svc, diskSpaceLowRequest)
+	if code2 != conformance.ExitOK {
+		t.Fatalf("resume exit = %d, want 0; reply=%v", code2, reply2)
+	}
+	if err := conformance.Check(ResumeReplySchema, reply2); err != nil {
+		t.Fatalf("reply failed cli.resume-reply schema: %v", err)
+	}
+	if reply2["gate"] != GateDiskSpaceLow {
+		t.Fatalf("gate = %v, want %q", reply2["gate"], GateDiskSpaceLow)
+	}
+	if reply2["set"] != false {
+		t.Fatalf("set = %v, want false after resume", reply2["set"])
+	}
+	gates, _ = svc.GateSnapshot()
+	if got := gates[GateDiskSpaceLow]; got.Set {
+		t.Fatalf("disk_space_low = %+v, want cleared after resume", got)
+	}
+}
+
 // TestPauseResumeRaceSameGate proves concurrent pause/resume socket calls on
 // the SAME gate never race (run with -race) and always leave the gate cell
 // in one coherent, schema-valid state — never a torn/partial GateInfo —
