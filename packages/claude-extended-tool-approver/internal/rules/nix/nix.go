@@ -102,6 +102,22 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "nix-shell" && r.exprEval != nil {
 			return r.evaluateNixShell(pc.Args, input)
 		}
+		// tc-gq4r1: "nix-instantiate" (basename == "nix-instantiate" below) is,
+		// and was already, approved UNCONDITIONALLY at the time of the settings-
+		// audit evidence row this bead was filed from (ask-log row 60453,
+		// 2026-09-03) — this unconditional-approve branch predates that row by
+		// months (introduced in a7014b87, 2026-05-05). settings.local.json's
+		// `Bash(nix-instantiate:*)` rule is fully redundant with this branch for
+		// the "nix-instantiate" leaf itself; the logged abstain on row 60453 came
+		// from an UNRELATED sibling statement in the same multi-line Bash
+		// invocation — `flox activate -- just terraform validate` run from
+		// infrastructure/machines/regpo0/terraform, which internal/rules/
+		// buildtools deliberately declines to auto-approve (tc-mgb6's
+		// targetSensitiveVerbs scoping: "terraform" is only vetted under
+		// infrastructure/k3s/, not infrastructure/machines/ — Proxmox-host-level
+		// terraform is intentionally excluded from blanket approval). That is a
+		// correct, independent safety posture and is not loosened here. Same
+		// misattribution pattern as tc-ginhx's "nix eval" finding.
 		if basename == "nix-instantiate" || basename == "nix-hash" ||
 			basename == "nix-prefetch-url" || basename == "nix-prefetch-git" {
 			return hookio.RuleResult{
