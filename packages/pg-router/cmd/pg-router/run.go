@@ -899,6 +899,10 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 // added by bead pg2-af5ur) this run's config declares — the map keys
 // currentGateFiles/svc.ObserveGateFromTick use, one per
 // config.Config.OperatorPaused/CICDDown/DiskSpaceLow gate-file path.
+// gateTickKeyOperatorPaused's own GateInfo additionally carries the bead
+// pg2-efbb0 external-disable read (currentGateFiles'
+// gateFileInfoWithDisable) — a fourth fact folded into the SAME map entry,
+// not a fourth key.
 const (
 	gateTickKeyOperatorPaused = "operator_paused"
 	gateTickKeyCICDDown       = "cicd_down"
@@ -920,14 +924,34 @@ func gateFileInfo(path string) core.GateInfo {
 	return core.GateInfo{Set: true, Mtime: fi.ModTime()}
 }
 
+// gateFileInfoWithDisable is gateFileInfo's counterpart for a gate that
+// carries an external kill switch (bead pg2-efbb0 — see
+// config.Config.OperatorPausedDisable's doc comment for the full design).
+// Set/Mtime come from path exactly as gateFileInfo reports them — the
+// gate's own raw tripped state, UNCHANGED by the kill switch — and Disabled
+// reports whether disablePath itself currently exists, reusing
+// gateFileInfo's own "file exists ⇒ Set" reading rather than a second
+// os.Stat call. The two facts are independent, so TUI/CLI can show both
+// (this bead's acceptance criteria). An empty disablePath (the mechanism
+// not configured, or not yet wired for this gate) always reports
+// Disabled: false, matching gateFileInfo's own empty-path posture.
+func gateFileInfoWithDisable(path, disablePath string) core.GateInfo {
+	info := gateFileInfo(path)
+	info.Disabled = gateFileInfo(disablePath).Set
+	return info
+}
+
 // currentGateFiles reads every file-direct gate cfg declares — the drive
 // loop's periodic input to svc.ObserveGateFromTick (Task 3.5 Files: gates_cmd.go
 // itself needs no code change, since file-direct pause/resume never touches a
 // running core; this is the OTHER half — the drive loop's own read of that
-// same gate-file state).
+// same gate-file state). operator_paused alone also folds in its external
+// kill-switch read (bead pg2-efbb0, gateFileInfoWithDisable); cicd_down and
+// disk_space_low still use the plain gateFileInfo until their own sibling
+// beads (pg2-8c7az, pg2-hipf0) wire the identical pattern for their gates.
 func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
 	return map[string]core.GateInfo{
-		gateTickKeyOperatorPaused: gateFileInfo(cfg.OperatorPaused),
+		gateTickKeyOperatorPaused: gateFileInfoWithDisable(cfg.OperatorPaused, cfg.OperatorPausedDisable),
 		gateTickKeyCICDDown:       gateFileInfo(cfg.CICDDown),
 		gateTickKeyDiskSpaceLow:   gateFileInfo(cfg.DiskSpaceLow),
 	}
@@ -1013,6 +1037,14 @@ func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
 // are set at once (an ordering choice this packet is free to make: the design
 // only requires the report name ONE active gate, not enumerate every set
 // one).
+//
+// The operator-paused candidate is skipped entirely when its external kill
+// switch (bead pg2-efbb0, cfg.OperatorPausedDisable) is present: reporting
+// "gated by operator-paused" here would misname the real cause whenever
+// some OTHER gate is what is actually halting dispatch, since
+// Orchestrator.gated() itself already ignores operator-paused's file state
+// in that case — this function's notice MUST agree with gated()'s own
+// reading of which gate is truly active.
 func gateNotice(cfg config.Config) string {
 	type gate struct {
 		name, path, owner, remedy string
@@ -1023,6 +1055,9 @@ func gateNotice(cfg config.Config) string {
 	}
 	for _, g := range candidates {
 		if g.path == "" {
+			continue
+		}
+		if g.name == "operator-paused" && gateFileInfo(cfg.OperatorPausedDisable).Set {
 			continue
 		}
 		fi, err := os.Stat(g.path)

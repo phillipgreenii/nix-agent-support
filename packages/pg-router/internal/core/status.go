@@ -126,6 +126,16 @@ type GateInfo struct {
 	Set   bool
 	Mtime time.Time
 	Owner string
+	// Disabled reports whether this gate's MECHANISM has been switched off
+	// from outside pg-router (bead pg2-efbb0) — independent of Set, which
+	// stays the gate's own raw file-backed tripped state; a gate can be
+	// simultaneously Set (its file exists) and Disabled (its effect is
+	// ignored), and the two facts are reported separately rather than
+	// collapsed into one. Only operator_paused carries a live kill switch
+	// today (cmd/pg-router's currentGateFiles/gateFileInfoWithDisable);
+	// cicd_down/disk_space_low report this as always false until their own
+	// sibling beads (pg2-8c7az, pg2-hipf0) wire the identical pattern.
+	Disabled bool
 }
 
 // gateState is the daemon's per-gate observation cache — its OWN small

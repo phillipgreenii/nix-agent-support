@@ -642,6 +642,49 @@ func TestGated_operatorPausedAndCICDDownAndDiskSpaceLow(t *testing.T) {
 	}
 }
 
+// TestGated_operatorPausedDisableIgnoresOperatorPaused locks the bead
+// pg2-efbb0 external kill switch: when Cfg.OperatorPausedDisable names a
+// path that EXISTS, Gated() must ignore OperatorPaused's own file state
+// entirely — even while that file is present — but CICDDown/DiskSpaceLow
+// (which carry no kill switch yet) must still gate normally, and clearing
+// the disable file must restore OperatorPaused's own effect.
+func TestGated_operatorPausedDisableIgnoresOperatorPaused(t *testing.T) {
+	o := newOrch(fastCfg(), testQuerySet(nil, nil))
+	pausedFile, _ := writeTemp(t)
+	disableFile, _ := writeTemp(t)
+
+	o.Cfg.OperatorPaused = pausedFile
+	if !o.Gated() {
+		t.Fatal("OperatorPaused sentinel present (no disable configured) must report Gated() == true")
+	}
+
+	o.Cfg.OperatorPausedDisable = disableFile
+	if o.Gated() {
+		t.Fatal("OperatorPausedDisable present must make Gated() ignore OperatorPaused's own file state")
+	}
+
+	// CICDDown must still gate normally while operator_paused's own kill
+	// switch is active — the disable is scoped to operator_paused only.
+	o.Cfg.CICDDown = pausedFile
+	if !o.Gated() {
+		t.Fatal("CICDDown must still gate even while OperatorPausedDisable suppresses operator_paused")
+	}
+	o.Cfg.CICDDown = ""
+
+	// DiskSpaceLow likewise.
+	o.Cfg.DiskSpaceLow = pausedFile
+	if !o.Gated() {
+		t.Fatal("DiskSpaceLow must still gate even while OperatorPausedDisable suppresses operator_paused")
+	}
+	o.Cfg.DiskSpaceLow = ""
+
+	// Removing the disable file restores operator_paused's own effect.
+	o.Cfg.OperatorPausedDisable = ""
+	if !o.Gated() {
+		t.Fatal("clearing OperatorPausedDisable must restore OperatorPaused's own gating effect")
+	}
+}
+
 // TestWorkOne_dispatchesToWireClientForRole locks Task 5.4's own core
 // replacement: workOne no longer runs any in-process ccpool/command
 // mechanics at all (that business — Ensure/Send/wait, the budget watchdog,

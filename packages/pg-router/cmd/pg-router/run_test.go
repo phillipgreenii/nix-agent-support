@@ -1424,3 +1424,74 @@ func TestRunOneTick_gateNoticeOncePerTransition(t *testing.T) {
 		t.Fatalf("notice count after clear-and-reset = %d, want exactly 2 total; output=%q", n, buf.String())
 	}
 }
+
+// TestGateFileInfoWithDisable locks bead pg2-efbb0's GateInfo.Disabled read:
+// Set/Mtime come from path exactly like gateFileInfo, and Disabled reports
+// disablePath's own presence independently — a gate can be Set and Disabled
+// at once, or Set and not Disabled, or unset and Disabled.
+func TestGateFileInfoWithDisable(t *testing.T) {
+	pausedFile := writeGateFile(t)
+	disableFile := filepath.Join(t.TempDir(), "operator-paused-disabled")
+
+	if info := gateFileInfoWithDisable(pausedFile, disableFile); info.Disabled {
+		t.Errorf("Disabled = true with no disable file present, want false: %+v", info)
+	} else if !info.Set {
+		t.Errorf("Set = false with the gate file present, want true: %+v", info)
+	}
+
+	if err := os.WriteFile(disableFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info := gateFileInfoWithDisable(pausedFile, disableFile)
+	if !info.Set || !info.Disabled {
+		t.Errorf("with both files present, want Set=true Disabled=true, got %+v", info)
+	}
+
+	// Removing the underlying gate file leaves Disabled unaffected — the
+	// two facts are independent.
+	if err := os.Remove(pausedFile); err != nil {
+		t.Fatal(err)
+	}
+	info = gateFileInfoWithDisable(pausedFile, disableFile)
+	if info.Set || !info.Disabled {
+		t.Errorf("with the gate file removed but disable file present, want Set=false Disabled=true, got %+v", info)
+	}
+}
+
+// TestGateNotice_operatorPausedDisableSuppressesNotice locks the fix this
+// bead requires of gateNotice: when operator-paused's own file is set AND
+// its external kill switch is active, the notice must NOT name
+// operator-paused (Gated() itself ignores it), but a genuinely active
+// OTHER gate (cicd-down) must still be reported.
+func TestGateNotice_operatorPausedDisableSuppressesNotice(t *testing.T) {
+	pausedFile := writeGateFile(t)
+	disableFile := filepath.Join(t.TempDir(), "operator-paused-disabled")
+	if err := os.WriteFile(disableFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// operator-paused set, kill switch active, nothing else set: no notice
+	// at all (mirrors Gated() == false in this state).
+	cfg := config.Config{OperatorPaused: pausedFile, OperatorPausedDisable: disableFile}
+	if notice := gateNotice(cfg); notice != "" {
+		t.Errorf("gateNotice with operator-paused externally disabled and no other gate set = %q, want \"\"", notice)
+	}
+
+	// operator-paused set, kill switch active, cicd-down ALSO set: the
+	// notice must name the "cicd-down" gate label, never the "operator-paused"
+	// one — a FRESH sentinel filename (never writeGateFile's fixed
+	// "operator-paused" basename) so the notice's own embedded PATH cannot
+	// coincidentally contain the substring being asserted against.
+	cicdFile := filepath.Join(t.TempDir(), "cicd-down-sentinel")
+	if err := os.WriteFile(cicdFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.CICDDown = cicdFile
+	notice := gateNotice(cfg)
+	if !strings.Contains(notice, "gated by cicd-down") {
+		t.Errorf("gateNotice = %q, want it to name cicd-down (the real active gate)", notice)
+	}
+	if strings.Contains(notice, "gated by operator-paused") {
+		t.Errorf("gateNotice = %q, must not name operator-paused while its kill switch is active", notice)
+	}
+}

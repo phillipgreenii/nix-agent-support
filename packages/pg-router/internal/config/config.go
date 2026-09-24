@@ -78,11 +78,74 @@ type Config struct {
 	// recipe (MIGRATION.md) for new CI-health integrations; the field itself
 	// is kept, unremoved, for backward compatibility — see
 	// cmd/pg-router/gates_cmd.go's gateCICDDown doc comment.
+	//
+	// See OperatorPausedDisable below for the SEPARATE, external kill-switch
+	// mechanism (bead pg2-efbb0) that can disable operator_paused's effect
+	// entirely — distinct from these three fields, which carry each gate's
+	// own raw tripped state.
 	OperatorPaused string
 	CICDDown       string
 	DiskSpaceLow   string
-	Effort         string
-	Model          string
+	// OperatorPausedDisable is the EXTERNAL kill-switch for the
+	// operator_paused GATE MECHANISM itself (bead pg2-efbb0) — distinct from
+	// OperatorPaused above, which carries the gate's own current TRIPPED
+	// state. When this path EXISTS, Orchestrator.gated() ignores
+	// OperatorPaused's file state entirely, as if that gate were never
+	// configured. The two files are DELIBERATELY separate (never one file
+	// with a magic body, never a sentinel value written inside
+	// OperatorPaused's own file) so "is the mechanism disabled" and "is the
+	// gate currently tripped" stay two independently observable,
+	// independently toggleable facts — exactly the two facts this bead's
+	// acceptance criteria requires the TUI/CLI to report side by side.
+	//
+	// Chosen mechanism, and why (pg2-efbb0's own open design question named
+	// three options: an ops config file read at startup, an env var, or a
+	// GrowthBook-style flag service): this is closest to the first, but
+	// checked LIVE every tick (cmd/pg-router/run.go's currentGateFiles),
+	// exactly like the gate files themselves, rather than resolved once at
+	// startup — by reusing the SAME fileExists() mechanism
+	// internal/orchestrator/orchestrator.go's gated() already uses for
+	// OperatorPaused/CICDDown/DiskSpaceLow. That reuse is what makes it
+	// "outside pg-router's own source/config files" in the sense the bead
+	// means: the file lives OUTSIDE .pg-router/config.toml and outside this
+	// repo entirely, is never written by any `pg-router` subcommand
+	// (deliberately — a `pg-router` verb for it would put the kill switch
+	// back INSIDE pg-router's own CLI surface, the very thing being
+	// disabled; an operator or an ops tool flips it with a plain
+	// `touch`/`rm`), and needs no process restart to take effect — unlike an
+	// env var, which a running process can only observe as of its own exec,
+	// so an env-var-only design would fail the bead's explicit "without ...
+	// redeploying it" requirement. A GrowthBook-style flag service was
+	// rejected FOR NOW: a repo-wide grep found no existing GrowthBook client
+	// in pg-router, and wiring one — even just the interface, with no live
+	// network round-trip, since this task may not open outbound network
+	// connections — is materially more code than reusing a mechanism this
+	// package already has, for the identical operator-visible effect.
+	// Reconsider GrowthBook only if a later bead needs this SAME toggle
+	// centrally managed across many deployments at once; none of the three
+	// sibling gate beads (pg2-efbb0, pg2-8c7az, pg2-hipf0) ask for that.
+	//
+	// From PG_ROUTER_OPERATOR_PAUSED_DISABLE (env-only — deliberately NO
+	// [pool] TOML key: unlike OperatorPaused/CICDDown/DiskSpaceLow, a TOML
+	// key here would let pg-router's OWN config.toml declare the kill
+	// switch's location, an extra configurability surface nothing in this
+	// bead's acceptance criteria asks for). Empty resolves, in Load() only
+	// (never GatePaths(), which pause/resume deliberately never touch — see
+	// GatePaths()'s own doc), to
+	// <LogDir>/gate-overrides/operator-paused-disabled — a directory SIBLING
+	// to, but never mixed with, <LogDir>/gates/ (which pg-router's own
+	// pause/resume CLI owns), so an operator listing one directory never
+	// mistakes a kill-switch file for a tripped gate.
+	//
+	// Sibling beads pg2-8c7az (cicd_down) and pg2-hipf0 (disk_space_low)
+	// should mirror this EXACT pattern for their own gates — a
+	// CICDDownDisable / DiskSpaceLowDisable field, a
+	// PG_ROUTER_CICD_DOWN_DISABLE / PG_ROUTER_DISK_SPACE_LOW_DISABLE env var,
+	// and a <LogDir>/gate-overrides/{cicd-down,disk-space-low}-disabled
+	// default — rather than re-deciding the mechanism from scratch.
+	OperatorPausedDisable string
+	Effort                string
+	Model                 string
 	// PermissionMode is an OPAQUE, un-validated string on this side of the wire
 	// boundary (docket pg2-oju6w Task 5.7): pg-router forwards it verbatim to
 	// the new module's own dispatch config and displays it in `config --show`,
@@ -335,29 +398,30 @@ func Default() Config {
 		// (fail fast) so an unconfigured deployment is byte-for-byte unchanged
 		// from pg2-qq9v's original "a query failure must NOT masquerade as no
 		// ready work" behavior.
-		PullFailureBackoff: backoff.Default(),
-		PullFailureRetries: 0,
-		OperatorPaused:     "",
-		CICDDown:           "",
-		DiskSpaceLow:       "",
-		Effort:             "max",
-		Model:              "",
-		Autonomous:         true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
-		PermissionMode:     "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
-		PRTool:             "",        // no review-post grant by default — see defaultAllowedTools's doc comment
-		AllowedTools:       defaultAllowedTools(""),
-		HandlerCommand:     "", // no baked-in handler participant name — GOAL-MIN-1's Floor; see HandlerCommand's doc comment
-		SessionPrefix:      "pg-router-",
-		BudgetTokens:       0,                // unlimited until ccpool N3
-		BudgetCost:         0,                // unlimited until ccpool N3
-		BudgetTime:         25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:        0.725,
-		CancelPct:          0.90,
-		HardPct:            1.00,
-		LogDir:             state + "/pg-router",
-		ReminderMsg:        "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
-		WrapUpMsg:          "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
-		ConfirmIngest:      90 * time.Second, // catch a dropped initial nudge well under BudgetTime
+		PullFailureBackoff:    backoff.Default(),
+		PullFailureRetries:    0,
+		OperatorPaused:        "",
+		CICDDown:              "",
+		DiskSpaceLow:          "",
+		OperatorPausedDisable: "",
+		Effort:                "max",
+		Model:                 "",
+		Autonomous:            true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
+		PermissionMode:        "dontAsk", // deny-by-default: auto-DENY any tool outside AllowedTools, non-interactive. PG_ROUTER_PERMISSION_MODE=bypassPermissions is the opt-in escape for an attended/trusted run.
+		PRTool:                "",        // no review-post grant by default — see defaultAllowedTools's doc comment
+		AllowedTools:          defaultAllowedTools(""),
+		HandlerCommand:        "", // no baked-in handler participant name — GOAL-MIN-1's Floor; see HandlerCommand's doc comment
+		SessionPrefix:         "pg-router-",
+		BudgetTokens:          0,                // unlimited until ccpool N3
+		BudgetCost:            0,                // unlimited until ccpool N3
+		BudgetTime:            25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:           0.725,
+		CancelPct:             0.90,
+		HardPct:               1.00,
+		LogDir:                state + "/pg-router",
+		ReminderMsg:           "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:             "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:         90 * time.Second, // catch a dropped initial nudge well under BudgetTime
 	}
 }
 
@@ -384,6 +448,9 @@ func Load() (Config, error) {
 	c.OperatorPaused = envStr("PG_ROUTER_OPERATOR_PAUSED", c.OperatorPaused)
 	c.CICDDown = envStr("PG_ROUTER_CICD_DOWN", c.CICDDown)
 	c.DiskSpaceLow = envStr("PG_ROUTER_DISK_SPACE_LOW", c.DiskSpaceLow)
+	// OperatorPausedDisable's own env overlay (bead pg2-efbb0) — see its doc
+	// comment on the Config struct for the full external-kill-switch design.
+	c.OperatorPausedDisable = envStr("PG_ROUTER_OPERATOR_PAUSED_DISABLE", c.OperatorPausedDisable)
 	c.Effort = envStr("PG_ROUTER_EFFORT", c.Effort)
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
@@ -452,6 +519,17 @@ func Load() (Config, error) {
 	}
 	if c.DiskSpaceLow == "" {
 		c.DiskSpaceLow = filepath.Join(c.LogDir, "gates", "disk-space-low")
+	}
+	// OperatorPausedDisable's own default fill (bead pg2-efbb0), same
+	// still-empty-only rule as the three gate paths above, but under a
+	// SIBLING directory (gate-overrides/, never gates/) — see its doc
+	// comment on the Config struct for why the two directories are kept
+	// apart. Unlike the three paths above, this one has no [pool] TOML
+	// overlay to have already won by this point (deliberately — see the
+	// same doc comment), so this fill only ever sees the env-or-"" value
+	// from the overlay above.
+	if c.OperatorPausedDisable == "" {
+		c.OperatorPausedDisable = filepath.Join(c.LogDir, "gate-overrides", "operator-paused-disabled")
 	}
 	// The built-in feedback/worker/review role+query fallback (roles.
 	// BuiltinRoleSet/BuiltinQuerySet) is DELETED here (docket pg2-oju6w's
@@ -858,6 +936,26 @@ func GatePaths() (operatorPaused, cicdDown, diskSpaceLow string) {
 		diskSpaceLow = filepath.Join(logDir, "gates", "disk-space-low")
 	}
 	return operatorPaused, cicdDown, diskSpaceLow
+}
+
+// OperatorPausedDisablePath resolves operator_paused's external kill-switch
+// path (bead pg2-efbb0 — see Config.OperatorPausedDisable's doc comment for
+// the full design) with the SAME env-or-default precedence Load() uses, but
+// WITHOUT calling Load(). It exists for the identical reason GatePaths()
+// does: cmd/pg-router/gates_cmd.go's pause/resume subcommands MUST succeed
+// even with no core running and even against a config that could never
+// itself Load() (Validate() hard-fails on an absent backing command), so
+// they act on gate-file state directly and never need the rest of the
+// configuration to be valid — this resolver lets pause/resume additionally
+// report whether the gate they just toggled is externally disabled, without
+// pulling in Load()'s full validation to do it. There is deliberately no
+// [pool] TOML overlay here (see the Config field's own doc for why), so this
+// is simpler than GatePaths(): env, or the LogDir()-based default.
+func OperatorPausedDisablePath() string {
+	if v := envStr("PG_ROUTER_OPERATOR_PAUSED_DISABLE", ""); v != "" {
+		return v
+	}
+	return filepath.Join(LogDir(), "gate-overrides", "operator-paused-disabled")
 }
 
 func stateHome() string {

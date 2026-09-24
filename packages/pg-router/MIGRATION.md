@@ -250,6 +250,45 @@ there is no time-based or startup expiry. Keep it that way: `<LogDir>` is also w
 sweeping for gate files alone would make `<LogDir>`'s cleanup story inconsistent across the
 three, for no invariant that requires it.
 
+## Operator: disabling a gate's effect entirely, from outside pg-router (bead `pg2-efbb0`)
+
+Every named gate (`INV-LIFE-2`) had exactly one lever before this change: `pg-router
+pause`/`pg-router resume` (or the TUI's `P`/`R` keys), which set or clear the gate's own
+file-backed **tripped state**. There was no way to disable the gate **mechanism** itself — to make
+`Orchestrator.Gated()` ignore `operator_paused` even while its file happens to be present —
+without editing pg-router's own source or config and redeploying it.
+
+**`operator_paused` now carries a kill switch.** `Config.OperatorPausedDisable` names a path
+(`PG_ROUTER_OPERATOR_PAUSED_DISABLE`, defaulting to
+`<LogDir>/gate-overrides/operator-paused-disabled`) that, when it **exists**, makes
+`Orchestrator.Gated()` ignore `operator_paused`'s own file state entirely — as if that gate were
+never configured. Create it with a plain `touch`; remove it with `rm`. Nothing in this codebase
+ever writes or reads that file except this ignore-check and the reporting surfaces below — no
+`pg-router` subcommand manages it, deliberately: a CLI verb for it would put the kill switch back
+INSIDE pg-router's own surface, which defeats the point.
+
+**Why this mechanism, and not an env var or GrowthBook** (the two other options the filing bead
+named): an env var can only be read as of a process's own `exec`, so toggling one would require
+restarting the daemon — failing the "without … redeploying it" requirement outright. GrowthBook
+(already used elsewhere in this workspace for CETA gate-weakening rulings) was rejected for now: a
+repo-wide grep found no existing GrowthBook client in pg-router, and this task's own constraints
+rule out a live network round-trip, so wiring one here would mean building unused interface
+plumbing for no operator-visible gain over reusing the exact `fileExists()` check the gate files
+themselves already use. Reconsider only if a later need requires this SAME toggle centrally
+managed across many independent deployments at once.
+
+**Reporting.** `pg-router status` / `--json` and the TUI's Gates modal (`g`) show the gate's raw
+`set`/`mtime`/`owner` fields UNCHANGED, plus a new `disabled` field/marker that appears only while
+the kill-switch file is present. `pg-router pause`/`pg-router resume` (for `operator-paused`
+specifically) append a NOTE to their own output when the kill switch is active, so a `pause` that
+silently has no dispatch effect is never reported as if it worked normally.
+
+**What this means for cicd_down / disk_space_low.** Neither carries a kill switch yet — beads
+`pg2-8c7az` and `pg2-hipf0` track adding the IDENTICAL pattern (a `CICDDownDisable` /
+`DiskSpaceLowDisable` field, a `PG_ROUTER_CICD_DOWN_DISABLE` / `PG_ROUTER_DISK_SPACE_LOW_DISABLE`
+env var, and a `<LogDir>/gate-overrides/{cicd-down,disk-space-low}-disabled` default) for their own
+gates, rather than re-deciding the mechanism.
+
 ## Behavior: a partial produce during `run-until-idle` is a generic failure (Task 1.1)
 
 `run-until-idle` always **completes the drain** first — every

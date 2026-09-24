@@ -1407,6 +1407,10 @@ func statusQueues(depth map[string]int) []map[string]any {
 // statusGates renders GateSnapshot's map as the `gates` array, sorted by
 // name; `mtime`/`owner` are omitted per-entry when the gate carries none
 // (an unset gate has no mtime, and no writer here ever sets Owner today).
+// `disabled` follows the same omit-when-absent convention (bead pg2-efbb0):
+// it is added only when GateInfo.Disabled is true, so an existing reply
+// consumer that has never heard of the external kill switch sees byte-
+// identical output for every gate that has none wired.
 func statusGates(gates map[string]GateInfo) []map[string]any {
 	names := make([]string, 0, len(gates))
 	for n := range gates {
@@ -1422,6 +1426,9 @@ func statusGates(gates map[string]GateInfo) []map[string]any {
 		}
 		if g.Owner != "" {
 			entry["owner"] = g.Owner
+		}
+		if g.Disabled {
+			entry["disabled"] = true
 		}
 		out = append(out, entry)
 	}

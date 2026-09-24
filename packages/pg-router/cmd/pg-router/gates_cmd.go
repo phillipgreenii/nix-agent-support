@@ -88,7 +88,7 @@ func pauseGate(stdout, stderr io.Writer, gate string) int {
 	// Re-pause is idempotent-visible but MUST NOT touch an already-set gate's
 	// mtime: a second `pause` must report the ORIGINAL set time, never reset it.
 	if fi, err := os.Stat(path); err == nil {
-		fmt.Fprintf(stdout, "pg-router: already paused (%s since %s)\n", gate, fi.ModTime().Format("15:04"))
+		fmt.Fprintf(stdout, "pg-router: already paused (%s since %s)%s\n", gate, fi.ModTime().Format("15:04"), disabledNoteFor(gate))
 		return exitOK
 	}
 	now := time.Now()
@@ -97,9 +97,28 @@ func pauseGate(stdout, stderr io.Writer, gate string) int {
 		fmt.Fprintln(stderr, "pause:", err)
 		return exitGeneric
 	}
-	fmt.Fprintf(stdout, "pg-router: paused (%s since %s) — takes effect at the next start; a currently running \"run\" picks it up on its next tick\n",
-		gate, now.Format("15:04"))
+	fmt.Fprintf(stdout, "pg-router: paused (%s since %s) — takes effect at the next start; a currently running \"run\" picks it up on its next tick%s\n",
+		gate, now.Format("15:04"), disabledNoteFor(gate))
 	return exitOK
+}
+
+// disabledNoteFor returns an operator-visible suffix reporting whether
+// gate's external kill switch (bead pg2-efbb0) is currently active, so
+// `pause`/`resume` never leave an operator believing a toggle took dispatch
+// effect when Orchestrator.gated() will actually ignore it entirely. Only
+// operator-paused carries a kill switch today (config.
+// OperatorPausedDisablePath's doc comment) — every other gate name returns
+// "" unconditionally, matching gateFileInfo's own per-gate scoping in
+// cmd/pg-router/run.go.
+func disabledNoteFor(gate string) string {
+	if gate != gateOperatorPaused {
+		return ""
+	}
+	disablePath := config.OperatorPausedDisablePath()
+	if _, err := os.Stat(disablePath); err != nil {
+		return ""
+	}
+	return fmt.Sprintf(" — NOTE: operator-paused is currently externally DISABLED (%s exists); this gate has NO dispatch effect until that file is removed", disablePath)
 }
 
 // resumeGate is runResume's testable body: it clears gate's file-backed
@@ -125,9 +144,9 @@ func resumeGate(stdout, stderr io.Writer, gate string, allGates bool) int {
 			}
 		}
 		if len(cleared) == 0 {
-			fmt.Fprintln(stdout, "pg-router: already resumed (no gate was set)")
+			fmt.Fprintf(stdout, "pg-router: already resumed (no gate was set)%s\n", disabledNoteFor(gateOperatorPaused))
 		} else {
-			fmt.Fprintf(stdout, "pg-router: resumed (cleared %s)\n", strings.Join(cleared, ", "))
+			fmt.Fprintf(stdout, "pg-router: resumed (cleared %s)%s\n", strings.Join(cleared, ", "), disabledNoteFor(gateOperatorPaused))
 		}
 		return exitOK
 	}
@@ -138,9 +157,9 @@ func resumeGate(stdout, stderr io.Writer, gate string, allGates bool) int {
 		return exitGeneric
 	}
 	if removed {
-		fmt.Fprintf(stdout, "pg-router: resumed (%s cleared)\n", gate)
+		fmt.Fprintf(stdout, "pg-router: resumed (%s cleared)%s\n", gate, disabledNoteFor(gate))
 	} else {
-		fmt.Fprintf(stdout, "pg-router: already resumed (%s was not set)\n", gate)
+		fmt.Fprintf(stdout, "pg-router: already resumed (%s was not set)%s\n", gate, disabledNoteFor(gate))
 	}
 	return exitOK
 }

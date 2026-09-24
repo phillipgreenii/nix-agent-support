@@ -590,3 +590,34 @@ func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
 		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
 	}
 }
+
+// TestStatusGates_DisabledOmittedWhenFalse locks bead pg2-efbb0's wire
+// convention for GateInfo.Disabled: omitted entirely (never `"disabled":
+// false`) for a gate that does not carry the external kill switch, so an
+// existing reply consumer sees byte-identical output — the SAME
+// omit-when-absent convention mtime/owner already use.
+func TestStatusGates_DisabledOmittedWhenFalse(t *testing.T) {
+	out := statusGates(map[string]GateInfo{"operator_paused": {Set: true}})
+	if len(out) != 1 {
+		t.Fatalf("statusGates returned %d entries, want 1", len(out))
+	}
+	if _, present := out[0]["disabled"]; present {
+		t.Errorf("entry = %+v, want no \"disabled\" key when Disabled is false", out[0])
+	}
+}
+
+// TestStatusGates_DisabledPresentWhenTrue is the positive counterpart: a
+// gate with Disabled: true must carry `"disabled": true` on the wire,
+// independent of Set.
+func TestStatusGates_DisabledPresentWhenTrue(t *testing.T) {
+	out := statusGates(map[string]GateInfo{"operator_paused": {Set: true, Disabled: true}})
+	if len(out) != 1 {
+		t.Fatalf("statusGates returned %d entries, want 1", len(out))
+	}
+	if got, ok := out[0]["disabled"].(bool); !ok || !got {
+		t.Errorf("entry = %+v, want \"disabled\": true", out[0])
+	}
+	if got, ok := out[0]["set"].(bool); !ok || !got {
+		t.Errorf("entry = %+v, want \"set\": true unaffected by Disabled", out[0])
+	}
+}

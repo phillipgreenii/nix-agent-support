@@ -116,14 +116,26 @@ func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 // operator_paused while cicd_down remains set still leaves the pool paused
 // overall (INV-LIFE-2's OR-effective semantics), and the flash says so
 // rather than implying the pool resumed.
+//
+// A trailing note is appended (bead pg2-efbb0) whenever operator_paused's
+// own external kill switch is currently active — read from m.reply.Gates,
+// which applyGateToggleResult's own setGate call (its caller) never
+// disturbs for this field, only for Set — so an operator toggling `P` while
+// disabled is told the toggle has NO dispatch effect, rather than being left
+// to believe "pool now PAUSED"/"pool now RESUMED" actually changed
+// anything.
 func (m *Model) operatorGateFlashText(effective string) string {
+	disabledNote := ""
+	if g, ok := m.gate(core.GateOperatorPaused); ok && g.Disabled {
+		disabledNote = " (externally disabled — has no dispatch effect)"
+	}
 	if effective == "paused" {
-		return "operator gate paused — pool now PAUSED"
+		return "operator gate paused — pool now PAUSED" + disabledNote
 	}
 	if m.gateSet(core.GateCICDDown) {
 		return "operator gate cleared — still PAUSED by cicd-down"
 	}
-	return "operator gate cleared — pool now RESUMED"
+	return "operator gate cleared — pool now RESUMED" + disabledNote
 }
 
 // gate looks up the named gate (core.GateOperatorPaused / core.GateCICDDown)
@@ -200,6 +212,17 @@ func (m *Model) renderGatesModal() string {
 // that placeholder text carried no information distinguishing "never
 // observed" from "observed and cleared" -- both looked like malformed data
 // rather than a plain "not set" fact [pg2-y6sy5].
+//
+// A "[DISABLED]" marker (bead pg2-efbb0) is PREPENDED whenever g.Disabled is
+// true — REGARDLESS of g.Set, since the two facts are independent: this
+// bead's acceptance criteria requires the raw file-based set/clear state to
+// keep showing unchanged, with the external-disable state indicated
+// ADDITIONALLY, never in its place. It is prepended, not appended: Modal's
+// own fixed contentWidth hard-clips a long Right value with no ellipsis
+// (render.Modal's own doc), so putting the marker FIRST guarantees it
+// survives that clip even in a narrow terminal — only the pre-existing
+// since/owner detail's tail is ever at risk of clipping, never this bead's
+// own new signal.
 func (m *Model) gateModalRow(displayName, wireName string) render.ModalRow {
 	g, _ := m.gate(wireName)
 	right := "not set"
@@ -213,6 +236,9 @@ func (m *Model) gateModalRow(displayName, wireName string) render.ModalRow {
 			owner = "-"
 		}
 		right = fmt.Sprintf("SET since %s (owner: %s)", since, owner)
+	}
+	if g.Disabled {
+		right = "[DISABLED] " + right
 	}
 	return render.ModalRow{
 		Left:  displayName,

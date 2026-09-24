@@ -160,6 +160,15 @@ func (o *Orchestrator) commander() query.Commander {
 // PG_ROUTER_DISK_SPACE_LOW). A gated caller MUST NOT register listeners or
 // run a producer tick — no sessions are created, so nothing needs tearing
 // down either.
+//
+// operator_paused's own effect can be switched off entirely from OUTSIDE
+// pg-router (bead pg2-efbb0): when o.Cfg.OperatorPausedDisable names a path
+// that EXISTS, this method ignores OperatorPaused's file state completely,
+// as if that gate were never configured — see config.Config.
+// OperatorPausedDisable's doc comment for the full design rationale and why
+// this is deliberately a second, separate file rather than a sentinel value
+// inside OperatorPaused's own file. cicd_down and disk_space_low carry no
+// such kill switch yet (tracked separately: beads pg2-8c7az, pg2-hipf0).
 func (o *Orchestrator) Gated() bool { return o.gated() }
 
 // queryEnv builds the capability bag passed to each role's query.
@@ -388,7 +397,10 @@ func (unconfiguredHandler) PreShutdown(context.Context, roles.Role) (wireclient.
 }
 
 func (o *Orchestrator) gated() bool {
-	if o.Cfg.OperatorPaused != "" && fileExists(o.Cfg.OperatorPaused) {
+	// The bead pg2-efbb0 kill switch: OperatorPausedDisable present ⇒
+	// operator_paused's own file state (however it reads) is ignored for
+	// this check — see Gated()'s doc comment above.
+	if o.Cfg.OperatorPaused != "" && fileExists(o.Cfg.OperatorPaused) && !fileExists(o.Cfg.OperatorPausedDisable) {
 		return true
 	}
 	if o.Cfg.CICDDown != "" && fileExists(o.Cfg.CICDDown) {

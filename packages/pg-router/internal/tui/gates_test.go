@@ -290,6 +290,77 @@ func TestRenderGatesModal_NotSetIsUnambiguous(t *testing.T) {
 	}
 }
 
+// TestRenderGatesModal_ExternallyDisabledMarker locks bead pg2-efbb0's
+// acceptance criteria for the TUI: the gates modal must show the raw
+// set/clear state UNCHANGED and additionally mark the gate as externally
+// disabled, regardless of whether the gate's own file happens to be set or
+// clear at the same time.
+func TestRenderGatesModal_ExternallyDisabledMarker(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.reply = StatusReply{Gates: []Gate{
+		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator", Disabled: true},
+		{Name: core.GateCICDDown, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "automation"},
+	}}
+	m.activeModal = ModalGates
+
+	got := m.renderGatesModal()
+	if !strings.Contains(got, "SET") || !strings.Contains(got, "[DISABLED]") {
+		t.Errorf("disabled operator-paused must still show its raw SET state AND a [DISABLED] marker; got:\n%s", got)
+	}
+	// cicd-down carries no kill switch — its own row must show no marker.
+	cicdLine := got[strings.Index(got, "cicd-down"):]
+	if idx := strings.Index(cicdLine, "\n"); idx != -1 {
+		cicdLine = cicdLine[:idx]
+	}
+	if strings.Contains(cicdLine, "[DISABLED]") {
+		t.Errorf("cicd-down row must not carry the disabled marker; got:\n%s", cicdLine)
+	}
+}
+
+// TestRenderGatesModal_ExternallyDisabledMarkerWhenNotSet proves the marker
+// is independent of Set: a CLEARED gate that is also externally disabled
+// must still show BOTH "not set" and the disabled marker.
+func TestRenderGatesModal_ExternallyDisabledMarkerWhenNotSet(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.reply = StatusReply{Gates: []Gate{
+		{Name: core.GateOperatorPaused, Set: false, Disabled: true},
+	}}
+	m.activeModal = ModalGates
+
+	got := m.renderGatesModal()
+	if !strings.Contains(got, "not set") || !strings.Contains(got, "[DISABLED]") {
+		t.Errorf("a clear-but-disabled gate must show BOTH \"not set\" and the disabled marker; got:\n%s", got)
+	}
+}
+
+// TestOperatorGateFlashText_NotesExternalDisable locks the flash-text
+// enhancement (bead pg2-efbb0): toggling operator_paused while its kill
+// switch is active must append a note so the operator is not misled into
+// thinking the toggle changed dispatch behavior.
+func TestOperatorGateFlashText_NotesExternalDisable(t *testing.T) {
+	m := newTestModel(nil)
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true, Disabled: true}}}
+
+	got := m.operatorGateFlashText("paused")
+	if !strings.Contains(got, "pool now PAUSED") || !strings.Contains(got, "no dispatch effect") {
+		t.Errorf("flash text = %q, want the usual PAUSED text plus a no-dispatch-effect note", got)
+	}
+}
+
+// TestOperatorGateFlashText_NoNoteWhenNotDisabled is the negative control:
+// with no kill switch active, the flash text must be byte-identical to its
+// pre-pg2-efbb0 form.
+func TestOperatorGateFlashText_NoNoteWhenNotDisabled(t *testing.T) {
+	m := newTestModel(nil)
+	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}}}
+
+	if got := m.operatorGateFlashText("paused"); got != "operator gate paused — pool now PAUSED" {
+		t.Errorf("flash text = %q, want unchanged \"operator gate paused — pool now PAUSED\"", got)
+	}
+}
+
 // TestAsOfRaceGuard is Binding Decision Step 5: a poll result captured
 // before an in-flight/just-settled toggle started must be discarded
 // outright, never overwriting the pending/just-toggled gate state; a

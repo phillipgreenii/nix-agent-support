@@ -151,6 +151,10 @@ type statusReply struct {
 		Set   bool   `json:"set"`
 		Mtime string `json:"mtime"`
 		Owner string `json:"owner"`
+		// Disabled (bead pg2-efbb0) reports whether this gate's own
+		// MECHANISM has been switched off from outside pg-router,
+		// independent of Set — see core.GateInfo.Disabled's doc comment.
+		Disabled bool `json:"disabled"`
 	} `json:"gates"`
 	GatesObservedAt string `json:"gatesObservedAt"`
 	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
@@ -285,6 +289,12 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		}
 		if g.Owner != "" {
 			line += " owner=" + dash(g.Owner)
+		}
+		// disabled (bead pg2-efbb0) is printed only when true, mirroring the
+		// mtime/owner omit-when-absent convention above — the gate's raw
+		// set/clear state (already printed) is left unchanged either way.
+		if g.Disabled {
+			line += " disabled=true (externally disabled — mechanism ignored)"
 		}
 		fmt.Fprintln(w, line)
 	}

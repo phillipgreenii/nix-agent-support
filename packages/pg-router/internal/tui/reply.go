@@ -67,14 +67,19 @@ type CoreInfo struct {
 	ConfigPath string    `json:"configPath"`
 }
 
-// Gate mirrors one entry of the wire's `gates` array (INV-LIFE-2's two named
-// gates). Mtime/Owner are omitted on the wire when the gate carries neither
-// (composeStatusReply's statusGates), decoding to their zero values here.
+// Gate mirrors one entry of the wire's `gates` array (INV-LIFE-2's three
+// named gates). Mtime/Owner/Disabled are omitted on the wire when the gate
+// carries none (composeStatusReply's statusGates), decoding to their zero
+// values here. Disabled (bead pg2-efbb0) reports whether the gate's own
+// MECHANISM has been switched off from outside pg-router — independent of
+// Set, which stays the gate's raw file-backed tripped state; see
+// core.GateInfo.Disabled's doc comment for the full design.
 type Gate struct {
-	Name  string    `json:"name"`
-	Set   bool      `json:"set"`
-	Mtime time.Time `json:"mtime"`
-	Owner string    `json:"owner"`
+	Name     string    `json:"name"`
+	Set      bool      `json:"set"`
+	Mtime    time.Time `json:"mtime"`
+	Owner    string    `json:"owner"`
+	Disabled bool      `json:"disabled"`
 }
 
 // Queue mirrors one entry of the wire's `queues` array: a per-type depth.

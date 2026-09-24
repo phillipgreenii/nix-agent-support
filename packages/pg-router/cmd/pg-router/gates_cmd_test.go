@@ -47,6 +47,11 @@ func isolateGateEnv(t *testing.T) string {
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "")
 	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "")
+	// bead pg2-efbb0's external kill switch: cleared too, so a stray
+	// ambient PG_ROUTER_OPERATOR_PAUSED_DISABLE on the host can never make
+	// disabledNoteFor's output non-deterministic in a test that does not
+	// exercise it explicitly.
+	t.Setenv("PG_ROUTER_OPERATOR_PAUSED_DISABLE", "")
 	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 	return logDir
 }
@@ -63,6 +68,64 @@ func TestPauseGate_createsFileExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), gateOperatorPaused) || !strings.Contains(stdout.String(), "since") {
 		t.Errorf("pause output must name the gate and report a set time; got %q", stdout.String())
+	}
+}
+
+// TestPauseGate_reportsExternalDisable locks bead pg2-efbb0: pause/resume
+// output for operator-paused MUST note when the external kill switch
+// (config.OperatorPausedDisablePath()) is currently active, so an operator
+// is never left believing the toggle changed dispatch behavior when
+// Orchestrator.Gated() will actually ignore it. A gate other than
+// operator-paused MUST show no such note, since neither cicd-down nor
+// disk-space-low carries a kill switch yet.
+func TestPauseGate_reportsExternalDisable(t *testing.T) {
+	logDir := isolateGateEnv(t)
+	disablePath := filepath.Join(logDir, "gate-overrides", "operator-paused-disabled")
+	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "externally DISABLED") {
+		t.Errorf("pause output for operator-paused while the kill switch is active must note it; got %q", stdout.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	if code := resumeGate(&stdout2, &stderr2, gateOperatorPaused, false); code != exitOK {
+		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr2.String())
+	}
+	if !strings.Contains(stdout2.String(), "externally DISABLED") {
+		t.Errorf("resume output for operator-paused while the kill switch is active must note it; got %q", stdout2.String())
+	}
+
+	// cicd-down carries no kill switch — its own pause output must be
+	// unaffected by operator-paused's disable file.
+	var stdout3, stderr3 bytes.Buffer
+	if code := pauseGate(&stdout3, &stderr3, gateCICDDown); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr3.String())
+	}
+	if strings.Contains(stdout3.String(), "externally DISABLED") {
+		t.Errorf("pause output for cicd-down must not mention operator-paused's own kill switch; got %q", stdout3.String())
+	}
+}
+
+// TestPauseGate_noDisableNoteWhenNotDisabled is the negative control for
+// TestPauseGate_reportsExternalDisable: with no kill-switch file present,
+// pause output must carry no disable note at all.
+func TestPauseGate_noDisableNoteWhenNotDisabled(t *testing.T) {
+	isolateGateEnv(t)
+	var stdout, stderr bytes.Buffer
+	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "externally DISABLED") {
+		t.Errorf("pause output must not mention external disable when the kill switch is absent; got %q", stdout.String())
 	}
 }
 

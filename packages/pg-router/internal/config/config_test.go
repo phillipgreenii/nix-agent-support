@@ -704,6 +704,83 @@ func TestLoad_gatePaths_defaultUnderLogDir(t *testing.T) {
 	}
 }
 
+// TestLoad_operatorPausedDisable_defaultUnderLogDir locks bead pg2-efbb0's
+// external kill-switch default: with no env override, it resolves to
+// <LogDir>/gate-overrides/operator-paused-disabled — a SIBLING directory to
+// (never mixed with) <LogDir>/gates/, so a directory listing never confuses
+// a kill-switch file with a tripped gate.
+func TestLoad_operatorPausedDisable_defaultUnderLogDir(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/override/dir/gate-overrides/operator-paused-disabled"; c.OperatorPausedDisable != want {
+		t.Errorf("OperatorPausedDisable = %q, want %q", c.OperatorPausedDisable, want)
+	}
+}
+
+// TestLoad_operatorPausedDisable_envOverride locks the env overlay: setting
+// PG_ROUTER_OPERATOR_PAUSED_DISABLE wins over the <LogDir>/gate-overrides/
+// default, mirroring PG_ROUTER_OPERATOR_PAUSED's own precedence.
+func TestLoad_operatorPausedDisable_envOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_OPERATOR_PAUSED_DISABLE", "/custom/kill-switch")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OperatorPausedDisable != "/custom/kill-switch" {
+		t.Errorf("OperatorPausedDisable = %q, want /custom/kill-switch", c.OperatorPausedDisable)
+	}
+}
+
+// TestOperatorPausedDisablePath_agreesWithLoad mirrors
+// TestGatePaths_agreesWithLoad: OperatorPausedDisablePath() (used by
+// gates_cmd.go's pause/resume, which never call Load()) must resolve to the
+// SAME value Load() itself fills Config.OperatorPausedDisable with.
+func TestOperatorPausedDisablePath_agreesWithLoad(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := OperatorPausedDisablePath(); got != c.OperatorPausedDisable {
+		t.Errorf("OperatorPausedDisablePath() = %q, Load's OperatorPausedDisable = %q, want equal", got, c.OperatorPausedDisable)
+	}
+}
+
+// TestOperatorPausedDisablePath_worksWhenLoadWouldFail mirrors
+// TestGatePaths_worksWhenLoadWouldFail: OperatorPausedDisablePath() must
+// resolve even against a config that could never itself Load() (an absent
+// backing command), since gates_cmd.go's pause/resume must succeed with no
+// core running and no valid configuration.
+func TestOperatorPausedDisablePath_worksWhenLoadWouldFail(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "r"
+binds = ["e"]
+
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["absent-lister"]
+format = "jsonl"
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("premise: this config must fail Load() (absent backing command)")
+	}
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	want := "/override/dir/gate-overrides/operator-paused-disabled"
+	if got := OperatorPausedDisablePath(); got != want {
+		t.Errorf("OperatorPausedDisablePath() = %q, want %q (must resolve even though Load() fails)", got, want)
+	}
+}
+
 // PG_ROUTER_MAX_WORKER and the other role env vars are dropped (spec C): setting
 // them must have NO effect. Per-role capacity is no longer a declarable concept
 // at all (bead pg2-f3mcb.2, INV-CONC-1) — there is no `cap` left to be a no-op
