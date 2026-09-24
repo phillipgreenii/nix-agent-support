@@ -92,6 +92,51 @@ func TestNix_FlakeApprove(t *testing.T) {
 	}
 }
 
+// TestNix_Eval_RedirectAndFallback_Approve is tc-ginhx's pinning test.
+//
+// Settings row 60962 (settings.local.json's now-redundant `Bash(nix eval:*)`
+// rule) logged the top-level statement below as an `abstain` at the HOOK
+// level. Investigating with a direct engine probe (not committed — see the
+// bead) showed the abstain is NOT caused by the "nix eval" leaf at all: this
+// module already approves "nix eval" unconditionally (nixApproved["eval"],
+// no flag gating, same posture as every other nixApproved subcommand), and
+// both leaves of the `||` fallback below ("nix eval ..." and "nix flake
+// metadata ... | jq ...") independently resolve to approve. The row's actual
+// abstain came from two SIBLING statements in the same multi-line Bash
+// invocation — `find / -maxdepth N ... | head -N` — which internal/rules/
+// safecmds deliberately refuses to blanket-approve ("find references unknown
+// path /"): a root-filesystem search is intentionally NOT auto-approved,
+// and loosening that would be an unrelated safety regression, not something
+// this module should absorb.
+//
+// So there is no nix.go gap to close here: this test exists to PIN the
+// already-correct behavior (approve, unconditionally, regardless of the
+// `2>/dev/null` redirection or the `||`-fallback shape) against future
+// regression, since no prior test exercised this exact row shape.
+func TestNix_Eval_RedirectAndFallback_Approve(t *testing.T) {
+	approve := []string{
+		// The historical row's own first leaf, verbatim (minus the `||` fallback
+		// and downstream `| jq` pipe stage, which are separate leaves the outer
+		// engine dispatches individually — this module only ever sees one leaf
+		// per call, matching every other case in this file).
+		"nix eval --raw 'nixpkgs#path'",
+		// Confirms the redirection alone (2>/dev/null) never changes subcommand
+		// detection.
+		"nix eval --raw 'nixpkgs#path' 2>/dev/null",
+	}
+	r := New()
+	for _, cmd := range approve {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s, want approve", cmd, got.Decision)
+		}
+	}
+}
+
 func TestNix_Run_Abstain(t *testing.T) {
 	r := New()
 	input := &hookio.HookInput{

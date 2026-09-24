@@ -26,6 +26,18 @@ var nixApproved = map[string]bool{
 // "nix shell" is also NOT in the approved list. "nix shell ... -c <cmd>" is
 // handled specially by extracting and recursively evaluating the inner command,
 // similar to "nix develop --command".
+//
+// tc-ginhx: "nix eval" (nixApproved["eval"]) is, and was already, approved
+// UNCONDITIONALLY — no flag gating, same posture as every other nixApproved
+// subcommand. settings.local.json's `Bash(nix eval:*)` rule (added as a
+// workaround for a logged abstain on a "nix eval ... || nix flake metadata
+// ... | jq ..." command) is fully redundant with this map for the "nix eval"
+// leaf itself; the abstain that prompted the settings rule actually came from
+// an UNRELATED sibling statement in the same multi-line Bash invocation — a
+// `find / ...` search that internal/rules/safecmds deliberately declines to
+// blanket-approve (searching from filesystem root is intentionally not
+// auto-approved). That is a correct, independent safety posture and is not
+// loosened here.
 
 var nixFlakeApproved = map[string]bool{
 	"show": true, "metadata": true, "check": true,
