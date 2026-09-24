@@ -899,10 +899,10 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 // added by bead pg2-af5ur) this run's config declares — the map keys
 // currentGateFiles/svc.ObserveGateFromTick use, one per
 // config.Config.OperatorPaused/CICDDown/DiskSpaceLow gate-file path.
-// gateTickKeyOperatorPaused's own GateInfo additionally carries the bead
-// pg2-efbb0 external-disable read (currentGateFiles'
-// gateFileInfoWithDisable) — a fourth fact folded into the SAME map entry,
-// not a fourth key.
+// gateTickKeyOperatorPaused's and gateTickKeyDiskSpaceLow's own GateInfo
+// additionally carry the bead pg2-efbb0/pg2-hipf0 external-disable read
+// (currentGateFiles' gateFileInfoWithDisable) — a fourth fact folded into
+// the SAME map entry, not a fourth key.
 const (
 	gateTickKeyOperatorPaused = "operator_paused"
 	gateTickKeyCICDDown       = "cicd_down"
@@ -945,15 +945,16 @@ func gateFileInfoWithDisable(path, disablePath string) core.GateInfo {
 // loop's periodic input to svc.ObserveGateFromTick (Task 3.5 Files: gates_cmd.go
 // itself needs no code change, since file-direct pause/resume never touches a
 // running core; this is the OTHER half — the drive loop's own read of that
-// same gate-file state). operator_paused alone also folds in its external
-// kill-switch read (bead pg2-efbb0, gateFileInfoWithDisable); cicd_down and
-// disk_space_low still use the plain gateFileInfo until their own sibling
-// beads (pg2-8c7az, pg2-hipf0) wire the identical pattern for their gates.
+// same gate-file state). operator_paused and disk_space_low each also fold
+// in their own external kill-switch read (beads pg2-efbb0/pg2-hipf0,
+// gateFileInfoWithDisable); cicd_down still uses the plain gateFileInfo
+// until its own sibling bead (pg2-8c7az) wires the identical pattern for
+// its gate.
 func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
 	return map[string]core.GateInfo{
 		gateTickKeyOperatorPaused: gateFileInfoWithDisable(cfg.OperatorPaused, cfg.OperatorPausedDisable),
 		gateTickKeyCICDDown:       gateFileInfo(cfg.CICDDown),
-		gateTickKeyDiskSpaceLow:   gateFileInfo(cfg.DiskSpaceLow),
+		gateTickKeyDiskSpaceLow:   gateFileInfoWithDisable(cfg.DiskSpaceLow, cfg.DiskSpaceLowDisable),
 	}
 }
 

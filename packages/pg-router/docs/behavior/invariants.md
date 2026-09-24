@@ -370,15 +370,15 @@ sequenceDiagram
   next start if none is running when it is set. The two differ in **kind**, not degree, and neither
   substitutes for the other.
 
-  **A gate's tripped state is distinct from its mechanism being disabled.** `operator-paused` MAY
-  additionally be switched off entirely from **outside** `ACTOR-OP`'s own pause/resume surface —
-  a separate, external signal that makes the core ignore that gate's file-backed tripped state
-  regardless of whether it is set. Inspection **MUST** report the gate's raw tripped state and
-  whether it is externally disabled as **two independent facts**, never collapsed into one,
-  because a gate MAY be simultaneously set and disabled. This mechanism is concrete realization
-  detail (`phillipgreenii-nix-agent-support · packages/pg-router/MIGRATION.md`'s "Operator:
-  disabling a gate's effect entirely, from outside pg-router" section), not restated here beyond
-  the behavior it guarantees.
+  **A gate's tripped state is distinct from its mechanism being disabled.** `operator-paused` and
+  `disk-space-low` MAY additionally be switched off entirely from **outside** their own
+  pause/resume surface — a separate, external signal that makes the core ignore that gate's
+  file-backed tripped state regardless of whether it is set. Inspection **MUST** report the gate's
+  raw tripped state and whether it is externally disabled as **two independent facts**, never
+  collapsed into one, because a gate MAY be simultaneously set and disabled. This mechanism is
+  concrete realization detail (`phillipgreenii-nix-agent-support · packages/pg-router/MIGRATION.md`'s
+  "Operator: disabling a gate's effect entirely, from outside pg-router" section), not restated
+  here beyond the behavior it guarantees.
 
 - **`INV-LIFE-3`** <!-- uuid: 4c5534a8-3ef4-4e5f-954e-c099da336988 --> — **The drive loop's own
   liveness does not wait on any one offer settling.** The core's drive loop — re-querying pull

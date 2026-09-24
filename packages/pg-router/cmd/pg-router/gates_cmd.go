@@ -103,22 +103,28 @@ func pauseGate(stdout, stderr io.Writer, gate string) int {
 }
 
 // disabledNoteFor returns an operator-visible suffix reporting whether
-// gate's external kill switch (bead pg2-efbb0) is currently active, so
-// `pause`/`resume` never leave an operator believing a toggle took dispatch
-// effect when Orchestrator.gated() will actually ignore it entirely. Only
-// operator-paused carries a kill switch today (config.
-// OperatorPausedDisablePath's doc comment) — every other gate name returns
-// "" unconditionally, matching gateFileInfo's own per-gate scoping in
-// cmd/pg-router/run.go.
+// gate's external kill switch (beads pg2-efbb0, pg2-hipf0) is currently
+// active, so `pause`/`resume` never leave an operator believing a toggle
+// took dispatch effect when Orchestrator.gated() will actually ignore it
+// entirely. Only operator-paused and disk-space-low carry a kill switch
+// today (config.OperatorPausedDisablePath / config.DiskSpaceLowDisablePath
+// doc comments) — cicd-down (no kill switch yet, bead pg2-8c7az) and any
+// other gate name return "" unconditionally, matching gateFileInfo's own
+// per-gate scoping in cmd/pg-router/run.go.
 func disabledNoteFor(gate string) string {
-	if gate != gateOperatorPaused {
+	var disablePath string
+	switch gate {
+	case gateOperatorPaused:
+		disablePath = config.OperatorPausedDisablePath()
+	case gateDiskSpaceLow:
+		disablePath = config.DiskSpaceLowDisablePath()
+	default:
 		return ""
 	}
-	disablePath := config.OperatorPausedDisablePath()
 	if _, err := os.Stat(disablePath); err != nil {
 		return ""
 	}
-	return fmt.Sprintf(" — NOTE: operator-paused is currently externally DISABLED (%s exists); this gate has NO dispatch effect until that file is removed", disablePath)
+	return fmt.Sprintf(" — NOTE: %s is currently externally DISABLED (%s exists); this gate has NO dispatch effect until that file is removed", gate, disablePath)
 }
 
 // resumeGate is runResume's testable body: it clears gate's file-backed
@@ -143,10 +149,16 @@ func resumeGate(stdout, stderr io.Writer, gate string, allGates bool) int {
 				cleared = append(cleared, g.name)
 			}
 		}
+		// "--all" clears every gate in one call, so its summary line folds
+		// in disabledNoteFor for EVERY gate that carries a kill switch today
+		// (operator-paused, disk-space-low) rather than just one — mirrors
+		// the per-gate disabledNoteFor(gate) call the single-gate branch
+		// below already makes, just concatenated across all of them.
+		disabledNotes := disabledNoteFor(gateOperatorPaused) + disabledNoteFor(gateDiskSpaceLow)
 		if len(cleared) == 0 {
-			fmt.Fprintf(stdout, "pg-router: already resumed (no gate was set)%s\n", disabledNoteFor(gateOperatorPaused))
+			fmt.Fprintf(stdout, "pg-router: already resumed (no gate was set)%s\n", disabledNotes)
 		} else {
-			fmt.Fprintf(stdout, "pg-router: resumed (cleared %s)%s\n", strings.Join(cleared, ", "), disabledNoteFor(gateOperatorPaused))
+			fmt.Fprintf(stdout, "pg-router: resumed (cleared %s)%s\n", strings.Join(cleared, ", "), disabledNotes)
 		}
 		return exitOK
 	}

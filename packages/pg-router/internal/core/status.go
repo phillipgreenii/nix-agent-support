@@ -131,10 +131,11 @@ type GateInfo struct {
 	// stays the gate's own raw file-backed tripped state; a gate can be
 	// simultaneously Set (its file exists) and Disabled (its effect is
 	// ignored), and the two facts are reported separately rather than
-	// collapsed into one. Only operator_paused carries a live kill switch
-	// today (cmd/pg-router's currentGateFiles/gateFileInfoWithDisable);
-	// cicd_down/disk_space_low report this as always false until their own
-	// sibling beads (pg2-8c7az, pg2-hipf0) wire the identical pattern.
+	// collapsed into one. operator_paused and disk_space_low carry a live
+	// kill switch today (cmd/pg-router's
+	// currentGateFiles/gateFileInfoWithDisable, beads pg2-efbb0/pg2-hipf0);
+	// cicd_down reports this as always false until its own sibling bead
+	// (pg2-8c7az) wires the identical pattern.
 	Disabled bool
 }
 

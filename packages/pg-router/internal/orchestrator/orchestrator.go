@@ -161,14 +161,15 @@ func (o *Orchestrator) commander() query.Commander {
 // run a producer tick — no sessions are created, so nothing needs tearing
 // down either.
 //
-// operator_paused's own effect can be switched off entirely from OUTSIDE
-// pg-router (bead pg2-efbb0): when o.Cfg.OperatorPausedDisable names a path
-// that EXISTS, this method ignores OperatorPaused's file state completely,
-// as if that gate were never configured — see config.Config.
-// OperatorPausedDisable's doc comment for the full design rationale and why
-// this is deliberately a second, separate file rather than a sentinel value
-// inside OperatorPaused's own file. cicd_down and disk_space_low carry no
-// such kill switch yet (tracked separately: beads pg2-8c7az, pg2-hipf0).
+// operator_paused's and disk_space_low's own effects can each be switched
+// off entirely from OUTSIDE pg-router (beads pg2-efbb0, pg2-hipf0): when
+// o.Cfg.OperatorPausedDisable / o.Cfg.DiskSpaceLowDisable names a path that
+// EXISTS, this method ignores that gate's own file state completely, as if
+// it were never configured — see config.Config.OperatorPausedDisable's doc
+// comment for the full design rationale and why this is deliberately a
+// second, separate file rather than a sentinel value inside the gate's own
+// file. cicd_down carries no such kill switch yet (tracked separately:
+// bead pg2-8c7az).
 func (o *Orchestrator) Gated() bool { return o.gated() }
 
 // queryEnv builds the capability bag passed to each role's query.
@@ -406,7 +407,11 @@ func (o *Orchestrator) gated() bool {
 	if o.Cfg.CICDDown != "" && fileExists(o.Cfg.CICDDown) {
 		return true
 	}
-	if o.Cfg.DiskSpaceLow != "" && fileExists(o.Cfg.DiskSpaceLow) {
+	// The bead pg2-hipf0 kill switch: DiskSpaceLowDisable present ⇒
+	// disk_space_low's own file state (however it reads) is ignored for
+	// this check — see Gated()'s doc comment above, mirroring
+	// OperatorPausedDisable's identical treatment above.
+	if o.Cfg.DiskSpaceLow != "" && fileExists(o.Cfg.DiskSpaceLow) && !fileExists(o.Cfg.DiskSpaceLowDisable) {
 		return true
 	}
 	return false

@@ -685,6 +685,50 @@ func TestGated_operatorPausedDisableIgnoresOperatorPaused(t *testing.T) {
 	}
 }
 
+// TestGated_diskSpaceLowDisableIgnoresDiskSpaceLow mirrors
+// TestGated_operatorPausedDisableIgnoresOperatorPaused for disk_space_low's
+// own kill switch (bead pg2-hipf0): when Cfg.DiskSpaceLowDisable names a
+// path that EXISTS, Gated() must ignore DiskSpaceLow's own file state
+// entirely — even while that file is present — but OperatorPaused/CICDDown
+// must still gate normally, and clearing the disable file must restore
+// DiskSpaceLow's own effect.
+func TestGated_diskSpaceLowDisableIgnoresDiskSpaceLow(t *testing.T) {
+	o := newOrch(fastCfg(), testQuerySet(nil, nil))
+	diskSpaceLowFile, _ := writeTemp(t)
+	disableFile, _ := writeTemp(t)
+
+	o.Cfg.DiskSpaceLow = diskSpaceLowFile
+	if !o.Gated() {
+		t.Fatal("DiskSpaceLow sentinel present (no disable configured) must report Gated() == true")
+	}
+
+	o.Cfg.DiskSpaceLowDisable = disableFile
+	if o.Gated() {
+		t.Fatal("DiskSpaceLowDisable present must make Gated() ignore DiskSpaceLow's own file state")
+	}
+
+	// OperatorPaused must still gate normally while disk_space_low's own
+	// kill switch is active — the disable is scoped to disk_space_low only.
+	o.Cfg.OperatorPaused = diskSpaceLowFile
+	if !o.Gated() {
+		t.Fatal("OperatorPaused must still gate even while DiskSpaceLowDisable suppresses disk_space_low")
+	}
+	o.Cfg.OperatorPaused = ""
+
+	// CICDDown likewise.
+	o.Cfg.CICDDown = diskSpaceLowFile
+	if !o.Gated() {
+		t.Fatal("CICDDown must still gate even while DiskSpaceLowDisable suppresses disk_space_low")
+	}
+	o.Cfg.CICDDown = ""
+
+	// Removing the disable file restores disk_space_low's own effect.
+	o.Cfg.DiskSpaceLowDisable = ""
+	if !o.Gated() {
+		t.Fatal("clearing DiskSpaceLowDisable must restore DiskSpaceLow's own gating effect")
+	}
+}
+
 // TestWorkOne_dispatchesToWireClientForRole locks Task 5.4's own core
 // replacement: workOne no longer runs any in-process ccpool/command
 // mechanics at all (that business — Ensure/Send/wait, the budget watchdog,

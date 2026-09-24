@@ -781,6 +781,84 @@ format = "jsonl"
 	}
 }
 
+// TestLoad_diskSpaceLowDisable_defaultUnderLogDir mirrors
+// TestLoad_operatorPausedDisable_defaultUnderLogDir for disk_space_low's own
+// external kill-switch default (bead pg2-hipf0): with no env override, it
+// resolves to <LogDir>/gate-overrides/disk-space-low-disabled.
+func TestLoad_diskSpaceLowDisable_defaultUnderLogDir(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/override/dir/gate-overrides/disk-space-low-disabled"; c.DiskSpaceLowDisable != want {
+		t.Errorf("DiskSpaceLowDisable = %q, want %q", c.DiskSpaceLowDisable, want)
+	}
+}
+
+// TestLoad_diskSpaceLowDisable_envOverride mirrors
+// TestLoad_operatorPausedDisable_envOverride: setting
+// PG_ROUTER_DISK_SPACE_LOW_DISABLE wins over the <LogDir>/gate-overrides/
+// default.
+func TestLoad_diskSpaceLowDisable_envOverride(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_DISK_SPACE_LOW_DISABLE", "/custom/kill-switch")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DiskSpaceLowDisable != "/custom/kill-switch" {
+		t.Errorf("DiskSpaceLowDisable = %q, want /custom/kill-switch", c.DiskSpaceLowDisable)
+	}
+}
+
+// TestDiskSpaceLowDisablePath_agreesWithLoad mirrors
+// TestOperatorPausedDisablePath_agreesWithLoad: DiskSpaceLowDisablePath()
+// (used by gates_cmd.go's pause/resume, which never call Load()) must
+// resolve to the SAME value Load() itself fills Config.DiskSpaceLowDisable
+// with.
+func TestDiskSpaceLowDisablePath_agreesWithLoad(t *testing.T) {
+	absentConfig(t)
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := DiskSpaceLowDisablePath(); got != c.DiskSpaceLowDisable {
+		t.Errorf("DiskSpaceLowDisablePath() = %q, Load's DiskSpaceLowDisable = %q, want equal", got, c.DiskSpaceLowDisable)
+	}
+}
+
+// TestDiskSpaceLowDisablePath_worksWhenLoadWouldFail mirrors
+// TestOperatorPausedDisablePath_worksWhenLoadWouldFail: DiskSpaceLowDisablePath()
+// must resolve even against a config that could never itself Load() (an
+// absent backing command), since gates_cmd.go's pause/resume must succeed
+// with no core running and no valid configuration.
+func TestDiskSpaceLowDisablePath_worksWhenLoadWouldFail(t *testing.T) {
+	writeCfg(t, `
+[[role]]
+name = "r"
+binds = ["e"]
+
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["absent-lister"]
+format = "jsonl"
+`)
+	if _, err := Load(); err == nil {
+		t.Fatal("premise: this config must fail Load() (absent backing command)")
+	}
+	t.Setenv("PG_ROUTER_LOG_DIR", "/override/dir")
+	want := "/override/dir/gate-overrides/disk-space-low-disabled"
+	if got := DiskSpaceLowDisablePath(); got != want {
+		t.Errorf("DiskSpaceLowDisablePath() = %q, want %q (must resolve even though Load() fails)", got, want)
+	}
+}
+
 // PG_ROUTER_MAX_WORKER and the other role env vars are dropped (spec C): setting
 // them must have NO effect. Per-role capacity is no longer a declarable concept
 // at all (bead pg2-f3mcb.2, INV-CONC-1) — there is no `cap` left to be a no-op

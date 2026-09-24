@@ -137,15 +137,31 @@ type Config struct {
 	// pause/resume CLI owns), so an operator listing one directory never
 	// mistakes a kill-switch file for a tripped gate.
 	//
-	// Sibling beads pg2-8c7az (cicd_down) and pg2-hipf0 (disk_space_low)
-	// should mirror this EXACT pattern for their own gates — a
-	// CICDDownDisable / DiskSpaceLowDisable field, a
-	// PG_ROUTER_CICD_DOWN_DISABLE / PG_ROUTER_DISK_SPACE_LOW_DISABLE env var,
-	// and a <LogDir>/gate-overrides/{cicd-down,disk-space-low}-disabled
-	// default — rather than re-deciding the mechanism from scratch.
+	// Sibling bead pg2-8c7az (cicd_down) still needs to mirror this EXACT
+	// pattern for its own gate — a CICDDownDisable field, a
+	// PG_ROUTER_CICD_DOWN_DISABLE env var, and a
+	// <LogDir>/gate-overrides/cicd-down-disabled default — rather than
+	// re-deciding the mechanism from scratch. disk_space_low's own mirror
+	// (bead pg2-hipf0) is DiskSpaceLowDisable below.
 	OperatorPausedDisable string
-	Effort                string
-	Model                 string
+	// DiskSpaceLowDisable is disk_space_low's own counterpart to
+	// OperatorPausedDisable above (bead pg2-hipf0, mirroring pg2-efbb0's
+	// EXACT mechanism per that field's own doc comment — the design
+	// rationale, the deliberately-separate-file reasoning, and the
+	// env-only/no-[pool]-TOML-key choice all apply here unchanged, so they
+	// are not restated). It is disk_space_low's external kill-switch path:
+	// when it EXISTS, Orchestrator.gated() ignores DiskSpaceLow's own file
+	// state entirely, as if that gate were never configured.
+	//
+	// From PG_ROUTER_DISK_SPACE_LOW_DISABLE (env-only — same
+	// deliberately-no-[pool]-TOML-key posture as OperatorPausedDisable).
+	// Empty resolves, in Load() only (never GatePaths()), to
+	// <LogDir>/gate-overrides/disk-space-low-disabled — the SAME
+	// gate-overrides/ directory OperatorPausedDisable's default uses,
+	// never <LogDir>/gates/.
+	DiskSpaceLowDisable string
+	Effort              string
+	Model               string
 	// PermissionMode is an OPAQUE, un-validated string on this side of the wire
 	// boundary (docket pg2-oju6w Task 5.7): pg-router forwards it verbatim to
 	// the new module's own dispatch config and displays it in `config --show`,
@@ -404,6 +420,7 @@ func Default() Config {
 		CICDDown:              "",
 		DiskSpaceLow:          "",
 		OperatorPausedDisable: "",
+		DiskSpaceLowDisable:   "",
 		Effort:                "max",
 		Model:                 "",
 		Autonomous:            true,      // workers are human-less; AskUserQuestion is structurally blocked via ccpool --autonomous
@@ -451,6 +468,10 @@ func Load() (Config, error) {
 	// OperatorPausedDisable's own env overlay (bead pg2-efbb0) — see its doc
 	// comment on the Config struct for the full external-kill-switch design.
 	c.OperatorPausedDisable = envStr("PG_ROUTER_OPERATOR_PAUSED_DISABLE", c.OperatorPausedDisable)
+	// DiskSpaceLowDisable's own env overlay (bead pg2-hipf0) — mirrors
+	// OperatorPausedDisable's overlay above; see its doc comment on the
+	// Config struct for the full external-kill-switch design.
+	c.DiskSpaceLowDisable = envStr("PG_ROUTER_DISK_SPACE_LOW_DISABLE", c.DiskSpaceLowDisable)
 	c.Effort = envStr("PG_ROUTER_EFFORT", c.Effort)
 	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
 	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
@@ -530,6 +551,12 @@ func Load() (Config, error) {
 	// from the overlay above.
 	if c.OperatorPausedDisable == "" {
 		c.OperatorPausedDisable = filepath.Join(c.LogDir, "gate-overrides", "operator-paused-disabled")
+	}
+	// DiskSpaceLowDisable's own default fill (bead pg2-hipf0), mirroring
+	// OperatorPausedDisable's fill immediately above — same still-empty-only
+	// rule, same gate-overrides/ sibling directory, no [pool] TOML overlay.
+	if c.DiskSpaceLowDisable == "" {
+		c.DiskSpaceLowDisable = filepath.Join(c.LogDir, "gate-overrides", "disk-space-low-disabled")
 	}
 	// The built-in feedback/worker/review role+query fallback (roles.
 	// BuiltinRoleSet/BuiltinQuerySet) is DELETED here (docket pg2-oju6w's
@@ -956,6 +983,18 @@ func OperatorPausedDisablePath() string {
 		return v
 	}
 	return filepath.Join(LogDir(), "gate-overrides", "operator-paused-disabled")
+}
+
+// DiskSpaceLowDisablePath is disk_space_low's own counterpart to
+// OperatorPausedDisablePath above (bead pg2-hipf0 — see
+// Config.DiskSpaceLowDisable's doc comment for the full design); same
+// reason for existing (cmd/pg-router/gates_cmd.go's pause/resume never call
+// Load()) and same env-or-LogDir()-based-default precedence.
+func DiskSpaceLowDisablePath() string {
+	if v := envStr("PG_ROUTER_DISK_SPACE_LOW_DISABLE", ""); v != "" {
+		return v
+	}
+	return filepath.Join(LogDir(), "gate-overrides", "disk-space-low-disabled")
 }
 
 func stateHome() string {

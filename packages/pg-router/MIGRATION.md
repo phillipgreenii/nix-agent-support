@@ -250,7 +250,7 @@ there is no time-based or startup expiry. Keep it that way: `<LogDir>` is also w
 sweeping for gate files alone would make `<LogDir>`'s cleanup story inconsistent across the
 three, for no invariant that requires it.
 
-## Operator: disabling a gate's effect entirely, from outside pg-router (bead `pg2-efbb0`)
+## Operator: disabling a gate's effect entirely, from outside pg-router (beads `pg2-efbb0`, `pg2-hipf0`)
 
 Every named gate (`INV-LIFE-2`) had exactly one lever before this change: `pg-router
 pause`/`pg-router resume` (or the TUI's `P`/`R` keys), which set or clear the gate's own
@@ -277,17 +277,25 @@ plumbing for no operator-visible gain over reusing the exact `fileExists()` chec
 themselves already use. Reconsider only if a later need requires this SAME toggle centrally
 managed across many independent deployments at once.
 
+**`disk_space_low` now carries the IDENTICAL kill switch (bead `pg2-hipf0`).**
+`Config.DiskSpaceLowDisable` names a path (`PG_ROUTER_DISK_SPACE_LOW_DISABLE`, defaulting to
+`<LogDir>/gate-overrides/disk-space-low-disabled`) that, when it **exists**, makes
+`Orchestrator.Gated()` ignore `disk_space_low`'s own file state entirely — mechanically the same
+mechanism as `operator_paused`'s above (same `fileExists()` reuse, same deliberately-separate-file
+reasoning, same no-`pg-router`-subcommand-manages-it posture, same rejection of an env var/GrowthBook
+for the same reasons), just wired onto a second gate rather than re-decided from scratch.
+
 **Reporting.** `pg-router status` / `--json` and the TUI's Gates modal (`g`) show the gate's raw
 `set`/`mtime`/`owner` fields UNCHANGED, plus a new `disabled` field/marker that appears only while
-the kill-switch file is present. `pg-router pause`/`pg-router resume` (for `operator-paused`
-specifically) append a NOTE to their own output when the kill switch is active, so a `pause` that
-silently has no dispatch effect is never reported as if it worked normally.
+the kill-switch file is present — for **both** `operator-paused` and `disk-space-low` now.
+`pg-router pause`/`pg-router resume` for either of those two gate names append a NOTE to their own
+output when that gate's kill switch is active, so a `pause` that silently has no dispatch effect is
+never reported as if it worked normally.
 
-**What this means for cicd_down / disk_space_low.** Neither carries a kill switch yet — beads
-`pg2-8c7az` and `pg2-hipf0` track adding the IDENTICAL pattern (a `CICDDownDisable` /
-`DiskSpaceLowDisable` field, a `PG_ROUTER_CICD_DOWN_DISABLE` / `PG_ROUTER_DISK_SPACE_LOW_DISABLE`
-env var, and a `<LogDir>/gate-overrides/{cicd-down,disk-space-low}-disabled` default) for their own
-gates, rather than re-deciding the mechanism.
+**What this means for cicd_down.** It does not carry a kill switch yet — bead `pg2-8c7az` tracks
+adding the IDENTICAL pattern (a `CICDDownDisable` field, a `PG_ROUTER_CICD_DOWN_DISABLE` env var,
+and a `<LogDir>/gate-overrides/cicd-down-disabled` default) for its own gate, rather than
+re-deciding the mechanism.
 
 ## Behavior: a partial produce during `run-until-idle` is a generic failure (Task 1.1)
 

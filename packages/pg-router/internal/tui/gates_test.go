@@ -335,6 +335,41 @@ func TestRenderGatesModal_ExternallyDisabledMarkerWhenNotSet(t *testing.T) {
 	}
 }
 
+// TestRenderGatesModal_ExternallyDisabledMarker_diskSpaceLow mirrors
+// TestRenderGatesModal_ExternallyDisabledMarker for disk-space-low's own
+// kill switch (bead pg2-hipf0), through the SAME production entry point
+// (m.renderGatesModal(), which wires the fixed "disk-space-low"/
+// core.GateDiskSpaceLow row) rather than calling gateModalRow directly —
+// this is what actually proves the wire-name wiring, not just the generic
+// gateModalRow mechanism gateModalRow's own doc comment already covers.
+func TestRenderGatesModal_ExternallyDisabledMarker_diskSpaceLow(t *testing.T) {
+	m := newTestModel(nil)
+	m.width, m.height = 80, 24
+	m.reply = StatusReply{Gates: []Gate{
+		{Name: core.GateDiskSpaceLow, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Disabled: true},
+		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
+	}}
+	m.activeModal = ModalGates
+
+	got := m.renderGatesModal()
+	diskLine := got[strings.Index(got, "disk-space-low"):]
+	if idx := strings.Index(diskLine, "\n"); idx != -1 {
+		diskLine = diskLine[:idx]
+	}
+	if !strings.Contains(diskLine, "SET") || !strings.Contains(diskLine, "[DISABLED]") {
+		t.Errorf("disabled disk-space-low must still show its raw SET state AND a [DISABLED] marker; got:\n%s", diskLine)
+	}
+	// operator-paused carries its OWN, separate kill switch — its own row
+	// must show no marker while only disk-space-low is disabled.
+	operatorLine := got[strings.Index(got, "operator-paused"):]
+	if idx := strings.Index(operatorLine, "\n"); idx != -1 {
+		operatorLine = operatorLine[:idx]
+	}
+	if strings.Contains(operatorLine, "[DISABLED]") {
+		t.Errorf("operator-paused row must not carry the disabled marker while only disk-space-low is disabled; got:\n%s", operatorLine)
+	}
+}
+
 // TestOperatorGateFlashText_NotesExternalDisable locks the flash-text
 // enhancement (bead pg2-efbb0): toggling operator_paused while its kill
 // switch is active must append a note so the operator is not misled into

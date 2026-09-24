@@ -47,11 +47,13 @@ func isolateGateEnv(t *testing.T) string {
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "")
 	t.Setenv("PG_ROUTER_CICD_DOWN", "")
 	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "")
-	// bead pg2-efbb0's external kill switch: cleared too, so a stray
-	// ambient PG_ROUTER_OPERATOR_PAUSED_DISABLE on the host can never make
+	// beads pg2-efbb0/pg2-hipf0's external kill switches: cleared too, so a
+	// stray ambient PG_ROUTER_OPERATOR_PAUSED_DISABLE/
+	// PG_ROUTER_DISK_SPACE_LOW_DISABLE on the host can never make
 	// disabledNoteFor's output non-deterministic in a test that does not
 	// exercise it explicitly.
 	t.Setenv("PG_ROUTER_OPERATOR_PAUSED_DISABLE", "")
+	t.Setenv("PG_ROUTER_DISK_SPACE_LOW_DISABLE", "")
 	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
 	return logDir
 }
@@ -75,9 +77,8 @@ func TestPauseGate_createsFileExitsZero(t *testing.T) {
 // output for operator-paused MUST note when the external kill switch
 // (config.OperatorPausedDisablePath()) is currently active, so an operator
 // is never left believing the toggle changed dispatch behavior when
-// Orchestrator.Gated() will actually ignore it. A gate other than
-// operator-paused MUST show no such note, since neither cicd-down nor
-// disk-space-low carries a kill switch yet.
+// Orchestrator.Gated() will actually ignore it. cicd-down MUST show no such
+// note, since it carries no kill switch yet (bead pg2-8c7az).
 func TestPauseGate_reportsExternalDisable(t *testing.T) {
 	logDir := isolateGateEnv(t)
 	disablePath := filepath.Join(logDir, "gate-overrides", "operator-paused-disabled")
@@ -122,6 +123,64 @@ func TestPauseGate_noDisableNoteWhenNotDisabled(t *testing.T) {
 	isolateGateEnv(t)
 	var stdout, stderr bytes.Buffer
 	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "externally DISABLED") {
+		t.Errorf("pause output must not mention external disable when the kill switch is absent; got %q", stdout.String())
+	}
+}
+
+// TestPauseGate_reportsExternalDisable_diskSpaceLow mirrors
+// TestPauseGate_reportsExternalDisable for disk-space-low's own kill switch
+// (bead pg2-hipf0): pause/resume output for disk-space-low MUST note when
+// its external kill switch (config.DiskSpaceLowDisablePath()) is currently
+// active, and operator-paused's own pause output MUST be unaffected by
+// disk-space-low's disable file.
+func TestPauseGate_reportsExternalDisable_diskSpaceLow(t *testing.T) {
+	logDir := isolateGateEnv(t)
+	disablePath := filepath.Join(logDir, "gate-overrides", "disk-space-low-disabled")
+	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "externally DISABLED") {
+		t.Errorf("pause output for disk-space-low while the kill switch is active must note it; got %q", stdout.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	if code := resumeGate(&stdout2, &stderr2, gateDiskSpaceLow, false); code != exitOK {
+		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr2.String())
+	}
+	if !strings.Contains(stdout2.String(), "externally DISABLED") {
+		t.Errorf("resume output for disk-space-low while the kill switch is active must note it; got %q", stdout2.String())
+	}
+
+	// operator-paused carries its OWN, separate kill switch — its own pause
+	// output must be unaffected by disk-space-low's disable file.
+	var stdout3, stderr3 bytes.Buffer
+	if code := pauseGate(&stdout3, &stderr3, gateOperatorPaused); code != exitOK {
+		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr3.String())
+	}
+	if strings.Contains(stdout3.String(), "externally DISABLED") {
+		t.Errorf("pause output for operator-paused must not mention disk-space-low's own kill switch; got %q", stdout3.String())
+	}
+}
+
+// TestPauseGate_noDisableNoteWhenNotDisabled_diskSpaceLow is the negative
+// control for TestPauseGate_reportsExternalDisable_diskSpaceLow: with no
+// kill-switch file present, disk-space-low's pause output must carry no
+// disable note at all.
+func TestPauseGate_noDisableNoteWhenNotDisabled_diskSpaceLow(t *testing.T) {
+	isolateGateEnv(t)
+	var stdout, stderr bytes.Buffer
+	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
 		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
 	if strings.Contains(stdout.String(), "externally DISABLED") {
@@ -270,6 +329,34 @@ func TestResumeGate_allClearsEveryGate(t *testing.T) {
 	}
 	if got := buf.String(); !strings.Contains(got, gateDiskSpaceLow) {
 		t.Errorf("resume --all output must name disk-space-low among the cleared gates; got %q", got)
+	}
+}
+
+// TestResumeGate_allReportsExternalDisableForDiskSpaceLow locks the "--all"
+// summary line's own disabledNoteFor fold (gates_cmd.go's resumeGate): with
+// disk-space-low's kill switch active, `resume --all`'s summary MUST note
+// it — not just operator-paused's, the only gate the pre-pg2-hipf0 summary
+// checked.
+func TestResumeGate_allReportsExternalDisableForDiskSpaceLow(t *testing.T) {
+	logDir := isolateGateEnv(t)
+	disablePath := filepath.Join(logDir, "gate-overrides", "disk-space-low-disabled")
+	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf, stderr bytes.Buffer
+	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
+		t.Fatalf("pause disk-space-low exit = %d", code)
+	}
+	buf.Reset()
+	if code := resumeGate(&buf, &stderr, "", true); code != exitOK {
+		t.Fatalf("resume --all exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if got := buf.String(); !strings.Contains(got, "externally DISABLED") {
+		t.Errorf("resume --all summary must note disk-space-low's active kill switch; got %q", got)
 	}
 }
 
