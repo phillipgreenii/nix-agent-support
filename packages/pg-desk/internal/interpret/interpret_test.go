@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/verdict"
 )
 
 // --- ownership: ported verbatim from packages/pg-pr/internal/ownership/ownership_test.go ---
@@ -338,6 +339,20 @@ func TestDetectLanguages(t *testing.T) {
 	}
 }
 
+// TestComputeEnrichment_TitleAndURL pins that Title/URL are copied verbatim
+// from the PR — the two display facts a dashboard row needs to be
+// human-readable and link back to the real PR (pg2-2j5ac).
+func TestComputeEnrichment_TitleAndURL(t *testing.T) {
+	pr := prShow{Title: "fix(store): handle nil", URL: "https://example.invalid/o/r/pull/1"}
+	got := computeEnrichment(pr, nil, nil)
+	if got.Title != pr.Title {
+		t.Errorf("Title = %q; want %q", got.Title, pr.Title)
+	}
+	if got.URL != pr.URL {
+		t.Errorf("URL = %q; want %q", got.URL, pr.URL)
+	}
+}
+
 // --- category: new, config-vocabulary-driven ---
 
 func TestClassifyCategory(t *testing.T) {
@@ -383,7 +398,7 @@ func TestComputeApprovals(t *testing.T) {
 		{Author: "bob", State: "APPROVED"},
 		{Author: "policy-bot", State: "CHANGES_REQUESTED"},
 	}}
-	appr := computeApprovals(pr, []string{"policy-bot"})
+	appr := computeApprovals(pr, []string{"policy-bot"}, nil)
 	if appr.HumanApprovers != 2 || !appr.HumanApproved {
 		t.Fatalf("got HumanApprovers=%d HumanApproved=%v; want 2/true", appr.HumanApprovers, appr.HumanApproved)
 	}
@@ -392,14 +407,88 @@ func TestComputeApprovals(t *testing.T) {
 	}
 
 	prApproved := prShow{Reviews: []prReview{{Author: "policy-bot", State: "APPROVED"}}}
-	if got := computeApprovals(prApproved, []string{"policy-bot"}).BotVerdict; got != BotVerdictApproved {
+	if got := computeApprovals(prApproved, []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictApproved {
 		t.Fatalf("got BotVerdict=%q; want approved", got)
 	}
 
 	prNoDecision := prShow{Reviews: []prReview{{Author: "policy-bot", State: "COMMENTED"}}}
-	if got := computeApprovals(prNoDecision, []string{"policy-bot"}).BotVerdict; got != BotVerdictNoDecision {
+	if got := computeApprovals(prNoDecision, []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictNoDecision {
 		t.Fatalf("got BotVerdict=%q; want no-decision", got)
 	}
+}
+
+// TestComputeApprovals_CommentVerdictGrammar covers the comment-verdict-
+// grammar signal (verdictClassifier): a bot whose disapproval never
+// surfaces as a review State (it posts a non-CHANGES_REQUESTED review,
+// e.g. COMMENTED, alongside a separate marker-carrying issue comment) —
+// observed for a real bot in the wild (pg2-2j5ac), reproduced here with a
+// synthetic marker/pattern per this file's own "no real vendor identifiers"
+// convention (see packages/pg-pr/internal/verdict/verdict_test.go's
+// identical note).
+func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
+	classifier, err := verdict.New([]verdict.Generation{
+		{
+			ID:                "v1",
+			BodyMarker:        "X-TEST-REVIEW-BOT-MARKER",
+			FindingsPatterns:  []string{`(?im)^DECISION: CLEAN$`, `(?im)^DECISION: ISSUES-FOUND$`},
+			AuthorityPatterns: []string{`(?im)^AUTHORITY: AUTO-APPROVED$`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("verdict.New: %v", err)
+	}
+
+	t.Run("comment reports issues found, review is only COMMENTED", func(t *testing.T) {
+		pr := prShow{
+			Reviews: []prReview{{Author: "review-bot", State: "COMMENTED"}},
+			Comments: []prComment{
+				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: ISSUES-FOUND"},
+			},
+		}
+		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		if got.BotVerdict != BotVerdictDisapproved {
+			t.Fatalf("got BotVerdict=%q; want disapproved (comment signal must not be masked by a merely-COMMENTED review)", got.BotVerdict)
+		}
+	})
+
+	t.Run("comment reports clean+auto-approved, review is only COMMENTED", func(t *testing.T) {
+		pr := prShow{
+			Reviews: []prReview{{Author: "review-bot", State: "COMMENTED"}},
+			Comments: []prComment{
+				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: CLEAN\nAUTHORITY: AUTO-APPROVED"},
+			},
+		}
+		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		if got.BotVerdict != BotVerdictApproved {
+			t.Fatalf("got BotVerdict=%q; want approved", got.BotVerdict)
+		}
+	})
+
+	t.Run("review-state disapproval wins even when the comment signal reads approved", func(t *testing.T) {
+		pr := prShow{
+			Reviews: []prReview{{Author: "review-bot", State: "CHANGES_REQUESTED"}},
+			Comments: []prComment{
+				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: CLEAN\nAUTHORITY: AUTO-APPROVED"},
+			},
+		}
+		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		if got.BotVerdict != BotVerdictDisapproved {
+			t.Fatalf("got BotVerdict=%q; want disapproved (disapproved must win across signals, never be silently overridden by an approval elsewhere)", got.BotVerdict)
+		}
+	})
+
+	t.Run("nil classifier is the pre-existing Reviews-only behavior", func(t *testing.T) {
+		pr := prShow{
+			Reviews: []prReview{{Author: "review-bot", State: "COMMENTED"}},
+			Comments: []prComment{
+				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: ISSUES-FOUND"},
+			},
+		}
+		got := computeApprovals(pr, []string{"review-bot"}, nil)
+		if got.BotVerdict != BotVerdictNoDecision {
+			t.Fatalf("got BotVerdict=%q; want no-decision (nil classifier must not read comments at all)", got.BotVerdict)
+		}
+	})
 }
 
 // --- waiting-on-me: ported from pkg/beads.AllNonClosedHumanLabeled's own semantics ---

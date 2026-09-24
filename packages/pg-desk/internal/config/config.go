@@ -133,9 +133,11 @@ type AgentConfig struct {
 }
 
 // VerdictGeneration describes one generation of the review-comment verdict
-// grammar (provenance: internal/sync/approver.go). Shape mirrors
-// packages/pg-pr/internal/config's field of the same name; unconsumed by
-// this packet's own code.
+// grammar. Shape mirrors packages/pg-pr/internal/config's field of the same
+// name; consumed by internal/interpret's computeApprovals (via
+// buildVerdictClassifier, converting to []verdict.Generation and compiling
+// with internal/verdict.New — that package, ported from
+// packages/pg-pr/internal/verdict, is the real grammar parser).
 type VerdictGeneration struct {
 	ID                string   `yaml:"id" json:"id"`
 	BodyMarker        string   `yaml:"body_marker" json:"body_marker"`

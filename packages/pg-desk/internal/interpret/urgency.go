@@ -180,6 +180,8 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 		Kind:      classifyKind(pr.Title, pr.Branch, msgs),
 		Languages: detectLanguages(paths),
 		Size:      bucketSize(pr.Additions + pr.Deletions),
+		Title:     pr.Title,
+		URL:       pr.URL,
 	}
 }
 

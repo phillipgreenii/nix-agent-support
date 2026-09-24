@@ -53,16 +53,21 @@
 //     D15 predicate as it can see it (own PR, draft, checks green, no bot
 //     disapproval, no conflict) and leaves the WIP gate to whatever joins
 //     annotation at read time.
-//   - No verdict-generation body parsing: internal/verdict.go (comment-body
-//     verdict-marker grammar, config.VerdictGenerations' consumer in pg-pr)
-//     is not a pinned porting source for this packet. Bot verdict here reads
-//     GitHub's own Review.State directly for approver_allowlist logins
-//     (APPROVED/CHANGES_REQUESTED), a strictly more reliable signal than
-//     regex-classifying a comment body, when the reviewer acted through a
-//     real GitHub review. verdict_generations remains a typed Config field
-//     (as pinned) but is not consumed by this packet's own code — mirroring
-//     config.go's own established "present but unused by this phase"
-//     convention for Jira/TicketPatterns/AgentTrackerBackend/Sync.Mode.
+//   - Verdict-generation body parsing (superseded, pg2-2j5ac): this packet
+//     originally read GitHub's Review.State directly for approver_allowlist
+//     logins (APPROVED/CHANGES_REQUESTED) ONLY, treating that as a strictly
+//     more reliable signal than regex-classifying a comment body — true when
+//     a reviewer's verdict is fully carried by a matching Review State, but
+//     not every real bot's is: one observed in the wild disapproves via a
+//     COMMENTED (not CHANGES_REQUESTED) review plus a separate marker-
+//     carrying issue comment, using a real Review State (APPROVED) only when
+//     clean. approvals.go's computeApprovals now ALSO runs
+//     internal/verdict's comment-body verdict-marker grammar (ported from
+//     packages/pg-pr/internal/verdict, config.VerdictGenerations' consumer)
+//     over pr.allComments(), merging its Authority reading with the
+//     Review-state signal — disapproved wins across BOTH signals, never
+//     silently overridden by an approval from the other. See approvals.go's
+//     own doc comment for the merge rule.
 //   - Category and feedback-disposition RULE SETS ("df-categorize",
 //     "df-feedback") have no Go source anywhere in this repo to port from
 //     (they are today's LLM/ccpool-prompt-driven classifiers in the private
@@ -119,14 +124,26 @@ const (
 	PanelNone                    = ""
 )
 
-// Enrichment is the base (LLM-free) PR enrichment: kind, languages, size.
-// Urgency is scored/reported separately (Urgency below) even though pg-pr's
-// own enrich.Result bundles all four — the store's interpretation table (and
-// this Contract) keeps "enrichment" and "urgency" as two distinct columns.
+// Enrichment is the base (LLM-free) PR enrichment: kind, languages, size,
+// plus the two display facts (Title, URL) a human-readable dashboard row
+// needs to be usable at all. Urgency is scored/reported separately
+// (Urgency below) even though pg-pr's own enrich.Result bundles all four —
+// the store's interpretation table (and this Contract) keeps "enrichment"
+// and "urgency" as two distinct columns.
+//
+// Title/URL are copied verbatim from pr.Title/pr.URL (the pg-connector `pr
+// show` read this package already decodes for every other field) rather
+// than re-fetched or re-derived: httpapi/server.go's buildRow flattens
+// every Enrichment key straight onto the dashboard payload's row object, so
+// this is the one place those two fields need to be captured to reach it —
+// they were decoded into prShow already but, before this, went no further
+// (pg2-2j5ac, "no human-readable columns" gap).
 type Enrichment struct {
 	Kind      string   `json:"kind"`
 	Languages []string `json:"languages,omitempty"`
 	Size      string   `json:"size"`
+	Title     string   `json:"title"`
+	URL       string   `json:"url"`
 }
 
 // Urgency is the base-urgency scoring result (labels, keywords, checks
@@ -233,6 +250,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	var urgencyCfg *config.UrgencyConfig
 	var jiraCfg *config.JiraConfig
 	var checkInterpreters []config.CheckInterpreterConfig
+	var verdictGenerations []config.VerdictGeneration
 	if cfg != nil {
 		selfLogin = cfg.SelfLogin
 		teamMembers = cfg.TeamMembers
@@ -242,6 +260,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 		urgencyCfg = cfg.Urgency
 		jiraCfg = cfg.Jira
 		checkInterpreters = cfg.CheckInterpreters
+		verdictGenerations = cfg.VerdictGenerations
 	}
 
 	commitAuthors := make([]string, 0, len(commits))
@@ -263,7 +282,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	urgency := scoreUrgencyWithHealth(pr, commits, ci, urgencyCfg, jiraIssues, jiraCfg)
 	category := classifyCategory(pr, categoryVocab)
 	dispositions := computeDispositions(pr)
-	approvals := computeApprovals(pr, approverAllowlist)
+	approvals := computeApprovals(pr, approverAllowlist, buildVerdictClassifier(verdictGenerations))
 	approvals.WaitingOnMe = computeWaitingOnMe(facts.Deps)
 	matchReasons := computeMatchReasons(pr, teamMembers, watchLabels, selfLogin)
 	panel := classifyPanel(ownership, pr, ci, approvals, matchReasons)
