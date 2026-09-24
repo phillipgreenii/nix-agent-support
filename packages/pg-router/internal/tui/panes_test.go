@@ -365,7 +365,7 @@ func TestRenderListenersPane_OverflowingRoleKeepsBoxWellFormed(t *testing.T) {
 		{Role: "a-very-long-role-name-that-overflows-its-column", Enabled: true, Delivered: 3, Declined: 4},
 	}
 
-	got := renderListenersPane(listeners, render.TierTiny, 40, theme, "(none)", "Listeners", nil)
+	got := renderListenersPane(listeners, render.TierTiny, 40, theme, "(none)", "Listeners", nil, 0)
 	lines := strings.Split(got, "\n")
 
 	// top border + header + 2 data rows + bottom border.
@@ -396,7 +396,7 @@ func TestRenderListenersPane_WidensColumnsWhenRoomAllows(t *testing.T) {
 
 	for _, tier := range []int{render.TierTiny, render.TierNarrow, render.TierWide} {
 		t.Run("ample width shows the full role", func(t *testing.T) {
-			got := renderListenersPane(listeners, tier, 200, theme, "(none)", "Listeners", nil)
+			got := renderListenersPane(listeners, tier, 200, theme, "(none)", "Listeners", nil, 0)
 			if !strings.Contains(got, longRole) {
 				t.Errorf("tier=%d width=200: expected the full role name un-truncated; got:\n%s", tier, got)
 			}
@@ -405,7 +405,7 @@ func TestRenderListenersPane_WidensColumnsWhenRoomAllows(t *testing.T) {
 			}
 		})
 		t.Run("narrow width still truncates (pg2-8iy1m preserved)", func(t *testing.T) {
-			got := renderListenersPane(listeners, tier, 30, theme, "(none)", "Listeners", nil)
+			got := renderListenersPane(listeners, tier, 30, theme, "(none)", "Listeners", nil, 0)
 			if strings.Contains(got, longRole) {
 				t.Errorf("tier=%d width=30: expected the role to be truncated, not shown in full; got:\n%s", tier, got)
 			}
@@ -523,7 +523,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
 			{Role: "triager", Enabled: true, Binds: []string{"bead.new"}},
 		}
-		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"})
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"}, 0)
 		lines := strings.Split(got, "\n")
 
 		var reviewerLine, triagerLine string
@@ -548,7 +548,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 			{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}},
 			{Role: "triager", Enabled: true, Binds: []string{"pr.new"}},
 		}
-		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"})
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", []string{"pr.new"}, 0)
 		if strings.Contains(got, "not seen yet this run") {
 			t.Errorf("ambiguous (2-row) unmatched type must not render an inline marker anywhere; got:\n%s", got)
 		}
@@ -556,7 +556,7 @@ func TestRenderListenersPane_InlineUnmatchedMarker(t *testing.T) {
 
 	t.Run("nil unmatchedBindings renders no marker", func(t *testing.T) {
 		listeners := []Listener{{Role: "reviewer", Enabled: true, Binds: []string{"pr.new"}}}
-		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", nil)
+		got := renderListenersPane(listeners, render.TierWide, 0, theme, "(none)", "Listeners", nil, 0)
 		if strings.Contains(got, "not seen yet this run") {
 			t.Errorf("nil unmatchedBindings must render no marker; got:\n%s", got)
 		}
@@ -616,7 +616,7 @@ func TestRenderListenersPane_MarkerRowStaysWithinWidthBudget(t *testing.T) {
 	}
 
 	const width = 45
-	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", []string{"pr.new"})
+	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", []string{"pr.new"}, 0)
 	lines := listenersBoxLines(t, got, width)
 
 	// The right border ("│") must survive on every content line -- every
@@ -649,7 +649,7 @@ func TestRenderListenersPane_MarkerRowStaysWithinWidthBudget(t *testing.T) {
 	// renders in full and the box is correspondingly wider -- proving
 	// width=45 above was genuinely narrower than this row's natural width,
 	// not just a case where there was never anything to clip.
-	unbounded := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", []string{"pr.new"})
+	unbounded := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", []string{"pr.new"}, 0)
 	if !strings.Contains(unbounded, "not seen yet this run") {
 		t.Fatalf("unbounded sibling should render the marker's full text; got:\n%s", unbounded)
 	}
@@ -673,7 +673,7 @@ func TestRenderListenersPane_NoMarkerRowsUnaffectedAtSameConstrainedWidth(t *tes
 	}
 
 	const width = 45
-	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", nil)
+	got := renderListenersPane(listeners, render.TierTiny, width, theme, "(none)", "Listeners", nil, 0)
 	lines := listenersBoxLines(t, got, width)
 
 	for i, l := range lines[1 : len(lines)-1] {
@@ -734,7 +734,7 @@ func TestListener_DeclinedBucketed_SumInvariantHoldsEvenOnCollidingOverrideText(
 // self-report, must render clean placeholders, never a blank cell.
 func TestRenderListenersPane_NeverDispatchedRoleRendersCleanZeroState(t *testing.T) {
 	listeners := []Listener{{Role: "idle-role", Enabled: true}}
-	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil, 0)
 	if !strings.Contains(out, "0 / 0 / 0") {
 		t.Fatalf("expected a zero decline breakdown, got:\n%s", out)
 	}
@@ -751,7 +751,7 @@ func TestRenderListenersPane_NeverDispatchedRoleRendersCleanZeroState(t *testing
 // handler-failure count (this task's HandlerFailures field).
 func TestRenderListenersPane_WideTierIncludesFailColumn(t *testing.T) {
 	listeners := []Listener{{Role: "df-feedback", HandlerFailures: 3}}
-	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil, 0)
 	if !strings.Contains(out, "FAIL") || !strings.Contains(out, "3") {
 		t.Fatalf("rendered pane missing FAIL column/value:\n%s", out)
 	}
@@ -762,7 +762,7 @@ func TestRenderListenersPane_WideTierIncludesFailColumn(t *testing.T) {
 // role must render "0" in FAIL, not a blank cell.
 func TestRenderListenersPane_NeverFailedRoleShowsCleanZero(t *testing.T) {
 	listeners := []Listener{{Role: "idle-role", Enabled: true}}
-	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil)
+	out := renderListenersPane(listeners, render.TierWide, 0, render.Theme{}, "", "Listeners", nil, 0)
 	if !strings.Contains(out, "0") {
 		t.Fatalf("expected a clean 0 in FAIL for a never-failed role, got:\n%s", out)
 	}
@@ -875,7 +875,7 @@ func TestView_WidensPaneContentAcrossAllThreeTiers(t *testing.T) {
 // renders with a (heartbeat) label and no depth bar [design: Task 5, Step 1;
 // Global Constraints].
 func TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconcile", Depth: 70}}, 0, "", "Queues")
+	out := renderQueuesPane([]Queue{{Type: "pr.reconcile", Depth: 70}}, 0, "", "Queues", 0)
 	if strings.ContainsAny(out, "█░") {
 		t.Fatalf("heartbeat queue row rendered a depth bar:\n%s", out)
 	}
@@ -888,7 +888,7 @@ func TestRenderQueuesPane_HeartbeatTypeHasNoBarButHasLabel(t *testing.T) {
 // acceptance bar: any other queue type renders a depthBar and no (heartbeat)
 // label [design: Task 5, Step 1].
 func TestRenderQueuesPane_IncrementalTypeHasBarNoLabel(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.changed", Depth: 3}}, 0, "", "Queues")
+	out := renderQueuesPane([]Queue{{Type: "pr.changed", Depth: 3}}, 0, "", "Queues", 0)
 	if !strings.Contains(out, "█") {
 		t.Fatalf("incremental queue row missing a depth bar:\n%s", out)
 	}
@@ -903,7 +903,7 @@ func TestRenderQueuesPane_IncrementalTypeHasBarNoLabel(t *testing.T) {
 // string, so a dot-delimited prefixed variant must also render the
 // heartbeat label.
 func TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconcile.detail", Depth: 5}}, 0, "", "Queues")
+	out := renderQueuesPane([]Queue{{Type: "pr.reconcile.detail", Depth: 5}}, 0, "", "Queues", 0)
 	if strings.ContainsAny(out, "█░") {
 		t.Fatalf("prefixed heartbeat queue row rendered a depth bar:\n%s", out)
 	}
@@ -918,7 +918,7 @@ func TestRenderQueuesPane_HeartbeatPrefixMatchNotExactMatch(t *testing.T) {
 // queue type name ("reconcile completed" event), not itself a heartbeat --
 // so the match must require the dot boundary, not bare prefix.
 func TestRenderQueuesPane_NonDelimitedFalsePositiveExcluded(t *testing.T) {
-	out := renderQueuesPane([]Queue{{Type: "pr.reconciled", Depth: 4}}, 0, "", "Queues")
+	out := renderQueuesPane([]Queue{{Type: "pr.reconciled", Depth: 4}}, 0, "", "Queues", 0)
 	if strings.Contains(out, "(heartbeat)") {
 		t.Fatalf("\"pr.reconciled\" must not be misclassified as a heartbeat type via bare prefix match:\n%s", out)
 	}
@@ -1042,5 +1042,108 @@ func TestRenderActivityPane_ZeroFreshFloorDimsNothing(t *testing.T) {
 	}
 	if !strings.Contains(out, line) {
 		t.Errorf("expected the plain entry line present; got:\n%s", out)
+	}
+}
+
+// TestRenderListenersPane_ClampsToHeightBudget is bead pg2-zxf3d's own
+// regression test: with a double-digit handler count (14 -- matching the
+// live incident's own "11 handler roles, 14 sources" report) far exceeding
+// a deliberately small maxLines budget, the returned box's physical line
+// count must never exceed maxLines. Before this bead, renderListenersPane
+// took no maxLines parameter at all -- the focused-pane fill zone's
+// renderFill closure (model.go) discarded the height concatZones (zones.go)
+// handed it and always returned this function's full, unclamped output,
+// which is exactly what let the unclamped table overflow a realistic
+// terminal and scroll the pinned top zone off-screen even with
+// tea.WithAltScreen() engaged [pg2-x9w25 regression].
+func TestRenderListenersPane_ClampsToHeightBudget(t *testing.T) {
+	theme := render.NewTheme(false)
+	listeners := make([]Listener, 14)
+	for i := range listeners {
+		listeners[i] = Listener{Role: fmt.Sprintf("role-%02d", i), Enabled: true, Delivered: int64(i)}
+	}
+
+	for _, maxLines := range []int{1, 2, 3, 5, 8} {
+		t.Run(fmt.Sprintf("maxLines=%d", maxLines), func(t *testing.T) {
+			got := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", nil, maxLines)
+			lines := strings.Split(got, "\n")
+			if len(lines) > maxLines {
+				t.Errorf("maxLines=%d: rendered %d physical lines, want <= %d; got:\n%s", maxLines, len(lines), maxLines, got)
+			}
+		})
+	}
+
+	// Control case: maxLines large enough to hold every row (top border +
+	// header + 14 rows + bottom border = 17) must render every row
+	// unclamped -- this fix must not clamp when there is no need to.
+	t.Run("ample budget renders every row unclamped", func(t *testing.T) {
+		const ample = 17
+		got := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", nil, ample)
+		lines := strings.Split(got, "\n")
+		if len(lines) != ample {
+			t.Errorf("ample budget: got %d lines, want exactly %d (every row shown, no clamping); got:\n%s", len(lines), ample, got)
+		}
+		for i := range listeners {
+			role := fmt.Sprintf("role-%02d", i)
+			if !strings.Contains(got, role) {
+				t.Errorf("ample budget: expected every row to survive unclamped, missing %q; got:\n%s", role, got)
+			}
+		}
+	})
+
+	// unbounded (maxLines <= 0, every pre-pg2-zxf3d call site) must still
+	// render every row -- this fix's new parameter must not change the
+	// unbounded case's own byte-for-byte behavior.
+	t.Run("maxLines<=0 stays unbounded", func(t *testing.T) {
+		got := renderListenersPane(listeners, render.TierTiny, 0, theme, "(none)", "Listeners", nil, 0)
+		lines := strings.Split(got, "\n")
+		if want := 2 + 1 + len(listeners); len(lines) != want { // top+bottom border, header, N rows
+			t.Errorf("unbounded: got %d lines, want %d; got:\n%s", len(lines), want, got)
+		}
+	})
+}
+
+// TestRenderSourcesPane_ClampsToHeightBudget is renderSourcesPane's own
+// sibling to TestRenderListenersPane_ClampsToHeightBudget above -- same
+// bead (pg2-zxf3d), same regression, a different one of the two
+// focused-pane renderers the bug report named.
+func TestRenderSourcesPane_ClampsToHeightBudget(t *testing.T) {
+	theme := render.NewTheme(false)
+	now := time.Now()
+	sources := make([]Source, 14)
+	for i := range sources {
+		sources[i] = Source{Name: fmt.Sprintf("source-%02d", i), Enabled: true, LastTick: now}
+	}
+
+	for _, maxLines := range []int{1, 2, 3, 5, 8} {
+		t.Run(fmt.Sprintf("maxLines=%d", maxLines), func(t *testing.T) {
+			got := renderSourcesPane(sources, now, 0, theme, "(none)", "Sources", maxLines)
+			lines := strings.Split(got, "\n")
+			if len(lines) > maxLines {
+				t.Errorf("maxLines=%d: rendered %d physical lines, want <= %d; got:\n%s", maxLines, len(lines), maxLines, got)
+			}
+		})
+	}
+}
+
+// TestRenderQueuesPane_ClampsToHeightBudget is renderQueuesPane's own
+// sibling -- Queues shares the identical renderPaneBox machinery and the
+// identical bug (model.go's Queues fill-zone closure ignored its own
+// height parameter too, even though the bug report named only Listeners/
+// Sources).
+func TestRenderQueuesPane_ClampsToHeightBudget(t *testing.T) {
+	queues := make([]Queue, 14)
+	for i := range queues {
+		queues[i] = Queue{Type: fmt.Sprintf("q.type-%02d", i), Depth: i}
+	}
+
+	for _, maxLines := range []int{1, 2, 3, 5, 8} {
+		t.Run(fmt.Sprintf("maxLines=%d", maxLines), func(t *testing.T) {
+			got := renderQueuesPane(queues, 0, "(none)", "Queues", maxLines)
+			lines := strings.Split(got, "\n")
+			if len(lines) > maxLines {
+				t.Errorf("maxLines=%d: rendered %d physical lines, want <= %d; got:\n%s", maxLines, len(lines), maxLines, got)
+			}
+		})
 	}
 }

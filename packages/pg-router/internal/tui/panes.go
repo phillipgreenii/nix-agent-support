@@ -302,7 +302,16 @@ func unmatchedRowMarker(types []string, theme render.Theme) string {
 // declared columns, keeps the fix local to this one extra cell without
 // touching paneColumnWidths/formatPaneRow's shared machinery (also used by
 // renderQueuesPane/renderSourcesPane, which have no such trailing cell).
-func renderListenersPane(listeners []Listener, tier, width int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string) string {
+//
+// maxLines is the TOTAL rendered line budget (top border + header + data
+// rows + bottom border), threaded through to renderPaneBox -- see its own
+// doc and paneRowBudget for how rows are dropped (with a "N more" summary
+// line replacing them) rather than the whole box overflowing the caller's
+// height allotment [design: bead pg2-zxf3d fix; pg2-x9w25 regression].
+// maxLines <= 0 is unbounded (every unfocused-pane render, and every
+// pre-existing call site): every row renders, matching this function's
+// behavior before this bead.
+func renderListenersPane(listeners []Listener, tier, width int, theme render.Theme, emptyMsg, title string, unmatchedBindings []string, maxLines int) string {
 	var headers []string
 	var widths []int
 	switch tier {
@@ -382,7 +391,7 @@ func renderListenersPane(listeners []Listener, tier, width int, theme render.The
 			rows[i] = append(rows[i], m)
 		}
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width, maxLines)
 }
 
 // heartbeatQueuePrefixes names queue-type prefixes whose depth is a
@@ -444,7 +453,11 @@ func depthBar(depth int) string {
 // type in the heartbeat set (pr.reconcile today) -- that depth is a
 // monitored-universe count, not an actionable backlog [design: Task 5,
 // "pr.reconcile relabeling"; Global Constraints].
-func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string {
+//
+// maxLines is the same total-rendered-line budget renderListenersPane's own
+// doc explains (bead pg2-zxf3d) -- <= 0 unbounded, otherwise threaded
+// straight through to renderPaneBox.
+func renderQueuesPane(queues []Queue, width int, emptyMsg, title string, maxLines int) string {
 	headers := []string{"TYPE", "DEPTH"}
 	widths := []int{18, 30}
 	rows := make([][]string, 0, len(queues))
@@ -457,7 +470,7 @@ func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string 
 		}
 		rows = append(rows, []string{textsafe.Sanitize(q.Type), depthCell})
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width, maxLines)
 }
 
 // renderSourcesPane renders the Sources pane: SOURCE/STATUS/SINCE LAST
@@ -466,7 +479,11 @@ func renderQueuesPane(queues []Queue, width int, emptyMsg, title string) string 
 // doc [pg2-hlpuv]. Widened (this task) to use each source's own
 // ExpectedIntervalMs rather than the pool-wide tickIntervalMs -- the
 // tickIntervalMs parameter is gone from this signature entirely.
-func renderSourcesPane(sources []Source, now time.Time, width int, theme render.Theme, emptyMsg, title string) string {
+//
+// maxLines is the same total-rendered-line budget renderListenersPane's own
+// doc explains (bead pg2-zxf3d) -- <= 0 unbounded, otherwise threaded
+// straight through to renderPaneBox.
+func renderSourcesPane(sources []Source, now time.Time, width int, theme render.Theme, emptyMsg, title string, maxLines int) string {
 	headers := []string{"SOURCE", "STATUS", "SINCE LAST TICK", "NEXT CHECK IN"}
 	widths := []int{12, 8, 16, 18}
 	rows := make([][]string, 0, len(sources))
@@ -482,7 +499,7 @@ func renderSourcesPane(sources []Source, now time.Time, width int, theme render.
 			sourceNextCheckText(s, now),
 		})
 	}
-	return renderPaneBox(title, headers, widths, rows, emptyMsg, width)
+	return renderPaneBox(title, headers, widths, rows, emptyMsg, width, maxLines)
 }
 
 // outcomeBudgetEscalation is the Activity Ring's own "resource-limit"
@@ -604,7 +621,22 @@ func renderActivityOutcome(outcome string, theme render.Theme) string {
 // resolved by paneColumnWidths, which widens columns past staticWidths
 // when budget allows -- renderPaneBox itself no longer chooses widths,
 // only gathers the row data and hands the decision off.
-func renderPaneBox(title string, headers []string, staticWidths []int, rows [][]string, emptyMsg string, budget int) string {
+//
+// maxLines is the TOTAL rendered line budget for the whole box (top
+// border + header + data rows + bottom border), <= 0 meaning unbounded
+// (bead pg2-zxf3d's fix): when the focused/fill-zone pane's real content
+// would exceed it, paneClampLines drops trailing data rows and replaces
+// them with a single "N more" summary line so the box's own top/bottom
+// border structure survives intact; clampBoxLines is then an unconditional
+// backstop for the one case paneClampLines cannot -- maxLines too small
+// even to fit both borders (e.g. a near-pinnedFloorHeight terminal
+// squeeze) -- see both functions' own docs. Before this bead, every
+// renderFill closure for the Listeners/Sources/Queues fill zone ignored
+// the height concatZones (zones.go) actually handed it and always
+// rendered every row, which could overflow the terminal and scroll the
+// pinned top zone off-screen even with tea.WithAltScreen() engaged
+// [pg2-x9w25 regression].
+func renderPaneBox(title string, headers []string, staticWidths []int, rows [][]string, emptyMsg string, budget, maxLines int) string {
 	var lines []string
 	if len(rows) == 0 {
 		if emptyMsg != "" {
@@ -612,12 +644,91 @@ func renderPaneBox(title string, headers []string, staticWidths []int, rows [][]
 		}
 	} else {
 		widths := paneColumnWidths(headers, rows, staticWidths, budget)
-		lines = append(lines, formatPaneRow(headers, widths))
-		for _, r := range rows {
-			lines = append(lines, formatPaneRow(r, widths))
+		headerLine := formatPaneRow(headers, widths)
+		dataLines := make([]string, len(rows))
+		for i, r := range rows {
+			dataLines[i] = formatPaneRow(r, widths)
 		}
+		lines = paneClampLines(headerLine, dataLines, maxLines)
 	}
-	return paneFrame(title, lines)
+	return clampBoxLines(paneFrame(title, lines), maxLines)
+}
+
+// paneClampLines resolves the actual header+data content lines a pane box
+// renders under a total-box-line budget maxLines (bead pg2-zxf3d's fix for
+// pg2-x9w25's regression: the focused-pane fill zone must never render
+// more lines than zones.go's own layout budget allotted it).
+//
+// maxLines <= 0 means unbounded (every unfocused pane, and every
+// pre-existing call site before this bead): the header plus every data
+// line renders unchanged.
+//
+// Otherwise `available` is maxLines minus paneFrame's own two border
+// lines (top + bottom), which are ALWAYS present regardless of content --
+// this function chooses which header/data lines fit within THAT budget,
+// so paneFrame's eventual total output (len(returned)+2) already meets
+// maxLines on its own, without depending on a later truncation pass to
+// fix up an over-budget result (a first version of this fix did exactly
+// that -- truncated the already-built box from the bottom -- which lost
+// the bottom border whenever the naive row-count math left no room for
+// it, silently rendering a box with no closing line at all).
+//
+// When header+data already fits `available`, everything renders
+// unchanged (the common case: a realistic handler/source count against a
+// tall-enough terminal). When it does not fit, the header always renders
+// if there is any room at all, and a "N more" summary line replaces
+// whatever trailing data rows do not fit. `available <= 0` (an extreme,
+// near-pinnedFloorHeight terminal squeeze) means not even the header
+// fits: this returns nil, so the box renders as bare top+bottom borders
+// with no content line -- still well-formed, unlike losing the bottom
+// border to a mid-content truncation.
+func paneClampLines(headerLine string, dataLines []string, maxLines int) []string {
+	if maxLines <= 0 {
+		return append([]string{headerLine}, dataLines...)
+	}
+	available := maxLines - 2 // top border + bottom border, always present
+	if available <= 0 {
+		return nil
+	}
+	if len(dataLines)+1 <= available {
+		return append([]string{headerLine}, dataLines...)
+	}
+	remaining := available - 1 // one line for the header, always shown when it fits at all
+	if remaining <= 0 {
+		return []string{headerLine}
+	}
+	shown := remaining - 1 // reserve one line for the "N more" summary
+	if shown < 0 {
+		shown = 0
+	}
+	more := len(dataLines) - shown
+	lines := append([]string{headerLine}, dataLines[:shown]...)
+	if more > 0 {
+		lines = append(lines, fmt.Sprintf("… %d more row(s) not shown -- resize taller", more))
+	}
+	return lines
+}
+
+// clampBoxLines is renderPaneBox's unconditional backstop: paneClampLines
+// already sizes the header/data/more-line content so the box's own
+// top+bottom border structure survives, but that guarantee needs at least
+// 2 lines of budget (the two borders themselves); a maxLines below that --
+// an extreme, near-pinnedFloorHeight terminal squeeze (zones.go's own fill
+// zone can be handed a bodyHeight as low as 1) -- cannot fit even the
+// borders. This truncates the fully-built box string to maxLines lines as
+// a last resort, so the one invariant that actually matters -- a
+// renderFill closure never returns more lines than the height budget
+// concatZones (zones.go) handed it -- holds unconditionally, rather than
+// relying on paneClampLines alone to get every edge case right.
+func clampBoxLines(s string, maxLines int) string {
+	if maxLines <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n")
 }
 
 // paneBoxOverhead is how many columns paneFrame's own border/padding add

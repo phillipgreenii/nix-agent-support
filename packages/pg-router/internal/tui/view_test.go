@@ -166,21 +166,29 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 	// time [design: Binding decisions 6; Task 4.9 Step 1]. For
 	// sixScreenMainFixture at 80x10: the top zone (header) and footer are
 	// pinned and always render; Listeners is the fill zone (the default
-	// focusedPane) and renders in full (5 lines: border+header+2 rows+
-	// border); Sources (dropOrder 5, 4 lines) survives; Activity
-	// (dropOrder 3) and Queues (dropOrder 4) are dropped to make room. Total
-	// output is 13 lines -- MORE than the requested height 10, because the
-	// fill zone's renderFill closure (model.go's renderMain, the
-	// `p == m.focusedPane` branch) returns its own fixed-size content and
-	// ignores the bodyHeight budget entirely, so layoutZones' padOrExtend
-	// (which only ever pads, never truncates) cannot bring it back down to
-	// exactly 10. That is a discovered fact about Task 4.6's renderMain, not
-	// something this test invents around or fixes (Contract §8, "Out of
-	// scope"). The count moved from 12 to 13 lines under pg2-xp415: the
-	// pinned header itself grew from 2 lines to 3 (health leads its own
-	// line, the version pair moved to a second line, gates/config trail on
-	// a third) -- a pinned zone getting taller shrinks the fill zone's
-	// budget by exactly that much, it does not change which zones survive.
+	// focusedPane); Sources (dropOrder 5, 4 lines) survives; Activity
+	// (dropOrder 3) and Queues (dropOrder 4) are dropped to make room.
+	//
+	// Before bead pg2-zxf3d's fix, total output was 13 lines -- MORE than
+	// the requested height 10 -- because the fill zone's renderFill closure
+	// (model.go's renderMain, the `p == m.focusedPane` branch) returned its
+	// own fixed-size content and ignored the bodyHeight budget entirely, so
+	// layoutZones' padOrExtend (which only ever pads, never truncates)
+	// could not bring it back down to exactly 10 -- the SAME class of bug
+	// pg2-x9w25 fixed for the pinned zones, discovered still live for the
+	// fill zone itself when pg2-x9w25's own live verification follow-up
+	// (pg2-czj6p) reproduced the top-of-frame scroll-off symptom again at
+	// realistic terminal sizes. pg2-zxf3d wires the real height budget
+	// through m.renderPaneContent/renderPaneBox (panes.go's
+	// paneClampLines/clampBoxLines) so the fill zone always renders AT MOST
+	// its allotted bodyHeight, dropping trailing data rows (replaced by a
+	// "N more" summary line) or, once the budget is too tight even for the
+	// header, the header itself -- while always preserving the box's own
+	// top+bottom border pair. At 80x10, the Listeners fill zone's own
+	// budget is squeezed to exactly 2 lines (barely enough for the two
+	// borders alone, none left for the header), so its box renders as a
+	// bare bordered box with no header/data row -- and the SCREEN total
+	// comes out to exactly 10 lines, matching m.height, never 13.
 	t.Run("main screen's exact height-10 survivor set", func(t *testing.T) {
 		m := sixScreenMainFixture()
 		m.width, m.height = 80, 10
@@ -197,8 +205,8 @@ func TestSixScreenBanner_At80x24AndHeight10(t *testing.T) {
 			}
 		}
 		lines := strings.Split(out, "\n")
-		if len(lines) != 13 {
-			t.Errorf("line count = %d, want the discovered survivor total of 13; got:\n%s", len(lines), out)
+		if len(lines) != m.height {
+			t.Errorf("line count = %d, want it to exactly match the requested height %d (pg2-zxf3d: the fill zone must never overflow its own budget); got:\n%s", len(lines), m.height, out)
 		}
 	})
 }
@@ -398,6 +406,65 @@ func TestLayoutZones_DroppedZoneContributesZeroLinesAtExactHeight(t *testing.T) 
 	for i, l := range lines {
 		if l == "" {
 			t.Errorf("line %d is blank -- a dropped zone left a phantom placeholder row instead of contributing zero lines; got:\n%s", i, out)
+		}
+	}
+}
+
+// TestRenderMain_FocusedFillZoneNeverOverflowsRealisticConfig is bead
+// pg2-zxf3d's own end-to-end regression test, reproducing the exact live
+// incident report: a config with a double-digit handler/source count (11
+// listeners, 14 sources -- the report's own numbers) rendered at the two
+// terminal sizes the live investigation reproduced the bug at, 100x30 and
+// 100x45, plus 100x60 (the report's own "stable" size) as a control.
+//
+// Before this bead, model.go's renderMain wired the Listeners/Sources (and
+// Queues) fill-zone renderFill closures to always return
+// m.renderPaneContent's full, unclamped table regardless of the height
+// concatZones (zones.go) actually called them with -- so at a realistic
+// terminal size the focused pane's own box could need far more rows than
+// the terminal provides, and even inside tea.WithAltScreen()'s buffer,
+// printing more lines than the buffer holds scrolls it, pushing the pinned
+// top zone (banner, keybinding hints) off-screen. This asserts the two
+// properties that symptom violates: total output never exceeds m.height,
+// and the pinned top zone's own identity text and the pinned footer's own
+// keybinding hints both survive in the output regardless of how many rows
+// the focused pane's real content would have needed.
+func TestRenderMain_FocusedFillZoneNeverOverflowsRealisticConfig(t *testing.T) {
+	listeners := make([]Listener, 11)
+	for i := range listeners {
+		listeners[i] = Listener{Role: fmt.Sprintf("handler-role-%02d", i), Enabled: true, Delivered: int64(i)}
+	}
+	sources := make([]Source, 14)
+	for i := range sources {
+		sources[i] = Source{Name: fmt.Sprintf("source-%02d", i), Enabled: true, LastTick: time.Now()}
+	}
+
+	for _, size := range []struct{ w, h int }{{100, 30}, {100, 45}, {100, 60}} {
+		for _, focused := range []int{paneListeners, paneSources} {
+			t.Run(fmt.Sprintf("%dx%d focused=%s", size.w, size.h, paneName(focused)), func(t *testing.T) {
+				m := NewModel(Options{}, render.NewTheme(false))
+				m.screen = screenMain
+				m.focusedPane = focused
+				m.reply = StatusReply{
+					Core:      CoreInfo{State: coreStateStarted, Version: "1.0.0"},
+					Listeners: listeners,
+					Sources:   sources,
+				}
+				m.width, m.height = size.w, size.h
+
+				out := m.View()
+				lines := strings.Split(out, "\n")
+
+				if len(lines) > m.height {
+					t.Errorf("rendered %d physical lines at height=%d -- the focused fill zone overflowed its budget (pg2-x9w25 regression); got:\n%s", len(lines), m.height, out)
+				}
+				if !strings.Contains(out, "pg-router") {
+					t.Errorf("pinned top zone's own identity text is missing -- it scrolled off-screen; got:\n%s", out)
+				}
+				if !strings.Contains(out, "[tab] pane") {
+					t.Errorf("pinned footer's own keybinding hints are missing; got:\n%s", out)
+				}
+			})
 		}
 	}
 }

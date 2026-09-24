@@ -559,29 +559,41 @@ func (m *Model) renderMain() string {
 	// Static tier: Listeners, Sources -- fixed membership for the run, never
 	// reordered/resized by the dynamic tier below (this task).
 	for _, p := range []int{paneListeners, paneSources} {
-		content := m.renderPaneContent(p, gated, now)
 		if p == m.focusedPane {
+			// bug fix (pg2-zxf3d): renderFill's own `height` parameter is
+			// zones.go's concatZones's real, computed budget for this fill
+			// zone -- it MUST be threaded into m.renderPaneContent on every
+			// call so the focused table is truncated to fit it, not a
+			// precomputed, height-oblivious `content` string captured once
+			// and returned unconditionally regardless of what height the
+			// closure is actually handed [pg2-x9w25 regression].
 			zones = append(zones, zoneSpec{
-				name:       paneName(p),
-				fill:       true,
-				renderFill: func(int) string { return content },
+				name: paneName(p),
+				fill: true,
+				renderFill: func(height int) string {
+					return m.renderPaneContent(p, gated, now, height)
+				},
 			})
 			continue
 		}
+		content := m.renderPaneContent(p, gated, now, 0)
 		zones = append(zones, zoneSpec{name: paneName(p), content: content, dropOrder: unfocusedPaneDropOrder(p)})
 	}
 
 	// Dynamic tier: Queues, then Activity -- both change every poll.
 	{
 		p := paneQueues
-		content := m.renderPaneContent(p, gated, now)
 		if p == m.focusedPane {
+			// Same fix as the static-tier loop above (pg2-zxf3d).
 			zones = append(zones, zoneSpec{
-				name:       paneName(p),
-				fill:       true,
-				renderFill: func(int) string { return content },
+				name: paneName(p),
+				fill: true,
+				renderFill: func(height int) string {
+					return m.renderPaneContent(p, gated, now, height)
+				},
 			})
 		} else {
+			content := m.renderPaneContent(p, gated, now, 0)
 			zones = append(zones, zoneSpec{name: paneName(p), content: content, dropOrder: unfocusedPaneDropOrder(p)})
 		}
 	}
@@ -625,7 +637,16 @@ func (m *Model) renderActivityZoneContent(gated bool) string {
 // depth is meaningless while dispatch is halted) and IS suppressed while
 // gated, per resolveEmptyState's own doc [design: Task 4.6 Step 6; §5
 // Derived health].
-func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
+//
+// maxLines is the total rendered line budget when p is the zone ladder's
+// fill zone (m.focusedPane) -- renderMain's caller passes the REAL height
+// concatZones (zones.go) handed the renderFill closure, threaded straight
+// through to renderListenersPane/renderQueuesPane/renderSourcesPane (see
+// their own docs for how they honor it). 0 means unbounded -- every
+// UNFOCUSED pane render (its content is a fixed zoneSpec.content, never a
+// height-bounded fill zone) [design: bead pg2-zxf3d fix; pg2-x9w25
+// regression].
+func (m *Model) renderPaneContent(p int, gated bool, now time.Time, maxLines int) string {
 	tier := render.Tier(m.width)
 	// width is the pane box's own available budget: panes are stacked
 	// vertically (zones.go), never side-by-side, so each one may use the
@@ -640,14 +661,14 @@ func (m *Model) renderPaneContent(p int, gated bool, now time.Time) string {
 	switch p {
 	case paneListeners:
 		es := resolveEmptyState(false, false, len(m.reply.Listeners) == 0)
-		content := renderListenersPane(m.reply.Listeners, tier, width, m.theme, emptyStateText(es, "(no listeners configured)"), title, m.reply.UnmatchedBindings)
+		content := renderListenersPane(m.reply.Listeners, tier, width, m.theme, emptyStateText(es, "(no listeners configured)"), title, m.reply.UnmatchedBindings, maxLines)
 		return dimIfPaused(content, gated, m.theme)
 	case paneQueues:
 		es := resolveEmptyState(false, gated, len(m.reply.Queues) == 0)
-		return renderQueuesPane(m.reply.Queues, width, emptyStateText(es, "No events queued."), title)
+		return renderQueuesPane(m.reply.Queues, width, emptyStateText(es, "No events queued."), title, maxLines)
 	case paneSources:
 		es := resolveEmptyState(false, false, len(m.reply.Sources) == 0)
-		content := renderSourcesPane(m.reply.Sources, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title)
+		content := renderSourcesPane(m.reply.Sources, now, width, m.theme, emptyStateText(es, "(no sources configured)"), title, maxLines)
 		return dimIfPaused(content, gated, m.theme)
 	default:
 		return ""
