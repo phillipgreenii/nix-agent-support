@@ -17,7 +17,7 @@ Lifecycle handler for processing-cycle / work beads on a merge-request.
 
 - **PR bead** — the merge-request. Parent of cycle beads and work beads.
 - **processing-cycle** — `process-feedback: …`; child of the PR bead. Tracks one review pass.
-- **work bead** — a proposed change (`task`/`bug`) you create in response to feedback. A **child of the PR bead**, `discovered-from` the feedback item that motivated it.
+- **work bead** — a proposed change (`task`/`bug`) you create in response to feedback. A **child of the PR bead**, `discovered-from` the feedback item that motivated it. Labeled `worker-ready` when the change is clear-cut, or `human` (never both) when it instead poses a question only the PR author can resolve — see step 5.3.
 
 Feedback items are the PR's own comments and review-thread entries (not beads) — read via
 `pg-connector pr show <id>`. Each carries `id`, `author`, `body`, `resolved`, and, for a
@@ -97,12 +97,24 @@ needing processing.
       instead of creating a duplicate. Multiple comments, or a later cycle's feedback, commonly
       map to the same work.
    3. Otherwise create a **new work bead** (`task`/`bug`) as a **child of the PR bead**,
-      `discovered-from` this feedback item's id, describing the needed change.
-   4. Do **not** implement the change and do **not** work the new bead — that is the worker agent's job.
+      `discovered-from` this feedback item's id, describing the needed change — then judge
+      whether that change is clear-cut or needs a human call:
+      - **Clear-cut** (unambiguous engineering work): label it `worker-ready`, as before, so the
+        worker role picks it up.
+      - **Needs a human call** (the comment poses a genuine question, a design tradeoff, or an
+        ambiguity you cannot resolve from the PR/repo alone): label it `human` instead —
+        **never** `worker-ready` — and write the specific question into the bead's description.
+        This keeps it out of the worker queue (which already excludes `human`-labeled beads)
+        instead of letting a worker discover the same dead end later. **Do not wait for it**:
+        keep processing this cycle's remaining feedback items exactly as normal, and a
+        `human`-labeled item never blocks closing the cycle (step 6) or working any other item.
+   4. Do **not** implement the change and do **not** work the new bead — that is the worker
+      agent's job (a `human`-labeled bead additionally waits on the PR author's answer, not a
+      worker).
    5. **Record your disposition** for the item:
 
       ```bash
-      # For actionable feedback (work bead created or linked):
+      # For actionable feedback (work bead created or linked, worker-ready or human alike):
       pg-desk feedback set <pr_number> <comment-id> --disposition will-fix
 
       # For non-actionable feedback:
