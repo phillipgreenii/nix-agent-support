@@ -313,7 +313,17 @@ func Run(opts Options) error {
 		return err
 	}
 	m := NewModel(opts, theme)
-	p := tea.NewProgram(m, tea.WithOutput(out))
+	// tea.WithAltScreen() is required (bead pg2-x9w25): without it bubbletea
+	// renders inline at whatever row the cursor happened to be on, instead
+	// of a fixed full-screen region starting at row 0. If the initial frame
+	// is taller than the terminal's remaining visible rows below the
+	// cursor, the terminal scrolls and the TOP of the frame -- the pinned
+	// header/PAUSED-banner zone and its P/R keybinding hints -- is what
+	// scrolls off, even when zones.go sized the frame correctly for
+	// m.height. Matches pa-monitor's own precedent (packages/pa-monitor/
+	// cmd/pa-monitor/tui_remote.go's tea.NewProgram(model,
+	// tea.WithAltScreen())). Regression-guarded by altscreen_test.go.
+	p := tea.NewProgram(m, tea.WithOutput(out), tea.WithAltScreen())
 	_, err = p.Run()
 	return err
 }

@@ -139,6 +139,42 @@ func TestLayoutZones_DropsLowestPriorityFirst(t *testing.T) {
 	}
 }
 
+// TestLayoutZones_ExactFitNoStrayBlankLine is bead pg2-x9w25's regression
+// guard for the off-by-one this bead found in concatZones: a terminal sized
+// to EXACTLY fit the pinned zones (bodyHeight lands on precisely 0, not
+// negative -- the fill zone gets no rows but the pinned zones alone
+// consume the full requested height) must render exactly `height` lines,
+// not height+1. Before the fix, concatZones appended an empty string for
+// the un-rendered fill zone, and strings.Join still inserted a "\n"
+// separator around that empty part -- one stray blank line, making the
+// output taller than m.height even though every zone's own math looked
+// correct. That is exactly the kind of "frame one line taller than
+// budgeted" overflow that, without tea.WithAltScreen(), manifests as the
+// top of the frame scrolling off.
+func TestLayoutZones_ExactFitNoStrayBlankLine(t *testing.T) {
+	zones := []zoneSpec{
+		{name: "top", content: "T1\nT2\nT3", pinned: true},
+		{name: "fill", fill: true, renderFill: func(int) string { return "FILL" }},
+		{name: "footer", content: "F1", pinned: true},
+	}
+	// Pinned zones alone total 3+1 = 4 lines; height is also 4, so
+	// bodyHeight computes to exactly 0 (not negative) -- the fill zone
+	// renders nothing, but that must not add a row of its own.
+	got := layoutZones(zones, 40, 4)
+	gotLines := strings.Split(got, "\n")
+	if len(gotLines) != 4 {
+		t.Fatalf("layoutZones returned %d lines, want exactly 4 (no stray blank line for the empty fill zone); got:\n%q", len(gotLines), got)
+	}
+	if strings.Contains(got, "FILL") {
+		t.Errorf("fill zone should not have rendered content when bodyHeight == 0; got:\n%q", got)
+	}
+	for _, want := range []string{"T1", "T2", "T3", "F1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing pinned content %q; got:\n%q", want, got)
+		}
+	}
+}
+
 // TestLayoutZones_HeadlessModeConcatenatesWithNoDropping (height == 0) is
 // the test/headless escape hatch: every zone renders in source order, with
 // no dropping or padding.

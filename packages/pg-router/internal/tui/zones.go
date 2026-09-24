@@ -148,19 +148,32 @@ func highestPriorityDroppable(zones []zoneSpec) int {
 // concatZones joins surviving zones in source order. The fill zone is
 // rendered with bodyHeight (skipped entirely when bodyHeight <= 0). Width
 // is forwarded to render.Block as the final per-line clip.
+//
+// bug fix (pg2-x9w25): when bodyHeight <= 0, the fill zone is OMITTED from
+// parts entirely rather than contributing an empty string. Appending ""
+// looks like a no-op but is not: strings.Join still inserts a "\n"
+// separator on each side of that empty part, injecting one stray blank
+// line into the output. That extra line pushed the total rendered height
+// one row past the requested `height` in exactly the case layoutZones's own
+// doc calls out as already accounted for ("the sum of all pinned zones +
+// the fill zone's minimum content can never exceed m.height") -- e.g. a
+// terminal sized to *exactly* fit the pinned zones (bodyHeight lands on 0,
+// not negative) rendered one line taller than it should have, which is
+// indistinguishable, without tea.WithAltScreen(), from the top of the
+// frame scrolling off. Proven via zones_test.go's
+// TestLayoutZones_ExactFitNoStrayBlankLine, which failed with 5 lines for a
+// height=4 request before this fix.
 func concatZones(zones []zoneSpec, bodyHeight, width int) string {
 	parts := make([]string, 0, len(zones))
 	for _, z := range zones {
-		var s string
 		switch {
 		case z.fill:
 			if z.renderFill != nil && bodyHeight > 0 {
-				s = z.renderFill(bodyHeight)
+				parts = append(parts, z.renderFill(bodyHeight))
 			}
 		default:
-			s = z.content
+			parts = append(parts, z.content)
 		}
-		parts = append(parts, s)
 	}
 	joined := strings.Join(parts, "\n")
 	if width > 0 {
