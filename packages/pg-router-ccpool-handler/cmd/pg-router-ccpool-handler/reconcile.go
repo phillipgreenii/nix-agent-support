@@ -45,10 +45,12 @@ import (
 // for this handler's roles, which is how the original zr-50s7h.2 incident
 // (bursty review/feedback dispatch) surfaced in the first place.
 //
-// Reuses closeSessionAndWorktree and beadAlreadyClosed (preshutdown.go)
-// unmodified for the actual purge and the bead-status check respectively —
-// the SAME fail-closed bd lookup teardownAllSessions's own shutdown-time
-// sweep already uses. Returns the number of sessions actually closed.
+// Reuses closeSessionAndWorktree and beadAlreadyClosed (preshutdown.go) for
+// the actual purge (worktree removal AND its own pg-router/<beadID> anchor
+// branch delete, bead pg2-ci75j via pg2-tpa18) and the bead-status check
+// respectively — the SAME fail-closed bd lookup teardownAllSessions's own
+// shutdown-time sweep already uses. Returns the number of sessions actually
+// closed.
 //
 // Deliberately narrower than closeUnlessNeedsInput's own shutdown-time
 // decision: at shutdown EVERY session is torn down regardless of state (the
@@ -60,7 +62,7 @@ import (
 // StateIdle/StateNeedsInput qualify (reconcilableState below), matching
 // pg2-hrppg's own Ask verbatim: "if the bead is closed AND the session is
 // idle/needs_input (not actively working), close/purge the session."
-func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix string) (closed int) {
+func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("reconcile: list failed", "err", err)
@@ -76,7 +78,7 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 		if !beadAlreadyClosed(ctx, br, s) {
 			continue
 		}
-		if closeSessionAndWorktree(ctx, cc, open, s) {
+		if closeSessionAndWorktree(ctx, cc, open, repoRoot, s) {
 			closed++
 		}
 	}

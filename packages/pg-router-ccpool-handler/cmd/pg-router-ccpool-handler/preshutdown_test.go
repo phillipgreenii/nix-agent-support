@@ -78,22 +78,44 @@ var _ ccpool.Runner = (*fakeCC)(nil)
 // shared NoopGitOpener/NoopWorktreeManager offer no error injection on
 // RemoveWorktree itself, only on Open.
 type fakeWorktreeOpener struct {
-	mu          sync.Mutex
-	OpenErrAt   map[string]bool // dir -> Open fails (not inside any git repository)
-	RemoveErrAt map[string]bool // dir -> the opened manager's RemoveWorktree fails (not a linked worktree)
-	Removed     []string        // every path RemoveWorktree was actually invoked with
+	mu            sync.Mutex
+	OpenErrAt     map[string]bool // dir -> Open fails (not inside any git repository)
+	RemoveErrAt   map[string]bool // dir -> the opened manager's RemoveWorktree fails (not a linked worktree)
+	Removed       []string        // every path RemoveWorktree was actually invoked with
+	Opens         []string        // every dir Open was invoked with, in order (pg2-tpa18)
+	BranchDeletes []branchDelete  // every DeleteBranch call recorded (pg2-tpa18)
+}
+
+// branchDelete records one DeleteBranch(branch, force) call — pg2-tpa18's
+// own test double addition, mirroring internal/dtest.NoopWorktreeManager's
+// DeleteBranch recording added by bead pg2-ci75j at the other two call
+// sites.
+type branchDelete struct {
+	Branch string
+	Force  bool
 }
 
 func (o *fakeWorktreeOpener) Open(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+	o.mu.Lock()
+	o.Opens = append(o.Opens, dir)
+	o.mu.Unlock()
 	if o.OpenErrAt[dir] {
 		return nil, gitclient.ErrNotARepository
 	}
 	return &fakeWorktreeManager{owner: o}, nil
 }
 
+// fakeWorktreeManager is both a gitclient.WorktreeManager AND a
+// gitclient.BranchManager — like the real *gitclient.Client — so
+// deleteAnchorBranch's own `root.(gitclient.BranchManager)` type assertion
+// (preshutdown.go) succeeds against this fake too (bead pg2-ci75j's pattern,
+// applied at this third call site by pg2-tpa18).
 type fakeWorktreeManager struct{ owner *fakeWorktreeOpener }
 
-var _ gitclient.WorktreeManager = (*fakeWorktreeManager)(nil)
+var (
+	_ gitclient.WorktreeManager = (*fakeWorktreeManager)(nil)
+	_ gitclient.BranchManager   = (*fakeWorktreeManager)(nil)
+)
 
 func (m *fakeWorktreeManager) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
 	return nil // unused by preShutdown's teardown sweep
@@ -110,6 +132,13 @@ func (m *fakeWorktreeManager) RemoveWorktree(_ context.Context, path string, _ b
 }
 
 func (m *fakeWorktreeManager) PruneWorktrees(context.Context) error { return nil }
+
+func (m *fakeWorktreeManager) DeleteBranch(_ context.Context, branch string, force bool) error {
+	m.owner.mu.Lock()
+	defer m.owner.mu.Unlock()
+	m.owner.BranchDeletes = append(m.owner.BranchDeletes, branchDelete{Branch: branch, Force: force})
+	return nil
+}
 
 func contains(a []string, x string) bool {
 	for _, v := range a {
@@ -128,7 +157,7 @@ func TestTeardownAllSessions_purges(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-x", Live: true},
 		{ExternalID: "cc-unrelated", Live: true},
 	}}}
-	teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
+	teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root")
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
 		t.Fatalf("teardown must close only the pg-router session; closed=%v", cc.Closed)
 	}
@@ -145,7 +174,7 @@ func TestTeardownAllSessions_returnsClosedCount(t *testing.T) {
 		{ExternalID: "pg-router-feedback-zr-b", Live: true},
 		{ExternalID: "cc-unrelated", Live: true},
 	}}}
-	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root")
 	if n != 2 {
 		t.Errorf("teardownAllSessions closed count = %d, want 2 (pg-router- sessions only); closed=%v", n, cc.Closed)
 	}
@@ -163,7 +192,7 @@ func TestTeardownAllSessions_preservesNeedsInput(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-done", Live: true, State: ccpool.StateIdle},
 		{ExternalID: "cc-unrelated", Live: true, State: ccpool.StateWorking},
 	}}}
-	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root")
 	if n != 1 {
 		t.Errorf("teardownAllSessions closed count = %d, want 1 (needs_input preserved, stray excluded); closed=%v", n, cc.Closed)
 	}
@@ -196,7 +225,7 @@ func TestTeardownAllSessions_reconcilesNeedsInputWhenBeadClosed(t *testing.T) {
 		"show zr-50s7h.2 --json": `{"status":"closed"}`,
 		"show zr-0t0z7.3 --json": `{"status":"open"}`,
 	}}
-	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
 	if n != 1 {
 		t.Fatalf("teardownAllSessions closed count = %d, want 1 (only the closed-bead session reconciled); closed=%v", n, cc.Closed)
 	}
@@ -216,7 +245,7 @@ func TestTeardownAllSessions_removesWorktreeOfClosedSessionOnly(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-done", Live: true, State: ccpool.StateIdle, CWD: "/wt/done"},
 	}}}
 	open := &fakeWorktreeOpener{}
-	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-", "/repo/root")
 	if n != 1 {
 		t.Fatalf("teardownAllSessions closed count = %d, want 1; closed=%v", n, cc.Closed)
 	}
@@ -237,7 +266,7 @@ func TestCloseUnlessNeedsInput_worktreeOpenFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{OpenErrAt: map[string]bool{"/scratch/not-a-repo": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/scratch/not-a-repo"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a worktree-open failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -257,7 +286,7 @@ func TestCloseUnlessNeedsInput_removeWorktreeFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/repo/root": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/repo/root"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a RemoveWorktree failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -283,7 +312,7 @@ func TestCloseUnlessNeedsInput_reconcilesNeedsInputWhenBeadClosed(t *testing.T) 
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-50s7h.2"},
 	}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a needs_input session whose bead is already closed must be reconciled")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != s.ExternalID {
@@ -303,7 +332,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputWhenBeadOpen(t *testing.T) {
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-0t0z7.3"},
 	}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session whose bead is still open must be preserved")
 	}
 	if len(cc.Closed) != 0 {
@@ -319,7 +348,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputWithoutBeadMeta(t *testing.T) 
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-old", State: ccpool.StateNeedsInput}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session with no bead metadata must be preserved")
 	}
 	if len(cc.Closed) != 0 {
@@ -339,7 +368,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputOnBeadLookupError(t *testing.T
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-x"},
 	}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a bd lookup failure must fail soft and preserve the session")
 	}
 	if len(cc.Closed) != 0 {
@@ -356,12 +385,115 @@ func TestTeardownAllSessions_worktreeFailureDoesNotAbortSweep(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-b", Live: true, State: ccpool.StateIdle, CWD: "/wt/b"},
 	}}}
 	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/repo/root": true}}
-	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-")
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-", "/repo/root")
 	if n != 2 {
 		t.Fatalf("teardownAllSessions closed count = %d, want 2 (both sessions closed despite the first's worktree removal failing); closed=%v", n, cc.Closed)
 	}
 	if !contains(open.Removed, "/repo/root") || !contains(open.Removed, "/wt/b") {
 		t.Errorf("RemoveWorktree must have been attempted for both sessions; calls=%v", open.Removed)
+	}
+}
+
+// TestCloseSessionAndWorktree_deletesAnchorBranchAfterSuccessfulRemoval is
+// pg2-tpa18's own regression: bead pg2-ci75j fixed the orphaned-branch bug
+// at internal/executor.cleanupWorktree and the nix mkWorktreeSweepScript,
+// but explicitly left THIS preShutdown/reconcile call site
+// (closeSessionAndWorktree) out of scope. Once RemoveWorktree succeeds,
+// closeSessionAndWorktree must reopen the gitclient at repoRoot (NOT the
+// now-removed worktree dir — proven here by asserting the exact Open order)
+// and delete the session's own pg-router/<beadID> anchor branch, force=true.
+func TestCloseSessionAndWorktree_deletesAnchorBranchAfterSuccessfulRemoval(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	s := ccpool.Session{
+		ExternalID: "pg-router-worker-zr-w",
+		State:      ccpool.StateIdle,
+		CWD:        "/wt/zr-w",
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-w"},
+	}
+	if !closeSessionAndWorktree(context.Background(), cc, open.Open, "/repo/root", s) {
+		t.Fatal("closeSessionAndWorktree = false, want true")
+	}
+	if len(open.Removed) != 1 || open.Removed[0] != "/wt/zr-w" {
+		t.Fatalf("RemoveWorktree calls = %v, want exactly one call for /wt/zr-w", open.Removed)
+	}
+	if len(open.BranchDeletes) != 1 || open.BranchDeletes[0] != (branchDelete{Branch: "pg-router/zr-w", Force: true}) {
+		t.Fatalf("DeleteBranch calls = %v, want exactly one [pg-router/zr-w force=true]", open.BranchDeletes)
+	}
+	if len(open.Opens) != 2 || open.Opens[0] != "/wt/zr-w" || open.Opens[1] != "/repo/root" {
+		t.Errorf("expected Open(cwd) then Open(repoRoot), got %v", open.Opens)
+	}
+}
+
+// TestCloseSessionAndWorktree_removeFailureNeverDeletesBranch proves the
+// branch-delete step never runs at all (no second Open) when RemoveWorktree
+// itself fails — the worktree is presumably still there (e.g. dirty), so its
+// anchor branch must not be deleted out from under it either.
+func TestCloseSessionAndWorktree_removeFailureNeverDeletesBranch(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/wt/zr-w": true}}
+	s := ccpool.Session{
+		ExternalID: "pg-router-worker-zr-w",
+		State:      ccpool.StateIdle,
+		CWD:        "/wt/zr-w",
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-w"},
+	}
+	if !closeSessionAndWorktree(context.Background(), cc, open.Open, "/repo/root", s) {
+		t.Fatal("closeSessionAndWorktree = false, want true: a RemoveWorktree failure must not be treated as a close failure")
+	}
+	if len(open.Opens) != 1 || open.Opens[0] != "/wt/zr-w" {
+		t.Errorf("a failed RemoveWorktree must short-circuit before any branch-delete Open; opens=%v", open.Opens)
+	}
+	if len(open.BranchDeletes) != 0 {
+		t.Errorf("branch must not be deleted when RemoveWorktree failed; deletes=%v", open.BranchDeletes)
+	}
+}
+
+// TestCloseSessionAndWorktree_openFailureNeverDeletesBranch is the other
+// fail-soft shape's own analogue: when Open(s.CWD) itself fails (cwd not
+// inside any git repository at all), the branch-delete step must never run
+// either — there was never a confirmed worktree removal to follow up on.
+func TestCloseSessionAndWorktree_openFailureNeverDeletesBranch(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{OpenErrAt: map[string]bool{"/scratch/not-a-repo": true}}
+	s := ccpool.Session{
+		ExternalID: "pg-router-worker-zr-w",
+		State:      ccpool.StateIdle,
+		CWD:        "/scratch/not-a-repo",
+		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-w"},
+	}
+	if !closeSessionAndWorktree(context.Background(), cc, open.Open, "/repo/root", s) {
+		t.Fatal("closeSessionAndWorktree = false, want true: an Open failure must not be treated as a close failure")
+	}
+	if len(open.Opens) != 1 {
+		t.Errorf("an Open(cwd) failure must short-circuit before any branch-delete Open; opens=%v", open.Opens)
+	}
+	if len(open.BranchDeletes) != 0 {
+		t.Errorf("branch must not be deleted when Open(cwd) failed; deletes=%v", open.BranchDeletes)
+	}
+}
+
+// TestCloseSessionAndWorktree_noBeadMetaSkipsBranchDelete covers an older
+// session dispatched before pg2-5sirm's meta round-trip (or a
+// non-"worktree"-isolation stray this sweep still matched by prefix alone):
+// with no pgrouter.bead tag at all, deleteAnchorBranch must no-op entirely —
+// "pg-router/" alone is not a real branch, and there is nothing safe to
+// delete — even though RemoveWorktree itself succeeded.
+func TestCloseSessionAndWorktree_noBeadMetaSkipsBranchDelete(t *testing.T) {
+	cc := &fakeCC{}
+	open := &fakeWorktreeOpener{}
+	s := ccpool.Session{ExternalID: "pg-router-worker-zr-old", State: ccpool.StateIdle, CWD: "/wt/zr-old"}
+	if !closeSessionAndWorktree(context.Background(), cc, open.Open, "/repo/root", s) {
+		t.Fatal("closeSessionAndWorktree = false, want true")
+	}
+	if len(open.Removed) != 1 || open.Removed[0] != "/wt/zr-old" {
+		t.Fatalf("RemoveWorktree calls = %v, want exactly one call for /wt/zr-old", open.Removed)
+	}
+	if len(open.Opens) != 1 || open.Opens[0] != "/wt/zr-old" {
+		t.Errorf("a missing bead tag must short-circuit before any branch-delete Open; opens=%v", open.Opens)
+	}
+	if len(open.BranchDeletes) != 0 {
+		t.Errorf("branch must not be deleted without a bead id; deletes=%v", open.BranchDeletes)
 	}
 }
 
@@ -373,7 +505,7 @@ func TestServePreShutdown_success(t *testing.T) {
 		{ExternalID: "pg-router-worker-zr-x", Live: true},
 	}}}
 	var stdout bytes.Buffer
-	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", strings.NewReader(`{"schemaVersion":"1","id":"hs-1"}`), &stdout)
+	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root", strings.NewReader(`{"schemaVersion":"1","id":"hs-1"}`), &stdout)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d", code, conformance.ExitOK)
 	}
@@ -394,7 +526,7 @@ func TestServePreShutdown_success(t *testing.T) {
 func TestServePreShutdown_rejectsMalformedRequest(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-x", Live: true}}}}
 	var stdout bytes.Buffer
-	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", strings.NewReader(`{"schemaVersion":"1"}`), &stdout) // missing id
+	code := servePreShutdown(cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root", strings.NewReader(`{"schemaVersion":"1"}`), &stdout) // missing id
 	if code != conformance.ExitError {
 		t.Fatalf("exit = %d, want %d on a schema-invalid request", code, conformance.ExitError)
 	}

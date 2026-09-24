@@ -84,14 +84,14 @@ func runPreShutdown(args []string) int {
 		return conformance.ExitError
 	}
 
-	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot), cfg.SessionPrefix, os.Stdin, os.Stdout)
+	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot), cfg.SessionPrefix, cfg.RepoRoot, os.Stdin, os.Stdout)
 }
 
 // servePreShutdown is runPreShutdown's testable core, factored out so a test
 // can drive it against a fake ccpool.Runner and capture its reply without
 // touching a real ccpool binary or os.Stdin/os.Stdout — mirrors
 // conformance.Participant.Serve's own (stdin, stdout) shape.
-func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, sessionPrefix string, stdin io.Reader, stdout io.Writer) int {
+func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, sessionPrefix, repoRoot string, stdin io.Reader, stdout io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "preShutdown: read request from stdin:", err)
@@ -109,7 +109,7 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 	var req lifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
-	closed := teardownAllSessions(context.Background(), cc, open, br, sessionPrefix)
+	closed := teardownAllSessions(context.Background(), cc, open, br, sessionPrefix, repoRoot)
 	slog.Info("preShutdown: teardown", "closed", closed)
 
 	writeReply(stdout, map[string]any{
@@ -141,7 +141,7 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 // Orchestrator.teardownAll — this module's own local re-implementation, not
 // an import (Go's internal-package visibility rule; docs/adr/0065's
 // Addendum), since that package no longer exists in this module.
-func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix string) (closed int) {
+func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("preShutdown: teardown list failed", "err", err)
@@ -151,7 +151,7 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 		if !strings.HasPrefix(s.ExternalID, prefix) {
 			continue
 		}
-		if closeUnlessNeedsInput(ctx, cc, open, br, s) {
+		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, s) {
 			closed++
 		}
 	}
@@ -186,20 +186,22 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 // once-per-shutdown sweep, which reconciles a closed-bead session's
 // StateIdle/StateNeedsInput row while the daemon is still up, rather than
 // leaving it to leak until the next shutdown.
-func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, s ccpool.Session) bool {
+func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot string, s ccpool.Session) bool {
 	if s.State == ccpool.StateNeedsInput && !beadAlreadyClosed(ctx, br, s) {
 		slog.Info("preShutdown: teardown preserving needs_input session for operator attach",
 			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
 		return false
 	}
-	return closeSessionAndWorktree(ctx, cc, open, s)
+	return closeSessionAndWorktree(ctx, cc, open, repoRoot, s)
 }
 
 // closeSessionAndWorktree purges s via cc.Close(purge=true), then
 // best-effort removes s's own working directory (ccpool.Session.CWD) as a
-// linked git worktree via open/gitclient.WorktreeManager.RemoveWorktree.
-// This must fail SOFT (log + continue), never abort the caller's sweep or be
-// promoted to a nonzero overall exit: both callers — closeUnlessNeedsInput's
+// linked git worktree via open/gitclient.WorktreeManager.RemoveWorktree —
+// and, once that removal actually succeeds, deletes s's own
+// pg-router/<beadID> anchor branch (deleteAnchorBranch below). This must
+// fail SOFT (log + continue), never abort the caller's sweep or be promoted
+// to a nonzero overall exit: both callers — closeUnlessNeedsInput's
 // once-per-shutdown sweep and reconcile.go's periodic
 // reconcileClosedBeadSessions — sweep sessions regardless of which
 // IsolationConfig.Type (internal/executor/isolation.go) launched them, so
@@ -210,10 +212,23 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // failure shape (open erroring because cwd isn't inside any repo, or
 // RemoveWorktree itself erroring because it isn't a registered linked
 // worktree of the repo it IS inside) is expected and equally harmless — same
-// fail-soft posture cc.Close's own error handling below already has.
+// fail-soft posture cc.Close's own error handling below already has. Since
+// the branch delete only ever runs after a successful RemoveWorktree, it
+// naturally never fires for either of those isolation types either — only a
+// genuine "worktree" isolation session ever has a pg-router/<beadID> anchor
+// branch to delete in the first place.
 // Returns true iff cc.Close succeeded (the session was actually purged); a
-// worktree-removal failure never changes that.
-func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, s ccpool.Session) bool {
+// worktree-removal or branch-delete failure never changes that.
+//
+// The branch-delete step is bead pg2-ci75j's own fix, applied here at this
+// THIRD call site by pg2-tpa18: ci75j's own acceptance criterion named only
+// internal/executor.cleanupWorktree and the nix mkWorktreeSweepScript,
+// leaving this preShutdown/reconcile call site explicitly out of scope —
+// x/gitclient's RemoveWorktree only ever ran `git worktree remove`, never
+// touching the branch it was created on, so every session purged through
+// this function orphaned its pg-router/<beadID> anchor branch forever until
+// now.
+func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session) bool {
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
@@ -224,8 +239,70 @@ func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktre
 	} else if err := wm.RemoveWorktree(ctx, s.CWD, true); err != nil {
 		slog.Warn("teardown: worktree remove failed (cwd may not be a linked worktree)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
+	} else {
+		slog.Info("teardown: worktree removed", "session", s.ExternalID, "cwd", s.CWD)
+		deleteAnchorBranch(ctx, open, repoRoot, s.ExternalID, s.Meta[ccpool.MetaKeyBead])
 	}
 	return true
+}
+
+// deleteAnchorBranch removes s's own throwaway pg-router/<beadID> anchor
+// branch (worktree.Ensure's own doc comment: "a dedicated branch
+// pg-router/<beadID>") now that closeSessionAndWorktree has confirmed its
+// worktree is gone. x/gitclient's RemoveWorktree runs only `git worktree
+// remove` and never touches the branch (bead pg2-ci75j's root cause) --
+// without this call, the branch is orphaned in repoRoot forever, exactly the
+// ~100+-stray-branch state pg2-ci75j found in the ZR monorepo at its other
+// two call sites.
+//
+// Deliberately reopens the gitclient at repoRoot rather than reusing the
+// worktree.Opener result the caller already holds: that manager was opened
+// at s.CWD, which RemoveWorktree just removed, so it can no longer spawn git
+// at all -- a branch is a repo-level ref that must be deleted from a still-
+// existing checkout, the same anchor worktree.Ensure itself used to create
+// the branch in the first place (internal/worktree/worktree.go's Ensure
+// opens repoRoot, not the not-yet-created worktree path, to create it).
+//
+// beadID comes from the session's own pgrouter.bead metadata
+// (ccpool.MetaKeyBead) -- the SAME source beadAlreadyClosed above already
+// trusts for this session's bead identity, rather than re-deriving one from
+// s.CWD's basename. An empty beadID (an older session dispatched before
+// pg2-5sirm's meta round-trip, or a non-"worktree"-isolation stray this
+// sweep still matched by prefix alone) is a no-op: "pg-router/" alone is not
+// a real branch, and there is nothing safe to delete.
+//
+// These are pg-router's own internal per-dispatch anchor branches, reset at
+// HEAD on every dispatch (worktree.Ensure's own ResetBranch/-B) -- never a
+// user branch with independent value -- so once the worktree is confirmed
+// removed the branch has fully served its purpose. Most are never merged
+// into anything, so deletion uses force (`git branch -D`) rather than plain
+// `-d`, which would refuse constantly for exactly that reason.
+//
+// Fails soft exactly like RemoveWorktree above: any error here (open
+// failure, the branch already gone, a client that isn't a BranchManager, a
+// transient git error) is logged and left for the next sweep, never
+// escalated -- an orphaned branch costs disk, not correctness.
+func deleteAnchorBranch(ctx context.Context, open worktree.Opener, repoRoot, externalID, beadID string) {
+	if beadID == "" {
+		return
+	}
+	branch := "pg-router/" + beadID
+	root, err := open(ctx, repoRoot)
+	if err != nil {
+		slog.Warn("teardown: branch delete: open repo root failed (left for next sweep)",
+			"session", externalID, "branch", branch, "err", err)
+		return
+	}
+	bm, ok := root.(gitclient.BranchManager)
+	if !ok {
+		return
+	}
+	if err := bm.DeleteBranch(ctx, branch, true); err != nil {
+		slog.Warn("teardown: branch delete failed (left for next sweep)",
+			"session", externalID, "branch", branch, "err", err)
+		return
+	}
+	slog.Info("teardown: branch deleted", "session", externalID, "branch", branch)
 }
 
 // beadAlreadyClosed reports whether s's own bead — read from its

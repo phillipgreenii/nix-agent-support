@@ -170,7 +170,7 @@ func runDispatch(args []string) int {
 	// pair of runners. Best effort: logged, never turned into a dispatch
 	// failure — the actual dispatch below is this subcommand's primary job.
 	if role.CCPool != nil {
-		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix); closed > 0 {
+		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot); closed > 0 {
 			slog.Info("dispatch: reconciled sessions with closed beads", "closed", closed)
 		}
 	}
