@@ -537,6 +537,53 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 	})
 }
 
+func TestComputeApprovals_LatestReviewPerAuthorWins(t *testing.T) {
+	t.Run("changes requested then approved by the same author reads approved", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{
+			{Author: "carol", State: "CHANGES_REQUESTED"},
+			{Author: "carol", State: "APPROVED"},
+		}}
+		appr := computeApprovals(pr, "", nil, nil)
+		if !appr.HumanApproved || appr.HumanChangesRequested {
+			t.Fatalf("got HumanApproved=%v HumanChangesRequested=%v; want true/false (carol's later APPROVED supersedes her earlier CHANGES_REQUESTED)", appr.HumanApproved, appr.HumanChangesRequested)
+		}
+	})
+	t.Run("approved then changes requested by the same author reads changes requested", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{
+			{Author: "carol", State: "APPROVED"},
+			{Author: "carol", State: "CHANGES_REQUESTED"},
+		}}
+		appr := computeApprovals(pr, "", nil, nil)
+		if appr.HumanApproved || !appr.HumanChangesRequested {
+			t.Fatalf("got HumanApproved=%v HumanChangesRequested=%v; want false/true (carol's later CHANGES_REQUESTED supersedes her earlier APPROVED)", appr.HumanApproved, appr.HumanChangesRequested)
+		}
+	})
+	t.Run("a later COMMENTED review does not erase an earlier APPROVED", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{
+			{Author: "carol", State: "APPROVED"},
+			{Author: "carol", State: "COMMENTED"},
+		}}
+		if got := computeApprovals(pr, "", nil, nil).HumanApproved; !got {
+			t.Fatalf("got HumanApproved=%v; want true (a later COMMENTED review must not mask carol's standing APPROVED)", got)
+		}
+	})
+	t.Run("self approves then later requests changes: SelfApproved reads false", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{
+			{Author: "me", State: "APPROVED"},
+			{Author: "me", State: "CHANGES_REQUESTED"},
+		}}
+		if got := computeApprovals(pr, "me", nil, nil).SelfApproved; got {
+			t.Fatalf("got SelfApproved=%v; want false (self's later CHANGES_REQUESTED supersedes the earlier APPROVED)", got)
+		}
+	})
+	t.Run("an empty-author review never counts as a self-approval", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{{Author: "", State: "APPROVED"}}}
+		if got := computeApprovals(pr, "", nil, nil).SelfApproved; got {
+			t.Fatalf("got SelfApproved=%v; want false (self is \"\", must never match a ghost/empty Author)", got)
+		}
+	})
+}
+
 // --- waiting-on-me: ported from pkg/beads.AllNonClosedHumanLabeled's own semantics ---
 
 func TestComputeWaitingOnMe(t *testing.T) {

@@ -1222,7 +1222,10 @@ Leave every panel from `"id": 8` ("Data Age (s)") onward untouched — their `gr
 Run: `cd /Users/phillipg/phillipg_mbp/phillipgreenii-nix-support-apps && jq empty darwin/modules/observability/dashboards/pg-desk.json && echo "valid JSON"`
 Expected: `valid JSON`, no parse error.
 
-Run: `cd /Users/phillipg/phillipg_mbp/phillipgreenii-nix-support-apps && jq -r '.panels[] | select(.type=="table") | .targets[0].root_selector' darwin/modules/observability/dashboards/pg-desk.json`
+Run: `cd /Users/phillipg/phillipg_mbp/phillipgreenii-nix-support-apps && jq -r '[.. | objects | select(.type? == "table")] | .[].targets[0].root_selector' darwin/modules/observability/dashboards/pg-desk.json`
+
+(Corrected post-execution: the non-recursive form above this note originally shipped could never see the "Hidden" table panel nested inside the collapsed "Hidden / Dropped" row — it only iterates the top-level `.panels` array. This recursive form is what was actually used.)
+
 Expected, in order: `team_awaiting_me`, `team_awaiting_team`, `team_awaiting_owner`, `mine_awaiting_me`, `mine_awaiting_team`, `hidden` — matching Task 3's five `PanelXxx` constants (plus the pre-existing `hidden` panel, untouched by this plan) exactly.
 
 - [ ] **Step 3: Format and commit**
@@ -1241,4 +1244,4 @@ git commit -m "pg-desk dashboard: rename panels to the awaiting-owner/team/me ta
 
 ## Deployment note (not a plan task — do not run without explicit request)
 
-None of the five tasks above activate the change. `pg-desk-serve` is a live launchd agent (`com.phillipg.pg-desk-serve`) running an already-built Nix package; picking up Task 1-3's Go changes requires rebuilding and re-activating home-manager (and the Grafana provisioning module for Task 5, likely via `darwin-rebuild switch` or the workspace's own `pn workspace apply`). Per this session's standing rule, do not run any system-activation command on your own initiative — hand the finished, committed, tested branch back and let the operator apply it themselves, or ask explicitly before activating.
+None of the five tasks above activate the change. `pg-desk-serve` is a live launchd agent (`com.phillipg.pg-desk-serve`) running an already-built Nix package; picking up Task 1-3's Go changes requires rebuilding and re-activating home-manager (and the Grafana provisioning module for Task 5, likely via `darwin-rebuild switch` or the workspace's own `pn workspace apply`). Per this session's standing rule, do not run any system-activation command on your own initiative — hand the finished, committed, tested branch back and let the operator apply it themselves, or ask explicitly before activating. Separately: `BuildPayload` and `open`'s row selection both silently drop any interpretation row whose stored `panel` string isn't one of the five current names — so once this change is actually applied, every previously-interpreted PR needs a fresh interpret pass (a pipeline trigger, or `pg-desk run --change sweep`) before it reappears under its new panel name in either the dashboard or `open`; until then it simply vanishes from both rather than erroring.

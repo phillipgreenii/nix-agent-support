@@ -412,7 +412,7 @@ func runOpenCmd(t *testing.T, f openFlags) (stdout, stderr string, err error) {
 	return outBuf.String(), errBuf.String(), err
 }
 
-func TestOpenCmdPrintListsTeamActNowByDefault(t *testing.T) {
+func TestOpenCmdPrintListsTeamAwaitingMeByDefault(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)

@@ -14,9 +14,13 @@ Pinned by the ported `open_test.go`/`open_json_test.go` goldens: `--mine`, `--al
 
 - `--all` and `--needs-attention` are mutually exclusive, as are `--json` and `--print`.
 - `--reason`, `--owner`, and `--not-owner` MUST be rejected together with `--mine`.
-- A merged PR MUST always be excluded.
+- A PR that is not open (merged, closed unmerged/rejected, or any other non-`open` state) MUST
+  always be excluded.
 - The per-side attention default: the team side defaults to needs-attention; `--mine` defaults to
-  all.
+  all. On the team side, "needs attention" resolves to exactly the `team_awaiting_me` panel — a
+  PR the operator is a requested reviewer on and hasn't approved yet — not every non-blocked team
+  PR. `team_awaiting_team` and `team_awaiting_owner` rows are still selectable with `--all`, just
+  excluded from the default view.
 - The `PG_DESK_OUTPUT=json` environment variable overrides the default text rendering.
 
 `open` opens one browser window with one tab per selected PR.

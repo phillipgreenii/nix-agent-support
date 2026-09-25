@@ -60,10 +60,16 @@ const (
 // WaitingOnMe is populated by interpret.go's caller (computeWaitingOnMe), not
 // here.
 //
-// No staleness axis: schema.PRReview carries no head-SHA-at-review field, so
-// unlike pg-pr's store.Approval.IsStale (INV-APPROVAL-3), every review is
-// treated as standing for the PR's CURRENT state — a documented deviation
-// (see interpret.go's package doc).
+// No PER-COMMIT staleness axis: schema.PRReview carries no head-SHA-at-review
+// field, so unlike pg-pr's store.Approval.IsStale (INV-APPROVAL-3), a review
+// is never invalidated by a LATER COMMIT landing with no new review from
+// anyone — a documented deviation (see interpret.go's package doc). This
+// function DOES collapse pr.Reviews to each author's latest decisive verdict
+// (see latestDecision inside computeApprovals), which fixes the OTHER
+// staleness axis — a review superseded by a LATER REVIEW FROM THE SAME
+// AUTHOR (e.g. CHANGES_REQUESTED followed by that same author's own
+// APPROVED) no longer reads as standing. The two axes are independent; only
+// the per-commit one remains unaddressed.
 //
 // SelfApproved and HumanChangesRequested are computed in the SAME pass as
 // HumanApprovers/HumanApproved (one loop over pr.Reviews) rather than as
@@ -76,34 +82,46 @@ const (
 func computeApprovals(pr prShow, self string, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
 	allow := toSet(approverAllowlist)
 
-	approvers := map[string]struct{}{}
-	selfApproved := false
-	humanChangesRequested := false
+	// latestDecision collapses pr.Reviews (a full chronological history,
+	// per pg-connector-pr-github's ListReviews) to each author's most
+	// recent APPROVED/CHANGES_REQUESTED verdict. A COMMENTED (or any other)
+	// review never overwrites an earlier decisive one, mirroring
+	// pg-connector-pr-github's own needsAttentionForPR collapse
+	// (internal/provider.go) and GitHub's own reviewDecision semantics.
+	// Without this, a reviewer who requested changes and was later
+	// satisfied — an ordinary review cycle — would read as "still
+	// requesting changes" forever, since pr.Reviews carries every
+	// historical event, not just the live one.
+	latestDecision := map[string]string{}
 	for _, r := range pr.Reviews {
 		switch r.State {
-		case "APPROVED":
-			approvers[r.Author] = struct{}{}
-			if self != "" && r.Author == self {
-				selfApproved = true
-			}
-		case "CHANGES_REQUESTED":
-			if _, isBot := allow[r.Author]; !isBot {
-				humanChangesRequested = true
-			}
+		case "APPROVED", "CHANGES_REQUESTED":
+			latestDecision[r.Author] = r.State
 		}
 	}
 
+	approvers := map[string]struct{}{}
+	selfApproved := false
+	humanChangesRequested := false
 	disapproved := false
 	approvedByAllowlisted := false
-	for _, r := range pr.Reviews {
-		if _, ok := allow[r.Author]; !ok {
-			continue
-		}
-		switch r.State {
-		case "CHANGES_REQUESTED":
-			disapproved = true
+	for author, state := range latestDecision {
+		_, isBot := allow[author]
+		switch state {
 		case "APPROVED":
-			approvedByAllowlisted = true
+			approvers[author] = struct{}{}
+			if self != "" && author == self {
+				selfApproved = true
+			}
+			if isBot {
+				approvedByAllowlisted = true
+			}
+		case "CHANGES_REQUESTED":
+			if isBot {
+				disapproved = true
+			} else {
+				humanChangesRequested = true
+			}
 		}
 	}
 
