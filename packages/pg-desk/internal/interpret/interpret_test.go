@@ -706,43 +706,43 @@ func TestClassifyPanel(t *testing.T) {
 		})
 
 		tests := []struct {
-			name string
-			pr   prShow
-			ci   ciRollupResult
-			appr Approvals
-			want string
+			name         string
+			pr           prShow
+			ci           ciRollupResult
+			appr         Approvals
+			matchReasons []string
+			want         string
 		}{
-			{"ci failing -> awaiting owner", openPR, ciRollupResult{State: "failure"}, Approvals{}, PanelTeamAwaitingOwner},
-			{"ci pending -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{}, PanelTeamAwaitingOwner},
-			{"conflict -> awaiting owner", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingOwner},
-			{"bot disapproved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, PanelTeamAwaitingOwner},
-			{"human changes requested -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, PanelTeamAwaitingOwner},
+			{"ci failing -> awaiting owner", openPR, ciRollupResult{State: "failure"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"ci pending -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"conflict -> awaiting owner", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"bot disapproved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"human changes requested -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 			{
 				"blocked wins even if I'm assigned and already approved",
 				openPR,
 				ciRollupResult{State: "success"},
 				Approvals{SelfApproved: true, HumanChangesRequested: true},
+				[]string{MatchReasonReviewRequested},
 				PanelTeamAwaitingOwner,
 			},
-			{"clean, I'm requested, I haven't approved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingMe},
-			{"clean, I'm requested, I already approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true}, PanelTeamAwaitingOwner},
-			{"clean, not requested, nobody approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingTeam},
-			{"clean, not requested, someone else approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelTeamAwaitingOwner},
+			{
+				"blocked wins even when I'm assigned and have NOT approved yet",
+				openPR,
+				ciRollupResult{State: "success"},
+				Approvals{HumanChangesRequested: true},
+				[]string{MatchReasonReviewRequested},
+				PanelTeamAwaitingOwner,
+			},
+			{"clean, I'm requested, I haven't approved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingMe},
+			{"clean, I'm requested, I already approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingOwner},
+			{"clean, not requested, nobody approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingTeam},
+			{"clean, not requested, someone else approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 		}
 		for _, tt := range tests {
-			// Every case with SelfApproved:true is deliberately a
-			// requested-reviewer case (see the two rows this fires for:
-			// "blocked wins even if I'm assigned and already approved" and
-			// "clean, I'm requested, I already approved"). No row sets
-			// SelfApproved:true while intending a not-requested reading, so
-			// this alone is a safe, unambiguous selector.
-			matchReasons := []string{MatchReasonTeamAuthored}
-			if tt.want == PanelTeamAwaitingMe || tt.appr.SelfApproved {
-				matchReasons = []string{MatchReasonReviewRequested}
-			}
 			t.Run(tt.name, func(t *testing.T) {
-				if got := classifyPanel(OwnershipTeam, tt.pr, tt.ci, tt.appr, matchReasons); got != tt.want {
-					t.Errorf("classifyPanel = %q; want %q (matchReasons=%v)", got, tt.want, matchReasons)
+				if got := classifyPanel(OwnershipTeam, tt.pr, tt.ci, tt.appr, tt.matchReasons); got != tt.want {
+					t.Errorf("classifyPanel = %q; want %q (matchReasons=%v)", got, tt.want, tt.matchReasons)
 				}
 			})
 		}
