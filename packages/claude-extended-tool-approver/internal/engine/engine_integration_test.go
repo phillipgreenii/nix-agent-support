@@ -4581,6 +4581,45 @@ func TestIntegration_UnclassifiableEnvValueNeverApproves(t *testing.T) {
 	}
 }
 
+// TestIntegration_RandomnessSourceEnvValueStillRejects is tc-424ks's own
+// regression test: MEASURED via `evaluate --baseline` against the real
+// decision corpus, granting safecmds a `/proc/sys/kernel/random/uuid` read
+// (a plain `cat /proc/sys/kernel/random/uuid`, harmless on its own) moved
+// `ACTOR_ID="$(cat /proc/sys/kernel/random/uuid)-drain"` from `deny` to
+// `allow` — envvars' "value is unverifiable" guard (internal/rules/envvars.go)
+// recursively evaluates a value's command substitution through this SAME
+// engine and treats an Approve as POSITIVE PROOF the value is verifiable,
+// which a live randomness source is definitionally not: the hook cannot know
+// ahead of time what `$(cat /proc/sys/kernel/random/uuid)` will read as, so
+// trusting its Approve to clear the assignment was a real, if narrow,
+// less-restrictive regression. safecmds' procSafeTopLevelFiles now excludes
+// the whole `/proc/sys/kernel/random/*` subtree (see its own doc) precisely
+// so this stays gated; this test pins the END-TO-END shape (both the bare
+// read AND the value-verification interaction), not just the unit-level
+// exclusion pinned in safecmds_test.go's TestIsProcSafeReadPath.
+func TestIntegration_RandomnessSourceEnvValueStillRejects(t *testing.T) {
+	projectRoot := "/Users/testuser/workspace/my-project"
+	eng := buildFullEngine(projectRoot, projectRoot)
+
+	runChainCases(t, eng, projectRoot, []chainCase{
+		{
+			"bare read of a randomness source stays deferred",
+			"cat /proc/sys/kernel/random/uuid",
+			hookio.NoOpinion, "",
+		},
+		{
+			"the corpus spelling: actor id seeded from a randomness source",
+			`ACTOR_ID="$(cat /proc/sys/kernel/random/uuid)-drain"; echo "$ACTOR_ID"`,
+			hookio.Reject, "",
+		},
+		{
+			"boot_id is the same generative shape as uuid",
+			`X=$(cat /proc/sys/kernel/random/boot_id); echo "$X"`,
+			hookio.Reject, "",
+		},
+	})
+}
+
 // TestIntegration_NixInnerCommandStructuralDelegation is pg2-m132k's
 // end-to-end regression test, run through the REAL composed chain: nix
 // develop/shell's -c/--command inner-command delegation must judge the

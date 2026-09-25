@@ -1050,7 +1050,7 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 			return "has malformed glued quoting " + cand
 		}
 		if looksLikePath(cand) {
-			if !pe.Evaluate(cand).CanRead() {
+			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand
 			}
 		}
@@ -1271,12 +1271,142 @@ func readPathIssue(args []string, pe *patheval.PathEvaluator, program string, pr
 			return "has a dynamically-expanded path arg " + cand, hookio.RefusalCategoryDynamicPathRead
 		}
 		if looksLikePath(cand) {
-			if !pe.Evaluate(cand).CanRead() {
+			if !pe.Evaluate(cand).CanRead() && !isProcSafeReadPath(cand) {
 				return "references unknown path " + cand, hookio.RefusalCategoryUnspecified
 			}
 		}
 	}
 	return "", hookio.RefusalCategoryUnspecified
+}
+
+// procSafeTopLevelFiles are exact `/proc` paths (no PID component) that are
+// pure OS-wide, read-only diagnostics — the same risk class `ps`/`uptime`/
+// `df` (already unconditionally in alwaysSafe above) already expose, just
+// gated here by a literal path rather than a bare command name because the
+// zone model (patheval, scoped to the project/workspace/sandbox roots) has
+// no opinion on `/proc` at all: it is a virtual, machine-global filesystem
+// outside every one of those roots, so every `/proc` read previously
+// abstained ("references unknown path /proc/...") regardless of how benign
+// the target file actually was. None of these can carry a filesystem secret
+// or act as a symlink to somewhere else (see procSafePerPIDFiles' doc for
+// the entries that DO and are therefore excluded).
+//
+// DELIBERATELY EXCLUDES `/proc/sys/kernel/random/*` (uuid, boot_id, and
+// siblings): those files do not just REPORT state, they GENERATE a fresh
+// unpredictable value on every read, which is a materially different
+// capability from every entry actually listed below. MEASURED regression
+// (tc-424ks, via `evaluate --baseline`): with `/proc/sys/kernel/random/uuid`
+// admitted here, `ACTOR_ID="$(cat /proc/sys/kernel/random/uuid)-drain"` moved
+// from `deny` to `allow` — internal/rules/envvars' "value is unverifiable"
+// guard recursively evaluates a value's command substitution and treats an
+// Approve as POSITIVE PROOF the value is verifiable, which a randomness
+// source is definitionally not. No entry below shares that generative
+// property (they all report existing kernel/process STATE), so this
+// exclusion is scoped to the one subtree that does, not a broader retreat
+// from `/proc/sys/kernel/*`.
+var procSafeTopLevelFiles = map[string]bool{
+	"/proc/loadavg":   true,
+	"/proc/diskstats": true,
+	"/proc/uptime":    true,
+	"/proc/meminfo":   true,
+	"/proc/cpuinfo":   true,
+	"/proc/version":   true,
+	"/proc/stat":      true,
+	"/proc/sys/kernel/unprivileged_userns_clone": true,
+	"/proc/sys/kernel/osrelease":                 true,
+	"/proc/sys/kernel/ostype":                    true,
+	"/proc/sys/kernel/hostname":                  true,
+}
+
+// procSafePerPIDFiles are the LEAF filenames (the FINAL path component only)
+// safe to read under `/proc/<pid>/` for ANY pid — process-introspection data
+// no more sensitive than what `ps aux` (already unconditionally in
+// alwaysSafe) already exposes for every process on the machine, including
+// its full command line.
+//
+// DELIBERATELY EXCLUDES every entry that IS, or can act AS, a handle to
+// something OUTSIDE `/proc` itself:
+//
+//   - cwd, root, exe — symlinks to the process's real working directory,
+//     chroot, or binary. Admitting these would let a `/proc`-prefixed
+//     literal smuggle an ARBITRARY real path straight past the zone model —
+//     `cat /proc/self/root/etc/shadow` reads `/etc/shadow` through a literal
+//     this predicate would otherwise see only as "under /proc".
+//   - fd (and any fd/<n>) — each entry is a symlink to whatever that file
+//     descriptor currently has open; reading it reads THAT file's live
+//     content, the identical escape shape as root/cwd/exe one level down.
+//   - environ — may carry secrets passed via the process's own environment,
+//     the same class internal/rules/secrets already gates for ordinary
+//     files.
+//   - maps, mem — raw memory contents.
+//
+// isProcSafeReadPath consults this map only AFTER confirming the candidate
+// is exactly `/proc/<pid>/<leaf>` (its own two-segment shape check), so this
+// map cannot accidentally admit `/proc/<pid>/root/status` — the "root"
+// segment fails that shape check before the leaf name is ever consulted.
+var procSafePerPIDFiles = map[string]bool{
+	"status":        true,
+	"io":            true,
+	"wchan":         true,
+	"stat":          true,
+	"statm":         true,
+	"cmdline":       true,
+	"comm":          true,
+	"oom_score":     true,
+	"oom_score_adj": true,
+}
+
+// isProcSafeReadPath reports whether cand — already confirmed path-shaped by
+// the caller's own looksLikePath check — names a known-safe `/proc` read
+// target: either an exact procSafeTopLevelFiles entry, or a
+// `/proc/<pid-or-self>/<leaf>` path whose leaf is in procSafePerPIDFiles.
+//
+// cand is re-cleaned here (filepath.Clean) rather than trusted as-is: this
+// check runs as an ALTERNATIVE to pe.Evaluate(cand).CanRead(), which cleans
+// internally, so a `..`-bearing spelling must be judged on the SAME cleaned
+// form or a traversal could dodge both checks. Cleaning `/proc/../etc/shadow`
+// yields `/etc/shadow`, which fails the `/proc/` prefix test below outright —
+// the traversal cancels itself out of `/proc` entirely rather than needing a
+// dedicated `..` guard here.
+func isProcSafeReadPath(cand string) bool {
+	clean := filepath.Clean(cand)
+	if procSafeTopLevelFiles[clean] {
+		return true
+	}
+	rest, ok := strings.CutPrefix(clean, "/proc/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 {
+		// Not exactly `/proc/<pid>/<leaf>` — in particular this rejects any
+		// THIRD segment (`/proc/<pid>/root/<anything>`, `/proc/<pid>/fd/<n>`),
+		// which is the shape check that keeps procSafePerPIDFiles' exclusions
+		// load-bearing even if a future edit widened that map by mistake.
+		return false
+	}
+	pid, leaf := parts[0], parts[1]
+	if pid != "self" && pid != "thread-self" && !isDigits(pid) {
+		return false
+	}
+	return procSafePerPIDFiles[leaf]
+}
+
+// isDigits reports whether s is non-empty and every byte is an ASCII digit —
+// isProcSafeReadPath's PID-shape check (a literal `/proc/<pid>/...` entry is
+// always numeric on Linux; `self`/`thread-self` are the only non-numeric
+// aliases the kernel itself provides, and isProcSafeReadPath checks those
+// separately).
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveReadlinkRealpathSubstitution reports whether cand — an argument

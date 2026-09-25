@@ -2861,3 +2861,119 @@ func TestSafecmds_ForLoopVar_NonLiteralWordList_Abstains(t *testing.T) {
 		t.Errorf("reason %q does not name the dynamic-expansion refusal", got.Reason)
 	}
 }
+
+// TestIsProcSafeReadPath pins isProcSafeReadPath's allowlist shape directly:
+// top-level diagnostic files, the curated per-PID leaf set (numeric pid,
+// "self", "thread-self"), and — most importantly — every excluded shape that
+// would otherwise let a `/proc`-prefixed literal smuggle access to something
+// OUTSIDE `/proc` (cwd/root/exe/fd/environ/maps/mem — see the map's own doc),
+// plus a `..`-traversal attempt that lexically escapes `/proc` entirely.
+func TestIsProcSafeReadPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/proc/loadavg", true},
+		{"/proc/diskstats", true},
+		{"/proc/sys/kernel/hostname", true},
+		{"/proc/1234/status", true},
+		{"/proc/1234/io", true},
+		{"/proc/1234/wchan", true},
+		{"/proc/self/status", true},
+		{"/proc/thread-self/stat", true},
+		// exclusions: symlink/handle escape vectors
+		{"/proc/1234/cwd", false},
+		{"/proc/1234/root", false},
+		{"/proc/1234/exe", false},
+		{"/proc/1234/fd", false},
+		{"/proc/1234/fd/3", false},
+		{"/proc/1234/environ", false},
+		{"/proc/1234/maps", false},
+		{"/proc/1234/mem", false},
+		// escape attempt through a would-be-safe leaf name one level deeper
+		{"/proc/1234/root/etc/shadow", false},
+		{"/proc/self/root/etc/shadow", false},
+		// not a pid/self/thread-self at all
+		{"/proc/kcore", false},
+		{"/proc/notapid/status", false},
+		// traversal lexically escapes /proc before this predicate ever sees it
+		{"/proc/../etc/shadow", false},
+		// exclusion: a randomness SOURCE, not a state report — see
+		// procSafeTopLevelFiles' doc for the measured envvars interaction this
+		// closes (tc-424ks)
+		{"/proc/sys/kernel/random/uuid", false},
+		{"/proc/sys/kernel/random/boot_id", false},
+		// unrelated paths
+		{"/etc/passwd", false},
+		{"/proc", false},
+	}
+	for _, tt := range tests {
+		if got := isProcSafeReadPath(tt.path); got != tt.want {
+			t.Errorf("isProcSafeReadPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestSafecmds_ProcTopLevel_Approve pins the end-to-end shape (tc-424ks): a
+// `cat`/`ls` of a known-safe top-level `/proc` diagnostic file is approved,
+// where before this bead it abstained ("references unknown path") because
+// the zone model has no opinion on `/proc` at all.
+func TestSafecmds_ProcTopLevel_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	for _, cmd := range []string{"cat /proc/loadavg", "ls -la /proc/loadavg"} {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("%s: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_ProcPerPID_Approve pins the curated per-PID leaf set end to
+// end, matching the corpus evidence (tc-424ks: `cat /proc/<pid>/status`,
+// `cat /proc/<pid>/io`).
+func TestSafecmds_ProcPerPID_Approve(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	for _, cmd := range []string{"cat /proc/105764/io", "cat /proc/449196/status | grep State"} {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("%s: got %s (%s), want approve", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_ProcEscapeVectors_Abstain pins that the excluded /proc shapes
+// (a symlink to somewhere else, or the environment/memory of an arbitrary
+// process) still defer to claude-code rather than auto-approving — the
+// security-relevant negative space isProcSafeReadPath's own doc names.
+func TestSafecmds_ProcEscapeVectors_Abstain(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	for _, cmd := range []string{
+		"cat /proc/self/root/etc/shadow",
+		"cat /proc/1234/environ",
+		"cat /proc/1234/fd/3",
+		"cat /proc/1234/cwd",
+	} {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("%s: got %s (%s), want abstain", cmd, got.Decision, got.Reason)
+		}
+	}
+}
