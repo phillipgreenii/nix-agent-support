@@ -632,48 +632,119 @@ func TestApplyDispositionOverrides_UnknownCommentIgnored(t *testing.T) {
 // internal/snapshot/mine_panels.go & panels.go) ---
 
 func TestClassifyPanel(t *testing.T) {
-	tests := []struct {
-		name string
-		own  Ownership
-		pr   prShow
-		ci   ciRollupResult
-		appr Approvals
-		want string
-	}{
-		{"mine, conflict -> act now", OwnershipMine, prShow{Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineActNow},
-		{"mine, ci red -> act now", OwnershipMine, prShow{}, ciRollupResult{State: "failure"}, Approvals{}, PanelMineActNow},
-		{"mine, bot disapproved -> act now", OwnershipMine, prShow{}, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, PanelMineActNow},
-		{"mine, approved+clean+pending -> awaiting other things", OwnershipMine, prShow{MergeStateStatus: "CLEAN"}, ciRollupResult{State: "pending"}, Approvals{HumanApproved: true}, PanelMineAwaitingOtherThings},
-		{"mine, otherwise clean -> awaiting others", OwnershipMine, prShow{MergeStateStatus: "CLEAN"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingOthers},
-		{"mine, merged -> none", OwnershipMine, prShow{Merged: true}, ciRollupResult{State: "success"}, Approvals{}, PanelNone},
-		{"co-owned acts as mine", OwnershipCoOwned, prShow{Mergeable: "CONFLICTING"}, ciRollupResult{}, Approvals{}, PanelMineActNow},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyPanel(tt.own, tt.pr, tt.ci, tt.appr, nil); got != tt.want {
-				t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+	openPR := prShow{State: "open"}
+
+	t.Run("not open is excluded regardless of ownership", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			pr   prShow
+		}{
+			{"merged", prShow{State: "closed", Merged: true}},
+			{"closed unmerged (rejected/abandoned)", prShow{State: "closed"}},
+			{"empty state (never recorded / stale row)", prShow{State: ""}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := classifyPanel(OwnershipMine, tc.pr, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelNone {
+					t.Errorf("mine: classifyPanel = %q; want PanelNone", got)
+				}
+				if got := classifyPanel(OwnershipTeam, tc.pr, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}); got != PanelNone {
+					t.Errorf("team: classifyPanel = %q; want PanelNone", got)
+				}
+			})
+		}
+	})
+
+	t.Run("mine", func(t *testing.T) {
+		tests := []struct {
+			name string
+			pr   prShow
+			ci   ciRollupResult
+			appr Approvals
+			want string
+		}{
+			{"conflict -> awaiting me", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingMe},
+			{"ci failure -> awaiting me", openPR, ciRollupResult{State: "failure"}, Approvals{}, PanelMineAwaitingMe},
+			{"ci pending -> awaiting me (pending counts as blocked)", openPR, ciRollupResult{State: "pending"}, Approvals{}, PanelMineAwaitingMe},
+			{"ci none -> awaiting me (no countable run is not green)", openPR, ciRollupResult{State: "none"}, Approvals{}, PanelMineAwaitingMe},
+			{"bot disapproved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, PanelMineAwaitingMe},
+			{"human changes requested -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, PanelMineAwaitingMe},
+			{
+				"unresolved thread -> awaiting me, even with zero approvals",
+				prShow{State: "open", Comments: []prComment{{ID: "c1", ThreadID: "t1", Resolved: false}}},
+				ciRollupResult{State: "success"},
+				Approvals{HumanApproved: false},
+				PanelMineAwaitingMe,
+			},
+			{"resolved thread only, no approval -> awaiting team", prShow{State: "open", Comments: []prComment{{ID: "c1", ThreadID: "t1", Resolved: true}}}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingTeam},
+			{"clean + approved -> awaiting me (ready to merge)", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelMineAwaitingMe},
+			{"clean + not yet approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingTeam},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := classifyPanel(OwnershipMine, tt.pr, tt.ci, tt.appr, nil); got != tt.want {
+					t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+				}
+			})
+		}
+		t.Run("co-owned acts as mine", func(t *testing.T) {
+			if got := classifyPanel(OwnershipCoOwned, openPR, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelMineAwaitingTeam {
+				t.Errorf("classifyPanel = %q; want %q", got, PanelMineAwaitingTeam)
 			}
 		})
-	}
+	})
 
-	t.Run("team, draft -> none", func(t *testing.T) {
-		if got := classifyPanel(OwnershipTeam, prShow{Draft: true}, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}); got != PanelNone {
-			t.Errorf("got %q; want none", got)
+	t.Run("team", func(t *testing.T) {
+		t.Run("draft -> none", func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, prShow{State: "open", Draft: true}, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}); got != PanelNone {
+				t.Errorf("got %q; want none", got)
+			}
+		})
+		t.Run("no match reasons -> none", func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, openPR, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelNone {
+				t.Errorf("got %q; want none", got)
+			}
+		})
+
+		tests := []struct {
+			name string
+			pr   prShow
+			ci   ciRollupResult
+			appr Approvals
+			want string
+		}{
+			{"ci failing -> awaiting owner", openPR, ciRollupResult{State: "failure"}, Approvals{}, PanelTeamAwaitingOwner},
+			{"ci pending -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{}, PanelTeamAwaitingOwner},
+			{"conflict -> awaiting owner", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingOwner},
+			{"bot disapproved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, PanelTeamAwaitingOwner},
+			{"human changes requested -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, PanelTeamAwaitingOwner},
+			{
+				"blocked wins even if I'm assigned and already approved",
+				openPR,
+				ciRollupResult{State: "success"},
+				Approvals{SelfApproved: true, HumanChangesRequested: true},
+				PanelTeamAwaitingOwner,
+			},
+			{"clean, I'm requested, I haven't approved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingMe},
+			{"clean, I'm requested, I already approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true}, PanelTeamAwaitingOwner},
+			{"clean, not requested, nobody approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelTeamAwaitingTeam},
+			{"clean, not requested, someone else approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelTeamAwaitingOwner},
 		}
-	})
-	t.Run("team, no match reasons -> none", func(t *testing.T) {
-		if got := classifyPanel(OwnershipTeam, prShow{}, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelNone {
-			t.Errorf("got %q; want none", got)
-		}
-	})
-	t.Run("team, clean -> act now", func(t *testing.T) {
-		if got := classifyPanel(OwnershipTeam, prShow{}, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}); got != PanelTeamActNow {
-			t.Errorf("got %q; want team_act_now", got)
-		}
-	})
-	t.Run("team, ci failing -> blocked", func(t *testing.T) {
-		if got := classifyPanel(OwnershipTeam, prShow{}, ciRollupResult{State: "failure"}, Approvals{}, []string{MatchReasonTeamAuthored}); got != PanelTeamBlocked {
-			t.Errorf("got %q; want team_blocked", got)
+		for _, tt := range tests {
+			// Every case with SelfApproved:true is deliberately a
+			// requested-reviewer case (see the two rows this fires for:
+			// "blocked wins even if I'm assigned and already approved" and
+			// "clean, I'm requested, I already approved"). No row sets
+			// SelfApproved:true while intending a not-requested reading, so
+			// this alone is a safe, unambiguous selector.
+			matchReasons := []string{MatchReasonTeamAuthored}
+			if tt.want == PanelTeamAwaitingMe || tt.appr.SelfApproved {
+				matchReasons = []string{MatchReasonReviewRequested}
+			}
+			t.Run(tt.name, func(t *testing.T) {
+				if got := classifyPanel(OwnershipTeam, tt.pr, tt.ci, tt.appr, matchReasons); got != tt.want {
+					t.Errorf("classifyPanel = %q; want %q (matchReasons=%v)", got, tt.want, matchReasons)
+				}
+			})
 		}
 	})
 }

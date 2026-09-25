@@ -16,6 +16,15 @@ const (
 	BotVerdictNoDecision  = "no-decision"
 )
 
+const (
+	PanelTeamAwaitingOwner = "team_awaiting_owner"
+	PanelTeamAwaitingTeam  = "team_awaiting_team"
+	PanelTeamAwaitingMe    = "team_awaiting_me"
+	PanelMineAwaitingMe    = "mine_awaiting_me"
+	PanelMineAwaitingTeam  = "mine_awaiting_team"
+	PanelNone              = ""
+)
+
 // computeApprovals derives Approvals from the PR's current review set
 // (pr.Reviews) and, when verdictClassifier is non-nil, its comments. It
 // merges two independent bot-verdict signals — see this function's own
@@ -281,70 +290,93 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 // staleness-dependent clause. See interpret.go's package doc for the full
 // list of documented deviations.
 
-// openConversationOnly ports mine_panels.go's OpenConversationOnly exactly
-// (module-level free function there; a private helper here, over prComment
-// instead of api.Comment).
-func openConversationOnly(humanApproved bool, mergeStateStatus, ciState string, hasConflict bool, comments []prComment) bool {
-	if !humanApproved {
-		return false
+// classifyPanel places one entity into exactly one of the five named
+// panels, or PanelNone when it is not currently in flight at all (not
+// open, a draft/reasonless team PR).
+//
+// Operator ruling, 2026-09-25 (superseding the earlier act-now/blocked
+// taxonomy this function carried through Phase 9-13): "Act Now" conflated
+// "nothing is stopping you from looking at this" with "this needs YOUR
+// action," which was misleading — a team PR already carrying two human
+// approvals and a bot approval showed as Act Now solely because it matched
+// a watch label, with nothing left for the operator to actually do.
+//
+//   - blocked (ci not green, bot disapproved, a real human
+//     CHANGES_REQUESTED, or a merge conflict) always resolves to
+//     team_awaiting_owner / mine_awaiting_me FIRST, before any
+//     assignment/approval check — see this file's TestClassifyPanel
+//     "blocked wins even if I'm assigned and already approved".
+//   - Team, once not blocked: if I'm a requested reviewer
+//     (MatchReasonReviewRequested) and haven't approved yet ->
+//     team_awaiting_me; if I have -> team_awaiting_owner (the ball is back
+//     with the PR's owner/other reviewers). If I'm not requested: any
+//     existing human approval -> team_awaiting_owner, otherwise ->
+//     team_awaiting_team.
+//   - Mine, once not blocked: any unresolved review-thread comment ->
+//     mine_awaiting_me (no author qualifier — any open thread is on me).
+//     Otherwise, already having a human approval -> mine_awaiting_me
+//     (nothing left to do but merge). Otherwise -> mine_awaiting_team.
+//
+// No staleness axis (package doc): "approved" here means "a currently
+// APPROVED review exists," not "a non-stale one" — pg-desk has no
+// per-review head-SHA history to tell the two apart yet.
+func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, matchReasons []string) string {
+	if pr.State != "open" {
+		return PanelNone
 	}
-	if mergeStateStatus == "" || mergeStateStatus == "CLEAN" {
-		return false
+
+	blocked := ci.State != "success" ||
+		appr.BotVerdict == BotVerdictDisapproved ||
+		appr.HumanChangesRequested ||
+		pr.hasConflict()
+
+	if own.ActsAsMine() {
+		switch {
+		case blocked:
+			return PanelMineAwaitingMe
+		case hasUnresolvedThread(pr.allComments()):
+			return PanelMineAwaitingMe
+		case appr.HumanApproved:
+			return PanelMineAwaitingMe
+		default:
+			return PanelMineAwaitingTeam
+		}
 	}
-	if ciState != "success" {
-		return false
+
+	// Team: admitted only when non-draft and carrying at least one live
+	// match reason (unchanged from the prior taxonomy).
+	if pr.Draft || len(matchReasons) == 0 {
+		return PanelNone
 	}
-	if hasConflict {
-		return false
+	if blocked {
+		return PanelTeamAwaitingOwner
 	}
+
+	_, requested := toSet(matchReasons)[MatchReasonReviewRequested]
+	if requested {
+		if appr.SelfApproved {
+			return PanelTeamAwaitingOwner
+		}
+		return PanelTeamAwaitingMe
+	}
+	if appr.HumanApproved {
+		return PanelTeamAwaitingOwner
+	}
+	return PanelTeamAwaitingTeam
+}
+
+// hasUnresolvedThread reports whether any review-thread comment is still
+// open — ported from the old openConversationOnly's inner loop, but no
+// longer gated on approval/CI/conflict state: the 2026-09-25 ruling makes
+// an open thread on a mine PR actionable on its own, regardless of
+// anything else about the PR.
+func hasUnresolvedThread(comments []prComment) bool {
 	for _, c := range comments {
 		if c.ThreadID != "" && !c.Resolved {
 			return true
 		}
 	}
 	return false
-}
-
-// classifyPanel places one entity into exactly one of the five named panels,
-// or PanelNone when it is not currently admitted to any (a merged PR of
-// mine, or a draft/reasonless team PR — mirroring pg-pr's silently-dropped
-// DroppedCount branch, internal/snapshot/builder.go's Build).
-func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, matchReasons []string) string {
-	if pr.Merged {
-		// A merged PR is retained in the human view's "Mine" list, but is no
-		// longer "in flight" in any of the three mine-panel senses
-		// (builder.go: three-view membership is "computed for every ACTIVE
-		// (non-merged) mine/co-owned row, never for a retained merged row").
-		return PanelNone
-	}
-
-	hasConflict := pr.hasConflict()
-	botDisapproved := appr.BotVerdict == BotVerdictDisapproved
-
-	if own.ActsAsMine() {
-		ciRed := ci.State == "failure"
-		openConvo := openConversationOnly(appr.HumanApproved, pr.MergeStateStatus, ci.State, hasConflict, pr.allComments())
-		actNow := hasConflict || botDisapproved || ciRed || openConvo
-		switch {
-		case actNow:
-			return PanelMineActNow
-		case appr.HumanApproved && pr.MergeStateStatus == "CLEAN" && ci.State == "pending":
-			return PanelMineAwaitingOtherThings
-		default:
-			return PanelMineAwaitingOthers
-		}
-	}
-
-	// Team: admitted only when non-draft and carrying at least one live
-	// match reason (builder.go's admission switch: "!p.PR.Draft &&
-	// len(reasons) > 0"). Otherwise it is not in the review set at all.
-	if pr.Draft || len(matchReasons) == 0 {
-		return PanelNone
-	}
-	if ci.State == "success" && !botDisapproved && !hasConflict {
-		return PanelTeamActNow
-	}
-	return PanelTeamBlocked
 }
 
 // --- ready-to-promote (D15) ------------------------------------------------

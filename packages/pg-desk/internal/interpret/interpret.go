@@ -109,21 +109,6 @@ type SystemClock struct{}
 // Now implements Clock.
 func (SystemClock) Now() time.Time { return time.Now() }
 
-// Panel names — the five named panels the design's dashboard payload exposes
-// (section 7.7's "the five named selectors": mine_act_now,
-// mine_awaiting_others, mine_awaiting_other_things, team_act_now,
-// team_blocked). PanelNone means the entity is not currently admitted to any
-// panel (a merged PR of mine, a draft/reasonless team PR, or a "removed"
-// entity) — mirroring pg-pr's silently-dropped DroppedCount branch.
-const (
-	PanelMineActNow              = "mine_act_now"
-	PanelMineAwaitingOthers      = "mine_awaiting_others"
-	PanelMineAwaitingOtherThings = "mine_awaiting_other_things"
-	PanelTeamActNow              = "team_act_now"
-	PanelTeamBlocked             = "team_blocked"
-	PanelNone                    = ""
-)
-
 // Enrichment is the base (LLM-free) PR enrichment: kind, languages, size,
 // plus the two display facts (Title, URL) a human-readable dashboard row
 // needs to be usable at all. Urgency is scored/reported separately
