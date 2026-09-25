@@ -1,0 +1,6 @@
+{
+  "name": "service-daemon-checklist",
+  "description": "Claude skill: seven-question authoring checklist for a new launchd daemon/agent, systemd service, or phillipgreenii.system.launchdServices registration (process identity, log collection, log rotation, metrics/alerts, liveness alerting, restart-on-change, cross-platform).",
+  "version": "1.0.0",
+  "defaultEnabled": true
+}

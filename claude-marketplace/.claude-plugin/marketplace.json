@@ -88,6 +88,11 @@
       "name": "pg-wi-flow",
       "source": "./pg-wi-flow",
       "description": "The /drain skill and dispatcher/worker/resolver agent definitions that drive the pg-wi-flow CLI's work-item loop (execution phase 1: framework only, null workflow)."
+    },
+    {
+      "name": "service-daemon-checklist",
+      "source": "./service-daemon-checklist",
+      "description": "Claude skill: seven-question authoring checklist for a new launchd daemon/agent, systemd service, or phillipgreenii.system.launchdServices registration (process identity, log collection, log rotation, metrics/alerts, liveness alerting, restart-on-change, cross-platform)."
     }
   ]
 }
