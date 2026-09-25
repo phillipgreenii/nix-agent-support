@@ -202,6 +202,24 @@ groups:
       # an absent series means zero failures of any class have ever been
       # recorded (OTel counters are lazily created per label set on first
       # increment), which is the healthy state.
+      #
+      # class=declined,reason=at-capacity is EXCLUDED from the condition
+      # (pg2-v3qn6, operator decision 2026-09-25): reason=at-capacity is
+      # internal/metrics/metrics.go's OnDeclined recording pg-router-ccpool-
+      # handler's busyReasonAtCapacity (cmd/pg-router-ccpool-handler/
+      # dispatch.go, fed from executor.ErrPoolAtCapacity at
+      # packages/pg-router-ccpool-handler/internal/executor/ccpool.go:97-101)
+      # -- routine backpressure from the review role's max_sessions=1 cap
+      # (pg2-mr0sl, an INTENTIONAL throughput-for-reliability tradeoff after
+      # the pg2-5sirm zombie-session incident), not a real failure. Both
+      # pg-router-queue-depth-growing (pg2-3ir8j) and this alert
+      # (pg2-q4hzc) fired for that same accepted tradeoff within the same
+      # ~24h window and were both closed no-fix-needed, which is the signal
+      # this exclusion exists to act on. `reason` is ONLY ever set by
+      # OnDeclined (class=declined) -- OnDispatchFailure/OnHandlerFailure
+      # never attach it -- so a bare `reason!="at-capacity"` matcher cannot
+      # clip dispatch-failure/handler-error, nor any other declined reason
+      # (e.g. capacity-unknown): those keep paging unchanged.
       - uid: pg-router-failure-rate
         title: pg-router failure rate is non-zero (by class)
         condition: C
@@ -212,7 +230,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} has been non-zero"
-          description: "sum by (class) (rate(pg_router_failures_total[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} -- deliveries are failing. See pg2-97539 for the failure-class catalog's provenance and known limitations (no per-role breakdown)."
+          description: 'sum by (class) (rate(pg_router_failures_total{reason!="at-capacity"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} -- deliveries are failing. class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap) is excluded from this condition -- see pg2-v3qn6. See pg2-97539 for the failure-class catalog''s provenance and known limitations (no per-role breakdown).'
         data:
           - refId: A
             relativeTimeRange:
@@ -223,7 +241,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class) (rate(pg_router_failures_total[10m]))
+              expr: sum by (class) (rate(pg_router_failures_total{reason!="at-capacity"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:
