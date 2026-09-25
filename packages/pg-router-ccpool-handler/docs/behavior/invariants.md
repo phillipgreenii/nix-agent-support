@@ -40,3 +40,11 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   regardless of the role's `on_failure`, and MUST escalate to `human` on the second
   consecutive external close of the same bead. Only an unexplained death, or a close the
   handler itself requested (`handler`), applies `on_failure`.
+- **`INV-CCH-8`** — when preparing per-bead isolation (`git worktree add`) fails because the
+  filesystem has run out of room, the handler MUST NOT treat it as a per-bead launch failure
+  (no `pool-launch-fail`/`human` escalation) — a full disk is a transient, system-wide
+  condition that would hit whichever bead happened to dispatch next, not a defect in the one
+  that hit it first. It MUST signal this ONLY through the transport's pre-accept busy decline
+  (`conformance.ExitBusy`, reason `low-disk`), mutating no bead, so the core simply re-offers
+  the event later with backoff. This is consistent with `INV-CCH-3`/`INV-CCH-6`: a system-wide
+  resource shortage is a pre-accept signal, not a post-accept or per-bead outcome.

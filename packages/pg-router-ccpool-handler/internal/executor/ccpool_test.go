@@ -1354,6 +1354,59 @@ func TestRun_poolCapacityErrorDeclinesBusy(t *testing.T) {
 	}
 }
 
+// --- isolation low-disk (bead pg2-8vn8t) ---
+
+// lowDiskWTM is a gitclient.WorktreeManager whose CreateWorktree always fails
+// with the disk-full *gitclient.GitError shape observed in the 2026-09-23
+// incident: exit 128, stderr naming the OS's out-of-space wording.
+type lowDiskWTM struct{}
+
+func (lowDiskWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
+	return &gitclient.GitError{ExitCode: 128, Stderr: "fatal: Unable to create '/repo/.git/worktrees/zr-w/index.lock': No space left on device"}
+}
+func (lowDiskWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
+func (lowDiskWTM) PruneWorktrees(context.Context) error               { return nil }
+
+// TestRun_isolationLowDiskDeclinesBusyNoEscalation proves a worktree-add
+// failure caused by a full filesystem (bead pg2-8vn8t) is classified
+// ErrLowDisk and mutates NO bead at all (no pool-launch-fail/human
+// escalation — see ccpool.go's own doc comment at its isolation-Ensure
+// error branch): before this fix, ANY isolation failure — including this
+// one — escalated per-bead via escalateLaunchFailure, which is exactly what
+// flooded several UNRELATED beads with `human` during the incident (each
+// dispatch that happened to land while the volume was full got its own
+// escalation for the SAME underlying cause). It must also stay distinct from
+// either pool-capacity sentinel — a third, independent "decline and retry
+// later" case, not a launch failure.
+func TestRun_isolationLowDiskDeclinesBusyNoEscalation(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{}
+	cc := &dtest.FakeCC{}
+	e := newExec(cc, bd, cfg)
+	path := filepath.Join(cfg.WorktreeDir, "zr-w")
+	e.deps.GitOpener = func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+		if dir == path {
+			return nil, gitclient.ErrNotARepository // path doesn't exist yet -> attempt create
+		}
+		return lowDiskWTM{}, nil
+	}
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	_, err := e.run(context.Background(), d)
+	if !errors.Is(err, ErrLowDisk) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrLowDisk)", err)
+	}
+	if errors.Is(err, ErrPoolAtCapacity) || errors.Is(err, ErrPoolCapacityUnknown) {
+		t.Fatalf("a low-disk isolation failure must not also satisfy either pool-capacity sentinel; err = %v", err)
+	}
+	if len(cc.Ensured) != 0 {
+		t.Fatal("no ccpool session may be launched when isolation itself failed")
+	}
+	if len(bd.Updates) != 0 {
+		t.Fatalf("low disk must not mutate the bead (no pool-launch-fail/human escalation); updates=%v", bd.Updates)
+	}
+}
+
 // TestRun_notIngestedClosesSession proves a never-ingested session is closed
 // (reason handler, via the CLI runner) before the bead is unclaimed, so a
 // ready-but-empty row does not hold a counted slot until idle_ttl.

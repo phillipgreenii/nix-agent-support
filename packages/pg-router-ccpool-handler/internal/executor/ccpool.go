@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/watchdog"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -59,6 +60,22 @@ var ErrPoolAtCapacity = errors.New("ccpool: no free slot")
 // blind is the failure mode the gate exists to stop, and a re-offer costs
 // nothing.
 var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
+
+// ErrLowDisk re-exports internal/worktree.ErrLowDisk under this package's own
+// Err* naming (bead pg2-8vn8t), mirroring ErrPoolAtCapacity/
+// ErrPoolCapacityUnknown just above: a worktree-isolation failure caused by
+// the filesystem running out of room is a transient, SYSTEM-WIDE condition,
+// never a bead-specific defect — the 2026-09-23 incident's repeated
+// 'git worktree add ... exit 128' failures escalated several UNRELATED beads
+// to `human` (one per dispatch that happened to land while the volume was
+// full), which is exactly the noise this sentinel exists to stop. It is the
+// SAME error value as worktree.ErrLowDisk (not a distinct wrapping sentinel),
+// so errors.Is(err, ErrLowDisk) and errors.Is(err, worktree.ErrLowDisk) match
+// identically; this alias exists purely so callers outside this file (e.g.
+// cmd/pg-router-ccpool-handler/dispatch.go's busyDeclineReason, which already
+// references this package's other two sentinels this same way) never need
+// their own import of internal/worktree just to check it.
+var ErrLowDisk = worktree.ErrLowDisk
 
 // run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
@@ -110,6 +127,22 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// purpose, by its own explicit config, not as a fallback).
 	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
+		if errors.Is(wtErr, ErrLowDisk) {
+			// Low disk is the ONE isolation failure this function does NOT treat
+			// like an ordinary launch failure (bead pg2-8vn8t): it is a
+			// transient, system-wide condition that will hit whichever bead
+			// happens to dispatch next, not a defect in THIS bead — escalating
+			// it per-bead (below) is exactly what flooded several unrelated
+			// beads with `human` during the 2026-09-23 incident. Logged clearly
+			// (distinguishable from a generic exit-128 at a glance, unlike
+			// before this fix) and returned with no bead mutation at all, so the
+			// caller (cmd/pg-router-ccpool-handler/dispatch.go's
+			// busyDeclineReason) can map it to a pre-accept busy decline instead
+			// — the core simply re-offers later with backoff, same as
+			// ErrPoolAtCapacity.
+			slog.Warn("dispatch declined: low disk space preparing isolation", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)
+			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+		}
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)

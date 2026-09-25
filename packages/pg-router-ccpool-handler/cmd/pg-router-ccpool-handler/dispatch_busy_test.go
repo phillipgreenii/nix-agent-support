@@ -82,6 +82,21 @@ func TestRunDispatch_busyDeclineReasonAtCapacity(t *testing.T) {
 	}
 }
 
+// TestRunDispatch_busyDeclineReasonLowDisk is dispatch.go's own
+// busyDeclineReason mapping tested directly for the low-disk sentinel (bead
+// pg2-8vn8t, widening ADR 0072's Decision item 3's busy-decline set): an
+// isolation failure caused by a full filesystem (executor.ErrLowDisk) maps to
+// busyReasonLowDisk, distinct from either capacity reason above.
+func TestRunDispatch_busyDeclineReasonLowDisk(t *testing.T) {
+	reason, busy := busyDeclineReason(executor.ErrLowDisk)
+	if !busy {
+		t.Fatalf("ErrLowDisk must be recognized as a busy decline")
+	}
+	if reason != busyReasonLowDisk {
+		t.Fatalf("reason = %q, want %q", reason, busyReasonLowDisk)
+	}
+}
+
 // TestRunDispatch_busyDeclineReasonNilAndOtherErrors proves busyDeclineReason
 // reports ok=false for nil and for an unrelated error — it must not
 // misclassify a genuine dispatch failure as a busy decline.

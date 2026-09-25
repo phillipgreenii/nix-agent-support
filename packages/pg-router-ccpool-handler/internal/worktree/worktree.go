@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -29,6 +30,54 @@ import (
 // repo (design §4.6's app-local opener seam for multi-directory consumers —
 // Ensure opens both the prospective worktree path and repoRoot).
 type Opener func(ctx context.Context, dir string) (gitclient.WorktreeManager, error)
+
+// ErrLowDisk is returned (wrapping the original failure) when Ensure's `git
+// worktree add` failed because the filesystem had run out of room, rather
+// than any other failure sharing that invocation's same generic exit code 128
+// (bead pg2-8vn8t: the 2026-09-23 incident's repeated 'git worktree add ...
+// exit 128: ... error: unable to write/create file' failures against a
+// ~213k-file monorepo checkout, which pg-router surfaced as nothing more than
+// an opaque handler-error). A caller checks errors.Is(err, ErrLowDisk) to
+// treat this specific, transient, system-wide condition differently from a
+// genuine per-bead defect — e.g. declining and retrying later rather than
+// escalating the bead to a human (see pg-router-ccpool-handler's own
+// ccpool.go, the one production caller of this duplicated package today).
+var ErrLowDisk = errors.New("worktree: low disk space")
+
+// diskFullMarkers are the case-insensitive stderr substrings known to
+// accompany a disk-full git failure on the two platforms this pool actually
+// runs on (Linux prod, Darwin dev): "no space left on device" is ENOSPC's own
+// libc strerror text; "disk quota exceeded" is EDQUOT, which presents to a
+// caller identically (the filesystem will not take more bytes either way).
+//
+// gitclient's own classify() deliberately never keys on stderr text (that
+// package's errors.go doc: "text matching would be locale-fragile... MUST key
+// on exit codes") — exit code 128 is shared by many unrelated fatal git
+// conditions, so it alone cannot distinguish this case. This package accepts
+// the locale caveat and scans stderr anyway, but ONLY for
+// classification/logging, never for correctness-critical control flow: a
+// false negative here (an unrecognized locale) simply returns the original,
+// unlabeled error — exactly today's status quo — so this is a strict
+// improvement with no downside risk.
+var diskFullMarkers = []string{"no space left on device", "disk quota exceeded"}
+
+// isDiskFull reports whether err's failed git invocation looks like it was
+// caused by the filesystem running out of room, by scanning the wrapped
+// *gitclient.GitError's own Stderr (never the generic ExitCode, per
+// diskFullMarkers' own doc).
+func isDiskFull(err error) bool {
+	var ge *gitclient.GitError
+	if !errors.As(err, &ge) {
+		return false
+	}
+	lower := strings.ToLower(ge.Stderr)
+	for _, marker := range diskFullMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // Ensure returns the path to a fresh per-bead worktree, creating it under
 // worktreeDir off repoRoot's current HEAD on branch pg-router/<beadID>. If a
@@ -79,6 +128,9 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 	// the new worktree branches off the monorepo's current commit, then checks
 	// out in isolation.
 	if err := wm.CreateWorktree(ctx, path, branch, gitclient.CreateWorktreeOptions{ResetBranch: true}); err != nil {
+		if isDiskFull(err) {
+			return "", fmt.Errorf("worktree add %s: %w: %w", path, ErrLowDisk, err)
+		}
 		return "", fmt.Errorf("worktree add %s: %w", path, err)
 	}
 	return path, nil

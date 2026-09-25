@@ -304,22 +304,32 @@ func writeErrorReply(w io.Writer, msg string) {
 const (
 	busyReasonCapacityUnknown = "capacity-unknown"
 	busyReasonAtCapacity      = "at-capacity"
+	// busyReasonLowDisk (bead pg2-8vn8t): the isolation step's `git worktree
+	// add` failed because the filesystem ran out of room (executor.ErrLowDisk)
+	// — a transient, system-wide condition, not a per-bead defect, so it is
+	// mapped to the SAME busy-decline treatment as the two capacity reasons
+	// above rather than an escalation (see ccpool.go's own doc comment at its
+	// isolation-Ensure error branch).
+	busyReasonLowDisk = "low-disk"
 )
 
 // busyDeclineReason maps err to the wire's busy-decline reason tag when err
-// is one of executor's two admission-gate sentinels (bead pg2-j4uwg): ok is
-// false for any other err (including nil), matching neither. Both sentinels
+// is one of executor's three "decline and retry later" sentinels (bead
+// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel): ok is
+// false for any other err (including nil), matching none of them. All three
 // still map to the SAME wire-level conformance.ExitBusy — the core's
 // retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
 // — reason exists purely so pg-router core's declined metric/status
 // breakdown can tell them apart (see this file's runDispatch call site and
-// ErrPoolCapacityUnknown/ErrPoolAtCapacity's own doc comments).
+// ErrPoolCapacityUnknown/ErrPoolAtCapacity/ErrLowDisk's own doc comments).
 func busyDeclineReason(err error) (reason string, ok bool) {
 	switch {
 	case errors.Is(err, executor.ErrPoolCapacityUnknown):
 		return busyReasonCapacityUnknown, true
 	case errors.Is(err, executor.ErrPoolAtCapacity):
 		return busyReasonAtCapacity, true
+	case errors.Is(err, executor.ErrLowDisk):
+		return busyReasonLowDisk, true
 	default:
 		return "", false
 	}

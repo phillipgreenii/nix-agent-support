@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,6 +94,102 @@ func TestEnsure_reusesExistingWorktree(t *testing.T) {
 	}
 	if len(o.calls) != 1 || o.calls[0] != path {
 		t.Errorf("reuse path must open only the target path once; opens=%v", o.calls)
+	}
+}
+
+// failingCreateWTM is a gitclient.WorktreeManager whose CreateWorktree always
+// fails with a configured error -- for exercising Ensure's isDiskFull
+// classification (pg2-8vn8t) without depending on recWTM's own
+// call-recording, which always returns nil.
+type failingCreateWTM struct{ err error }
+
+func (f failingCreateWTM) CreateWorktree(context.Context, string, string, gitclient.CreateWorktreeOptions) error {
+	return f.err
+}
+func (failingCreateWTM) RemoveWorktree(context.Context, string, bool) error { return nil }
+func (failingCreateWTM) PruneWorktrees(context.Context) error               { return nil }
+
+// TestEnsure_createWorktreeDiskFullWrapsErrLowDisk is the regression pin for
+// pg2-8vn8t: a `git worktree add` failure whose stderr names the OS's
+// out-of-space wording must be classifiable via errors.Is(err, ErrLowDisk),
+// not just surfaced as an opaque exit-128 *gitclient.GitError -- exactly the
+// 2026-09-23 incident's 'git worktree add ... exit 128: ... error: unable to
+// write/create file' failures, which pg-router could not distinguish from any
+// other exit-128 git failure before this fix.
+func TestEnsure_createWorktreeDiskFullWrapsErrLowDisk(t *testing.T) {
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-lowdisk")
+	gitErr := &gitclient.GitError{
+		Args:     []string{"worktree", "add", "-B", "pg-router/zr-lowdisk", path},
+		ExitCode: 128,
+		Stderr:   "fatal: Unable to create '/repo/.git/worktrees/zr-lowdisk/index.lock': No space left on device",
+	}
+	open := func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+		if dir == path {
+			return nil, gitclient.ErrNotARepository
+		}
+		return failingCreateWTM{err: gitErr}, nil
+	}
+
+	_, err := Ensure(context.Background(), open, wtDir, "/repo", "zr-lowdisk")
+	if err == nil {
+		t.Fatal("expected CreateWorktree's failure to propagate")
+	}
+	if !errors.Is(err, ErrLowDisk) {
+		t.Errorf("Ensure error = %v, want errors.Is(err, ErrLowDisk)", err)
+	}
+	var ge *gitclient.GitError
+	if !errors.As(err, &ge) {
+		t.Errorf("Ensure error must still carry the original *gitclient.GitError; got %v", err)
+	}
+}
+
+// TestEnsure_createWorktreeOtherFailureNotLowDisk proves isDiskFull does not
+// false-positive on an ordinary git failure sharing the same exit code 128
+// (e.g. a stale lock, a bad ref) -- only a stderr naming a known disk-full
+// marker is classified ErrLowDisk.
+func TestEnsure_createWorktreeOtherFailureNotLowDisk(t *testing.T) {
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-otherfail")
+	gitErr := &gitclient.GitError{ExitCode: 128, Stderr: "fatal: 'pg-router/zr-otherfail' already exists"}
+	open := func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+		if dir == path {
+			return nil, gitclient.ErrNotARepository
+		}
+		return failingCreateWTM{err: gitErr}, nil
+	}
+
+	_, err := Ensure(context.Background(), open, wtDir, "/repo", "zr-otherfail")
+	if err == nil {
+		t.Fatal("expected CreateWorktree's failure to propagate")
+	}
+	if errors.Is(err, ErrLowDisk) {
+		t.Errorf("an unrelated exit-128 git failure must not classify as ErrLowDisk; err=%v", err)
+	}
+}
+
+// TestIsDiskFull_caseInsensitiveAndOtherMarker exercises isDiskFull directly:
+// the "no space left on device" match is case-insensitive (git's own
+// locale/wrapper could plausibly vary casing) and the EDQUOT sibling marker
+// ("disk quota exceeded") is recognized too.
+func TestIsDiskFull_caseInsensitiveAndOtherMarker(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"lowercase enospc", &gitclient.GitError{ExitCode: 128, Stderr: "fatal: unable to write file: no space left on device"}, true},
+		{"mixed case enospc", &gitclient.GitError{ExitCode: 128, Stderr: "Fatal: No Space Left On Device"}, true},
+		{"edquot", &gitclient.GitError{ExitCode: 128, Stderr: "fatal: cannot write: Disk quota exceeded"}, true},
+		{"unrelated", &gitclient.GitError{ExitCode: 128, Stderr: "fatal: not a valid ref"}, false},
+		{"not a GitError at all", errors.New("boom"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isDiskFull(c.err); got != c.want {
+				t.Errorf("isDiskFull(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
 	}
 }
 
