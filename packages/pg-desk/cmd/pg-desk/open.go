@@ -167,15 +167,15 @@ func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, e
 		var actNowPanel string
 		mineHalf := actsAsMine(interp.Ownership)
 		if mineHalf {
-			if interp.Panel != panelMineActNow && interp.Panel != panelMineAwaitingOthers && interp.Panel != panelMineAwaitingOtherThings {
+			if interp.Panel != panelMineAwaitingMe && interp.Panel != panelMineAwaitingTeam {
 				continue
 			}
-			actNowPanel = panelMineActNow
+			actNowPanel = panelMineAwaitingMe
 		} else {
-			if interp.Panel != panelTeamActNow && interp.Panel != panelTeamBlocked {
+			if interp.Panel != panelTeamAwaitingMe && interp.Panel != panelTeamAwaitingOwner {
 				continue
 			}
-			actNowPanel = panelTeamActNow
+			actNowPanel = panelTeamAwaitingMe
 		}
 
 		entity, found, gerr := st.GetEntity(interp.Repo, interp.EntityType, interp.EntityID)

@@ -5,26 +5,11 @@
   "stale_after_seconds": 120,
   "sync_interval_seconds": 60,
   "dropped_count": 0,
-  "mine_act_now": [
-    {
-      "human_approved": true,
-      "bot_verdict": "no_decision",
-      "repo": "acme/widgets",
-      "entity_type": "pull_request",
-      "entity_id": "101",
-      "ownership": "mine",
-      "category": "bug",
-      "gate_state": "satisfied",
-      "as_of": "2026-09-16T12:00:00Z",
-      "ready_to_promote": true,
-      "degraded": false
-    }
-  ],
-  "mine_awaiting_others": [],
-  "mine_awaiting_other_things": [],
-  "team_act_now": [
+  "team_awaiting_owner": [
     {
       "human_approved": false,
+      "self_approved": false,
+      "human_changes_requested": false,
       "bot_verdict": "disapproved",
       "match_reasons": ["team-authored", "label:urgent"],
       "match_team_authored": true,
@@ -41,7 +26,25 @@
       "degraded": true
     }
   ],
-  "team_blocked": [],
+  "team_awaiting_team": [],
+  "team_awaiting_me": [],
+  "mine_awaiting_me": [
+    {
+      "human_approved": true,
+      "human_changes_requested": false,
+      "bot_verdict": "no_decision",
+      "repo": "acme/widgets",
+      "entity_type": "pull_request",
+      "entity_id": "101",
+      "ownership": "mine",
+      "category": "bug",
+      "gate_state": "satisfied",
+      "as_of": "2026-09-16T12:00:00Z",
+      "ready_to_promote": true,
+      "degraded": false
+    }
+  ],
+  "mine_awaiting_team": [],
   "hidden": [
     {
       "repo": "acme/widgets",

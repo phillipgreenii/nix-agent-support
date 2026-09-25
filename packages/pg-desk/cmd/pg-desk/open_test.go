@@ -417,8 +417,8 @@ func TestOpenCmdPrintListsTeamActNowByDefault(t *testing.T) {
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
-	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamActNow, 0, []string{"review-requested"}, false, false)
-	seedOpenPR(t, st, "o/r", 2, "two", "https://example.test/pull/2", "bob", "team", panelTeamBlocked, 0, []string{"team-authored"}, false, false)
+	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, false, false)
+	seedOpenPR(t, st, "o/r", 2, "two", "https://example.test/pull/2", "bob", "team", panelTeamAwaitingOwner, 0, []string{"team-authored"}, false, false)
 
 	stdout, _, err := runOpenCmd(t, openFlags{printOnly: true})
 	if err != nil {
@@ -437,8 +437,8 @@ func TestOpenCmdMineAloneOpensAllOfMyPRs(t *testing.T) {
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
-	seedOpenPR(t, st, "o/r", 11, "eleven", "https://example.test/pull/11", "me", "mine", panelMineAwaitingOthers, 0, nil, false, false)
-	seedOpenPR(t, st, "o/r", 12, "twelve", "https://example.test/pull/12", "me", "mine", panelMineActNow, 0, nil, false, false)
+	seedOpenPR(t, st, "o/r", 11, "eleven", "https://example.test/pull/11", "me", "mine", panelMineAwaitingTeam, 0, nil, false, false)
+	seedOpenPR(t, st, "o/r", 12, "twelve", "https://example.test/pull/12", "me", "mine", panelMineAwaitingMe, 0, nil, false, false)
 
 	stdout, _, err := runOpenCmd(t, openFlags{mine: true, printOnly: true})
 	if err != nil {
@@ -454,8 +454,8 @@ func TestOpenCmdHiddenExcludedByDefault_IncludedWithFlag(t *testing.T) {
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
-	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamActNow, 0, []string{"review-requested"}, false, false)
-	seedOpenPR(t, st, "o/r", 2, "two", "https://example.test/pull/2", "bob", "team", panelTeamActNow, 0, []string{"review-requested"}, true, false)
+	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, false, false)
+	seedOpenPR(t, st, "o/r", 2, "two", "https://example.test/pull/2", "bob", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, true, false)
 
 	stdout, _, err := runOpenCmd(t, openFlags{printOnly: true})
 	if err != nil {

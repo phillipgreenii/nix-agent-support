@@ -35,14 +35,14 @@ const entityTypePR = "pr"
 // internal/store and internal/pipeline as Consumes, not internal/interpret,
 // so the panel and ownership STRING VALUES a stored interpretation row
 // carries are compared here as plain strings rather than importing
-// packet 5's Go API. Values pinned verbatim from the design doc's section
-// 7.7 ("the five named selectors").
+// packet 5's Go API. Values pinned verbatim from the 2026-09-25
+// awaiting-owner/team/me taxonomy redesign.
 const (
-	panelMineActNow              = "mine_act_now"
-	panelMineAwaitingOthers      = "mine_awaiting_others"
-	panelMineAwaitingOtherThings = "mine_awaiting_other_things"
-	panelTeamActNow              = "team_act_now"
-	panelTeamBlocked             = "team_blocked"
+	panelTeamAwaitingOwner = "team_awaiting_owner"
+	panelTeamAwaitingTeam  = "team_awaiting_team"
+	panelTeamAwaitingMe    = "team_awaiting_me"
+	panelMineAwaitingMe    = "mine_awaiting_me"
+	panelMineAwaitingTeam  = "mine_awaiting_team"
 )
 
 // ownershipMine and ownershipCoOwned mirror internal/interpret.Ownership's

@@ -50,19 +50,20 @@ const defaultHeartbeatPeriod = 60 * time.Second
 // freshness.BoundIntervals.
 const boundIntervals = 2
 
-// Panel name constants, pinned verbatim from the design doc's section 7.7
-// (docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md
-// lines 946-953) and cross-checked against the Grafana dashboard JSON's
-// root_selector values in phillipgreenii-nix-support-apps
-// (darwin/modules/observability/dashboards/pg-desk.json) — every byte here MUST
-// match those root_selector strings exactly, or the Infinity datasource panel
-// finds nothing.
+// Panel name constants — the five panels of the 2026-09-25
+// awaiting-owner/team/me taxonomy (operator ruling; superseded the earlier
+// act-now/blocked split). Cross-checked against the Grafana dashboard
+// JSON's root_selector values in phillipgreenii-nix-support-apps
+// (darwin/modules/observability/dashboards/pg-desk.json) and against
+// docs/behavior/pg-desk/interpret.md's "Panel placement" section — every
+// byte here MUST match both, or the Infinity datasource panel finds
+// nothing.
 const (
-	PanelMineActNow              = "mine_act_now"
-	PanelMineAwaitingOthers      = "mine_awaiting_others"
-	PanelMineAwaitingOtherThings = "mine_awaiting_other_things"
-	PanelTeamActNow              = "team_act_now"
-	PanelTeamBlocked             = "team_blocked"
+	PanelTeamAwaitingOwner = "team_awaiting_owner"
+	PanelTeamAwaitingTeam  = "team_awaiting_team"
+	PanelTeamAwaitingMe    = "team_awaiting_me"
+	PanelMineAwaitingMe    = "mine_awaiting_me"
+	PanelMineAwaitingTeam  = "mine_awaiting_team"
 )
 
 // Match-reason vocabulary, ported verbatim from pg-pr's
@@ -195,10 +196,10 @@ type PayloadError struct {
 }
 
 // Payload is the GET /api/v1/dashboard response body: the five named panel
-// arrays, the hidden array, and root freshness/counter fields — pinned
-// verbatim from the design doc's section 7.7. Every array field is always
-// non-nil (serializes as "[]", never "null"), matching pg-pr's own Mine/Team
-// convention (packages/pg-pr/internal/snapshot/snapshot.go).
+// arrays, the hidden array, and root freshness/counter fields — see
+// docs/behavior/pg-desk/interpret.md's "Panel placement" section and
+// serve.md for the canonical description. Every array field is always
+// non-nil (serializes as "[]", never "null").
 type Payload struct {
 	GeneratedAt         time.Time `json:"generated_at"`
 	AgeSeconds          int       `json:"age_seconds"`
@@ -212,11 +213,11 @@ type Payload struct {
 	// vanish from the payload).
 	DroppedCount int `json:"dropped_count"`
 
-	MineActNow              []Row `json:"mine_act_now"`
-	MineAwaitingOthers      []Row `json:"mine_awaiting_others"`
-	MineAwaitingOtherThings []Row `json:"mine_awaiting_other_things"`
-	TeamActNow              []Row `json:"team_act_now"`
-	TeamBlocked             []Row `json:"team_blocked"`
+	TeamAwaitingOwner []Row `json:"team_awaiting_owner"`
+	TeamAwaitingTeam  []Row `json:"team_awaiting_team"`
+	TeamAwaitingMe    []Row `json:"team_awaiting_me"`
+	MineAwaitingMe    []Row `json:"mine_awaiting_me"`
+	MineAwaitingTeam  []Row `json:"mine_awaiting_team"`
 
 	// Hidden carries every row excluded from the five panels above because
 	// its PR-level annotation is hidden (annotation.hidden), per the Binding
@@ -242,21 +243,21 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 	}
 
 	p := &Payload{
-		MineActNow:              []Row{},
-		MineAwaitingOthers:      []Row{},
-		MineAwaitingOtherThings: []Row{},
-		TeamActNow:              []Row{},
-		TeamBlocked:             []Row{},
-		Hidden:                  []Row{},
-		Errors:                  []PayloadError{},
+		TeamAwaitingOwner: []Row{},
+		TeamAwaitingTeam:  []Row{},
+		TeamAwaitingMe:    []Row{},
+		MineAwaitingMe:    []Row{},
+		MineAwaitingTeam:  []Row{},
+		Hidden:            []Row{},
+		Errors:            []PayloadError{},
 	}
 
 	panels := map[string]*[]Row{
-		PanelMineActNow:              &p.MineActNow,
-		PanelMineAwaitingOthers:      &p.MineAwaitingOthers,
-		PanelMineAwaitingOtherThings: &p.MineAwaitingOtherThings,
-		PanelTeamActNow:              &p.TeamActNow,
-		PanelTeamBlocked:             &p.TeamBlocked,
+		PanelTeamAwaitingOwner: &p.TeamAwaitingOwner,
+		PanelTeamAwaitingTeam:  &p.TeamAwaitingTeam,
+		PanelTeamAwaitingMe:    &p.TeamAwaitingMe,
+		PanelMineAwaitingMe:    &p.MineAwaitingMe,
+		PanelMineAwaitingTeam:  &p.MineAwaitingTeam,
 	}
 
 	cutoff := now.Add(-24 * time.Hour)

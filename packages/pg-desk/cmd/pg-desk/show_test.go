@@ -39,7 +39,7 @@ func TestShowPrintsStoredInterpretation(t *testing.T) {
 	// resolvePRRef would have queried with.
 	if err := st.UpsertInterpretation(store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
-		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
+		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
@@ -65,7 +65,7 @@ func TestShowPrintsPlannedSyncRowsInPlanMode(t *testing.T) {
 
 	if err := st.UpsertInterpretation(store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
-		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
+		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
@@ -178,7 +178,7 @@ func TestShowPlainTextEntityIDNotDoubled(t *testing.T) {
 	withOpenSeams(t, cfg, openFresh)
 	if err := st.UpsertInterpretation(store.Interpretation{
 		Repo: "owner/repo", EntityType: entityTypePR, EntityID: "owner/repo#105204",
-		Ownership: "mine", Category: "bugfix", Panel: panelMineActNow,
+		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)

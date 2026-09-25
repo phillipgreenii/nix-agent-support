@@ -25,7 +25,7 @@ func TestOpenJSONMode_Schema(t *testing.T) {
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
-	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamActNow, 1, []string{"review-requested"}, false, false)
+	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamAwaitingMe, 1, []string{"review-requested"}, false, false)
 
 	stdout, _, err := runOpenCmd(t, openFlags{all: true, jsonOutput: true})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestOpenJSONMode_MaxTruncationIsVisible(t *testing.T) {
 	withOpenSeams(t, cfg, openFresh)
 
 	for i := 1; i <= 3; i++ {
-		seedOpenPR(t, st, "o/r", i, "t", "https://example.test/pull/"+numToID(i), "alice", "team", panelTeamActNow, 0, []string{"review-requested"}, false, false)
+		seedOpenPR(t, st, "o/r", i, "t", "https://example.test/pull/"+numToID(i), "alice", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, false, false)
 	}
 
 	stdout, stderr, err := runOpenCmd(t, openFlags{all: true, max: 2, jsonOutput: true})
@@ -103,7 +103,7 @@ func TestOpenJSONMode_PGDeskOutputEnvSelectsJSON(t *testing.T) {
 	cfg := openTestConfig("o/r")
 	withOpenSeams(t, cfg, openFresh)
 
-	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamActNow, 0, []string{"review-requested"}, false, false)
+	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, false, false)
 
 	stdout, _, err := runOpenCmd(t, openFlags{all: true})
 	if err != nil {

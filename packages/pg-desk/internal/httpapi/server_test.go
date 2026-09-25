@@ -56,7 +56,7 @@ func TestDashboard200AfterFirstInterpretation(t *testing.T) {
 	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-		Panel: PanelMineActNow, AsOf: "2026-09-16T12:00:00Z",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
 	})
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
@@ -75,15 +75,15 @@ func TestDashboard200AfterFirstInterpretation(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if len(payload.MineActNow) != 1 {
-		t.Fatalf("MineActNow = %+v, want exactly 1 row", payload.MineActNow)
+	if len(payload.MineAwaitingMe) != 1 {
+		t.Fatalf("MineAwaitingMe = %+v, want exactly 1 row", payload.MineAwaitingMe)
 	}
 	for name, got := range map[string][]Row{
-		"mine_awaiting_others":       payload.MineAwaitingOthers,
-		"mine_awaiting_other_things": payload.MineAwaitingOtherThings,
-		"team_act_now":               payload.TeamActNow,
-		"team_blocked":               payload.TeamBlocked,
-		"hidden":                     payload.Hidden,
+		"team_awaiting_owner": payload.TeamAwaitingOwner,
+		"team_awaiting_team":  payload.TeamAwaitingTeam,
+		"team_awaiting_me":    payload.TeamAwaitingMe,
+		"mine_awaiting_team":  payload.MineAwaitingTeam,
+		"hidden":              payload.Hidden,
 	} {
 		if got == nil || len(got) != 0 {
 			t.Fatalf("%s = %#v, want a non-nil empty array", name, got)
@@ -115,7 +115,7 @@ func TestStaleFlag(t *testing.T) {
 			s := store.OpenForTest(t)
 			mustUpsertInterpretation(t, s, store.Interpretation{
 				Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-				Panel: PanelMineActNow, AsOf: base.Format(time.RFC3339),
+				Panel: PanelMineAwaitingMe, AsOf: base.Format(time.RFC3339),
 			})
 			if tc.lastHeartbeat != "" {
 				mustSetMeta(t, s, store.MetaKeyLastHeartbeat, tc.lastHeartbeat)
@@ -150,7 +150,7 @@ func TestHiddenArrayExcludesFromPanel(t *testing.T) {
 	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "9",
-		Panel: PanelMineAwaitingOthers, ReadyToPromote: true, Degraded: true,
+		Panel: PanelMineAwaitingTeam, ReadyToPromote: true, Degraded: true,
 		AsOf: "2026-09-16T10:00:00Z",
 	})
 	hidden := true
@@ -168,8 +168,8 @@ func TestHiddenArrayExcludesFromPanel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
-	if len(payload.MineAwaitingOthers) != 0 {
-		t.Fatalf("MineAwaitingOthers = %+v, want empty (row is hidden)", payload.MineAwaitingOthers)
+	if len(payload.MineAwaitingTeam) != 0 {
+		t.Fatalf("MineAwaitingTeam = %+v, want empty (row is hidden)", payload.MineAwaitingTeam)
 	}
 	if len(payload.Hidden) != 1 {
 		t.Fatalf("Hidden = %+v, want exactly 1 row", payload.Hidden)
@@ -194,7 +194,7 @@ func TestMetricsSmoke(t *testing.T) {
 	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-		Panel: PanelMineActNow, AsOf: "2026-09-16T12:00:00Z",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
 	})
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
@@ -243,7 +243,7 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 	s := store.OpenForTest(t)
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
-		Panel: PanelMineActNow, AsOf: "2026-09-16T12:00:00Z",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
 	})
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	// 121s past a 60s heartbeat period (120s stale-after bound): stale.
@@ -266,50 +266,36 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 
 // TestPayloadGoldenMatchesGrafanaSelectors is the acceptance criterion
 // "Payload golden matches the Grafana selector list byte-for-byte on the
-// fields Grafana reads." Every per-row column selector below was read
-// directly from phillipgreenii-nix-support-apps's
-// darwin/modules/observability/dashboards/pg-desk.json (read-only reference;
-// that repo's own file is never touched here). Commit bde10e9 (pg2-060c7,
-// landed in that repo 2026-09-18) retired this dashboard's old column set —
-// number, title, url, draft, build_state, agent_approved, has_conflicts,
-// owner, self_approval_state, self_commented, files_changed, lines_changed —
-// verifying against the real running server and this package's buildRow
-// (plus internal/interpret's Enrichment/Approvals structs, which now back
-// this row: neither carries any of those field names) that none of them are
-// emitted by the current Row shape. Only "number" got a replacement
-// (entity_id); the rest have none:
+// fields Grafana reads." Column selectors below were read directly from
+// phillipgreenii-nix-support-apps's
+// darwin/modules/observability/dashboards/pg-desk.json (read-only
+// reference; that repo's own file is never touched here) as of the
+// 2026-09-25 awaiting-owner/team/me redesign.
 //
-//   - Mine panels (mine_act_now, mine_awaiting_others,
-//     mine_awaiting_other_things) read: entity_id, human_approved,
-//     bot_verdict, ready_to_promote, degraded, sync_error.
-//   - Team panels (team_act_now, team_blocked) read: entity_id,
-//     human_approved, bot_verdict, match_team_authored,
+//   - Team panels (team_awaiting_owner, team_awaiting_team,
+//     team_awaiting_me) read: entity_id, human_approved, self_approved,
+//     human_changes_requested, bot_verdict, match_team_authored,
 //     match_review_requested, match_has_watch_label, ready_to_promote,
 //     degraded, sync_error.
+//   - Mine panels (mine_awaiting_me, mine_awaiting_team) read: entity_id,
+//     human_approved, human_changes_requested, bot_verdict,
+//     ready_to_promote, degraded, sync_error.
 //   - The hidden panel (hidden) reads: entity_id, category,
 //     ready_to_promote, degraded, sync_error.
 //   - The root reads: dropped_count, age_seconds.
 //
 // sync_error is exercised via the hidden-panel fixture (entity 303) rather
-// than duplicated on every fixture below: buildRow sets it through the same
-// setIfNonEmpty call regardless of which panel the row lands in (see
+// than duplicated on every fixture below: buildRow sets it through the
+// same setIfNonEmpty call regardless of which panel the row lands in (see
 // buildRow above), so proving it once is sufficient.
-//
-// The fixture stuffs those exact field names into the interpretation row's
-// approvals blob plus match_reasons — this test proves buildRow's flatten
-// mechanism projects them onto the served row unchanged, byte-for-byte on
-// every key name above, and that the fixed payload matches the checked-in
-// golden file exactly.
 func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
-	// The five panel keys and "hidden", pinned against the design doc and
-	// the Grafana JSON's root_selector values.
 	wantPanelKeys := []string{
-		PanelMineActNow, PanelMineAwaitingOthers, PanelMineAwaitingOtherThings,
-		PanelTeamActNow, PanelTeamBlocked, "hidden",
+		PanelTeamAwaitingOwner, PanelTeamAwaitingTeam, PanelTeamAwaitingMe,
+		PanelMineAwaitingMe, PanelMineAwaitingTeam, "hidden",
 	}
 	for _, want := range []string{
-		"mine_act_now", "mine_awaiting_others", "mine_awaiting_other_things",
-		"team_act_now", "team_blocked",
+		"team_awaiting_owner", "team_awaiting_team", "team_awaiting_me",
+		"mine_awaiting_me", "mine_awaiting_team",
 	} {
 		found := false
 		for _, k := range wantPanelKeys {
@@ -327,22 +313,22 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "101",
 		Ownership: "mine", Category: "bug", GateState: "satisfied",
-		Approvals: `{"human_approved":true,"bot_verdict":"no_decision"}`,
-		Panel:     PanelMineActNow, ReadyToPromote: true, Degraded: false,
+		Approvals: `{"human_approved":true,"human_changes_requested":false,"bot_verdict":"no_decision"}`,
+		Panel:     PanelMineAwaitingMe, ReadyToPromote: true, Degraded: false,
 		AsOf: "2026-09-16T12:00:00Z",
 	})
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "202",
 		Ownership: "team", Category: "feature", GateState: "unsatisfied",
-		Approvals:    `{"human_approved":false,"bot_verdict":"disapproved"}`,
+		Approvals:    `{"human_approved":false,"self_approved":false,"human_changes_requested":false,"bot_verdict":"disapproved"}`,
 		MatchReasons: `["team-authored","label:urgent"]`,
-		Panel:        PanelTeamActNow, ReadyToPromote: false, Degraded: true,
+		Panel:        PanelTeamAwaitingOwner, ReadyToPromote: false, Degraded: true,
 		AsOf: "2026-09-16T11:55:00Z",
 	})
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "303",
 		Ownership: "mine", Category: "chore",
-		Panel: PanelMineAwaitingOthers, ReadyToPromote: false, Degraded: false,
+		Panel: PanelMineAwaitingTeam, ReadyToPromote: false, Degraded: false,
 		// SyncError is the one row exercising the sync_error Grafana
 		// selector (see the doc comment above): buildRow sets it uniformly
 		// regardless of destination panel, so a single fixture suffices.
@@ -372,32 +358,29 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	// Byte-for-byte on the fields Grafana reads: every mine/team/hidden
-	// column selector must be present, spelled exactly as pg-desk.json's
-	// Infinity datasource columns spell them.
-	mineColumns := []string{"entity_id", "human_approved", "bot_verdict", "ready_to_promote", "degraded"}
+	mineColumns := []string{"entity_id", "human_approved", "human_changes_requested", "bot_verdict", "ready_to_promote", "degraded"}
 	teamColumns := []string{
-		"entity_id", "human_approved", "bot_verdict",
+		"entity_id", "human_approved", "self_approved", "human_changes_requested", "bot_verdict",
 		"match_team_authored", "match_review_requested", "match_has_watch_label", "ready_to_promote", "degraded",
 	}
 	hiddenColumns := []string{"entity_id", "category", "ready_to_promote", "degraded", "sync_error"}
 
-	if len(payload.MineActNow) != 1 {
-		t.Fatalf("MineActNow = %+v, want exactly 1 row", payload.MineActNow)
+	if len(payload.MineAwaitingMe) != 1 {
+		t.Fatalf("MineAwaitingMe = %+v, want exactly 1 row", payload.MineAwaitingMe)
 	}
-	requireColumns(t, "mine_act_now[0]", payload.MineActNow[0], mineColumns)
+	requireColumns(t, "mine_awaiting_me[0]", payload.MineAwaitingMe[0], mineColumns)
 
-	if len(payload.TeamActNow) != 1 {
-		t.Fatalf("TeamActNow = %+v, want exactly 1 row", payload.TeamActNow)
+	if len(payload.TeamAwaitingOwner) != 1 {
+		t.Fatalf("TeamAwaitingOwner = %+v, want exactly 1 row", payload.TeamAwaitingOwner)
 	}
-	requireColumns(t, "team_act_now[0]", payload.TeamActNow[0], teamColumns)
+	requireColumns(t, "team_awaiting_owner[0]", payload.TeamAwaitingOwner[0], teamColumns)
 
 	if len(payload.Hidden) != 1 {
-		t.Fatalf("Hidden = %+v, want exactly 1 row (entity 303, excluded from mine_awaiting_others)", payload.Hidden)
+		t.Fatalf("Hidden = %+v, want exactly 1 row (entity 303, excluded from mine_awaiting_team)", payload.Hidden)
 	}
 	requireColumns(t, "hidden[0]", payload.Hidden[0], hiddenColumns)
-	if len(payload.MineAwaitingOthers) != 0 {
-		t.Fatalf("MineAwaitingOthers = %+v, want empty (entity 303 is hidden)", payload.MineAwaitingOthers)
+	if len(payload.MineAwaitingTeam) != 0 {
+		t.Fatalf("MineAwaitingTeam = %+v, want empty (entity 303 is hidden)", payload.MineAwaitingTeam)
 	}
 
 	// dropped_count is the one root-level Grafana selector.

@@ -198,7 +198,7 @@ func TestInterpretationRoundTrip(t *testing.T) {
 		Approvals:      `[]`,
 		GateState:      "open",
 		MatchReasons:   `["watch_label"]`,
-		Panel:          "mine_act_now",
+		Panel:          "mine_awaiting_me",
 		ReadyToPromote: false,
 		Degraded:       false,
 		SyncError:      "", // Phase 9 never writes this; must round-trip as empty.
