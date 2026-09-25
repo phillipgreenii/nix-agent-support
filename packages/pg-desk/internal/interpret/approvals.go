@@ -55,15 +55,35 @@ const (
 // unlike pg-pr's store.Approval.IsStale (INV-APPROVAL-3), every review is
 // treated as standing for the PR's CURRENT state — a documented deviation
 // (see interpret.go's package doc).
-func computeApprovals(pr prShow, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
+//
+// SelfApproved and HumanChangesRequested are computed in the SAME pass as
+// HumanApprovers/HumanApproved (one loop over pr.Reviews) rather than as
+// separate helper functions, since all four read the identical
+// State/Author fields — splitting them would mean re-walking pr.Reviews
+// for no benefit. HumanChangesRequested excludes approverAllowlist logins
+// deliberately: a bot's disapproval is already BotVerdict's concern, and
+// double-carrying it here would let one bot rejection present as two
+// independent signals to classifyPanel.
+func computeApprovals(pr prShow, self string, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
+	allow := toSet(approverAllowlist)
+
 	approvers := map[string]struct{}{}
+	selfApproved := false
+	humanChangesRequested := false
 	for _, r := range pr.Reviews {
-		if r.State == "APPROVED" {
+		switch r.State {
+		case "APPROVED":
 			approvers[r.Author] = struct{}{}
+			if self != "" && r.Author == self {
+				selfApproved = true
+			}
+		case "CHANGES_REQUESTED":
+			if _, isBot := allow[r.Author]; !isBot {
+				humanChangesRequested = true
+			}
 		}
 	}
 
-	allow := toSet(approverAllowlist)
 	disapproved := false
 	approvedByAllowlisted := false
 	for _, r := range pr.Reviews {
@@ -93,9 +113,11 @@ func computeApprovals(pr prShow, approverAllowlist []string, verdictClassifier *
 	}
 
 	return Approvals{
-		HumanApprovers: len(approvers),
-		HumanApproved:  len(approvers) > 0,
-		BotVerdict:     botVerdict,
+		HumanApprovers:        len(approvers),
+		HumanApproved:         len(approvers) > 0,
+		SelfApproved:          selfApproved,
+		HumanChangesRequested: humanChangesRequested,
+		BotVerdict:            botVerdict,
 	}
 }
 

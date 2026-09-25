@@ -181,6 +181,20 @@ type Approvals struct {
 	// doc comment on the missing agent registry).
 	HumanApprovers int  `json:"human_approvers"`
 	HumanApproved  bool `json:"human_approved"`
+	// SelfApproved is true iff SelfLogin has a currently APPROVED review on
+	// this PR — classifyPanel's team branch uses this to route an assigned
+	// reviewer who has already approved to team_awaiting_owner instead of
+	// team_awaiting_me. No staleness axis (see this package's own doc
+	// comment): a self-approval standing from before the PR's latest push
+	// still reads true here — a documented, currently-unavoidable gap, not
+	// a bug in this field.
+	SelfApproved bool `json:"self_approved"`
+	// HumanChangesRequested is true iff any reviewer NOT in the configured
+	// approver_allowlist currently carries a CHANGES_REQUESTED review.
+	// Deliberately excludes allowlisted (bot) reviewers so a bot's own
+	// disapproval — already carried by BotVerdict — is never double-counted
+	// here as if a second, independent human rejection existed.
+	HumanChangesRequested bool `json:"human_changes_requested"`
 	// BotVerdict is one of BotVerdictApproved/BotVerdictDisapproved/
 	// BotVerdictNoDecision (approvals.go), read from approver_allowlist
 	// logins' Review.State only.
@@ -282,7 +296,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	urgency := scoreUrgencyWithHealth(pr, commits, ci, urgencyCfg, jiraIssues, jiraCfg)
 	category := classifyCategory(pr, categoryVocab)
 	dispositions := computeDispositions(pr)
-	approvals := computeApprovals(pr, approverAllowlist, buildVerdictClassifier(verdictGenerations))
+	approvals := computeApprovals(pr, selfLogin, approverAllowlist, buildVerdictClassifier(verdictGenerations))
 	approvals.WaitingOnMe = computeWaitingOnMe(facts.Deps)
 	matchReasons := computeMatchReasons(pr, teamMembers, watchLabels, selfLogin)
 	panel := classifyPanel(ownership, pr, ci, approvals, matchReasons)

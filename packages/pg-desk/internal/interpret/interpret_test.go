@@ -398,23 +398,69 @@ func TestComputeApprovals(t *testing.T) {
 		{Author: "bob", State: "APPROVED"},
 		{Author: "policy-bot", State: "CHANGES_REQUESTED"},
 	}}
-	appr := computeApprovals(pr, []string{"policy-bot"}, nil)
+	appr := computeApprovals(pr, "", []string{"policy-bot"}, nil)
 	if appr.HumanApprovers != 2 || !appr.HumanApproved {
 		t.Fatalf("got HumanApprovers=%d HumanApproved=%v; want 2/true", appr.HumanApprovers, appr.HumanApproved)
 	}
 	if appr.BotVerdict != BotVerdictDisapproved {
 		t.Fatalf("got BotVerdict=%q; want disapproved", appr.BotVerdict)
 	}
+	if appr.HumanChangesRequested {
+		t.Fatalf("got HumanChangesRequested=true; want false (the only CHANGES_REQUESTED review is the allowlisted bot's own, already carried by BotVerdict)")
+	}
+	if appr.SelfApproved {
+		t.Fatalf("got SelfApproved=true; want false (self is \"\", must never match Author: \"\")")
+	}
 
 	prApproved := prShow{Reviews: []prReview{{Author: "policy-bot", State: "APPROVED"}}}
-	if got := computeApprovals(prApproved, []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictApproved {
+	if got := computeApprovals(prApproved, "", []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictApproved {
 		t.Fatalf("got BotVerdict=%q; want approved", got)
 	}
 
 	prNoDecision := prShow{Reviews: []prReview{{Author: "policy-bot", State: "COMMENTED"}}}
-	if got := computeApprovals(prNoDecision, []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictNoDecision {
+	if got := computeApprovals(prNoDecision, "", []string{"policy-bot"}, nil).BotVerdict; got != BotVerdictNoDecision {
 		t.Fatalf("got BotVerdict=%q; want no-decision", got)
 	}
+}
+
+// TestComputeApprovals_SelfApproved covers the "do I already have a current
+// APPROVED review" signal classifyPanel's team branch needs to route an
+// assigned reviewer to team_awaiting_owner instead of team_awaiting_me.
+func TestComputeApprovals_SelfApproved(t *testing.T) {
+	pr := prShow{Reviews: []prReview{
+		{Author: "alice", State: "APPROVED"},
+		{Author: "me", State: "APPROVED"},
+	}}
+	if got := computeApprovals(pr, "me", nil, nil).SelfApproved; !got {
+		t.Fatalf("got SelfApproved=%v; want true (self has a current APPROVED review)", got)
+	}
+	if got := computeApprovals(pr, "carol", nil, nil).SelfApproved; got {
+		t.Fatalf("got SelfApproved=%v; want false (self never reviewed)", got)
+	}
+}
+
+// TestComputeApprovals_HumanChangesRequested covers the "a real reviewer,
+// not the allowlisted bot, currently disapproves" signal — kept separate
+// from BotVerdict so the bot's own disapproval is never double-counted.
+func TestComputeApprovals_HumanChangesRequested(t *testing.T) {
+	t.Run("non-allowlisted reviewer requests changes", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{{Author: "carol", State: "CHANGES_REQUESTED"}}}
+		if got := computeApprovals(pr, "", []string{"policy-bot"}, nil).HumanChangesRequested; !got {
+			t.Fatalf("got HumanChangesRequested=%v; want true", got)
+		}
+	})
+	t.Run("only the allowlisted bot requests changes", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{{Author: "policy-bot", State: "CHANGES_REQUESTED"}}}
+		if got := computeApprovals(pr, "", []string{"policy-bot"}, nil).HumanChangesRequested; got {
+			t.Fatalf("got HumanChangesRequested=%v; want false (that's the bot's own disapproval, already BotVerdict)", got)
+		}
+	})
+	t.Run("no allowlist configured, any CHANGES_REQUESTED counts as human", func(t *testing.T) {
+		pr := prShow{Reviews: []prReview{{Author: "carol", State: "CHANGES_REQUESTED"}}}
+		if got := computeApprovals(pr, "", nil, nil).HumanChangesRequested; !got {
+			t.Fatalf("got HumanChangesRequested=%v; want true (empty allowlist means nobody is exempted)", got)
+		}
+	})
 }
 
 // TestComputeApprovals_CommentVerdictGrammar covers the comment-verdict-
@@ -445,7 +491,7 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: ISSUES-FOUND"},
 			},
 		}
-		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		got := computeApprovals(pr, "", []string{"review-bot"}, classifier)
 		if got.BotVerdict != BotVerdictDisapproved {
 			t.Fatalf("got BotVerdict=%q; want disapproved (comment signal must not be masked by a merely-COMMENTED review)", got.BotVerdict)
 		}
@@ -458,7 +504,7 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: CLEAN\nAUTHORITY: AUTO-APPROVED"},
 			},
 		}
-		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		got := computeApprovals(pr, "", []string{"review-bot"}, classifier)
 		if got.BotVerdict != BotVerdictApproved {
 			t.Fatalf("got BotVerdict=%q; want approved", got.BotVerdict)
 		}
@@ -471,7 +517,7 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: CLEAN\nAUTHORITY: AUTO-APPROVED"},
 			},
 		}
-		got := computeApprovals(pr, []string{"review-bot"}, classifier)
+		got := computeApprovals(pr, "", []string{"review-bot"}, classifier)
 		if got.BotVerdict != BotVerdictDisapproved {
 			t.Fatalf("got BotVerdict=%q; want disapproved (disapproved must win across signals, never be silently overridden by an approval elsewhere)", got.BotVerdict)
 		}
@@ -484,7 +530,7 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 				{ID: "c1", Author: "review-bot", Body: "X-TEST-REVIEW-BOT-MARKER\nDECISION: ISSUES-FOUND"},
 			},
 		}
-		got := computeApprovals(pr, []string{"review-bot"}, nil)
+		got := computeApprovals(pr, "", []string{"review-bot"}, nil)
 		if got.BotVerdict != BotVerdictNoDecision {
 			t.Fatalf("got BotVerdict=%q; want no-decision (nil classifier must not read comments at all)", got.BotVerdict)
 		}
