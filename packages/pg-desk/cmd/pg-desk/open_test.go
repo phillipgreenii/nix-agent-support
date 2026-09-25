@@ -432,6 +432,39 @@ func TestOpenCmdPrintListsTeamActNowByDefault(t *testing.T) {
 	}
 }
 
+// TestOpenCmdAllOpensTeamAwaitingTeamToo proves panelTeamAwaitingTeam rows are
+// admitted to the team candidate set (so --all can surface them) while the
+// default attention-only filter still excludes them — the exact admission
+// gap that let a panelTeamAwaitingTeam PR go missing from `open` entirely,
+// even with --all.
+func TestOpenCmdAllOpensTeamAwaitingTeamToo(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	cfg := openTestConfig("o/r")
+	withOpenSeams(t, cfg, openFresh)
+
+	seedOpenPR(t, st, "o/r", 1, "one", "https://example.test/pull/1", "alice", "team", panelTeamAwaitingMe, 0, []string{"review-requested"}, false, false)
+	seedOpenPR(t, st, "o/r", 2, "two", "https://example.test/pull/2", "bob", "team", panelTeamAwaitingTeam, 0, []string{"team-authored"}, false, false)
+
+	stdout, _, err := runOpenCmd(t, openFlags{printOnly: true})
+	if err != nil {
+		t.Fatalf("RunE() error = %v", err)
+	}
+	if !strings.Contains(stdout, "#1") {
+		t.Errorf("stdout missing the act-now PR:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "#2") {
+		t.Errorf("default (attention-only) team selection must exclude an awaiting_team PR:\n%s", stdout)
+	}
+
+	stdoutAll, _, err := runOpenCmd(t, openFlags{all: true, printOnly: true})
+	if err != nil {
+		t.Fatalf("RunE() --all error = %v", err)
+	}
+	if !strings.Contains(stdoutAll, "#1") || !strings.Contains(stdoutAll, "#2") {
+		t.Errorf("--all must admit the awaiting_team PR alongside the awaiting_me one:\n%s", stdoutAll)
+	}
+}
+
 func TestOpenCmdMineAloneOpensAllOfMyPRs(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := openTestConfig("o/r")

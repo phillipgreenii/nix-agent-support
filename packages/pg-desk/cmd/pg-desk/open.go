@@ -172,7 +172,7 @@ func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, e
 			}
 			actNowPanel = panelMineAwaitingMe
 		} else {
-			if interp.Panel != panelTeamAwaitingMe && interp.Panel != panelTeamAwaitingOwner {
+			if interp.Panel != panelTeamAwaitingMe && interp.Panel != panelTeamAwaitingTeam && interp.Panel != panelTeamAwaitingOwner {
 				continue
 			}
 			actNowPanel = panelTeamAwaitingMe
