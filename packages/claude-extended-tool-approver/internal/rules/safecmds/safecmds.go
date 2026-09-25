@@ -177,8 +177,20 @@ var alwaysSafe = map[string]bool{
 //
 // Safe to run on any in-zone path since browsingCmds only expose names, sizes,
 // timestamps — never content.
+//
+// "find" is DELIBERATELY ABSENT (tc-zo10s, moved out of this map): it gets its
+// own dedicated branch (findDangerousFlag / findPathIssue, below) rather than
+// this shared browsingPathIssue treatment, for two reasons this map's plain
+// zone check cannot express — a find PREDICATE (`-name`, `-path`, …) takes a
+// PATTERN operand, not a path find ever opens, and a find PREDICATE (`-exec`,
+// `-delete`, …) can mutate or run an arbitrary program, which disqualifies the
+// whole invocation the same way grep's `--pre`/`--filter` does (pg2-ygjs5) —
+// screening the OTHER arguments as paths does not make an `-exec` payload
+// read-only. find otherwise stays conceptually part of THIS pg2-4k7yd
+// decision (still metadata-only, still zone-checked); see findPathIssue's own
+// doc for the one deliberate widening beyond browsingPathIssue's check.
 var browsingCmds = map[string]bool{
-	"ls": true, "find": true, "fd": true, "du": true, "stat": true, "file": true,
+	"ls": true, "fd": true, "du": true, "stat": true, "file": true,
 	"lsof": true,
 }
 
@@ -353,6 +365,17 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if alwaysSafe[basename] || lspServices[basename] {
 			continue
 		}
+		// find: see findDangerousFlag/findPathIssue's own docs (tc-zo10s) for why
+		// this is its own branch rather than a browsingCmds member.
+		if basename == "find" {
+			if flag, dangerous := findDangerousFlag(pc.Args); dangerous {
+				return r.refuse("safe-commands: find " + flag + " mutates or runs a program, so this is not a read-only invocation (deferred to claude-code)")
+			}
+			if issue := findPathIssue(pc.Args, pe); issue != "" {
+				return r.refuse("safe-commands: find " + issue + " (deferred to claude-code)")
+			}
+			continue
+		}
 		if browsingCmds[basename] {
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
@@ -444,6 +467,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 				continue
 			}
 			if alwaysSafe[innerBase] || lspServices[innerBase] {
+				continue
+			}
+			// find: mirrors the main loop's dedicated "find" branch above (tc-zo10s).
+			if innerBase == "find" {
+				if flag, dangerous := findDangerousFlag(innerArgs); dangerous {
+					return r.refuse("safe-commands: xargs find " + flag + " mutates or runs a program, so this is not a read-only invocation (deferred to claude-code)")
+				}
+				if issue := findPathIssue(innerArgs, pe); issue != "" {
+					return r.refuse("safe-commands: xargs find " + issue + " (deferred to claude-code)")
+				}
 				continue
 			}
 			if browsingCmds[innerBase] {
@@ -1054,6 +1087,108 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 				return "references unknown path " + cand
 			}
 		}
+	}
+	return ""
+}
+
+// findPatternFlags are find predicates whose OPERAND is a PATTERN matched
+// against the walk, never a path find opens — the same table (by role, not by
+// import — a rule may not import another rule's package) as
+// internal/rules/gitdir's findPathPredicates. `find . -name '../secret'`
+// compares "../secret" against each walked entry's NAME; find never opens it
+// as a path, so findPathIssue's candidate scan must skip a findPatternFlags
+// value entirely rather than zone-checking it as one.
+var findPatternFlags = map[string]bool{
+	"-path": true, "-wholename": true, "-ipath": true, "-iwholename": true,
+	"-name": true, "-iname": true, "-regex": true, "-iregex": true,
+}
+
+// findDangerousFlags are find predicates that MUTATE (-delete), RUN A PROGRAM
+// (-exec/-execdir/-ok/-okdir), or WRITE their match list to a file
+// (-fprint/-fprint0/-fprintf/-fls). Presence alone disqualifies the whole
+// invocation, regardless of the flag's own operand — an -exec payload is
+// opaque (`-exec sh -c '…'` doubly so) — the same "a flag that makes the
+// invocation not read-only" disqualification grep/rg's GrepExecFlag already
+// applies (pg2-ygjs5), generalized to find's own predicate vocabulary
+// (tc-zo10s). Mirrors cmdparse/pipesink.go's identical find-writer table (kept
+// as a separate local table here for the same reason pipesink.go's own doc
+// gives for not sharing one across rule packages).
+var findDangerousFlags = map[string]bool{
+	"-delete": true, "-exec": true, "-execdir": true, "-ok": true, "-okdir": true,
+	"-fprint": true, "-fprint0": true, "-fprintf": true, "-fls": true,
+}
+
+// findDangerousFlag reports the first findDangerousFlags member present in
+// args, or ("", false) when none is.
+func findDangerousFlag(args []string) (string, bool) {
+	for _, a := range args {
+		if findDangerousFlags[a] {
+			return a, true
+		}
+	}
+	return "", false
+}
+
+// findPathIssue is browsingPathIssue's find-specific counterpart (tc-zo10s),
+// called only after findDangerousFlag has already cleared the invocation.
+// Two differences from the plain browsingPathIssue check:
+//
+//  1. A findPatternFlags value is skipped entirely — see that table's doc.
+//
+//  2. In addition to browsingPathIssue's ordinary zone check
+//     (pe.Evaluate(cand).CanRead()), a candidate that is a proper ANCESTOR of
+//     a real, non-fabricated project root (PathEvaluator.ProjectRootGrantsZone)
+//     also clears. find only lists names under a search root — it never
+//     reads their content — so an ancestor of the agent's own granted
+//     project zone grants nothing beyond LISTING directories that already
+//     sit above proven-own-working-area, the identical "expose names, never
+//     content" rationale browsingCmds' doc already gives find; this just
+//     extends it from "the target itself is in zone" to "the target CONTAINS
+//     an in-zone target" (tc-zo10s, absorbing the corpus's dominant
+//     miss-caught-by-settings find shape: `find $HOME`, `find
+//     $HOME/workspace`, … from a project nested under either).
+//
+//     The bare filesystem root "/" is deliberately EXCLUDED from this
+//     widening even though it is technically an ancestor of everything:
+//     granting it is equivalent to lifting the zone check for find
+//     entirely (a whole-filesystem enumeration), which is a broader call
+//     than this exemption is scoped to make — `find /` still needs the
+//     ordinary zone check (and so still abstains, deferring to
+//     claude-code) unless its own operand independently resolves in-zone.
+func findPathIssue(args []string, pe *patheval.PathEvaluator) string {
+	var projectRoot string
+	if pe.ProjectRootGrantsZone() {
+		projectRoot = pe.ProjectRoot()
+	}
+	skipNext := false
+	for _, a := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if findPatternFlags[a] {
+			skipNext = true
+			continue
+		}
+		cand, ok, malformed := pathCandidate(a)
+		if !ok {
+			continue
+		}
+		if malformed {
+			return "has malformed glued quoting " + cand
+		}
+		if !looksLikePath(cand) {
+			continue
+		}
+		if pe.Evaluate(cand).CanRead() {
+			continue
+		}
+		if projectRoot != "" {
+			if resolved := pe.ResolvePath(cand); resolved != "" && resolved != "/" && patheval.PathContains(resolved, projectRoot) {
+				continue
+			}
+		}
+		return "references unknown path " + cand
 	}
 	return ""
 }

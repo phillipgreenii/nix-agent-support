@@ -2348,6 +2348,121 @@ func TestSafecmds_Pg2_4k7yd_BrowsingAndTest(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Tc_zo10s_FindDangerousFlags pins find's absorb-settings fix
+// (tc-zo10s): a predicate that mutates, runs a program, or writes its match
+// list to a file disqualifies the whole invocation, exactly like grep's
+// --pre/--filter (pg2-ygjs5) — the search-root path being in-zone does not
+// make an -exec/-delete/-fprint* payload read-only.
+func TestSafecmds_Tc_zo10s_FindDangerousFlags(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+	dangerous := []string{
+		`find . -delete`,
+		`find . -exec rm {} \;`,
+		`find . -execdir rm {} \;`,
+		`find . -ok rm {} \;`,
+		`find . -okdir rm {} \;`,
+		`find . -fprint /tmp/out`,
+		`find . -fprint0 /tmp/out`,
+		`find . -fprintf /tmp/out %p`,
+		`find . -fls /tmp/out`,
+		// through xargs too — a guard applied only to the direct spelling is
+		// one-spelling coverage (pg2-ygjs5's precedent).
+		`true | xargs find . -delete`,
+	}
+	for _, cmd := range dangerous {
+		got := verdict(cmd)
+		if got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s (%s), want abstain (dangerous find predicate)", cmd, got.Decision, got.Reason)
+		}
+	}
+	// A find invocation with none of these predicates is unaffected by this guard.
+	safe := []string{`find /home/user/project -name '*.go'`}
+	for _, cmd := range safe {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (no dangerous predicate)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_Tc_zo10s_FindPatternFlagsNotPaths pins findPatternFlags: a
+// -name/-path/-iname/-ipath/-wholename/-iwholename/-regex/-iregex VALUE is a
+// PATTERN find matches against each walked entry's name, never a path find
+// opens, so it must not be zone-checked as one. Before this fix a pattern
+// with a `../` prefix (a legitimate exclusion idiom, e.g. `-path '../.git'`)
+// would be treated as a real path operand and zone-checked against the
+// parent directory.
+func TestSafecmds_Tc_zo10s_FindPatternFlagsNotPaths(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+	cmds := []string{
+		`find . -name ../secret`,
+		`find . -iname ../secret`,
+		`find . -path ../.git -prune -o -print`,
+		`find . -ipath ../.git -prune -o -print`,
+		`find . -wholename ../.git -prune -o -print`,
+		`find . -iwholename ../.git -prune -o -print`,
+		`find . -regex ../secret`,
+		`find . -iregex ../secret`,
+	}
+	for _, cmd := range cmds {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (pattern operand, not a path)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
+// TestSafecmds_Tc_zo10s_FindAncestorOfProjectRoot pins the one deliberate
+// widening findPathIssue makes beyond browsingPathIssue's plain zone check:
+// find's search root may be a proper ANCESTOR of a real, non-fabricated
+// project root — find only lists names under it, never content — but the
+// bare filesystem root "/" is excluded (see findPathIssue's own doc).
+func TestSafecmds_Tc_zo10s_FindAncestorOfProjectRoot(t *testing.T) {
+	// Deliberately NOT under /tmp: /tmp is its own always-granted ReadWrite
+	// zone (classify()'s tmpRoot rule), which would make every case below
+	// approve regardless of this bead's ancestor widening and defeat the
+	// test's purpose.
+	const projectRoot = "/home/user/workspace/project"
+	pe := patheval.New(projectRoot)
+	r := New(pe)
+	verdict := func(cmd string) hookio.RuleResult {
+		input := &hookio.HookInput{ToolName: "Bash", CWD: projectRoot, ToolInput: mustJSON(map[string]string{"command": cmd})}
+		return hookio.Verdict(r.Evaluate(input))
+	}
+
+	for _, cmd := range []string{
+		"find /home/user/workspace -name '*.nix'",
+		"find /home/user -name '*.nix'",
+	} {
+		got := verdict(cmd)
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (ancestor of project root)", cmd, got.Decision, got.Reason)
+		}
+	}
+
+	// The bare filesystem root is NOT granted by the ancestor widening.
+	got := verdict("find / -maxdepth 6 -iname 'devbox' -type f")
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("cmd %q: got %s (%s), want abstain (bare \"/\" excluded from ancestor widening)", "find /", got.Decision, got.Reason)
+	}
+
+	// A sibling directory (not an ancestor) is still refused.
+	got = verdict("find /home/user/other-project -name '*.nix'")
+	if got.Decision != hookio.NoOpinion {
+		t.Errorf("cmd %q: got %s (%s), want abstain (sibling, not an ancestor)", "find /home/user/other-project", got.Decision, got.Reason)
+	}
+}
+
 // TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected pins the bead's scope
 // guard: safeCmdSubstitutions members (readlink/realpath/basename, all still in
 // the alwaysSafe map here) get NO zone check from this bead and measure exactly
