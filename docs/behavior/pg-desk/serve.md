@@ -15,8 +15,8 @@ the pipeline; it only ever reads committed rows.
 
 `serve` MUST return `503` until the store has at least one interpretation. Once it has one, it
 serves `GET /api/v1/dashboard` with today's payload contract — the five named selectors
-(`mine_act_now`, `mine_awaiting_others`, `mine_awaiting_other_things`, `team_act_now`,
-`team_blocked`) and the root fields `generated_at`, `age_seconds`, `stale`, `stale_after_seconds`,
+(`team_awaiting_owner`, `team_awaiting_team`, `team_awaiting_me`, `mine_awaiting_me`,
+`mine_awaiting_team`) and the root fields `generated_at`, `age_seconds`, `stale`, `stale_after_seconds`,
 `sync_interval_seconds`, `dropped_count` — plus the fields this phase adds: a `hidden` array,
 `last_run_at`, `last_sweep_at`, `runs_failed_24h`, `errors[]`, and per-row `degraded`,
 `sync_error`, and `ready_to_promote`. Freshness derives from `meta.last_heartbeat` with the same

@@ -32,6 +32,35 @@ and MUST NOT use an LLM for any step below.
   or the PR's labels intersect the configured watch labels.
 - **Ready-to-promote** — a stored flag (own PR, not co-owned, draft, not WIP, checks green, no bot
   disapproval, no merge conflict). It is recorded, not acted on — see "Out of scope" below.
+- **Panel placement** — five named panels (`team_awaiting_owner`, `team_awaiting_team`,
+  `team_awaiting_me`, `mine_awaiting_me`, `mine_awaiting_team`), or no panel at all for a PR that
+  is not open, a draft team PR, or a team PR with zero match reasons. Operator ruling, 2026-09-25
+  (superseding the earlier act-now/blocked taxonomy): "Act Now" conflated "nothing is stopping you
+  from looking at this" with "this needs YOUR action."
+
+  A PR is **blocked** when CI is not green (`failure`, `pending`, or `none` all count — only
+  `success` passes), the bot verdict is disapproved, a non-bot reviewer currently carries a
+  `CHANGES_REQUESTED` review, or there is a merge conflict. Blocked always wins over every
+  assignment/approval check below.
+  - **Team**, once not blocked: if the operator is a requested reviewer and has not yet approved
+    → `team_awaiting_me`; if the operator has already approved → `team_awaiting_owner` (the ball
+    is back with the PR's owner or other reviewers). If the operator is not a requested reviewer:
+    any existing human approval → `team_awaiting_owner`, otherwise → `team_awaiting_team`. Blocked
+    → `team_awaiting_owner` (fixing CI/conflicts/disapprovals is the PR owner's job, not the
+    reviewer's).
+  - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
+    author qualifier — an open thread is on the operator regardless of who left it). Otherwise, an
+    existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise →
+    `mine_awaiting_team`. Blocked → `mine_awaiting_me` (it's the operator's own PR to fix).
+
+  **Known data gap:** pg-desk has no per-review head-SHA history, so "approved" here means "a
+  currently `APPROVED` review exists," not "a non-stale one" — a self- or team-approval from
+  before the PR's latest push still reads as satisfied. A future gather/store change to add
+  per-review staleness would change this without changing the taxonomy above.
+
+  **Known scope gap:** the taxonomy cannot distinguish "fully approved" from "partially approved"
+  (no required-approver-count signal — no CODEOWNERS/branch-protection data is gathered), so mine
+  has only two panels rather than a third "waiting on more approvals" bucket.
 
 **Hidden and WIP are explicitly NOT interpreted.** `serve` and `open` join the `annotation` table
 at read time, so a `hide` or `wip` call takes effect on the very next request, never waiting for
