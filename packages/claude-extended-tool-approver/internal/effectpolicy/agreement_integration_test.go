@@ -786,6 +786,51 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"entry). scp's LOCAL destination write (./syslog) is an ordinary non-secret CWD " +
 			"write and contributes no independent cap.",
 	},
+	// find_delete_build (tc-zo10s): production's safecmds `find` branch now
+	// refuses (defers to claude-code) ANY find invocation carrying a
+	// findDangerousFlags member — -delete included — the MOMENT the flag is
+	// present, independent of what it would actually delete (the same
+	// presence-alone disqualification grep/rg's GrepExecFlag already applies
+	// to an opaque -exec/--pre payload, generalized to find's whole
+	// mutate/run/write-list predicate vocabulary). That is a deliberate
+	// coarse simplification: find's own grammar makes computing exactly what
+	// a bare `-delete` (no preceding `-name`/`-type` test) reaches under a
+	// walk require evaluating the whole boolean expression, which production
+	// does not attempt — so it defers unconditionally instead.
+	//
+	// The spike's findInterpreter (slice 3q, predating this row and unchanged
+	// by it — see interpreter_find.go's delete()/golden_test.go's slice 3q
+	// comment) models `-delete` precisely instead: it emits a PathDelete of
+	// each starting point and judges it through the SAME DeleteAccess ladder
+	// `rm` uses (writable-not-deletable abstains, gitignored/declared-build
+	// approves, read-only/reject zones reject — tc-z806's operator-ruled
+	// delete model). In this fixture "build" is a gitignored build
+	// directory, so DeleteAccess correctly Approves deleting it — identical
+	// to what `rm -rf build` already Approves (rm_rf_build_gitignored). The
+	// sibling rows find_delete_log_dot (Abstain: "." is writable but not
+	// deletable) and find_delete_nix_store (Reject: read-only zone) exercise
+	// the same ladder and now classify both-undecided/spike-stricter, not
+	// looser — only this ROW, where DeleteAccess's precise answer happens to
+	// be Approve, exposes the gap against production's coarser refuse.
+	//
+	// Per jq_args's and gofmt_w_readme's precedent: the spike is the more
+	// precise engine here, and this is a production-side simplification (not
+	// a spike defect) — production could in principle special-case a bare
+	// `-delete` with no preceding test as "deletes exactly its starting
+	// points" and hand it to the same DeleteAccess-shaped judgment, but that
+	// is a production-side widening for a future slice, not a reason to
+	// regress the spike's already-tested, rm-equivalent -delete model here.
+	"find_delete_build": {
+		Class: "looser-than-abstain",
+		Cause: "production's safecmds find branch refuses on findDangerousFlags presence alone " +
+			"(deliberately not evaluating what -delete would actually reach), so `find build " +
+			"-delete` reaches NoOpinion. The spike's findInterpreter (slice 3q, unchanged by " +
+			"tc-zo10s) instead judges the PathDelete of each starting point through the same " +
+			"DeleteAccess ladder rm uses, and \"build\" is a gitignored build directory, so it " +
+			"correctly Approves — identical to rm_rf_build_gitignored. The spike is the more " +
+			"precise engine here (same family as jq_args/gofmt_w_readme); production's blanket " +
+			"refusal is a deliberate coarse simplification, not a defect this row should mask.",
+	},
 }
 
 // TestAgreement drives every case in goldenAgreementCases and
