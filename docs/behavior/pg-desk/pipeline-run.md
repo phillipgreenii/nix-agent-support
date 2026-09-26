@@ -17,6 +17,11 @@ flowchart LR
     ST --> SV["serve and open"]
 ```
 
+`pg-desk sweep` (bead `pg2-gznpe`, see [`operator-commands.md`](operator-commands.md)) is the
+bulk form of this same call: it re-runs this exact pipeline, always with `--change sweep`, once
+per entity already in the store, for every entity — the operator's backfill command for a
+schema/enrichment change that would otherwise reach an entity only on its own next real event.
+
 An `issue` or `thread` event is designed to additionally re-run stage 2 for the PR it links to, so
 that sync never signals from facts older than the last gather of that PR. As of Phase 10, `run
 issue` for the beads backend implements this: it resolves the triggering bead to its linked PR

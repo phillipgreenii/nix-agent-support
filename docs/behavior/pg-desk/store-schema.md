@@ -37,7 +37,9 @@ even though Phase 9 supports exactly one (see "Out of scope" below).
   plan/apply parity check mechanical. `last_reviewed_head_sha` is meaningful only for the
   `review-request` kind row.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
-  migrations, `heartbeat`, and `run`.
+  migrations, `heartbeat`, and `sweep` (`last_sweep`, bead `pg2-gznpe`) — `last_run` is reserved in
+  this same table but not yet written by any command (a separate, pre-existing gap; not this
+  bead's scope).
 
 ## Exit codes, telemetry, and logs
 

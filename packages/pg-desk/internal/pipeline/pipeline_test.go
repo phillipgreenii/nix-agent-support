@@ -538,3 +538,131 @@ func TestPipelineRunInterpretOnly_Degraded(t *testing.T) {
 		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
 	}
 }
+
+// --- Sweep: `pg-desk sweep` (bead pg2-gznpe) -------------------------------
+
+// TestPipelineSweep_IteratesEveryEntityAndSetsLastSweep is Sweep's core
+// contract: every entity in the given list gets the SAME full
+// gather/interpret/store pipeline call an existing single-entity `run`
+// uses, always with change=sweep (regardless of what change kind the
+// caller might otherwise have used) — and meta.last_sweep is stamped once
+// the pass completes.
+func TestPipelineSweep_IteratesEveryEntityAndSetsLastSweep(t *testing.T) {
+	var out bytes.Buffer
+	var gatheredIDs []string
+	var gatheredChanges []gather.ChangeKind
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		gatheredIDs = append(gatheredIDs, entityID)
+		gatheredChanges = append(gatheredChanges, change)
+		return minimalFacts(t, map[string]any{"author": "me", "title": "x", "repo": "acme/widgets"}), nil
+	}), &out)
+
+	entities := []store.Entity{
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1"},
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#2"},
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#3"},
+	}
+
+	if err := p.Sweep(context.Background(), entities); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	wantIDs := []string{"acme/widgets#1", "acme/widgets#2", "acme/widgets#3"}
+	if len(gatheredIDs) != len(wantIDs) {
+		t.Fatalf("gather was called for %v, want one call per entity in %v", gatheredIDs, wantIDs)
+	}
+	for i, id := range wantIDs {
+		if gatheredIDs[i] != id {
+			t.Fatalf("gather call %d was for %q, want %q (full order: %v)", i, gatheredIDs[i], id, gatheredIDs)
+		}
+		if gatheredChanges[i] != gather.ChangeSweep {
+			t.Fatalf("gather call %d used change=%q, want %q", i, gatheredChanges[i], gather.ChangeSweep)
+		}
+	}
+
+	for _, id := range wantIDs {
+		if _, found, err := p.store.GetInterpretation("acme/widgets", "pr", id); err != nil || !found {
+			t.Fatalf("GetInterpretation(%s): found=%v err=%v (Sweep must persist through the same pipeline Run uses)", id, found, err)
+		}
+	}
+
+	lastSweep, found, err := p.store.GetMeta(store.MetaKeyLastSweep)
+	if err != nil || !found {
+		t.Fatalf("GetMeta(last_sweep): found=%v err=%v", found, err)
+	}
+	wantSweepAt := p.clock.Now().UTC().Format(time.RFC3339)
+	if lastSweep != wantSweepAt {
+		t.Fatalf("meta.last_sweep = %q, want %q", lastSweep, wantSweepAt)
+	}
+}
+
+// TestPipelineSweep_EmptyStoreIsNoopButStillStampsLastSweep proves the
+// degenerate case: sweeping an empty entity list invokes gather zero
+// times, returns nil, and still stamps meta.last_sweep — an empty store
+// is a legitimate "nothing to back-fill yet" outcome, not an error.
+func TestPipelineSweep_EmptyStoreIsNoopButStillStampsLastSweep(t *testing.T) {
+	var out bytes.Buffer
+	calls := 0
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		calls++
+		return gather.Facts{}, nil
+	}), &out)
+
+	if err := p.Sweep(context.Background(), nil); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("gather was invoked %d times sweeping an empty list, want 0", calls)
+	}
+
+	if _, found, err := p.store.GetMeta(store.MetaKeyLastSweep); err != nil || !found {
+		t.Fatalf("GetMeta(last_sweep): found=%v err=%v, want it stamped even for an empty sweep", found, err)
+	}
+}
+
+// TestPipelineSweep_ContinuesPastOneEntitysFailureAndStillStampsLastSweep
+// proves the error-tolerance contract: a hard failure on one entity
+// (mirrors TestPipelineRun_TriggeringEntityFetchFailure) does not stop
+// the rest of the sweep from being attempted, the returned error names
+// the failing entity, and meta.last_sweep is still stamped — the sweep
+// PASS itself completed even though one entity's own Run call failed,
+// mirroring Run's own "degraded is still success" completion contract.
+func TestPipelineSweep_ContinuesPastOneEntitysFailureAndStillStampsLastSweep(t *testing.T) {
+	var out bytes.Buffer
+	var gatheredIDs []string
+	wantErr := errors.New("gather: fetch triggering PR acme/widgets#2: pg-connector reports not_found")
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		gatheredIDs = append(gatheredIDs, entityID)
+		if entityID == "acme/widgets#2" {
+			return gather.Facts{}, wantErr
+		}
+		return minimalFacts(t, map[string]any{"author": "me", "title": "x", "repo": "acme/widgets"}), nil
+	}), &out)
+
+	entities := []store.Entity{
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1"},
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#2"},
+		{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#3"},
+	}
+
+	err := p.Sweep(context.Background(), entities)
+	if err == nil {
+		t.Fatal("Sweep: expected a non-nil error naming the failed entity")
+	}
+	if !strings.Contains(err.Error(), "acme/widgets#2") || !strings.Contains(err.Error(), "not_found") {
+		t.Fatalf("Sweep error = %v, want it to name the failed entity and wrap the underlying failure", err)
+	}
+
+	wantIDs := []string{"acme/widgets#1", "acme/widgets#2", "acme/widgets#3"}
+	if len(gatheredIDs) != len(wantIDs) {
+		t.Fatalf("gather was called for %v, want every entity attempted (%v), including the ones after the failure", gatheredIDs, wantIDs)
+	}
+
+	if _, found, err := p.store.GetInterpretation("acme/widgets", "pr", "acme/widgets#3"); err != nil || !found {
+		t.Fatalf("GetInterpretation(acme/widgets#3): found=%v err=%v (the entity after the failure must still have been processed)", found, err)
+	}
+
+	if _, found, err := p.store.GetMeta(store.MetaKeyLastSweep); err != nil || !found {
+		t.Fatalf("GetMeta(last_sweep): found=%v err=%v, want it stamped even though one entity failed", found, err)
+	}
+}

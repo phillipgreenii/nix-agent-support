@@ -183,6 +183,55 @@ func TestEntityGetMissingNotFound(t *testing.T) {
 	}
 }
 
+// TestListEntitiesReturnsEveryRowOrdered proves ListEntities' own
+// contract (added for `pg-desk sweep`, bead pg2-gznpe): every entity row
+// currently in the store comes back, ordered deterministically by
+// (repo, entity_type, entity_id) regardless of insertion order — mirrors
+// TestInterpretationRoundTrip's sibling ListInterpretations ordering
+// proof, one table over.
+func TestListEntitiesReturnsEveryRowOrdered(t *testing.T) {
+	s := OpenForTest(t)
+
+	// Inserted out of order on purpose, so a passing test cannot be
+	// explained by incidental SQLite scan order matching insertion order.
+	third := Entity{Repo: "owner/repo", EntityType: "pr", EntityID: "9", Facts: `{}`, AsOf: "2026-09-25T00:00:00Z", ContentHash: "c9"}
+	first := Entity{Repo: "owner/repo", EntityType: "pr", EntityID: "1", Facts: `{}`, AsOf: "2026-09-25T00:00:00Z", ContentHash: "c1"}
+	second := Entity{Repo: "owner/repo", EntityType: "pr", EntityID: "5", Facts: `{}`, AsOf: "2026-09-25T00:00:00Z", ContentHash: "c5"}
+	for _, e := range []Entity{third, first, second} {
+		if err := s.UpsertEntity(e); err != nil {
+			t.Fatalf("UpsertEntity(%s): %v", e.EntityID, err)
+		}
+	}
+
+	got, err := s.ListEntities()
+	if err != nil {
+		t.Fatalf("ListEntities: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListEntities returned %d rows, want 3: %+v", len(got), got)
+	}
+	wantOrder := []string{"1", "5", "9"}
+	for i, want := range wantOrder {
+		if got[i].EntityID != want {
+			t.Fatalf("ListEntities[%d].EntityID = %q, want %q (full result: %+v)", i, got[i].EntityID, want, got)
+		}
+	}
+}
+
+// TestListEntitiesEmptyStoreReturnsNoRowsNoError proves the empty case —
+// `pg-desk sweep` against a fresh store (nothing gathered yet) must not
+// error, just report zero entities to sweep.
+func TestListEntitiesEmptyStoreReturnsNoRowsNoError(t *testing.T) {
+	s := OpenForTest(t)
+	got, err := s.ListEntities()
+	if err != nil {
+		t.Fatalf("ListEntities: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListEntities on an empty store returned %d rows, want 0: %+v", len(got), got)
+	}
+}
+
 func TestInterpretationRoundTrip(t *testing.T) {
 	s := OpenForTest(t)
 

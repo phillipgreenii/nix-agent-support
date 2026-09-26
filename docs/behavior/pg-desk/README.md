@@ -22,9 +22,10 @@ this set and MUST NOT contradict it without a docket design amendment.
 ## Scope (Phase 9, widened by Phase 10)
 
 In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes — added by Phase
-10, docket pg2-2j5ac.34), the `run` pipeline, `serve` (behind the soak option only), `open`,
-`hide`/`unhide`/`wip`, `feedback list`/`feedback set`, `show`, `status`, `doctor`,
-`heartbeat`/`heartbeat-item`, and `import-pg-pr-annotations`.
+10, docket pg2-2j5ac.34), the `run` pipeline, `sweep` (bead `pg2-gznpe`'s bulk backfill over every
+stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
+`feedback list`/`feedback set`, `show`, `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+`import-pg-pr-annotations`.
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
 qualifier every time:**
@@ -61,7 +62,7 @@ back here — not the full list.
 | [`open.md`](open.md)                                         | `pg-desk open`                                                                                         |
 | [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                          |
 | [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                 |
-| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `doctor`, `heartbeat`, `heartbeat-item`                                              |
+| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                     |
 | [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                        |
 
 ## Telemetry declaration (D24)

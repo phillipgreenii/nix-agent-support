@@ -51,6 +51,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -327,6 +328,51 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	p.logRun(entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
 	if p.verbose {
 		p.printTimeline([]stageEvent{{Stage: "interpret", DurationMs: p.clock.Now().Sub(runStart).Milliseconds()}})
+	}
+	return nil
+}
+
+// Sweep implements `pg-desk sweep` (bead pg2-gznpe): the operator's
+// "recompute everything" backfill — it re-runs the full gather/interpret/
+// store/sync pipeline (Run, above; change is always ChangeSweep, matching
+// the manual per-entity workaround this command replaces:
+// `pg-desk run pr <id>` with no --change, which already defaults to
+// sweep) for every entity in entities, in the given order, then stamps
+// meta.last_sweep once the pass over the whole list has been attempted.
+//
+// Every entity is attempted even after an earlier one fails — mirrors
+// cmd/pg-desk/run.go's own runJiraIssue/runThread "attempt every one,
+// join errors" convention, one layer down: a handful of stale or
+// since-deleted entities must not stop the rest of the backfill. Errors
+// (per-entity Run failures, and a meta.last_sweep write failure) are
+// joined into a single returned error; last_sweep is still stamped even
+// when one or more entities failed, since the SWEEP ITSELF — the attempt
+// to recompute every entity — did complete, mirroring Run's own "a
+// degraded-but-completed run is still success" contract (see the package
+// doc comment) rather than requiring every entity to succeed before the
+// dashboard's last_sweep_at is allowed to advance.
+//
+// This is distinct from, and does NOT implement, sync.md's still-out-of-
+// scope "store-wide sweep that re-verifies every ledger row whose entity
+// has left every gathered query" — that needs a driver over the LEDGER
+// table (which entities have vanished from every live query); this Sweep
+// only re-runs the pipeline for entities the ENTITY table already knows
+// about.
+func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
+	var errs []error
+	for _, e := range entities {
+		if err := p.Run(ctx, e.EntityType, e.EntityID, gather.ChangeSweep); err != nil {
+			errs = append(errs, fmt.Errorf("sweep %s %s: %w", e.EntityType, e.EntityID, err))
+		}
+	}
+
+	now := p.clock.Now().UTC().Format(time.RFC3339)
+	if err := p.store.SetMeta(store.MetaKeyLastSweep, now); err != nil {
+		errs = append(errs, fmt.Errorf("sweep: record meta.last_sweep: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("pipeline: sweep: %w", errors.Join(errs...))
 	}
 	return nil
 }

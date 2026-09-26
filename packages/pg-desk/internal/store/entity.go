@@ -74,6 +74,38 @@ func (s *Store) CountEntities() (int, error) {
 	return n, nil
 }
 
+// ListEntities returns every entity row, ordered by
+// (repo, entity_type, entity_id) for a deterministic result — mirrors
+// ListInterpretations' own identical ordering rationale (interpretation.go).
+// Added for `pg-desk sweep` (bead pg2-gznpe): the bulk-backfill command's
+// own "iterate every entity currently in the store" driver reads this list
+// rather than requiring a caller to invent its own full-table scan.
+func (s *Store) ListEntities() ([]Entity, error) {
+	rows, err := s.sql.Query(
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha
+		 FROM entity ORDER BY repo, entity_type, entity_id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list entities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Entity
+	for rows.Next() {
+		var e Entity
+		var headSHA sql.NullString
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA); err != nil {
+			return nil, fmt.Errorf("store: scan entity row: %w", err)
+		}
+		e.HeadSHA = headSHA.String
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list entities: %w", err)
+	}
+	return out, nil
+}
+
 // nullableString maps an empty Go string to a SQL NULL, so optional
 // TEXT columns (e.g. entity.head_sha) round-trip as NULL rather than "".
 func nullableString(v string) any {
