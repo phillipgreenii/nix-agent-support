@@ -227,6 +227,28 @@ func TestBackend_Show_IncludesDescriptionAssigneeParentDeps(t *testing.T) {
 	}
 }
 
+// TestBackend_Show_IncludesOwner locks in bead pg2-t9zzg (D-F8): bd's own
+// `owner` field, distinct from `assignee`, is carried through Show's
+// response on schema.Issue.Owner.
+func TestBackend_Show_IncludesOwner(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":1,` +
+			`"issue_type":"task","owner":"owner@example.com",` +
+			`"assignee":"assignee@example.com"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	got, err := b.Show(context.Background(), "tp-1")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.Owner != "owner@example.com" {
+		t.Fatalf("Owner = %q, want %q", got.Owner, "owner@example.com")
+	}
+	if got.Assignee != "assignee@example.com" {
+		t.Fatalf("Assignee = %q, want %q (Owner must not clobber Assignee)", got.Assignee, "assignee@example.com")
+	}
+}
+
 // TestBackend_Show_IncludesFreshnessAndMetadataFields locks in bead
 // pg2-2j5ac.28.3's own additions: AsOf/Stale always populated (a live
 // read, so Stale is always false), UpdatedAt/DueDate carried straight

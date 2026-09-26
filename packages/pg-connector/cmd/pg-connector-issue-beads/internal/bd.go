@@ -47,7 +47,10 @@ import (
 // --external-ref ... --metadata ... --json` / `bd show --json` round trip
 // in a disposable embedded-dolt workspace, not assumed from `--help` text
 // alone (bd's own flags are named `--due`/`--external-ref` but the WIRE
-// field names differ: `due_at`/`external_ref`).
+// field names differ: `due_at`/`external_ref`). Owner was added by bead
+// pg2-t9zzg (D-F8), decoding bd's own `owner` field — distinct from
+// Assignee — verified live against a real `bd show --json` (bd's own
+// `owner`/`assignee` keys hold different values for the same issue).
 type bdIssue struct {
 	ID           string                     `json:"id"`
 	Title        string                     `json:"title"`
@@ -57,6 +60,7 @@ type bdIssue struct {
 	IssueType    string                     `json:"issue_type"`
 	Labels       []string                   `json:"labels,omitempty"`
 	Assignee     string                     `json:"assignee,omitempty"`
+	Owner        string                     `json:"owner,omitempty"`
 	Parent       string                     `json:"parent,omitempty"`
 	Dependencies []bdDependency             `json:"dependencies,omitempty"`
 	UpdatedAt    string                     `json:"updated_at,omitempty"`

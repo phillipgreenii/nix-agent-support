@@ -58,7 +58,12 @@ import "encoding/json"
 // given actual landing order; the invariant itself ("this bead bumps the
 // version by exactly one, to cover its own new field shape") holds
 // regardless of which specific numeral that lands on.
-const IssueSchemaVersion = 5
+//
+// Bumped 5 -> 6 by bead pg2-t9zzg (D-F8, named by pg2-2j5ac.27's design and
+// confirmed a real correctness blocker by pg2-2j5ac.48's finding S6), which
+// added the Owner field below — same "any field-shape change bumps the
+// version" precedent as every earlier bump on this constant.
+const IssueSchemaVersion = 6
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -113,6 +118,14 @@ type Issue struct {
 	// Empty when unassigned or the backend does not supply one — added by
 	// bead pg2-akfw5 (review finding A-33).
 	Assignee string `json:"assignee,omitempty"`
+
+	// Owner is the issue's owner, in whatever identity form its own
+	// tracker uses (bd's own distinct `owner` field, separate from
+	// Assignee) — added by bead pg2-t9zzg (D-F8: both pg2-2j5ac.27's
+	// daily-focus design and pg2-2j5ac.46's generic-entity-pipeline design
+	// assume this field exists, feeding it into ownership classification
+	// alongside Assignee). Empty when the backend does not supply one.
+	Owner string `json:"owner,omitempty"`
 
 	// Parent is the id of this issue's parent in a hierarchical tracker
 	// (e.g. one of bd's dot-suffixed child ids). Empty when the issue has

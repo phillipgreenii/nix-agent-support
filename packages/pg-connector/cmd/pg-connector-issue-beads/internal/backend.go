@@ -160,6 +160,9 @@ func formatPriority(p int) string {
 // (review finding A-33: this
 // mapping previously dropped all four).
 //
+// Owner is carried straight through from bdIssue's own owner field, added
+// by bead pg2-t9zzg (D-F8) — distinct from Assignee.
+//
 // asOf is this call's own completion time (bead pg2-2j5ac.28.3, mirroring
 // pkg/schema/pr.go's toSchemaPR/asOf precedent exactly): every call site
 // below execs `bd` fresh with no local cache of bd's own facts, so Stale
@@ -186,6 +189,7 @@ func toSchemaIssue(iss *bdIssue, tracker string, asOf time.Time) *schema.Issue {
 		Tracker:      tracker,
 		Description:  iss.Description,
 		Assignee:     iss.Assignee,
+		Owner:        iss.Owner,
 		Parent:       iss.Parent,
 		Deps:         deps,
 		AsOf:         asOf.Format(time.RFC3339),
