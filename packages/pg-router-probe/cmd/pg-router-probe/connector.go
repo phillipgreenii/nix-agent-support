@@ -19,10 +19,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // pgConnectorBinary is the ambient $PATH name this probe execs. Never a
@@ -139,15 +141,61 @@ func listEscalated(ctx context.Context, warn func(string)) ([]connectorIssue, er
 }
 
 // metadataArgs renders a metadata map as one repeated --metadata k=v flag
-// per entry (pg-connector's own StringToStringVar flag accepts either
-// form; repeating the flag keeps each value's own `=`/`,` characters from
-// needing escaping).
+// per entry.
+//
+// pg-connector's own --metadata flag (packages/pg-connector/cmd/pg-connector
+// /issue.go) is pflag's StringToStringVar. Its Set() counts every "=" in the
+// WHOLE flag value: with exactly one "=" it keeps the value verbatim, but
+// with two or more (i.e. whenever the value ITSELF contains an "=", which
+// every k=v pair here does once you count the flag's own leading "k=") it
+// re-parses the whole value as one CSV row and splits on any UNQUOTED
+// comma. grafanaAlertFingerprint's own wire format is
+// "<rule-uid>|k1=v1,k2=v2,..." [fingerprint.go], so any finding with more
+// than one label (in particular the "type" label that distinguishes
+// pg-router-queue-depth-growing's pr.reconcile vs pr.changed instances)
+// pushes the "=" count to 2+ and hits that CSV path -- pg-connector then
+// shreds the fingerprint at its first comma and spills the remaining
+// "key=value" fragments as bogus top-level metadata keys. Every affected
+// bead's stored fingerprint collapses to just "<rule-uid>|__alert_rule_uid__
+// =<rule-uid>" (that key always sorts first and its value always equals
+// the rule uid), so two genuinely different alert instances (different
+// "type") collapse to the SAME stored fingerprint and dedup.go's
+// matchExisting can never tell them apart -- this is pg2-0gn0u's actual
+// root cause: a metadata-transport bug, not an omission in fingerprint
+// computation (grafanaAlertFingerprint already hashes every label it is
+// given, "type" included; see fingerprint_test.go's
+// TestGrafanaAlertFingerprintDistinguishesTypeLabel).
+//
+// The fix: CSV-encode the whole "k=v" token as a single field before
+// handing it to pg-connector. A field with no comma/quote/newline comes
+// back byte-for-byte unchanged (csv.Writer only quotes when needed), so
+// this is a no-op for every existing simple case; a field containing
+// commas gets wrapped in a quoted CSV field starting at position 0, which
+// pflag's own csv.NewReader on the receiving end reads back as a single
+// unsplit element -- reconstructing the original value exactly.
 func metadataArgs(metadata map[string]string) []string {
 	args := make([]string, 0, len(metadata)*2)
 	for k, v := range metadata {
-		args = append(args, "--metadata", k+"="+v)
+		args = append(args, "--metadata", csvEncodeMetadataPair(k, v))
 	}
 	return args
+}
+
+// csvEncodeMetadataPair renders "k=v" as a single RFC 4180 CSV field via
+// encoding/csv, so it round-trips intact through pg-connector's pflag
+// StringToStringVar parser (see metadataArgs' own doc comment above).
+func csvEncodeMetadataPair(k, v string) string {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{k + "=" + v}); err != nil {
+		// A single well-formed Go string can only fail here on a writer
+		// I/O error, which an in-memory bytes.Buffer never returns in
+		// practice; fall back to the unencoded form rather than losing
+		// the argument entirely.
+		return k + "=" + v
+	}
+	w.Flush()
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 // createIssue runs `pg-connector issue create` with the given title,

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 func noopWarn(string) {}
@@ -190,5 +192,64 @@ func TestMetadataArgsRepeatsFlag(t *testing.T) {
 	args := metadataArgs(map[string]string{"a": "1"})
 	if len(args) != 2 || args[0] != "--metadata" || args[1] != "a=1" {
 		t.Fatalf("got %v", args)
+	}
+}
+
+// TestMetadataArgsRoundTripsThroughPflagStringToString is pg2-0gn0u's
+// regression test for the actual root cause: pg-connector's own --metadata
+// flag is pflag's StringToStringVar (packages/pg-connector/cmd/pg-connector
+// /issue.go), whose Set() CSV-parses the whole flag value -- splitting on
+// any unquoted comma -- as soon as the value contains 2+ "=" characters.
+// grafanaAlertFingerprint's "<rule-uid>|k1=v1,k2=v2,..." format guarantees
+// that for any finding with more than one label, so without
+// metadataArgs' own CSV-encoding this test fails exactly the way the real
+// pg2-40ro0/pg2-yrvor/pg2-cbbma beads did: the fingerprint value gets
+// truncated at its first comma and the remaining "k=v" fragments leak out
+// as bogus separate top-level metadata keys. This test drives the SAME
+// pflag parser pg-connector uses (not a hand-rolled stand-in), so it
+// fails on the pre-fix metadataArgs and passes on the fixed one.
+//
+// Scoped to comma-containing values only -- the real bug, and the only
+// shape this probe's own metadata values (fingerprints, state, episode
+// counts, Grafana label values) ever take. A value containing a literal
+// `"` character hits a separate, pre-existing inconsistency between
+// pflag's own two Set() parsing paths (its single-"=" fast path only
+// trims outer quotes rather than fully CSV-unescaping) that is out of
+// scope here: no metadata this probe writes ever contains a quote
+// character.
+func TestMetadataArgsRoundTripsThroughPflagStringToString(t *testing.T) {
+	cases := []struct {
+		name string
+		k, v string
+	}{
+		{"simple", "a", "1"},
+		{
+			"multi-label-fingerprint-with-type",
+			metaFingerprint,
+			"pg-router-queue-depth-growing|__alert_rule_uid__=pg-router-queue-depth-growing," +
+				"alertname=pg-router queue depth is growing (by type),severity=warning,type=pr.reconcile",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			args := metadataArgs(map[string]string{c.k: c.v})
+			if len(args) != 2 || args[0] != "--metadata" {
+				t.Fatalf("metadataArgs: got %v", args)
+			}
+
+			fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			var parsed map[string]string
+			fs.StringToStringVar(&parsed, "metadata", nil, "")
+			if err := fs.Parse(args); err != nil {
+				t.Fatalf("pflag parse of metadataArgs' own output: %v", err)
+			}
+
+			if len(parsed) != 1 {
+				t.Fatalf("expected exactly 1 metadata key to survive the round trip, got %d: %v", len(parsed), parsed)
+			}
+			if parsed[c.k] != c.v {
+				t.Fatalf("round-trip mismatch: got %q, want %q (full map %v)", parsed[c.k], c.v, parsed)
+			}
+		})
 	}
 }
