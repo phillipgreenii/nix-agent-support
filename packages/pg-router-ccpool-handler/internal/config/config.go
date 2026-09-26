@@ -144,10 +144,29 @@ func (c Config) WorkerBudget() budget.Budget {
 }
 
 // baseAllowedTools is the built-in claude --allowed-tools allowlist granted
-// to every autonomous worker regardless of configuration. Mirrors
-// packages/pg-router/internal/config.baseAllowedTools (same value, same
-// rationale — see that package's own doc comment).
-const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)"
+// to every autonomous worker regardless of configuration. Historically
+// mirrored packages/pg-router/internal/config.baseAllowedTools byte-for-byte
+// (same rationale — see that package's own doc comment); the two have
+// deliberately DIVERGED as of bead pg2-s9zh5 below, since
+// packages/pg-router/internal/config.baseAllowedTools is not on this
+// module's own live dispatch path (this package's Config, not pg-router
+// core's, is what `ccpool new --allowed-tools` actually receives —
+// internal/ccpool/cli.go's NewCLIRunnerForPool) and that other constant
+// carries its own "HUMAN SIGN-OFF REQUIRED" gate this bugfix does not
+// touch.
+//
+// pg-connector issue */ccpool * (bead pg2-s9zh5): every dispatched role
+// shares this ONE process-wide allowlist — there is no per-role override
+// mechanism today (roles.CCPoolConfig and the nix module's roleFileFor carry
+// no allowedTools field of their own) — so a triager-shaped role's own
+// dispatch prompt instructing it to read/mutate the escalated bead
+// (`pg-connector issue show/comment/update/close`) and inspect/reply to
+// stuck sessions (`ccpool list/state/reply/tail`) had no path to those verbs
+// under PermissionMode=dontAsk (auto-deny, no prompt possible). Widening the
+// shared base list (rather than adding role-scoped plumbing) is the
+// deliberately narrower of the two fixes the bead allows, since the
+// role-scoped mechanism does not exist yet.
+const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)"
 
 // defaultAllowedTools builds the AllowedTools default: baseAllowedTools plus,
 // when prTool is configured, a Bash(<prTool>:*) grant — mirrors

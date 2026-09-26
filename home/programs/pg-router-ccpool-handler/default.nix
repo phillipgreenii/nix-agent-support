@@ -362,7 +362,17 @@ let
   # overlay sets a nonempty PRTool -- so this nix default deliberately does
   # the same (no dynamic Bash(<prTool>:*) append here either); see
   # launchConfig.allowedTools's own doc comment below.
-  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*)";
+  #
+  # pg-connector issue */ccpool * (bead pg2-s9zh5): widened alongside
+  # packages/pg-router-ccpool-handler/internal/config.go's own
+  # baseAllowedTools (see that constant's doc comment for the full
+  # rationale) -- every dispatched role shares this ONE process-wide
+  # allowlist (no per-role override mechanism exists in `roles`/
+  # `roleFileFor` below), so a triager-shaped role's own dispatch prompt
+  # instructing it to use `pg-connector issue show/comment/update/close` and
+  # `ccpool list/state/reply/tail` had no path to those verbs under
+  # PermissionMode=dontAsk (auto-deny, no prompt possible).
+  defaultAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(gofmt:*),Bash(go mod:*),Bash(nix flake check:*),Bash(nix fmt:*),Bash(prek:*),Bash(pre-commit:*),Bash(pg-connector issue show:*),Bash(pg-connector issue comment:*),Bash(pg-connector issue update:*),Bash(pg-connector issue close:*),Bash(ccpool list:*),Bash(ccpool state:*),Bash(ccpool reply:*),Bash(ccpool tail:*)";
 
   # launchConfigFile (this bead, pg2-qsred: home-manager module has no
   # launch-config surface, so real dispatch fails on empty WorktreeDir).
