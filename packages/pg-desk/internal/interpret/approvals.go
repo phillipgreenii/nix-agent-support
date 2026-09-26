@@ -72,12 +72,15 @@ const (
 // the per-commit one remains unaddressed.
 //
 // SelfApproved and HumanChangesRequested are computed in the SAME pass as
-// HumanApprovers/HumanApproved (one loop over pr.Reviews) rather than as
-// separate helper functions, since all four read the identical
-// State/Author fields — splitting them would mean re-walking pr.Reviews
-// for no benefit. HumanChangesRequested excludes approverAllowlist logins
-// deliberately: a bot's disapproval is already BotVerdict's concern, and
-// double-carrying it here would let one bot rejection present as two
+// HumanApprovers/HumanApproved: computeApprovals runs two loops, one over
+// pr.Reviews to build latestDecision (each author's single most recent
+// decisive verdict), then one over that collapsed latestDecision map, where
+// all four are derived together rather than via separate helper functions,
+// since all four read the identical author/state pairs latestDecision
+// already produced — splitting them would mean re-deriving that same
+// collapse for no benefit. HumanChangesRequested excludes approverAllowlist
+// logins deliberately: a bot's disapproval is already BotVerdict's concern,
+// and double-carrying it here would let one bot rejection present as two
 // independent signals to classifyPanel.
 func computeApprovals(pr prShow, self string, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
 	allow := toSet(approverAllowlist)
