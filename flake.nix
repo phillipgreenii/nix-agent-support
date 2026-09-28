@@ -3777,22 +3777,27 @@
                   touch $out
                 '';
 
-              # test-pg-wi-flow-module (bead tc-9ddu3.1.5): proves
-              # home/programs/pg-wi-flow/default.nix's new paths.defaults
-              # wiring actually evaluates and renders the expected
-              # xdg.configFile output, using the same bare-evalModules
-              # technique as test-ceta-extra-readonly-roots below (imports
-              # the REAL claude-extended-tool-approver module alongside
-              # pg-wi-flow's own, rather than stubbing its
-              # enable/inputProcessors options by hand -- the same
-              # rationale that check gives). Disabled resolves inert (no
-              # package installed, no config.json rendered); enabled
-              # renders $XDG_CONFIG_HOME/pg-wi-flow/config.json with
-              # paths.defaults pointing at the built pg-wi-flow-data store
-              # path, and the ceta inputProcessors list gains
+              # test-pg-wi-flow-module (bead tc-9ddu3.1.5, extended by
+              # tc-9ddu3.1.17): proves home/programs/pg-wi-flow/default.nix's
+              # paths.defaults wiring actually evaluates and renders the
+              # expected xdg.configFile output, using the same
+              # bare-evalModules technique as test-ceta-extra-readonly-roots
+              # below (imports the REAL claude-extended-tool-approver module
+              # alongside pg-wi-flow's own, rather than stubbing its
+              # enable/inputProcessors options by hand -- the same rationale
+              # that check gives). Disabled resolves inert (no package
+              # installed, no config.json rendered, marketplace override
+              # false); enabled renders $XDG_CONFIG_HOME/pg-wi-flow/config.json
+              # with paths.defaults pointing at the built pg-wi-flow-data
+              # store path, the ceta inputProcessors list gains
               # "pg-wi-flow-identity" (unchanged behaviour -- this packet's
               # own Acceptance criteria requires the pre-existing wiring to
-              # stay unchanged).
+              # stay unchanged), and the marketplace override is true. The
+              # marketplace override assertions are tc-9ddu3.1.17's own
+              # Acceptance criteria: a single toggle (this option) MUST
+              # control BOTH home.packages (CLI) AND the marketplace/plugin
+              # registration -- verifiable via evaluation, not just by
+              # reading the code.
               test-pg-wi-flow-module =
                 let
                   evalHM =
@@ -3837,6 +3842,17 @@
                               # which pg-wi-flow's module contributes to
                               # regardless of this gate).
                               phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              # Stub for the marketplaces.overrides option this
+                              # module now contributes to (tc-9ddu3.1.17); the
+                              # real option lives in
+                              # home/programs/claude-marketplaces/default.nix,
+                              # not imported here (same not-imported rationale
+                              # as claude-code.enable above -- only the leaf
+                              # option this module writes to needs to exist).
+                              phillipgreenii.programs.claude-code.marketplaces.overrides = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.bool;
+                                default = { };
+                              };
                               warnings = lib.mkOption {
                                 type = lib.types.listOf lib.types.str;
                                 default = [ ];
@@ -3855,18 +3871,32 @@
                   hmEnabled = evalHM { enable = true; };
 
                   configJsonDrv = hmEnabled.xdg.configFile."pg-wi-flow/config.json".source;
+
+                  marketplaceOverrideKey = "pg-wi-flow@phillipgreenii-nix-agent-support-marketplace-local";
                 in
-                # Disabled: nothing installed, nothing rendered.
+                # Disabled: nothing installed, nothing rendered, and the
+                # marketplace/plugin registration is explicitly forced OFF
+                # (not merely absent) -- tc-9ddu3.1.17's Acceptance criteria:
+                # enable=false -> neither the CLI binary nor the /drain
+                # skill/agents are present.
                 assert hmDisabled.home.packages == [ ];
                 assert hmDisabled.xdg.configFile == { };
+                assert
+                  hmDisabled.phillipgreenii.programs.claude-code.marketplaces.overrides.${marketplaceOverrideKey}
+                  == false;
                 # Enabled: the package is installed, the config file is
-                # rendered, and the pre-existing ceta wiring still fires
+                # rendered, the pre-existing ceta wiring still fires
                 # (unchanged by this packet, per its own Acceptance
-                # criteria).
+                # criteria), and the marketplace/plugin registration is
+                # explicitly forced ON -- tc-9ddu3.1.17's Acceptance
+                # criteria: enable=true -> both are present.
                 assert lib.elem pkgs.pg-wi-flow hmEnabled.home.packages;
                 assert hmEnabled.xdg.configFile ? "pg-wi-flow/config.json";
                 assert lib.elem "pg-wi-flow-identity"
                   hmEnabled.phillipgreenii.programs.claude-extended-tool-approver.inputProcessors;
+                assert
+                  hmEnabled.phillipgreenii.programs.claude-code.marketplaces.overrides.${marketplaceOverrideKey}
+                  == true;
                 pkgs.runCommand "test-pg-wi-flow-module-ok"
                   {
                     nativeBuildInputs = [ pkgs.jq ];
