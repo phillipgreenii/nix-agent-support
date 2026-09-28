@@ -74,8 +74,8 @@ schema = 3
     hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
 
   [mod.'github.com/grpc-ecosystem/grpc-gateway/v2']
-    version = 'v2.30.0'
-    hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
+    version = 'v2.31.0'
+    hash = 'sha256-dfOnXLoo7B7ZcaMghr9oZ6TJz6Fj4R6ttwun+c2KeeE='
 
   [mod.'github.com/lucasb-eyer/go-colorful']
     version = 'v1.4.1'
@@ -214,5 +214,5 @@ schema = 3
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.59.0'
-    hash = 'sha256-CaNi9UvS9y6aiiSy3GUlRHX84og+i4MWOZmxbFONeb4='
+    version = 'v1.60.0'
+    hash = 'sha256-ot2nO8b43WdhbM2V0bAs02yJP+WGG6FqcbOJkpm4BRE='
