@@ -70,9 +70,7 @@
     # Claude-marketplace pattern (nix-repo-base/docs/claude-marketplaces.md).
     # mobilecombackup (tc-5lxy.10) built packages.mobilecombackup-marketplace
     # via nix-repo-base's lib.mkClaudeMarketplaceBuilders; this repo registers
-    # it below via marketplaces.nixProvided. git+ssh (not the bare `github:`
-    # fetcher) mirrors how homelab/nix/flake.nix declares its own
-    # nix-agent-support input for a sibling repo in this estate.
+    # it below via marketplaces.nixProvided.
     #
     # OPERATOR RULING (2026-08-16, tc-5lxy.11 notes): registrant is
     # nix-agent-support, not the homelab machine flake -- accepting the
@@ -80,8 +78,20 @@
     # ("Self-Contained... don't add dependencies on other custom flakes").
     # That tradeoff is deliberate and MUST NOT be "fixed" by moving this
     # input to homelab instead.
+    #
+    # Forgejo pull-mirror (tc-x2ygw), same as homelab/nix/flake.nix's own
+    # `bb`/`phillipgreenii-nix-agent-support` inputs -- this was the last
+    # `git+ssh://git@github.com/...` input left anywhere in the workspace.
+    # It broke `tc-support deploy` run interactively on monorepod: the
+    # shared GitHub deploy key is scoped to ONLY `tc-support-auto-update`'s
+    # own environment (monorepod's configuration.nix, tc-n0crv), never to an
+    # interactive sudo session, so root had no SSH credential for
+    # github.com the moment `--refresh` forced a real fetch. The
+    # `github-mirrors/mobilecombackup` mirror is public regardless of the
+    # GitHub source's own visibility (operator ruling 2026-09-17), so this
+    # needs zero credential from any machine, interactive or automated.
     mobilecombackup = {
-      url = "git+ssh://git@github.com/phillipgreenii/mobilecombackup.git";
+      url = "git+https://forgejo.twistcone.us/github-mirrors/mobilecombackup.git";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
