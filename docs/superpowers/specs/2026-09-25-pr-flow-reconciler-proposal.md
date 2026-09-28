@@ -118,13 +118,13 @@ stateDiagram-v2
     [*] --> Ready: noticed (mine / co-owned)
     Draft --> Draft: review / fix CI / work feedback
     Draft --> Ready: CI green, marked ready
-    Ready --> Ready: new head -> re-review; feedback -> fixes
+    Ready --> Ready: new head means re-review, feedback means fixes
     Ready --> AwaitingLand: CI green + approved
     AwaitingLand --> Ready: new head / new feedback
     AwaitingLand --> Merged: operator grants permission
     Draft --> Closed
     Ready --> Closed
-    Closed --> Ready: reopened -> linked work reopened
+    Closed --> Ready: reopened, linked work reopened
     Merged --> [*]: clean up work
     Closed --> [*]: clean up work
 ```
