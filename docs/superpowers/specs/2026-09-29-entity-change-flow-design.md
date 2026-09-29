@@ -122,6 +122,30 @@ CQRS** with a **Transactional Outbox** (the change log); hydration and classific
 are hints; state is read separately), bridged by an **Adapter**. Each decider is a **Reconciler**
 built as **Functional Core, Imperative Shell** (pure `decide`; `plan` and `apply` are two shells).
 
+### Where new logic goes
+
+When a new piece of logic is proposed, place it by asking these questions in order. The first "yes"
+decides.
+
+1. **Does it need data no component holds yet, or write to an external system?** Extend
+   pg-connector (a new summary field, detail read or write verb), then continue with the questions
+   below for the logic that consumes it.
+2. **Is it a fact derived from data pg-desk already holds** (the snapshot, links, annotations),
+   with no side effect? It is a **decoration**: extend pg-desk's per-type classifier or
+   interpreter. A decoration MUST be deterministic, cheap and free of LLM calls, because it is
+   recomputed on every hydration. pg-desk MUST NOT decide.
+3. **Does it cause a work item, label, annotation or external write to be created, changed or
+   closed?** It is a **decision**: add a rule to the type's decider (7.9), which runs as a pg-router
+   command role. It MUST be idempotent (G6) and MUST read pg-desk's composite view rather than keep
+   its own cache. It never belongs in pg-desk or in pg-router's core (G5, ADR 0065).
+4. **Does it require an agent to act on an existing work item** (review, fix, resolve)? It is an
+   **agent role** prompt. A decider still decides that the work item exists.
+
+Two consequences follow. A signal that genuinely requires an LLM MUST NOT become a decoration; it
+belongs in a role, which MAY write its result back as an annotation for `show` to display. Cross-entity
+judgment that chooses an outcome (for example daily-focus ranking) is a decision, not a decoration.
+An entity type with no decider is still watched, hydrated and classified (7.10).
+
 One poll cycle:
 
 ```mermaid
