@@ -773,13 +773,23 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 		t.Fatalf("ledger LastReviewedHeadSHA = %q, want %q", review.LastReviewedHeadSHA, "new-sha")
 	}
 
-	// Same head again: no-op.
-	before := len(readCallRecords(t, recordFile))
+	// Same head again: no-op for the review request itself (the anchor still
+	// gets its last_checked_at stamp, pg2-kftf9.3, so count review calls only).
+	countReview := func() int {
+		n := 0
+		for _, r := range readCallRecords(t, recordFile) {
+			if strings.Contains(strings.Join(r.Args, " "), "bd-review-existing") {
+				n++
+			}
+		}
+		return n
+	}
+	before := countReview()
 	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeChanged, facts, interp); err != nil {
 		t.Fatalf("second Sync: %v", err)
 	}
-	if after := len(readCallRecords(t, recordFile)); after != before {
-		t.Fatalf("unchanged head issued %d more call(s), want 0", after-before)
+	if after := countReview(); after != before {
+		t.Fatalf("unchanged head issued %d more review-request call(s), want 0", after-before)
 	}
 }
 
@@ -851,5 +861,101 @@ func TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe(t *testing.T
 	review, _, _ = s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)
 	if review.LastSyncedContentHash != closedSentinel {
 		t.Fatalf("review ledger row not closed after retry: %+v", review)
+	}
+}
+
+// argsHave reports whether a recorded call carries the exact "--metadata k=v".
+func argsHave(r callRecord, kv string) bool {
+	for i, a := range r.Args {
+		if a == "--metadata" && i+1 < len(r.Args) && r.Args[i+1] == kv {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSync_ConfirmedClosure_StampsTerminalStateBeforeClose guards
+// pg2-kftf9.3: a closed anchor MUST carry state=merged|closed and closed_at,
+// written BEFORE the close transition.
+func TestSync_ConfirmedClosure_StampsTerminalStateBeforeClose(t *testing.T) {
+	for _, tc := range []struct{ removed, wantState string }{
+		{"merged", "merged"}, {"closed", "closed"}, {"not_found", "closed"},
+	} {
+		t.Run(tc.removed, func(t *testing.T) {
+			s := newTestSyncer(t, ModeApply)
+			recordFile := withFactory(t)
+			anchorID, _, _ := seedExistingAnchorCycleAndReview(t, s)
+			facts := gather.Facts{HeadSHA: fixtureHeadSHA, RemovedState: tc.removed}
+			if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil)); err != nil {
+				t.Fatalf("Sync: %v", err)
+			}
+			updateIdx, closeIdx := -1, -1
+			for i, r := range readCallRecords(t, recordFile) {
+				if len(r.Args) < 3 || r.Args[2] != anchorID {
+					continue
+				}
+				if r.verb() == "issue update" && argsHave(r, "state="+tc.wantState) {
+					updateIdx = i
+					if !strings.Contains(strings.Join(r.Args, " "), "closed_at=") {
+						t.Errorf("closing update lacks closed_at: %v", r.Args)
+					}
+				}
+				if r.verb() == "issue transition" {
+					closeIdx = i
+				}
+			}
+			if updateIdx < 0 || closeIdx < 0 || updateIdx > closeIdx {
+				t.Fatalf("want state=%s update before close; update=%d close=%d", tc.wantState, updateIdx, closeIdx)
+			}
+		})
+	}
+}
+
+// TestSync_Reconcile_StampsLastCheckedAtEvenWhenUnchanged guards
+// pg2-kftf9.3: last_checked_at is written on every successful check, and an
+// existing anchor is refreshed (draft drift) even when nothing currently
+// needs it.
+func TestSync_Reconcile_StampsLastCheckedAtEvenWhenUnchanged(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	facts := gather.Facts{PRShow: prFixture(nil), HeadSHA: fixtureHeadSHA}
+	interp := interpFor("mine", nil)
+	for i := 0; i < 2; i++ { // second run: identical content hash
+		if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
+			t.Fatalf("Sync %d: %v", i, err)
+		}
+	}
+	anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
+	var checkedUpdates int
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue update" && len(r.Args) > 2 && r.Args[2] == anchor.BeadID && strings.Contains(strings.Join(r.Args, " "), "last_checked_at=") {
+			checkedUpdates++
+		}
+	}
+	if checkedUpdates < 1 {
+		t.Fatalf("unchanged re-check wrote no last_checked_at; records: %+v", readCallRecords(t, recordFile))
+	}
+}
+
+// TestSync_Reconcile_ExistingAnchorDraftDriftCorrected guards pg2-kftf9.3:
+// the PR flips draft->ready while no cycle/review needs the anchor (team PR);
+// the existing anchor's draft metadata MUST still be corrected.
+func TestSync_Reconcile_ExistingAnchorDraftDriftCorrected(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, _, _ := seedExistingAnchorCycleAndReview(t, s)
+	facts := gather.Facts{PRShow: prFixture(map[string]any{"author": "bob", "draft": true}), HeadSHA: fixtureHeadSHA}
+	// team + draft: needsReview=false, no cycle => anchorNeeded=false.
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interpFor("team", nil)); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	var sawDraft bool
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue update" && len(r.Args) > 2 && r.Args[2] == anchorID && argsHave(r, "draft=true") {
+			sawDraft = true
+		}
+	}
+	if !sawDraft {
+		t.Fatalf("existing anchor's draft metadata not refreshed; records: %+v", readCallRecords(t, recordFile))
 	}
 }

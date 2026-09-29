@@ -117,7 +117,6 @@ func (rc *runContext) upsertLedger(kind, beadID, contentHash, lastReviewedHeadSH
 // (it went stale at ~8x process-feedback's rate when only the feedback
 // cycle closed here).
 func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
-	_ = reason // names why (merged/closed/gone); no pinned bead/ledger field carries it (see design's Bead-shapes table)
 	if rc.anchorID == "" {
 		return nil // no anchor ever existed for this PR — nothing to close
 	}
@@ -130,6 +129,17 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	// sentinel-closed (closeCascadedChild).
 	if rc.ledgerAnchor.LastSyncedContentHash != closedSentinel {
 		if rc.mode == ModeApply {
+			// Stamp the terminal state BEFORE the close so a closed anchor
+			// never keeps its stale open/draft metadata (pg2-kftf9.3).
+			state := reason
+			if state != "merged" {
+				state = "closed" // "closed" and "gone" (PR vanished) both read as closed
+			}
+			if err := rc.syncer.client.Update(ctx, rc.anchorID, updateInput{Metadata: map[string]string{
+				"state": state, "draft": "false", "closed_at": rc.now, "last_checked_at": rc.now,
+			}}); err != nil {
+				return fmt.Errorf("sync: stamp closed state on anchor %s: %w", rc.anchorID, err)
+			}
 			if err := rc.syncer.client.Transition(ctx, rc.anchorID, "closed"); err != nil {
 				return fmt.Errorf("sync: close anchor %s: %w", rc.anchorID, err)
 			}
@@ -197,7 +207,10 @@ func (rc *runContext) reconcile(ctx context.Context) error {
 		}
 	}
 
-	if anchorNeeded {
+	// An anchor that already exists is refreshed on EVERY check even when no
+	// cycle/review currently needs it, so its state/draft metadata cannot
+	// drift from GitHub (pg2-kftf9.3).
+	if anchorNeeded || rc.anchorID != "" {
 		if err := rc.ensureAnchor(ctx, coOwned, actsAsMine); err != nil {
 			return err
 		}
@@ -253,7 +266,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		"repo": rc.repo, "pr_number": strconv.Itoa(rc.prNumber),
 		"state": rc.pr.State, "branch": rc.pr.Branch, "base": rc.pr.Base,
 		"author": rc.pr.Author, "url": rc.pr.URL, "draft": strconv.FormatBool(rc.pr.Draft),
-		"last_synced_at": rc.now,
+		"last_synced_at": rc.now, "last_checked_at": rc.now,
 	}
 
 	if rc.anchorID == "" {
@@ -284,7 +297,17 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 	}
 
 	if hash == rc.ledgerAnchor.LastSyncedContentHash {
-		return nil // nothing changed since the last sync — diff-before-write
+		// Content unchanged: skip the full write (last_synced_at keeps its
+		// "last content change" meaning) but still stamp last_checked_at so
+		// a stalled sync is detectable (pg2-kftf9.3).
+		if rc.mode == ModeApply {
+			if err := rc.syncer.client.Update(ctx, rc.anchorID, updateInput{
+				Metadata: map[string]string{"last_checked_at": rc.now},
+			}); err != nil {
+				return fmt.Errorf("sync: stamp anchor last_checked_at %s: %w", rc.anchorID, err)
+			}
+		}
+		return nil
 	}
 	if rc.mode == ModeApply {
 		upd := updateInput{Metadata: metadata, AddLabels: addLabels, RemoveLabels: removeLabels}
