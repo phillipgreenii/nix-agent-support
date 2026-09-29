@@ -192,7 +192,10 @@ func ClassifyWith(pe *patheval.PathEvaluator, kinds []Kind, path string) (Class,
 	if access == patheval.PathReject || access == patheval.PathReadOnly {
 		return NotWritable, "zone " + access.String()
 	}
-	abs := pe.ResolvePath(path)
+	// ResolveComponentwise (symlink.go), not pe.ResolvePath: see that file's
+	// package doc comment for why patheval's own resolution can miss a
+	// symlink-then-`..` escape.
+	abs := ResolveComponentwise(pe, path)
 	if abs == "" {
 		return NotWritable, "path does not resolve"
 	}
@@ -244,7 +247,8 @@ func NonSecretWithKinds(pe *patheval.PathEvaluator, kinds []Kind, path string) (
 	if pe == nil {
 		return false, "no path evaluator"
 	}
-	abs := pe.ResolvePath(path)
+	// ResolveComponentwise (symlink.go): see that file's package doc comment.
+	abs := ResolveComponentwise(pe, path)
 	if abs == "" {
 		return false, "path does not resolve"
 	}

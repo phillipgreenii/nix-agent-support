@@ -55,6 +55,21 @@ type Config struct {
 	// "unknown never approves" — makes every absolute-path exec untrusted
 	// rather than silently guessing a plausible-looking default location.
 	TrustedExecPath []string `json:"trustedExecPath"`
+
+	// AgentWritableConfig lists path/glob patterns (an absolute path, or a
+	// `~/`-prefixed pattern resolved against $HOME) the operator has
+	// human-set as agent-writable, per P18: a ceta config file in either
+	// P17 layer (this package's own config file, specfmt's user-level spec
+	// directory, or a repo's `.ceta/` directory) is Reject-by-default for an
+	// agent-proposed write, UNLESS its resolved absolute path matches one of
+	// these patterns — in which case the write is judged by ordinary path
+	// policy instead (internal/pathspec's cetaProtectedConfigWrite). P18's
+	// own text: "a human-set, USER-LEVEL setting" — it is NEVER read from a
+	// repo's `.ceta/` layer, so a repo cannot widen its own agent-writable
+	// allowlist. Self-referential: this FIELD's own file (DefaultPath, above)
+	// is itself a P17 config file, so it too is Reject-by-default unless this
+	// same list names it.
+	AgentWritableConfig []string `json:"agentWritableConfig"`
 }
 
 // DefaultPath returns the new engine's user-level config file location,

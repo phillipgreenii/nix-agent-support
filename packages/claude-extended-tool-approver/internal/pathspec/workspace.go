@@ -231,10 +231,12 @@ type Kind struct {
 }
 
 // DefaultKinds returns the built-in declarations in registry order: temp,
-// home, git, go, gradle, pn, just, npm, devbox. Order matters only as the
-// tie-break between two candidates with the SAME root depth.
+// home, git, go, gradle, pn, just, npm, devbox, claude-config,
+// claude-config-home (claudeconfig.go's R7/D12 + P18 write classification,
+// Phase 2h(1)). Order matters only as the tie-break between two candidates
+// with the SAME root depth.
 func DefaultKinds() []Kind {
-	return []Kind{tempKind, homeKind, gitKind, goKind, gradleKind, pnKind, justKind, npmKind, devboxKind}
+	return []Kind{tempKind, homeKind, gitKind, goKind, gradleKind, pnKind, justKind, npmKind, devboxKind, claudeConfigGitKind, claudeConfigHomeKind}
 }
 
 // EffectiveKinds composes P1's workspace Kinds (DefaultKinds), P2's OS-spec

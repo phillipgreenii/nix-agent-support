@@ -215,6 +215,56 @@ var osXDGDataKind = Kind{
 	},
 }
 
+// osAsksDBKind: ceta's OWN sqlite database and its WAL/SHM/journal
+// sidecars, under the SAME xdgDataHome/claude-extended-tool-approver
+// directory osXDGDataKind's own add("claude-extended-tool-approver", ...)
+// already declares ReadWrite (deliberately duplicating that root
+// resolution — see this file's header, "a deliberate, accepted
+// duplication" — rather than threading a dependency between the two
+// declarations). Declares a Forbidden Write opinion for the asks.db* files
+// THEMSELVES, which wins outright over osXDGDataKind's own blanket
+// Permitted (workspace.go's updateFacet: a Forbidden opinion always wins,
+// regardless of depth or Kind order). [design: P5 — "ceta's asks.db*
+// (REJECT)"] This hook only ever evaluates an AGENT's proposed tool call;
+// ceta's own runtime process writing its own asks.db never reaches the
+// hook-evaluation path at all (Phase 2h(1) packet's own binding note), so
+// no carve-out is needed here for that case — REJECT is unconditional.
+//
+// A fixed enumeration of the modernc.org/sqlite driver's known sidecar
+// suffixes (WAL mode: "-wal", "-shm"; rollback-journal mode: "-journal"),
+// not a true "asks.db*" glob — Kind.Roots declares fixed absolute roots,
+// each with one flat opinion (workspace.go's rootKind), so a path-varying
+// basename glob is not expressible this way; enumerating the known
+// suffixes is the practical equivalent for this driver.
+var osAsksDBKind = Kind{
+	Name: "os-asks-db",
+	Roots: func() []RootDecl {
+		var base string
+		if x := os.Getenv("XDG_DATA_HOME"); x != "" {
+			base = x
+		} else if home, err := os.UserHomeDir(); err == nil && home != "" {
+			base = filepath.Join(home, ".local", "share")
+		}
+		if base == "" {
+			return nil
+		}
+		xdg := patheval.ResolveRealPath(base)
+		if xdg == "" {
+			return nil
+		}
+		dir := filepath.Join(xdg, "claude-extended-tool-approver")
+		var decls []RootDecl
+		for _, name := range []string{"asks.db", "asks.db-wal", "asks.db-shm", "asks.db-journal"} {
+			p := filepath.Join(dir, name)
+			if r := patheval.ResolveRealPath(p); r != "" {
+				p = r
+			}
+			decls = append(decls, RootDecl{Root: p, Write: Forbidden})
+		}
+		return decls
+	},
+}
+
 // OSKinds returns the OS-spec Kinds declared in this file, in no
 // significant order (each occupies a disjoint root; ordering only matters
 // as the tie-break between two candidates at the SAME depth, which these
@@ -222,7 +272,10 @@ var osXDGDataKind = Kind{
 // workspace.go's DefaultKinds()/tempKind, e.g. for /tmp's full
 // Read/Write/Delete picture) to ResolveAccess/ClassifyWith's explicit
 // []Kind parameter — wiring it into DefaultKinds() itself is P5's job, not
-// this packet's (see this file's package-level doc comment).
+// this packet's (see this file's package-level doc comment). osAsksDBKind
+// (Phase 2h(1)) is the one exception: EffectiveKinds already composes
+// OSKinds() for every production caller (judgeWrite et al.), so it needs no
+// separate DefaultKinds() wiring of its own.
 func OSKinds() []Kind {
-	return []Kind{osTmpKind, osNixKind, osHomeKind, osGradleCacheKind, osXDGDataKind}
+	return []Kind{osTmpKind, osNixKind, osHomeKind, osGradleCacheKind, osXDGDataKind, osAsksDBKind}
 }

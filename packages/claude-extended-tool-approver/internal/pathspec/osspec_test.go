@@ -45,12 +45,12 @@ func homeScratch(t *testing.T) string {
 	return dir
 }
 
-// TestOSKinds: OSKinds() returns exactly the five Kind values this file
-// declares.
+// TestOSKinds: OSKinds() returns exactly the six Kind values this file
+// declares (osAsksDBKind, Phase 2h(1), is the sixth).
 func TestOSKinds(t *testing.T) {
 	got := OSKinds()
-	if len(got) != 5 {
-		t.Fatalf("OSKinds() returned %d kinds, want 5", len(got))
+	if len(got) != 6 {
+		t.Fatalf("OSKinds() returned %d kinds, want 6", len(got))
 	}
 }
 
