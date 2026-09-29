@@ -1,6 +1,6 @@
 # ccpool per-pool Grafana dashboard — implementation plan
 
-Status: DRAFT rev 5 (2026-09-29), revised after two independent reviews and the operator
+Status: DRAFT rev 6 (2026-09-29), revised after two independent reviews and the operator
 rulings of 2026-09-29 (section 3). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
 half) and possibly C ALSO change `phillipgreenii-nix-support-apps` (the otelcol pipeline);
 both repos share the `pg2-` tracker.
@@ -109,9 +109,15 @@ session id (yes, "we can see if it works").
   `ccpool hook end` only writes the store; the reaper's next sweep emits the metrics for
   runs that ended since the last emission (a per-run `metrics_emitted` flag, added by Bead B).
 
-**Canonical grouping key (A, C, D, E agree):** the metric attribute `pool` (Prometheus label
-`pool`). Capacity series (Bead C) use the pool name the handler already passes
-(`--pool name=dir`). `pgrouter_role` is available for sessions that carry the label.
+**Canonical grouping key (A, C, D, E agree; operator ruling, Phillip, 2026-09-29, option A):**
+the metric attribute `pool` (Prometheus label `pool`), whose value is ALWAYS the basename of
+the pool directory. ccpool has no pool-name property (`PoolContext` in
+`internal/config/pool.go` holds a directory `Root`, empty in default mode); the only "name"
+is the handler's `--pool <name>=<dir>` argument, which is a caller-supplied display label and
+MUST NOT be used as the metric value. The default pool (empty `Root`) uses the value
+`default`. Capacity series (Bead C) therefore take the basename of the `dir` half of
+`--pool name=dir`, not the `name` half. `pgrouter_role` is available for sessions that carry
+the label. This supersedes the earlier text that had Bead C use the handler's pool name.
 
 ## 4. Work breakdown
 
@@ -175,7 +181,8 @@ bead MUST follow TDD (failing test first) and SHOULD be run through the
 
 - **Pool.** Every metric record carries `pool` (P1): the basename of the resolved pool root
   (`config.ResolvePool(...).Root`, the same value that sets `CCPOOL_POOL` in `main.go`),
-  held as a field on the per-pool `Service` deps and passed explicitly into the `Record*`
+  (the literal `default` when `Root` is empty, that is default mode, per the operator ruling
+  in section 3), held as a field on the per-pool `Service` deps and passed explicitly into the `Record*`
   functions. Do NOT read `CCPOOL_POOL` from the process environment inside `Record*`.
 - **Labels.** Additional attributes come from `SessionAttrs(externalID)`, filtered through an
   allowlist (default `pgrouter.role` only; configurable in ccpool config). Keys not on the
@@ -218,6 +225,10 @@ the plan is self-contained.
   `ccpool hook end`. If the run already carries a reason (ccpool stamps it BEFORE sending
   `/exit`) keep it; otherwise record `exited`, `end_source=hook`, with the hook's exact
   timestamp. `reason=clear|resume` MUST NOT end the run as `exited` (verify on this machine).
+  A `--purge` close skips the `close_reason` stamp, so it is a separate case. Operator ruling
+  (Phillip, 2026-09-29): "purge wins": when a `--purge` close races the hook, the run's
+  result is the purge close's reason, not `exited`; the purge path writes its pending
+  `end_reason` onto the open run before sending `/exit` and before deleting the row.
 - Reaper backstop: Reap Pass 0 ends any open run whose tmux session is gone with `exited`,
   `ended_at = last_activity_at`, before any delete. Covers SIGKILL, power loss and rows
   predating the hook.
@@ -255,8 +266,9 @@ the plan is self-contained.
 
 - **Spike (short).** Confirm P3 option (a): `ccpool capacity` (`cmd/ccpool/capacity.go`)
   already computes `max_sessions|live|preserved|counted|free`. Emit these as OTLP
-  gauges with attribute `pool` (the pool name the handler already passes as
-  `--pool name=dir`; the path itself MUST NOT become a label) and a `dim` attribute, from the poolMetrics LaunchAgent (or a `--emit-metrics` flag on
+  gauges with attribute `pool` (the BASENAME of the `dir` half of the handler's
+  `--pool name=dir`, matching Bead A; the `name` half and the full path MUST NOT become the
+  label value) and a `dim` attribute, from the poolMetrics LaunchAgent (or a `--emit-metrics` flag on
   `capacity`). Give the `pg-router-ccpool-handler-pool-metrics` LaunchAgent
   `obs.mkEmitterEnv` (`darwin/modules/pg-router-ccpool-handler/default.nix`); it has no
   `EnvironmentVariables` today. Gauges have no temporality problem.
