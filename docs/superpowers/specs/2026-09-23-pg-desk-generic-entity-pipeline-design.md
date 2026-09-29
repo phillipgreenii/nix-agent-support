@@ -59,32 +59,41 @@ design replaces the mechanisms they belonged to:
 
 ```mermaid
 flowchart TD
-    subgraph unchanged["Unchanged gather/interpret functions"]
-        PRG["gather.Gather (existing, pr-only)"]
-        PRI["interpret.Interpret (existing, pr-only)"]
-    end
-    subgraph new["New: generic seam"]
+    subgraph seam["General seam (works for every entity type)"]
+        PIPE["Pipeline.RunGenericEntity"]
         GREG["Gather Registry (Strategy):<br/>entityType -> EntityGatherer"]
         IREG["Interpret Registry (Strategy):<br/>entityType -> EntityInterpreter"]
-        ISSG["issueGatherAdapter (new, small)"]
-        ISSI["InterpretIssue (new, small)"]
-        PRGA["prGatherAdapter (Adapter over PRG)"]
-        PRIA["InterpretPR (Adapter over PRI)"]
     end
-    GREG -->|"pr"| PRGA --> PRG
+    subgraph pr["pr implementation (existing functions, adapted)"]
+        PRGA["prGatherAdapter"] --> PRG["gather.Gather"]
+        PRIA["InterpretPR"] --> PRI["interpret.Interpret"]
+    end
+    subgraph issue["issue implementation (new)"]
+        ISSG["issueGatherAdapter"]
+        ISSI["InterpretIssue"]
+    end
+    subgraph future["future types"]
+        FUT["calendar, notes, email, ..."]
+    end
+    PIPE --> GREG
+    PIPE --> IREG
+    GREG -->|"pr"| PRGA
     GREG -->|"issue"| ISSG
-    IREG -->|"pr"| PRIA --> PRI
+    GREG -.->|"one map entry each"| FUT
+    IREG -->|"pr"| PRIA
     IREG -->|"issue"| ISSI
-    PRG --> ENT["entity table"]
-    ISSG --> ENT
-    PRI --> INT["interpretation table<br/>(PR-only columns stay zero for issues)"]
-    ISSI --> INT
+    IREG -.->|"one map entry each"| FUT
+    PIPE --> ENT["entity table"]
+    PIPE --> INT["interpretation table<br/>(PR-only columns stay zero for issues)"]
 ```
 
-The Gather and Interpret registries are the **Strategy** pattern (one algorithm per entity type,
-chosen at dispatch), realized as a small **Registry** (`map[string]...`) so a third type is one map
-entry, not a new arm at every call site. `prGatherAdapter` and `InterpretPR` are **Adapters**: they
-let the unchanged PR implementations satisfy the generic contracts.
+The seam is the pair of contracts (`EntityGatherer`, `EntityInterpreter`), their registries, and
+`RunGenericEntity`. Every type, including `pr`, is an implementation of it; `pr` is simply the
+implementation whose bodies already exist. The Registries are the **Strategy** pattern (one
+algorithm per entity type, chosen at dispatch), realized as a small **Registry** (`map[string]...`)
+so a new type is one map entry, not a new arm at every call site. `prGatherAdapter` and
+`InterpretPR` are **Adapters**: they let the existing PR functions, unchanged internally, satisfy
+the contracts.
 
 ## 4. Gather
 
@@ -163,6 +172,14 @@ func (g *Gatherer) EntityGatherers() map[string]EntityGatherer {
 	}
 }
 ```
+
+`ChangeKind` (`added`, `changed`, `removed`, `sweep`) is a hint about why pg-desk is hydrating this
+entity now, not part of the entity's identity. A gatherer MAY use it to choose a cheaper or
+different read (PR gather re-reads on `removed` and consults a head-sha cache on `sweep`); a
+gatherer with nothing to branch on, like the issue one, ignores it. The caller is pg-desk itself:
+its `changes` flow derives the kind from what pg-connector reported (or `sweep` for age-driven
+re-hydration), and the pipeline passes it through. `RunGenericEntity` also uses `removed` to
+exempt an explicit removal from the D-G8 not-found failure.
 
 ## 5. Interpret
 
