@@ -1,0 +1,39 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rtk",
+  "command": {
+    "name": "rtk",
+    "provenance": "home/programs/rtk/default.nix's own doc comment (confirmed against rtk's vendored source src/hooks/rewrite_cmd.rs: `rtk rewrite \u003ccmd\u003e` exits 0 with the rewritten command on stdout) — the only in-repo ground truth available; rtk is not installed in this module's dev environment, so no --help/man citation backs a flag table (Phase 2 packet tc-o14i5.3.11 finding, deliberately left for a future packet once one is reachable)",
+    "citations": {
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient"
+  }
+}

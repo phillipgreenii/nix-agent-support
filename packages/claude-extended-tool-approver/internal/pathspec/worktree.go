@@ -1,11 +1,17 @@
 package pathspec
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/userconfig"
 )
 
 // WORKTREE-STATE POLICY (tc-lc8f item 4a, resume bead tc-lc8f, design bead
@@ -118,6 +124,100 @@ func hermeticGitEnviron() []string {
 	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 }
 
+// gitProbeDefaultTimeout is the wall-clock budget this package's own two git
+// subprocess invocations (realWorktreeState, realGitTracked) each get — the
+// P9 hardening gap Ground Truth flagged verbatim: "pathspec/worktree.go:129,
+// 227 execs git inside the hook (PATH-resolved, no timeout, repo config
+// honoured)". No specific value is mandated by the design; this matches
+// internal/rules/gh/resolver.go's existing defaultResolverTimeout (the
+// OLD engine's already-hardened git/gh call site, kept as a cross-codebase
+// precedent per this packet's own "Expected additional reads" note) so every
+// git-shelling-out call site in this codebase budgets the same 3s, not a
+// distinct magic number per file.
+const gitProbeDefaultTimeout = 3 * time.Second
+
+// gitProbeTimeout is the timeout realWorktreeState/realGitTracked actually
+// apply, kept a separate var (mirroring internal/inputproc's identical
+// `timeout`/`defaultTimeout` split, inputproc.go) solely so this package's
+// OWN tests can install a generous value for a real (slow, potentially
+// nix-sandbox-throttled) git subprocess without touching
+// gitProbeDefaultTimeout, and a tight value to exercise the timeout-kill
+// path deterministically. Production never reassigns this.
+var gitProbeTimeout = gitProbeDefaultTimeout
+
+// gitProbeWaitGrace bounds the one delay the context deadline cannot reach
+// on its own: a process git forked that OUTLIVES it while still holding the
+// output pipe, and has also left the process group isolateProcessGroup
+// kills (only a deliberate setsid/setpgid does that). Mirrors
+// internal/inputproc's identical `waitGrace` constant and rationale
+// (inputproc.go) — small on purpose, since `git status`/`git ls-files`
+// output is a few lines of text that drains in microseconds once every
+// holder of the write end has actually exited.
+const gitProbeWaitGrace = 250 * time.Millisecond
+
+// trustedGitPath resolves the "git" executable this package is about to
+// invoke and confirms its identity against the operator's configured
+// trusted PATH (userconfig.Config.TrustedExecPath, P4/P7/P17 — the SAME
+// declared list ADR 0075's P4 executable-identity check already reads for
+// the new engine, reused here rather than a second "which directories do I
+// trust" setting). exec.LookPath performs the ordinary PATH search FIRST,
+// so the candidate actually examined is whichever `git` PATH would resolve
+// to today — including a fake `git` script placed earlier on PATH in an
+// agent-writable zone, exactly the PATH-shadowing scenario P9 exists to
+// catch. The candidate's realpath is then compared against the realpath of
+// `<dir>/git` for every directory in TrustedExecPath.
+//
+// This deliberately does NOT call patheval.ResolveTrustedExecutable
+// directly: that function's own unconditional "/nix/store/... argv0 is
+// never trusted" carve-out (its own doc comment's "The /nix/store
+// carve-out" section) exists for a DIFFERENT threat model — an
+// AGENT-SUPPLIED absolute argv0 that bypasses the operator's PATH search
+// entirely by spelling out a store path directly. Here there is no
+// agent-supplied argv0 to bypass anything: exec.LookPath performed the
+// PATH search itself, so a candidate landing directly under /nix/store
+// (verified live: on this machine's `nix flake check` sandbox, `git`
+// resolves straight to /nix/store/.../libexec/git-core/git with no
+// profile-symlink layer in between — a normal, non-adversarial PATH shape,
+// not an impersonation) is exactly as legitimate as one reached through a
+// profile symlink. Applying the argv0-specific carve-out here would
+// unconditionally distrust a perfectly normal nix-sandboxed PATH,
+// regressing every git-shelling call this package makes inside that
+// environment — caught by this packet's own commit-time pre-commit hook
+// run before landing. The realpath-equality comparison itself (the actual
+// "is this the git I trust" question) is unchanged and still closes the
+// PATH-shadowing gap P9 names.
+//
+// An unconfigured TrustedExecPath (today's default: the HM/Nix wiring for
+// it is a separate, not-yet-landed deployment gap — see this packet's own
+// commit message) makes every candidate untrusted, which is the correct
+// fail-closed behavior here too: ProbeWorktreeState/realGitTracked report
+// WorktreeUnknown/an error rather than silently trusting an unverified
+// `git`, mirroring P4's own "an operator who has not populated this field
+// gets an empty trusted PATH... rather than silently guessing a
+// plausible-looking default location" (userconfig.Config.TrustedExecPath's
+// doc comment).
+func trustedGitPath() (string, error) {
+	candidate, err := exec.LookPath("git")
+	if err != nil {
+		return "", fmt.Errorf("git not found on PATH: %w", err)
+	}
+	candidateReal := patheval.ResolveRealPath(candidate)
+	if candidateReal == "" {
+		return "", fmt.Errorf("git resolved via PATH to %s, which could not be resolved to a real path", candidate)
+	}
+	cfg := userconfig.LoadDefault()
+	for _, dir := range cfg.TrustedExecPath {
+		if dir == "" {
+			continue
+		}
+		trustedReal := patheval.ResolveRealPath(filepath.Join(dir, "git"))
+		if trustedReal != "" && trustedReal == candidateReal {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("git resolved via PATH to %s (realpath %s), which does not match the operator's configured trusted PATH — refusing to execute it", candidate, candidateReal)
+}
+
 // realWorktreeState runs `git -C root status --porcelain=v1 --ignored`
 // hermetically and classifies the output: any non-`!!`-prefixed line means
 // dirty (tracked modification, staged change, or untracked file); a `!!`
@@ -126,10 +226,27 @@ func hermeticGitEnviron() []string {
 // PATH, root does not exist) reports WorktreeUnknown with the error —
 // never a crash, and never treated as clean.
 func realWorktreeState(root string) (WorktreeState, error) {
-	cmd := exec.Command("git", "-C", root, "status", "--porcelain=v1", "--ignored")
+	gitPath, err := trustedGitPath()
+	if err != nil {
+		return WorktreeUnknown, &worktreeProbeError{root: root, err: err}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, gitPath, "-C", root, "status", "--porcelain=v1", "--ignored")
 	cmd.Env = hermeticGitEnviron()
+	// isolateProcessGroup + WaitDelay (procgroup_unix.go): without them the
+	// context deadline bounds only THIS process, not a grandchild a hostile
+	// "git" forked and left holding the output pipe — see that file's doc
+	// comment for the measured hang this closes.
+	isolateProcessGroup(cmd)
+	cmd.WaitDelay = gitProbeWaitGrace
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			err = fmt.Errorf("%w after %s: %w", ctx.Err(), gitProbeTimeout, err)
+		} else if errors.Is(err, exec.ErrWaitDelay) {
+			err = fmt.Errorf("a process git forked still held its output pipe %s after it exited: %w", gitProbeWaitGrace, err)
+		}
 		return WorktreeUnknown, &worktreeProbeError{root: root, out: strings.TrimSpace(string(out)), err: err}
 	}
 	dirty, ignored := false, false
@@ -219,17 +336,30 @@ func SetGitTrackedProbe(fn func(root, rel string, isDir bool) (bool, error)) (re
 // property realWorktreeState's own doc comment states for its non-zero
 // exit: "never treated as clean" there, "never treated as untracked" here.
 func realGitTracked(root, rel string, isDir bool) (bool, error) {
+	gitPath, err := trustedGitPath()
+	if err != nil {
+		return false, &gitTrackedProbeError{root: root, rel: rel, err: err}
+	}
 	args := []string{"-C", root, "ls-files"}
 	if !isDir {
 		args = append(args, "--error-unmatch")
 	}
 	args = append(args, "--", rel)
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, gitPath, args...)
 	cmd.Env = hermeticGitEnviron()
+	isolateProcessGroup(cmd)
+	cmd.WaitDelay = gitProbeWaitGrace
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return false, nil
+		}
+		if ctx.Err() != nil {
+			err = fmt.Errorf("%w after %s: %w", ctx.Err(), gitProbeTimeout, err)
+		} else if errors.Is(err, exec.ErrWaitDelay) {
+			err = fmt.Errorf("a process git forked still held its output pipe %s after it exited: %w", gitProbeWaitGrace, err)
 		}
 		return false, &gitTrackedProbeError{root: root, rel: rel, err: err}
 	}

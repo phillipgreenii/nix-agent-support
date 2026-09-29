@@ -78,6 +78,10 @@ func DefaultRegistry() Registry {
 		// installable-reference verb-dispatch shape — see
 		// registry_breadth.go's nixSchema/nixRunSchema doc comments.
 		nixSchema,
+		// Phase 2 packet tc-o14i5.3.11 (design item j): rtk's own
+		// passthrough registration — see registry_breadth.go's rtkSchema
+		// doc comment.
+		rtkSchema,
 	)
 }
 

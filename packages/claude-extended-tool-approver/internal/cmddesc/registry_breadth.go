@@ -2093,3 +2093,43 @@ var nixRunSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }
+
+// ---- rtk (Phase 2 packet tc-o14i5.3.11, design item j: "rtk passthrough
+// spec") --------------------------------------------------------------------
+
+// rtkSchema: `rtk` (Rust Token Killer, an LLM-token-optimizer CLI) is wired
+// into ceta's OWN CETA_INPUT_PROCESSORS chain as `rtk rewrite` (see
+// home/programs/rtk/default.nix) and is also invoked DIRECTLY by an agent
+// as an ordinary Bash tool call in this codebase's own operational history
+// (e.g. "rtk find foo" — packages/pg-ccaudit's test fixtures). Before this
+// entry, a direct `rtk ...` invocation had NO registry entry at all
+// ("no schema for rtk" — cmddesc.Registry.Lookup's ordinary miss path,
+// effectgraph/build.go), which already abstains (P3) but reads as "this
+// tool has never been looked at."
+//
+// This is a deliberate PASSTHROUGH registration, not a fully-modeled
+// schema: rtk is not installed in this module's dev/build environment (no
+// `rtk --help`/man page reachable to verify a flag table against, and P14
+// forbids inventing spec facts without a citable source), so every
+// positional is Unmodeled rather than Literal — ANY `rtk` invocation beyond
+// the bare, argument-less form therefore still Abstains (P3: "unknown ⇒
+// never approve"), exactly as the no-schema case did, but the registry now
+// records THAT this is a deliberate, reviewed choice rather than an
+// unregistered gap — see this packet's own commit message for the finding
+// that a real flag table is future work once rtk's actual `--help`/source
+// is available to cite.
+var rtkSchema = CommandSchema{
+	Name: "rtk",
+	Provenance: "home/programs/rtk/default.nix's own doc comment (confirmed against rtk's " +
+		"vendored source src/hooks/rewrite_cmd.rs: `rtk rewrite <cmd>` exits 0 with the " +
+		"rewritten command on stdout) — the only in-repo ground truth available; rtk is not " +
+		"installed in this module's dev environment, so no --help/man citation backs a flag " +
+		"table (Phase 2 packet tc-o14i5.3.11 finding, deliberately left for a future packet " +
+		"once one is reachable)",
+	Flags:        map[string]FlagSpec{},
+	Positionals:  PositionalSpec{Rest: Unmodeled},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: false,
+}

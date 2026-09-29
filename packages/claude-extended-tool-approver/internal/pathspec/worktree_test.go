@@ -22,16 +22,47 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// trustRealGit configures HOME's userconfig (P4/P7's trustedExecPath, ADR
+// 0075) so the PATH-resolved `git` this package's own hardened probes
+// (realWorktreeState/realGitTracked, trustedGitPath) look up is recognized
+// as trusted — mirroring internal/patheval/trustedexec_test.go's own
+// writeTrustedExecPathConfig helper, since this package now reuses that
+// SAME P4 mechanism (see trustedGitPath's doc comment) rather than a second
+// detector. Without this, every real-git test in this file would report
+// WorktreeUnknown — the correct fail-closed default for an OPERATOR who has
+// not configured a trusted PATH, but not what these tests (which know
+// exactly which git binary they mean) want to exercise.
+func trustRealGit(t *testing.T, home string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git not found on PATH: %v", err)
+	}
+	dir := filepath.Join(home, ".config", "claude-extended-tool-approver-engine")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	body := `{"trustedExecPath":["` + filepath.Dir(gitPath) + `"]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+}
+
 // gitTestRepo builds a real, throwaway git repository (t.TempDir()) with an
 // initial commit on branch "main", entirely via the hermetic git() helper
 // above. HOME is pointed at a second, separate t.TempDir() as an extra
 // isolation layer on top of hermeticGitEnviron's GIT_CONFIG_GLOBAL=/dev/null
 // (mirrors internal/engine/primarycommit_worktree_test.go's
 // nestedWorktreeFixture) — no invocation in this file ever touches the real
-// user's home directory or an ambient repository.
+// user's home directory or an ambient repository. trustRealGit additionally
+// makes that HOME trust the PATH-resolved git (trustedGitPath), so the
+// hardened probes this file exercises against real repositories still see
+// their real git as trusted.
 func gitTestRepo(t *testing.T) string {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	trustRealGit(t, home)
 	root := t.TempDir()
 	git(t, root, "init", "-q", "-b", "main")
 	git(t, root, "config", "user.email", "t@example.com")
