@@ -134,3 +134,28 @@ func TestTracker_closeOrTriage(t *testing.T) {
 		}
 	})
 }
+
+// TestTracker_observeLatchesClaim covers the seenClaimed latch: only
+// handback-capable modes latch on in_progress, and the latch then lets an
+// open bead read as a hand-back.
+func TestTracker_observeLatchesClaim(t *testing.T) {
+	for _, c := range []roles.Completion{roles.CloseOrHandback, roles.CloseOrTriage} {
+		var tr Tracker
+		tr.Observe(c, "open")
+		if tr.SeenClaimed {
+			t.Errorf("%s: open must not latch", c)
+		}
+		tr.Observe(c, "in_progress")
+		if !tr.SeenClaimed {
+			t.Fatalf("%s: in_progress must latch", c)
+		}
+		if !tr.Done(c, Observation{Status: "open", Labels: []string{"escalated"}}, true) {
+			t.Errorf("%s: open after claim is a hand-back", c)
+		}
+	}
+	var tr Tracker
+	tr.Observe(roles.CloseOnly, "in_progress")
+	if tr.SeenClaimed {
+		t.Error("close-only must never latch")
+	}
+}
