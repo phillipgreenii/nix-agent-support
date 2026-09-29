@@ -179,3 +179,89 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # pg2-kftf9.5: leaked-anchor signals. pg_desk_sync_error_rows and
+      # pg_desk_oldest_sync_error_age_seconds are derived from the shared
+      # store at scrape time (internal/httpapi/metrics_handler.go), so they
+      # DO see failures recorded by the separate `pg-desk run` process --
+      # unlike pg_desk_sync_errors_total above, which has no live call site.
+
+      - uid: pg-desk-sync-error-rows
+        title: pg-desk has rows with a recorded sync_error
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-desk has {{ $values.B }} row(s) with a non-empty sync_error"
+          description: "pg_desk_sync_error_rows has been above 0 for over 5 minutes -- one or more PR anchors failed bead sync and may have leaked open merge-request or child beads. Run `pg-desk doctor` (or `pg-desk status`) for the affected entities."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_sync_error_rows
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-unreconciled-anchor-age
+        title: pg-desk oldest sync_error is older than 1 hour
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "pg-desk has had an unreconciled sync_error anchor for over an hour"
+          description: "pg_desk_oldest_sync_error_age_seconds has exceeded 3600 for over 5 minutes -- an anchor with a recorded sync_error has not been reconciled by a later successful run."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_oldest_sync_error_age_seconds
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]

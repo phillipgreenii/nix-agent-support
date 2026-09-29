@@ -244,3 +244,22 @@ func TestDoctorFailsWhenStrandedCyclesFanOutFails(t *testing.T) {
 		t.Errorf("error %q does not name the failing check", err)
 	}
 }
+
+func TestDoctorFailsOnNonEmptySyncError(t *testing.T) {
+	seed, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	if err := seed.UpsertInterpretation(store.Interpretation{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#9",
+		SyncError: "close failed", AsOf: "2026-09-22T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	stdout, err := runDoctorCmd(t)
+	if err == nil || !strings.Contains(err.Error(), "sync_error rows") {
+		t.Fatalf("doctor err = %v, want failure naming sync_error rows", err)
+	}
+	if !strings.Contains(stdout, "o/r#9: close failed") {
+		t.Errorf("stdout does not list the row: %s", stdout)
+	}
+}

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,10 +54,17 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}
+		interps, err := st.ListInterpretations()
+		if err != nil {
+			return metrics.Snapshot{}, err
+		}
+		syncRows, oldestAge := syncErrorStats(interps, nowUTC())
 		return metrics.Snapshot{
-			AgeSeconds:   payload.AgeSeconds,
-			Stale:        payload.Stale,
-			DroppedCount: payload.DroppedCount,
+			AgeSeconds:                payload.AgeSeconds,
+			Stale:                     payload.Stale,
+			DroppedCount:              payload.DroppedCount,
+			SyncErrorRows:             syncRows,
+			OldestSyncErrorAgeSeconds: oldestAge,
 		}, nil
 	}
 
@@ -65,4 +73,22 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 	}
 
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), nil
+}
+
+// syncErrorStats counts interpretation rows with a non-empty sync_error and
+// returns the age in seconds of the oldest (by as_of); 0 when none or when
+// as_of is unparseable (pg2-kftf9.5).
+func syncErrorStats(interps []store.Interpretation, now time.Time) (rows, oldestAgeSeconds int) {
+	for _, i := range interps {
+		if i.SyncError == "" {
+			continue
+		}
+		rows++
+		if t := parseAsOf(i.AsOf); !t.IsZero() {
+			if age := int(now.Sub(t).Seconds()); age > oldestAgeSeconds {
+				oldestAgeSeconds = age
+			}
+		}
+	}
+	return rows, oldestAgeSeconds
 }

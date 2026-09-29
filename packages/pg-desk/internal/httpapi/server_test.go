@@ -430,3 +430,19 @@ func mustSetMeta(t *testing.T, s *store.Store, key, value string) {
 		t.Fatalf("SetMeta(%s): %v", key, err)
 	}
 }
+
+func TestSyncErrorStats(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	interps := []store.Interpretation{
+		{EntityID: "a", SyncError: "boom", AsOf: "2026-09-29T11:00:00Z"},
+		{EntityID: "b", SyncError: "bang", AsOf: "2026-09-29T09:00:00Z"},
+		{EntityID: "c", AsOf: "2026-09-01T00:00:00Z"}, // no sync_error: ignored
+	}
+	rows, oldest := syncErrorStats(interps, now)
+	if rows != 2 || oldest != 3*3600 {
+		t.Fatalf("syncErrorStats = (%d, %d), want (2, %d)", rows, oldest, 3*3600)
+	}
+	if rows, oldest := syncErrorStats(nil, now); rows != 0 || oldest != 0 {
+		t.Fatalf("empty = (%d, %d), want (0, 0)", rows, oldest)
+	}
+}

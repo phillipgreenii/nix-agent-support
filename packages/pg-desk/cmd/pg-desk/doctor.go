@@ -185,6 +185,22 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 	return stranded, nil
 }
 
+// doctorSyncErrors lists every interpretation row with a non-empty
+// sync_error as "entity: error" (pg2-kftf9.5).
+func doctorSyncErrors(st *store.Store) ([]string, error) {
+	interps, err := st.ListInterpretations()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, i := range interps {
+		if i.SyncError != "" {
+			out = append(out, fmt.Sprintf("%s: %s", i.EntityID, i.SyncError))
+		}
+	}
+	return out, nil
+}
+
 // doctorCmd implements `pg-desk doctor`
 // [docs/behavior/pg-desk/operator-commands.md]. Exit codes: 0 when every
 // check passes; 1 when any check fails (naming which one). The
@@ -255,7 +271,24 @@ func runDoctor(cmd *cobra.Command) error {
 		failures = append(failures, "stranded cycles")
 	} else {
 		stranded, err := doctorStrandedCycles(ctx, cfg, st)
+		// sync_error check (pg2-kftf9.5): a row with a recorded sync_error
+		// is a PR whose bead sync failed and may have leaked open beads;
+		// unlike stranded cycles this IS a gate (exit 1) so an alert can
+		// hang off the doctor exit code.
+		syncErrs, syncErrCheck := doctorSyncErrors(st)
 		_ = st.Close()
+		if syncErrCheck != nil {
+			fmt.Fprintf(w, "sync_error rows: FAIL (%v)\n", syncErrCheck)
+			failures = append(failures, "sync_error rows")
+		} else if len(syncErrs) > 0 {
+			fmt.Fprintf(w, "sync_error rows: FAIL (%d non-empty)\n", len(syncErrs))
+			for _, s := range syncErrs {
+				fmt.Fprintf(w, "  - %s\n", s)
+			}
+			failures = append(failures, "sync_error rows")
+		} else {
+			fmt.Fprintln(w, "sync_error rows: 0")
+		}
 		if err != nil {
 			fmt.Fprintf(w, "stranded cycles: FAIL (%v)\n", err)
 			failures = append(failures, "stranded cycles")

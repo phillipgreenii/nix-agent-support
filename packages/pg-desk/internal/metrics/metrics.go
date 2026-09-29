@@ -59,6 +59,14 @@ const (
 	// RecordThroughput/RecordDispatchLatency are built and exposed
 	// without one yet.
 	MetricSyncErrors = "pg_desk_sync_errors"
+	// MetricSyncErrorRows is the point-in-time count of interpretation rows
+	// with a non-empty sync_error (pg2-kftf9.5). Unlike MetricSyncErrors it
+	// is derived from the shared store at scrape time, so it reflects
+	// failures recorded by the separate `pg-desk run` process.
+	MetricSyncErrorRows = "pg_desk_sync_error_rows"
+	// MetricOldestSyncErrorAge is the age in seconds of the oldest row with
+	// a non-empty sync_error (0 when none): the oldest unreconciled anchor.
+	MetricOldestSyncErrorAge = "pg_desk_oldest_sync_error_age_seconds"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -70,6 +78,10 @@ type Snapshot struct {
 	AgeSeconds   int
 	Stale        bool
 	DroppedCount int
+	// SyncErrorRows and OldestSyncErrorAgeSeconds are pg2-kftf9.5's
+	// leaked-anchor signals.
+	SyncErrorRows             int
+	OldestSyncErrorAgeSeconds int
 }
 
 // SnapshotFunc supplies the current dashboard snapshot at collect time.
@@ -145,6 +157,30 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		}),
 	); err != nil {
 		return nil, err
+	}
+
+	for _, g := range []struct {
+		name, desc string
+		val        func(Snapshot) int
+	}{
+		{MetricSyncErrorRows, "count of interpretation rows with a non-empty sync_error (leaked/unreconciled anchors)", func(s Snapshot) int { return s.SyncErrorRows }},
+		{MetricOldestSyncErrorAge, "age in seconds of the oldest row with a non-empty sync_error, 0 when none", func(s Snapshot) int { return s.OldestSyncErrorAgeSeconds }},
+	} {
+		g := g
+		if _, err := m.Int64ObservableGauge(
+			g.name,
+			metric.WithDescription(g.desc),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				snap, err := snapshotFn()
+				if err != nil {
+					return err
+				}
+				o.Observe(int64(g.val(snap)))
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	syncErrors, err := m.Int64Counter(
