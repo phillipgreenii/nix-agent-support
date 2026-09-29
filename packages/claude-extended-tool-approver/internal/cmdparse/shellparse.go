@@ -35,6 +35,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
@@ -1092,13 +1093,14 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, c
 		lw.emitDataSpan(a.Pos(), a.End(), []syntax.Node{a})
 	}
 	for i, w := range cmd.Args {
-		tok, procSubs, live := lw.wordToken(w)
-		leaf.ProcessSubstitutions = append(leaf.ProcessSubstitutions, procSubs...)
-		if i == 0 {
-			leaf.Executable = tok
-			continue
+		for j, bt := range lw.wordTokens(w) {
+			leaf.ProcessSubstitutions = append(leaf.ProcessSubstitutions, bt.procSubs...)
+			if i == 0 && j == 0 {
+				leaf.Executable = bt.token
+				continue
+			}
+			appendArg(&leaf, bt.token, bt.live)
 		}
-		appendArg(&leaf, tok, live)
 	}
 	lw.attachRedirs(st, &leaf)
 	leaf.Substitutions = lw.callSubstitutions(cmd, st.Redirs)
@@ -1326,20 +1328,120 @@ func (lw *lowering) wordToken(w *syntax.Word) (string, []string, bool) {
 	if !hasProcSubst(w) {
 		return unquote(lw.node(w)), nil, live
 	}
+	tok, procSubs := lw.renderWordParts(w.Parts)
+	return unquote(tok), procSubs, live
+}
+
+// renderWordParts concatenates parts into the literal shell-syntax text
+// wordToken's own hasProcSubst branch above builds for an ordinary word — a
+// *syntax.ProcSubst is fabricated exactly as that branch's own doc describes,
+// and every other part is source-sliced via lw.node, which is safe for any
+// UNMUTATED AST node (every part type except the synthesized *syntax.Lit
+// fragments described below).
+//
+// A *syntax.Lit is deliberately rendered from its own .Value field rather
+// than lw.node(part): this function is ALSO the renderer wordTokens uses for
+// a brace-expansion alternative's Parts (see that function's doc), and
+// syntax.SplitBraces synthesizes new *syntax.Lit fragments for the literal
+// text immediately touching a "{"/","/"}" whose ValuePos/ValueEnd are copied
+// from the ORIGINAL, wider literal WITHOUT being narrowed to the truncated
+// .Value (verified against mvdan.cc/sh/v3's syntax/braces.go: `l2 := *lit;
+// l2.Value = l2.Value[last:j]` copies the position fields verbatim) — so
+// lw.node(part) on such a fragment would slice the WRONG span, while
+// part.Value already IS the exact literal text, no source slice needed. An
+// ordinary, non-brace *syntax.Lit's .Value is simply its own source text
+// too, so using .Value here is a no-op change for every word this function
+// already handled before brace support existed.
+func (lw *lowering) renderWordParts(parts []syntax.WordPart) (string, []string) {
 	var b strings.Builder
 	var procSubs []string
-	for _, part := range w.Parts {
-		ps, ok := part.(*syntax.ProcSubst)
-		if !ok {
+	for _, part := range parts {
+		switch p := part.(type) {
+		case *syntax.ProcSubst:
+			// The body is the text BETWEEN the operator and the closing paren,
+			// verbatim, exactly as tokenize's `s[start:j-1]`.
+			procSubs = append(procSubs, lw.slice(bodyStart(p), p.Rparen))
+			b.WriteString(procSubFabricatedOperand)
+		case *syntax.Lit:
+			b.WriteString(p.Value)
+		default:
 			b.WriteString(lw.node(part))
-			continue
 		}
-		// The body is the text BETWEEN the operator and the closing paren, verbatim,
-		// exactly as tokenize's `s[start:j-1]`.
-		procSubs = append(procSubs, lw.slice(bodyStart(ps), ps.Rparen))
-		b.WriteString(procSubFabricatedOperand)
 	}
-	return unquote(b.String()), procSubs, live
+	return b.String(), procSubs
+}
+
+// braceToken is one lowered argv position: the token text, any process
+// substitution bodies lifted out of it, and its own live-expansion
+// provenance bit (wordToken's third return, computed per ALTERNATIVE rather
+// than once per source word — see wordTokens' doc for why that is the
+// correct granularity for a brace expansion).
+type braceToken struct {
+	token    string
+	procSubs []string
+	live     bool
+}
+
+// wordTokens lowers one *syntax.Word from a call's executable/argument
+// position to ONE OR MORE argv tokens: more than one exactly when w carries
+// an unquoted, well-formed brace expansion ({a,b,c} or {x..y[..incr]}),
+// which POSIX/bash brace expansion turns into that many SEPARATE words on
+// the command line before the shell does anything else with them — each
+// alternative therefore needs its own argv position, the packet's own
+// "every argv position claimed by the spec" acceptance bar (this is the
+// LIVE/UNEXPANDED form the doc comment near the top of this file's sibling
+// parser.go used to list as wholly unsupported).
+//
+// A word already brace-EXPANDED by an outer shell before Claude Code's own
+// tool_input ever reached this parser — the OTHER form item g names — never
+// takes the brace branch at all: there is no literal "{" left for
+// syntax.SplitBraces to find (it already returns false fast when no `{`
+// appears in any top-level literal part), so the ordinary single-token
+// wordToken path below runs unchanged. That is what makes both forms lower
+// to an equivalent argv set without this function needing to tell them
+// apart itself.
+func (lw *lowering) wordTokens(w *syntax.Word) []braceToken {
+	if cp := braceExpandCopy(w); cp != nil {
+		if alts := expand.Braces(cp); len(alts) > 0 {
+			out := make([]braceToken, len(alts))
+			for i, alt := range alts {
+				tok, procSubs := lw.renderWordParts(alt.Parts)
+				out[i] = braceToken{
+					token:    unquote(tok),
+					procSubs: procSubs,
+					live:     wordHasLiveExpansion(alt),
+				}
+			}
+			return out
+		}
+	}
+	tok, procSubs, live := lw.wordToken(w)
+	return []braceToken{{token: tok, procSubs: procSubs, live: live}}
+}
+
+// braceExpandCopy runs syntax.SplitBraces on a SHALLOW COPY of w and returns
+// that copy when a valid, unquoted brace expression was found, or nil
+// otherwise (no brace, or a malformed one SplitBraces itself folds back to
+// plain literal text per its own doc, e.g. "a{b").
+//
+// It deliberately never mutates w itself: SplitBraces replaces its
+// argument's OWN Parts wholesale (`*word = *top`), so running it on a copy
+// leaves the ORIGINAL AST node cmd.Args holds untouched — load-bearing,
+// because lowerCall's own callSubstitutions walks that SAME cmd.Args slice
+// via syntax.Walk right after wordTokens runs, and syntax.Walk has no case
+// for a *syntax.BraceExp node: it panics on any node type its own switch
+// does not enumerate (verified against mvdan.cc/sh/v3's syntax/walk.go,
+// whose case list predates BraceExp's own use here). SplitBraces itself
+// never mutates the ORIGINAL WordPart objects w.Parts' backing array holds
+// either — every literal fragment and BraceExp it produces is a freshly
+// allocated value appended to a NEW Word — so the copy and the original AST
+// safely go on sharing every part object neither side ever writes to.
+func braceExpandCopy(w *syntax.Word) *syntax.Word {
+	cp := *w
+	if !syntax.SplitBraces(&cp) {
+		return nil
+	}
+	return &cp
 }
 
 // bodyStart is the position just past a process substitution's two-byte opening

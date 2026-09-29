@@ -151,3 +151,70 @@ func TestNestedShellDashCTempDirVars_PrefixAssignment(t *testing.T) {
 		})
 	}
 }
+
+// TestExactKeyDecoding pins item g's second acceptance bar: DecodeBashToolInput
+// uses EXACT-KEY matching over a Bash tool_input payload — an unrecognised key
+// is a decode failure, not a silently-dropped field, and a payload missing the
+// required "command" key is ALSO a decode failure, not a zero-value empty
+// command a loose json.Unmarshal would hand back.
+func TestExactKeyDecoding(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "well-formed payload decodes the command",
+			raw:  `{"command":"echo hi"}`,
+			want: "echo hi",
+		},
+		{
+			name: "empty-string command is a valid, present value",
+			raw:  `{"command":""}`,
+			want: "",
+		},
+		{
+			name:    "an unrecognized extra key is a decode failure, not silently ignored",
+			raw:     `{"command":"echo hi","sandbox":true}`,
+			wantErr: true,
+		},
+		{
+			name:    "an unrecognized key alone, with no command at all, is a decode failure",
+			raw:     `{"description":"list files"}`,
+			wantErr: true,
+		},
+		{
+			name:    "missing command key is a decode failure, not the zero-value empty string",
+			raw:     `{}`,
+			wantErr: true,
+		},
+		{
+			name:    "malformed JSON is a decode failure",
+			raw:     `{"command":`,
+			wantErr: true,
+		},
+		{
+			name:    "a JSON array instead of an object is a decode failure",
+			raw:     `["echo hi"]`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DecodeBashToolInput([]byte(tc.raw))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("DecodeBashToolInput(%q) = %q, nil; want an error", tc.raw, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeBashToolInput(%q) unexpected error: %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Errorf("DecodeBashToolInput(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

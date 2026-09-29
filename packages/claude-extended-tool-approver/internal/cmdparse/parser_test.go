@@ -1820,18 +1820,25 @@ func TestParse_Redirections(t *testing.T) {
 			wantExec: "cmd", wantArgs: []string{"123"}, wantRedirs: nil,
 		},
 		{
-			// Brace EXPANSION is unsupported syntax and must not be mistaken for the
-			// `{varname}` descriptor form — a comma is not a variable name.
-			// The expectation CHANGED at ADR 0039 step 2, and bash agrees with the new
-			// one: `>` is a metacharacter, so `cmd {a,b}>x` is the word `{a,b}` plus a
-			// real `>x` redirection (`echo {a,b}>x` writes "a b" into x). The outgoing
-			// grammar could not see that — `isVarName` rejected `{a,b}` as a descriptor
-			// prefix and the whole thing fell through to "ordinary argument", so the
-			// write was NEVER path-checked. Recording it is the MORE restrictive
-			// direction: a redirection to a read-only path now Rejects where it used to
-			// be an unexamined operand.
+			// `{a,b}` here must not be mistaken for the `{varname}` descriptor
+			// form — a comma is not a variable name. The expectation CHANGED at ADR
+			// 0039 step 2, and bash agrees with it: `>` is a metacharacter, so
+			// `cmd {a,b}>x` is the word `{a,b}` plus a real `>x` redirection (`echo
+			// {a,b}>x` writes "a b" into x). The outgoing grammar could not see
+			// that — `isVarName` rejected `{a,b}` as a descriptor prefix and the
+			// whole thing fell through to "ordinary argument", so the write was
+			// NEVER path-checked. Recording the redirection at all was the MORE
+			// restrictive direction: a redirection to a read-only path now Rejects
+			// where it used to be an unexamined operand.
+			//
+			// GOLDEN FLIP (item g, docket tc-o14i5.3, Phase 2): `{a,b}` itself used
+			// to lower to the single literal argument "{a,b}" (brace expansion was
+			// unsupported syntax at the time this test was written). It now
+			// EXPANDS, exactly as bash's own comment above already says it must —
+			// two separate args "a" and "b" — which is what makes the redirection
+			// example's own "writes 'a b' into x" claim actually match Args too.
 			name: "brace expansion is not a descriptor", command: "cmd {a,b}>x",
-			wantExec: "cmd", wantArgs: []string{"{a,b}"},
+			wantExec: "cmd", wantArgs: []string{"a", "b"},
 			wantRedirs: []hooktypes.Redirection{{Operator: ">", Path: "x", Kind: hooktypes.RedirectStdout}},
 		},
 	}

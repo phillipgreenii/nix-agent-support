@@ -17,9 +17,13 @@ package cmdparse
 //   - Subshell grouping: ( cmd1; cmd2 )
 //   - Inline comments: cmd # comment
 //   - Loops: for VAR in LIST; do CMD; done  /  while COND; do CMD; done
+//   - Brace expansion in a simple command's own words (executable and args):
+//     {a,b,c} (list form) and {x..y[..incr]} (sequence form), lowered to one
+//     argv position per alternative — see shellparse.go's wordTokens. Not
+//     yet extended to a `for` loop's word list or to an assignment's value
+//     (bash itself does not brace-expand an assignment value either).
 //
 // Unsupported (falls through as Abstain — safe default):
-//   - Brace expansion: {a,b,c}
 //   - Array syntax: ${arr[@]}
 //   - Coproc: coproc cmd
 //   - Cross-token quote concatenation: 'it'\''s'

@@ -1,6 +1,11 @@
 package cmdparse
 
-import "path/filepath"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+)
 
 // UnwrapShellDashC reports whether pc is a `bash -c <script>` / `sh -c
 // <script>` invocation and, if so, returns <script> — a REAL element of
@@ -127,4 +132,47 @@ func NestedShellDashCTempDirVars(pc ParsedCommand) map[string]string {
 		delete(vars, ev.Name)
 	}
 	return vars
+}
+
+// DecodeBashToolInput decodes a Claude Code Bash tool's tool_input JSON
+// payload — {"command": "..."} , the one field internal/hookio's own
+// BashToolInput struct (internal/hookio/types.go) already models for the
+// same key — using EXACT-KEY semantics instead of encoding/json's default
+// loose decode.
+//
+// Item g's own acceptance bar is "no loose/fuzzy key matching that could let
+// an unexpected field shape slip past unnoticed": an unrecognised key (a
+// field shape nothing in this codebase's tool_input schemas — BashToolInput/
+// FileToolInput/SearchToolInput/WebFetchToolInput, internal/hookio/types.go
+// — has ever modeled) returns an error here rather than being silently
+// dropped the way a plain json.Unmarshal into a struct always is; and a
+// payload that omits "command" entirely ALSO returns an error rather than
+// the zero-value empty string json.Unmarshal would produce for a missing
+// field. An omitted command is a parse failure, not "run the empty
+// command": Parse("") lowers to zero leaves, which would let a malformed or
+// truncated hook payload through the fold with nothing to judge at all — P3
+// (docket tc-o14i5.3's Decision rule) requires an unmodeled shape to Abstain,
+// never to silently resolve to "nothing happened".
+//
+// Scoped to the Bash shape alone, deliberately: cmdparse only ever lowers
+// shell TEXT (a Bash tool_input's "command" field), never a Write/Edit/
+// Read/Glob/Grep/WebFetch tool_input's structured fields — those reach a
+// judged effect through internal/claudecodeadapter's own file-tool mapping
+// without ever being handed to cmdparse (see that package's adapter.go doc
+// comment: "cmdparse would never be asked to parse it"), so a matching
+// exact-key decoder for THOSE shapes belongs with whichever packet owns
+// that seam, not here.
+func DecodeBashToolInput(raw []byte) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var payload struct {
+		Command *string `json:"command"`
+	}
+	if err := dec.Decode(&payload); err != nil {
+		return "", fmt.Errorf("cmdparse: decode Bash tool_input: %w", err)
+	}
+	if payload.Command == nil {
+		return "", fmt.Errorf("cmdparse: Bash tool_input missing required %q key", "command")
+	}
+	return *payload.Command, nil
 }

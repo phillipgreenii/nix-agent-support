@@ -1596,3 +1596,72 @@ this table.)
 `internal/rules/pathsafety` at 29.3s — both green). `prek run --files <changed files>` and
 `nix flake check`: see this bead's own commit message / session report for the pass/fail
 evidence captured at commit time.
+
+---
+
+# Item g — cmdparse hardening: brace expansion + exact-key `tool_input` decoding
+
+Authority: docket `tc-o14i5.3` (CETA effect-engine plan, design v16), Phase 2 item g. Everything
+above this heading is the ADR 0039 migration record for the OLD engine's front end (already
+fully landed, per "Step 5 (final)" above); this section is the FIRST entry for the NEW engine's
+own docket and intentionally does not continue the old `pg2-*` step numbering.
+
+## Brace expansion (live/expanded and literal/unexpanded)
+
+Previously UNSUPPORTED: this file's sibling `parser.go` used to list `Brace expansion: {a,b,c}`
+under its top-of-file "Unsupported (falls through as Abstain — safe default)" comment. It is now
+**Covered**: `shellparse.go`'s `wordTokens` lowers each of a simple command's own words
+(executable and args) through `syntax.SplitBraces`/`expand.Braces` on a COPY of the word (never
+the original AST node — see `braceExpandCopy`'s own doc for why: `syntax.Walk` has no case for a
+`*syntax.BraceExp` and panics on one, so mutating `cmd.Args` in place would break
+`callSubstitutions`' walk over that same slice immediately afterward). Both list form (`{a,b,c}`)
+and sequence form (`{x..y[..incr]}`) are supported, matching POSIX/bash semantics: quoting fences
+expansion (`"{a,b}"`/`'{a,b}'` stay one literal argument), a single-element or malformed brace
+stays literal (`{a}`, `{a` unterminated), and expansion applies to the EXECUTABLE word too
+(`{echo,cat} foo` lowers to `Executable="echo"`, `Args=["cat","foo"]`), not only to argument
+positions — `TestBraceExpansion`/`TestBraceExpansion_LiveAndLiteralFormsAgree`/
+`TestBraceExpansion_ProcessSubstitutionInsideBraceElement` (`brace_test.go`) pin all of the
+above, including a process substitution embedded inside one brace alternative still being lifted
+into `ProcessSubstitutions` for that alternative's own argv position.
+
+A word already brace-expanded by an outer shell before Claude Code's own `tool_input` ever reaches
+this parser (the OTHER form item g names) needs no special handling: `syntax.SplitBraces` finds
+no literal `"{"` and returns false immediately, so the plain single-token `wordToken` path runs
+unchanged — this is what makes the live-expanded and literal-unexpanded forms of the same command
+lower to an equivalent argv set without `wordTokens` needing to tell them apart itself.
+
+**Golden flip**, per the Phase 2 Exit criterion: `parser_test.go`'s `TestParse_Redirections`
+subtest `"brace expansion is not a descriptor"` (`cmd {a,b}>x`) previously asserted the single
+literal argument `"{a,b}"` — correct when brace expansion was unsupported syntax, and already
+noted in that test's own comment as something bash disagrees with (`echo {a,b}>x` really does
+write `"a b"` into `x`). It now asserts the two separate arguments `["a","b"]`, matching real bash
+and the test's own pre-existing comment. No other test in the module changed expectation (full
+`go test ./...` re-run clean across all 37 packages after this change).
+
+## Exact-key `tool_input` decoding (Bash shape)
+
+New: `shellwrap.go`'s `DecodeBashToolInput([]byte) (string, error)` decodes a Bash tool's
+`tool_input` JSON payload — `{"command": "..."}`, the one field `internal/hookio`'s own
+`BashToolInput` struct (`internal/hookio/types.go`) already models for this key — using
+`encoding/json`'s `Decoder.DisallowUnknownFields`, so an unrecognised key is a decode error
+rather than silently dropped, AND a `*string` field so a payload omitting `"command"` entirely is
+ALSO a decode error rather than the zero-value empty string a loose `json.Unmarshal` produces.
+`TestExactKeyDecoding` (`shellwrap_test.go`) pins both halves plus malformed-JSON and
+wrong-top-level-shape (a JSON array) cases.
+
+Deliberately scoped to the Bash shape alone: cmdparse only ever lowers shell TEXT, never a
+Write/Edit/Read/Glob/Grep/WebFetch `tool_input`'s own structured fields — those reach a judged
+effect through `internal/claudecodeadapter`'s file-tool mapping without ever being handed to
+cmdparse (see that package's `adapter.go` doc comment: "cmdparse would never be asked to parse
+it"). `DecodeBashToolInput` is NOT wired into `internal/hookio`'s own (loose) `BashCommand()`
+decode by this packet — that file is outside item g's own `Files` scope (cmdparse only); whether
+and how a later packet adopts this stricter decoder there is that packet's own call.
+
+## Gates (this packet's own change)
+
+`go build ./...`: clean. `go test ./internal/cmdparse/...`: all tests PASS, including the fuzz
+seed corpora and every ENFORCEMENT GUARD test recorded above (`TestSeamIsTheOnlyParserImporter`
+in particular — `mvdan.cc/sh/v3/expand` is imported only from `shellparse.go`, matching I6). Full
+`go test ./...`: all 37 packages PASS, confirming the golden flip above is isolated to the one
+subtest it names. `prek run --files <changed files>` and `nix flake check`: see this bead's own
+commit message / session report for the pass/fail evidence captured at commit time.
