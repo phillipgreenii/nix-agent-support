@@ -292,8 +292,14 @@ func TestPipelineRun_SyncFailureSetsSyncError(t *testing.T) {
 		return wantSyncErr
 	})
 
-	if err := p.Run(context.Background(), "pr", "10", gather.ChangeAdded); err != nil {
-		t.Fatalf("Run: expected nil (a sync failure must not fail Run), got %v", err)
+	// pg2-kftf9.1: a sync failure is recorded AND fails Run, so pg-router
+	// retries with backoff and counts it in failure metrics.
+	runErr := p.Run(context.Background(), "pr", "10", gather.ChangeAdded)
+	if runErr == nil {
+		t.Fatal("Run: expected a non-nil error for a sync failure, got nil")
+	}
+	if !errors.Is(runErr, wantSyncErr) {
+		t.Fatalf("Run error should wrap the sync error, got %v", runErr)
 	}
 
 	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "10")
@@ -308,8 +314,37 @@ func TestPipelineRun_SyncFailureSetsSyncError(t *testing.T) {
 	if interp.Ownership == "" {
 		t.Fatalf("interpretation row lost its other fields on the sync_error update: %+v", interp)
 	}
-	if strings.Contains(out.String(), `"outcome":"error"`) {
-		t.Fatalf("a sync failure must not log a run-level error outcome, got: %s", out.String())
+	if !strings.Contains(out.String(), `"outcome":"error"`) {
+		t.Fatalf("a sync failure must log a run-level error outcome, got: %s", out.String())
+	}
+}
+
+// TestPipelineRun_SyncRecoveryClearsSyncError proves the retry path: once
+// sync succeeds on a re-run, the persisted sync_error is cleared (persist
+// rewrites the row with an empty SyncError) and Run exits nil.
+func TestPipelineRun_SyncRecoveryClearsSyncError(t *testing.T) {
+	facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "repo": "acme/widgets", "number": 10})
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return facts, nil
+	}), &out)
+	fail := true
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		if fail {
+			return errors.New("sync: boom")
+		}
+		return nil
+	})
+	if err := p.Run(context.Background(), "pr", "10", gather.ChangeAdded); err == nil {
+		t.Fatal("first Run: want error")
+	}
+	fail = false
+	if err := p.Run(context.Background(), "pr", "10", gather.ChangeAdded); err != nil {
+		t.Fatalf("retry Run: %v", err)
+	}
+	interp, _, _ := p.store.GetInterpretation("acme/widgets", "pr", "10")
+	if interp.SyncError != "" {
+		t.Fatalf("sync_error = %q after a successful retry, want cleared", interp.SyncError)
 	}
 }
 

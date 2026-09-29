@@ -163,6 +163,12 @@ func helperMain() {
 		if len(args) > 2 {
 			id = args[2]
 		}
+		// GO_HELPER_FAIL_ID makes any call naming that bead id fail (exit 1,
+		// stderr) — the closure-failure injection point (pg2-kftf9.1).
+		if failID := os.Getenv("GO_HELPER_FAIL_ID"); failID != "" && failID == id {
+			os.Stderr.WriteString("boom: injected failure for " + id)
+			os.Exit(1)
+		}
 		writeIssueResult(id)
 	default:
 		os.Stderr.WriteString("unexpected issue verb: " + args[1])
@@ -797,5 +803,53 @@ func TestSync_EveryIssueWriteCarriesBeadsDirEnv(t *testing.T) {
 		if r.PGConnectorBeadsDir != "/configured/beads" {
 			t.Fatalf("%v: PG_CONNECTOR_ISSUE_BEADS_DIR = %q, want %q", r.Args, r.PGConnectorBeadsDir, "/configured/beads")
 		}
+	}
+}
+
+// TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe guards
+// pg2-kftf9.1: a connector error during handleClosure MUST surface as a Sync
+// error (the pipeline turns it into a non-zero `run` so pg-router retries),
+// and a RETRY after a partial failure MUST finish the cascade without
+// re-closing what already closed. Here the anchor closes, then the review
+// request's close fails; the retry must close only the review request.
+func TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, cycleID, reviewID := seedExistingAnchorCycleAndReview(t, s)
+
+	facts := gather.Facts{HeadSHA: fixtureHeadSHA, RemovedState: "merged"}
+	interp := interpFor("mine", nil)
+
+	t.Setenv("GO_HELPER_FAIL_ID", reviewID)
+	err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interp)
+	if err == nil {
+		t.Fatal("Sync: expected the injected closure failure to be returned, got nil")
+	}
+	if !strings.Contains(err.Error(), reviewID) {
+		t.Fatalf("error should name the failing bead %q, got: %v", reviewID, err)
+	}
+	review, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)
+	if review.LastSyncedContentHash == closedSentinel {
+		t.Fatal("review ledger row marked closed despite its close failing")
+	}
+
+	// Retry with the connector healthy again.
+	t.Setenv("GO_HELPER_FAIL_ID", "")
+	before := len(readCallRecords(t, recordFile))
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interp); err != nil {
+		t.Fatalf("retry Sync: %v", err)
+	}
+	var retryCloses []string
+	for _, r := range readCallRecords(t, recordFile)[before:] {
+		if r.verb() == "issue transition" {
+			retryCloses = append(retryCloses, r.Args[2])
+		}
+	}
+	if len(retryCloses) != 1 || retryCloses[0] != reviewID {
+		t.Fatalf("retry closed %v, want only [%s] (anchor %s and cycle %s already closed)", retryCloses, reviewID, anchorID, cycleID)
+	}
+	review, _, _ = s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)
+	if review.LastSyncedContentHash != closedSentinel {
+		t.Fatalf("review ledger row not closed after retry: %+v", review)
 	}
 }

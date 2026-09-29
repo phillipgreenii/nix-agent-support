@@ -83,10 +83,15 @@ prompts that read these shapes, in the same change:
 ## Failure handling
 
 A sync failure for one PR sets that PR's `interpretation.sync_error` (via the store's existing
-interpretation writer) and does NOT fail the `run` invocation — `run`'s own exit-code contract
-(`0` on success or a degraded run, `1` only for a triggering-entity fetch or store failure — see
-[`pipeline-run.md`](pipeline-run.md)) is unaffected by a sync failure. `sync_error` surfaces on the
-dashboard and counts into `runs_failed_24h`, and is retried by the next sweep.
+interpretation writer) AND fails the `run` invocation with exit `1` (see
+[`pipeline-run.md`](pipeline-run.md)), so pg-router retries the event with backoff and counts it as
+a failure. A failed run MUST NOT lose the diagnostic: `sync_error` is still recorded and surfaces
+on the dashboard and counts into `runs_failed_24h`; a later successful run clears it. A `sweep`
+that hits a sync failure for any entity still attempts every entity, then exits `1`.
+
+Sync MUST be safe to retry. Closure is guarded by the ledger: an anchor or cycle already recorded
+as closed is not closed again, and a retry after a partial failure (for example the anchor closed
+but a child close failed) MUST finish the remaining closes without repeating the finished ones.
 
 ## Telemetry and logs (D24)
 

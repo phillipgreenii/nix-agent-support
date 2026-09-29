@@ -14,8 +14,9 @@
 // # Exit codes [Binding decisions]
 //
 // Run returns nil on success or on a degraded-but-completed run (pr-pool
-// exit 0), and a non-nil error on a triggering-entity fetch failure or a
-// store error (pr-pool exit 1). cmd/pg-desk/main.go's RunE dispatch maps
+// exit 0), and a non-nil error on a triggering-entity fetch failure, a
+// store error, or a sync-stage failure (pr-pool exit 1; a sync failure is
+// ALSO recorded as sync_error first — pg2-kftf9.1). cmd/pg-desk/main.go's RunE dispatch maps
 // any non-nil error to exit 1 and never calls os.Exit with another code,
 // so this package need not (and must not) call os.Exit itself: returning
 // nil/error is the whole contract, and it is never 9 and never a raw
@@ -42,8 +43,9 @@
 // A store error in gather/interpret/persist's own code path is still the
 // exit-1 case above; only a failure from the sync stage itself (below) sets
 // sync_error, and it does so via the SAME existing UpsertInterpretation
-// writer persist already uses, never a new store method, and never as a
-// Run-level error — see the sync stage's own doc comment below for why.
+// writer persist already uses, never a new store method. The sync failure
+// is then ALSO returned as a Run-level error (pg2-kftf9.1) so pg-router
+// retries it — see the sync stage's own doc comment below.
 package pipeline
 
 import (
@@ -213,12 +215,16 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 
 	// Sync stage (docket pg2-2j5ac.34, Phase 10) — entityType == "pr" only
 	// (see the package doc comment), and only once the entity/interpretation
-	// rows above are durably persisted, since a sync failure records itself
-	// ON that same interpretation row (sync_error) rather than failing this
-	// Run call. This mirrors the design's own exit-code contract: "Sync
-	// failures are recorded on the interpretation row (sync_error) ...
-	// never a raw pg-connector exit code" [design 7.9] — never returned as
-	// a Run error, never os.Exit(9), never a raw pg-connector exit code.
+	// rows above are durably persisted. A sync failure is recorded ON that
+	// same interpretation row (sync_error, the diagnostic) AND returned as a
+	// Run error (pg2-kftf9.1): a swallowed failure exited 0, so pg-router
+	// treated the dispatch as success and never retried (25 merge-request
+	// anchors stayed open after their PRs closed). Returning it makes the
+	// event retry with pg-router's backoff and count in its failure metrics.
+	// It is still an ordinary error -> exit 1 via main.go: never os.Exit(9),
+	// never a raw pg-connector exit code. Retries are safe: sync closure is
+	// ledger-guarded and re-entrant, and the next successful run's persist
+	// rewrites the row with an empty sync_error.
 	if entityType == entityTypePR {
 		if syncErr := p.syncer.Sync(ctx, p.repo(), entityID, change, facts, interp); syncErr != nil {
 			interpRow.SyncError = syncErr.Error()
@@ -229,6 +235,8 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 				p.logRun(entityType, entityID, change, "error", "", upsertErr, runStart)
 				return fmt.Errorf("pipeline: record sync_error %s %s: %w", entityType, entityID, upsertErr)
 			}
+			p.logRun(entityType, entityID, change, "error", interp.Degraded, syncErr, runStart)
+			return fmt.Errorf("pipeline: sync %s %s: %w", entityType, entityID, syncErr)
 		}
 	}
 

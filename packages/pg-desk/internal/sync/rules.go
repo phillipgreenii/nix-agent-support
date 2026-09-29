@@ -121,21 +121,27 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	if rc.anchorID == "" {
 		return nil // no anchor ever existed for this PR — nothing to close
 	}
-	if rc.ledgerAnchor.LastSyncedContentHash == closedSentinel {
-		return nil // already closed by an earlier run — idempotent no-op
-	}
-	if rc.mode == ModeApply {
-		if err := rc.syncer.client.Transition(ctx, rc.anchorID, "closed"); err != nil {
-			return fmt.Errorf("sync: close anchor %s: %w", rc.anchorID, err)
+	// A closure failure now fails the run so pg-router retries it
+	// (pg2-kftf9.1), so this MUST be safe to re-enter after a PARTIAL
+	// failure: the anchor being sentinel-closed no longer short-circuits the
+	// whole cascade (a child close that failed after the anchor closed would
+	// otherwise never be retried); it only skips the anchor's own
+	// transition, and each ledger-tracked child skips itself if already
+	// sentinel-closed (closeCascadedChild).
+	if rc.ledgerAnchor.LastSyncedContentHash != closedSentinel {
+		if rc.mode == ModeApply {
+			if err := rc.syncer.client.Transition(ctx, rc.anchorID, "closed"); err != nil {
+				return fmt.Errorf("sync: close anchor %s: %w", rc.anchorID, err)
+			}
+		}
+		if err := rc.upsertLedger(KindAnchor, rc.anchorID, closedSentinel, ""); err != nil {
+			return err
 		}
 	}
-	if err := rc.upsertLedger(KindAnchor, rc.anchorID, closedSentinel, ""); err != nil {
+	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID, rc.ledgerCycle); err != nil {
 		return err
 	}
-	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID); err != nil {
-		return err
-	}
-	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID); err != nil {
+	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID, rc.ledgerReview); err != nil {
 		return err
 	}
 	for _, id := range openChildrenOf(rc.workBeads, rc.anchorID) {
@@ -155,9 +161,9 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 // (a process-feedback cycle or a review-pr request) as part of handleClosure's
 // cascade, and records the closure in that kind's own ledger row. An empty
 // beadID means that child never existed for this PR — nothing to close.
-func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadID string) error {
-	if beadID == "" {
-		return nil
+func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadID string, ledger store.LedgerEntry) error {
+	if beadID == "" || ledger.LastSyncedContentHash == closedSentinel {
+		return nil // never existed, or already closed by an earlier (possibly partially failed) run
 	}
 	if rc.mode == ModeApply {
 		if err := rc.syncer.client.Transition(ctx, beadID, "closed"); err != nil {

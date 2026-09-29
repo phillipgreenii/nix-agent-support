@@ -33,10 +33,12 @@ cross-reference step that would give either kind of event a linked PR — see
 ## Exit codes
 
 `run`'s contract to pg-router is fixed regardless of phase: it MUST exit `0` on success and on a
-degraded run (see [`gather.md`](gather.md)) — a sync failure (recorded as `sync_error`, see
-[`sync.md`](sync.md)) is also a `0`, never a failure of `run` itself — `1` when the triggering
-entity itself could not be fetched or the store could not be written, and MUST NEVER exit `9` or
-return a raw `pg-connector` exit code.
+degraded run (see [`gather.md`](gather.md)), and `1` when the triggering entity itself could not
+be fetched, the store could not be written, or the sync stage failed (see [`sync.md`](sync.md)).
+A sync failure is recorded as `sync_error` (the diagnostic, kept for the dashboard) AND fails
+`run`, so pg-router retries the event with its backoff and counts it in its failure metrics; a
+later successful run clears `sync_error`. `run` MUST NEVER exit `9` or return a raw
+`pg-connector` exit code.
 
 ## Telemetry and logs
 
