@@ -1,7 +1,10 @@
 # PR-flow reconciler over pg-desk's read model — proposal
 
 - **Date**: 2026-09-25 (revision 2, 2026-09-28, after three independent reviews)
-- **Status**: PROPOSAL — NOT an approved design. Produced in the interactive brainstorming session
+- **Status**: SUPERSEDED (2026-09-29) by `2026-09-29-entity-change-flow-design.md` (same
+  directory), which makes the flow generic across entity types and moves change detection into
+  pg-connector and pg-desk. Kept for history only; do not act on it.
+- **Original status**: PROPOSAL — NOT an approved design. Produced in the interactive brainstorming session
   tracked by bead `pg2-2j5ac.49`. Nothing here authorizes implementation. Items are marked
   **Decided** (operator confirmed in session), **Recommended** (awaiting an operator ruling), or
   **Open**.
