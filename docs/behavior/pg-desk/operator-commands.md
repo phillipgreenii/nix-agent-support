@@ -64,6 +64,16 @@ config-authoring signal comparing a backend's declared query names against its p
 same type, bead `pg2-2j5ac.28.1`) is informational-only as of `pg2-rnnfz` — it does not affect
 that check's pass/fail verdict, so a query-coverage gap alone never fails `doctor`.
 
+"The config resolves" includes every configured `repos[].beads_dir`: config load MUST fail —
+so every command, `serve` startup, and `doctor` exit non-zero — when a `beads_dir` does not
+exist, is not a directory, or is not a beads workspace (no `config.yaml` or `metadata.json`).
+The error MUST name the repo and the path. This keeps a stale path from surfacing later as a
+swallowed per-event bead-write failure.
+
+**Path-move checklist.** Whenever a checkout or tracker directory moves (for example a
+primary-checkout relocation), update the deployment's pg-desk `repos[].beads_dir` in the same
+change, then run `pg-desk doctor` and confirm the config check passes.
+
 Exit codes: `0` when every check passes; `1` when any check fails (naming which one).
 
 ## heartbeat / heartbeat-item

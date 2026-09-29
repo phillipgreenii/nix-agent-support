@@ -310,6 +310,9 @@ func finalize(cfg *Config) error {
 				return fmt.Errorf("repos[%d].beads_dir: %w", i, err)
 			}
 			cfg.Repos[i].BeadsDir = expanded
+			if err := validateBeadsDir(cfg.Repos[i].Remote, expanded); err != nil {
+				return err
+			}
 		}
 	}
 	if cfg.Serve.Log != "" {
@@ -327,6 +330,27 @@ func finalize(cfg *Config) error {
 		cfg.Open.ChromeBin = expanded
 	}
 	return nil
+}
+
+// validateBeadsDir fails loudly when a configured beads_dir is not a real
+// beads workspace, so a stale path (e.g. left behind by a checkout move) stops
+// startup / `doctor` with an error naming the repo and path, instead of
+// surfacing later as a swallowed per-event `bd` chdir failure. A beads
+// workspace is a directory carrying config.yaml or metadata.json.
+func validateBeadsDir(remote, dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("repos[%s].beads_dir %q is not usable: %w (was the checkout moved? update pg-desk config)", remote, dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("repos[%s].beads_dir %q is not a directory", remote, dir)
+	}
+	for _, marker := range []string{"config.yaml", "metadata.json"} {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("repos[%s].beads_dir %q is not a beads workspace (no config.yaml or metadata.json)", remote, dir)
 }
 
 // expandHome expands a leading `~` or `~/` to the current user's home dir.

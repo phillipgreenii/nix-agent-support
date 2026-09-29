@@ -106,7 +106,8 @@ func testdataFixture(name string) string {
 // testdata/ to cover (acceptance criterion: "identifier-allowlist guard
 // extended to packages/pg-desk fixtures").
 func TestLoadFile_FullExample(t *testing.T) {
-	cfg, err := LoadFile(testdataFixture("config.example.yaml"))
+	examplePath, beadsDir := stageExample(t)
+	cfg, err := LoadFile(examplePath)
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestLoadFile_FullExample(t *testing.T) {
 	if cfg.Repos[0].Remote != "phillipgreenii/example-repo" {
 		t.Errorf("repos[0].remote: got %q", cfg.Repos[0].Remote)
 	}
-	if cfg.Repos[0].BeadsDir != "/tmp/example-repo/.beads" {
+	if cfg.Repos[0].BeadsDir != beadsDir {
 		t.Errorf("repos[0].beads_dir: got %q", cfg.Repos[0].BeadsDir)
 	}
 
@@ -220,8 +221,94 @@ func TestLoadFile_FullExample(t *testing.T) {
 		t.Errorf("open.chrome_bin: got %q", cfg.Open.ChromeBin)
 	}
 
-	if cfg.Path != testdataFixture("config.example.yaml") {
+	if cfg.Path != examplePath {
 		t.Errorf("cfg.Path: got %q", cfg.Path)
+	}
+}
+
+// makeBeadsDir creates a minimal valid beads workspace directory (a
+// .beads dir carrying config.yaml) under dir and returns its path.
+func makeBeadsDir(t *testing.T, dir string) string {
+	t.Helper()
+	b := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(b, "config.yaml"), "issue_prefix: x\n"); err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// stageExample copies testdata/config.example.yaml into a temp dir with its
+// placeholder beads_dir rewritten to a real (temp) beads workspace, since
+// config load now requires every beads_dir to exist. Returns the staged
+// config path and the substituted beads_dir.
+func stageExample(t *testing.T) (string, string) {
+	t.Helper()
+	raw, err := os.ReadFile(testdataFixture("config.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	beadsDir := makeBeadsDir(t, dir)
+	out := strings.Replace(string(raw), "/tmp/example-repo/.beads", beadsDir, 1)
+	if out == string(raw) {
+		t.Fatal("fixture placeholder beads_dir not found")
+	}
+	p := filepath.Join(dir, "example.yaml")
+	if err := writeFile(p, out); err != nil {
+		t.Fatal(err)
+	}
+	return p, beadsDir
+}
+
+func TestLoadFile_BeadsDirMissingFailsNamingRepoAndPath(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "gone", ".beads")
+	p := writeYAML(t, dir, "self_login: phillipgreenii\nrepos:\n  - remote: phillipgreenii/example-repo\n    beads_dir: "+missing+"\n")
+	_, err := LoadFile(p)
+	if err == nil {
+		t.Fatal("expected an error for a nonexistent beads_dir")
+	}
+	for _, want := range []string{"phillipgreenii/example-repo", missing, "beads_dir"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should name %q", err, want)
+		}
+	}
+}
+
+func TestLoadFile_BeadsDirNotADirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "file")
+	if err := writeFile(f, "x"); err != nil {
+		t.Fatal(err)
+	}
+	p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\n    beads_dir: "+f+"\n")
+	if _, err := LoadFile(p); err == nil || !strings.Contains(err.Error(), f) {
+		t.Fatalf("expected a not-a-directory error naming %s, got %v", f, err)
+	}
+}
+
+func TestLoadFile_BeadsDirNotABeadsWorkspaceFails(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "plain")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\n    beads_dir: "+empty+"\n")
+	_, err := LoadFile(p)
+	if err == nil || !strings.Contains(err.Error(), empty) || !strings.Contains(err.Error(), "o/r") {
+		t.Fatalf("expected a not-a-beads-workspace error naming repo and path, got %v", err)
+	}
+}
+
+func TestLoadFile_BeadsDirValidWorkspaceLoads(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBeadsDir(t, dir)
+	p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\n    beads_dir: "+b+"\n")
+	if _, err := LoadFile(p); err != nil {
+		t.Fatalf("valid beads workspace should load: %v", err)
 	}
 }
 
