@@ -7,6 +7,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
 // BuildStructural builds the graph from the parse ONLY: one Command node per
@@ -344,6 +345,28 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: "no executable"})
 		insufficient("no executable")
 	default:
+		// P4 executable identity (ADR 0075): an argv0 that STARTS WITH "/"
+		// is a PATH-search-bypassing absolute reference, so before trusting
+		// its basename enough to interpret it via that basename's schema
+		// (below), confirm its realpath actually matches what the trusted
+		// PATH resolves for that basename — otherwise an arbitrary absolute
+		// binary merely NAMED "git" would silently inherit git's known-safe
+		// effect schema. A leaf.Executable that does NOT start with "/"
+		// (a bare command name resolved by a real PATH search, e.g. "git",
+		// OR a relative path like "./scripts/foo" that resolves against
+		// CWD, never a PATH search) is UNCHANGED by this check: the bare
+		// case was never in scope for P4, and the relative case is "exec of
+		// an in-checkout file" under R2 — a different trust boundary this
+		// identity check does not adjudicate (see
+		// patheval.ResolveTrustedExecutable's doc comment).
+		if strings.HasPrefix(leaf.Executable, "/") {
+			if _, trusted, err := patheval.ResolveTrustedExecutable(leaf.Executable); err != nil || !trusted {
+				detail := "untrusted executable identity for " + leaf.Executable
+				effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: detail})
+				insufficient(detail)
+				break
+			}
+		}
 		base := path.Base(leaf.Executable)
 		schema, ok := reg.Lookup(base)
 		if !ok {
