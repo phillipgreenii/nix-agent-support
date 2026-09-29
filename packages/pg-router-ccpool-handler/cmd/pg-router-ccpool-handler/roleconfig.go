@@ -69,6 +69,10 @@ type roleFile struct {
 		// zero-value default) means unchanged behavior: no override, this
 		// process's own inherited CCPOOL_POOL still applies.
 		PoolDir string `json:"poolDir"`
+		// BeadsDir (bead pg2-2grpj): workspace dir of the bd tracker this
+		// role's items live in, when not cfg.RepoRoot's. See
+		// roles.CCPoolConfig.BeadsDir.
+		BeadsDir string `json:"beadsDir"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -122,6 +126,7 @@ func loadRole(path string) (roles.Role, error) {
 			},
 			Isolation: rf.CCPool.Isolation,
 			PoolDir:   rf.CCPool.PoolDir,
+			BeadsDir:  rf.CCPool.BeadsDir,
 		}
 	case "command":
 		if rf.Command == nil {

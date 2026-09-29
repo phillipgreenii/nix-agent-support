@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -141,4 +146,51 @@ func TestBuildDeps_noPoolDirLeavesCCUnscoped(t *testing.T) {
 	if cli.PoolDir != "" {
 		t.Errorf("CLIRunner.PoolDir = %q, want \"\" (no per-role override configured)", cli.PoolDir)
 	}
+}
+
+// TestBuildDeps_BD_resolvesRoleTracker is the pg2-2grpj regression: an item
+// whose id prefix belongs to a tracker other than cfg.RepoRoot's (a pg2 bead
+// dispatched by a handler whose RepoRoot is the ZR monorepo) must be read from
+// the role's own BeadsDir, so completion fires once that bead closes. A fake
+// `bd` on PATH answers only when run from the pg2 dir, like the real tracker
+// resolution (BEADS_DIR is scrubbed, cwd decides).
+func TestBuildDeps_BD_resolvesRoleTracker(t *testing.T) {
+	pg2, zr, bin := t.TempDir(), t.TempDir(), t.TempDir()
+	script := "#!/bin/sh\nif [ \"$(pwd -P)\" = \"" + mustEval(t, pg2) + "\" ]; then\n" +
+		"  echo '{\"data\":[{\"id\":\"pg2-x\",\"status\":\"closed\",\"labels\":[\"escalated\"]}]}'\n" +
+		"else echo 'no issues found matching the provided IDs' >&2; exit 1; fi\n"
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := config.Default()
+	cfg.RepoRoot = zr
+	role := roles.Role{Name: "pg2-escalation-triager", CCPool: &roles.CCPoolConfig{Completion: roles.CloseOrTriage, BeadsDir: pg2}}
+
+	// Without BeadsDir the ZR tracker cannot see the bead (the bug).
+	plain := buildDeps(cfg, roles.Role{Name: "x", CCPool: &roles.CCPoolConfig{}})
+	if iss, err := beads.ShowObj(context.Background(), plain.BD, "pg2-x"); err == nil {
+		t.Fatalf("control: ZR-rooted runner unexpectedly saw the pg2 bead: %+v", iss)
+	}
+
+	deps := buildDeps(cfg, role)
+	iss, err := beads.ShowObj(context.Background(), deps.BD, "pg2-x")
+	if err != nil {
+		t.Fatalf("role-tracker read failed: %v", err)
+	}
+	var tr complete.Tracker
+	obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount}
+	if !tr.Done(role.CCPool.Completion, obs, true) {
+		t.Error("DoneSignal must fire once the pg2 bead closes")
+	}
+}
+
+func mustEval(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

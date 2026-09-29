@@ -143,6 +143,7 @@ type ScriptBD struct {
 	ReadyErr    error             // if set, every `bd ready` returns this error
 	Show        map[string]string
 	ShowErrOnce map[string]error    // returns error once per id, then clears
+	CommentSeq  map[string][]int    // per-id comment_count sequence, indexed like StatusSeq (holds the last value); absent => 0
 	Labels      map[string][]string // keyed by bead id; wired into the synthesized "show" JSON's "labels" key below so beads.HasLabel can read a seeded label without a full Show[id] JSON literal.
 }
 
@@ -181,7 +182,11 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 		}
 		s.Idx[id]++
 		labels, _ := json.Marshal(s.Labels[id]) // nil Labels[id] marshals to "null", decoding to an empty/nil slice — same as omitted
-		return `{"id":"` + id + `","status":"` + seq[i] + `","labels":` + string(labels) + `}`, nil
+		comments := 0
+		if cs := s.CommentSeq[id]; len(cs) > 0 {
+			comments = cs[min(i, len(cs)-1)]
+		}
+		return `{"id":"` + id + `","status":"` + seq[i] + `","labels":` + string(labels) + `,"comment_count":` + strconv.Itoa(comments) + `}`, nil
 	case "update":
 		s.Updates = append(s.Updates, join(args))
 	case "comment":

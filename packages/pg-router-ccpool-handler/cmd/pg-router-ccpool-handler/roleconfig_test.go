@@ -247,3 +247,27 @@ func TestOverlayBudgetThresholds_ccpoolRoleGetsCfgThresholds(t *testing.T) {
 func TestOverlayBudgetThresholds_commandRoleNoop(t *testing.T) {
 	overlayBudgetThresholds(roles.Role{Name: "worker", Type: "command"}, config.Default())
 }
+
+// TestLoadRole_decodesBeadsDir proves the "beadsDir" key (bead pg2-2grpj)
+// decodes into roles.CCPoolConfig.BeadsDir, alongside the close-or-triage
+// completion the escalation triager uses.
+func TestLoadRole_decodesBeadsDir(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, `{
+		"name": "pg2-escalation-triager",
+		"type": "ccpool",
+		"ccpool": {
+			"actor": "pgii-pool__pg2-escalation-triager",
+			"completion": "close-or-triage",
+			"onFailure": "add-human",
+			"onDispatchFail": "leave",
+			"promptBody": "triage",
+			"beadsDir": "/Users/x/pg2"
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	if role.CCPool.BeadsDir != "/Users/x/pg2" || role.CCPool.Completion != roles.CloseOrTriage {
+		t.Errorf("BeadsDir=%q Completion=%q", role.CCPool.BeadsDir, role.CCPool.Completion)
+	}
+}

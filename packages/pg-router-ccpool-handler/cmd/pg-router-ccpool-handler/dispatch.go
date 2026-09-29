@@ -278,9 +278,16 @@ func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
 	if role.CCPool != nil && role.CCPool.PoolDir != "" {
 		cc = ccpool.NewCLIRunnerForPool(cfg, role.CCPool.PoolDir)
 	}
+	// Every bd call for this role's items resolves against the tracker the
+	// items live in: the role's own BeadsDir when set (pg2-2grpj, e.g. the pg2
+	// tracker for the escalation triager), else the monorepo at cfg.RepoRoot.
+	bdDir := cfg.RepoRoot
+	if role.CCPool != nil && role.CCPool.BeadsDir != "" {
+		bdDir = role.CCPool.BeadsDir
+	}
 	return executor.Deps{
 		CC:  cc,
-		BD:  beads.NewCLIRunnerForRepo(cfg.RepoRoot),
+		BD:  beads.NewCLIRunnerForRepo(bdDir),
 		Cfg: cfg,
 	}
 }

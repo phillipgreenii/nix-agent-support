@@ -155,7 +155,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
 		// is repo-rooted, so the worker must read/write the SAME bead store, just on
 		// its own working tree (pg2-yukh).
-		"BEADS_DIR":      r.deps.Cfg.RepoRoot + "/.beads",
+		"BEADS_DIR":      beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads",
 		"WORKSPACE_ROOT": wt,
 	}
 	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name)); err != nil {
@@ -635,8 +635,16 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d DispatchContext, name string) error {
 	completion := d.Role.CCPool.Completion
 	deadline := r.deps.clock().Add(r.deps.Cfg.MaxWait)
-	seenClaimed := false
+	var tr complete.Tracker
 	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
+	// check reads the bead (from the role's own tracker, pg2-2grpj) and reports
+	// whether the role's completion rule is satisfied; a failed read is
+	// "not done" (transient bd hiccup, matches bash bead_status 2>/dev/null).
+	check := func() (bool, string) {
+		iss, err := beads.ShowObj(ctx, r.deps.BD, d.Item.ID)
+		obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount}
+		return tr.Done(completion, obs, err == nil), iss.Status
+	}
 	// won reports whether this loop owns the single terminal outcome.
 	won := func() bool { return claimTerminal == nil || claimTerminal() }
 	// lose is the loser's exit: take NO bead action, wait for the orchestrator to
@@ -660,20 +668,17 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			}
 		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
-		status, _ := beads.Status(ctx, r.deps.BD, d.Item.ID)
-		if complete.DoneSignal(completion, status, seenClaimed) {
+		done, status := check()
+		if done {
 			if won() {
 				return nil
 			}
 			return lose()
 		}
-		if completion == roles.CloseOrHandback && status == "in_progress" {
-			seenClaimed = true
-		}
+		tr.Observe(completion, status)
 		if !r.active(ctx, name) {
 			// re-check-after-death: the bead may have closed as the session ended.
-			status, _ = beads.Status(ctx, r.deps.BD, d.Item.ID)
-			if complete.DoneSignal(completion, status, seenClaimed) {
+			if done, _ = check(); done {
 				if won() {
 					return nil
 				}
@@ -694,8 +699,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err != nil {
 				return err
 			}
-			status, _ = beads.Status(ctx, r.deps.BD, d.Item.ID)
-			if complete.DoneSignal(completion, status, seenClaimed) {
+			if done, _ = check(); done {
 				if won() {
 					return nil
 				}
@@ -730,8 +734,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		}
 		if !r.deps.clock().Before(deadline) {
 			// final status check after the deadline.
-			status, _ = beads.Status(ctx, r.deps.BD, d.Item.ID)
-			if complete.DoneSignal(completion, status, seenClaimed) {
+			if done, _ = check(); done {
 				if won() {
 					return nil
 				}
@@ -748,6 +751,15 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			return err
 		}
 	}
+}
+
+// beadsDirFor returns the workspace dir whose .beads holds the role's items:
+// the role's BeadsDir when set (pg2-2grpj), else repoRoot.
+func beadsDirFor(repoRoot string, cc *roles.CCPoolConfig) string {
+	if cc != nil && cc.BeadsDir != "" {
+		return cc.BeadsDir
+	}
+	return repoRoot
 }
 
 func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) error {

@@ -1698,3 +1698,72 @@ func anyDeleteBranchCall(opener *dtest.NoopGitOpener) bool {
 	}
 	return false
 }
+
+// --- pg2-2grpj: close-or-triage completion (escalation triager) ---
+
+func triagerRole(cfg config.Config) roles.Role {
+	r := workerRole(cfg)
+	r.Name = "pg2-escalation-triager"
+	r.CCPool.Completion = roles.CloseOrTriage
+	r.CCPool.BeadsDir = "/pg2"
+	return r
+}
+
+func triagerRun(t *testing.T, bd *dtest.ScriptBD, live bool) error {
+	t.Helper()
+	cfg := fastCfg()
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-pg2-escalation-triager-pg2-x", Live: live, State: ccpool.StateWorking}}}}
+	e := newExec(cc, bd, cfg)
+	d := DispatchContext{Role: triagerRole(cfg), Item: item.Item{ID: "pg2-x"}}
+	return e.waitDone(context.Background(), nil, d, "pg-router-pg2-escalation-triager-pg2-x")
+}
+
+func TestWaitDone_triager_closeIsSuccess(t *testing.T) {
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"pg2-x": {"open", "closed"}}, Labels: map[string][]string{"pg2-x": {"escalated"}}}
+	if err := triagerRun(t, bd, true); err != nil {
+		t.Fatalf("closed must succeed: %v", err)
+	}
+	if len(bd.Updates) != 0 {
+		t.Errorf("no on_failure effect expected; updates=%v", bd.Updates)
+	}
+}
+
+func TestWaitDone_triager_triageCommentIsSuccessAndNotHumanLabeled(t *testing.T) {
+	bd := &dtest.ScriptBD{
+		StatusSeq:  map[string][]string{"pg2-x": {"open", "open", "open"}},
+		CommentSeq: map[string][]int{"pg2-x": {4, 4, 5}},
+		Labels:     map[string][]string{"pg2-x": {"escalated"}},
+	}
+	if err := triagerRun(t, bd, true); err != nil {
+		t.Fatalf("Triage (comment, stays escalated) must succeed: %v", err)
+	}
+	if dtest.HasUpdate(bd, "add-label human") {
+		t.Errorf("Triage must not be human-labeled; updates=%v", bd.Updates)
+	}
+}
+
+func TestWaitDone_triager_escalateIsSuccess(t *testing.T) {
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"pg2-x": {"open"}}, Labels: map[string][]string{"pg2-x": {"human"}}}
+	if err := triagerRun(t, bd, true); err != nil {
+		t.Fatalf("Escalate (escalated removed, human added) must succeed: %v", err)
+	}
+}
+
+func TestWaitDone_triager_exitWithoutChangeStillFails(t *testing.T) {
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"pg2-x": {"open"}}, Labels: map[string][]string{"pg2-x": {"escalated"}}}
+	if err := triagerRun(t, bd, false); err == nil {
+		t.Fatal("a session that exits without changing its bead must still fail")
+	}
+	if !dtest.HasUpdate(bd, "update pg2-x --add-label human") {
+		t.Errorf("on_failure=add-human must apply; updates=%v", bd.Updates)
+	}
+}
+
+func TestBeadsDirFor(t *testing.T) {
+	if got := beadsDirFor("/zr", &roles.CCPoolConfig{BeadsDir: "/pg2"}); got != "/pg2" {
+		t.Errorf("got %q", got)
+	}
+	if got := beadsDirFor("/zr", &roles.CCPoolConfig{}); got != "/zr" {
+		t.Errorf("got %q", got)
+	}
+}

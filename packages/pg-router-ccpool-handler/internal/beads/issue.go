@@ -10,14 +10,18 @@ import (
 // Issue is the subset of a bd issue pg-router reads. Metadata is left as a generic
 // map (bd serializes merge-request fields like author/repo/pr_number into it).
 type Issue struct {
-	ID        string         `json:"id"`
-	Title     string         `json:"title"`
-	Status    string         `json:"status"`
-	Type      string         `json:"issue_type"`
-	Parent    string         `json:"parent"`
-	Labels    []string       `json:"labels"`
-	Metadata  map[string]any `json:"metadata"`
-	CreatedBy string         `json:"created_by"` // bd attributes creation to BEADS_ACTOR; lets a dispatch claim only its own new beads
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	Status string   `json:"status"`
+	Type   string   `json:"issue_type"`
+	Parent string   `json:"parent"`
+	Labels []string `json:"labels"`
+	// CommentCount is bd's own comment_count on `bd show --json`; the
+	// close-or-triage completion (internal/complete) reads it to see a triage
+	// comment appear. 0 when absent.
+	CommentCount int            `json:"comment_count"`
+	Metadata     map[string]any `json:"metadata"`
+	CreatedBy    string         `json:"created_by"` // bd attributes creation to BEADS_ACTOR; lets a dispatch claim only its own new beads
 }
 
 // HasLabel reports whether the issue carries the given label.

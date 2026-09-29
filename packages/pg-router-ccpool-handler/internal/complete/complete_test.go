@@ -84,3 +84,53 @@ func join(a []string) string {
 	}
 	return s
 }
+
+// TestTracker_closeOrTriage covers the escalation triager's completion rule
+// (pg2-2grpj): it never claims its bead, so besides closed it is done on
+// de-escalation or on a comment appended since the first read.
+func TestTracker_closeOrTriage(t *testing.T) {
+	esc := []string{"escalated", "agent-support"}
+	c := roles.CloseOrTriage
+
+	t.Run("closed", func(t *testing.T) {
+		var tr Tracker
+		if !tr.Done(c, Observation{Status: "closed", Labels: esc}, true) {
+			t.Error("closed must be done")
+		}
+	})
+	t.Run("untouched is not done (still fails)", func(t *testing.T) {
+		var tr Tracker
+		for i := 0; i < 3; i++ {
+			if tr.Done(c, Observation{Status: "open", Labels: esc, Comments: 2}, true) {
+				t.Fatal("unchanged bead must not be done")
+			}
+		}
+	})
+	t.Run("triage comment appended", func(t *testing.T) {
+		var tr Tracker
+		tr.Done(c, Observation{Status: "open", Labels: esc, Comments: 2}, true)
+		if !tr.Done(c, Observation{Status: "open", Labels: esc, Comments: 3}, true) {
+			t.Error("a new comment (Triage) must be done")
+		}
+	})
+	t.Run("escalated removed", func(t *testing.T) {
+		var tr Tracker
+		tr.Done(c, Observation{Status: "open", Labels: esc}, true)
+		if !tr.Done(c, Observation{Status: "open", Labels: []string{"human"}}, true) {
+			t.Error("escalated removed (Escalate) must be done")
+		}
+	})
+	t.Run("failed read is not done", func(t *testing.T) {
+		var tr Tracker
+		if tr.Done(c, Observation{}, false) {
+			t.Error("a failed read must not be done")
+		}
+	})
+	t.Run("comments do not complete close-or-handback", func(t *testing.T) {
+		var tr Tracker
+		tr.Done(roles.CloseOrHandback, Observation{Status: "open", Comments: 1}, true)
+		if tr.Done(roles.CloseOrHandback, Observation{Status: "open", Comments: 5}, true) {
+			t.Error("comment growth is only a close-or-triage signal")
+		}
+	})
+}

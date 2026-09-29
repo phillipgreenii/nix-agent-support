@@ -54,6 +54,13 @@ type CCPoolConfig struct {
 	// ccpool's own default XDG pool when that is unset too) — every role
 	// sharing that one pool, exactly as before this bead.
 	PoolDir string
+	// BeadsDir (bead pg2-2grpj) is the workspace directory of the bd tracker the
+	// items this role dispatches live in, when that is NOT cfg.RepoRoot's
+	// tracker (e.g. the pg2 tracker for the escalation triager). Every bd call
+	// the handler makes for this role -- completion polling, OnFailure,
+	// Unclaim, Comment -- resolves against it, and the dispatched session's
+	// BEADS_DIR is BeadsDir/.beads. "" (default) keeps cfg.RepoRoot.
+	BeadsDir string
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

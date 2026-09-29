@@ -9,15 +9,20 @@ type Completion string
 const (
 	CloseOnly       Completion = "close-only"
 	CloseOrHandback Completion = "close-or-handback"
+	// CloseOrTriage is for a role that works a bead it does NOT claim (the
+	// escalation triager, pg2-2grpj): done on close, on a hand-back, on
+	// de-escalation (the `escalated` label removed), or on a new comment
+	// since dispatch (a Triage outcome that leaves the bead escalated).
+	CloseOrTriage Completion = "close-or-triage"
 )
 
 func (c *Completion) UnmarshalText(b []byte) error {
 	switch Completion(b) {
-	case CloseOnly, CloseOrHandback:
+	case CloseOnly, CloseOrHandback, CloseOrTriage:
 		*c = Completion(b)
 		return nil
 	}
-	return fmt.Errorf("invalid completion %q (valid: close-only, close-or-handback)", b)
+	return fmt.Errorf("invalid completion %q (valid: close-only, close-or-handback, close-or-triage)", b)
 }
 
 // FailureAction is what to do to the bead when a dispatch is flagged.

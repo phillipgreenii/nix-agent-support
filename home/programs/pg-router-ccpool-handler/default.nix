@@ -320,6 +320,10 @@ let
               Path = roleCfg.ccpool.isolation.path;
             };
           }
+          // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
+            # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
+            inherit (roleCfg.ccpool) beadsDir;
+          }
           // lib.optionalAttrs roleCfg.ccpool.pool.enable {
             # poolDir (bead pg2-mr0sl): only rendered when this role opted
             # into its own dedicated pool -- omitted (not merely "") when
@@ -462,8 +466,21 @@ let
                 type = lib.types.enum [
                   "close-only"
                   "close-or-handback"
+                  "close-or-triage"
                 ];
                 description = "Bead-done semantics (`roleFile.CCPool.Completion` / `roles.Completion`).";
+              };
+              beadsDir = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = ''
+                  Workspace directory of the bd tracker this role's items live
+                  in, when that is NOT the handler's own repoRoot tracker
+                  (`roleFile.CCPool.BeadsDir`, bead pg2-2grpj) -- e.g. the pg2
+                  tracker for the escalation triager. Every handler-side bd
+                  call for the role (completion polling, on_failure, unclaim,
+                  comment) resolves against it. Empty (default) keeps repoRoot.
+                '';
               };
               onFailure = lib.mkOption {
                 type = lib.types.enum [

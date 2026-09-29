@@ -106,6 +106,26 @@ resolves the `pg2-` tracker from (confirm the exact value at implementation time
 `bd show pg2-5sirm` from candidate directories — not guessed here, matching this design's own
 "verify at implementation time" precedent set by `local-alert-triage`'s Grafana API paths).
 
+### Handler-side requirement (bead `pg2-2grpj`)
+
+The paragraph above holds for the triager's own `pg-connector` writes, but the handler itself
+also makes `bd` calls for every dispatched item: completion polling (`waitDone`), `on_failure`,
+unclaim and comment. Those resolve against `cfg.RepoRoot` (the ZR monorepo), so for a `pg2-*`
+bead they see "no issues found" and every dispatch was logged as a failure. Therefore:
+
+- A ccpool role whose items live in a tracker other than `cfg.RepoRoot`'s MUST set the role
+  option `beadsDir` (JSON `ccpool.beadsDir`, Nix `roles.<name>.ccpool.beadsDir`), the workspace
+  directory of that tracker. Every handler-side `bd` call for the role MUST resolve against it,
+  and the dispatched session's `BEADS_DIR` is `<beadsDir>/.beads`. `pg2-escalation-triager`
+  MUST set it to `pg2WorkspaceDir`.
+- The triager never claims its bead, so `close-or-handback` cannot observe Triage or Escalate.
+  The triager roles MUST use `completion = "close-or-triage"`: a dispatch is complete when the
+  bead is closed, OR de-escalated (the `escalated` label no longer present, i.e. Escalate), OR
+  a comment was appended since the first poll (Triage, bead left escalated), OR handed back
+  after being observed `in_progress`. A session that exits with none of these fails and
+  `on_failure = add-human` is applied on the role's own tracker. Known limit: the comment
+  baseline is the first successful poll, so a comment landing before that poll is not seen.
+
 The **read side** (the `escalated-work` query feeding the triager's dispatch, and the probes'
 own pre-create dedup check) is unaffected by this: `pg-router-source-pg-connector changes issue
 escalated-work --beads-dir <path>` already has a working `--beads-dir` flag (the same one
@@ -331,7 +351,8 @@ pg2-escalation-triager = {
   type = "ccpool";
   ccpool = {
     actor = "pgii-pool__pg2-escalation-triager";
-    completion = "close-or-handback";
+    completion = "close-or-triage";
+    beadsDir = pg2WorkspaceDir;
     onFailure = "add-human";
     onDispatchFail = "leave";
     authorshipGuard = false;
@@ -342,7 +363,7 @@ zr-escalation-triager = {
   type = "ccpool";
   ccpool = {
     actor = "pgii-pool__zr-escalation-triager";
-    completion = "close-or-handback";
+    completion = "close-or-triage";
     onFailure = "add-human";
     onDispatchFail = "leave";
     authorshipGuard = false;
