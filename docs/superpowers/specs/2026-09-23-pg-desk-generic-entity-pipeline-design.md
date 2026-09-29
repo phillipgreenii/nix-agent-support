@@ -38,7 +38,8 @@ needed.
 
 Rather than solve this as a third bolt-on special case (PR gather, PR-as-signal-for-urgency,
 now issue-as-a-third-thing), this document designs a genuinely generic gather/interpret **core**,
-with the PR pipeline **left completely untouched** as the first, still-unmigrated specialized
+with the PR gather/interpret functions **left completely untouched** (the surrounding `Run`/`sync`
+step is changed by the governing design; see the amendment) as the first, still-unmigrated specialized
 case, and issue-type support built as the **first real instance** of the new generic seam — a
 second data point, not a rewrite of the first. This validates the seam before any third type
 (calendar, notes, email — none of which have a `pg-connector` provider yet) is ever built against
@@ -54,7 +55,8 @@ and the ledger table; see the amendment below.)
 Out of scope: any actual calendar/notes/email connector (none exist in `pg-connector` yet); the
 `internal/focus` package and its priority/due-date ranking logic (owned by `pg2-2j5ac.27`'s own
 phase, reads this bead's output, is not part of it); rewriting `docs/behavior/pg-desk/run-issue.md`
-(lands in the implementation phase that changes the behavior, per this repo's own convention — not
+(struck 2026-09-29: the governing design removes `run`, so that doc is replaced by its migration
+rather than rewritten here; originally: lands in the implementation phase that changes the behavior, per this repo's own convention — not
 this design bead's own deliverable); any decoration/annotation generalization beyond noting the
 keying is already generic.
 
@@ -113,7 +115,7 @@ rejected-alternatives history (section 12) are unchanged.
 
 ```mermaid
 flowchart TD
-    subgraph unchanged["Unchanged"]
+    subgraph unchanged["Unchanged gather/interpret functions"]
         PRG["gather.Gather (existing, pr-only)"]
         PRI["interpret.Interpret (existing, pr-only)"]
     end
@@ -329,7 +331,10 @@ and already deployed; renaming it would be a breaking config-file change for zer
 
 ## 6. Pipeline
 
-New file `internal/pipeline/entity.go`. `Run` (PR path) and `RunInterpretOnly` are unchanged.
+New file `internal/pipeline/entity.go`. `Run` (PR path) and `RunInterpretOnly` are unchanged _by this
+document_. (Amended 2026-09-29: the governing design removes `sync` and the ledger table and drops
+`interpretation.sync_error`, so `Run` loses its `sync.Syncer` step and `interpret.Interpretation`
+loses `SyncError` and its readers. That removal is owned by the governing design's migration.)
 
 ```go
 // Pipeline gains one new field (FIXED, finding S3): entityGatherers
