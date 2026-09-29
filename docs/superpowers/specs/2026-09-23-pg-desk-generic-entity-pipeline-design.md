@@ -4,10 +4,18 @@
 - **Status**: Draft — independent review complete 2026-09-25 (`pg2-2j5ac.48`); addendum applied
   (see §13); pending final operator sign-off
 - **Bead**: `pg2-2j5ac.46`
+- **Governed by**: `docs/superpowers/specs/2026-09-29-entity-change-flow-design.md` (the entity
+  change flow design, branch `worktree-pg-desk-cli-boundary-notes`, not yet landed on main).
+  Amended 2026-09-29 per that design's decision S23 (operator ruling "A: amend .46"): where the two
+  overlap, the governing design owns triggering (pull-through `changes`), decisions (deciders) and
+  the composite-view contract; this document keeps the generic gather/interpret core for issues.
+  See "Amendment 2026-09-29" below for the per-decision disposition. Sections marked
+  **SUPERSEDED** are retained as history only and are not to be implemented.
 - **Blocks**: `pg2-2j5ac.27` (daily-focus store-first, phase 15) — that design's §4.1 treats this
   bead as an external prerequisite and assumes the design below without specifying it. Once this
   bead closes, that document's §4.1/§6 can be finalized against the actual mechanism instead of
-  deferring it.
+  deferring it. (Amended 2026-09-29: that design's focus `sync` step becomes a focus decider under
+  the governing design, and its planned focus-item ledger kind needs a new home.)
 - **Relates to**: `docs/superpowers/specs/2026-09-09-pg-desk-and-connector-discovery-design.md`
   (the founding pg-desk design, `pg2-od9se`, epic `pg2-2j5ac`) — this document does not amend that
   one's decisions ledger, but clarifies D10's "the interpreter is generic" in a direction that
@@ -37,9 +45,11 @@ second data point, not a rewrite of the first. This validates the seam before an
 it.
 
 In scope: a generic gather adapter contract and registry; a generic interpret adapter contract and
-registry, reusing the existing `interpretation` table's columns that already generalize; the
-`pipeline` entry point that dispatches through both; the `run issue` dispatch change needed for
-entities with no linked PR; a `beadref` error taxonomy addition; and a small ledger-kind dedup.
+registry, reusing the existing `interpretation` table's columns that already generalize; and the
+`pipeline` entry point that dispatches through both. (Amended 2026-09-29: the `run issue` dispatch
+change, the `beadref` error taxonomy addition and the ledger-kind dedup that were originally in
+scope here are struck — the governing design retires `run` for changes/refresh and removes `sync`
+and the ledger table; see the amendment below.)
 
 Out of scope: any actual calendar/notes/email connector (none exist in `pg-connector` yet); the
 `internal/focus` package and its priority/due-date ranking logic (owned by `pg2-2j5ac.27`'s own
@@ -52,16 +62,52 @@ keying is already generic.
 
 Operator rulings from this 2026-09-23 design session.
 
-| #    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-G1 | Scope is the generic gather/interpret **core**, not a narrow issue-type-only fix. The founding pg-desk design's own connector layer (`pg-connector`'s provider set: `pr`, `issue`, `ci`, `scm`, `calendar`, `thread`, `agentsession`, `search`, `attention`) was already domain-agnostic; only pg-desk's own gather/interpret pipeline stayed PR-locked. Building issue-type support as the first instance of a real generic seam, rather than a second special case, is the point of this bead.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| D-G2 | The PR pipeline (`gather.Gather`, `interpret.Interpret`, `gather.Facts`, `interpret.Interpretation`'s existing PR-only columns) is **not refactored or migrated**. It is registered into the new generic dispatch via a thin Adapter, unchanged underneath. Reuse-first: a working, pinned-contract pipeline is not touched to add genericity that has zero near-term benefit to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| D-G3 | Issue-type entities **do** get a real `interpretation` row, using the existing table's columns that already generalize (`ownership`, `category`, `degraded`, `as_of`) — reversing an earlier, narrower analysis in this same session that argued for entity-row-only. A persisted, periodically-refreshed interpretation row does not conflict with daily-focus's "never cache the rank" rule (D-F5 of `pg2-2j5ac.27`'s own doc): that rule governs live recomputation of the RANK/SELECTION decision at read time, not whether the underlying rows are cached — PR urgency is already exactly this kind of periodically-refreshed cache today.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| D-G4 | `Ownership` is **not** duplicated per entity type. `interpret.classifyOwnership(self, primary string, coOwnerCandidates []string) Ownership` (existing, `ownership.go`) is reused unchanged for issues: `classifyOwnership(cfg.SelfIssueOwner, issue.Owner, []string{issue.Assignee})`. A PR's "opened by someone else but I committed to it" and an issue's "owned by someone else but assigned to me" are the same relationship (`CoOwned`). Only the config value feeding it (`SelfIssueOwner`, new) is type-specific — GitHub login and a bd/Jira owner identity are genuinely different strings for the same person and cannot collapse into one field.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| D-G5 | `Urgency` (and `Enrichment`/`Dispositions`/`Approvals`/`GateState`/`MatchReasons`/`Panel`/`ReadyToPromote`) stay zero-value for issue-type interpretation rows. No due-date/priority scoring is written in this bead. `pg-desk` has no existing due-horizon or priority-mapping logic to reuse (checked against `urgency.go`: its Jira signal is a crude high-priority-list boolean, not the richer scoring `pg2-2j5ac.27`'s own §6 needs), and that consumer must recompute urgency live with cross-entity correlation regardless — writing a duplicate, unread scoring function here now would diverge from what that phase actually needs. Write it once, where it is consumed.                                                                                                                                                                                                                                                                                                                                                                                                             |
-| D-G6 | `run issue`'s existing two branches are preserved unchanged for PR-linked ids (Jira ticket already xref'd to a PR; a bead matching one of the three PR-linked shapes). A bead matching **none** of those shapes falls through, in the SAME command, to the new generic gather+persist path — no separate new verb. A Jira ticket **always** does both (persist its own facts AND re-interpret linked PRs), since a ticket is never itself "about" one PR, only cross-referenced to some.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| D-G7 | `status.go`/`show.go`'s duplicated 3-element ledger-kind literal is deduplicated into one exported `sync.KnownLedgerKinds`, consumed by both call sites. No new kind is added by this bead — this is pure reuse-first cleanup so `pg2-2j5ac.27`'s own `internal/focus` package has exactly one place to add `"focus-item"` later.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| D-G8 | A genuinely not-found issue **hard-fails**, mirroring the PR path exactly: `RunGenericEntity` (§6) errors on a `RemovedState == "not_found"` gather result unless `change == gather.ChangeKindRemoved` — the same gate `gather.Gather` already applies to PRs (`gather.go:329-334`). Operator ruling (2026-09-25, independent-review finding S1): this is intentional, not an oversight — a soft-delete/cancelled distinction ("this issue _existed_, and was later removed/cancelled/closed-permanently" vs. "this id is simply unknown") is a real, desired distinction but is **not built in this bead**. It is a forward-looking extension seam only: `GatherResult.RemovedState` (§4) stays free to carry a _different_ value (e.g. `"removed"`) once some backend can positively confirm that distinction, and `RunGenericEntity`'s gate MUST treat that different value as always-graceful — never a hard failure — the moment a backend provides it, exactly like the PR path already treats an explicit `removed` change. No backend provides it today; nothing here requires one to. |
+| #    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-G1 | Scope is the generic gather/interpret **core**, not a narrow issue-type-only fix. The founding pg-desk design's own connector layer (`pg-connector`'s provider set: `pr`, `issue`, `ci`, `scm`, `calendar`, `thread`, `agentsession`, `search`, `attention`) was already domain-agnostic; only pg-desk's own gather/interpret pipeline stayed PR-locked. Building issue-type support as the first instance of a real generic seam, rather than a second special case, is the point of this bead.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| D-G2 | **REFRAMED 2026-09-29 (S23):** the PR Adapter over the unchanged `gather.Gather`/`interpret.Interpret` is the governing design's PR hydration strategy; the reuse-first reasoning below stands. The PR pipeline (`gather.Gather`, `interpret.Interpret`, `gather.Facts`, `interpret.Interpretation`'s existing PR-only columns) is **not refactored or migrated**. It is registered into the new generic dispatch via a thin Adapter, unchanged underneath. Reuse-first: a working, pinned-contract pipeline is not touched to add genericity that has zero near-term benefit to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| D-G3 | Issue-type entities **do** get a real `interpretation` row, using the existing table's columns that already generalize (`ownership`, `category`, `degraded`, `as_of`) — reversing an earlier, narrower analysis in this same session that argued for entity-row-only. A persisted, periodically-refreshed interpretation row does not conflict with daily-focus's "never cache the rank" rule (D-F5 of `pg2-2j5ac.27`'s own doc): that rule governs live recomputation of the RANK/SELECTION decision at read time, not whether the underlying rows are cached — PR urgency is already exactly this kind of periodically-refreshed cache today.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D-G4 | `Ownership` is **not** duplicated per entity type. `interpret.classifyOwnership(self, primary string, coOwnerCandidates []string) Ownership` (existing, `ownership.go`) is reused unchanged for issues: `classifyOwnership(cfg.SelfIssueOwner, issue.Owner, []string{issue.Assignee})`. A PR's "opened by someone else but I committed to it" and an issue's "owned by someone else but assigned to me" are the same relationship (`CoOwned`). Only the config value feeding it (`SelfIssueOwner`, new) is type-specific — GitHub login and a bd/Jira owner identity are genuinely different strings for the same person and cannot collapse into one field.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| D-G5 | `Urgency` (and `Enrichment`/`Dispositions`/`Approvals`/`GateState`/`MatchReasons`/`Panel`/`ReadyToPromote`) stay zero-value for issue-type interpretation rows. No due-date/priority scoring is written in this bead. `pg-desk` has no existing due-horizon or priority-mapping logic to reuse (checked against `urgency.go`: its Jira signal is a crude high-priority-list boolean, not the richer scoring `pg2-2j5ac.27`'s own §6 needs), and that consumer must recompute urgency live with cross-entity correlation regardless — writing a duplicate, unread scoring function here now would diverge from what that phase actually needs. Write it once, where it is consumed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| D-G6 | **STRUCK 2026-09-29 (S23) — SUPERSEDED, history only:** `run` is retired for changes/refresh; the generic gather+persist path becomes the issue hydration strategy of the governing design, not a fallthrough inside `run issue`. Original text: `run issue`'s existing two branches are preserved unchanged for PR-linked ids (Jira ticket already xref'd to a PR; a bead matching one of the three PR-linked shapes). A bead matching **none** of those shapes falls through, in the SAME command, to the new generic gather+persist path — no separate new verb. A Jira ticket **always** does both (persist its own facts AND re-interpret linked PRs), since a ticket is never itself "about" one PR, only cross-referenced to some.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| D-G7 | **STRUCK 2026-09-29 (S23) — SUPERSEDED, history only:** `sync` and the ledger table are removed by the governing design, so there is no `sync.KnownLedgerKinds` to deduplicate. Original text: `status.go`/`show.go`'s duplicated 3-element ledger-kind literal is deduplicated into one exported `sync.KnownLedgerKinds`, consumed by both call sites. No new kind is added by this bead — this is pure reuse-first cleanup so `pg2-2j5ac.27`'s own `internal/focus` package has exactly one place to add `"focus-item"` later.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| D-G8 | **KEPT, SCOPED 2026-09-29 (S23):** applies to a targeted `pg-desk <type> refresh <id>` only. In the changes flow an entity that drops out of every watched query is removed/inactive, not a hard failure. Original text: A genuinely not-found issue **hard-fails**, mirroring the PR path exactly: `RunGenericEntity` (§6) errors on a `RemovedState == "not_found"` gather result unless `change == gather.ChangeKindRemoved` — the same gate `gather.Gather` already applies to PRs (`gather.go:329-334`). Operator ruling (2026-09-25, independent-review finding S1): this is intentional, not an oversight — a soft-delete/cancelled distinction ("this issue _existed_, and was later removed/cancelled/closed-permanently" vs. "this id is simply unknown") is a real, desired distinction but is **not built in this bead**. It is a forward-looking extension seam only: `GatherResult.RemovedState` (§4) stays free to carry a _different_ value (e.g. `"removed"`) once some backend can positively confirm that distinction, and `RunGenericEntity`'s gate MUST treat that different value as always-graceful — never a hard failure — the moment a backend provides it, exactly like the PR path already treats an explicit `removed` change. No backend provides it today; nothing here requires one to. |
+
+### Amendment 2026-09-29: reconciliation with the entity change flow design
+
+Operator ruling (Phillip, 2026-09-29, choice "A: amend .46"): "This design governs; amend .46".
+The governing design is `docs/superpowers/specs/2026-09-29-entity-change-flow-design.md`, decision
+S23. It postdates this document and splits triggering (pull-through `changes`), decisions (deciders)
+and the composite-view contract away from hydration. This document's generic gather/interpret core
+is exactly the hydration half, so most of it survives.
+
+| Decision   | Disposition  | Effect                                                                                                                                                               |
+| ---------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-G1       | Kept         | Unchanged.                                                                                                                                                           |
+| D-G2       | Reframed     | The PR Adapter over unchanged `gather.Gather`/`interpret.Interpret` is the governing design's PR hydration strategy.                                                 |
+| D-G3       | Kept         | Unchanged.                                                                                                                                                           |
+| D-G4       | Kept         | Unchanged.                                                                                                                                                           |
+| D-G5       | Kept         | Unchanged.                                                                                                                                                           |
+| D-G6       | Struck       | `run` is retired for changes/refresh; the generic gather+persist path becomes the issue hydration strategy.                                                          |
+| D-G7       | Struck       | `sync` and the ledger table are removed, so `sync.KnownLedgerKinds` has no purpose.                                                                                  |
+| D-G8       | Kept, scoped | Applies to targeted `pg-desk <type> refresh <id>` only. In the changes flow an entity that drops out of every watched query is removed/inactive, not a hard failure. |
+| (implicit) | Struck       | Keeping `sync.Syncer` as the PR-only follow-on step of the pipeline is struck along with `sync`.                                                                     |
+
+Raw payloads (`GatherResult.Payload`) MAY still be stored, but the composite view serves typed
+`schema.*` snapshots, never the raw payload. Concretely, the `IssueFacts`/`gather.Facts` payload
+shapes and the `persistRaw` write path in sections 4 and 6 are the gather-and-interpret half only:
+the governing design owns how a hydration becomes a typed `schema.Issue`/`schema.PR` snapshot
+(including its `version` check, `hydrated_at`/`active` bookkeeping and change-log append), and
+`persistRaw`'s deliberate `HeadSHA` drop must be reconciled with the PR snapshot's `head_sha` there.
+Likewise the `change gather.ChangeKind` parameter and D-G8's `ChangeKindRemoved` exemption assume a
+caller-supplied change kind; what a targeted `refresh <id>` passes, and how its failure semantics
+(previous snapshot kept, entity stays due) map onto D-G8's hard error, are settled by the governing
+design's refresh contract, not here.
+
+Consequences for the sections below: section 7 (Dispatch and `beadref`) and section 8 (Ledger
+kinds) are SUPERSEDED and kept as history only; sections 3, 6 and 10 are annotated where they
+mention the struck items. This document's own independent-review addendum (section 13) and
+rejected-alternatives history (section 12) are unchanged.
 
 ## 3. Architecture overview
 
@@ -70,7 +116,6 @@ flowchart TD
     subgraph unchanged["Unchanged"]
         PRG["gather.Gather (existing, pr-only)"]
         PRI["interpret.Interpret (existing, pr-only)"]
-        PRS["sync.Syncer (pr-only)"]
     end
     subgraph new["New: generic seam"]
         GREG["Gather Registry (Strategy):\nentityType -> EntityGatherer"]
@@ -88,9 +133,8 @@ flowchart TD
     ISSG --> ENT
     PRI --> INT["interpretation table\n(already generic keying;\nPR-only columns stay zero for issues)"]
     ISSI --> INT
-    PRI --> PRS
     ENT -.->|"xref: already generic, no change"| XREF["cross-references"]
-    ENT -.->|"annotation: generic keying,\nPR-specific fields today, unchanged"| ANNO["decoration"]
+    ENT -.->|"annotation: generic keying today;\ngeneralized to key/value by the governing design"| ANNO["decoration"]
 ```
 
 Design vocabulary: the Gather/Interpret registries are the **Strategy** pattern (one algorithm
@@ -303,8 +347,8 @@ New file `internal/pipeline/entity.go`. `Run` (PR path) and `RunInterpretOnly` a
 //
 // RunGenericEntity is the third entry point: gather -> interpret -> persist
 // for any registered entityType, dispatched through both registries.
-// Sync is never invoked here — sync stays PR-only, per Run's existing
-// entityTypePR gate.
+// (Amended 2026-09-29: the original note that sync stays PR-only is moot —
+// sync is removed by the governing design.)
 func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
 	adapter, ok := p.entityGatherers[entityType]
 	if !ok {
@@ -315,7 +359,8 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 		return fmt.Errorf("pipeline: gather %s %s: %w", entityType, entityID, err)
 	}
 
-	// D-G8 (FIXED, finding S1): hard-fail on a genuine not-found unless
+	// D-G8 (scoped 2026-09-29 to targeted `refresh <id>` — the changes flow
+	// treats a dropped-out entity as removed/inactive instead) (FIXED, finding S1): hard-fail on a genuine not-found unless
 	// this is an explicit removal — mirrors gather.Gather's own existing
 	// gate for the PR path exactly (gather.go:329-334). See §4's
 	// GatherResult.RemovedState comment for the forward-looking, not-
@@ -353,7 +398,13 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 }
 ```
 
-## 7. Dispatch (`cmd/pg-desk/run.go`) and `beadref`
+## 7. Dispatch (`cmd/pg-desk/run.go`) and `beadref` — SUPERSEDED (2026-09-29)
+
+> **SUPERSEDED, history only — do not implement.** This section is D-G6's dispatch design. D-G6 is
+> struck: `run` is retired for changes/refresh, and the generic gather+persist path is invoked by
+> the governing design's changes and `refresh` flows instead. The `ErrNoPRLink` sentinel and the
+> `runBeadIssue`/`runJiraIssue` shapes below are retained so the reasoning and the section 13
+> review findings that touch them (S4, S5) stay legible.
 
 ```go
 // beadref.go: CORRECTED (2026-09-25 review, finding S4) — today's
@@ -426,7 +477,10 @@ exec already uses. `pg-connector`'s `DispatchTargeted` short-circuiting on any e
 through to a Jira backend) is not a live bug for this design: as long as the env var is always
 threaded — which it now is, via the same existing helper — that failure mode is not reached.
 
-## 8. Ledger kinds
+## 8. Ledger kinds — SUPERSEDED (2026-09-29)
+
+> **SUPERSEDED, history only — do not implement.** D-G7 is struck: the governing design removes
+> `sync` and the ledger table, so there is no kind list to deduplicate.
 
 ```go
 // internal/sync/classify.go — the settled dedup (D-G7).
@@ -441,6 +495,13 @@ var KnownLedgerKinds = []string{KindAnchor, KindFeedbackCycle, KindReviewRequest
 "review-request"}` both become `sync.KnownLedgerKinds`.
 
 ## 9. Store and schema
+
+> **Amended 2026-09-29:** the "no schema migration" claim below describes this document's own
+> scope only. The governing design carries a store migration that supersedes it: `entity` gains
+> `version`, `hydrated_at` and `active`; `interpretation` drops `sync_error`; `annotation` is
+> generalized to key/value (so the "`annotation` keying is already generic ... not built here"
+> remarks below no longer hold — the governing design builds it). Read the governing design's
+> store section for the authoritative schema.
 
 No schema migration. `entity` (already keyed generically by `repo, entity_type, entity_id` with an
 untyped JSON `facts` column) and `interpretation` (same keying; PR-only columns simply stay at
@@ -459,10 +520,9 @@ and `RunGenericEntity`'s D-G8 gate on it (CORRECTED, finding M2: this adapter ha
 `targetedCall` and any non-not_found failure is a hard error, not a soft degradation; an earlier
 draft of this section wrongly promised a "degraded path" test with nothing to exercise); `InterpretIssue`'s
 ownership/category mapping, its length-check-before-decode early return (B1), and its own
-empty-`IssueShow` early return; `runBeadIssue`'s three-way branch (resolves to PR / falls through
-via `ErrNoPRLink` / genuine `Show` failure); `runJiraIssue`'s widened dual-effect behavior and its
-corrected error-join (S5, including the xrefs-lookup-failure case); the `sync.KnownLedgerKinds`
-dedup (both call sites read the same slice).
+empty-`IssueShow` early return. (Amended 2026-09-29: the tests originally listed here for
+`runBeadIssue`, `runJiraIssue` and the `sync.KnownLedgerKinds` dedup are struck along with
+sections 7 and 8; the governing design owns the tests for its own triggering and refresh flows.)
 
 ## 11. Open items for operator review
 
@@ -507,6 +567,11 @@ dedup (both call sites read the same slice).
 - **Restructuring `Config.SelfLogin` into a nested `Self` identity struct** alongside the new
   `SelfIssueOwner` field — rejected; would be a breaking config-file change to an already-deployed
   field for no benefit beyond cosmetic grouping.
+
+- **Keeping `run issue`'s fallthrough, `sync.KnownLedgerKinds` and `sync.Syncer`** (D-G6, D-G7 and
+  the implicit keep-`sync`) — rejected 2026-09-29 by operator ruling (governing design decision
+  S23): the governing design retires `run` for changes/refresh and removes `sync` and the ledger
+  table, so these were built on triggering this document no longer owns.
 
 ## 13. Independent review addendum (2026-09-25)
 
