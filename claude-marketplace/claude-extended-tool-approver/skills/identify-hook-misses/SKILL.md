@@ -5,7 +5,14 @@ description: Identify the 2-5 most impactful hook miss patterns from the decisio
 
 # Identify Hook Misses
 
-Analyze the decision database to find patterns where the hook makes wrong decisions. Present the top 2-5 most impactful miss patterns for user review, then create beads for approved patterns.
+**Retargeted 2026-09-27 per operator ruling R1** (docket `tc-o14i5.1`): the old Go rule engine
+(`internal/rules/*`) is frozen — deletions only, no new fixes. The target architecture retires
+per-command Go policy rules in favor of DATA specs (command/path/target specs, P13/P14). This
+skill's triage mechanics (Steps 1-6, calibration tiers) are unchanged; only what Phase 2 proposes
+has changed: instead of "fix this rule in internal/rules" it now proposes "author/regenerate the
+command spec for `<command>` to cover this case."
+
+Analyze the decision database to find patterns where the hook makes wrong decisions. Present the top 2-5 most impactful miss patterns for user review, then create spec-authoring beads for approved patterns.
 
 **This skill is read-only triage.** It does NOT fix code, modify the DB, or change settings. It creates beads for later deep-dive sessions.
 
@@ -95,7 +102,7 @@ For the top 5-10 pattern groups, get full details on 2-3 sample rows per group:
 claude-extended-tool-approver show <sample_id_1> <sample_id_2> <sample_id_3> --format=json
 ```
 
-**Tip:** If tracing was enabled (`CLAUDE_TOOL_APPROVER_TRACE=1`), the `show` output includes a `trace` array showing every rule that was evaluated, its decision, and reason. This reveals _why_ each rule abstained — invaluable for deciding which rule module to modify.
+**Tip:** If tracing was enabled (`CLAUDE_TOOL_APPROVER_TRACE=1`), the `show` output includes a `trace` array showing every rule that was evaluated, its decision, and reason. This reveals _why_ each rule abstained — invaluable for deciding which command's spec needs updating.
 
 ### Step 4: APPROVE candidates — segment by `approval_source` tier
 
@@ -254,6 +261,7 @@ Then label it:
 
 ```bash
 bd label add <bead-id> claude-extended-tool-approver
+bd label add <bead-id> spec-authoring
 ```
 
 ### Bead Description Template
@@ -287,9 +295,9 @@ claude-extended-tool-approver evaluate --misses-only --format=json | \
 
 claude-extended-tool-approver show <id1> <id2> <id3> --format=json
 
-## Verifying the fix (implementation ticket)
+## Verifying the fix (spec-authoring ticket)
 
-After the rule-module change lands, confirm the decision delta in one command rather than a
+After the command spec change lands, confirm the decision delta in one command rather than a
 second manual replay:
 
 claude-extended-tool-approver evaluate --format=json \
@@ -312,10 +320,10 @@ export CLAUDE_TOOL_APPROVER_TRACE=1
 
 ## Acceptance Criteria
 
-- [ ] Pattern and target rule module identified
-- [ ] Tracking ticket filed for the implementation work
+- [ ] Pattern and target command spec identified
+- [ ] Tracking ticket filed for the spec-authoring work
 
-This bead covers identifying the pattern and filing a tracking ticket; implementation (modifying the Go rule module, adding tests, running `set-correct-decision` on resolved rows) is a separate ticket.
+This bead covers identifying the pattern and filing a tracking ticket; spec authoring (authoring/regenerating the command's data spec per P13/P14 via the Phase 3 spec-generation skill once it exists, running `set-correct-decision` on resolved rows) is a separate ticket.
 ```
 
 ## Constraints
@@ -323,11 +331,11 @@ This bead covers identifying the pattern and filing a tracking ticket; implement
 - **Phase 1 MUST NOT modify anything** — no files, no DB, no `settings.local.json`, no approvals required.
 - **MUST wait for explicit user approval before Phase 2.**
 
-Beads should include the `claude-extended-tool-approver` label, target 2-5 improvements per run focused on the highest-impact patterns, and reference row IDs and CLI commands rather than `/tmp` paths (which are intermediate-only). Phase 2 creates beads only — no code changes, no `set-correct-decision`, no `mark-excluded`.
+Beads should include the `claude-extended-tool-approver` and `spec-authoring` labels, target 2-5 improvements per run focused on the highest-impact patterns, and reference row IDs and CLI commands rather than `/tmp` paths (which are intermediate-only). Phase 2 creates beads only — no code changes, no `set-correct-decision`, no `mark-excluded`.
 
 ## Key Paths
 
 - Binary: `packages/claude-extended-tool-approver/cmd/claude-extended-tool-approver/`
-- Rule modules: `packages/claude-extended-tool-approver/internal/rules/*/`
+- Rule modules (frozen per R1 — deletions only, no new fixes): `packages/claude-extended-tool-approver/internal/rules/*/`
 - Database: `~/.local/share/claude-extended-tool-approver/asks.db`
 - Trace env var: `CLAUDE_TOOL_APPROVER_TRACE=1` — enables per-rule decision tracing in `show` output

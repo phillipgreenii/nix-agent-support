@@ -1,5 +1,16 @@
 # Absorb 8 Settings Rules Implementation Plan
 
+> **HISTORICAL — completed pre-freeze.** Every task below has already landed in
+> `internal/rules/*` (verified 2026-09-28: `contained-claude` in `safecmds`'
+> `alwaysSafe`, `hasBashSyntaxCheckFlag`/`evaluateUnzip` in `safecmds.go`, `cue vet`
+> in `buildtools.go`). Per operator ruling R1 (2026-09-25, tracked in docket
+> `tc-o14i5.1`), the old engine (`internal/rules/*`) is now frozen — deletions
+> only, no new fixes — so this plan's shape (a Go rule-module change per settings
+> pattern) is NOT a template for future work. New absorption-style findings are
+> now routed to a command/path DATA SPEC (P13/P14) instead; see the retargeted
+> `absorb-settings-rules`/`identify-hook-misses` skills. Kept here as historical
+> implementation record only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move 8 `settings.local.json` permission rules into the Go rule engine, giving the engine proper path-aware and context-aware control over when to approve.

@@ -3,6 +3,16 @@
 **Status**: Approved
 **Date**: 2026-04-15
 
+> **HISTORICAL — completed pre-freeze.** All 8 changes described below have
+> already landed in `internal/rules/*` (verified 2026-09-28 against the current
+> code). Per operator ruling R1 (2026-09-25, tracked in docket `tc-o14i5.1`), the
+> old engine (`internal/rules/*`) is now frozen — deletions only, no new fixes —
+> so this design's shape (a Go rule-module change per settings pattern) is NOT a
+> template for future work. New absorption-style findings are now routed to a
+> command/path DATA SPEC (P13/P14) instead; see the retargeted
+> `absorb-settings-rules`/`identify-hook-misses` skills. Kept here as historical
+> implementation record only.
+
 ## Context
 
 The `identify-hook-misses` skill created 8 beads, each representing a
