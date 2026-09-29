@@ -164,6 +164,19 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
 		// first failure; on a subsequent failure (label already present) add human
 		// so discovery stops retrying it (worker discovery excludes human).
+		//
+		// Best-effort purge-close the abandoned session (pg2-u2v2p): `ccpool new`
+		// may have already inserted a store row (state=starting) before it failed
+		// or timed out waiting for ready ("did not reach ready before timeout
+		// (state=starting)") — ccpool never auto-reaps a session nobody explicitly
+		// closed. Left alone, that row stays state=starting, live=true forever,
+		// leaking pool capacity (the zombie-session incident this bead fixes).
+		// Purge (not a soft close) since a session that never reached ready has
+		// no transcript and nothing resumable worth preserving. If ensure never
+		// got far enough to create a row at all, ccpool close on an unknown
+		// external_id just errors, which this ignores exactly like every other
+		// best-effort Close call in this file.
+		_ = r.deps.CC.Close(ctx, r.deps.ExternalID, true)
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)

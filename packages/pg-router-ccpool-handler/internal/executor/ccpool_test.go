@@ -1172,6 +1172,16 @@ func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
 	if v := verbOf(res); v != "" {
 		t.Errorf("first launch-fail (label only) must report NO verb, got %q", v)
 	}
+	// pg2-u2v2p regression: an ensure failure/timeout must purge-close the
+	// abandoned external_id so the underlying ccpool session (possibly already
+	// inserted as state=starting by `ccpool new` before it failed) never lingers
+	// and leaks pool capacity.
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-w" {
+		t.Errorf("ensure failure must close the abandoned session, got Closed=%v", cc.Closed)
+	}
+	if len(cc.ClosedPurge) != 1 || !cc.ClosedPurge[0] {
+		t.Errorf("ensure failure's close must purge, got ClosedPurge=%v", cc.ClosedPurge)
+	}
 }
 
 func TestDispatch_ensureFailRepeat_escalated(t *testing.T) {
@@ -1181,6 +1191,11 @@ func TestDispatch_ensureFailRepeat_escalated(t *testing.T) {
 	res, _ := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
 	if v := verbOf(res); v != report.Escalated {
 		t.Errorf("repeat launch-fail must report Escalated, got %q", v)
+	}
+	// pg2-u2v2p regression: still purge-closes the abandoned session even on
+	// the escalated (repeat-failure) path.
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-w" || len(cc.ClosedPurge) != 1 || !cc.ClosedPurge[0] {
+		t.Errorf("repeat ensure failure must purge-close the abandoned session, got Closed=%v ClosedPurge=%v", cc.Closed, cc.ClosedPurge)
 	}
 }
 
