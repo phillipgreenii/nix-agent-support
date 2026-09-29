@@ -59,21 +59,12 @@ let
   # sentence and this mechanical guard together.
   knownAbsentRoots = config.phillipgreenii.programs.claude-code.knownAbsentRoots;
 
-  # effectiveInputProcessors (bead tc-7m85u item 1) is the ORDERED list ceta
-  # actually receives: the deprecated scalar inputProcessor, if set, is
-  # PREPENDED to inputProcessors rather than replacing it, so a machine that
-  # has not migrated off the scalar keeps running its single processor FIRST
-  # once it (or another consumer) also sets the list — exactly the behavior it
-  # had before the list existed, plus whatever the list adds after it.
-  effectiveInputProcessors =
-    lib.optional (cfg.inputProcessor != null) cfg.inputProcessor ++ cfg.inputProcessors;
-
   # wrapProgram flags, contributed only by the settings that are active. The
   # binary is wrapped iff at least one flag is present; otherwise the unwrapped
   # package is used directly.
   wrapArgs =
     lib.optional (
-      effectiveInputProcessors != [ ]
+      cfg.inputProcessors != [ ]
       # Newline-joined, matching internal/inputproc's CETA_INPUT_PROCESSORS
       # contract (a `:`-separated list was rejected there: a processor command
       # commonly embeds spaces in its own argv). Embedding a literal newline
@@ -81,7 +72,7 @@ let
       # real newline byte in the generated wrapper script's `export
       # CETA_INPUT_PROCESSORS="…"` line, which bash preserves verbatim inside
       # double quotes.
-    ) ''--set CETA_INPUT_PROCESSORS "${lib.concatStringsSep "\n" effectiveInputProcessors}"''
+    ) ''--set CETA_INPUT_PROCESSORS "${lib.concatStringsSep "\n" cfg.inputProcessors}"''
     ++ lib.optional (
       cfg.extraReadWriteRoots != [ ]
     ) ''--set CETA_EXTRA_READWRITE_ROOTS "${lib.concatStringsSep ":" cfg.extraReadWriteRoots}"''
@@ -169,17 +160,6 @@ in
         ADR 0070.
       '';
     };
-    inputProcessor = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = ''
-        DEPRECATED: use `inputProcessors` instead. If set, this single
-        command is PREPENDED to `inputProcessors` at evaluation time -- it
-        does not replace the list, so an existing single-processor
-        configuration keeps running first, unchanged, once `inputProcessors`
-        also gains entries. Setting this option emits a warning.
-      '';
-    };
     extraReadWriteRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -206,16 +186,6 @@ in
   };
 
   config = lib.mkIf (config.phillipgreenii.programs.claude-code.enable && cfg.enable) {
-    # mkRenamedOptionModule itself does not fit here: it requires the old and
-    # new options to share a type, and inputProcessor (a nullOr str) is being
-    # folded into inputProcessors (a listOf str) rather than simply renamed --
-    # see effectiveInputProcessors above for the prepend semantics this
-    # warning describes.
-    warnings = lib.optional (cfg.inputProcessor != null) ''
-      phillipgreenii.programs.claude-extended-tool-approver.inputProcessor is deprecated;
-      use inputProcessors instead. The configured value is being prepended to
-      inputProcessors for now.
-    '';
 
     # Base read-only inspection roots (pg2-t76k8): home dot-files/dirs that are
     # safe to READ for inspection but are deliberately NOT base-code path-safety

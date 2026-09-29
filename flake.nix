@@ -5007,8 +5007,7 @@
                             # test-pg-router-module stubs `assertions` above: this
                             # bare lib.evalModules call never imports home-manager's
                             # own base modules, which is where `warnings` normally
-                            # comes from, and the module's inputProcessor deprecation
-                            # warning (bead tc-7m85u) writes to it.
+                            # comes from.
                             options = {
                               phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
                               home.homeDirectory = lib.mkOption {
