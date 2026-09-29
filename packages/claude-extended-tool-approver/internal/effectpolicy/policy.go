@@ -386,47 +386,82 @@ func (ProgramInterpreted) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, b
 	return Finding{Verdict: Permitted, Reason: "dialect interpretation already vouched for this program (see cmddesc.interpState.program)"}, true
 }
 
-// envInjectorVars, envInjectorAskVars and envAskVars are copied — name and
-// one-line rationale per class — from internal/rules/envvars.go's
-// injectorVars / injectorAskVars / askVars (the LIVE engine's env-var
-// guard), not imported: a policy here never sees a command name or a
-// cmdparse.ParsedCommand, so it cannot reuse a rule built around either, and
-// this package's own doc comment already forbids reaching into
-// internal/hookio's transitive closure that internal/rules/envvars sits in.
-// A later migration that lets a policy consult the live rule tables directly
-// should delete ONE of these two copies rather than let them diverge
-// silently — see envvars.go's own doc comments for the full measured
-// history behind each entry; only the one-line summary is repeated here.
-var (
-	// envInjectorVars: assignment is GUARANTEED to be a code-injection /
+// envVarClass classifies a known env-var NAME for EnvAssignment's Judge
+// switch. This is the SINGLE allowlist mechanism docket tc-o14i5.3's Phase
+// 2 item c collapses three separate, by-hand-copied maps into (packet
+// tc-o14i5.3.3): before this slice, three parallel map[string]bool
+// variables existed — one per class (injector / injector-ask / ask) — each
+// individually copied — name and one-line rationale per class — from
+// internal/rules/envvars.go's per-class var tables (the LIVE engine's
+// env-var guard), not imported: a policy here never sees a command name or
+// a cmdparse.ParsedCommand, so it cannot reuse a rule built around either,
+// and this package's own doc comment already forbids reaching into
+// internal/hookio's transitive closure that internal/rules/envvars sits
+// in. Collapsing the three maps into one map[string]envVarClass keeps
+// every entry's rationale (below) while giving the mechanism ONE
+// identifier instead of three — a later migration that lets a policy
+// consult the live rule tables directly still only has
+// one copy here to delete, not three. See envvars.go's own doc comments
+// for the full measured history behind each entry; only the one-line
+// summary is repeated here.
+type envVarClass int
+
+const (
+	// envVarUnclassified is the zero value: NAME is outside every class
+	// below and falls to EnvAssignment.Judge's default branch ("static name
+	// outside the known-bad vocabulary" — Permitted).
+	envVarUnclassified envVarClass = iota
+	// envVarInjector: assignment is GUARANTEED to be a code-injection /
 	// library-preload vector regardless of value (hijacks the dynamic
 	// linker or a shell's startup before the "safe-looking" executable
-	// ever runs) — envvars.go's injectorVars.
-	envInjectorVars = map[string]bool{
-		"LD_PRELOAD":            true,
-		"DYLD_INSERT_LIBRARIES": true,
-		"LD_LIBRARY_PATH":       true,
-		"DYLD_LIBRARY_PATH":     true,
-		"BASH_ENV":              true,
-		"ZDOTDIR":               true,
-	}
-	// envInjectorAskVars: same injection family as envInjectorVars, but the
+	// ever runs) — envvars.go's injectorVars. Unconditionally Forbidden.
+	envVarInjector
+	// envVarInjectorAsk: same injection family as envVarInjector, but the
 	// NAME also collides with everyday project-variable traffic, so the
 	// live rule downgrades a name-only Reject to a user-overridable Ask —
-	// envvars.go's injectorAskVars.
-	envInjectorAskVars = map[string]bool{
-		"ENV": true,
-	}
-	// envAskVars: dangerous but not guaranteed-unsafe for every value (a
+	// envvars.go's injectorAskVars. Unconditionally Unknown.
+	envVarInjectorAsk
+	// envVarAsk: dangerous but not guaranteed-unsafe for every value (a
 	// legitimate PATH extension, a HOME override); the live rule's verdict
 	// depends on the VALUE (preservesCallerValue / the hermetic-HOME
 	// relief) and asks a human when it cannot prove the value safe —
-	// envvars.go's askVars.
-	envAskVars = map[string]bool{
-		"PATH": true,
-		"HOME": true,
-	}
+	// envvars.go's askVars. PATH additionally gets the agent-writable-zone
+	// hijack check below (Binding decision c).
+	envVarAsk
+	// envVarGitLocating (docket tc-o14i5.3, packet tc-o14i5.3.3; absorbs
+	// tc-j0aa): GIT_DIR/GIT_INDEX_FILE redirect WHICH files git reads or
+	// writes (the same repo-locating hazard internal/temproot's
+	// CanonicalRepoLocatingEnvVars and the old engine's internal/rules/
+	// gitdir guard against), but only for a leaf that actually INVOKES git
+	// — tc-j0aa's operator-ruled narrowing (superseded target, resolved
+	// here per the 2026-09-25 ruling: "Answer this question as part of
+	// [the new engine's] env-policy redesign"): a non-git command carrying
+	// this env prefix (e.g. `GIT_DIR=/tmp/x go test ./...`) is not, on that
+	// basis alone, refused. See EnvAssignment.Judge's envVarGitLocating
+	// case and cmddesc.Effect.EnvGitInvoking's own doc comment for the
+	// git-invocation signal this depends on.
+	envVarGitLocating
 )
+
+// envVarClasses is the single allowlist map (Binding decision c: "Env:
+// allowlist (single list)") replacing the three former per-class
+// map[string]bool variables (injector / injector-ask / ask).
+var envVarClasses = map[string]envVarClass{
+	"LD_PRELOAD":            envVarInjector,
+	"DYLD_INSERT_LIBRARIES": envVarInjector,
+	"LD_LIBRARY_PATH":       envVarInjector,
+	"DYLD_LIBRARY_PATH":     envVarInjector,
+	"BASH_ENV":              envVarInjector,
+	"ZDOTDIR":               envVarInjector,
+
+	"ENV": envVarInjectorAsk,
+
+	"PATH": envVarAsk,
+	"HOME": envVarAsk,
+
+	"GIT_DIR":        envVarGitLocating,
+	"GIT_INDEX_FILE": envVarGitLocating,
+}
 
 // EnvAssignment judges every EffectEnv effect. A read (EnvSet == false) is
 // always Permitted: reading a variable's current value cannot itself change
@@ -436,23 +471,27 @@ var (
 // be reachable only in theory today (see the EnvAssignment doc trailer
 // below), but checked defensively since Effect already carries the field.
 // Otherwise a set is classified by its statically known NAME against the
-// three data sets above: an injector name is Forbidden; an injector-ask name
-// is Unknown unconditionally (envvars.go's injectorAskVars split is itself
-// value-independent — see that map's own doc — so there is no value relief
-// to port here); an ask name (PATH, HOME) tries the hermetic-value reliefs
-// below FIRST and only falls back to Unknown when none apply; any other
-// static name is outside this slice's vocabulary of known-bad names and is
-// Permitted.
+// envVarClasses allowlist above: an injector name is Forbidden; an
+// injector-ask name is Unknown unconditionally (envvars.go's
+// injectorAskVars split is itself value-independent — see that class's own
+// doc — so there is no value relief to port here); a git-locating name
+// (GIT_DIR, GIT_INDEX_FILE) is Forbidden only for a git-invoking leaf, else
+// Permitted like any unclassified name (tc-j0aa; see envVarGitLocating's
+// own doc comment); an ask name (PATH, HOME) tries the hermetic-value
+// reliefs below FIRST — PATH additionally never approves a value whose
+// added directory resolves into an agent-writable zone, Binding decision c
+// — and only falls back to Unknown when none apply; any other static name
+// is outside this slice's vocabulary of known-bad names and is Permitted.
 //
 // # Value modeling (slice 3an, tc-8og1 item 5; tc-ife3 item 5, RULED
 // 2026-09-08: "Port the value-relief logic now")
 //
 // Ported from internal/rules/envvars.go — the LIVE engine's env-var guard —
-// by COPY, not import, for the same reason envInjectorVars/
-// envInjectorAskVars/envAskVars above already are (see their own doc
-// comment): a policy here never sees a cmdparse.ParsedCommand, so it cannot
-// reuse a rule built around one. Three of envvars.go's Approve predicates
-// are ported, each by its CORE shape only:
+// by COPY, not import, for the same reason envVarClasses above already is
+// (see its own doc comment): a policy here never sees a
+// cmdparse.ParsedCommand, so it cannot reuse a rule built around one. Three
+// of envvars.go's Approve predicates are ported, each by its CORE shape
+// only:
 //
 //   - envPreservesCallerValue mirrors preservesCallerValue's EXTEND shape
 //     (pg2-0q99a): the value keeps the caller's own value ($NAME/${NAME}) as
@@ -637,12 +676,30 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	if e.Dynamic {
 		return Finding{Verdict: Unknown, Reason: "env NAME is a runtime expansion"}, true
 	}
-	switch {
-	case envInjectorVars[e.EnvName]:
+	class, known := envVarClasses[e.EnvName]
+	if !known {
+		// Map miss: NAME is outside every class above. This is exactly the
+		// envVarUnclassified zero value (see its own doc comment) made
+		// explicit here rather than relied upon implicitly, so the switch
+		// below can dispatch on it like any other class.
+		class = envVarUnclassified
+	}
+	switch class {
+	case envVarInjector:
 		return Finding{Verdict: Forbidden, Reason: "injector variable (loader/exec hijack)"}, true
-	case envInjectorAskVars[e.EnvName]:
+	case envVarInjectorAsk:
 		return Finding{Verdict: Unknown, Reason: "injector-ask variable; live rule's verdict depends on value, which this slice does not model"}, true
-	case envAskVars[e.EnvName]:
+	case envVarGitLocating:
+		if e.EnvGitInvoking {
+			return Finding{Verdict: Forbidden, Reason: "GIT_DIR/GIT_INDEX_FILE redirects git's effective repository, and this leaf invokes git (tc-j0aa: narrowed from every command to git-invoking ones only)"}, true
+		}
+		return Finding{Verdict: Permitted, Reason: "GIT_DIR/GIT_INDEX_FILE only redirects git's own repo resolution; this leaf does not invoke git, so it is outside the known-bad vocabulary here (tc-j0aa)"}, true
+	case envVarAsk:
+		if e.EnvName == "PATH" {
+			if reason, hijack := pathPrependAgentWritable(e.EnvValue, ctx); hijack {
+				return Finding{Verdict: Forbidden, Reason: reason}, true
+			}
+		}
 		if envPreservesCallerValue(e.EnvName, e.EnvValue, e.EnvExpansion) {
 			return Finding{Verdict: Permitted, Reason: "sensitive env var preserves the caller's value and adds only static absolute paths (ported from envvars.go's preservesCallerValue core shape)"}, true
 		}
@@ -653,9 +710,74 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 			return Finding{Verdict: Permitted, Reason: "HOME replacement is grounded in a mktemp -d fresh temp dir (ported from envvars.go's isHermeticHomeReplacement mktemp -d idiom)"}, true
 		}
 		return Finding{Verdict: Unknown, Reason: "ask variable; value did not match a modeled hermetic-approval shape"}, true
-	default:
+	default: // envVarUnclassified
 		return Finding{Verdict: Permitted, Reason: "static name outside the known-bad vocabulary"}, true
 	}
+}
+
+// pathPrependAgentWritable inspects a PATH assignment's value for a static
+// absolute component that resolves into a zone this package's own write
+// ladder (judgeWrite below) would treat as writable — Binding decision c
+// ("PATH additions into agent-writable zones ⇒ Reject (known hijack
+// pattern)"): an agent that can already write into such a directory can
+// plant an executable there, and prepending/appending it to PATH lets that
+// planted executable shadow the real one for every LATER command in the
+// same invocation. A self-reference component ($PATH/${PATH}) is never
+// itself a candidate (it names no new directory, just the caller's
+// existing search path); a value carrying any substitution is skipped
+// entirely — same conservative exclusion envPreservesCallerValue/
+// envHermeticReplacement already use (see EnvAssignment's own doc
+// comment), since a naive ':'-split could misparse a substitution body's
+// own ':'. Checked BEFORE the hermetic-value-relief predicates below so a
+// hijack is caught regardless of which shape (preserves-caller-value or
+// env -i replacement) the rest of the value would otherwise match.
+func pathPrependAgentWritable(value string, ctx PolicyContext) (reason string, hijack bool) {
+	if ctx.PathEval == nil {
+		return "", false
+	}
+	if envValueHasSubstitution(value) {
+		return "", false
+	}
+	literal, ok := cmdparse.LiteralAssignmentValueText(value)
+	if !ok {
+		return "", false
+	}
+	for _, component := range strings.Split(literal, ":") {
+		if component == "$PATH" || component == "${PATH}" {
+			continue
+		}
+		if !envIsStaticAbsolutePath(component) {
+			continue
+		}
+		if agentWritablePath(ctx, component) {
+			return "PATH prepend/append into an agent-writable directory (" + component + ") is a known hijack pattern (Binding decision c)", true
+		}
+	}
+	return "", false
+}
+
+// agentWritablePath answers the same "would a plain write here be
+// approved" question judgeWrite (below) computes for an EffectPath write
+// effect, for path — an already-resolved absolute directory, not
+// necessarily an existing one. Reusing judgeWrite's own zone-classification
+// ladder (pathspec.ResolveAccessWithSecrets' Forbidden override, then
+// patheval's own zone verdict) answers the Contract's Consumes obligation —
+// "classifies PATH-prepend targets against the zone classification that
+// already exists in pathspec/workspace.go" — without re-deriving it. It
+// omits judgeWrite's denyWrite/AccessModify-secret-carve-out checks: those
+// judge an ACTUAL write attempt to a specific file, which is not what
+// classifying a directory as generically agent-writable needs.
+func agentWritablePath(ctx PolicyContext, path string) bool {
+	if ctx.PathEval == nil || path == "" {
+		return false
+	}
+	if abs := resolvePathAccessAbs(ctx.PathEval, path); abs != "" {
+		kinds := pathspec.EffectiveKinds(ctx.PathEval)
+		if v := pathspec.ResolveAccessWithSecrets(kinds, abs).Write; v.Result == pathspec.Forbidden {
+			return false
+		}
+	}
+	return ctx.PathEval.Evaluate(path).CanWrite()
 }
 
 // isVettedConnectionProducer reports whether producer (Effect.NetProducer)

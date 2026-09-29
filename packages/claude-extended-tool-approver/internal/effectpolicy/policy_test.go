@@ -300,6 +300,69 @@ func TestEnvAssignmentPolicy_ValueModeling(t *testing.T) {
 	}
 }
 
+// TestEnvAssignmentPolicy_GitLocating (docket tc-o14i5.3, packet
+// tc-o14i5.3.3; absorbs tc-j0aa): GIT_DIR/GIT_INDEX_FILE are Forbidden only
+// for a leaf that invokes git (EnvGitInvoking); the identical assignment on
+// a non-git-invoking leaf (e.g. `GIT_DIR=/tmp/x go test ./...`) is no
+// longer auto-rejected on the env-prefix alone — tc-j0aa's own narrowing
+// ask — and instead falls to the same "static name outside the known-bad
+// vocabulary" default any other unclassified name gets.
+func TestEnvAssignmentPolicy_GitLocating(t *testing.T) {
+	set := func(name string, gitInvoking bool) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectEnv, EnvName: name, EnvSet: true, EnvGitInvoking: gitInvoking}
+	}
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		verdict FindingVerdict
+	}{
+		{"GIT_DIR on a git-invoking leaf is forbidden", set("GIT_DIR", true), Forbidden},
+		{"GIT_INDEX_FILE on a git-invoking leaf is forbidden", set("GIT_INDEX_FILE", true), Forbidden},
+		{"GIT_DIR on a non-git-invoking leaf is permitted (tc-j0aa)", set("GIT_DIR", false), Permitted},
+		{"GIT_INDEX_FILE on a non-git-invoking leaf is permitted (tc-j0aa)", set("GIT_INDEX_FILE", false), Permitted},
+	}
+	for _, tc := range cases {
+		f, applies := EnvAssignment{}.Judge(tc.e, PolicyContext{})
+		if !applies || f.Verdict != tc.verdict {
+			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+}
+
+// TestEnvAssignmentPolicy_PathPrependAgentWritable (docket tc-o14i5.3,
+// packet tc-o14i5.3.3, Binding decision c): a PATH extend whose added
+// component resolves into a zone this package's own write ladder treats as
+// writable (here, the fixture's own project root) is Forbidden regardless
+// of the preserves-caller-value shape matching; the identical shape against
+// a directory outside every configured zone (unrecognized — PathUnknown)
+// is unaffected by this check and keeps its pre-existing Permitted verdict
+// (see TestEnvAssignmentPolicy_ValueModeling's "PATH extend, prepend" case
+// for the zero-PathEval variant of the same shape). A PolicyContext with no
+// PathEval configured at all (the zero value) cannot classify anything, so
+// the hijack check is a no-op there — proven separately by every
+// ValueModeling case above continuing to pass unchanged.
+func TestEnvAssignmentPolicy_PathPrependAgentWritable(t *testing.T) {
+	root, _ := fixture(t)
+	pe := patheval.NewWithCWD(root, root)
+	ctx := PolicyContext{PathEval: pe}
+
+	writable := cmddesc.Effect{
+		Kind: cmddesc.EffectEnv, EnvName: "PATH", EnvSet: true,
+		EnvValue: filepath.Join(root, "bin") + ":$PATH", EnvExpansion: cmdparse.ExpansionVarRef,
+	}
+	if f, applies := (EnvAssignment{}).Judge(writable, ctx); !applies || f.Verdict != Forbidden {
+		t.Errorf("prepend into project (agent-writable) root: applies=%v verdict=%s (%s), want forbidden", applies, f.Verdict, f.Reason)
+	}
+
+	unrecognized := cmddesc.Effect{
+		Kind: cmddesc.EffectEnv, EnvName: "PATH", EnvSet: true,
+		EnvValue: "/usr/bin:$PATH", EnvExpansion: cmdparse.ExpansionVarRef,
+	}
+	if f, applies := (EnvAssignment{}).Judge(unrecognized, ctx); !applies || f.Verdict != Permitted {
+		t.Errorf("prepend into an unrecognized (non-agent-writable) dir: applies=%v verdict=%s (%s), want permitted (unaffected)", applies, f.Verdict, f.Reason)
+	}
+}
+
 // TestTrustedCheckoutExecPolicy (slice 3x, tc-lc8f item 4e): CWD inside the
 // shared fixture (a declared git workspace) is Permitted; CWD in a bare
 // temp directory with no git/go marker is Unknown; a non-exec effect does

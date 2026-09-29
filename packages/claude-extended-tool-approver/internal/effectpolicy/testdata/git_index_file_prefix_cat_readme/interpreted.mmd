@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: GIT_INDEX_FILE=/tmp/x/index cat README.md<br/>- env:set GIT_INDEX_FILE<br/>- path:read README.md [arg 0]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1{{"env: GIT_INDEX_FILE"}}
+    n2[/"file: README.md"/]
+    n0 -->|"assign: GIT_INDEX_FILE=/tmp/x/index"| n1
+    n0 -->|"reads: read"| n2

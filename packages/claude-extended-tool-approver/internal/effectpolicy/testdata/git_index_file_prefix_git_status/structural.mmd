@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: GIT_INDEX_FILE=/tmp/x/index git status"]
+    n1{{"env: GIT_INDEX_FILE"}}
+    n0 -->|"assign: GIT_INDEX_FILE=/tmp/x/index"| n1

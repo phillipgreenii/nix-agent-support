@@ -257,6 +257,31 @@ type Effect struct {
 	EnvExpansion cmdparse.ExpansionKind
 	EnvCleared   bool
 
+	// EnvGitInvoking (docket tc-o14i5.3, packet tc-o14i5.3.3; absorbs
+	// tc-j0aa) is true when the LEAF that produced this EffectEnv set
+	// invokes git — its Executable's basename is "git", the same fact
+	// cmddesc's own registry lookup keys the gitSchema on (registry.go:396,
+	// Provenance "git version 2.54.0, git --help / git help git") — and
+	// false for every other leaf. It exists for exactly the reason
+	// EnvCleared does (see that field's own doc comment): a policy sees one
+	// Effect at a time and has no other way to learn a fact about the LEAF
+	// that produced it, so effectgraph's builder copies it onto every
+	// EffectEnv the leaf produces (build.go's leaf.EnvVars loop, alongside
+	// EnvCleared).
+	//
+	// The one reader is effectpolicy.EnvAssignment's GIT_DIR/GIT_INDEX_FILE
+	// handling: tc-j0aa's ask was to narrow an env-prefix refusal so it
+	// fires only when the invoked program actually runs git, not on every
+	// command that happens to carry the env prefix (e.g.
+	// `GIT_DIR=/tmp/x go test ./...`) — this field is exactly that
+	// narrowing signal. It deliberately does NOT attempt to recognise a
+	// git-invoking WRAPPER (a porcelain tool that shells out to git as a
+	// child) — tc-j0aa's own struck-through pre-ruling scope flagged that as
+	// an open design question needing a separate decision, and this slice
+	// answers only the direct-invocation case its own Validation section
+	// tests. Always false for a read (EnvSet == false), matching EnvCleared.
+	EnvGitInvoking bool
+
 	// EffectNet fields. Dynamic (shared with the path fields) is true when the
 	// URL is a runtime expansion, in which case Host holds the raw text. Method
 	// is the request method when the protocol has one ("" otherwise).

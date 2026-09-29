@@ -875,13 +875,36 @@ var goldenCases = []goldenCase{
 	// slice 3an (tc-8og1 item 5; tc-ife3 item 5, RULED "port the value-relief
 	// logic now"): `export PATH=/tmp/bin:$PATH` is envvars.go's own EXTEND
 	// shape — `$PATH` preserved as one whole ':'-component, `/tmp/bin` a
-	// static absolute path — so this case now Approves (was Abstain; this is
-	// the row this slice's own port closes, see testdata/agreement.txt).
-	{"export_path_extend", "export PATH=/tmp/bin:$PATH", evalcontract.Approve, nil},
+	// static absolute path — so this case Approved from slice 3an through
+	// docket tc-o14i5.3's Phase 2b (was Abstain before 3an; see
+	// testdata/agreement.txt).
+	//
+	// FLIPPED to Reject by docket tc-o14i5.3's packet tc-o14i5.3.3 (Binding
+	// decision c, "PATH additions into agent-writable zones ⇒ Reject (known
+	// hijack pattern)"): /tmp resolves to patheval's PathReadWrite zone, so
+	// /tmp/bin is a directory this process could itself plant an executable
+	// into and shadow a LATER command's real binary with — the
+	// preserves-caller-value shape alone (self-ref + static absolute
+	// component) is no longer sufficient to Approve a PATH addition into a
+	// zone this policy's own write ladder would treat as writable; see
+	// EnvAssignment's pathPrependAgentWritable.
+	{"export_path_extend", "export PATH=/tmp/bin:$PATH", evalcontract.Reject, nil},
 	{"export_ld_preload", "export LD_PRELOAD=/tmp/x.so", evalcontract.Reject, nil},
 	{"ld_preload_prefix_cat_readme", "LD_PRELOAD=/tmp/x.so cat README.md", evalcontract.Reject, nil},
 	{"home_prefix_cat_readme", "HOME=/tmp/h cat README.md", evalcontract.Abstain, nil},
 	{"foo_prefix_cat_readme", "FOO=bar cat README.md", evalcontract.Approve, nil},
+	// GIT_DIR/GIT_INDEX_FILE narrowing (docket tc-o14i5.3, packet
+	// tc-o14i5.3.3; absorbs tc-j0aa, Binding decision c): the env-prefix
+	// refusal fires only for a leaf that actually invokes git
+	// (cmddesc.Effect.EnvGitInvoking) — `git status` alone already Approves
+	// (see git_status above), so prefixing it with GIT_DIR flips the SAME
+	// leaf to Reject; the identical env prefix on a non-git-invoking leaf
+	// (`cat README.md`, itself Approve — see cat_readme) is unaffected,
+	// exactly tc-j0aa's own narrowing ask.
+	{"git_dir_prefix_git_status", "GIT_DIR=/tmp/x git status", evalcontract.Reject, nil},
+	{"git_index_file_prefix_git_status", "GIT_INDEX_FILE=/tmp/x/index git status", evalcontract.Reject, nil},
+	{"git_dir_prefix_cat_readme", "GIT_DIR=/tmp/x cat README.md", evalcontract.Approve, nil},
+	{"git_index_file_prefix_cat_readme", "GIT_INDEX_FILE=/tmp/x/index cat README.md", evalcontract.Approve, nil},
 	// env_i_path_hermetic_replacement: envvars.go's isHermeticEnvReplacement
 	// shape (pg2-d71my) — under `env -i` there is no caller PATH left to
 	// preserve, so a STATIC absolute-path REPLACEMENT is safe on its own.

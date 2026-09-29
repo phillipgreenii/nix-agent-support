@@ -321,6 +321,15 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 
 	var effects []cmddesc.Effect
 	var children []cmddesc.ChildInvocation
+	// gitInvoking (docket tc-o14i5.3, packet tc-o14i5.3.3; absorbs tc-j0aa):
+	// the LEAF's own fact "does this invocation run git" — its Executable's
+	// basename is "git", the same identity the schema lookup below (base :=
+	// path.Base(leaf.Executable)) keys the git registry entry on — copied
+	// onto every EffectEnv this leaf produces exactly like leaf.EnvCleared
+	// is, for the identical reason: a policy sees one Effect at a time and
+	// has no other way to learn a fact about the leaf that produced it. See
+	// cmddesc.Effect.EnvGitInvoking's own doc comment for the consumer.
+	gitInvoking := path.Base(leaf.Executable) == "git"
 	for _, e := range leaf.EnvVars {
 		// EnvValue/EnvExpansion/EnvCleared (slice 3an, tc-8og1 item 5): carry
 		// the assignment's value onto the effect so
@@ -329,12 +338,13 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 		// leaf.EnvCleared is the LEAF's fact (env -i wraps this leaf), copied
 		// onto every EffectEnv the leaf produces.
 		effects = append(effects, cmddesc.Effect{
-			Kind:         cmddesc.EffectEnv,
-			EnvName:      e.Name,
-			EnvSet:       true,
-			EnvValue:     e.Value,
-			EnvExpansion: e.Expansion,
-			EnvCleared:   leaf.EnvCleared,
+			Kind:           cmddesc.EffectEnv,
+			EnvName:        e.Name,
+			EnvSet:         true,
+			EnvValue:       e.Value,
+			EnvExpansion:   e.Expansion,
+			EnvCleared:     leaf.EnvCleared,
+			EnvGitInvoking: gitInvoking,
 		})
 	}
 
