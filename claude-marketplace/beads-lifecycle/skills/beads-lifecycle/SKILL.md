@@ -69,9 +69,17 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 - **B-4** Any transition out of `in_progress` that is not a `bd close` MUST clear the assignee
   — including `blocked`, `deferred`, and re-`open`. A `bd close` MAY leave the assignee (it
   records who did the work), so anything that later RE-OPENS a closed bead MUST clear it then.
-- **B-5** MUST prefer an explicit `--actor "<session-id>"` on every claim. Without it the
-  assignee resolves to the human's display name, which makes an abandoned claim look like the
-  operator deliberately took the bead.
+- **B-5** MUST pass an explicit agent identity on every claim: `--actor "<session-id>[-<role>]"`
+  (or `BEADS_ACTOR`), where `<session-id>` is the Claude session id and `-<role>` an optional
+  suffix such as `-drain` or `-unblock`. Without it the assignee resolves (`--actor` >
+  `$BEADS_ACTOR` > git `user.name` > `$USER`) to the human's display name, which makes an
+  abandoned claim look like the operator deliberately took the bead and strands it (operator
+  ruling 2026-09-29, pg2-w2jlm: claims in the operator's name are the primary concern; beads
+  merely CREATED in the operator's name are acceptable). A claim, for this rule, is `--claim`,
+  `bd ready --claim`, `--status in_progress`, or a non-empty `--assignee`. The rule covers
+  agents AND daemons. A machine `bd` wrapper MAY refuse a claim whose resolved actor is the
+  operator's git `user.name` when the caller is non-interactive or `CLAUDECODE` is set; on such a
+  refusal, re-run with `--actor` rather than working around the wrapper.
 - **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
   rather than silently steal or clear it — it is this defect, and the operator decides.
 - **B-7** `bd ready --claim` (or any other MUTATING `bd`/git command) MUST NOT appear on

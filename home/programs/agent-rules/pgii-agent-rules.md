@@ -126,6 +126,13 @@
   release it before ending — every exit path MUST end `closed` or released — and a release
   MUST clear the assignee in the SAME `bd update` call as the status change
   (`--status open --assignee ""`; `--status open` alone is NOT a release).
+- **B-5 essence** (always-on, same reason as B-1/B-2): every claim by an agent or daemon
+  (`--claim`, `bd ready --claim`, `--status in_progress`, `--assignee`) MUST carry an explicit
+  agent identity, `--actor "<session-id>[-<role>]"` (or `BEADS_ACTOR`), e.g. the Claude session id,
+  optionally suffixed with a role such as `-drain` or `-unblock`. It MUST NOT resolve to the
+  operator's name: a claim in the operator's name looks deliberate, is never released, and strands
+  the bead so no agent picks it up. Machine `bd` wrappers MAY refuse such a claim outright. A
+  bead merely CREATED in the operator's name is acceptable; the claim is the concern.
 - **F-9 pre-brief clause**: before briefing a subagent to create, restore, or commit a missing
   artifact, invoke `beads-lifecycle` and run its `decided-against?` probe first — an absence
   MAY be a ruling, not missing work.
