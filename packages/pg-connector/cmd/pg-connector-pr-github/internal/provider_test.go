@@ -701,3 +701,201 @@ func TestBackend_Commits_GHError_Classified(t *testing.T) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnauthenticated)", err)
 	}
 }
+
+// ----------------------------------------------------------------------
+// schema.PR summary fields (bead pg2-2j5ac.52.6.1): node_id, updated_at,
+// review_decision, comment_count, review_count.
+// ----------------------------------------------------------------------
+
+// canonicalSummaryHash is a local copy of the rule in cmd/pg-connector's
+// ledger.go canonicalHash (unexported in package main, and Go's internal
+// rule stops cmd/pg-connector importing this package's internal tree): marshal
+// the entity, decode it into map[string]json.RawMessage, delete "as_of" and
+// "stale", re-marshal, and compare. Keep it in step with that function; it
+// is deliberately NOT exported or moved. The full JSON is never compared
+// directly because as_of has one-second precision, which would make a
+// comparison flaky.
+func canonicalSummaryHash(t *testing.T, pr schema.PR) string {
+	t.Helper()
+	raw, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatalf("marshal schema.PR: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decode schema.PR: %v", err)
+	}
+	delete(fields, "as_of")
+	delete(fields, "stale")
+	data, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("re-encode schema.PR: %v", err)
+	}
+	return string(data)
+}
+
+// listOnePR runs Backend.List against a fakeGH whose batched search answers
+// exactly the given PR, and returns the one matched entity.
+func listOnePR(t *testing.T, in api.PR) schema.PR {
+	t.Helper()
+	gh := &fakeGH{
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{in}, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+	got, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 {
+		t.Fatalf("Entities = %+v, want exactly one", got.Entities)
+	}
+	return got.Entities[0]
+}
+
+// TestPRChangesReportsChangedWhenOnlyCommentCountMoves proves the point of
+// putting comment_count on the summary entity: changes diffs list results by
+// a hash of the whole summary entity (canonicalHash, minus as_of/stale), so a
+// new comment must alter that hash. omitempty drops a zero count, so both
+// values are non-zero. The control assertion proves two List calls over
+// identical input hash equal, so the difference below cannot be noise.
+func TestPRChangesReportsChangedWhenOnlyCommentCountMoves(t *testing.T) {
+	base := api.PR{Repo: "owner/repo", Number: 1, Title: "T", State: "open", UpdatedAt: "2026-09-14T10:00:00Z"}
+
+	oneA := base
+	oneA.CommentCount = 1
+	oneB := base
+	oneB.CommentCount = 1
+	two := base
+	two.CommentCount = 2
+
+	hashOneA := canonicalSummaryHash(t, listOnePR(t, oneA))
+	hashOneB := canonicalSummaryHash(t, listOnePR(t, oneB))
+	hashTwo := canonicalSummaryHash(t, listOnePR(t, two))
+
+	if hashOneA != hashOneB {
+		t.Fatalf("control: identical input hashed differently:\n%s\n%s", hashOneA, hashOneB)
+	}
+	if hashOneA == hashTwo {
+		t.Fatalf("hash did not change when only comment_count moved 1 -> 2:\n%s", hashOneA)
+	}
+}
+
+// TestPRSummaryIncludesNodeID proves both read paths carry the PR's own
+// GraphQL node id (the rename-proof dedup/adoption key) plus the other four
+// summary fields, straight from what the GitHub layer decoded: never
+// synthesized from "<repo>#<number>".
+func TestPRSummaryIncludesNodeID(t *testing.T) {
+	summary := api.PR{
+		Repo: "owner/repo", Number: 7, Title: "T", State: "open",
+		NodeID:         "PR_kwDOSynthetic7",
+		UpdatedAt:      "2026-09-14T10:00:00Z",
+		ReviewDecision: "APPROVED",
+		CommentCount:   5,
+		ReviewCount:    3,
+	}
+
+	check := func(t *testing.T, path string, got schema.PR) {
+		t.Helper()
+		if got.NodeID != "PR_kwDOSynthetic7" {
+			t.Errorf("%s: NodeID = %q, want %q", path, got.NodeID, "PR_kwDOSynthetic7")
+		}
+		if got.UpdatedAt != "2026-09-14T10:00:00Z" {
+			t.Errorf("%s: UpdatedAt = %q", path, got.UpdatedAt)
+		}
+		if got.ReviewDecision != "APPROVED" {
+			t.Errorf("%s: ReviewDecision = %q", path, got.ReviewDecision)
+		}
+		if got.ReviewCount != 3 {
+			t.Errorf("%s: ReviewCount = %d, want 3", path, got.ReviewCount)
+		}
+	}
+
+	t.Run("list", func(t *testing.T) {
+		got := listOnePR(t, summary)
+		check(t, "list", got)
+		if got.CommentCount != 5 {
+			t.Errorf("list: CommentCount = %d, want the list connection's own 5 (comments slice is nil there)", got.CommentCount)
+		}
+	})
+
+	t.Run("show", func(t *testing.T) {
+		showSummary := summary
+		showSummary.CommentCount = 0 // GetPR never fills this: ghPR has no comments field
+		gh := &fakeGH{pr: &showSummary, comments: []api.Comment{}}
+		b := newTestBackend(t, gh)
+		got, err := b.Show(context.Background(), "owner/repo#7")
+		if err != nil {
+			t.Fatalf("Show: %v", err)
+		}
+		check(t, "show", *got)
+	})
+
+	t.Run("absent stays empty and is never derived from repo and number", func(t *testing.T) {
+		bare := api.PR{Repo: "owner/repo", Number: 8, Title: "T", State: "open"}
+		got := listOnePR(t, bare)
+		if got.NodeID != "" || got.UpdatedAt != "" || got.ReviewDecision != "" {
+			t.Errorf("summary fields fabricated for a bare PR: %+v", got)
+		}
+		if got.CommentCount != 0 || got.ReviewCount != 0 {
+			t.Errorf("counts fabricated for a bare PR: %+v", got)
+		}
+	})
+}
+
+// TestBackend_Show_CommentCountCountsOnlyTopLevelComments proves the show
+// path's comment_count is the number of top-level (issue-endpoint) PR
+// comments only. GetPR cannot supply it (ghPR has no comments field), so
+// toSchemaPR counts the comments it is handed: entries with no thread and no
+// path. An inline review comment is excluded whether or not it nested under
+// a review: an inline comment whose review could not be joined (empty
+// ReviewID) lands in PR.Comments, so len(Comments) is NOT the count.
+func TestBackend_Show_CommentCountCountsOnlyTopLevelComments(t *testing.T) {
+	gh := &fakeGH{
+		// A stale non-zero value on the api.PR must be ignored: the show
+		// path was handed a comments slice, so that slice is the source.
+		pr: &api.PR{Repo: "owner/repo", Number: 3, Title: "T", State: "open", CommentCount: 99},
+		comments: []api.Comment{
+			{ID: "c1", Author: "alice", Body: "top-level one"},
+			{ID: "c2", Author: "carol", Body: "top-level two"},
+			{ID: "c3", Author: "bob", Body: "inline nested", Path: "main.go", Line: 10, ThreadID: "t3", ReviewID: "PRR_kwDOSynthetic1"},
+			{ID: "c4", Author: "bob", Body: "inline, review not joined", Path: "main.go", Line: 12, ThreadID: "t4"},
+		},
+		reviews: []api.Review{
+			{ID: "PRR_kwDOSynthetic1", Author: "bob", State: "COMMENTED"},
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.Show(context.Background(), "owner/repo#3")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.CommentCount != 2 {
+		t.Fatalf("CommentCount = %d, want 2 (top-level only)", got.CommentCount)
+	}
+	if len(got.Comments) != 3 {
+		t.Fatalf("len(Comments) = %d, want 3 (2 top-level + 1 inline with no joined review): %+v", len(got.Comments), got.Comments)
+	}
+}
+
+// TestBackend_Show_CommentCountZeroWhenNoCommentsFetched proves an empty,
+// non-nil comments slice (what ListComments answers for a PR with no
+// comments) yields 0 rather than falling back to the api.PR's own count: the
+// fallback is only for the list path, which passes a nil slice.
+func TestBackend_Show_CommentCountZeroWhenNoCommentsFetched(t *testing.T) {
+	gh := &fakeGH{
+		pr:       &api.PR{Repo: "owner/repo", Number: 4, Title: "T", State: "open", CommentCount: 7},
+		comments: []api.Comment{},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.Show(context.Background(), "owner/repo#4")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if got.CommentCount != 0 {
+		t.Fatalf("CommentCount = %d, want 0", got.CommentCount)
+	}
+}

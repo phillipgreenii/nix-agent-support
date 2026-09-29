@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -360,11 +361,10 @@ func TestGetPR_ChecksRollup_NoChecksIsNone(t *testing.T) {
 // TestGetPR_ParsesReviewCount proves prListFields' widened "reviews"
 // field (bead pg2-2j5ac.30.6) decodes into api.PR.ReviewCount via a plain
 // len() -- no review's own fields are ever read, only the array length.
-// List's own supplemental per-matched-PR fetch (provider.go's
-// mergeSupplementalFields) reuses this SAME gh pr view call, rather than
-// a second gh invocation shape, to fill in review count -- the one
-// fingerprint-needed field gh search prs' own --json field list cannot
-// carry at all.
+// This is the show path's review_count source (bead pg2-2j5ac.52.6.1): the
+// same reviews connection the list path counts through
+// reviews { totalCount }, with no extra fetch. (List's old per-matched-PR
+// supplemental fetch, which used to reuse this call, no longer exists.)
 func TestGetPR_ParsesReviewCount(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["pr view"] = []byte(`{
@@ -386,6 +386,59 @@ func TestGetPR_ParsesReviewCount(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(gh.calls[0], " "), "reviews") {
 		t.Errorf("gh pr view must request reviews; args=%v", gh.calls)
+	}
+}
+
+// TestGetPR_ParsesSummaryFields proves prListFields carries id, updatedAt and
+// reviewDecision (bead pg2-2j5ac.52.6.1) and that they decode into
+// api.PR.NodeID/UpdatedAt/ReviewDecision. The fake runner returns its canned
+// JSON whatever arguments it is given, so the decode assertions alone cannot
+// catch a field missing from the --json argument; the second half splits that
+// argument on commas and requires each name as a WHOLE field. A substring
+// check would be vacuous for "id": it already sits inside headRefOid.
+func TestGetPR_ParsesSummaryFields(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"id": "PR_kwDOSynthetic7",
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"updatedAt": "2026-09-14T10:00:00Z",
+		"reviewDecision": "CHANGES_REQUESTED"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.NodeID != "PR_kwDOSynthetic7" {
+		t.Errorf("NodeID = %q, want %q", pr.NodeID, "PR_kwDOSynthetic7")
+	}
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Errorf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.ReviewDecision != "CHANGES_REQUESTED" {
+		t.Errorf("ReviewDecision = %q, want %q", pr.ReviewDecision, "CHANGES_REQUESTED")
+	}
+
+	args := gh.calls[0]
+	jsonArg := ""
+	for i, a := range args {
+		if a == "--json" && i+1 < len(args) {
+			jsonArg = args[i+1]
+			break
+		}
+	}
+	if jsonArg == "" {
+		t.Fatalf("gh pr view call carries no --json argument: %v", args)
+	}
+	fields := map[string]bool{}
+	for _, f := range strings.Split(jsonArg, ",") {
+		fields[f] = true
+	}
+	for _, want := range []string{"id", "updatedAt", "reviewDecision"} {
+		if !fields[want] {
+			t.Errorf("--json argument lacks the whole field %q: %s", want, jsonArg)
+		}
 	}
 }
 
@@ -908,6 +961,7 @@ const sampleBatchedSearchPage = `{
       "pageInfo": {"hasNextPage": false, "endCursor": ""},
       "nodes": [
         {
+          "id": "PR_kwDOSynthetic7",
           "number": 7,
           "title": "fix: bug",
           "url": "https://github.com/owner/repo/pull/7",
@@ -915,10 +969,12 @@ const sampleBatchedSearchPage = `{
           "body": "fixes a thing",
           "isDraft": false,
           "updatedAt": "2026-09-14T10:00:00Z",
+          "reviewDecision": "REVIEW_REQUIRED",
           "author": {"login": "octocat"},
           "repository": {"nameWithOwner": "owner/repo"},
           "labels": {"nodes": [{"name": "bug"}, {"name": "p1"}]},
           "comments": {"totalCount": 5},
+          "reviews": {"totalCount": 2},
           "headRefOid": "deadbeef",
           "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
         }
@@ -956,6 +1012,15 @@ func TestSearchPRsEnriched_ParsesAndConverts(t *testing.T) {
 	}
 	if pr.CommentCount != 5 {
 		t.Fatalf("CommentCount = %d, want 5", pr.CommentCount)
+	}
+	if pr.NodeID != "PR_kwDOSynthetic7" {
+		t.Fatalf("NodeID = %q, want %q", pr.NodeID, "PR_kwDOSynthetic7")
+	}
+	if pr.ReviewDecision != "REVIEW_REQUIRED" {
+		t.Fatalf("ReviewDecision = %q, want %q", pr.ReviewDecision, "REVIEW_REQUIRED")
+	}
+	if pr.ReviewCount != 2 {
+		t.Fatalf("ReviewCount = %d, want 2", pr.ReviewCount)
 	}
 	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
 		t.Fatalf("Labels = %v", pr.Labels)
@@ -1006,10 +1071,17 @@ func TestSearchPRsEnriched_QueryRequestsExpectedFields(t *testing.T) {
 		"statusCheckRollup",
 		"headRefOid",
 		"repository { nameWithOwner }",
+		// summary fields (bead pg2-2j5ac.52.6.1). "id" is checked below as a
+		// whole token: as a bare substring it already sits inside "headRefOid".
+		"reviewDecision",
+		"reviews { totalCount }",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected the query to contain %q: %v", want, gh.calls[0])
 		}
+	}
+	if !regexp.MustCompile(`(^|\s)id(\s|$)`).MatchString(joined) {
+		t.Fatalf("expected the query to select the PR's own id as a whole token: %v", gh.calls[0])
 	}
 }
 

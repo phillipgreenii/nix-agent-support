@@ -707,6 +707,16 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 		MergeStateStatus: in.MergeStateStatus,
 		ReviewRequests:   in.ReviewRequests,
 		ChecksRollup:     in.ChecksRollup,
+
+		// bead pg2-2j5ac.52.6.1's summary fields. Each is carried from what
+		// the GitHub layer decoded and left empty or zero when it did not;
+		// none is synthesized (NodeID in particular is never derived from
+		// the "<repo>#<number>" id).
+		NodeID:         in.NodeID,
+		UpdatedAt:      in.UpdatedAt,
+		ReviewDecision: in.ReviewDecision,
+		CommentCount:   topLevelCommentCount(in, comments),
+		ReviewCount:    in.ReviewCount,
 	}
 
 	byReview := make(map[string][]schema.PRComment, len(reviews))
@@ -730,6 +740,31 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 	}
 
 	return out
+}
+
+// topLevelCommentCount is schema.PR.CommentCount: the number of top-level PR
+// comments, never review-thread comments, on both read paths.
+//
+// The list path hands toSchemaPR a nil comments slice and already carries the
+// count from the batched query's comments { totalCount }, so in.CommentCount
+// is used as is. The show path cannot get it from GetPR (ghPR has no comments
+// field, so in.CommentCount is always 0 there); it counts the issue-endpoint
+// comments it is handed instead: entries with no thread and no path, which
+// are exactly the ones ListComments builds from the issue-comments endpoint.
+// len(out.Comments) is NOT that count: an inline review comment whose
+// review could not be joined (empty ReviewID) also lands in PR.Comments. A
+// non-nil empty slice (a PR with no comments at all) counts as 0.
+func topLevelCommentCount(in *api.PR, comments []api.Comment) int {
+	if comments == nil {
+		return in.CommentCount
+	}
+	n := 0
+	for _, c := range comments {
+		if c.ThreadID == "" && c.Path == "" {
+			n++
+		}
+	}
+	return n
 }
 
 // toSchemaComment maps one api.Comment onto its schema.PRComment shape.

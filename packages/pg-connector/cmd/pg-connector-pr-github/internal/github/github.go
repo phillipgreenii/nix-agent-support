@@ -148,17 +148,21 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 // separate GraphQL enrich call is needed to populate them.
 //
 // reviews was added by bead pg2-2j5ac.30.6, purely to COUNT (never to
-// inspect) this PR's reviews: List's own supplemental per-matched-PR fetch
-// (provider.go's mergeSupplementalFields) reuses this SAME call (rather
-// than inventing a second gh invocation shape) to fill in ReviewCount —
-// one of the three fingerprint-needed fields gh search prs' own --json
-// field list cannot carry (verified 2026-09-15 against the real gh
-// binary — see searchPRFields' own doc comment below). ghPR.Reviews below
-// decodes each element as an empty struct: only len() is ever read.
-var prListFields = "number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,statusCheckRollup,reviews"
+// inspect) this PR's reviews: it is the show path's review_count source
+// (ghPR.toAPI sets ReviewCount = len(Reviews)), and needs no extra fetch.
+// ghPR.Reviews below decodes each element as an empty struct: only len() is
+// ever read.
+//
+// id, updatedAt and reviewDecision were added by bead pg2-2j5ac.52.6.1 for
+// schema.PR's node_id, updated_at and review_decision summary fields on the
+// show path. id is the PR object's own GraphQL node id (gh's export of the
+// PullRequest id field), the rename-proof key for dedup and adoption.
+var prListFields = "id,number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,updatedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
+	// ID is the PR object's own GraphQL node id (bead pg2-2j5ac.52.6.1).
+	ID          string `json:"id"`
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
 	HeadRefName string `json:"headRefName"`
@@ -169,15 +173,21 @@ type ghPR struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
-	IsDraft      bool   `json:"isDraft"`
-	State        string `json:"state"`
-	MergedAt     string `json:"mergedAt"`
-	ClosedAt     string `json:"closedAt"`
-	Additions    int    `json:"additions"`
-	Deletions    int    `json:"deletions"`
-	ChangedFiles int    `json:"changedFiles"`
-	Body         string `json:"body"`
-	Labels       []struct {
+	IsDraft  bool   `json:"isDraft"`
+	State    string `json:"state"`
+	MergedAt string `json:"mergedAt"`
+	ClosedAt string `json:"closedAt"`
+	// UpdatedAt/ReviewDecision (bead pg2-2j5ac.52.6.1) feed schema.PR's
+	// updated_at and review_decision. ReviewDecision is carried verbatim:
+	// APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED, or "" when GitHub
+	// reports none.
+	UpdatedAt      string `json:"updatedAt"`
+	ReviewDecision string `json:"reviewDecision"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	ChangedFiles   int    `json:"changedFiles"`
+	Body           string `json:"body"`
+	Labels         []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 	// ReviewRequests is gh's reviewRequests array. Requested accounts (users, bots,
@@ -220,9 +230,7 @@ type ghPR struct {
 	} `json:"statusCheckRollup"`
 	// Reviews is gh's reviews array (bead pg2-2j5ac.30.6) — decoded only
 	// to count via len(); no element field is ever read (see prListFields'
-	// own doc comment on why this call, rather than a second gh
-	// invocation, is List's own supplemental-fetch source for review
-	// count).
+	// own doc comment: this is the show path's review_count source).
 	Reviews []struct{} `json:"reviews"`
 }
 
@@ -293,6 +301,9 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Draft:            p.IsDraft,
 		Merged:           p.MergedAt != "",
 		MergedAt:         p.MergedAt,
+		NodeID:           p.ID,
+		UpdatedAt:        p.UpdatedAt,
+		ReviewDecision:   p.ReviewDecision,
 		Additions:        p.Additions,
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
@@ -674,12 +685,20 @@ func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error
 // directly on the search result, so one call per query string replaces
 // what used to be 1 (search) + 2*N (GetPR, ReviewThreadCount) calls.
 //
-// reviews{totalCount}/reviewThreads{totalCount} are deliberately NOT
-// requested: the design doc traced every consumer of the old fan-out's
-// ReviewCount/ReviewThreadCount fields and found none once
-// FingerprintCursor (List's own cursor emission) stops being computed —
-// see List's own doc comment in provider.go. Adding them back here would
-// be dead weight dressed up as fidelity to the old shape.
+// reviewThreads{totalCount} is deliberately NOT requested: the design doc
+// traced every consumer of the old fan-out's ReviewThreadCount field and
+// found none once FingerprintCursor (List's own cursor emission) stops
+// being computed — see List's own doc comment in provider.go. Adding it
+// back here would be dead weight dressed up as fidelity to the old shape.
+//
+// id, reviewDecision and reviews{totalCount} (bead pg2-2j5ac.52.6.1) ARE
+// requested, next to updatedAt and comments{totalCount}: they feed
+// schema.PR's node_id, review_decision and review_count summary fields, and
+// the entity-change flow diffs list results by a hash of the whole summary
+// entity, so a new comment or review makes a PR visible as changed. id is
+// the PR object's own GraphQL node id (a rename-proof key for dedup and
+// adoption), selected as its own token; comments{totalCount} counts
+// top-level PR comments only, not review-thread comments.
 //
 // repository{nameWithOwner} is included even though the design doc's own
 // query snippet omits it: this backend's id convention (formatPRID,
@@ -704,11 +723,13 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
-        number title url state body isDraft updatedAt
+        id
+        number title url state body isDraft updatedAt reviewDecision
         author { login }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
         comments { totalCount }
+        reviews { totalCount }
         headRefOid
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
@@ -724,14 +745,17 @@ query($q: String!, $after: String) {
 // 0, which SearchPRsEnriched treats as "not a PR" and skips, matching the
 // gh CLI's own defensive posture elsewhere in this file.
 type ghBatchedSearchNode struct {
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	URL       string `json:"url"`
-	State     string `json:"state"`
-	Body      string `json:"body"`
-	IsDraft   bool   `json:"isDraft"`
-	UpdatedAt string `json:"updatedAt"`
-	Author    struct {
+	// ID is the PR object's own GraphQL node id (bead pg2-2j5ac.52.6.1).
+	ID             string `json:"id"`
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	URL            string `json:"url"`
+	State          string `json:"state"`
+	Body           string `json:"body"`
+	IsDraft        bool   `json:"isDraft"`
+	UpdatedAt      string `json:"updatedAt"`
+	ReviewDecision string `json:"reviewDecision"`
+	Author         struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Repository struct {
@@ -745,6 +769,9 @@ type ghBatchedSearchNode struct {
 	Comments struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"comments"`
+	Reviews struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"reviews"`
 	HeadRefOid string `json:"headRefOid"`
 	Commits    struct {
 		Nodes []struct {
@@ -827,6 +854,10 @@ func (n ghBatchedSearchNode) toAPI() api.PR {
 		CommentCount: n.Comments.TotalCount,
 		HeadSHA:      n.HeadRefOid,
 		ChecksRollup: statusStateToChecksRollup(n.headCommitStatusState()),
+
+		NodeID:         n.ID,
+		ReviewDecision: n.ReviewDecision,
+		ReviewCount:    n.Reviews.TotalCount,
 	}
 	for _, l := range n.Labels.Nodes {
 		out.Labels = append(out.Labels, l.Name)

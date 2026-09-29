@@ -108,29 +108,35 @@ type PR struct {
 	// entry or not stacked.
 	StackDownstreamHeadRefName string `json:"stack_downstream_head_ref_name,omitempty"`
 
-	// UpdatedAt/CommentCount/ReviewCount (bead pg2-2j5ac.30.6) are three of
-	// the raw fields a future GitHub fingerprint cursor needs (the parked
-	// sibling packet pg2-2j5ac.30.3's own GitHubPRSnapshot field set) that
-	// gh search prs's own --json field list carries directly — verified
-	// against the real gh binary's field-name error, 2026-09-15. Populated
-	// only by SearchPRs (List's own search path); zero-valued on the
-	// GetPR/gh-pr-view path, which has no updatedAt/commentsCount fields of
-	// its own in prListFields.
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	CommentCount int    `json:"comment_count,omitempty"`
-	// ReviewCount is the PR's review count (bead pg2-2j5ac.30.6) — the one
-	// fingerprint-needed field gh search prs' own --json field list does
-	// NOT carry (verified 2026-09-15: gh search prs --json only supports
-	// assignees, author, authorAssociation, body, closedAt, commentsCount,
-	// createdAt, id, isDraft, isLocked, isPullRequest, labels, number,
-	// repository, state, title, updatedAt, url — no reviews field).
-	// Populated only via GetPR's own widened prListFields call (used by
-	// Show/ListAttention); List no longer populates this field as of bead
-	// pg2-aehpr — its own SearchPRsEnriched query does not request
-	// reviews{totalCount} at all (see that method's own doc comment for
-	// why not), so a List-returned entity now always carries this at its
-	// zero value.
+	// UpdatedAt/CommentCount/ReviewCount (bead pg2-2j5ac.30.6) were first
+	// added as raw fields for a fingerprint cursor that no longer exists;
+	// they now feed schema.PR's summary fields (bead pg2-2j5ac.52.6.1).
+	//
+	// UpdatedAt is the PR's last-updated time. SearchPRsEnriched fills it
+	// (GraphQL updatedAt) and so does GetPR (gh pr view --json updatedAt).
+	UpdatedAt string `json:"updated_at,omitempty"`
+	// CommentCount is the PR's count of top-level PR comments only, never
+	// review-thread comments. SearchPRsEnriched fills it from
+	// comments { totalCount }. GetPR leaves it at zero, because ghPR has no
+	// comments field: the show path (provider.go's toSchemaPR) counts the
+	// issue-endpoint comments it is handed instead.
+	CommentCount int `json:"comment_count,omitempty"`
+	// ReviewCount is the PR's review count. SearchPRsEnriched fills it from
+	// reviews { totalCount } (bead pg2-2j5ac.52.6.1 added that selection) and
+	// GetPR from the length of the reviews array already in prListFields:
+	// the same reviews connection on both paths.
 	ReviewCount int `json:"review_count,omitempty"`
+	// NodeID is the PR object's own GraphQL node id (id in GraphQL, and in
+	// gh pr view --json), the same mechanism this backend already uses for
+	// comment and review node ids, applied one level up. It is the
+	// rename-proof key for dedup and adoption. Filled from the batched
+	// search on the list path and from gh pr view on the show path; never
+	// derived from Repo and Number.
+	NodeID string `json:"node_id,omitempty"`
+	// ReviewDecision is GitHub's aggregate review verdict, carried verbatim:
+	// APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED, or empty when GitHub
+	// reports none (a PR with no review requirement).
+	ReviewDecision string `json:"review_decision,omitempty"`
 	// ReviewThreadCount is the PR's inline code-review comment thread count
 	// (GraphQL's PullRequest.reviewThreads.totalCount — distinct from
 	// CommentCount's issue-level comments) — originally the 8th and final

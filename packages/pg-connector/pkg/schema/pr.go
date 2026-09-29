@@ -58,7 +58,13 @@ import "encoding/json"
 // the next integer per this const's own one-bump-per-field-shape-change
 // precedent (see the 1 -> 2 / 2 -> 3 comments above), not a deviation from
 // it.
-const PRSchemaVersion = 4
+//
+// Bumped 4 -> 5 by bead pg2-2j5ac.52.6.1, which added PR's summary fields
+// (NodeID, UpdatedAt, ReviewDecision, CommentCount, ReviewCount) below. All
+// are additive and omitempty, so every version-4 consumer keeps decoding
+// unchanged; the bump follows this const's own rule that ANY field-shape
+// change bumps the version, additive or not.
+const PRSchemaVersion = 5
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -160,6 +166,36 @@ type PR struct {
 	// is a freedom-boundary choice; the design pins only this closed value
 	// set.
 	ChecksRollup string `json:"checks_rollup,omitempty"`
+
+	// The fields below (bead pg2-2j5ac.52.6.1) are the PR's summary
+	// signals. They ride on the summary entity that "list" returns, and the
+	// entity-change flow diffs list results by a hash of that whole entity,
+	// so a new comment or review makes a PR visible as changed. All are
+	// additive and omitempty, and each is empty or zero when a backend
+	// cannot provide it cheaply: a backend MUST leave one empty rather than
+	// fabricate it (NodeID in particular is never derived from Repo and
+	// Number).
+
+	// NodeID is the PR object's own opaque, backend-native node id (for the
+	// GitHub backend, the PR's GraphQL node id). Unlike ID, which is built
+	// from the repo slug and PR number and so changes when the repo is
+	// renamed or transferred, it is a rename-proof key for dedup and
+	// adoption.
+	NodeID string `json:"node_id,omitempty"`
+	// UpdatedAt is the backend's own last-updated time for the PR (RFC3339),
+	// distinct from AsOf, which is this READ's own time.
+	UpdatedAt string `json:"updated_at,omitempty"`
+	// ReviewDecision is the backend's aggregate review verdict, carried
+	// verbatim (for the GitHub backend: "APPROVED", "CHANGES_REQUESTED" or
+	// "REVIEW_REQUIRED"). Empty when the backend reports none, which GitHub
+	// does for a PR with no review requirement.
+	ReviewDecision string `json:"review_decision,omitempty"`
+	// CommentCount is the number of top-level PR comments. Review-thread
+	// comments are NOT counted (they nest under Reviews).
+	CommentCount int `json:"comment_count,omitempty"`
+	// ReviewCount is the number of reviews on the PR, counted from the same
+	// reviews connection on every read path.
+	ReviewCount int `json:"review_count,omitempty"`
 }
 
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on

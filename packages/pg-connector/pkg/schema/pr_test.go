@@ -89,12 +89,73 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (bead pg2-2j5ac.28.2 bumped 3 -> 4) so an accidental future edit that
+// (bead pg2-2j5ac.52.6.1 bumped 4 -> 5) so an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 4 {
-		t.Fatalf("PRSchemaVersion = %d, want 4", PRSchemaVersion)
+	if PRSchemaVersion != 5 {
+		t.Fatalf("PRSchemaVersion = %d, want 5", PRSchemaVersion)
+	}
+}
+
+// TestPR_V5FieldSet_JSONRoundTrip asserts the v5 summary field set (bead
+// pg2-2j5ac.52.6.1's additive fields: NodeID, UpdatedAt, ReviewDecision,
+// CommentCount, ReviewCount) round-trips through JSON under its exact wire
+// keys.
+func TestPR_V5FieldSet_JSONRoundTrip(t *testing.T) {
+	in := PR{
+		ID:             "pr-1",
+		NodeID:         "PR_kwDOSynthetic1",
+		UpdatedAt:      "2026-09-14T10:00:00Z",
+		ReviewDecision: "CHANGES_REQUESTED",
+		CommentCount:   4,
+		ReviewCount:    2,
+	}
+
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var out PR
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", out, in)
+	}
+
+	var asMap map[string]any
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	for _, key := range []string{
+		"node_id", "updated_at", "review_decision", "comment_count", "review_count",
+	} {
+		if _, ok := asMap[key]; !ok {
+			t.Errorf("wire JSON missing %q key: %s", key, raw)
+		}
+	}
+}
+
+// TestPR_V5FieldSet_OmittedWhenEmpty asserts every v5 field is omitempty: a
+// backend that cannot provide one leaves it empty/zero and the key is absent
+// from the wire, never a fabricated placeholder.
+func TestPR_V5FieldSet_OmittedWhenEmpty(t *testing.T) {
+	raw, err := json.Marshal(PR{ID: "pr-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	for _, key := range []string{
+		"node_id", "updated_at", "review_decision", "comment_count", "review_count",
+	} {
+		if _, ok := asMap[key]; ok {
+			t.Errorf("wire JSON carries %q for an empty value: %s", key, raw)
+		}
 	}
 }
 
