@@ -33,9 +33,9 @@ leaves the red/green step-by-step detail to that phase's own decomposition. Wher
 - Decorations MUST be deterministic, cheap and LLM-free.
 - Breaking contract changes ship as one coordinated cutover with no dual-version serving (S11);
   additive changes only otherwise.
-- No parallel running: `sync` is stopped before anything new writes (Phase 10). A pg-desk build that
-  contains the new store code MUST NOT be applied before Phase 10, and pg-desk MUST refuse to open a
-  store that has not been migrated, with a clear error.
+- No parallel running: `sync` is stopped before anything new writes (Phase 10). Until then the primary
+  branch MUST stay deployable: old `sync`/`run`/`heartbeat` code and the old-schema store API keep
+  working, and the new-schema commands refuse on an old-schema store with a clear error.
 - pg-router binds match by exact string equality; no `pr.*` wildcard (S22).
 - This repo is public: no employer-specific names in code, tests or docs; fixtures are synthetic and
   MUST pass `TestIdentifierAllowlistGuard` (`packages/pg-desk/cmd/pg-desk/identifier_allowlist_test.go`).
@@ -171,21 +171,21 @@ Phases 1 and 2 have no upstream dependencies and can start immediately, in paral
 **Files:**
 
 - Modify: `pg-desk/internal/store/migrations.go`, `entity.go`, `annotation.go`, `interpretation.go`
-- Create: `pg-desk/internal/store/changelog.go`, `cursor.go`
+- Create: `pg-desk/internal/store/changelog.go`, `cursor.go`, `cutover.go`
 - Test: `pg-desk/internal/store/*_test.go` against a REAL SQLite file
 - Create/Modify: `docs/behavior/pg-desk/store-schema.md` in the SAME change
 
 **Interfaces:**
 
-- Produces: the whole 9.11 migration as one runnable step (`pg-desk migrate`, invoked at cutover), not run automatically on open: `entity` columns `version`, `hydrated_at`, `active`; `change_log` appended in the same transaction as the version bump; `consumer` cursors; key/value `annotation` copied from the old columns; `sync_error` and `ledger` dropped. Opening an unmigrated store returns a clear "run `pg-desk migrate`" error.
+- Produces: `pg-desk migrate --cutover`, which runs the whole 9.11 block as ONE transaction, kept separate from `store.Open`'s existing auto-migrations (Open still runs only the old ones, and `OpenForTest` gets a helper that opens a fresh new-schema store). The store package keeps the old annotation/ledger API alongside the new key/value API until Phase 10. New-schema commands call a schema check and refuse on an old-schema store with "run `pg-desk migrate --cutover`". Result: `entity` columns `version`, `hydrated_at`, `active`; `change_log` appended in the same transaction as the version bump; `consumer` cursors; key/value `annotation` copied from the old columns; `sync_error` and `ledger` dropped.
 
-- [ ] **Step 1:** Write failing tests: `TestMigrationAddsEntityColumns`, `TestAnnotationReservedKeyMigration`, `TestMigrateFromSyntheticPreMigrationDB` (a checked-in database built by running the OLD migrations), `TestOpenUnmigratedStoreRefuses`, `TestAnnotationChangedAppendedInSameTransaction`, `TestLogAppendAndVersionBumpAreAtomic`, `TestCursorAdvancesOnlyAfterFlush`, `TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss` (fault-injecting `database/sql` driver that fails mid-sequence), `TestPruneWaitsForSlowestConsumer`, `TestConcurrentChangesSameConsumerSerialize`, `TestRefreshRacingHydrationNeverRegressesVersion` (goroutine race test on a real file, generalizing `lock_test.go`'s contention shape).
+- [ ] **Step 1:** Write failing tests: `TestMigrationAddsEntityColumns`, `TestAnnotationReservedKeyMigration`, `TestMigrateFromSyntheticPreMigrationDB` (a checked-in database built by running the OLD migrations), `TestMigrateFailureLeavesStoreUnchanged`, `TestMigrateIsIdempotentOnMigratedStore`, `TestOpenLeavesOldSchemaAlone`, `TestNewSchemaCommandsRefuseOldSchemaStore` (for `changes`, `refresh`, `history`, `show`, `serve`, `status`, `doctor` reports it rather than crashing), `TestAnnotationChangedAppendedInSameTransaction`, `TestLogAppendAndVersionBumpAreAtomic`, `TestCursorAdvancesOnlyAfterFlush`, `TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss` (fault-injecting `database/sql` driver that fails mid-sequence), `TestPruneWaitsForSlowestConsumer`, `TestStaleConsumerExcludedFromPruneHorizon`, `TestConcurrentChangesSameConsumerSerialize`, `TestRefreshRacingHydrationNeverRegressesVersion` (goroutine race test on a real file, generalizing `lock_test.go`'s contention shape).
 - [ ] **Step 2:** Run `go test ./internal/store/...`; expected FAIL.
 - [ ] **Step 3:** Implement the migration and store API. Optimistic concurrency uses a `version` compare-and-set; a lost race retries and is counted for the observability metric.
 - [ ] **Step 4:** Re-run with `-race`; expected PASS.
-- [ ] **Step 5:** Run `nix build .#pg-desk` (background, explicit timeout) to run the whole-module checkPhase. Commit. Old `sync`/`run` code stays in the tree and is deleted in Phase 10; it is not expected to pass against a migrated store.
+- [ ] **Step 5:** Run `nix build .#pg-desk` (background, explicit timeout) to run the whole-module checkPhase, which includes the existing `sync`/`run`/`ledger`/`heartbeat` suites unchanged. Commit.
 
-**Gate:** the migration succeeds on the synthetic pre-migration database and the migrated store round-trips through the new store API. Decomposition units: (a) migration and annotation copy; (b) log, cursor, pruning and concurrency semantics.
+**Gate:** the existing `sync`/`run`/`hide`/`unhide`/`wip`/`feedback` test suites pass unchanged on the old schema; the migration succeeds on the synthetic pre-migration database and the migrated store round-trips through the new store API. Decomposition units: (a) migration and annotation copy; (b) log, cursor, pruning and concurrency semantics.
 
 ### Phase 4: Generic hydration seam (size L)
 
@@ -234,11 +234,10 @@ Phases 1 and 2 have no upstream dependencies and can start immediately, in paral
 
 - Produces: `pg-desk <type> changes --consumer NAME [--query Q] [--cached] [--reset] [--limit N]`, `refresh <id>`, `history`, `show <id> [--json] [--refresh]`, exit codes per the spec's section 9.12; the change envelope of section 9.3.
 
-- [ ] **Step 1:** Write failing tests: envelope golden JSON per contract version, `TestChangesCachedDoesNotAdvanceCursor`, `TestChangesResetReplaysActiveEntities`, `TestChangesExit2OnPartialFailure`, `TestChangesTotalFailureLogsNothingAndKeepsCursor`, `TestHydrationBudgetHydratesChangedBeforeSweepDue`, `TestConsumerForgetStopsPruneWaiting`, `TestRefreshFailureKeepsSnapshotAndEntityStaysDue`, `TestRefreshNotFoundFailsLoudly` and `TestChangesDroppedEntityBecomesInactive`, plus the sweep tests (`TestSweepSelectsOldestFirstCapN`, `TestSweepExcludesInactive`).
+- [ ] **Step 1:** Write failing tests: envelope golden JSON per contract version, `TestChangesCachedDoesNotAdvanceCursor`, `TestChangesResetReplaysActiveEntities`, `TestChangesExit2OnPartialFailure`, `TestChangesTotalFailureLogsNothingAndKeepsCursor`, `TestHydrationBudgetHydratesChangedBeforeSweepDue`, `TestConsumerForgetStopsPruneWaiting`, `TestBudgetExhaustionMarksSourceDegradedAndKeepsCursor`, `TestSeenAtLivenessReplacesHeartbeat`, `TestDoctorReportsUnmigratedStoreWithoutRefusing`, `TestRefreshFailureKeepsSnapshotAndEntityStaysDue`, `TestRefreshNotFoundFailsLoudly` and `TestChangesDroppedEntityBecomesInactive`, plus the sweep tests (`TestSweepSelectsOldestFirstCapN`, `TestSweepExcludesInactive`).
 - [ ] **Step 2:** Run; expected FAIL. Implement. Re-run; expected PASS.
 - [ ] **Step 3:** Update `docs/behavior/pg-desk/` in the SAME change (repo rule: behavior docs are the source of truth).
 - [ ] **Step 4:** Add the `/metrics`, `status` and `doctor` coverage listed in the spec's section 11: per-type records, hydration failures, due backlog, consumer lag, optimistic-concurrency retries; `doctor` flags an unresolvable watched query, a consumer stalled past 3x its period, the sweep sizing bound (`active_count/N x poll_interval <= D`), and with `--router-config` which decider roles are bound per type.
-- [ ] **Step 4b:** Add the G5 guard, `TestNoDecisionLogicInPgDesk` (module-dependency check that no decision logic exists under `packages/pg-desk` outside test fixtures).
 - [ ] **Step 5:** `nix build .#pg-desk`; commit. old `run`, `sync` and `heartbeat` code stays in the tree until Phase 10.
 
 **Gate:** `pg-desk pr changes --consumer scratch` against a live backend returns a non-empty, correct envelope, live-exercised. Decomposition units: (a) `changes`, sweep and budget; (b) `refresh`, `history`, `show`, `open`; (c) annotation, `consumer` and `feedback` verbs; (d) config, httpapi, metrics, doctor; (e) behavior docs.
@@ -283,7 +282,7 @@ Phases 1 and 2 have no upstream dependencies and can start immediately, in paral
 
 ### Phase 9: Router config prepared, not applied (size S-M)
 
-**Files:** (this repo) `pg-router/internal/config` loader checks; (deployment repo, prepared but NOT applied) `pg-desk changes` sources per watched type, the `watch:` queries taken from today's router query names, decider roles, the two forced prompt edits (`pg-desk feedback` to `pg-desk pr feedback`; `pg-pr review submit` to `pg-connector pr review submit`), and removal of the `desk-*` ingest roles and `desk-heartbeat`.
+**Files:** (this repo) `pg-router/internal/config` loader checks; (deployment repo, prepared but NOT applied) `pg-desk changes` sources per watched type, the `watch:` queries taken from today's router query names, decider roles in `plan` form plus the one-flag switch to `apply`, the two forced prompt edits (`pg-desk feedback` to `pg-desk pr feedback`; `pg-pr review submit` to `pg-connector pr review submit`), and removal of the `desk-*` ingest roles and `desk-heartbeat`.
 
 **Interfaces:**
 
@@ -299,19 +298,19 @@ Phases 1 and 2 have no upstream dependencies and can start immediately, in paral
 
 The only phase that touches the live system. It is operator-run and MUST NOT be applied by an agent.
 
-**Files:** one release: delete `pg-desk/internal/sync`, `ledger.go`, `import_pg_pr_annotations.go`, `run.go`, `heartbeat.go`, `heartbeat_item.go`, the `heartbeat` and `sync.mode` config, and the old un-namespaced `feedback` verb; retire `docs/behavior/pg-desk/run-issue.md` and `sync.md`; include the Phase 7 adapter, Phase 8 deciders and the Phase 9 router change. Add a runbook with the steps below at the repo's existing runbook location.
+**Files:** one release: delete `pg-desk/internal/sync`, `ledger.go`, the old-schema store API, `import_pg_pr_annotations.go`, `run.go`, `heartbeat.go`, `heartbeat_item.go`, the `heartbeat` and `sync.mode` config, the parity tool, and the old un-namespaced `feedback` verb; retire `docs/behavior/pg-desk/run-issue.md` and `sync.md`; include the Phase 7 adapter, Phase 8 deciders and the Phase 9 router change. Add `TestNoDecisionLogicInPgDesk` (the G5 guard): pg-desk MUST NOT exec `bd` or tracker write verbs, MUST NOT contain work-kind or `dedup_key` literals, and MUST NOT import decider packages. Add the runbook as `docs/runbooks/entity-change-flow-cutover.md`.
 
 - [ ] **Step 1:** Merge the deletion change and cut the release; run `nix build` and `nix flake check` once before landing.
-- [ ] **Step 2 (operator, maintenance window):** stop `sync` by disabling the `desk-*` ingest roles; confirm nothing is writing beads or the store.
-- [ ] **Step 3:** Back up the store file and record its path.
-- [ ] **Step 4:** Apply the release; run `pg-desk migrate` against the store.
-- [ ] **Step 5:** Bootstrap with `pg-desk <type> changes --reset` per watched type.
-- [ ] **Step 6:** Live-exercise with deciders in `plan` mode (`pg-router run-query` / `run-role`, including the `env -i PATH=/usr/bin:/bin` negative control against the unwrapped binary): at least one real `plan` output with an action, or a correct skip.
-- [ ] **Step 7:** Enable decider `apply`; live-exercise: at least one applied action visible on a real work item with its audit comment.
+- [ ] **Step 2 (operator, maintenance window):** stop pg-router and `pg-desk serve`; confirm nothing is writing beads or the store.
+- [ ] **Step 3:** Rehearse first: run `pg-desk migrate --cutover` on a COPY of the real store; check row counts and a `show` round trip. Then back up the store file and record its path.
+- [ ] **Step 4:** Apply the release; run `pg-desk migrate --cutover` against the store.
+- [ ] **Step 5:** Start pg-router and `serve`; bootstrap with `pg-desk <type> changes --reset --consumer pg-router` per watched type.
+- [ ] **Step 6:** Live-exercise with deciders in `plan` mode (`pg-router run-query` / `run-role`, including the `env -i PATH=/usr/bin:/bin` negative control against the unwrapped binary): the adapter (a real routed item with correct `type`/`metadata`), the review and feedback prompt roles, and at least one real `plan` output with an action, or a correct skip.
+- [ ] **Step 7:** Switch deciders to `apply`, re-run `--reset` for the pg-router consumer, and live-exercise: at least one applied action visible on a real work item with its audit comment.
 
-**Rollback:** restore the store backup, reapply the previous release, re-enable the `desk-*` roles. Anything created after the cutover is lost from pg-desk's store; adoption makes the previous release safe to resume over beads a decider created. Pre-cutover `ledger` history is not carried forward (accepted loss). Rehearse the restore once on a copy of the backup before Step 2.
+**Rollback:** restore the store backup, reapply the previous release (an old binary refuses a newer schema loudly), restart pg-router. Everything pg-desk recorded after the cutover is lost; beads deciders created after Step 7 remain and the previous release's `sync` adopts them. Pre-cutover `ledger` history is not carried forward (accepted loss). Rehearse the restore on a copy of the backup before Step 2.
 
-**Gate (observable):** Phases 1-9 landed; Phase 1's `pg-connector pr review submit` is available so no role needs pg-pr; the rollback rehearsal succeeded; then the operator authorizes the window.
+**Gate (observable):** Phases 1-9 landed; the migration ran cleanly on a copy of the real store; the rollback rehearsal succeeded; Phase 1's `pg-connector pr review submit` is available so no role needs pg-pr; then the operator authorizes the window.
 
 ---
 
@@ -321,5 +320,5 @@ The only phase that touches the live system. It is operator-run and MUST NOT be 
 - **Type consistency:** `RunGenericEntity`, `EntityGatherer`, `EntityInterpreter` match the `.46` doc; envelope and item shapes match spec sections 9.3 and 9.4.
 - **Proportion:** the plan is a program-level index. Phase 8 is the largest and is flagged for splitting.
 - **Spec change made alongside this plan:** the spec's Migration section is now a stop-the-world cutover (no shadow run, no dual-write, no soak) and 9.11 is again one migration block, run at cutover. This needs your review.
-- **Main risk:** Phases 3-9 land on the primary branch but must not be deployed before Phase 10. Applying is operator-only, and pg-desk refuses an unmigrated store, so a premature apply fails loudly instead of corrupting data. If that is not enough protection, keep Phases 3-10 on one long-lived branch and land it at cutover.
-- **Open items for the operator:** whether the adapter is a new mode or a new binary (Phase 7); the runbook location (Phase 10).
+- **Deployability:** the primary branch stays deployable at every phase, because old code and the old-schema store API are kept until Phase 10 and new-schema commands refuse on an old-schema store. Phases 1 and 2 are additive connector changes and can deploy independently.
+- **Open items for the operator:** whether the adapter is a new mode or a new binary (Phase 7).

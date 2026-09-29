@@ -124,56 +124,31 @@ built as **Functional Core, Imperative Shell** (pure `decide`; `plan` and `apply
 
 ### Where new logic goes
 
-When a new piece of logic is proposed, place it by asking these questions in order. The first "yes"
-decides.
+Place a new piece of logic by asking these questions in order. The first "yes" decides.
 
-1. **Does it need data no component holds yet, or write to an external system?** Extend
-   pg-connector (a new summary field, detail read or write verb), then continue with the questions
-   below for the logic that consumes it.
-2. **Is it a fact derived from data pg-desk already holds** (the snapshot, links, annotations),
-   with no side effect? It is a **decoration**: extend pg-desk's per-type classifier or
-   interpreter. A decoration MUST be deterministic, cheap and free of LLM calls, because it is
-   recomputed on every hydration. pg-desk MUST NOT decide.
+1. **Is it a new external data source or a new write VERB** (a field the backend can supply, a way
+   to submit a review)? That is mechanism: extend pg-connector. Deciding WHEN to use a verb is not
+   this question; that is question 3.
+2. **Is it a fact derived from data pg-desk already holds** (snapshot, links, annotations), with no
+   side effect? It is a **decoration**: extend the type's interpreter. A decoration MUST be
+   deterministic, cheap and free of LLM calls, because it is recomputed on every hydration. If
+   instead it is a _change kind_ to emit (a transition between two snapshots), extend the type's
+   classifier (6.4) or add a local change source (6.5). pg-desk MUST NOT decide.
 3. **Does it cause a work item, label, annotation or external write to be created, changed or
    closed?** It is a **decision**: add a rule to the type's decider (7.9), which runs as a pg-router
    command role. It MUST be idempotent (G6) and MUST read pg-desk's composite view rather than keep
    its own cache. It never belongs in pg-desk or in pg-router's core (G5, ADR 0065).
 4. **Does it require an agent to act on an existing work item** (review, fix, resolve)? It is an
    **agent role** prompt. A decider still decides that the work item exists.
+5. **Is it a new poll, timer or re-check cadence?** It is pg-router configuration (8.3). pg-router
+   is the only scheduler (G4); neither pg-desk nor a decider starts its own.
+6. **Is it translation between pg-desk's envelope and pg-router's item format?** It belongs in the
+   source adapter (9.4), which MUST NOT add, drop or decide anything.
 
 Two consequences follow. A signal that genuinely requires an LLM MUST NOT become a decoration; it
-belongs in a role, which MAY write its result back as an annotation for `show` to display. Cross-entity
-judgment that chooses an outcome (for example daily-focus ranking) is a decision, not a decoration.
-An entity type with no decider is still watched, hydrated and classified (7.10).
-
-One poll cycle:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant R as pg-router
-    participant A as adapter
-    participant D as pg-desk
-    participant C as pg-connector
-    participant X as decider
-
-    R->>A: timer fires for type pr
-    A->>D: pr changes --consumer pg-router
-    D->>C: pr changes per watched query --consumer pg-desk
-    C-->>D: added / changed / removed, summary entities
-    loop each changed or sweep-due entity
-        D->>C: detail reads for this type
-        C-->>D: detail
-    end
-    D->>D: classify old vs new, save snapshot, append records (one transaction)
-    D-->>A: envelope: records since cursor
-    A-->>R: one item per record and kind
-    R->>X: route pr.head_changed etc
-    X->>D: pr show ID --json (snapshot, no network)
-    D-->>X: composite view
-    X->>D: pg-desk-owned writes (annotations, decider state)
-    X->>C: external writes (path: S10)
-```
+belongs in a role, which MAY write its result back as an annotation for `show` to display.
+Cross-entity judgment that chooses an outcome (for example daily-focus ranking) is a decision, not
+a decoration. An entity type with no decider is still watched, hydrated and classified (7.10).
 
 ## 3. Decision log
 
@@ -1123,11 +1098,14 @@ tables and use `entity_type`/`entity_id` throughout for consistency with the rea
 they reference, rather than the shorter `type`/`id` this design's envelope/view use at the JSON
 layer (6.6).
 
-**Applied once, at the cutover (14 step 7).** The whole block below runs as one migration during the
-maintenance window in which `sync` is stopped; nothing runs against the old and new schema at the
-same time. Because the store code lands before the cutover, a build that contains it MUST NOT be
-deployed until the cutover (Migration step 3), and pg-desk MUST refuse to open a store that has not
-been migrated with a clear error rather than half-working.
+**Applied once, at the cutover (14 step 7), by `pg-desk migrate --cutover`.** Until then the deployed
+pg-desk keeps its old schema and old code paths working: `store.Open` continues to run only the
+existing migrations, and the new-schema commands (`changes`, `refresh`, `history`, ...) refuse with
+"run `pg-desk migrate --cutover`" when the store is still on the old schema. The store package
+therefore keeps BOTH the old annotation/ledger API and the new key/value API until the old one is
+deleted with `internal/sync` at cutover. The whole block below runs as ONE transaction during the
+maintenance window in which `sync` is stopped; a failure leaves the store untouched. Nothing runs
+against the old and new schema at the same time.
 
 ```sql
 ALTER TABLE entity ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
@@ -1209,17 +1187,17 @@ The single place every new or changed CLI's exit-code scheme is defined; contrac
 
 ## 10. Failure modes
 
-| Failure                                         | Effect              | Handling                                                                                     |
-| ----------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
-| a backend fails during `changes`                | partial source      | exit 2 (9.12); no `removed`/`closed` for unlisted entities; retried next poll                |
-| detail read fails for one entity                | stale snapshot      | previous snapshot kept; entity stays due                                                     |
-| concurrent writers on one entity                | lost update         | optimistic `version` check; loser re-reads and re-classifies (6.8)                           |
-| pg-desk crashes before cursor advance           | duplicate records   | harmless (idempotent deciders)                                                               |
-| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D (S12)                                                               |
-| decider write succeeds, refresh fails           | stale view          | dedup key prevents duplicate; next hydration catches up                                      |
-| decider action keeps failing                    | no progress         | escalate after K runs (7.4)                                                                  |
-| rule change deployed                            | old decisions stand | sweep within D; `--reset` for immediate (STORY-OP-7)                                         |
-| old `sync` and deciders both writing at cutover | duplicate beads     | prevented by construction (14 step 7): `sync` is stopped and removed before deciders `apply` |
+| Failure                                         | Effect              | Handling                                                                                  |
+| ----------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
+| a backend fails during `changes`                | partial source      | exit 2 (9.12); no `removed`/`closed` for unlisted entities; retried next poll             |
+| detail read fails for one entity                | stale snapshot      | previous snapshot kept; entity stays due                                                  |
+| concurrent writers on one entity                | lost update         | optimistic `version` check; loser re-reads and re-classifies (6.8)                        |
+| pg-desk crashes before cursor advance           | duplicate records   | harmless (idempotent deciders)                                                            |
+| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D (S12)                                                            |
+| decider write succeeds, refresh fails           | stale view          | dedup key prevents duplicate; next hydration catches up                                   |
+| decider action keeps failing                    | no progress         | escalate after K runs (7.4)                                                               |
+| rule change deployed                            | old decisions stand | sweep within D; `--reset` for immediate (STORY-OP-7)                                      |
+| old `sync` and deciders both writing at cutover | duplicate beads     | prevented by procedure (14 step 7): `sync` is stopped and removed before deciders `apply` |
 
 ## 11. Observability
 
@@ -1292,43 +1270,53 @@ SHAPES with synthetic values, never real ones.
    migration's two forced prompt edits: `pg-pr review submit` → `pg-connector pr review submit`
    (STORY-AGT-2, `modules/zm/pg-router/review-prompt.txt`).
 2. **pg-connector**: PR summary fields including `node_id` (5.1).
-3. **pg-desk** (built and tested, NOT deployed): the 9.11 migration as a runnable step; issue and
+3. **pg-desk** (built and tested; safe to deploy): the 9.11 migration as an explicit
+   `pg-desk migrate --cutover` step, kept separate from `store.Open`'s existing migrations; issue and
    thread snapshots (per `.46`, reconciled per step 0); hydration strategies; classifiers; change
    log; cursors; `changes`, `refresh`, `history`, `show`, annotation verbs; `watch:` config (9.10).
-   Old `sync`, `run`, `ledger` and `heartbeat` code stays in the tree and is deleted by step 7's
-   change. Because this code needs the migrated store, a build containing it MUST NOT be applied
-   before step 7. This step's own forced prompt edit: `pg-desk feedback ...` →
-   `pg-desk pr feedback ...` (`modules/zm/pg-router/feedback-prompt.txt`), matching 6.9's
-   verbs-move-under-type change; it ships with step 7.
-4. **Adapter** (9.4): build and test against envelope fixtures; live-exercise happens in step 7.
+   Old `sync`, `run`, `ledger` and `heartbeat` code and the old-schema store API stay working and
+   are deleted by step 7's release, so the primary branch stays deployable at every phase. The new
+   commands refuse on an old-schema store, so an early deploy changes nothing the running system
+   uses.
+4. **Adapter** (9.4): build and test against envelope fixtures.
 5. **Deciders**: port rules (7.3) including adoption — adoption's first pass MAY also backfill
    `node_id` onto an already-adopted bead's `dedup_key` where the backend now provides one (S19),
    rewriting it from `<repo>#<n>` form to `node_id` form; move the work-item contract (7.8). Prove
    parity on synthetic fixtures by running `plan` against the same fixtures fed through the old
    `sync.mode = "plan"` (12's "adoption / parity" row), including the team-PR feedback-cycle
-   exception (S16). The old `sync` code still exists at this point, which is what makes the diff
-   possible; there is no live shadow run.
+   exception (S16). The old `sync` code still works at this point, which is what makes the diff
+   possible; the parity tool is deleted with `internal/sync` in step 7. There is no live shadow run.
 6. **pg-router**: prepare (do not apply) the `pg-desk changes` sources and decider roles (9.9,
    explicit kinds only — S22), the `watch:` queries taken from today's query names, both forced
-   prompt edits, and removal of the `desk-*` ingest roles and `desk-heartbeat` (6.9, 13). The
-   loader checks (S22, orphan producer/consumer) land in `pg-router`'s own tests.
+   prompt edits (the `pg-pr review submit` and `pg-desk feedback` prompts; both ship at step 7, since
+   the roles they belong to are exercised there), and removal of the `desk-*` ingest roles and
+   `desk-heartbeat` (6.9, 13). The loader checks (S22, orphan producer/consumer) land in
+   `pg-router`'s own tests. Decider roles are prepared in `plan` form; switching to `apply` is one
+   small config change (an `apply` flag rendered into the role's argv).
 7. **Cutover, one operator-run maintenance window** (no parallel running):
-   1. Stop `sync`: disable the `desk-*` ingest roles so nothing writes beads or the store.
-   2. Back up the store file and record its path.
-   3. Apply one release containing: the 9.11 migration run against the store; deletion of pg-desk
-      `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run`, `heartbeat` and `sync.mode`; the
-      adapter; the deciders; the prepared router config and both prompt edits.
-   4. Bootstrap: `pg-desk <type> changes --reset` per watched type to hydrate every active entity.
-   5. Live-exercise per 12 with deciders in `plan` mode: at least one real `plan` output with ≥1
-      action, or a correct skip, against a live entity.
-   6. Enable decider `apply`; live-exercise: at least one applied action visible on a real work
-      item with its audit comment (7.6).
-8. **Rollback** (if step 7 fails before item 6): restore the store backup, reapply the previous
-   release, re-enable the `desk-*` roles. Anything created after the cutover is lost from pg-desk's
-   store, but adoption (7.3) makes the previous release safe to resume over beads a decider created.
-   After item 6 the same procedure applies, with the same caveat.
-   Pre-cutover `ledger` history is not carried into `change_log` or the audit trail (13) — an
-   accepted loss, and the reason the backup is the only way back.
+   1. Stop pg-router and `pg-desk serve`, so nothing writes beads or the store.
+   2. Back up the store file and record its path. Beforehand, run `pg-desk migrate --cutover` on a
+      COPY of the real store and check row counts and a `show` round trip.
+   3. Apply one release containing: deletion of pg-desk `internal/sync`, `ledger`,
+      `import-pg-pr-annotations`, `run`, `heartbeat` and `sync.mode`; the adapter; the deciders;
+      the prepared router config with both prompt edits.
+   4. Run `pg-desk migrate --cutover` against the store.
+   5. Start pg-router and `serve`; bootstrap with `pg-desk <type> changes --reset --consumer
+pg-router` per watched type, so every active entity is replayed as a `reconcile` to the
+      deciders.
+   6. Live-exercise the changed roles, with deciders in `plan` mode: the adapter (a real routed
+      item with the correct `type`/`metadata`), the review and feedback prompt roles, and at least
+      one real `plan` output with ≥1 action, or a correct skip, against a live entity.
+   7. Switch deciders to `apply` (the config flag), run `--reset` for the pg-router consumer once
+      more so the deciders see every entity again, and live-exercise: at least one applied action
+      visible on a real work item with its audit comment (7.6).
+8. **Rollback**: restore the store backup, reapply the previous release (an old binary already
+   refuses a newer schema loudly, so it cannot half-run against a migrated store), and restart
+   pg-router. Everything pg-desk recorded after the cutover is lost, and beads deciders created
+   after step 7.7 remain: the previous release's `sync` adopts them rather than duplicating them
+   (7.3), an assumption the parity fixtures cover for the PR kinds only. Pre-cutover `ledger`
+   history is not carried into `change_log` or the audit trail (13) — an accepted loss, and the
+   reason the backup is the only way back.
 
 ## 15. Glossary
 
