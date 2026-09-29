@@ -5189,6 +5189,107 @@
                 assert hasSub "plugin marketplace update" activationNoDir;
                 pkgs.runCommand "claude-settings-activation-marketplace-add-ok" { } "touch $out";
 
+              # Counterpart to test-claude-settings-activation-marketplace-add
+              # above: a marketplace REMOVED from nix declarations is never
+              # unregistered by anything in the activation script
+              # structurally, so wiring the prune step in is what closes that
+              # gap (pg2-rjfti). Pure module eval inspecting the generated
+              # activation string — no HM harness. The bats suite
+              # (test-claude-settings-prune-marketplaces) proves the SCRIPT
+              # prunes what it's told to; this proves the module TELLS it,
+              # with the FULL declared-name set (every extraKnownMarketplaces
+              # name, both directory- and github-source) — not just the
+              # directory-only subset the register step uses — and that it
+              # still runs even when there is no directory marketplace at all.
+              test-claude-settings-activation-marketplace-prune =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  mkCfg = extraKnownMarketplaces: {
+                    phillipgreenii.programs.claude-code = {
+                      enable = true;
+                      settings = {
+                        claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                        plugins = [ "some-plugin@dir-mkt" ];
+                        inherit extraKnownMarketplaces;
+                      };
+                    };
+                  };
+
+                  # A directory marketplace + a github marketplace, mirroring
+                  # the sibling add-test's fixture.
+                  activation =
+                    (evalActivation (mkCfg {
+                      dir-mkt.source = {
+                        source = "directory";
+                        path = "/home/test/.local/share/pgii-marketplaces/dir-mkt";
+                      };
+                      gh-mkt.source = {
+                        source = "github";
+                        repo = "x/y";
+                      };
+                    })).home.activation.claude-settings;
+
+                  # No directory marketplace at all — the prune step must
+                  # still run (it has nothing to do with whether a directory
+                  # marketplace is CURRENTLY declared; it exists precisely for
+                  # the case where one no longer is).
+                  activationNoDir =
+                    (evalActivation (mkCfg {
+                      gh-mkt.source = {
+                        source = "github";
+                        repo = "x/y";
+                      };
+                    })).home.activation.claude-settings;
+
+                  hasSub = needle: haystack: lib.hasInfix needle haystack;
+                in
+                assert hasSub "claude-settings-prune-marketplaces" activation;
+                assert hasSub ''"$HOME/.claude/plugins/known_marketplaces.json"'' activation;
+                # The FULL declared-name set — both directory- and
+                # github-source names — not just directoryMarketplaces.
+                assert hasSub ''["dir-mkt","gh-mkt"]'' activation;
+                assert hasSub "claude-settings-prune-marketplaces" activationNoDir;
+                assert hasSub ''["gh-mkt"]'' activationNoDir;
+                pkgs.runCommand "claude-settings-activation-marketplace-prune-ok" { } "touch $out";
+
               # Regression guard for pg2-4q1qk: the activation must hand each
               # install-plugin invocation the settings path AND that plugin's
               # Nix-declared `enabledPlugins` value, so the installer's own
@@ -6123,6 +6224,19 @@
               test-claude-settings-gc-plugin-cache = checksHelpers.testBashScripts {
                 package = claudeSettingsScripts.gcPluginCache.script;
                 tests = claudeSettingsTestSrc "test_gc_plugin_cache.bats";
+                extraInputs = [
+                  pkgs.jq
+                  pkgs.coreutils
+                ];
+              };
+
+              # pg2-rjfti: prune a directory-source known_marketplaces.json
+              # entry whose declaring nix config entry was removed AND whose
+              # target directory no longer exists. Counterpart to
+              # test-claude-settings-register-marketplace, run right after it.
+              test-claude-settings-prune-marketplaces = checksHelpers.testBashScripts {
+                package = claudeSettingsScripts.pruneMarketplaces.script;
+                tests = claudeSettingsTestSrc "test_prune_marketplaces.bats";
                 extraInputs = [
                   pkgs.jq
                   pkgs.coreutils

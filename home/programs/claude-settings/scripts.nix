@@ -81,6 +81,19 @@ let
     ];
     manPage = false;
   };
+
+  pruneMarketplaces = mkBashScript {
+    name = "claude-settings-prune-marketplaces";
+    src = ./.;
+    public = false;
+    description = "Prune stale directory-source marketplace registrations from known_marketplaces.json (pg2-rjfti)";
+    libraries = [ activation-lib ];
+    runtimeDeps = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    manPage = false;
+  };
 in
 {
   inherit
@@ -88,5 +101,6 @@ in
     installPlugin
     registerMarketplace
     gcPluginCache
+    pruneMarketplaces
     ;
 }

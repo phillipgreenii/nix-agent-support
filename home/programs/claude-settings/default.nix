@@ -142,6 +142,7 @@ let
   installPluginScript = scripts.installPlugin.script;
   registerMarketplaceScript = scripts.registerMarketplace.script;
   gcPluginCacheScript = scripts.gcPluginCache.script;
+  pruneMarketplacesScript = scripts.pruneMarketplaces.script;
 
   # DIRECTORY-source marketplaces from extraKnownMarketplaces. `claude plugin
   # marketplace update` only refreshes marketplaces already in the registry, so
@@ -560,6 +561,21 @@ in
             '') directoryMarketplaces
           )}
         ''}
+
+        # Counterpart to the registration above: a marketplace REMOVED from
+        # nix declarations is never unregistered by anything above, so its
+        # known_marketplaces.json entry lingers pointing at a directory that
+        # no longer exists and fails to refresh on every subsequent apply
+        # (pg2-rjfti). Warns always; only mutates known_marketplaces.json when
+        # CLAUDE_SETTINGS_PRUNE_STALE_MARKETPLACES is set, mirroring
+        # claude-settings-install-plugin's CLAUDE_SETTINGS_PRUNE_STALE_SCOPE
+        # opt-in style. The declared-name set is EVERY extraKnownMarketplaces
+        # name (any source type) for this generation, not just
+        # directoryMarketplaces, so a marketplace whose source type merely
+        # changed is never mistaken for a removed one.
+        ${pruneMarketplacesScript}/bin/claude-settings-prune-marketplaces \
+          "$HOME/.claude/plugins/known_marketplaces.json" \
+          '${builtins.toJSON (builtins.attrNames cfg.extraKnownMarketplaces)}'
 
         # Each install is followed, INSIDE the install script, by a re-assert of
         # this plugin's Nix-declared `enabledPlugins` value — because
