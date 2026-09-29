@@ -1707,6 +1707,30 @@
                 ];
               };
 
+              # claude-extended-tool-approver-spec-lint — Phase 1 packet 1.3
+              # (tc-o14i5.2.3): runs the new `lint --embedded` CLI subcommand
+              # (internal/speclint, cmd_lint.go) over packet 1.2's 45
+              # generated embedded built-in command specs
+              # (internal/embeddedspecs/data/*.json), failing the check on
+              # any HARD finding — citation-presence is WARN-staged for
+              # exactly this embedded/builtin layer (Phase 3 back-fill turns
+              # it HARD later), the danger-shaped-flag-role and
+              # UnknownFlagInert-justification checks are skipped for the
+              # same builtin layer (see internal/speclint's doc.go for why:
+              # they are authorial-judgment checks over hand-written specs,
+              # and the 45 built-ins are a mechanical marshalling of
+              # cmddesc/registry.go's already-reviewed schemas, not
+              # hand-written at the spec-format level), and
+              # overrides-conflict is structurally impossible with only one
+              # layer loaded. `lint` itself exits 1 on any HARD finding, so
+              # this check needs no extra assertion beyond running it.
+              claude-extended-tool-approver-spec-lint =
+                pkgs.runCommand "check-claude-extended-tool-approver-spec-lint" { }
+                  ''
+                    ${pkgs.claude-extended-tool-approver}/bin/claude-extended-tool-approver lint --embedded
+                    touch $out
+                  '';
+
               # plugin-conformance — pg2-amzvw: wires pg2-z3u4f's
               # plugin-conformance-check tool into `nix flake check` against
               # THIS repo's own claude-marketplace/ tree. Every extracted

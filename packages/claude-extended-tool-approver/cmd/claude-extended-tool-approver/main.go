@@ -46,6 +46,7 @@ var knownSubcommands = map[string]bool{
 	"baseline":             true,
 	"compare":              true,
 	"evaluate":             true,
+	"lint":                 true,
 	"mark-excluded":        true,
 	"report":               true,
 	"set-correct-decision": true,
@@ -77,6 +78,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newBaselineCmd())
 	root.AddCommand(newCompareCmd())
 	root.AddCommand(newEvaluateCmd())
+	root.AddCommand(newLintCmd())
 	root.AddCommand(newMarkExcludedCmd())
 	root.AddCommand(newReportCmd())
 	root.AddCommand(newSetCorrectDecisionCmd())
