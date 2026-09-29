@@ -1,21 +1,18 @@
 # Entity change flow: pg-connector → pg-desk → pg-router → deciders — design
 
-- **Date**: 2026-09-29 (revision 2: independent review folded in; contracts and user stories
-  added)
-- **Status**: DRAFT for operator review — NOT approved. Produced in the interactive brainstorming
-  session tracked by bead `pg2-2j5ac.49`. Nothing here authorizes implementation.
-- **Markers**: **Decided** = operator confirmed in session (dated, section 3); **Recommended** =
-  author's recommendation awaiting an operator ruling; **Open** = unresolved (section 16).
-- **Supersedes**: `2026-09-25-pr-flow-reconciler-proposal.md` (same directory). Resolves questions
-  8.1, 8.3 and 8.4 of `2026-09-25-pg-desk-cli-and-boundary-reconsideration-notes.md`.
-- **Amends (if approved)**: `2026-09-09-pg-desk-and-connector-discovery-design.md` D8 (pg-desk
-  mints beads) and the sync part of D9 (gather → interpret → sync in one process). D7 and D10 still
-  hold. Approval MUST be recorded as an explicit amendment of that design, and accepted
-  conclusions MUST be captured in an ADR before implementation (`docs/superpowers/specs/` files are
-  not durable citation targets).
-- **Overlaps**: `2026-09-23-pg-desk-generic-entity-pipeline-design.md` (`pg2-2j5ac.46`, issue-entity
-  ingest). This design needs issue and thread entities stored in pg-desk; the two designs MUST be
-  reconciled before either is implemented (section 15, step 0).
+- **Date**: 2026-09-29.
+- **Status**: DRAFT for operator review — NOT approved; nothing here authorizes implementation.
+  Approval MUST be recorded as an ADR (migration step 0, section 15) amending the 2026-09-09 design
+  (`2026-09-09-pg-desk-and-connector-discovery-design.md`) D8 and the sync part of D9 — D7 and D10
+  still hold. This design MUST also be reconciled with `pg2-2j5ac.46`
+  (`2026-09-23-pg-desk-generic-entity-pipeline-design.md`) before either implements issue/thread
+  storage (section 15 step 0): both need issue and thread entities held in pg-desk. Per this
+  repo's citation conventions, `docs/superpowers/specs/` files (including this one) are not
+  durable citation targets — the ADR is.
+- **Markers**: **Decided** = recorded in the decision log with a date and rationale (section 3);
+  **Recommended** = the design's own recommendation, accepted but not itself a separate operator
+  ruling. Every question this design raised now has a recorded decision (section 3); there is no
+  open-questions section. A glossary of terms used throughout is section 16.
 
 ## 1. Purpose and problem
 
@@ -36,8 +33,8 @@ Today that is wired the other way round and is PR-centric:
   metadata keys) is implicit.
 - pg-connector's PR summary already carries `head_sha`, `mergeable`, `merge_state_status` and
   `checks_rollup` (`pkg/schema/pr.go`), and `changes` hashes the whole summary, so pushes, CI and
-  conflict changes are already detected. It lacks `updated_at` and any review/comment signal, so
-  new comments and reviews are missed.
+  conflict changes are already detected. It lacks `updated_at`, a stable backend id, and any
+  review/comment signal, so new comments and reviews are missed.
 - The review role still posts through `pg-pr review submit`; pg-connector has no review write verb.
 
 ## 2. Goals and non-goals
@@ -104,7 +101,7 @@ flowchart TD
     RT --> DC
     DC -->|"reads"| STO
     DC -->|"pg-desk-owned writes"| STO
-    DC -->|"external writes (path: OQ-1)"| BK
+    DC -->|"external writes (path: S10)"| BK
 ```
 
 | Component       | Owns                                                                                                                                           | MUST NOT                                                                             |
@@ -152,118 +149,148 @@ sequenceDiagram
     X->>D: pr show ID --json (snapshot, no network)
     D-->>X: composite view
     X->>D: pg-desk-owned writes (annotations, decider state)
-    X->>C: external writes (path: OQ-1)
+    X->>C: external writes (path: S10)
 ```
 
-## 3. Decisions recorded in session
+## 3. Decision log
 
-| #   | Decision                                                                                                                                  | Date                       |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| S1  | pg-desk is a caching/decorating layer over pg-connector, multi-entity from the start                                                      | 2026-09-25, restated 09-29 |
-| S2  | Decisions move out of pg-desk into deciders; deciders read through pg-desk                                                                | 2026-09-28                 |
-| S3  | A dry-run `plan` lives on the decider CLI, not on pg-desk                                                                                 | 2026-09-28                 |
-| S4  | pg-router's timer polls pg-desk for changes; pg-desk returns one event per changed entity with its change kinds; events route to deciders | 2026-09-29                 |
-| S5  | pg-connector implementations produce most deltas; pg-desk adds changes they cannot see                                                    | 2026-09-29                 |
-| S6  | `pg-desk changes` pulls fresh data from pg-connector by default; pg-router stays the only clock                                           | 2026-09-29                 |
-| S7  | Events carry a reference and change kinds, not the full entity; deciders read the snapshot from pg-desk                                   | 2026-09-29                 |
-| S8  | The sweep MUST NOT replay everything; a duration-based approach replaces `--full`                                                         | 2026-09-29                 |
-| S9  | There may be deciders for every entity type                                                                                               | 2026-09-29                 |
+Every decision this design depends on, merged into one log. **Operator ruling** rows were
+confirmed by the operator in session; **Derived** rows follow mechanically from an already-decided
+goal, invariant or fact and are recorded here for traceability rather than re-argued; **Fact
+correction** rows correct a claim against verified code, not a decision at all.
+
+| #   | Decision                                                                                                                                                                                                                              | Decided by / derived from                                                                            | Date                       | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S1  | pg-desk is a caching/decorating layer over pg-connector, multi-entity from the start.                                                                                                                                                 | Operator, in session                                                                                 | 2026-09-25, restated 09-29 | Generalizes pg-desk beyond "pg-pr's replacement" so G1 holds from day one, not as a later retrofit.                                                                                                                                                                                                                                                                                                                                                                |
+| S2  | Decisions move out of pg-desk into deciders; deciders read through pg-desk.                                                                                                                                                           | Operator, in session                                                                                 | 2026-09-28                 | Enforces G5 (pg-desk MUST NOT decide) and makes a decision independently testable and previewable (G7) without running the ingest pipeline.                                                                                                                                                                                                                                                                                                                        |
+| S3  | A dry-run `plan` lives on the decider CLI, not on pg-desk.                                                                                                                                                                            | Operator, in session                                                                                 | 2026-09-28                 | pg-desk has no rule knowledge to preview (S2); `plan` is a decider-owned view of its own rules (8.2).                                                                                                                                                                                                                                                                                                                                                              |
+| S4  | pg-router's timer polls pg-desk for changes; pg-desk returns one event per changed entity with its change kinds; events route to deciders.                                                                                            | Operator, in session                                                                                 | 2026-09-29                 | Keeps pg-router the sole scheduler (G4) while pg-desk stays the sole source of semantic change information (G3).                                                                                                                                                                                                                                                                                                                                                   |
+| S5  | pg-connector implementations produce most deltas; pg-desk adds changes they cannot see.                                                                                                                                               | Operator, in session                                                                                 | 2026-09-29                 | Realizes G2 without duplicating detection logic pg-connector already gets cheaply from summary fields (5.1).                                                                                                                                                                                                                                                                                                                                                       |
+| S6  | `pg-desk changes` pulls fresh data from pg-connector by default; pg-router stays the only clock.                                                                                                                                      | Operator, in session                                                                                 | 2026-09-29                 | Avoids a second polling clock inside pg-desk (G4) while still letting an operator force a fresh read on demand (STORY-OP-2's `--refresh`).                                                                                                                                                                                                                                                                                                                         |
+| S7  | Events carry a reference and change kinds, not the full entity; deciders read the snapshot from pg-desk.                                                                                                                              | Operator, in session                                                                                 | 2026-09-29                 | Keeps the change feed small and single-sourced — the entity's current truth lives in exactly one place (the store), never duplicated into the event payload.                                                                                                                                                                                                                                                                                                       |
+| S8  | The sweep MUST NOT replay everything; a duration-based approach replaces `--full`.                                                                                                                                                    | Operator, in session                                                                                 | 2026-09-29                 | Bounds the cost of catching missed events and rule changes (9.4) without a full-replay storm on every poll.                                                                                                                                                                                                                                                                                                                                                        |
+| S9  | There may be deciders for every entity type.                                                                                                                                                                                          | Operator, in session                                                                                 | 2026-09-29                 | Keeps the decider contract (8.1) generic across types (G1); day one still ships only PR rules (S20).                                                                                                                                                                                                                                                                                                                                                               |
+| S10 | Decider external writes go DIRECTLY to pg-connector, then `pg-desk <type> refresh <id>`. pg-desk is not a write-through repository for external systems; pg-desk-owned data (annotations, decider state) is still written to pg-desk. | Operator ruling                                                                                      | 2026-09-29                 | A write-through repository would make pg-desk re-implement every backend's write path pg-connector already has; a direct write plus refresh keeps pg-desk's contract (hold snapshots, decide nothing) and costs one extra call per decider write (8.4).                                                                                                                                                                                                            |
+| S11 | Breaking contract changes ship as one coordinated cutover, no dual-version serving: every component is deployed together by the same home-manager apply.                                                                              | Derived, from the deployment topology                                                                | 2026-09-29                 | pg-connector, pg-desk, pg-router and the deciders all ship through one apply, so no independent-rollout path ever needs two contract versions served at once; the additive-change rule already in section 10's preamble is the only versioning policy this needs.                                                                                                                                                                                                  |
+| S12 | Advance the cursor after flush plus an age-based sweep; no explicit ack.                                                                                                                                                              | Derived, from G6 and 9.2's duplicate-tolerance requirement                                           | 2026-09-29                 | Deciders are idempotent (G6) and consumers already tolerate duplicates/reordering (9.2); the sweep (9.4) already bounds the loss window, no user story needs faster-than-sweep recovery, and STORY-OP-7's `--reset` covers "I need this now." An ack protocol would buy correctness this design does not need.                                                                                                                                                     |
+| S13 | Own PRs (mine/co-owned) get BOTH `fix-ci` and `resolve-conflict` work kinds, labeled `worker-ready` so the worker role acts on them; `anchor.priority`'s conflict nudge stays.                                                        | Operator ruling                                                                                      | 2026-09-29                 | The ZR deployment set's `JOURNEY-ZR-7` requires the worker role to iterate until CI is green, but the worker only consumes `worker-ready` work items; with neither kind existing, nothing ever produced that work.                                                                                                                                                                                                                                                 |
+| S14 | Ready-to-land is an annotation, never a work item.                                                                                                                                                                                    | Derived, from the landing gate                                                                       | 2026-09-29                 | The ZR deployment set's `INV-GOV-4`/`INV-GOV-5` forbid any agent-reachable merge path and require the operator's own, non-self-grantable permission to land. A work item is something a role can act on; making "ready to land" one would hand a worker role exactly the merge-adjacent job the gate exists to keep out of its reach.                                                                                                                              |
+| S15 | `hide` stops ALL decider actions on that entity until unhidden; `wip` stays view-only.                                                                                                                                                | Operator ruling                                                                                      | 2026-09-29                 | Differs from current behavior: today neither annotation affects bead writes (`internal/interpret/interpret.go`: "Hidden and WIP are NOT interpreted"). An operator hiding something expects it to stop, not merely to stop appearing in `open`.                                                                                                                                                                                                                    |
+| S16 | Team PRs get only an operator-pending review; `process-feedback` cycles are gated to mine/co-owned PRs (merges the prior OQ-7 and OQ-13).                                                                                             | Derived, from `JOURNEY-ZR-8` plus the feedback consumer's own filter                                 | 2026-09-29                 | `JOURNEY-ZR-8` says a teammate's PR is never modified beyond the draft review, but a feedback cycle leads to worker commits — an edit path that forbids. The feedback-cycle consumer also only ever reads `mine`-labelled cycles, so today's ungated team-PR cycles are already inert. Differs from current behavior: `internal/sync/rules.go`'s `needsCycle` has no ownership gate — a documented parity exception the migration parity check (13, 15) MUST list. |
+| S17 | Decider packaging is an implementer choice; RECOMMENDED: one binary with a rule registry selected by `<type>`.                                                                                                                        | Derived, from avoiding N copies of shared plumbing                                                   | 2026-09-29                 | The read/apply/audit plumbing (8.1, 8.4, 8.6) is identical across types; one binary needs it written once. A registry keyed by `<type>` still lets a type's rule set be added without touching another's.                                                                                                                                                                                                                                                          |
+| S18 | The only day-one time-based change source is thread `resolved` (no reply within `watch.thread.active_window`); others are added only when a story needs one.                                                                          | Derived, from minimality                                                                             | 2026-09-29                 | No user story (section 4) needs a different time-based signal yet, and `active_window` (6.1, 10.10) already exists for exactly this one.                                                                                                                                                                                                                                                                                                                           |
+| S19 | Add a stable backend id (`node_id`) to pg-connector's `schema.PR`; deciders key dedup/adoption matching on it when present.                                                                                                           | Derived, from a precedent already in the GitHub backend                                              | 2026-09-29                 | The GitHub backend already fetches `NodeID` for comments and reviews (`cmd/pg-connector-pr-github/internal/github/github.go`); extending the same field to the PR object itself is a small, precedented addition, and a stable id survives a repo rename or transfer where `<repo>#<n>` does not.                                                                                                                                                                  |
+| S20 | No issue or thread decider ships on day one.                                                                                                                                                                                          | Derived, from S9's "may," not "must"                                                                 | 2026-09-29                 | Today's issue/thread roles only re-interpret linked PRs; S9 permits per-type deciders without requiring them, and no story yet motivates independent issue/thread rules. pg-desk still watches, hydrates and logs issues/threads regardless (6.1, 8.10).                                                                                                                                                                                                           |
+| S21 | Keep the `merge-request` anchor.                                                                                                                                                                                                      | Derived, from the worker prompt's own resolution path plus the journeys' tracking-object requirement | 2026-09-29                 | The worker prompt resolves a PR via its parent anchor's metadata, and the ZR deployment set's journeys need a claimable per-PR tracking object that pre-exists any specific work kind (`INV-TRACK-1`); dropping the anchor would push that identity data onto every child kind redundantly, with no single parent to hang from (8.3).                                                                                                                              |
+| S22 | pg-router binds match by exact string equality; there is no `pr.*` wildcard.                                                                                                                                                          | Fact correction, verified against code                                                               | 2026-09-29                 | `packages/pg-router/internal/orchestrator/listener.go`'s `Matches` does `b == evt.Type`, and `internal/config/config.go`'s orphan checks compare emitted/bound strings the same way — a wildcard bind would silently match nothing. Every source's `emits` and every role's `binds` MUST list each `<type>.<kind>` explicitly (9.3, 10.9).                                                                                                                         |
 
 ## 4. Actors and user stories
 
 Actors follow the companion notes (section 3 there): **Operator**, **pg-router**, **Monitoring**,
 **Debugging**. Two participants are added because this design introduces them as distinct
 callers: **Decider** (automated rule runner) and **Agent role** (a pg-router role session
-executing a work item). Stories use `STORY-<ACTOR>-N`; each lists its acceptance criteria and the
-sections that realize it.
+executing a work item). Stories use `STORY-<ACTOR>-N`; each lists its acceptance criteria, the
+sections that realize it, and the section-13 test row(s) that cover it.
 
 ### Operator
 
 - **STORY-OP-1 — See what needs me.** As the operator I open everything that currently needs my
   attention, straight from the store, with no daemon.
   _Accept_: `pg-desk <type> open` with criteria lists matching entities from local snapshots;
-  staleness is shown per entity (`as_of`). _Sections_: 6.7, 10.5.
+  staleness is shown per entity (`as_of`). _Sections_: 6.7, 10.5. _Test_: "console CLI".
 - **STORY-OP-2 — Look at one entity.** I view one PR/issue/thread with its decorations, my
   annotations and its linked work, and can force it fresh.
   _Accept_: `pg-desk <type> show <id>` returns the composite view (10.5) including linked work and
-  both `as_of` and `links_as_of`; `--refresh` hydrates first. _Sections_: 6.7, 10.5.
+  both `as_of` and `links_as_of`; `--refresh` hydrates first. _Sections_: 6.7, 10.5. _Test_:
+  "console CLI"; "contracts".
 - **STORY-OP-3 — Know what will happen next.** For one entity I see which work the deciders would
   create/reopen/close and why, without anything being written.
   _Accept_: `<decider> plan <type> <id>` prints each action with rule id and facts, or
-  `no actions`. _Sections_: 8.2, 10.7.
+  `no actions`. _Sections_: 8.2, 10.7. _Test_: "plan".
 - **STORY-OP-4 — Suppress noise without losing anything.** I hide an entity, mark it WIP,
   suppress one kind of work on it, or dismiss one work item, and it stays that way until the
   situation materially changes.
-  _Accept_: annotations persist across polls; a person-closed work item is not re-created for the
-  same head/digest; a new head/digest re-arms it. _Sections_: 8.7, 10.6.
+  _Accept_: hiding an entity yields zero actions from every rule (S15); `wip` never changes what
+  is created; `suppress --kind` yields zero actions for that kind only, every other kind still
+  evaluating; a person-closed work item is not re-created for the same head/digest, and a new
+  head/digest re-arms it (precedence order, 8.3). _Sections_: 8.3, 8.7, 10.6. _Test_: "deciders";
+  "annotations".
 - **STORY-OP-5 — Force a re-review.** I ask for a fresh review of the current head even though it
   was already reviewed.
   _Accept_: `pg-desk pr force-review <id>` makes the next PR decider run reopen/create the review
-  item once. _Sections_: 8.7.
+  item once, and consuming it is recorded so a second run does not repeat it. _Sections_: 8.5, 8.7.
+  _Test_: "annotations"; "deciders".
 - **STORY-OP-6 — Record my call on feedback.** I mark a comment handled / won't-fix / no-action so
   it drops off "unaddressed".
   _Accept_: `pg-desk pr feedback set` writes a disposition annotation; the next decider run sees
-  the digest change. _Sections_: 6.5, 10.6.
+  the digest change. _Sections_: 6.5, 10.6. _Test_: "annotations"; "deciders".
 - **STORY-OP-7 — Apply a rule change now.** After changing decider rules I make them take effect
   immediately rather than within the sweep window.
   _Accept_: `pg-desk <type> changes --reset --consumer pg-router` replays every active entity as
-  `reconcile`. _Sections_: 6.2, 9.4.
+  `reconcile`. _Sections_: 6.2, 9.4. _Test_: "change log and cursors".
 
 ### pg-router
 
 - **STORY-RTR-1 — Poll for changes.** On a timer per entity type I ask pg-desk what changed and
   receive one record per changed entity, with a stable exit code even when a backend is degraded.
-  _Accept_: `pg-desk <type> changes --consumer pg-router` returns the 10.3 envelope; exit 0/2/3;
-  a degraded backend never yields `removed`/`closed`. _Sections_: 6.2, 9, 10.2, 10.3.
+  _Accept_: `pg-desk <type> changes --consumer pg-router` returns the 10.3 envelope; exit codes
+  per 10.12; a degraded backend never yields `removed`/`closed`. _Sections_: 6.2, 9, 10.2, 10.3,
+  10.12. _Test_: "degraded sources".
 - **STORY-RTR-2 — Route to deciders.** I turn each record into one routed item per change kind and
   dispatch it to the decider roles subscribed to that `<type>.<kind>`.
-  _Accept_: the adapter (10.4) emits items; routing config (10.9) binds kinds to decider roles.
-  _Sections_: 9.3, 10.4, 10.9.
+  _Accept_: the adapter (10.4) emits items; routing config (10.9) binds each kind to decider roles
+  explicitly — no wildcard bind is recognized (S22). _Sections_: 9.3, 10.4, 10.9. _Test_: "routing
+  config"; "contracts".
 
 ### Decider
 
 - **STORY-DEC-1 — Decide from current state.** Given a routed item I read the current composite
   view and compute the actions needed, deterministically.
-  _Accept_: `decide(view)` is pure; the same view always yields the same actions; an empty list
-  when work matches. _Sections_: 8.1, 10.7.
+  _Accept_: `decide(view)` is pure; the same view always yields the same actions regardless of
+  which kind routed it; an empty list when work matches. _Sections_: 8.1, 8.3, 10.7. _Test_:
+  "deciders".
 - **STORY-DEC-2 — Apply safely.** I apply actions without creating duplicates, even with stale
   cache, duplicate events or a crash mid-apply.
-  _Accept_: dedup key lookup before create; best-effort ordered apply; escalation after K
-  consecutive failures. _Sections_: 8.4, 10.8.
+  _Accept_: dedup key lookup (including a `node_id`-based key, S19) before create; best-effort
+  ordered apply; escalation after K consecutive failures. _Sections_: 8.4, 10.8. _Test_:
+  "deciders".
 - **STORY-DEC-3 — Remember my own state.** I persist data that exists nowhere else (e.g.
   consumed force-review) in pg-desk.
   _Accept_: `pg-desk <type> annotate ... --origin decider:<name>` writes an annotation and logs
-  `annotation_changed`. _Sections_: 8.5, 10.6.
+  `annotation_changed`. _Sections_: 8.5, 10.6. _Test_: "annotations".
 
 ### Agent role
 
 - **STORY-AGT-1 — Act on a work item without extra lookups.** A review / feedback / worker role
   finds everything it needs (repo, number, branch, head SHA, parent) on the work item.
   _Accept_: the work-item contract (10.8) lists every key roles read; role prompts cite it.
-  _Sections_: 8.8, 10.8.
+  _Sections_: 8.8, 10.8. _Test_: "contracts".
 - **STORY-AGT-2 — Post a review without pg-pr.**
   _Accept_: `pg-connector pr review submit` exists with the 10.1 contract; the review prompt uses
-  it. _Sections_: 5.2, 10.1.
+  it, not `pg-pr review submit`. _Sections_: 5.2, 10.1. _Test_: "review submit".
 
 ### Monitoring
 
 - **STORY-MON-1 — Scrape health.** I scrape per-type change volume, hydration failures, due
   backlog and consumer lag.
-  _Accept_: metrics in section 12 exposed on `serve`'s `/metrics`. _Sections_: 12.
+  _Accept_: metrics in section 12 exposed on `serve`'s `/metrics`. _Sections_: 12. _Test_:
+  "observability".
 
 ### Debugging
 
 - **STORY-DBG-1 — Confirm the chain is wired.** Before trusting anything I confirm config
   resolves, watched queries exist in pg-connector, every consumer cursor advances, and which
   deciders subscribe to each type.
-  _Accept_: `pg-desk doctor` checks 12's list. _Sections_: 12.
+  _Accept_: `pg-desk doctor` checks section 12's list. _Sections_: 12. _Test_: "observability".
 - **STORY-DBG-2 — Explain a work item.** I trace a work item back to the decider, rule and facts
   that created or last changed it, and the change record that triggered that run.
   _Accept_: audit comment on the item (8.6) plus change-log `origin` (10.2) plus
-  `pg-desk <type> history <id>` listing the entity's change records. _Sections_: 8.6, 10.2.
+  `pg-desk <type> history <id>` listing the entity's change records, newest first.
+  _Sections_: 8.6, 10.2. _Test_: "audit"; "change log and cursors".
 - **STORY-DBG-3 — Explain a missing work item.** I find out why an entity did NOT get work.
-  _Accept_: `plan` shows no action and why (rule not matched, suppressed, hidden, parked);
-  `history` shows whether a change record was ever logged. _Sections_: 8.2, 10.2.
+  _Accept_: `plan` shows no action and the exact stopping point in the precedence order (8.3):
+  hidden, suppressed kind, person-dismissed, or rule not matched; `history` shows whether a change
+  record was ever logged. _Sections_: 8.2, 8.3, 10.2. _Test_: "plan"; "change log and cursors".
 
 ## 5. pg-connector
 
@@ -273,13 +300,16 @@ sections that realize it.
 (`cmd/pg-connector/ledger.go` `canonicalHash`), so any summary field that moves makes a change
 visible. Current coverage and the additions needed:
 
-| Type   | Already in summary                                                                                   | Add                                                              | Why                                              |
-| ------ | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------ |
-| pr     | `state`, `draft`, `merged`, `labels`, `head_sha`, `mergeable`, `merge_state_status`, `checks_rollup` | `updated_at`, `review_decision`, `comment_count`, `review_count` | new comments and reviews otherwise move no field |
-| issue  | `state`, `assignee`, `labels`, `priority`, `updated_at`, `due_date`                                  | none                                                             | —                                                |
-| thread | `last_reply_at`, `reply_count`, `participants`                                                       | none                                                             | —                                                |
+| Type   | Already in summary                                                                                   | Add                                                                         | Why                                                                                                       |
+| ------ | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| pr     | `state`, `draft`, `merged`, `labels`, `head_sha`, `mergeable`, `merge_state_status`, `checks_rollup` | `updated_at`, `review_decision`, `comment_count`, `review_count`, `node_id` | new comments and reviews otherwise move no field; `node_id` gives dedup/adoption a rename-proof key (S19) |
+| issue  | `state`, `assignee`, `labels`, `priority`, `updated_at`, `due_date`                                  | none                                                                        | —                                                                                                         |
+| thread | `last_reply_at`, `reply_count`, `participants`                                                       | none                                                                        | —                                                                                                         |
 
-A backend that cannot provide a field cheaply MUST leave it empty rather than fabricate it.
+A backend that cannot provide a field cheaply MUST leave it empty rather than fabricate it. The
+GitHub backend already fetches an equivalent node id for comments and reviews
+(`cmd/pg-connector-pr-github/internal/github/github.go`); adding it for the PR object itself is
+the same mechanism, applied one level up.
 
 ### 5.2 Review write verb (REQUIRED, independent)
 
@@ -304,8 +334,8 @@ while it is non-terminal in its source system (open PR; issue not in a terminal 
 a reply inside `thread_active_window`). Only active entities are swept (9.4).
 
 The watched set (what pg-desk keeps fresh and shows) is independent of decider subscriptions (what
-pg-router routes). An entity MAY be watched with no decider subscribed; its records are still
-logged.
+pg-router routes). An entity MAY be watched with no decider subscribed to its type at all (8.10);
+its records are still logged.
 
 ### 6.2 `pg-desk <type> changes`
 
@@ -315,8 +345,8 @@ Contract: 10.2. Default (pull-through): for each watched query of `<type>`, run
 the caller's cursor, and advance it after the output is flushed.
 
 `--cached` skips the pg-connector call and hydration. `--reset` replays every active entity to
-that consumer as `reconcile` records — an explicit operator action (STORY-OP-7). `--limit` caps
-records per call.
+that consumer as `reconcile` — an explicit operator action (STORY-OP-7). `--limit` caps records
+per call.
 
 ### 6.3 Hydration (Strategy per type)
 
@@ -328,6 +358,10 @@ records per call.
 
 A failed detail read for one entity leaves its previous snapshot in place and logs nothing for it;
 the entity stays due and is retried next poll.
+
+Hydration and classification run for every watched entity regardless of whether any decider
+subscribes to its type or kind (6.1). An issue or thread with no decider (8.10) is still hydrated,
+classified and logged exactly as configured — only routing (9.3) has nothing to send it to.
 
 ### 6.4 Classification (Strategy per type)
 
@@ -349,7 +383,8 @@ Written to the same log with `origin: pg-desk` (or the annotating decider):
   `annotate`) append `annotation_changed` for their entity immediately;
 - a linked entity's change appends `link_changed` (for a PR's work item: `work_changed`) to every
   entity linked to it via xref;
-- time-based conditions (OQ-9).
+- time-based conditions: thread `resolved` only, on day one (S18) — a thread with no reply inside
+  `watch.thread.active_window` (10.10) appends `resolved`.
 
 ### 6.6 Store
 
@@ -394,7 +429,7 @@ sweep inside `changes`.
 | Verb                                                                | Status                 | Contract                                                       |
 | ------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
 | `pg-desk <type> changes`                                            | new                    | 10.2                                                           |
-| `pg-desk <type> refresh <id>`                                       | new (replaces `run`)   | hydrates one entity; exit 0/2/3                                |
+| `pg-desk <type> refresh <id>`                                       | new (replaces `run`)   | hydrates one entity; exit codes: 10.12                         |
 | `pg-desk <type> show <id>`                                          | changed                | 10.5                                                           |
 | `pg-desk <type> open [<id> \| criteria]`                            | changed                | companion notes section 7                                      |
 | `pg-desk <type> history <id> [--limit N]`                           | new                    | change records for one entity, newest first, 10.2 record shape |
@@ -423,6 +458,12 @@ A decider is registered for one entity type and a set of change kinds (always in
    and the facts it keyed on;
 3. apply them (8.4), or print them (`plan`, 8.2).
 
+`decide(view)` is a pure function of the view alone (STORY-DEC-1) — it does not branch on which
+change kind caused pg-router to route the item. This is deliberate: at-least-once, possibly
+reordered or coalesced delivery (9.2) means the routed kind is only ever a hint that something
+changed, never a reliable description of what; every routed item re-derives the full action set
+from current state, which is also what makes `decide` idempotent (G6).
+
 CLI contract: 10.7.
 
 ### 8.2 `plan` (Decided, S3)
@@ -438,41 +479,67 @@ actions:
   create  fix-ci           rule=fixci.failing-on-head   check "unit" failed on 9f3c1e2
 
 skipped:
-  conflict.present  not matched  mergeable=MERGEABLE
+  conflict.present       not matched  mergeable=MERGEABLE
+  fixci.failing-on-head  suppressed   kind=fix-ci
 ```
 
-`skipped` lists every rule evaluated that produced no action and why (not matched, suppressed,
-hidden, parked, already satisfied), which answers STORY-DBG-3.
+`skipped` lists every rule evaluated that produced no action and why — one of the four
+precedence-order stops in 8.3 (hidden, suppressed kind, person-dismissed) or "not matched" — which
+answers STORY-DBG-3.
 
-### 8.3 PR deciders (rules)
+### 8.3 PR decider rules (single source for all PR rule behavior)
 
 _Ported_ rows reproduce pg-desk's current `internal/sync` behavior (`internal/sync/rules.go`,
-`docs/behavior/pg-desk/sync.md` "Rules" and "Adoption"); _new_ rows are proposals.
+`docs/behavior/pg-desk/sync.md` "Rules" and "Adoption"). The **Behavior** column states, for every
+row, whether it matches today's `sync` or differs from it — this table is the only place PR rule
+behavior is specified; nothing elsewhere in this document restates it.
 
-| Rule id                   | Status    | Subscribes to                                   | Condition → action                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | --------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `all.closed`              | ported    | `closed`, `merged`                              | PR merged/closed → `close` anchor and every open direct child                                                                                                                                                                                                                                                          |
-| `all.reopened`            | new       | `reopened`                                      | PR open and anchor closed → `reopen` anchor (today the anchor is never reopened); child rules then re-evaluate                                                                                                                                                                                                         |
-| `anchor.lazy`             | ported    | any                                             | a child is needed and no anchor → `create` anchor (`merge-request`, title `<repo>#<n>: <title>`)                                                                                                                                                                                                                       |
-| `anchor.backfill`         | ported    | any                                             | adopted anchor lacks `repo`/`pr_number` → `update` metadata once                                                                                                                                                                                                                                                       |
-| `anchor.priority`         | ported    | `mergeability_changed`, `reconcile`             | mine/co-owned + conflict → raise; team → lower; baseline stashed in `pbase:<n>`, restored when cleared → `update`                                                                                                                                                                                                      |
-| `review.head-advanced`    | ported    | `opened`, `head_changed`, `draft_changed`       | qualifying = (mine or co-owned, draft included) or (team and not draft). Qualifying and no review item → `create` `review-pr: <repo>#<n>`. Qualifying, item closed, and `head_sha` ≠ item's reviewed head → `reopen` with new `head_sha` and refresh metadata. Item open → no action                                   |
-| `feedback.digest-changed` | ported    | `feedback_changed`                              | any ownership with unaddressed comments (no ownership gate today; `mine` label only when mine/co-owned). No open cycle → `create` `process-feedback: <repo>#<n>` with `fbsum:<digest>`; open cycle with another digest → `update`, add new and remove stale `fbsum:` labels. Whether team PRs should get cycles: OQ-13 |
-| `fixci.failing-on-head`   | new, OQ-4 | `ci_changed`, `head_changed`                    | mine/co-owned, CI failing on head, none open for this head → `create`                                                                                                                                                                                                                                                  |
-| `conflict.present`        | new, OQ-4 | `mergeability_changed`                          | mine/co-owned, conflicting, none open → `create`                                                                                                                                                                                                                                                                       |
-| `land.ready`              | new, OQ-5 | `ci_changed`, `review_changed`, `draft_changed` | mine/co-owned, green + approved + not draft → `annotate` ready-to-land, not a work item                                                                                                                                                                                                                                |
+Each rule's **Subscribes to** column names the change kinds whose delivery is _documentation_ of
+when that rule's condition typically changes — it is not a separate routing filter. Routing (9.3)
+binds the whole PR decider role to the union of every rule's subscribed kinds (10.9); once routed
+for any reason, `decide(view)` evaluates every rule against the current view (8.1), so the action
+set produced is always whatever current state warrants, never gated by which kind triggered
+delivery.
+
+**Order of precedence**, evaluated before any rule below runs:
+
+1. **hidden** (`annotations.hidden`, S15) — the entire entity is skipped; no rule runs, no action
+   is produced; only hydration and annotation writes continue. Differs from current behavior:
+   today `hide` has no effect on writes at all (`internal/interpret/interpret.go`: "Hidden and WIP
+   are NOT interpreted").
+2. **suppressed kind** (`suppress.<kind>`, 10.6) — only that kind is skipped; every other kind
+   still evaluates normally.
+3. **person-dismissed** — a work item of that kind closed by someone other than the decider actor
+   is treated as dismissed for the current head (per-head kinds) or digest (feedback); a new head
+   or digest re-arms it (8.7).
+4. **rule** — otherwise the row below applies.
+
+| Rule id                   | Behavior                                                                                                           | Subscribes to                                        | Condition → action                                                                                                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `all.closed`              | same as current                                                                                                    | `closed`, `merged`                                   | PR merged/closed → `close` anchor and every open direct child                                                                                                                                                                                                   |
+| `all.reopened`            | differs from current: today the anchor is never reopened                                                           | `reopened`                                           | PR open and anchor closed → `reopen` anchor; child rules then re-evaluate                                                                                                                                                                                       |
+| `anchor.lazy`             | same as current                                                                                                    | none — runs inline, not a routing filter (see above) | a child is needed and no anchor exists → `create` anchor (`merge-request`, title `<repo>#<n>: <title>`)                                                                                                                                                         |
+| `anchor.backfill`         | same as current                                                                                                    | none — runs inline, not a routing filter (see above) | adopted anchor lacks `repo`/`pr_number` → `update` metadata once                                                                                                                                                                                                |
+| `anchor.priority`         | same as current                                                                                                    | `mergeability_changed`, `reconcile`                  | mine/co-owned + conflict → raise; team → lower; baseline stashed in `pbase:<n>`, restored when cleared → `update`                                                                                                                                               |
+| `review.head-advanced`    | same as current                                                                                                    | `opened`, `head_changed`, `draft_changed`            | qualifying = (mine or co-owned, draft included) or (team and not draft). Qualifying and no review item → `create` `review-pr: <repo>#<n>`. Qualifying, item closed, and `head_sha` ≠ item's reviewed head → `reopen` with new `head_sha`. Item open → no action |
+| `feedback.digest-changed` | differs from current: `needsCycle` (`internal/sync/rules.go`) has no ownership gate today; this row adds one (S16) | `feedback_changed`                                   | **mine/co-owned only**, unaddressed comments, no open cycle → `create` `process-feedback: <repo>#<n>` labeled `mine`, with `fbsum:<digest>`; open cycle with another digest → `update`, swap `fbsum:` labels. Team PRs: no cycle, ever (S16)                    |
+| `fixci.failing-on-head`   | differs from current: no rule of this kind exists today (S13)                                                      | `ci_changed`, `head_changed`                         | mine/co-owned, CI failing on head, none open for this head → `create`, labeled `mine`, `worker-ready`                                                                                                                                                           |
+| `conflict.present`        | differs from current: no rule of this kind exists today (S13)                                                      | `mergeability_changed`                               | mine/co-owned, conflicting, none open → `create` `resolve-conflict`, labeled `mine`, `worker-ready`                                                                                                                                                             |
+| `land.ready`              | differs from current: no rule of this kind exists today (S14)                                                      | `ci_changed`, `review_changed`, `draft_changed`      | mine/co-owned, green + approved + not draft → `annotate` `ready_to_land` (10.6); never a work item (S14 — the ZR deployment set's landing gate forbids any agent-reachable merge path)                                                                          |
 
 **Adoption (ported)**: existing beads without a `dedup_key` are matched by exact title (anchors by
-`<repo>#<n>:` prefix) and adopted; `apply` writes `dedup_key` onto them. MUST run on the first
-reconcile per entity after cutover.
+`<repo>#<n>:` prefix) or, when the tracker exposes it, by the stable backend id (`node_id`, S19),
+and adopted; `apply` writes `dedup_key` onto them. MUST run on the first reconcile per entity after
+cutover.
 
 **Parked work**: children labeled `human` count as existing work for dedup and MUST NOT be
 re-created or re-labeled.
 
-**hide / wip (new, OQ-6)**: today they do not affect bead writes (`sync` never reads them;
-`internal/interpret/interpret.go`: "Hidden and WIP are NOT interpreted").
+**hide / wip**: resolved (S15) — see precedence step 1 above for `hide`. `wip` stays view-only,
+same as current behavior: it has never affected writes (`sync` never reads it).
 
-**Team PRs (OQ-7)**: never modified beyond an operator-pending review.
+**Team PRs**: resolved (S16) — never modified beyond an operator-pending review; no
+`process-feedback` cycle regardless of unaddressed comments.
 
 **Stacked PRs**: each PR is decided independently; gating a downstream PR on its upstream landing
 is the worker role's concern.
@@ -480,10 +547,10 @@ is the worker role's concern.
 ### 8.4 Applying actions
 
 - **Dedup key (REQUIRED)**: every work item carries `dedup_key` (10.8); `apply` MUST look it up
-  in the tracker before `create`. On repo rename or transfer, deciders SHOULD match on a stable
-  backend id when available (OQ-10).
+  in the tracker before `create`. On repo rename or transfer, deciders SHOULD match on the stable
+  backend id when available (S19).
 - **Tracker is the source of truth** for work items. After an external write the decider MUST run
-  `pg-desk issue refresh <work-item-id>` unless the write went through pg-desk (OQ-1). A failed
+  `pg-desk issue refresh <work-item-id>` unless the write went through pg-desk (S10). A failed
   refresh is retryable staleness, not an apply failure. `apply` MUST NOT roll back a tracker write.
 - **Partial apply**: actions apply in order, best-effort; errors are captured and later actions
   continue unless they depend on a failed one (children depend on the anchor `create`). A failed
@@ -508,9 +575,11 @@ this replaces the removed `ledger`'s history.
 
 ### 8.7 Operator control (Recommended)
 
-- `suppress --kind` is sticky; deciders create no work of that kind for the entity.
+- `suppress --kind` is sticky; deciders create no work of that kind for the entity (precedence
+  step 2, 8.3).
 - A work item closed by a person (closer ≠ the decider actor) is treated as dismissed for the
-  current head (per-head kinds) or current digest (feedback); a new head or digest re-arms it.
+  current head (per-head kinds) or current digest (feedback); a new head or digest re-arms it
+  (precedence step 3, 8.3).
 - `force-review` is one-shot; its consumption is recorded via 8.5.
 
 ### 8.8 Work-item contract
@@ -519,10 +588,26 @@ Owned by the deciders' behavior docs (schema 10.8). The "Bead shapes" table in
 `docs/behavior/pg-desk/sync.md` MUST move there verbatim, plus `dedup_key`, before
 `internal/sync` is deleted; role prompts SHOULD cite it.
 
-### 8.9 Packaging (Open, OQ-8)
+### 8.9 Packaging (S17)
 
-One binary per entity type, one binary with a rule registry, or role config over a shared binary.
-Each decider runs as a pg-router command role; no pg-router core or handler-model change.
+RECOMMENDED: one binary with a rule registry selected by `<type>`, so the shared read/apply/audit
+plumbing (8.1, 8.4, 8.6) is written once and a type's rule set can be added without touching
+another's. Packaging otherwise remains an implementer choice — one binary per entity type and role
+config over a shared binary both satisfy the contract equally. Each decider runs as a pg-router
+command role; no pg-router core or handler-model change.
+
+### 8.10 Issue and thread deciders (S20)
+
+No issue or thread decider ships on day one: today's issue/thread roles only re-interpret linked
+PRs, and no user story (section 4) yet needs an independent rule set for either type. This is a
+scoping choice, not a structural gap — nothing about the decider contract (8.1) is PR-specific,
+and S9 already permits (without requiring) a decider for every type.
+
+Until one exists, pg-desk still watches, hydrates and classifies issues and threads exactly as
+configured (6.1, 6.3, 6.4): their change records are logged and visible through `changes`,
+`history` and `show` (STORY-OP-1, STORY-OP-2) regardless of whether any decider subscribes. An
+operator simply does not configure a pg-router query/role pair for that type (9.3) until a decider
+for it exists; pg-desk itself never depends on one existing.
 
 ## 9. Delivery, routing and the sweep
 
@@ -536,17 +621,19 @@ of the existing one) is REQUIRED (10.4).
 ### 9.2 Delivery semantics
 
 At-least-once. pg-desk advances a consumer's cursor after flush. The remaining loss window —
-pg-router crashes after reading but before enqueueing — is accepted and repaired by the sweep
-(Recommended; explicit ack is OQ-3). Consumers MUST tolerate duplicates and reordering; deciders
-do so by reading the current view.
+pg-router crashes after reading but before enqueueing — is accepted and repaired by the sweep (no
+explicit ack, S12). Consumers MUST tolerate duplicates and reordering; deciders do so by reading
+the current view.
 
 ### 9.3 Routing
 
 pg-router config (10.9) declares one source per watched type (`pg-desk <type> changes --consumer
 pg-router` via the adapter, period per type) emitting one item per change kind as
-`<type>.<kind>`, and routes each to subscribed decider roles. pg-router's core is unchanged.
+`<type>.<kind>`, and routes each to subscribed decider roles by exact string match — there is no
+wildcard bind (S22): a source's `emits` and a role's `binds` MUST each enumerate every kind.
+pg-router's core is unchanged.
 
-### 9.4 Sweep: rolling re-hydration by age (Recommended)
+### 9.4 Sweep: rolling re-hydration by age (Recommended, S8)
 
 On every `changes` call pg-desk also hydrates up to `sweep.max_per_poll` (N) active entities of
 that type whose `hydrated_at` is older than `sweep.max_age` (D), oldest first, and logs
@@ -557,7 +644,7 @@ events lost in the delivery window, and eventual application of changed rules.
 
 All JSON below is normative in field names and types; examples use illustrative values. New
 fields MAY be added (consumers MUST ignore unknown fields); fields MUST NOT be removed or change
-meaning without a version bump of the containing contract.
+meaning without a version bump of the containing contract (S11).
 
 ### 10.1 `pg-connector pr review submit <id>`
 
@@ -578,8 +665,7 @@ meaning without a version bump of the containing contract.
   host if the head moved is reported as `head_moved`); bot-marked by the backend; when
   `supersede_pending`, deletes the actor's existing pending review first.
 - **Output**: `{"review_id": "...", "state": "pending", "head_sha": "...", "as_of": "..."}`.
-- **Exit codes**: 0 ok; 2 degraded (posted, supersede failed); 3 failed (nothing posted),
-  with `error.code` ∈ `head_moved`, `not_found`, `forbidden`, `backend_error`.
+- **Exit codes**: 10.12; `error.code` ∈ `head_moved`, `not_found`, `forbidden`, `backend_error`.
 
 ### 10.2 `pg-desk <type> changes`
 
@@ -590,8 +676,7 @@ pg-desk <type> history <id> [--limit N]
 
 - **Output**: the envelope in 10.3. `history` returns `{"records": [...]}` with the same record
   shape, newest first.
-- **Exit codes**: 0 ok; 2 degraded (at least one watched query or hydration failed; partial
-  records); 3 total failure (nothing logged, cursor not advanced).
+- **Exit codes**: 10.12.
 - **Invariants**: the cursor advances only after output is flushed; a degraded source MUST NOT
   yield `removed`/`closed` for entities it failed to list; first observation yields `reconcile`
   only (6.4).
@@ -662,8 +747,9 @@ A pg-router command source; one item per `(record, kind)`:
 ```
 
 Matches pg-router's item model (`packages/pg-router/internal/item/item.go`: `ID`, `Type`,
-`Title`, `Metadata`). Exit code mirrors pg-desk's. Packaging (new binary vs. a mode of
-`pg-router-source-pg-connector`) is an implementation choice; it MUST be live-exercised (13).
+`Title`, `Metadata`). Exit codes: 10.12 (mirrors the pg-desk call it wraps). Packaging (new binary
+vs. a mode of `pg-router-source-pg-connector`) is an implementation choice; it MUST be
+live-exercised (13).
 
 ### 10.5 Composite view (`pg-desk <type> show <id> --json`)
 
@@ -709,8 +795,9 @@ Matches pg-router's item model (`packages/pg-router/internal/item/item.go`: `ID`
 ```
 
 `snapshot` is the pg-connector schema type for the entity (`schema.PR`, `schema.Issue`,
-`schema.Thread`), hydrated per 6.3. `closed_by` lets deciders tell person-closed from
-decider-closed work (8.7).
+`schema.Thread`), hydrated per 6.3. `snapshot.node_id` (pr only, when the backend provides it,
+S19) is the stable backend id dedup/adoption matching prefers over `<repo>#<n>` (10.8). `closed_by`
+lets deciders tell person-closed from decider-closed work (8.7).
 
 ### 10.6 Annotations
 
@@ -727,7 +814,8 @@ Generalized `annotation` table: `(type, id, key, value, origin, set_by, set_at)`
 | `ready_to_land`            | `true`/`false`                    | `land.ready` decider                  |
 | `decider.<name>.<k>`       | string                            | deciders via `annotate`               |
 
-Every annotation write appends `annotation_changed` in the same transaction.
+Every annotation write appends `annotation_changed` in the same transaction. `hidden` and
+`suppress.<kind>` are read by every PR rule as the precedence order's steps 1 and 2 (8.3).
 
 ### 10.7 Decider CLI and action schema
 
@@ -738,8 +826,7 @@ Every annotation write appends `annotation_changed` in the same transaction.
 
 - `apply` accepts the routed pg-router item (10.4) on stdin or by path, but always re-reads the
   view (8.1).
-- Exit codes: 0 all actions applied or none needed; 2 some actions failed (captured); 3 view
-  unreadable (nothing applied).
+- Exit codes: 10.12.
 - **Action**:
 
   ```json
@@ -769,37 +856,57 @@ Every annotation write appends `annotation_changed` in the same transaction.
 
 ### 10.8 Work-item contract (PR kinds)
 
-| Kind                      | Issue type      | Title                          | Labels                                               | Metadata                                                                              | Parent |
-| ------------------------- | --------------- | ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------- | ------ |
-| anchor                    | `merge-request` | `<repo>#<n>: <pr title>`       | `co-owned` when applicable; `pbase:<n>` while nudged | `repo`, `pr_number`, `state`, `branch`, `base`, `author`, `url`, `draft`, `dedup_key` | none   |
-| `process-feedback`        | `task`          | `process-feedback: <repo>#<n>` | `mine` (mine/co-owned only), `fbsum:<digest>`        | `repo`, `pr_number`, `branch`, `dedup_key`; description = rendered unaddressed items  | anchor |
-| `review-pr`               | `task`          | `review-pr: <repo>#<n>`        | —                                                    | `repo`, `pr_number`, `branch`, `head_sha` (reviewed head), `ownership`, `dedup_key`   | anchor |
-| `fix-ci` (OQ-4)           | `task`          | `fix-ci: <repo>#<n>`           | `mine`                                               | `repo`, `pr_number`, `branch`, `head_sha`, `failing_checks`, `dedup_key`              | anchor |
-| `resolve-conflict` (OQ-4) | `task`          | `resolve-conflict: <repo>#<n>` | `mine`                                               | `repo`, `pr_number`, `branch`, `base`, `dedup_key`                                    | anchor |
+| Kind               | Issue type      | Title                          | Labels                                               | Metadata                                                                              | Parent |
+| ------------------ | --------------- | ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------- | ------ |
+| anchor             | `merge-request` | `<repo>#<n>: <pr title>`       | `co-owned` when applicable; `pbase:<n>` while nudged | `repo`, `pr_number`, `state`, `branch`, `base`, `author`, `url`, `draft`, `dedup_key` | none   |
+| `process-feedback` | `task`          | `process-feedback: <repo>#<n>` | `mine` (mine/co-owned only, S16), `fbsum:<digest>`   | `repo`, `pr_number`, `branch`, `dedup_key`; description = rendered unaddressed items  | anchor |
+| `review-pr`        | `task`          | `review-pr: <repo>#<n>`        | —                                                    | `repo`, `pr_number`, `branch`, `head_sha` (reviewed head), `ownership`, `dedup_key`   | anchor |
+| `fix-ci`           | `task`          | `fix-ci: <repo>#<n>`           | `mine`, `worker-ready` (S13)                         | `repo`, `pr_number`, `branch`, `head_sha`, `failing_checks`, `dedup_key`              | anchor |
+| `resolve-conflict` | `task`          | `resolve-conflict: <repo>#<n>` | `mine`, `worker-ready` (S13)                         | `repo`, `pr_number`, `branch`, `base`, `dedup_key`                                    | anchor |
 
-`dedup_key` = `<type>:<id>:<kind>`, plus `:<head_sha>` for per-head kinds (`fix-ci`). Roles MUST
-rely only on fields in this table.
+`dedup_key` = `<type>:<id>:<kind>`, plus `:<head_sha>` for per-head kinds (`fix-ci`). When the
+entity carries a stable backend id (`node_id`, 5.1, S19), deciders SHOULD key dedup/adoption
+matching on `<type>:<node_id>:<kind>` instead, so a rename or transfer does not orphan existing
+work items. Roles MUST rely only on fields in this table.
 
 ### 10.9 pg-router configuration (shape)
 
 ```toml
 [[query]]
 name = "desk-pr-changes"
-emits = ["pr.*"]
+emits = [
+  "pr.opened", "pr.reopened", "pr.closed", "pr.merged",
+  "pr.draft_changed", "pr.head_changed", "pr.base_changed",
+  "pr.ci_changed", "pr.mergeability_changed", "pr.review_changed",
+  "pr.feedback_changed", "pr.work_changed",
+  "pr.reconcile", "pr.annotation_changed", "pr.link_changed",
+]
 type = "command"
 trigger = { kind = "period", every = "60s" }
-command.argv = ["<adapter>", "pg-desk", "pr", "--consumer", "pg-router"]
-command.format = "json"
+
+[query.command]
+argv = ["<adapter>", "pg-desk", "pr", "--consumer", "pg-router"]
+format = "json"
 
 [[role]]
 name = "pr-decider"
-binds = ["pr.*"]
+enabled = true
+binds = [
+  "pr.opened", "pr.reopened", "pr.closed", "pr.merged",
+  "pr.draft_changed", "pr.head_changed", "pr.base_changed",
+  "pr.ci_changed", "pr.mergeability_changed", "pr.review_changed",
+  "pr.feedback_changed", "pr.work_changed",
+  "pr.reconcile", "pr.annotation_changed", "pr.link_changed",
+]
 # rendered role config (handler command dir): argv = ["pr-decider", "apply", "pr", "{{.Item.Metadata.entity_id}}", "--from-item", "-"]
 ```
 
-One query per watched type; decider roles bind to the kinds they subscribe to (8.1). Whether
-pg-router supports a `pr.*` wildcard bind or needs each kind listed is an implementation detail to
-confirm against pg-router's config loader.
+One query per watched type; its `emits` MUST list every kind that type's classifier (10.2) can
+produce — `pr.*` is not a wildcard pg-router recognizes (S22): `emits`/`binds` match by exact
+string equality (`packages/pg-router/internal/orchestrator/listener.go`'s `Matches`), and
+`internal/config/config.go`'s orphan checks compare the same way, so an unlisted kind silently
+never routes. A decider role's `binds` is the union of every rule's `Subscribes to` column it owns
+(8.3) — here, every `pr.*` kind, since the PR decider (one binary, S17) owns every PR rule.
 
 ### 10.10 pg-desk configuration additions (`config.yaml`)
 
@@ -853,15 +960,28 @@ CREATE TABLE consumer (
 DROP TABLE ledger;
 ```
 
+### 10.12 Exit codes (consolidated)
+
+The single place every new or changed CLI's exit-code scheme is defined; contracts elsewhere
+(5.2, 6.9, 10.1, 10.2, 10.4, 10.7) cross-reference this table rather than restate it.
+
+| CLI                                       | 0                                   | 2                                                               | 3                                                                                       |
+| ----------------------------------------- | ----------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `pg-connector pr review submit` (10.1)    | posted                              | posted, `supersede_pending` delete failed (degraded)            | nothing posted (`error.code` ∈ `head_moved`, `not_found`, `forbidden`, `backend_error`) |
+| `pg-desk <type> changes`/`history` (10.2) | ok                                  | at least one watched query or hydration failed; partial records | total failure: nothing logged, cursor not advanced                                      |
+| `pg-desk <type> refresh <id>` (6.9)       | hydrated                            | hydration degraded for this entity (stale detail kept)          | hydration failed entirely; previous snapshot kept, entity stays due                     |
+| source adapter (10.4)                     | mirrors the pg-desk call it wraps   | mirrors                                                         | mirrors                                                                                 |
+| `<decider> plan\|apply` (10.7)            | all actions applied, or none needed | some actions failed (captured; retried next run or sweep)       | view unreadable; nothing applied                                                        |
+
 ## 11. Failure modes
 
 | Failure                                         | Effect              | Handling                                                                        |
 | ----------------------------------------------- | ------------------- | ------------------------------------------------------------------------------- |
-| a backend fails during `changes`                | partial source      | exit 2; no `removed`/`closed` for unlisted entities; retried next poll          |
+| a backend fails during `changes`                | partial source      | exit 2 (10.12); no `removed`/`closed` for unlisted entities; retried next poll  |
 | detail read fails for one entity                | stale snapshot      | previous snapshot kept; entity stays due                                        |
 | concurrent writers on one entity                | lost update         | optimistic `version` check; loser re-reads and re-classifies (6.8)              |
 | pg-desk crashes before cursor advance           | duplicate records   | harmless (idempotent deciders)                                                  |
-| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D; OQ-3                                                  |
+| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D (S12)                                                  |
 | decider write succeeds, refresh fails           | stale view          | dedup key prevents duplicate; next hydration catches up                         |
 | decider action keeps failing                    | no progress         | escalate after K runs (8.4)                                                     |
 | rule change deployed                            | old decisions stand | sweep within D; `--reset` for immediate (STORY-OP-7)                            |
@@ -875,31 +995,38 @@ DROP TABLE ledger;
 - `pg-desk status`: the same, human-readable, per consumer and type.
 - `pg-desk doctor`: config resolves; every watched query resolves in pg-connector; every
   registered consumer's `seen_at` is within 3× its expected period; and, when pointed at the
-  pg-router config with `--router-config <path>` (read as a file; no dependency on pg-router), which
-  decider roles bind to each type (STORY-DBG-1).
+  pg-router config with `--router-config <path>` (read as a file; no dependency on pg-router),
+  which decider roles bind to each type (STORY-DBG-1) — this list is expected empty for issue and
+  thread on day one (S20).
 - Deciders: per rule, actions planned/applied/failed; escalations.
 
 ## 13. Test strategy
 
-Each MUST in this document maps to at least one test:
+Each MUST in this document maps to at least one test. The first row maps the goals (G1-G8)
+themselves onto the rows below it; every user story (section 4) names the specific row(s) that
+cover it.
 
-| Area                              | Tests                                                                                                                                                                                                                                                                                        |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pg-connector summary fields (5.1) | per-backend fixture tests: new fields populated; `changes` reports `changed` when only `updated_at`/`comment_count` moves                                                                                                                                                                    |
-| review submit (5.2, 10.1)         | fake-host tests: pending-only; `head_moved` on 422; bot marker present; `supersede_pending` deletes the prior pending review; exit 2 when supersede fails                                                                                                                                    |
-| classifiers (6.4)                 | table tests per kind plus no-change; **property tests**: classify(s, s) = ∅; first observation yields only `reconcile`; kinds are a pure function of (old, new)                                                                                                                              |
-| hydration (6.3)                   | fake pg-connector (`fake_backend_test.go` pattern); failed detail read keeps previous snapshot and logs nothing                                                                                                                                                                              |
-| change log and cursors (6.2)      | multi-consumer delivery; crash between flush and advance → duplicate not loss; `--limit` paging; pruning waits for the slowest consumer; `--reset`                                                                                                                                           |
-| degraded sources (6.2)            | failing backend never yields `removed`/`closed`; exit 2                                                                                                                                                                                                                                      |
-| concurrency (6.8)                 | two concurrent `changes` for one consumer serialize; `refresh` racing hydration never regresses `version`; log append and version bump are atomic                                                                                                                                            |
-| sweep (9.4)                       | selection by age, cap N, oldest-first, inactive excluded                                                                                                                                                                                                                                     |
-| annotations (10.6)                | each write appends `annotation_changed` in the same transaction; reserved-key migration from existing rows                                                                                                                                                                                   |
-| deciders (8.1–8.4)                | table tests per rule id; **idempotency property**: for any fixture view, `decide(apply(view, decide(view)))` = ∅; parked `human` children never duplicated; dedup lookup before create; escalation after K consecutive failures; person-closed item not re-created until head/digest changes |
-| audit (8.6)                       | every applied external action writes exactly one audit comment with rule, facts, seq                                                                                                                                                                                                         |
-| plan (8.2)                        | golden output per fixture, including `skipped` reasons                                                                                                                                                                                                                                       |
-| adoption / parity (8.3, 15)       | fixtures from real pre-cutover bead shapes; `plan` for every tracked PR vs. live `sync` writes: zero or explained differences, including team-PR feedback cycles                                                                                                                             |
-| contracts (10.3–10.8)             | golden JSON fixtures per contract version; adapter test from envelope to items; decider parses composite-view fixtures; role-prompt keys ⊆ work-item contract                                                                                                                                |
-| live exercise                     | per this repo's rules, every new or changed pg-router query/role pair is exercised live once (`pg-router run-query` / `run-role` with realistic input, non-trivial outcome) as part of its own change                                                                                        |
+| Area                                   | Tests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| goals (G1-G8)                          | G1 (generic across types): classifier/hydration tables cover pr/issue/thread uniformly (rows "hydration", "classifiers") and the decider contract (8.1) names no concrete type. G2 (connector detects most changes): row "pg-connector summary fields". G3 (pg-desk holds snapshot + change log): row "change log and cursors". G4 (pg-router the only scheduler): row "sweep" (pg-desk needs no clock of its own) plus row "routing config". G5 (pg-desk MUST NOT decide): row "deciders"' idempotency property, plus a module-dependency check that no decision logic exists under `packages/pg-desk` outside test fixtures. G6 (deciders idempotent): row "deciders". G7 (see next actions without writing): row "plan". G8 (no pg-pr dependency): row "review submit", plus a dependency-graph test asserting no package under `packages/pg-router`, `packages/pg-desk`, or a decider imports `packages/pg-pr`. |
+| pg-connector summary fields (5.1)      | per-backend fixture tests: new fields (including `node_id`) populated; `changes` reports `changed` when only `updated_at`/`comment_count` moves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| review submit (5.2, 10.1)              | fake-host tests: pending-only; `head_moved` on 422; bot marker present; `supersede_pending` deletes the prior pending review; exit 2 when supersede fails                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| classifiers (6.4)                      | table tests per kind plus no-change; **property tests**: classify(s, s) = ∅; first observation yields only `reconcile`; kinds are a pure function of (old, new)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| hydration (6.3)                        | fake pg-connector (`fake_backend_test.go` pattern); failed detail read keeps previous snapshot and logs nothing; hydration/classification proceed identically whether or not any decider subscribes (8.10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| change log and cursors (6.2)           | multi-consumer delivery; crash between flush and advance → duplicate not loss; `--limit` paging; pruning waits for the slowest consumer; `--reset`; `history` returns per-entity records newest-first                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| degraded sources (6.2)                 | failing backend never yields `removed`/`closed`; exit 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| concurrency (6.8)                      | two concurrent `changes` for one consumer serialize; `refresh` racing hydration never regresses `version`; log append and version bump are atomic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| sweep (9.4)                            | selection by age, cap N, oldest-first, inactive excluded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| annotations (10.6)                     | each write appends `annotation_changed` in the same transaction; reserved-key migration from existing rows; `force-review` consumption is one-shot (8.5, 8.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| routing config (9.3, 10.9)             | config loader rejects a `pr.*`-style wildcard in `emits`/`binds` (S22); orphan-producer/orphan-consumer errors fire when a query emits a kind no role binds or a role binds a kind no query emits; the worked example (10.9) round-trips through the loader                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| deciders (8.1-8.4)                     | table tests per rule id, including `fix-ci`/`resolve-conflict` (S13) and `land.ready` (S14, asserts no work item is ever created — only the annotation); precedence tests: a hidden entity yields zero actions from every rule (S15); `suppress.<kind>` skips only that kind; a person-closed item is skipped until its head/digest changes (8.7); **idempotency property**: for any fixture view, `decide(apply(view, decide(view)))` = ∅; parked `human` children never duplicated; dedup lookup (including `node_id`-keyed, S19) before create; escalation after K consecutive failures                                                                                                                                                                                                                                                                                                                          |
+| audit (8.6)                            | every applied external action writes exactly one audit comment with rule, facts, seq                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| plan (8.2)                             | golden output per fixture, including `skipped` reasons for each precedence-order stop (hidden, suppressed, person-dismissed, not matched)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| adoption / parity (8.3, 15)            | fixtures from real pre-cutover bead shapes; `plan` for every tracked PR vs. live `sync` writes: zero or explained differences, explicitly including the team-PR feedback-cycle parity exception (S16)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| contracts (10.3-10.8)                  | golden JSON fixtures per contract version; adapter test from envelope to items; decider parses composite-view fixtures (including `node_id`, S19); role-prompt keys ⊆ work-item contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| console CLI (`open`/`show`, 6.7, 10.5) | `open` lists matching entities from local snapshots with per-entity `as_of` staleness; `show` returns the composite view with `as_of` and `links_as_of`; `show --refresh` hydrates the entity and its links first                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| observability (12)                     | `/metrics` exposes per-type records-by-kind/origin, hydration failures, due backlog, consumer lag and optimistic-concurrency retries; `status` reports the same; `doctor` flags an unresolvable watched query, a consumer stalled past 3x its period, and (with `--router-config`) which decider roles bind to each type, including the expected-empty issue/thread list (S20)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| live exercise                          | per this repo's rules, every new or changed pg-router query/role pair is exercised live once (`pg-router run-query` / `run-role` with realistic input, non-trivial outcome) as part of its own change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## 14. What is removed
 
@@ -911,9 +1038,11 @@ Each MUST in this document maps to at least one test:
 
 ## 15. Migration
 
-0. **Record decisions**: ADR; amend the 2026-09-09 design; reconcile with `pg2-2j5ac.46`.
+0. **Record decisions**: file an ADR capturing this design's decisions (section 3); amend the
+   2026-09-09 design's D8 and the sync part of D9 (D7/D10 unchanged); reconcile with
+   `pg2-2j5ac.46` before implementing issue/thread storage.
 1. **pg-connector**: review submit verb (5.2); switch the review prompt off pg-pr.
-2. **pg-connector**: PR summary fields (5.1).
+2. **pg-connector**: PR summary fields including `node_id` (5.1).
 3. **pg-desk**: store migration (10.11); issue and thread snapshots (per `.46`); hydration
    strategies; classifiers; change log; cursors; `changes`, `refresh`, `history`, `show`,
    annotation verbs; `watch:` config (10.10) populated from the query names in today's pg-router
@@ -921,9 +1050,10 @@ Each MUST in this document maps to at least one test:
 4. **Adapter** (10.4): build and live-exercise against `pg-desk changes`.
 5. **Deciders** in plan-only mode: port rules (8.3) including adoption; move the work-item
    contract (8.8); run `plan` for every tracked PR alongside live pg-desk `sync` and diff until
-   parity (13). Old `sync` keeps writing throughout.
-6. **pg-router**: add the `pg-desk changes` sources and decider roles with deciders still in
-   plan-only mode; live-exercise.
+   parity (13), including the team-PR feedback-cycle exception (S16). Old `sync` keeps writing
+   throughout.
+6. **pg-router**: add the `pg-desk changes` sources and decider roles (10.9, explicit kinds only —
+   S22) with deciders still in plan-only mode; live-exercise.
 7. **Flip, as one change**: deciders switch to `apply`; pg-desk `sync.mode = "off"`; old
    pg-connector sources and `desk-*` ingest roles removed. There MUST be no deployed state in which
    both `sync` apply and decider apply are enabled.
@@ -933,20 +1063,43 @@ Each MUST in this document maps to at least one test:
 9. **Delete** pg-desk `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run` once the flip
    has run cleanly for an agreed soak period.
 
-## 16. Open questions
+## 16. Glossary
 
-- **OQ-1** Decider external writes: directly to pg-connector (then `pg-desk refresh`), or through
-  pg-desk as a write-through Repository. Author leans direct.
-- **OQ-2** Envelope versioning policy beyond `contract: .../v1`.
-- **OQ-3** Explicit ack vs. advance-after-flush plus sweep.
-- **OQ-4** Should fix-CI and resolve-conflict be work kinds?
-- **OQ-5** Ready-to-land: annotation (as written), notification, or work item?
-- **OQ-6** hide/wip effect on work creation.
-- **OQ-7** Team-PR scope beyond a pending review.
-- **OQ-8** Decider packaging.
-- **OQ-9** Time-based change sources: which, and where configured.
-- **OQ-10** Stable backend ids for rename/transfer.
-- **OQ-11** Issue and thread deciders: which rules exist on day one, if any.
-- **OQ-12** Keep or drop the `merge-request` anchor once work items carry `repo`/`pr_number`.
-- **OQ-13** Should team PRs keep getting `process-feedback` cycles (today's behavior) or only
-  mine/co-owned PRs?
+- **active**: an entity whose source-system state is non-terminal (6.1) — an open PR, a
+  non-terminal issue, a thread with a reply inside `thread_active_window`. Only active entities
+  are swept (9.4) or replayed by `--reset`.
+- **anchor**: the `merge-request`-kind work item that roots a PR's other work items as its parent
+  (8.3, 10.8, S21).
+- **annotation**: a sticky, explicitly written key/value fact tied to an entity, from an operator
+  verb or a decider's own state (10.6) — the only entity data a decider or operator writes without
+  going out to pg-connector.
+- **change kind**: one label from the catalogue (10.2) describing what kind of change a change
+  record carries (`head_changed`, `reconcile`, ...).
+- **change log**: the append-only `change_log` table (6.6, 10.11) holding every change record ever
+  produced, pruned once every consumer has passed a row and it is past retention.
+- **change record**: one row appended to the change log, naming an entity, the change kinds it
+  experienced, its origin, and the snapshot version it followed (10.2, 10.3, 10.11).
+- **composite view**: the JSON `pg-desk <type> show <id> --json` returns — snapshot, decorations,
+  annotations and linked entities in one read (10.5); what a decider's `decide(view)` consumes.
+- **consumer**: a named reader of `changes`/the change log with its own cursor — pg-router is one;
+  a decider reading directly could be another (6.6, 10.11).
+- **cursor**: a consumer's own bookmark into `change_log.seq`; advances only after that consumer's
+  output is flushed (6.2, 6.8, S12).
+- **decider**: a rule engine for one entity type that reads the composite view and decides/applies
+  work items (8.1) — the only component allowed to decide what work should exist (G5).
+- **decoration**: a computed fact about an entity that pg-desk derives, not decides (relationship,
+  urgency, category, dispositions), held in `interpretation` (6.6) and read via the composite view
+  (6.7, 10.5).
+- **dedup key**: the stable string a decider looks up before creating a work item, so re-running on
+  an unchanged view creates nothing new — `<type>:<id>:<kind>[:<head_sha>]`, or
+  `<type>:<node_id>:<kind>` when a stable backend id is available (10.8, S19).
+- **entity**: one instance of a watched type (a PR, issue, or thread), identified by `(type, id)`
+  (10.5).
+- **envelope**: the JSON `changes` returns (10.3) — a cursor range, per-source status, and the
+  change records since the caller's cursor; carries no entity content (S7).
+- **snapshot**: an entity's most recently hydrated state, held in the `entity` table (6.6); the
+  classifier's "new" side (6.4).
+- **watched set**: the per-type set of pg-connector named queries pg-desk keeps fresh (6.1),
+  independent of which deciders subscribe to that type (8.10).
+- **work item**: an external tracker item (a bead) a decider creates, updates or closes to
+  represent needed work (10.8) — never minted by pg-desk itself (G5).
