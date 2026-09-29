@@ -1123,11 +1123,25 @@ tables and use `entity_type`/`entity_id` throughout for consistency with the rea
 they reference, rather than the shorter `type`/`id` this design's envelope/view use at the JSON
 layer (6.6).
 
+**Two stages (Recommended).** The old `sync` keeps running until the flip (14 steps 5-7), and it
+reads `ledger`, writes `interpretation.sync_error` and reads the old `annotation` columns. The
+DDL below is therefore applied in two stages, not as one block:
+
+- **Additive stage (Migration step 3):** the `entity` columns, `change_log`, `consumer`, and
+  `annotation_v2` created and populated but NOT yet swapped in. While `sync` is live, pg-desk's
+  store layer dual-writes `hidden`/`wip`/`disposition` to both the old `annotation` columns and
+  `annotation_v2`; new code reads only `annotation_v2`. Nothing old code depends on is dropped.
+- **Destructive stage (Migration step 9):** `DROP COLUMN sync_error`, `DROP TABLE annotation` and
+  the rename of `annotation_v2`, and `DROP TABLE ledger`, applied with the deletion of `internal/sync`.
+
+The statements are marked `[additive]` or `[destructive]` below.
+
 ```sql
 ALTER TABLE entity ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE entity ADD COLUMN hydrated_at TEXT;
 ALTER TABLE entity ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
 
+-- [destructive]
 ALTER TABLE interpretation DROP COLUMN sync_error;
 
 CREATE TABLE change_log (
@@ -1182,9 +1196,11 @@ SELECT repo, entity_type, entity_id, 'disposition.' || comment_id, disposition,
        'pg-desk', set_by, set_at
 FROM annotation WHERE comment_id != '' AND disposition IS NOT NULL;
 
+-- [destructive]
 DROP TABLE annotation;
 ALTER TABLE annotation_v2 RENAME TO annotation;
 
+-- [destructive]
 DROP TABLE ledger;
 ```
 
@@ -1286,7 +1302,7 @@ SHAPES with synthetic values, never real ones.
    migration's two forced prompt edits: `pg-pr review submit` → `pg-connector pr review submit`
    (STORY-AGT-2, `modules/zm/pg-router/review-prompt.txt`).
 2. **pg-connector**: PR summary fields including `node_id` (5.1).
-3. **pg-desk**: store migration (9.11); issue and thread snapshots (per `.46`, reconciled per
+3. **pg-desk**: store migration, additive stage only (9.11); issue and thread snapshots (per `.46`, reconciled per
    step 0); hydration strategies; classifiers; change log; cursors; `changes`, `refresh`,
    `history`, `show`, annotation verbs; `watch:` config (9.10) populated from the query names in
    today's pg-router config; `heartbeat`/`heartbeat-item` removed (6.9, 13). This step's own forced
@@ -1311,7 +1327,8 @@ SHAPES with synthetic values, never real ones.
 8. **Rollback** (if needed after the flip): revert that one change — deciders back to plan-only,
    `sync.mode = "apply"`, old sources and roles restored. Adoption makes either side safe to resume
    over beads the other created.
-9. **Delete** pg-desk `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run` once the flip
+9. **Delete** pg-desk `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run`, and apply 9.11's
+   destructive stage, once the flip
    has run cleanly for an agreed soak period. Pre-cutover `ledger` history is not carried forward
    into this delete either (13) — it was already an accepted loss at the flip.
 
