@@ -162,11 +162,11 @@ schema = 3
     hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20260921155816-b14227669459'
-    hash = 'sha256-vFPDopJXc/dMuPxwrcc2zGxP3UyF8E7PzAs1YmBnlGo='
+    version = 'v0.0.0-20260928230214-8a89bd6388cc'
+    hash = 'sha256-3DgHu8gZYFpwX6UXEh1vZdKUrdCsGAkTBtslaphAcFM='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20260921155816-b14227669459'
+    version = 'v0.0.0-20260928230214-8a89bd6388cc'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -194,5 +194,5 @@ schema = 3
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.59.0'
-    hash = 'sha256-CaNi9UvS9y6aiiSy3GUlRHX84og+i4MWOZmxbFONeb4='
+    version = 'v1.60.0'
+    hash = 'sha256-ot2nO8b43WdhbM2V0bAs02yJP+WGG6FqcbOJkpm4BRE='
