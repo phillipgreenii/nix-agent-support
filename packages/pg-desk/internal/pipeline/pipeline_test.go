@@ -701,3 +701,162 @@ func TestPipelineSweep_ContinuesPastOneEntitysFailureAndStillStampsLastSweep(t *
 		t.Fatalf("GetMeta(last_sweep): found=%v err=%v, want it stamped even though one entity failed", found, err)
 	}
 }
+
+// --- Reconcile: pg2-kftf9.2 — re-drive PRs that left the open set ----------
+
+func seedReconcileEntity(t *testing.T, p *Pipeline, id string, anchorHash string) {
+	t.Helper()
+	if err := p.store.UpsertEntity(store.Entity{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: id,
+		Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "seed",
+	}); err != nil {
+		t.Fatalf("seed entity %s: %v", id, err)
+	}
+	if anchorHash != "" {
+		if err := p.store.UpsertLedger(store.LedgerEntry{
+			Repo: "acme/widgets", EntityType: "pr", EntityID: id, Kind: "anchor",
+			BeadID: "bead-" + id, LastSyncedContentHash: anchorHash,
+		}); err != nil {
+			t.Fatalf("seed ledger %s: %v", id, err)
+		}
+	}
+}
+
+// TestPipelineReconcile_ClosesAnchorWhoseClosureFailedOnce is the bead's
+// acceptance test: a merged PR's closure fails once (recorded as
+// sync_error, anchor left unclosed), and the next Reconcile — with no
+// event and no operator action — re-drives it to success.
+func TestPipelineReconcile_ClosesAnchorWhoseClosureFailedOnce(t *testing.T) {
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets", "number": 7})
+		facts.RemovedState = "merged"
+		return facts, nil
+	}), &out)
+	seedReconcileEntity(t, p, "7", "abc123") // anchor open in the ledger
+
+	closureFails := true
+	closed := map[string]int{}
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		if closureFails {
+			return errors.New("sync: close anchor bead-7: boom")
+		}
+		closed[entityID]++
+		return p.store.UpsertLedger(store.LedgerEntry{
+			Repo: repo, EntityType: "pr", EntityID: entityID, Kind: "anchor", BeadID: "bead-" + entityID, LastSyncedContentHash: "closed",
+		})
+	})
+
+	// The event-driven closure fails once.
+	if err := p.Run(context.Background(), "pr", "7", gather.ChangeRemoved); err == nil {
+		t.Fatal("Run: expected the first closure to fail")
+	}
+	if i, _, _ := p.store.GetInterpretation("acme/widgets", "pr", "7"); i.SyncError == "" {
+		t.Fatal("expected sync_error recorded after the failed closure")
+	}
+
+	closureFails = false
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if closed["7"] != 1 {
+		t.Fatalf("Reconcile drove closure %d times, want 1", closed["7"])
+	}
+	if i, _, _ := p.store.GetInterpretation("acme/widgets", "pr", "7"); i.SyncError != "" {
+		t.Fatalf("sync_error not cleared: %q", i.SyncError)
+	}
+
+	// Idempotent: nothing left to re-drive on the next pass.
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if closed["7"] != 1 {
+		t.Fatalf("second Reconcile re-drove a closed anchor (%d)", closed["7"])
+	}
+}
+
+// TestPipelineReconcile_SkipsOpenPRsAndClosedAnchors: an open PR with an
+// open anchor is left alone (no Run, no sync); an already-closed anchor
+// is never re-read.
+func TestPipelineReconcile_SkipsOpenPRsAndClosedAnchors(t *testing.T) {
+	gathered := map[string][]gather.ChangeKind{}
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		gathered[entityID] = append(gathered[entityID], change)
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "open", "repo": "acme/widgets"})
+		facts.RemovedState = "open"
+		return facts, nil
+	}), nil)
+	seedReconcileEntity(t, p, "1", "abc123") // open PR, open anchor
+	seedReconcileEntity(t, p, "2", "closed") // closed anchor
+	synced := 0
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		synced++
+		return nil
+	})
+
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if synced != 0 {
+		t.Fatalf("sync ran %d times, want 0", synced)
+	}
+	if len(gathered["2"]) != 0 {
+		t.Fatalf("closed anchor was re-read: %v", gathered["2"])
+	}
+}
+
+// TestPipelineReconcile_RedrivesSyncErrorOnOpenPR: a sync_error is re-driven
+// even when the PR is still open and its anchor is not the problem.
+func TestPipelineReconcile_RedrivesSyncErrorOnOpenPR(t *testing.T) {
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "open", "repo": "acme/widgets", "number": 3})
+		facts.RemovedState = "open"
+		return facts, nil
+	}), nil)
+	seedReconcileEntity(t, p, "3", "")
+	if err := p.store.UpsertInterpretation(store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: "3", Ownership: "mine", SyncError: "boom",
+	}); err != nil {
+		t.Fatalf("seed interpretation: %v", err)
+	}
+	synced := 0
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		synced++
+		return nil
+	})
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if synced != 1 {
+		t.Fatalf("sync ran %d times, want 1", synced)
+	}
+	if i, _, _ := p.store.GetInterpretation("acme/widgets", "pr", "3"); i.SyncError != "" {
+		t.Fatalf("sync_error not cleared: %q", i.SyncError)
+	}
+}
+
+// TestPipelineReconcile_ContinuesPastFailureAndReturnsError: one entity's
+// failure neither stops the pass nor is swallowed (non-nil error -> exit 1).
+func TestPipelineReconcile_ContinuesPastFailureAndReturnsError(t *testing.T) {
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		if entityID == "4" {
+			return gather.Facts{}, errors.New("boom")
+		}
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets", "number": 5})
+		facts.RemovedState = "merged"
+		return facts, nil
+	}), nil)
+	seedReconcileEntity(t, p, "4", "abc")
+	seedReconcileEntity(t, p, "5", "abc")
+	synced := 0
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		synced++
+		return nil
+	})
+	if err := p.Reconcile(context.Background()); err == nil {
+		t.Fatal("Reconcile: expected an error from the failing entity")
+	}
+	if synced != 1 {
+		t.Fatalf("sync ran %d times, want 1 (entity 5)", synced)
+	}
+}

@@ -1,4 +1,4 @@
-# pg-desk — show, status, sweep, doctor, heartbeat, heartbeat-item
+# pg-desk — show, status, sweep, reconcile, doctor, heartbeat, heartbeat-item
 
 ## show
 
@@ -54,6 +54,29 @@ that needs a driver over the `ledger` table (which entities have vanished from e
 Exit codes: `0` when every entity's pipeline run succeeds (including a degraded run — see
 [`gather.md`](gather.md)); `1` when the config or store cannot be opened, or when one or more
 entities' pipeline run failed (naming which).
+
+## reconcile
+
+`pg-desk reconcile` is the event-independent repair pass for PRs that left the open set. Closure
+is otherwise driven only by the one-shot `--change removed` event, and `pr-sweep` lists only PRs
+matching the open queries, so a single failed closure would leave a merge-request anchor open
+forever. `reconcile` reads the store and re-drives, through the same `run pr <id> --change
+removed` path (so closure stays ledger-guarded and re-entrant), every PR entity that has either:
+
+- a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR a
+  `--change removed` re-read reports as merged, closed, or not found; a PR still `open` is left
+  alone; or
+- a recorded `interpretation.sync_error`, re-driven regardless of PR state (a successful run
+  clears it).
+
+`reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
+no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
+one error. It takes no arguments and does not stamp `meta.last_sweep`. `pg-desk` ships no
+scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST invoke
+`pg-desk reconcile` periodically.
+
+Exit codes: `0` when every candidate succeeds (including none); `1` when config or store cannot
+be opened, or when any candidate's re-drive failed (naming which).
 
 ## doctor
 

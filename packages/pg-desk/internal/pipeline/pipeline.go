@@ -385,6 +385,83 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 	return nil
 }
 
+// Reconcile implements `pg-desk reconcile` (bead pg2-kftf9.2): an
+// event-independent repair pass over the ledger. Closure is otherwise
+// driven only by the one-shot `removed` event, so a PR that has left every
+// open query is never visited again and a single failed closure was
+// permanent. Reconcile re-drives, via the SAME Run(ChangeRemoved) path the
+// event uses (so closure stays ledger-guarded and re-entrant), every PR
+// entity that has either
+//
+//   - a non-closed anchor ledger row whose PR is now merged/closed/gone
+//     (confirmed by a `--change removed` re-read; an anchor whose PR is
+//     still open is left alone), or
+//   - a recorded sync_error (re-driven regardless of PR state; a successful
+//     run clears it).
+//
+// It is idempotent: once an anchor is closed and sync_error is empty the
+// entity is no longer a candidate. Every candidate is attempted even after
+// one fails; failures are joined into the returned error (exit 1) so the
+// caller's scheduler retries the pass. Unlike Sweep it does not touch
+// meta.last_sweep.
+func (p *Pipeline) Reconcile(ctx context.Context) error {
+	repo := p.repo()
+	ledger, err := p.store.ListLedger()
+	if err != nil {
+		return fmt.Errorf("pipeline: reconcile: %w", err)
+	}
+	interps, err := p.store.ListInterpretations()
+	if err != nil {
+		return fmt.Errorf("pipeline: reconcile: %w", err)
+	}
+
+	// needsPeek[id]=true: anchor-open candidate that must be confirmed
+	// merged/closed first; false: sync_error candidate, always re-driven.
+	needsPeek := map[string]bool{}
+	var order []string
+	add := func(id string, peek bool) {
+		prev, seen := needsPeek[id]
+		if !seen {
+			order = append(order, id)
+			needsPeek[id] = peek
+			return
+		}
+		needsPeek[id] = prev && peek
+	}
+	for _, l := range ledger {
+		if l.Repo == repo && l.EntityType == entityTypePR && l.Kind == sync.KindAnchor &&
+			l.BeadID != "" && l.LastSyncedContentHash != sync.ClosedSentinel {
+			add(l.EntityID, true)
+		}
+	}
+	for _, i := range interps {
+		if i.Repo == repo && i.EntityType == entityTypePR && i.SyncError != "" {
+			add(i.EntityID, false)
+		}
+	}
+
+	var errs []error
+	for _, id := range order {
+		if needsPeek[id] {
+			facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
+			if gErr != nil {
+				errs = append(errs, fmt.Errorf("reconcile %s: %w", id, gErr))
+				continue
+			}
+			if facts.RemovedState == "open" {
+				continue // still open: nothing to close
+			}
+		}
+		if runErr := p.Run(ctx, entityTypePR, id, gather.ChangeRemoved); runErr != nil {
+			errs = append(errs, fmt.Errorf("reconcile %s: %w", id, runErr))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("pipeline: reconcile: %w", errors.Join(errs...))
+	}
+	return nil
+}
+
 // entityTypePR is the one entity type the sync stage runs for — mirrors
 // cmd/pg-desk/desk.go's own entityTypePR constant (this package does not
 // import cmd/pg-desk, so it is repeated here rather than shared).

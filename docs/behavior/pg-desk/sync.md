@@ -107,7 +107,7 @@ line or stream.
 run issue` against the beads backend — is [`run-issue.md`](run-issue.md), not this doc.
 - Jira/Slack sync, the cross-reference step, and layered urgency are Phase 13.
 - `daemon.enable` is this docket's last packet.
-- The store-wide sweep that re-verifies every ledger row whose entity has left every gathered
-  query (as opposed to the single triggering entity a `sweep` change re-verifies) needs a
-  store-wide driver this packet's single-entity `Sync` call does not have; it is not implemented
-  here.
+- The store-wide re-verification of ledger rows whose entity has left every gathered query is
+  `pg-desk reconcile` (see [`operator-commands.md`](operator-commands.md)), not `Sync` itself:
+  `Sync` stays single-entity, and `reconcile` is the store-wide driver that calls the same
+  `run` path per entity.

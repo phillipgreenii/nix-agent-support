@@ -183,7 +183,11 @@ const rfc3339 = "2006-01-02T15:04:05Z07:00"
 // later run does not keep re-issuing `issue transition ... closed` forever.
 // Never a valid hex sha256 digest (those are exactly 64 lowercase hex
 // chars), so it cannot collide with a real content hash.
-const closedSentinel = "closed"
+const closedSentinel = ClosedSentinel
+
+// ClosedSentinel is closedSentinel exported for pipeline.Reconcile, which
+// selects ledger anchors that are not yet closed.
+const ClosedSentinel = "closed"
 
 // closureFromFacts decides whether this run's facts confirm the PR is
 // closed, per design section 7.3's removed-re-read rule and the Anchor
