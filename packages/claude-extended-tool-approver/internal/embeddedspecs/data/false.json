@@ -7,16 +7,16 @@
     "provenance": "false (GNU coreutils) 9.11 / bash 5.3.9 builtin false — ignores all arguments unconditionally",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"false\"]"
+        "source": "false --help: \"Usage: false [ignored command line arguments]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"false\"]"
+        "source": "false --help: \"Usage: false [ignored command line arguments] or: false OPTION\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"false\"]"
+        "source": "false --help: \"Usage: false [ignored command line arguments] or: false OPTION\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"false\"]"
+        "source": "false --help: \"Usage: false [ignored command line arguments]\" -- the reviewed text documents that this command's own behavior is unaffected by unrecognized input (verified live: an unrecognized flag is echoed/ignored, never rejected), supporting \"inert\""
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"false\"]"
+        "source": "false --help: \"Usage: false [ignored command line arguments] or: false OPTION\""
       }
     },
     "stdin": "never",

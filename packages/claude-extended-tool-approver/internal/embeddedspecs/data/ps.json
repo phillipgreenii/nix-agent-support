@@ -7,16 +7,16 @@
     "provenance": "ps from procps-ng 4.0.6, ps --help all",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ps\"]"
+        "source": "ps --help all: \"ps [options]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ps\"]"
+        "source": "ps --help all: \"ps [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ps\"]"
+        "source": "ps --help all: \"ps [options]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ps\"]"
+        "source": "ps --help all: `ps --this-is-not-a-real-flag` -\u003e \"error: unknown gnu long option\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (procps-ng's own getopt-based arg parsing), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ps\"]"
+        "source": "ps --help all: \"ps [options]\""
       }
     },
     "stdin": "never",

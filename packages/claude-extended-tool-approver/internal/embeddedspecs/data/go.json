@@ -7,16 +7,16 @@
     "provenance": "go version go1.26.6 linux/amd64 (`go version`), go help / go help \u003ccommand\u003e, this host 2026-09-07",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+        "source": "go help: \"Go is a tool for managing Go source code.\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+        "source": "go help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+        "source": "go help: \"go \\u003ccommand\\u003e [arguments]\""
       }
     },
     "stdin": "never",
@@ -42,16 +42,16 @@
         "provenance": "go help build (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help build: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -64,7 +64,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -76,7 +76,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -88,7 +88,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -100,7 +100,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -112,7 +112,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -124,7 +124,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -136,7 +136,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -148,7 +148,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -160,7 +160,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-gccgoflags": {
@@ -172,7 +172,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -184,7 +184,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -196,7 +196,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -208,7 +208,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-json Emit build output in JSON suitable for automated processing.\""
             }
           },
           "-ldflags": {
@@ -220,7 +220,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -232,7 +232,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -244,7 +244,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -256,7 +256,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -268,7 +268,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -280,7 +280,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -292,7 +292,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-n print the commands but do not run them.\""
             }
           },
           "-o": {
@@ -304,7 +304,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\""
             }
           },
           "-p": {
@@ -316,7 +316,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -328,7 +328,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -340,7 +340,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -352,7 +352,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-race enable data race detection.\""
             }
           },
           "-tags": {
@@ -364,7 +364,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-trimpath": {
@@ -376,7 +376,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -388,7 +388,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-v print the names of packages as they are compiled.\""
             }
           },
           "-work": {
@@ -400,7 +400,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -412,7 +412,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"-x print the commands.\""
             }
           }
         },
@@ -426,7 +426,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -436,7 +436,7 @@
             },
             "target": "go build",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build: \"usage: go build [-o output] [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go build\", role \"exec\") is derived from"
             }
           }
         ],
@@ -450,16 +450,16 @@
         "provenance": "go help clean (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help clean: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -472,7 +472,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-fuzzcache": {
@@ -484,7 +484,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-i": {
@@ -496,7 +496,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-modcache": {
@@ -508,7 +508,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-n": {
@@ -520,7 +520,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"The -n flag causes clean to print the remove commands it would execute,\""
             }
           },
           "-r": {
@@ -532,7 +532,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-testcache": {
@@ -544,7 +544,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
             }
           },
           "-v": {
@@ -556,7 +556,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-v print the names of packages as they are compiled.\""
             }
           },
           "-x": {
@@ -568,7 +568,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"The -x flag causes clean to print remove commands as it executes them.\""
             }
           }
         },
@@ -582,7 +582,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -593,7 +593,7 @@
             "target": "~/.cache/go-build",
             "whenFlags": ["-cache"],
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"~/.cache/go-build\", role \"path-delete\") is derived from"
             }
           },
           {
@@ -603,7 +603,7 @@
             "target": "~/go/pkg/mod",
             "whenFlags": ["-modcache"],
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help clean: \"usage: go clean [-i] [-r] [-cache] [-testcache] [-modcache] [-fuzzcache] [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"~/go/pkg/mod\", role \"path-delete\") is derived from"
             }
           }
         ],
@@ -617,16 +617,16 @@
         "provenance": "go help env (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help env: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -639,7 +639,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\""
             }
           },
           "-json": {
@@ -651,7 +651,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\""
             }
           }
         },
@@ -665,7 +665,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\""
           }
         },
         "implicitEffects": [
@@ -675,7 +675,7 @@
             },
             "target": "go env",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help env: \"usage: go env [-json] [-changed] [-u] [-w] [var ...]\" -- documents the optional/omittable operand shape this implicit default (target \"go env\", role \"exec\") is derived from"
             }
           }
         ],
@@ -689,16 +689,16 @@
         "provenance": "go help fmt (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help fmt: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -711,7 +711,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help fmt: \"The -mod flag's value sets which module download mode\""
             }
           },
           "-n": {
@@ -723,7 +723,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\""
             }
           },
           "-x": {
@@ -735,7 +735,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\""
             }
           }
         },
@@ -749,7 +749,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\""
           }
         },
         "implicitEffects": [
@@ -760,7 +760,7 @@
             "target": ".",
             "whenNoPositionals": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-modify\") is derived from"
             }
           },
           {
@@ -769,7 +769,7 @@
             },
             "target": "go fmt",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help fmt: \"usage: go fmt [-n] [-x] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go fmt\", role \"exec\") is derived from"
             }
           }
         ],
@@ -783,16 +783,16 @@
         "provenance": "go help generate (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help generate: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -805,7 +805,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\""
             }
           },
           "-run": {
@@ -817,7 +817,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help generate: \"-run=\\\"\\\" if non-empty, specifies a regular expression to select\""
             }
           },
           "-v": {
@@ -829,7 +829,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\""
             }
           },
           "-x": {
@@ -841,7 +841,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\""
             }
           }
         },
@@ -855,7 +855,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\""
           }
         },
         "implicitEffects": [
@@ -865,7 +865,7 @@
             },
             "target": "go generate",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help generate: \"usage: go generate [-run regexp] [-n] [-v] [-x] [build flags] [file.go... | packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go generate\", role \"exec\") is derived from"
             }
           }
         ],
@@ -879,16 +879,16 @@
         "provenance": "go help get (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help get: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -901,7 +901,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -913,7 +913,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -925,7 +925,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -937,7 +937,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -949,7 +949,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -961,7 +961,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -973,7 +973,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -985,7 +985,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -997,7 +997,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-gccgoflags": {
@@ -1009,7 +1009,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -1021,7 +1021,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -1033,7 +1033,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -1045,7 +1045,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help: \"buildjson build -json encoding\""
             }
           },
           "-ldflags": {
@@ -1057,7 +1057,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -1069,7 +1069,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -1081,7 +1081,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -1093,7 +1093,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -1105,7 +1105,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -1117,7 +1117,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -1129,7 +1129,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-n print the commands but do not run them.\""
             }
           },
           "-p": {
@@ -1141,7 +1141,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -1153,7 +1153,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -1165,7 +1165,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -1177,7 +1177,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-t": {
@@ -1189,7 +1189,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
             }
           },
           "-tags": {
@@ -1201,7 +1201,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-tool": {
@@ -1213,7 +1213,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
             }
           },
           "-trimpath": {
@@ -1225,7 +1225,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-u": {
@@ -1237,7 +1237,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
             }
           },
           "-v": {
@@ -1249,7 +1249,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-v print the names of packages as they are compiled.\""
             }
           },
           "-work": {
@@ -1261,7 +1261,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -1273,7 +1273,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help get: \"The -x flag prints commands as they are executed. This is useful for\""
             }
           }
         },
@@ -1287,7 +1287,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -1297,7 +1297,7 @@
             },
             "target": "go get downloads modules and rewrites go.mod/go.sum; not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go get downloads modules and rewrites go.mod/go.sum; not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -1311,16 +1311,16 @@
         "provenance": "go help install (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help install: \"usage: go install [build flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help install: \"usage: go install [build flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help install: \"usage: go install [build flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help install: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1333,7 +1333,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -1345,7 +1345,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -1357,7 +1357,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -1369,7 +1369,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -1381,7 +1381,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -1393,7 +1393,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -1405,7 +1405,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -1417,7 +1417,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -1429,7 +1429,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-gccgoflags": {
@@ -1441,7 +1441,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -1453,7 +1453,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -1465,7 +1465,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -1477,7 +1477,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help: \"buildjson build -json encoding\""
             }
           },
           "-ldflags": {
@@ -1489,7 +1489,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -1501,7 +1501,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -1513,7 +1513,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -1525,7 +1525,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -1537,7 +1537,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -1549,7 +1549,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -1561,7 +1561,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-n print the commands but do not run them.\""
             }
           },
           "-p": {
@@ -1573,7 +1573,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -1585,7 +1585,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -1597,7 +1597,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -1609,7 +1609,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-tags": {
@@ -1621,7 +1621,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-trimpath": {
@@ -1633,7 +1633,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -1645,7 +1645,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-v print the names of packages as they are compiled.\""
             }
           },
           "-work": {
@@ -1657,7 +1657,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -1669,7 +1669,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-x print the commands.\""
             }
           }
         },
@@ -1683,7 +1683,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help install: \"usage: go install [build flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -1693,7 +1693,7 @@
             },
             "target": "go install writes GOBIN/GOPATH/bin; not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help install: \"usage: go install [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go install writes GOBIN/GOPATH/bin; not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -1707,16 +1707,16 @@
         "provenance": "go help list (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help list: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1729,7 +1729,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -1741,7 +1741,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -1753,7 +1753,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -1765,7 +1765,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -1777,7 +1777,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -1789,7 +1789,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -1801,7 +1801,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -1813,7 +1813,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -1825,7 +1825,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-deps": {
@@ -1837,7 +1837,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"The -deps flag causes list to iterate over not just the named packages\""
             }
           },
           "-e": {
@@ -1849,7 +1849,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"The -e flag changes the handling of erroneous packages, those that\""
             }
           },
           "-f": {
@@ -1861,7 +1861,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\""
             }
           },
           "-gccgoflags": {
@@ -1873,7 +1873,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -1885,7 +1885,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -1897,7 +1897,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -1909,7 +1909,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\""
             }
           },
           "-ldflags": {
@@ -1921,7 +1921,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -1933,7 +1933,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"Shlib string // the shared library that contains this package (only set when -linkshared)\""
             }
           },
           "-m": {
@@ -1945,7 +1945,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\""
             }
           },
           "-mod": {
@@ -1957,7 +1957,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -1969,7 +1969,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -1981,7 +1981,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"module is in the module cache or if the -modfile flag is used.\""
             }
           },
           "-msan": {
@@ -1993,7 +1993,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -2005,7 +2005,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-n print the commands but do not run them.\""
             }
           },
           "-p": {
@@ -2017,7 +2017,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -2029,7 +2029,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -2041,7 +2041,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -2053,7 +2053,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-tags": {
@@ -2065,7 +2065,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-trimpath": {
@@ -2077,7 +2077,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -2089,7 +2089,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-v print the names of packages as they are compiled.\""
             }
           },
           "-work": {
@@ -2101,7 +2101,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -2113,7 +2113,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-x print the commands.\""
             }
           }
         },
@@ -2127,7 +2127,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -2137,7 +2137,7 @@
             },
             "target": "go list",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help list: \"usage: go list [-f format] [-json] [-m] [list flags] [build flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go list\", role \"exec\") is derived from"
             }
           }
         ],
@@ -2151,16 +2151,16 @@
         "provenance": "go help mod (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help mod: \"Go mod provides access to operations on modules.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help mod: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "positionals": {
@@ -2173,7 +2173,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help mod: \"go mod \\u003ccommand\\u003e [arguments]\""
           }
         },
         "stdin": "never",
@@ -2186,16 +2186,16 @@
             "provenance": "go help mod download (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod download: \"By default, download writes nothing to standard output. It may print progress\""
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod download: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2208,7 +2208,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\""
                 }
               },
               "-reuse": {
@@ -2220,7 +2220,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\""
                 }
               },
               "-x": {
@@ -2232,7 +2232,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\""
                 }
               }
             },
@@ -2246,7 +2246,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\""
               }
             },
             "implicitEffects": [
@@ -2256,7 +2256,7 @@
                 },
                 "target": "go mod download",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod download: \"usage: go mod download [-x] [-json] [-reuse=old.json] [modules]\" -- documents the optional/omittable operand shape this implicit default (target \"go mod download\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2270,16 +2270,16 @@
             "provenance": "go help mod edit (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod edit: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2292,7 +2292,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -exclude=path@version and -dropexclude=path@version flags\""
                 }
               },
               "-dropgodebug": {
@@ -2304,7 +2304,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -dropgodebug=key flag drops any existing godebug lines\""
                 }
               },
               "-dropreplace": {
@@ -2316,7 +2316,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"-replace, -dropreplace, -retract, -dropretract, -tool, -droptool, -ignore,\""
                 }
               },
               "-droprequire": {
@@ -2328,7 +2328,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -require=path@version and -droprequire=path flags\""
                 }
               },
               "-dropretract": {
@@ -2340,7 +2340,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"-replace, -dropreplace, -retract, -dropretract, -tool, -droptool, -ignore,\""
                 }
               },
               "-exclude": {
@@ -2352,7 +2352,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -exclude=path@version and -dropexclude=path@version flags\""
                 }
               },
               "-fmt": {
@@ -2364,7 +2364,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -fmt flag reformats the go.mod file without making other changes.\""
                 }
               },
               "-go": {
@@ -2376,7 +2376,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -go=version flag sets the expected Go language version.\""
                 }
               },
               "-godebug": {
@@ -2388,7 +2388,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -godebug=key=value flag adds a godebug key=value line,\""
                 }
               },
               "-json": {
@@ -2400,7 +2400,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -json flag prints the final go.mod file in JSON format instead of\""
                 }
               },
               "-module": {
@@ -2412,7 +2412,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -module flag changes the module's path (the go.mod file's module line).\""
                 }
               },
               "-print": {
@@ -2424,7 +2424,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -print flag prints the final go.mod in its text format instead of\""
                 }
               },
               "-replace": {
@@ -2436,7 +2436,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"-replace, -dropreplace, -retract, -dropretract, -tool, -droptool, -ignore,\""
                 }
               },
               "-require": {
@@ -2448,7 +2448,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -require=path@version and -droprequire=path flags\""
                 }
               },
               "-retract": {
@@ -2460,7 +2460,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"-retract=version is a no-op if that retraction already exists.\""
                 }
               },
               "-toolchain": {
@@ -2472,7 +2472,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"The -toolchain=version flag sets the Go toolchain to use.\""
                 }
               }
             },
@@ -2486,7 +2486,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\""
               }
             },
             "implicitEffects": [
@@ -2496,7 +2496,7 @@
                 },
                 "target": "go.mod",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\" -- documents the optional/omittable operand shape this implicit default (target \"go.mod\", role \"path-modify\") is derived from"
                 }
               },
               {
@@ -2505,7 +2505,7 @@
                 },
                 "target": "go mod edit",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod edit: \"usage: go mod edit [editing flags] [-fmt|-print|-json] [go.mod]\" -- documents the optional/omittable operand shape this implicit default (target \"go mod edit\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2519,16 +2519,16 @@
             "provenance": "go help mod graph (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod graph: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2541,7 +2541,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\""
                 }
               },
               "-x": {
@@ -2553,7 +2553,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\""
                 }
               }
             },
@@ -2567,7 +2567,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\""
               }
             },
             "implicitEffects": [
@@ -2577,7 +2577,7 @@
                 },
                 "target": "go mod graph",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod graph: \"usage: go mod graph [-go=version] [-x]\" -- documents the optional/omittable operand shape this implicit default (target \"go mod graph\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2591,16 +2591,16 @@
             "provenance": "go help mod tidy (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod tidy: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2613,7 +2613,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               },
               "-diff": {
@@ -2625,7 +2625,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               },
               "-e": {
@@ -2637,7 +2637,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               },
               "-go": {
@@ -2649,7 +2649,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               },
               "-v": {
@@ -2661,7 +2661,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               },
               "-x": {
@@ -2673,7 +2673,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
                 }
               }
             },
@@ -2687,7 +2687,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\""
               }
             },
             "implicitEffects": [
@@ -2697,7 +2697,7 @@
                 },
                 "target": "go mod tidy",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod tidy: \"usage: go mod tidy [-e] [-v] [-x] [-diff] [-go=version] [-compat=version]\" -- documents the optional/omittable operand shape this implicit default (target \"go mod tidy\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2711,16 +2711,16 @@
             "provenance": "go help mod vendor (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod vendor: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2733,7 +2733,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\""
                 }
               },
               "-o": {
@@ -2745,7 +2745,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\""
                 }
               },
               "-v": {
@@ -2757,7 +2757,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\""
                 }
               }
             },
@@ -2771,7 +2771,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\""
               }
             },
             "implicitEffects": [
@@ -2781,7 +2781,7 @@
                 },
                 "target": "go mod vendor",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod vendor: \"usage: go mod vendor [-e] [-v] [-o outdir]\" -- documents the optional/omittable operand shape this implicit default (target \"go mod vendor\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2795,16 +2795,16 @@
             "provenance": "go help mod verify (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod verify: \"usage: go mod verify\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod verify: \"usage: go mod verify\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod verify: \"usage: go mod verify\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod verify: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "positionals": {
@@ -2817,7 +2817,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod verify: \"usage: go mod verify\""
               }
             },
             "implicitEffects": [
@@ -2827,7 +2827,7 @@
                 },
                 "target": "go mod verify",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod verify: \"usage: go mod verify\" -- documents the optional/omittable operand shape this implicit default (target \"go mod verify\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2841,16 +2841,16 @@
             "provenance": "go help mod why (go1.26.6, this host 2026-09-07)",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod why: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2863,7 +2863,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\""
                 }
               },
               "-vendor": {
@@ -2875,7 +2875,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\""
                 }
               }
             },
@@ -2889,7 +2889,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\""
               }
             },
             "implicitEffects": [
@@ -2899,7 +2899,7 @@
                 },
                 "target": "go mod why",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+                  "source": "go help mod why: \"usage: go mod why [-m] [-vendor] packages...\" -- documents the optional/omittable operand shape this implicit default (target \"go mod why\", role \"exec\") is derived from"
                 }
               }
             ],
@@ -2915,16 +2915,16 @@
         "provenance": "go help run (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help run: \"usage: go run [build flags] [-exec xprog] package [arguments...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help run: \"usage: go run [build flags] [-exec xprog] package [arguments...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help run: \"usage: go run [build flags] [-exec xprog] package [arguments...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help run: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2937,7 +2937,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -2949,7 +2949,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -2961,7 +2961,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -2973,7 +2973,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -2985,7 +2985,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -2997,7 +2997,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -3009,7 +3009,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -3021,7 +3021,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -3033,7 +3033,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-exec": {
@@ -3045,7 +3045,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help run: \"usage: go run [build flags] [-exec xprog] package [arguments...]\""
             }
           },
           "-gccgoflags": {
@@ -3057,7 +3057,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -3069,7 +3069,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -3081,7 +3081,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -3093,7 +3093,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help: \"buildjson build -json encoding\""
             }
           },
           "-ldflags": {
@@ -3105,7 +3105,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -3117,7 +3117,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -3129,7 +3129,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -3141,7 +3141,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -3153,7 +3153,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -3165,7 +3165,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -3177,7 +3177,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-n print the commands but do not run them.\""
             }
           },
           "-p": {
@@ -3189,7 +3189,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -3201,7 +3201,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -3213,7 +3213,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -3225,7 +3225,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-tags": {
@@ -3237,7 +3237,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-trimpath": {
@@ -3249,7 +3249,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -3261,7 +3261,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-v print the names of packages as they are compiled.\""
             }
           },
           "-work": {
@@ -3273,7 +3273,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -3285,7 +3285,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-x print the commands.\""
             }
           }
         },
@@ -3304,7 +3304,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help run: \"usage: go run [build flags] [-exec xprog] package [arguments...]\""
           }
         },
         "stdin": "never",
@@ -3318,16 +3318,16 @@
         "provenance": "go help testflag, go help test (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help test: \"standard output, even if the test printed them to its own standard\""
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help test: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -3340,7 +3340,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -3352,7 +3352,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -3364,7 +3364,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-bench": {
@@ -3376,7 +3376,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"If invoked with the -bench or -v flag, go test prints the full\""
             }
           },
           "-buildmode": {
@@ -3388,7 +3388,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -3400,7 +3400,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-compiler": {
@@ -3412,7 +3412,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-count": {
@@ -3424,7 +3424,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"test caching explicitly is to use -count=1. Tests that open files within\""
             }
           },
           "-cover": {
@@ -3436,7 +3436,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -3448,7 +3448,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -3460,7 +3460,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-coverprofile": {
@@ -3472,7 +3472,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-coverprofile, -cpu, -failfast, -fullpath, -list, -outputdir, -parallel,\""
             }
           },
           "-cpu": {
@@ -3484,7 +3484,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-coverprofile, -cpu, -failfast, -fullpath, -list, -outputdir, -parallel,\""
             }
           },
           "-failfast": {
@@ -3496,7 +3496,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-coverprofile, -cpu, -failfast, -fullpath, -list, -outputdir, -parallel,\""
             }
           },
           "-gccgoflags": {
@@ -3508,7 +3508,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -3520,7 +3520,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -3532,7 +3532,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -3544,7 +3544,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-json Convert test output to JSON suitable for automated processing.\""
             }
           },
           "-ldflags": {
@@ -3556,7 +3556,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -3568,7 +3568,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -3580,7 +3580,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -3592,7 +3592,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -3604,7 +3604,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -3616,7 +3616,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -3628,7 +3628,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-n print the commands but do not run them.\""
             }
           },
           "-p": {
@@ -3640,7 +3640,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -3652,7 +3652,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -3664,7 +3664,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -3676,7 +3676,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-run": {
@@ -3688,7 +3688,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-run, -short, -skip, -timeout and -v.\""
             }
           },
           "-short": {
@@ -3700,7 +3700,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-run, -short, -skip, -timeout and -v.\""
             }
           },
           "-shuffle": {
@@ -3712,7 +3712,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help testflag: \"-shuffle off,on,N Randomize the execution order of tests and benchmarks.\""
             }
           },
           "-tags": {
@@ -3724,7 +3724,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
           "-timeout": {
@@ -3736,7 +3736,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-run, -short, -skip, -timeout and -v.\""
             }
           },
           "-trimpath": {
@@ -3748,7 +3748,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -3760,7 +3760,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"-run, -short, -skip, -timeout and -v.\""
             }
           },
           "-work": {
@@ -3772,7 +3772,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -3784,7 +3784,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-x print the commands.\""
             }
           }
         },
@@ -3798,7 +3798,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\""
           }
         },
         "implicitEffects": [
@@ -3808,7 +3808,7 @@
             },
             "target": "go test",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help test: \"usage: go test [build/test flags] [packages] [build/test flags \\u0026 test binary flags]\" -- documents the optional/omittable operand shape this implicit default (target \"go test\", role \"exec\") is derived from"
             }
           }
         ],
@@ -3822,16 +3822,16 @@
         "provenance": "go help version (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help version: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -3844,7 +3844,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\""
             }
           },
           "-m": {
@@ -3856,7 +3856,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\""
             }
           },
           "-v": {
@@ -3868,7 +3868,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\""
             }
           }
         },
@@ -3882,7 +3882,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\""
           }
         },
         "implicitEffects": [
@@ -3892,7 +3892,7 @@
             },
             "target": "go version",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help version: \"usage: go version [-m] [-v] [-json] [file ...]\" -- documents the optional/omittable operand shape this implicit default (target \"go version\", role \"exec\") is derived from"
             }
           }
         ],
@@ -3906,16 +3906,16 @@
         "provenance": "go help vet (go1.26.6, this host 2026-09-07)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help vet: \"usage: go vet [build flags] [-vettool prog] [vet flags] [packages]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help vet: \"usage: go vet [build flags] [-vettool prog] [vet flags] [packages]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help vet: \"usage: go vet [build flags] [-vettool prog] [vet flags] [packages]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help vet: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -3928,7 +3928,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-a force rebuilding of packages that are already up-to-date.\""
             }
           },
           "-asan": {
@@ -3940,7 +3940,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asan enable interoperation with address sanitizer.\""
             }
           },
           "-asmflags": {
@@ -3952,7 +3952,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-asmflags '[pattern=]arg list' arguments to pass on each go tool asm invocation.\""
             }
           },
           "-buildmode": {
@@ -3964,7 +3964,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildmode mode build mode to use. See 'go help buildmode' for more.\""
             }
           },
           "-buildvcs": {
@@ -3976,7 +3976,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-buildvcs Whether to stamp binaries with version control information\""
             }
           },
           "-c": {
@@ -3988,7 +3988,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"-c int\""
             }
           },
           "-compiler": {
@@ -4000,7 +4000,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-compiler name name of compiler to use, as in runtime.Compiler (gccgo or gc).\""
             }
           },
           "-cover": {
@@ -4012,7 +4012,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-cover enable code coverage instrumentation.\""
             }
           },
           "-covermode": {
@@ -4024,7 +4024,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-covermode set,count,atomic set the mode for coverage analysis.\""
             }
           },
           "-coverpkg": {
@@ -4036,7 +4036,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-coverpkg pattern1,pattern2,pattern3 For a build that targets package 'main' (e.g. building a Go\""
             }
           },
           "-gccgoflags": {
@@ -4048,7 +4048,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gccgoflags '[pattern=]arg list' arguments to pass on each gccgo compiler/linker invocation.\""
             }
           },
           "-gcflags": {
@@ -4060,7 +4060,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-gcflags '[pattern=]arg list' arguments to pass on each go tool compile invocation.\""
             }
           },
           "-installsuffix": {
@@ -4072,7 +4072,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-installsuffix suffix a suffix to use in the name of the package installation directory,\""
             }
           },
           "-json": {
@@ -4084,7 +4084,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"-json\""
             }
           },
           "-ldflags": {
@@ -4096,7 +4096,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-ldflags '[pattern=]arg list' arguments to pass on each go tool link invocation.\""
             }
           },
           "-linkshared": {
@@ -4108,7 +4108,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-linkshared build code that will be linked against shared libraries previously\""
             }
           },
           "-mod": {
@@ -4120,7 +4120,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-mod mode module download mode to use: readonly, vendor, or mod.\""
             }
           },
           "-modcacherw": {
@@ -4132,7 +4132,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modcacherw leave newly-created directories in the module cache read-write\""
             }
           },
           "-modfile": {
@@ -4144,7 +4144,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-modfile file in module aware mode, read (and possibly write) an alternate go.mod\""
             }
           },
           "-msan": {
@@ -4156,7 +4156,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-msan enable interoperation with memory sanitizer.\""
             }
           },
           "-n": {
@@ -4168,7 +4168,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"and execution, such as -C, -n, -x, -v, -tags, and -toolexec.\""
             }
           },
           "-p": {
@@ -4180,7 +4180,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-p n the number of programs, such as build commands or\""
             }
           },
           "-pgo": {
@@ -4192,7 +4192,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pgo file specify the file path of a profile for profile-guided optimization (PGO).\""
             }
           },
           "-pkgdir": {
@@ -4204,7 +4204,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-pkgdir dir install and load all packages from dir instead of the usual locations.\""
             }
           },
           "-race": {
@@ -4216,7 +4216,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-race enable data race detection.\""
             }
           },
           "-tags": {
@@ -4228,7 +4228,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"and execution, such as -C, -n, -x, -v, -tags, and -toolexec.\""
             }
           },
           "-trimpath": {
@@ -4240,7 +4240,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-trimpath remove all file system paths from the resulting executable.\""
             }
           },
           "-v": {
@@ -4252,7 +4252,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"and execution, such as -C, -n, -x, -v, -tags, and -toolexec.\""
             }
           },
           "-work": {
@@ -4264,7 +4264,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help build (shared build flags): \"-work print the name of the temporary work directory and\""
             }
           },
           "-x": {
@@ -4276,7 +4276,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"and execution, such as -C, -n, -x, -v, -tags, and -toolexec.\""
             }
           }
         },
@@ -4290,7 +4290,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            "source": "go help vet: \"usage: go vet [build flags] [-vettool prog] [vet flags] [packages]\""
           }
         },
         "implicitEffects": [
@@ -4300,7 +4300,7 @@
             },
             "target": "go vet",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+              "source": "go help vet: \"usage: go vet [build flags] [-vettool prog] [vet flags] [packages]\" -- documents the optional/omittable operand shape this implicit default (target \"go vet\", role \"exec\") is derived from"
             }
           }
         ],

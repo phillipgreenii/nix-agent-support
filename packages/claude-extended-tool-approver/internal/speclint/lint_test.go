@@ -32,7 +32,13 @@ func minimalCommand() specfmt.CommandSpecV1 {
 }
 
 func TestLintCommand_CitationPresence(t *testing.T) {
-	t.Run("thin citation on a builtin spec is WARN", func(t *testing.T) {
+	t.Run("thin citation on a builtin spec is HARD", func(t *testing.T) {
+		// Docket tc-o14i5.4's Phase 3 packet 1 (tc-o14i5.4.3) back-filled
+		// real citations for all 46 embedded built-in specs and flipped
+		// this check from WARN (a staging allowance for packet 1.2's
+		// not-yet-cited mechanical marshalling) to HARD, unconditionally
+		// — the builtin/non-builtin split no longer affects this check's
+		// severity at all (see citationFinding's own doc comment).
 		c := minimalCommand()
 		c.Citations["provenance"] = realCite(thinCite)
 		findings := LintCommand("x", c, true /* builtin */)
@@ -40,8 +46,8 @@ func TestLintCommand_CitationPresence(t *testing.T) {
 		if found == nil {
 			t.Fatalf("expected a citation-presence finding, got %#v", findings)
 		}
-		if found.Severity != SeverityWarn {
-			t.Errorf("severity = %v, want %v", found.Severity, SeverityWarn)
+		if found.Severity != SeverityHard {
+			t.Errorf("severity = %v, want %v", found.Severity, SeverityHard)
 		}
 	})
 
@@ -316,10 +322,11 @@ type errFixture struct{ msg string }
 func (e errFixture) Error() string { return e.msg }
 
 // TestLintRepository_Embedded is a light smoke test over a synthetic
-// embedded-style Repository (not the real 45 built-ins — that live corpus
+// embedded-style Repository (not the real 46 built-ins — that live corpus
 // is exercised by this packet's own live/manual CLI runs, not a unit test)
-// confirming builtin=true both stages citation-presence to WARN and skips
-// checks 2/3 end to end through LintRepository, not just LintCommand.
+// confirming builtin=true still skips checks 2/3 end to end through
+// LintRepository, not just LintCommand, while citation-presence is now HARD
+// regardless of builtin (tc-o14i5.4.3's WARN→HARD flip).
 func TestLintRepository_Embedded(t *testing.T) {
 	spec := specfmt.Spec{
 		Version: specfmt.FormatVersion,
@@ -348,11 +355,17 @@ func TestLintRepository_Embedded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LintRepository: %v", err)
 	}
-	if report.HasHard() {
-		t.Errorf("builtin report has a HARD finding, want none (checks 2/3 skipped, citation-presence WARN-staged): %#v", report.Findings)
+	if !report.HasHard() {
+		t.Errorf("builtin report has no HARD finding, want citation-presence to fire HARD even though checks 2/3 are skipped: %#v", report.Findings)
 	}
-	if findFinding(report.Findings, CheckCitationPresence, "provenance") == nil {
-		t.Errorf("expected a WARN citation-presence finding, got %#v", report.Findings)
+	provFinding := findFinding(report.Findings, CheckCitationPresence, "provenance")
+	if provFinding == nil {
+		t.Errorf("expected a citation-presence finding, got %#v", report.Findings)
+	} else if provFinding.Severity != SeverityHard {
+		t.Errorf("citation-presence severity = %v, want %v (builtin no longer WARN-stages this check)", provFinding.Severity, SeverityHard)
+	}
+	if findFinding(report.Findings, CheckDangerFlagRole, "") != nil {
+		t.Errorf("builtin report has a danger-flag-role finding, want none (checks 2/3 still skipped for builtin): %#v", report.Findings)
 	}
 
 	nonBuiltinReport, err := LintRepository(specfmt.NewRepository(embFS, "", ""), false)
@@ -361,6 +374,9 @@ func TestLintRepository_Embedded(t *testing.T) {
 	}
 	if !nonBuiltinReport.HasHard() {
 		t.Errorf("non-builtin report over the SAME fixture has no HARD finding, want checks 2/3 to fire: %#v", nonBuiltinReport.Findings)
+	}
+	if findFinding(nonBuiltinReport.Findings, CheckDangerFlagRole, "") == nil {
+		t.Errorf("non-builtin report over the SAME fixture has no danger-flag-role finding, want checks 2/3 to fire: %#v", nonBuiltinReport.Findings)
 	}
 }
 

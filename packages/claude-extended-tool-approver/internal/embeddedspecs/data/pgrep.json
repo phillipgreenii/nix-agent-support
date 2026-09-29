@@ -7,16 +7,16 @@
     "provenance": "pgrep from procps-ng 4.0.6, pgrep --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+        "source": "pgrep --help: \"pgrep [options] \\u003cpattern\\u003e\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+        "source": "pgrep --help: \"pgrep [options] \\u003cpattern\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+        "source": "pgrep --help: \"pgrep [options] \\u003cpattern\\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+        "source": "pgrep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"--cgroup \\u003cgrp,...\\u003e match by cgroup v2 names\""
         }
       },
       "--count": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-c, --count count of matching processes\""
         }
       },
       "--delimiter": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-d, --delimiter \\u003cstring\\u003e specify output delimiter\""
         }
       },
       "--env": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"--env \\u003cname=val,...\\u003e match on environment variable\""
         }
       },
       "--euid": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-u, --euid \\u003cID,...\\u003e match by effective IDs\""
         }
       },
       "--exact": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-x, --exact match exactly with the command name\""
         }
       },
       "--full": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-f, --full use full command line to match\""
         }
       },
       "--group": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-G, --group \\u003cGID,...\\u003e match real group IDs\""
         }
       },
       "--help": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-h, --help display this help and exit\""
         }
       },
       "--ignore-ancestors": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-A, --ignore-ancestors exclude our ancestors from results\""
         }
       },
       "--ignore-case": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-i, --ignore-case match case insensitively\""
         }
       },
       "--inverse": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-v, --inverse negates the matching\""
         }
       },
       "--lightweight": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-w, --lightweight list all TID\""
         }
       },
       "--list-full": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-a, --list-full list PID and full command line\""
         }
       },
       "--list-name": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-l, --list-name list PID and process name\""
         }
       },
       "--logpidfile": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-L, --logpidfile fail if PID file is not locked\""
         }
       },
       "--newest": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-n, --newest select most recently started\""
         }
       },
       "--ns": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"--ns \\u003cPID\\u003e match the processes that belong to the same namespace as \\u003cpid\\u003e\""
         }
       },
       "--nslist": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"--nslist \\u003cns,...\\u003e list which namespaces will be considered for the --ns option.\""
         }
       },
       "--older": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-O, --older \\u003cseconds\\u003e select where older than seconds\""
         }
       },
       "--oldest": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-o, --oldest select least recently started\""
         }
       },
       "--parent": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-P, --parent \\u003cPPID,...\\u003e match only child processes of the given parent\""
         }
       },
       "--pgroup": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-g, --pgroup \\u003cPGID,...\\u003e match listed process group IDs\""
         }
       },
       "--pid": {
@@ -305,7 +305,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-p, --pid \\u003cPID,...\\u003e match process PIDs\""
         }
       },
       "--pidfile": {
@@ -317,7 +317,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-F, --pidfile \\u003cfile\\u003e read PIDs from file\""
         }
       },
       "--quiet": {
@@ -329,7 +329,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"--quiet suppress all normal output\""
         }
       },
       "--runstates": {
@@ -341,7 +341,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-r, --runstates \\u003cstate\\u003e match runstates [D,S,Z,...]\""
         }
       },
       "--session": {
@@ -353,7 +353,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-s, --session \\u003cSID,...\\u003e match session IDs\""
         }
       },
       "--shell-quote": {
@@ -365,7 +365,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-Q, --shell-quote output the command line in shell-quoted form\""
         }
       },
       "--terminal": {
@@ -377,7 +377,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-t, --terminal \\u003ctty,...\\u003e match by controlling terminal\""
         }
       },
       "--uid": {
@@ -389,7 +389,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-U, --uid \\u003cID,...\\u003e match by real IDs\""
         }
       },
       "--version": {
@@ -401,7 +401,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-V, --version output version information and exit\""
         }
       },
       "-A": {
@@ -413,7 +413,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-A, --ignore-ancestors exclude our ancestors from results\""
         }
       },
       "-F": {
@@ -425,7 +425,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-F, --pidfile \\u003cfile\\u003e read PIDs from file\""
         }
       },
       "-G": {
@@ -437,7 +437,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-G, --group \\u003cGID,...\\u003e match real group IDs\""
         }
       },
       "-L": {
@@ -449,7 +449,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-L, --logpidfile fail if PID file is not locked\""
         }
       },
       "-O": {
@@ -461,7 +461,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-O, --older \\u003cseconds\\u003e select where older than seconds\""
         }
       },
       "-P": {
@@ -473,7 +473,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-P, --parent \\u003cPPID,...\\u003e match only child processes of the given parent\""
         }
       },
       "-Q": {
@@ -485,7 +485,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-Q, --shell-quote output the command line in shell-quoted form\""
         }
       },
       "-U": {
@@ -497,7 +497,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-U, --uid \\u003cID,...\\u003e match by real IDs\""
         }
       },
       "-V": {
@@ -509,7 +509,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-V, --version output version information and exit\""
         }
       },
       "-a": {
@@ -521,7 +521,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-a, --list-full list PID and full command line\""
         }
       },
       "-c": {
@@ -533,7 +533,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-c, --count count of matching processes\""
         }
       },
       "-d": {
@@ -545,7 +545,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-d, --delimiter \\u003cstring\\u003e specify output delimiter\""
         }
       },
       "-f": {
@@ -557,7 +557,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-f, --full use full command line to match\""
         }
       },
       "-g": {
@@ -569,7 +569,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-g, --pgroup \\u003cPGID,...\\u003e match listed process group IDs\""
         }
       },
       "-h": {
@@ -581,7 +581,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-h, --help display this help and exit\""
         }
       },
       "-i": {
@@ -593,7 +593,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-i, --ignore-case match case insensitively\""
         }
       },
       "-l": {
@@ -605,7 +605,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-l, --list-name list PID and process name\""
         }
       },
       "-n": {
@@ -617,7 +617,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-n, --newest select most recently started\""
         }
       },
       "-o": {
@@ -629,7 +629,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-o, --oldest select least recently started\""
         }
       },
       "-p": {
@@ -641,7 +641,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-p, --pid \\u003cPID,...\\u003e match process PIDs\""
         }
       },
       "-r": {
@@ -653,7 +653,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-r, --runstates \\u003cstate\\u003e match runstates [D,S,Z,...]\""
         }
       },
       "-s": {
@@ -665,7 +665,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-s, --session \\u003cSID,...\\u003e match session IDs\""
         }
       },
       "-t": {
@@ -677,7 +677,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-t, --terminal \\u003ctty,...\\u003e match by controlling terminal\""
         }
       },
       "-u": {
@@ -689,7 +689,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-u, --euid \\u003cID,...\\u003e match by effective IDs\""
         }
       },
       "-v": {
@@ -701,7 +701,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-v, --inverse negates the matching\""
         }
       },
       "-w": {
@@ -713,7 +713,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-w, --lightweight list all TID\""
         }
       },
       "-x": {
@@ -725,7 +725,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+          "source": "pgrep --help: \"-x, --exact match exactly with the command name\""
         }
       }
     },
@@ -739,7 +739,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pgrep\"]"
+        "source": "pgrep --help: \"pgrep [options] \\u003cpattern\\u003e\""
       }
     },
     "stdin": "never",

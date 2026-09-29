@@ -7,16 +7,16 @@
     "provenance": "npm 11.17.0 (this host, npm --version / npm help run), 2026-09-08",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+        "source": "npm --help: \"npm \\u003ccommand\\u003e\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+        "source": "npm --help: \"npm install install all the dependencies in your project\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+        "source": "npm --help: \"npm install install all the dependencies in your project\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+        "source": "npm --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+        "source": "npm --help: \"npm install install all the dependencies in your project\""
       }
     },
     "stdin": "never",
@@ -42,16 +42,16 @@
         "provenance": "npm 11.17.0 (this host, npm help run / npm run --help), 2026-09-08",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+            "source": "npm help run: \"NPM-RUN(1) NPM-RUN(1)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+            "source": "npm help run: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -64,7 +64,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"(bare-header doc style) foreground-scripts -- faults to true\""
             }
           },
           "--if-present": {
@@ -76,7 +76,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"(bare-header doc style) if-present -- If true, npm will not exit with an error code when run is invoked for a\""
             }
           },
           "--ignore-scripts": {
@@ -88,7 +88,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"(bare-header doc style) ignore-scripts -- If true, npm does not run scripts specified in package.json files.\""
             }
           },
           "--include-workspace-root": {
@@ -100,7 +100,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"(bare-header doc style) include-workspace-root -- Include the workspace root when workspaces are enabled for a command.\""
             }
           },
           "--workspace": {
@@ -112,7 +112,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"npm test --workspace=a\""
             }
           },
           "--workspaces": {
@@ -124,7 +124,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"npm test --workspaces\""
             }
           },
           "-w": {
@@ -136,7 +136,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+              "source": "npm help run: \"use -w as a shorthand, e.g:\""
             }
           }
         },
@@ -150,7 +150,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"npm\"]"
+            "source": "npm help run: \"npm run \\u003ccommand\\u003e [-- \\u003cargs\\u003e]\""
           }
         },
         "stdin": "never",

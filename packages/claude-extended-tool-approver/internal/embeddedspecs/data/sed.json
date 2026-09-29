@@ -7,16 +7,16 @@
     "provenance": "sed (GNU sed) 4.10, sed --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+        "source": "sed --help: \"Usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+        "source": "sed --help: \"specified, then the standard input is read.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+        "source": "sed --help: \"Usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+        "source": "sed --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"--debug annotate program execution\""
         }
       },
       "--expression": {
@@ -42,7 +42,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-e script, --expression=script add the script to the commands to be executed\""
         }
       },
       "--file": {
@@ -54,7 +54,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-f script-file, --file=script-file add the contents of script-file to the commands to be executed\""
         }
       },
       "--follow-symlinks": {
@@ -66,7 +66,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"--follow-symlinks follow symlinks when processing in place\""
         }
       },
       "--in-place": {
@@ -78,7 +78,7 @@
           "kind": "in-place"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-i[SUFFIX], --in-place[=SUFFIX] edit files in place (makes backup if SUFFIX supplied)\""
         }
       },
       "--line-length": {
@@ -90,7 +90,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-l N, --line-length=N specify the desired line-wrap length for the 'l' command\""
         }
       },
       "--null-data": {
@@ -102,7 +102,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-z, --null-data separate lines by NUL characters\""
         }
       },
       "--posix": {
@@ -114,7 +114,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"--posix disable all GNU extensions.\""
         }
       },
       "--quiet": {
@@ -126,7 +126,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-n, --quiet, --silent suppress automatic printing of pattern space\""
         }
       },
       "--regexp-extended": {
@@ -138,7 +138,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-E, -r, --regexp-extended use extended regular expressions in the script\""
         }
       },
       "--sandbox": {
@@ -150,7 +150,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"--sandbox operate in sandbox mode (disable e/r/w commands).\""
         }
       },
       "--separate": {
@@ -162,7 +162,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-s, --separate consider files as separate rather than as a single,\""
         }
       },
       "--silent": {
@@ -174,7 +174,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-n, --quiet, --silent suppress automatic printing of pattern space\""
         }
       },
       "--unbuffered": {
@@ -186,7 +186,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-u, --unbuffered load minimal amounts of data from the input files and flush\""
         }
       },
       "-E": {
@@ -198,7 +198,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-E, -r, --regexp-extended use extended regular expressions in the script\""
         }
       },
       "-e": {
@@ -211,7 +211,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-e script, --expression=script add the script to the commands to be executed\""
         }
       },
       "-f": {
@@ -223,7 +223,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-f script-file, --file=script-file add the contents of script-file to the commands to be executed\""
         }
       },
       "-i": {
@@ -235,7 +235,7 @@
           "kind": "in-place"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-i[SUFFIX], --in-place[=SUFFIX] edit files in place (makes backup if SUFFIX supplied)\""
         }
       },
       "-l": {
@@ -247,7 +247,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-l N, --line-length=N specify the desired line-wrap length for the 'l' command\""
         }
       },
       "-n": {
@@ -259,7 +259,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-n, --quiet, --silent suppress automatic printing of pattern space\""
         }
       },
       "-r": {
@@ -271,7 +271,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-E, -r, --regexp-extended use extended regular expressions in the script\""
         }
       },
       "-s": {
@@ -283,7 +283,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-s, --separate consider files as separate rather than as a single,\""
         }
       },
       "-u": {
@@ -295,7 +295,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-u, --unbuffered load minimal amounts of data from the input files and flush\""
         }
       },
       "-z": {
@@ -307,7 +307,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+          "source": "sed --help: \"-z, --null-data separate lines by NUL characters\""
         }
       }
     },
@@ -328,7 +328,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sed\"]"
+        "source": "sed --help: \"Usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\""
       }
     },
     "stdin": "when-no-path-operands",

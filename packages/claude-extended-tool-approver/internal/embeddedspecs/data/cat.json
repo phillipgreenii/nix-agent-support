@@ -7,16 +7,16 @@
     "provenance": "GNU coreutils 9.x cat --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        "source": "cat --help: \"Usage: cat [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        "source": "cat --help: \"With no FILE, or when FILE is -, read standard input.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        "source": "cat --help: \"Concatenate FILE(s) to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        "source": "cat --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-n, --number number all output lines\""
         }
       },
       "--number-nonblank": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-b, --number-nonblank number nonempty output lines, overrides -n\""
         }
       },
       "--show-all": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-A, --show-all equivalent to -vET\""
         }
       },
       "--show-ends": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-E, --show-ends display $ or ^M$ at end of each line\""
         }
       },
       "--show-nonprinting": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-v, --show-nonprinting use ^ and M- notation, except for LFD and TAB\""
         }
       },
       "--show-tabs": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-T, --show-tabs display TAB characters as ^I\""
         }
       },
       "--squeeze-blank": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-s, --squeeze-blank suppress repeated empty output lines\""
         }
       },
       "-A": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-A, --show-all equivalent to -vET\""
         }
       },
       "-E": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-E, --show-ends display $ or ^M$ at end of each line\""
         }
       },
       "-T": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-T, --show-tabs display TAB characters as ^I\""
         }
       },
       "-b": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-b, --number-nonblank number nonempty output lines, overrides -n\""
         }
       },
       "-e": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-e equivalent to -vE\""
         }
       },
       "-n": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-n, --number number all output lines\""
         }
       },
       "-s": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-s, --squeeze-blank suppress repeated empty output lines\""
         }
       },
       "-t": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-t equivalent to -vT\""
         }
       },
       "-u": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-u (ignored)\""
         }
       },
       "-v": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+          "source": "cat --help: \"-v, --show-nonprinting use ^ and M- notation, except for LFD and TAB\""
         }
       }
     },
@@ -236,7 +236,7 @@
       },
       "stdinToken": "-",
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        "source": "cat --help: \"Usage: cat [OPTION]... [FILE]...\""
       }
     },
     "stdin": "when-no-path-operands",

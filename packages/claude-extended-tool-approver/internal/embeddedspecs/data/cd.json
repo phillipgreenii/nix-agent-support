@@ -7,16 +7,16 @@
     "provenance": "bash builtin, help cd",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+        "source": "bash builtin: help cd: \"cd: cd [-L|[-P [-e]]] [-@] [dir]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+        "source": "bash builtin: help cd: \"cd: cd [-L|[-P [-e]]] [-@] [dir]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+        "source": "bash builtin: help cd: \"cd: cd [-L|[-P [-e]]] [-@] [dir]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+        "source": "bash builtin: help cd: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+          "source": "bash builtin: help cd: \"-@ on systems that support it, present a file with extended attributes as a directory containing the file attributes\""
         }
       },
       "-L": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+          "source": "bash builtin: help cd: \"-L force symbolic links to be followed: resolve symbolic links in DIR after processing instances of `..'\""
         }
       },
       "-P": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+          "source": "bash builtin: help cd: \"-P use the physical directory structure without following symbolic links: resolve symbolic links in DIR before\""
         }
       },
       "-e": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+          "source": "bash builtin: help cd: \"-e if the -P option is supplied, and the current working directory cannot be determined successfully, exit with\""
         }
       }
     },
@@ -85,7 +85,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+        "source": "bash builtin: help cd: \"cd: cd [-L|[-P [-e]]] [-@] [dir]\""
       }
     },
     "implicitEffects": [
@@ -96,7 +96,7 @@
         "target": "~",
         "whenNoPositionals": true,
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cd\"]"
+          "source": "bash builtin: help cd: \"cd: cd [-L|[-P [-e]]] [-@] [dir]\" -- documents the optional/omittable operand shape this implicit default (target \"~\", role \"chdir\") is derived from"
         }
       }
     ],

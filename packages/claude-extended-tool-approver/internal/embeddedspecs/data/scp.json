@@ -7,19 +7,19 @@
     "provenance": "OpenSSH 10.5p1 (same package tree as ssh — /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/scp, resolved via /run/current-system/sw/bin/scp), scp(1) man page for that release; this host 2026-09-07 (scp itself is intercepted by this repo's own configured ssh rule before the binary ever runs, identically to ssh -V — see this schema's own doc comment)",
     "citations": {
       "interpreter": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "man scp: \"[-P port] [-S program] [-X sftp_option] source ... target\" -- documents scp's own program/command-invocation shape (interpreter \"scp\")"
       },
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config] [-i identity_file] [-J destination] [-l limit] [-o ssh_option] [-P port] [-S program] [-X sftp_option] source ... target\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config] [-i identity_file] [-J destination] [-l limit] [-o ssh_option] [-P port] [-S program] [-X sftp_option] source ... target\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "scp (bare invocation, usage banner): full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -32,7 +32,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-3 Copies between two remote hosts are transferred through the local host. This mode is the default, but see also the -R option for\""
         }
       },
       "-4": {
@@ -44,7 +44,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-4 Forces scp to use IPv4 addresses only.\""
         }
       },
       "-6": {
@@ -56,7 +56,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-6 Forces scp to use IPv6 addresses only.\""
         }
       },
       "-A": {
@@ -68,7 +68,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-A Allows forwarding of ssh-agent(1) to the remote system. The de- fault is not to forward an authentication agent.\""
         }
       },
       "-B": {
@@ -80,7 +80,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-B Selects batch mode (prevents asking for passwords or passphrases).\""
         }
       },
       "-C": {
@@ -92,7 +92,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-C Compression enable. Passes the -C flag to ssh(1) to enable com- pression.\""
         }
       },
       "-D": {
@@ -104,7 +104,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config]\""
         }
       },
       "-F": {
@@ -116,7 +116,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config]\""
         }
       },
       "-J": {
@@ -128,7 +128,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-i identity_file] [-J destination] [-l limit] [-o ssh_option]\""
         }
       },
       "-O": {
@@ -140,7 +140,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-O Use the legacy SCP protocol for file transfers instead of the SFTP protocol. Forcing the use of the SCP protocol may be necessary\""
         }
       },
       "-P": {
@@ -152,7 +152,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-P port] [-S program] [-X sftp_option] source ... target\""
         }
       },
       "-R": {
@@ -164,7 +164,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-R Copies between two remote hosts are transferred through the local host by default. This option instead copies between two remote\""
         }
       },
       "-S": {
@@ -176,7 +176,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-P port] [-S program] [-X sftp_option] source ... target\""
         }
       },
       "-T": {
@@ -188,7 +188,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-T Disable strict filename checking. By default when copying files from a remote host to a local directory scp checks that the re-\""
         }
       },
       "-X": {
@@ -200,7 +200,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-P port] [-S program] [-X sftp_option] source ... target\""
         }
       },
       "-c": {
@@ -212,7 +212,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config]\""
         }
       },
       "-i": {
@@ -224,7 +224,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-i identity_file] [-J destination] [-l limit] [-o ssh_option]\""
         }
       },
       "-l": {
@@ -236,7 +236,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-i identity_file] [-J destination] [-l limit] [-o ssh_option]\""
         }
       },
       "-o": {
@@ -248,7 +248,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner): \"[-i identity_file] [-J destination] [-l limit] [-o ssh_option]\""
         }
       },
       "-p": {
@@ -260,7 +260,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-p Preserves modification times, access times, and file mode bits from the source file.\""
         }
       },
       "-q": {
@@ -272,7 +272,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-q Quiet mode: disables the progress meter as well as warning and di- agnostic messages from ssh(1).\""
         }
       },
       "-r": {
@@ -284,7 +284,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-r Recursively copy entire directories. Note that scp follows sym- bolic links encountered in the tree traversal.\""
         }
       },
       "-s": {
@@ -296,7 +296,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "man scp: \"scp [-346ABCOpqRrsTv] [-c cipher] ...\" -- -s is listed among scp's bundled boolean switches in the SYNOPSIS but has no separate entry in the OPTIONS section of this OpenSSH 10.5p1 man page (legacy \"use the SFTP protocol\" switch, a no-op today since scp always uses SFTP); the synopsis bracket-group is the only documented evidence this build carries for it"
         }
       },
       "-v": {
@@ -308,7 +308,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+          "source": "scp (bare invocation, usage banner) (full): \"-v Verbose mode. Causes scp and ssh(1) to print debugging messages about their progress. This is helpful in debugging connection,\""
         }
       }
     },
@@ -322,7 +322,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"scp\"]"
+        "source": "scp (bare invocation, usage banner): \"usage: scp [-346ABCOpqRrsTv] [-c cipher] [-D sftp_server_path] [-F ssh_config] [-i identity_file] [-J destination] [-l limit] [-o ssh_option] [-P port] [-S program] [-X sftp_option] source ... target\""
       }
     },
     "stdin": "never",

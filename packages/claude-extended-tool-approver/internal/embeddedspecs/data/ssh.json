@@ -7,19 +7,19 @@
     "provenance": "OpenSSH 10.5p1 (openssh-10.5p1, /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/ssh, resolved via /run/current-system/sw/bin/ssh), ssh(1) option table for that release; this host 2026-09-07 (ssh -V itself is intercepted by this repo's own configured ssh rule, \"ssh with no host\" — see this schema's own doc comment)",
     "citations": {
       "interpreter": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "man ssh: \"[command [argument ...]]\" -- documents ssh's own program/command-invocation shape (interpreter \"ssh\")"
       },
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address] [-c cipher_spec] [-D [bind_address:]port] [-E log_file] [-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file] [-J destination] [-L address] [-l login_name] [-m mac_spec]\" (no explicit stdin wording in the reviewed text; classified \"always\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address] [-c cipher_spec] [-D [bind_address:]port] [-E log_file] [-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file] [-J destination] [-L address] [-l login_name] [-m mac_spec]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "ssh (bare invocation, usage banner): full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -32,7 +32,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-4 Forces ssh to use IPv4 addresses only.\""
         }
       },
       "-6": {
@@ -44,7 +44,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-6 Forces ssh to use IPv6 addresses only.\""
         }
       },
       "-A": {
@@ -56,7 +56,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-A Enables forwarding of connections from an authentication agent such as ssh-agent(1). This can also be specified on a per-host\""
         }
       },
       "-B": {
@@ -68,7 +68,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address]\""
         }
       },
       "-C": {
@@ -80,7 +80,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-C Requests compression of all data (including stdin, stdout, stderr, and data for forwarded X11, TCP and Unix-domain connections). The\""
         }
       },
       "-D": {
@@ -92,7 +92,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-c cipher_spec] [-D [bind_address:]port] [-E log_file]\""
         }
       },
       "-E": {
@@ -104,7 +104,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-c cipher_spec] [-D [bind_address:]port] [-E log_file]\""
         }
       },
       "-F": {
@@ -116,7 +116,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file]\""
         }
       },
       "-G": {
@@ -128,7 +128,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-G Causes ssh to print its configuration after evaluating Host and Match blocks and exit.\""
         }
       },
       "-I": {
@@ -140,7 +140,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file]\""
         }
       },
       "-J": {
@@ -152,7 +152,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-J destination] [-L address] [-l login_name] [-m mac_spec]\""
         }
       },
       "-K": {
@@ -164,7 +164,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-K Enables GSSAPI-based authentication and forwarding (delegation) of GSSAPI credentials to the server.\""
         }
       },
       "-L": {
@@ -176,7 +176,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-J destination] [-L address] [-l login_name] [-m mac_spec]\""
         }
       },
       "-M": {
@@ -188,7 +188,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-M Places the ssh client into \\\"master\\\" mode for connection sharing. Multiple -M options places ssh into \\\"master\\\" mode but with confir-\""
         }
       },
       "-N": {
@@ -200,7 +200,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-N Do not execute a remote command. This is useful for just forward- ing ports. Refer to the description of SessionType in ssh_con-\""
         }
       },
       "-Q": {
@@ -212,7 +212,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"ssh [-Q query_option]\""
         }
       },
       "-R": {
@@ -224,7 +224,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-O ctl_cmd] [-o option] [-P tag] [-p port] [-R address]\""
         }
       },
       "-S": {
@@ -236,7 +236,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-S ctl_path] [-W host:port] [-w local_tun[:remote_tun]]\""
         }
       },
       "-T": {
@@ -248,7 +248,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-T Disable pseudo-terminal allocation.\""
         }
       },
       "-V": {
@@ -260,7 +260,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-V Display the version number and exit.\""
         }
       },
       "-W": {
@@ -272,7 +272,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-S ctl_path] [-W host:port] [-w local_tun[:remote_tun]]\""
         }
       },
       "-X": {
@@ -284,7 +284,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-X Enables X11 forwarding. This can also be specified on a per-host basis in a configuration file.\""
         }
       },
       "-Y": {
@@ -296,7 +296,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-Y Enables trusted X11 forwarding. Trusted X11 forwardings are not subjected to the X11 SECURITY extension controls.\""
         }
       },
       "-a": {
@@ -308,7 +308,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-a Disables forwarding of the authentication agent connection.\""
         }
       },
       "-b": {
@@ -320,7 +320,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address]\""
         }
       },
       "-c": {
@@ -332,7 +332,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-c cipher_spec] [-D [bind_address:]port] [-E log_file]\""
         }
       },
       "-e": {
@@ -344,7 +344,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file]\""
         }
       },
       "-f": {
@@ -356,7 +356,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-f Requests ssh to go to background just before command execution. This is useful if ssh is going to ask for passwords or\""
         }
       },
       "-g": {
@@ -368,7 +368,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-g Allows remote hosts to connect to local forwarded ports. If used on a multiplexed connection, then this option must be specified on\""
         }
       },
       "-i": {
@@ -380,7 +380,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file]\""
         }
       },
       "-k": {
@@ -392,7 +392,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-k Disables forwarding (delegation) of GSSAPI credentials to the server.\""
         }
       },
       "-l": {
@@ -404,7 +404,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-J destination] [-L address] [-l login_name] [-m mac_spec]\""
         }
       },
       "-m": {
@@ -416,7 +416,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-J destination] [-L address] [-l login_name] [-m mac_spec]\""
         }
       },
       "-n": {
@@ -428,7 +428,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-n Redirects stdin from /dev/null (actually, prevents reading from stdin). This must be used when ssh is run in the background. A\""
         }
       },
       "-o": {
@@ -440,7 +440,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-O ctl_cmd] [-o option] [-P tag] [-p port] [-R address]\""
         }
       },
       "-p": {
@@ -452,7 +452,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-O ctl_cmd] [-o option] [-P tag] [-p port] [-R address]\""
         }
       },
       "-q": {
@@ -464,7 +464,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-q Quiet mode. Causes most warning and diagnostic messages to be suppressed.\""
         }
       },
       "-s": {
@@ -476,7 +476,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-s May be used to request invocation of a subsystem on the remote system. Subsystems facilitate the use of SSH as a secure trans-\""
         }
       },
       "-t": {
@@ -488,7 +488,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-t Force pseudo-terminal allocation. This can be used to execute ar- bitrary screen-based programs on a remote machine, which can be\""
         }
       },
       "-v": {
@@ -500,7 +500,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-v Verbose mode. Causes ssh to print debugging messages about its progress. This is helpful in debugging connection, authentica-\""
         }
       },
       "-w": {
@@ -512,7 +512,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner): \"[-S ctl_path] [-W host:port] [-w local_tun[:remote_tun]]\""
         }
       },
       "-x": {
@@ -524,7 +524,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-x Disables X11 forwarding.\""
         }
       },
       "-y": {
@@ -536,7 +536,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+          "source": "ssh (bare invocation, usage banner) (full): \"-y Send log information using the syslog(3) system module. By de- fault this information is sent to stderr.\""
         }
       }
     },
@@ -550,7 +550,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ssh\"]"
+        "source": "ssh (bare invocation, usage banner): \"usage: ssh [-46AaCfGgKkMNnqsTtVvXxYyZ] [-B bind_interface] [-b bind_address] [-c cipher_spec] [-D [bind_address:]port] [-E log_file] [-e escape_char] [-F configfile] [-I pkcs11] [-i identity_file] [-J destination] [-L address] [-l login_name] [-m mac_spec]\""
       }
     },
     "stdin": "always",

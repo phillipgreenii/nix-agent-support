@@ -7,16 +7,16 @@
     "provenance": "sort (GNU coreutils) 9.11, sort --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+        "source": "sort --help: \"Usage: sort [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+        "source": "sort --help: \"With no FILE, or when FILE is -, read standard input.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+        "source": "sort --help: \"Write sorted concatenation of all FILE(s) to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+        "source": "sort --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-t, --field-separator=SEP use SEP instead of non-blank to blank transition\""
         }
       },
       "--human-numeric-sort": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-h, --human-numeric-sort compare human readable numbers (e.g., 2K 1G)\""
         }
       },
       "--ignore-case": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-f, --ignore-case fold lower case to upper case characters\""
         }
       },
       "--key": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-k, --key=KEYDEF sort via a key; KEYDEF gives location and type\""
         }
       },
       "--numeric-sort": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-n, --numeric-sort compare according to string numerical value;\""
         }
       },
       "--output": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-o, --output=FILE write result to FILE instead of standard output\""
         }
       },
       "--reverse": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-r, --reverse reverse the result of comparisons\""
         }
       },
       "--stable": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-s, --stable stabilize sort by disabling last-resort comparison\""
         }
       },
       "--unique": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-u, --unique output only the first of lines with equal keys;\""
         }
       },
       "--version-sort": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-V, --version-sort natural sort of (version) numbers within text\""
         }
       },
       "--zero-terminated": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-z, --zero-terminated line delimiter is NUL, not newline\""
         }
       },
       "-V": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-V, --version-sort natural sort of (version) numbers within text\""
         }
       },
       "-f": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-f, --ignore-case fold lower case to upper case characters\""
         }
       },
       "-h": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-h, --human-numeric-sort compare human readable numbers (e.g., 2K 1G)\""
         }
       },
       "-k": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-k, --key=KEYDEF sort via a key; KEYDEF gives location and type\""
         }
       },
       "-n": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-n, --numeric-sort compare according to string numerical value;\""
         }
       },
       "-o": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-o, --output=FILE write result to FILE instead of standard output\""
         }
       },
       "-r": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-r, --reverse reverse the result of comparisons\""
         }
       },
       "-s": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-s, --stable stabilize sort by disabling last-resort comparison\""
         }
       },
       "-t": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-t, --field-separator=SEP use SEP instead of non-blank to blank transition\""
         }
       },
       "-u": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-u, --unique output only the first of lines with equal keys;\""
         }
       },
       "-z": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+          "source": "sort --help: \"-z, --zero-terminated line delimiter is NUL, not newline\""
         }
       }
     },
@@ -296,7 +296,7 @@
       },
       "stdinToken": "-",
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sort\"]"
+        "source": "sort --help: \"Usage: sort [OPTION]... [FILE]... or: sort [OPTION]... --files0-from=F\""
       }
     },
     "stdin": "when-no-path-operands",

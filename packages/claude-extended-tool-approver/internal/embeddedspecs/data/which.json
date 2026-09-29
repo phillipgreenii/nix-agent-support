@@ -7,16 +7,16 @@
     "provenance": "GNU which v2.23, which --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+        "source": "which --help: \"Usage: which [options] [--] COMMAND [...]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+        "source": "which --help: \"--read-alias, -i Read list of aliases from stdin.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+        "source": "which --help: \"Write the full path of COMMAND(s) to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+        "source": "which --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--all, -a Print all matches in PATH, not just the first\""
         }
       },
       "--help": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--help, Print this help and exit successfully.\""
         }
       },
       "--show-dot": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--show-dot Don't expand a dot to current directory in output.\""
         }
       },
       "--show-tilde": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--show-tilde Output a tilde for HOME directory for non-root.\""
         }
       },
       "--skip-dot": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--skip-dot Skip directories in PATH that start with a dot.\""
         }
       },
       "--skip-tilde": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--skip-tilde Skip directories in PATH that start with a tilde.\""
         }
       },
       "--tty-only": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--tty-only Stop processing options on the right if not on tty.\""
         }
       },
       "--version": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--version, -[vV] Print version and exit successfully.\""
         }
       },
       "-V": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--version, -[vV] Print version and exit successfully.\""
         }
       },
       "-a": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--all, -a Print all matches in PATH, not just the first\""
         }
       },
       "-v": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+          "source": "which --help: \"--version, -[vV] Print version and exit successfully.\""
         }
       }
     },
@@ -163,7 +163,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"which\"]"
+        "source": "which --help: \"Usage: which [options] [--] COMMAND [...]\""
       }
     },
     "stdin": "never",

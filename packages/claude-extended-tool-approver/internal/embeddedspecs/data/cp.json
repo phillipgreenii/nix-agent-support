@@ -7,16 +7,16 @@
     "provenance": "cp (GNU coreutils) 9.11, cp --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+        "source": "cp --help: \"Usage: cp [OPTION]... [-T] SOURCE DEST\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+        "source": "cp --help: \"Usage: cp [OPTION]... [-T] SOURCE DEST or: cp [OPTION]... SOURCE... DIRECTORY or: cp [OPTION]... -t DIRECTORY SOURCE...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+        "source": "cp --help: \"Usage: cp [OPTION]... [-T] SOURCE DEST or: cp [OPTION]... SOURCE... DIRECTORY or: cp [OPTION]... -t DIRECTORY SOURCE...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+        "source": "cp --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-a, --archive same as -dR --preserve=all\""
         }
       },
       "--backup": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"--backup[=CONTROL] make a backup of each existing destination file\""
         }
       },
       "--dereference": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-L, --dereference always follow symbolic links in SOURCE\""
         }
       },
       "--force": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-f, --force if an existing destination file cannot be opened, remove it and try\""
         }
       },
       "--interactive": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-i, --interactive prompt before overwrite (overrides a previous -n option)\""
         }
       },
       "--no-clobber": {
@@ -89,7 +89,7 @@
           "kind": "no-clobber"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-n, --no-clobber (deprecated) silently skip existing files. See also --update\""
         }
       },
       "--no-dereference": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-P, --no-dereference never follow symbolic links in SOURCE\""
         }
       },
       "--no-target-directory": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-T, --no-target-directory treat DEST as a normal file\""
         }
       },
       "--parents": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"--parents use full source file name under DIRECTORY\""
         }
       },
       "--preserve": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"--preserve[=ATTR_LIST] preserve the specified attributes\""
         }
       },
       "--recursive": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-R, -r, --recursive copy directories recursively\""
         }
       },
       "--suffix": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-S, --suffix=SUFFIX override the usual backup suffix\""
         }
       },
       "--target-directory": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-t, --target-directory=DIRECTORY copy all SOURCE arguments into DIRECTORY\""
         }
       },
       "--update": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"--update[=UPDATE] control which existing files are updated;\""
         }
       },
       "--verbose": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-v, --verbose explain what is being done\""
         }
       },
       "-H": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-H follow command-line symbolic links in SOURCE\""
         }
       },
       "-L": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-L, --dereference always follow symbolic links in SOURCE\""
         }
       },
       "-P": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-P, --no-dereference never follow symbolic links in SOURCE\""
         }
       },
       "-R": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-R, -r, --recursive copy directories recursively\""
         }
       },
       "-S": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-S, --suffix=SUFFIX override the usual backup suffix\""
         }
       },
       "-T": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-T, --no-target-directory treat DEST as a normal file\""
         }
       },
       "-a": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-a, --archive same as -dR --preserve=all\""
         }
       },
       "-f": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-f, --force if an existing destination file cannot be opened, remove it and try\""
         }
       },
       "-i": {
@@ -305,7 +305,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-i, --interactive prompt before overwrite (overrides a previous -n option)\""
         }
       },
       "-n": {
@@ -317,7 +317,7 @@
           "kind": "no-clobber"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-n, --no-clobber (deprecated) silently skip existing files. See also --update\""
         }
       },
       "-p": {
@@ -329,7 +329,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-p same as --preserve=mode,ownership,timestamps\""
         }
       },
       "-r": {
@@ -341,7 +341,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-R, -r, --recursive copy directories recursively\""
         }
       },
       "-t": {
@@ -353,7 +353,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-t, --target-directory=DIRECTORY copy all SOURCE arguments into DIRECTORY\""
         }
       },
       "-u": {
@@ -365,7 +365,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-u equivalent to --update[=older]. See below\""
         }
       },
       "-v": {
@@ -377,7 +377,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-v, --verbose explain what is being done\""
         }
       },
       "-x": {
@@ -389,7 +389,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+          "source": "cp --help: \"-x, --one-file-system stay on this file system\""
         }
       }
     },
@@ -410,7 +410,7 @@
       ],
       "trailingSkippedByFlags": ["-t", "--target-directory"],
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cp\"]"
+        "source": "cp --help: \"Usage: cp [OPTION]... [-T] SOURCE DEST or: cp [OPTION]... SOURCE... DIRECTORY or: cp [OPTION]... -t DIRECTORY SOURCE...\""
       }
     },
     "stdin": "never",

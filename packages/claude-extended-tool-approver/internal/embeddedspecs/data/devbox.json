@@ -7,16 +7,16 @@
     "provenance": "NOT VERIFIED LIVE (devbox not installed on this host, 2026-09-08); modeled from devbox.json's documented shell.scripts / `devbox run` CLI shape",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+        "source": "devbox --help: \"Instant, easy, predictable development environments\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+        "source": "devbox --help: \"devbox [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+        "source": "devbox --help: \"devbox [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+        "source": "devbox --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+        "source": "devbox --help: \"devbox [flags]\""
       }
     },
     "stdin": "never",
@@ -42,16 +42,16 @@
         "provenance": "NOT VERIFIED LIVE (devbox not installed on this host, 2026-09-08)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+            "source": "devbox run --help: \"Start a new shell and runs your script or command in it, exiting when done.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+            "source": "devbox run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -64,7 +64,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+              "source": "devbox run --help: \"-q, --quiet suppresses logs\""
             }
           },
           "-q": {
@@ -76,7 +76,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+              "source": "devbox run --help: \"-q, --quiet suppresses logs\""
             }
           }
         },
@@ -90,7 +90,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"devbox\"]"
+            "source": "devbox run --help: \"devbox run [\\u003cscript\\u003e | \\u003ccmd\\u003e] [flags]\""
           }
         },
         "stdin": "never",

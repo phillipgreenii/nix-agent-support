@@ -7,16 +7,16 @@
     "provenance": "just 1.51.0 (this host, just --version / just --help), 2026-09-08",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+        "source": "just --help: \"🤖 Just a command runner - https://github.com/casey/just\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+        "source": "just --help: \"Use \\u003cJUSTFILE\\u003e as justfile or `-` to read from standard input [env: JUST_JUSTFILE=]\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+        "source": "just --help: \"Usage: just [OPTIONS] [ARGUMENTS]...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+        "source": "just --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--alias-style \\u003cALIAS_STYLE\\u003e Set list command alias display style [env: JUST_ALIAS_STYLE=] [default: right] [possible\""
         }
       },
       "--allow-missing": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--allow-missing Ignore missing recipe and module errors [env: JUST_ALLOW_MISSING=]\""
         }
       },
       "--color": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--color \\u003cCOLOR\\u003e Print colorful output [env: JUST_COLOR=] [default: auto] [possible values: always, auto,\""
         }
       },
       "--command-color": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--command-color \\u003cCOMMAND_COLOR\\u003e Echo recipe lines in \\u003cCOMMAND-COLOR\\u003e [env: JUST_COMMAND_COLOR=] [possible values: black,\""
         }
       },
       "--dry-run": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-n, --dry-run Print what just would do without doing it [env: JUST_DRY_RUN=]\""
         }
       },
       "--explain": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--explain Print recipe doc comment before running it [env: JUST_EXPLAIN=]\""
         }
       },
       "--help": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-h, --help Print help\""
         }
       },
       "--highlight": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--highlight Highlight echoed recipe lines in bold [env: JUST_HIGHLIGHT=]\""
         }
       },
       "--no-deps": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--no-deps Don't run recipe dependencies [env: JUST_NO_DEPS=]\""
         }
       },
       "--no-dotenv": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--no-dotenv Don't load `.env` file [env: JUST_NO_DOTENV=]\""
         }
       },
       "--no-highlight": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--no-highlight Don't highlight echoed recipe lines in bold [env: JUST_NO_HIGHLIGHT=]\""
         }
       },
       "--quiet": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-q, --quiet Suppress all output [env: JUST_QUIET=]\""
         }
       },
       "--set": {
@@ -181,7 +181,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--set \\u003cVARIABLE\\u003e \\u003cVALUE\\u003e Override \\u003cVARIABLE\\u003e with \\u003cVALUE\\u003e\""
         }
       },
       "--unstable": {
@@ -193,7 +193,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--unstable Enable unstable features [env: JUST_UNSTABLE=]\""
         }
       },
       "--verbose": {
@@ -205,7 +205,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-v, --verbose... Use verbose output [env: JUST_VERBOSE=]\""
         }
       },
       "--version": {
@@ -217,7 +217,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-V, --version Print version\""
         }
       },
       "--yes": {
@@ -229,7 +229,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"--yes Automatically confirm all recipes. [env: JUST_YES=]\""
         }
       },
       "-V": {
@@ -241,7 +241,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-V, --version Print version\""
         }
       },
       "-h": {
@@ -253,7 +253,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-h, --help Print help\""
         }
       },
       "-n": {
@@ -265,7 +265,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-n, --dry-run Print what just would do without doing it [env: JUST_DRY_RUN=]\""
         }
       },
       "-q": {
@@ -277,7 +277,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-q, --quiet Suppress all output [env: JUST_QUIET=]\""
         }
       },
       "-v": {
@@ -289,7 +289,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+          "source": "just --help: \"-v, --verbose... Use verbose output [env: JUST_VERBOSE=]\""
         }
       }
     },
@@ -303,7 +303,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"just\"]"
+        "source": "just --help: \"Usage: just [OPTIONS] [ARGUMENTS]...\""
       }
     },
     "stdin": "never",

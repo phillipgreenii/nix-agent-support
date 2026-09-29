@@ -30,13 +30,17 @@
 //     provenance string packet 1.2's generator stamped on all 45 embedded
 //     built-ins is "thin" — non-empty (so it already passes
 //     specfmt.Validate) but not a real fact-by-fact citation. This check
-//     flags a thin citation as WARN for a spec loaded from
-//     specfmt.LayerEmbedded (the builtin bool this package's functions take
-//     — see BUILTIN SCOPING below) and as HARD for any other spec, per the
-//     packet's binding decision ("WARN-only for exactly packet 1.2's 45
-//     built-ins ... until Phase 3's back-fill completes"). A literally EMPTY
-//     citation never reaches this check at all — specfmt.Validate already
-//     rejects it unconditionally (see LintInvalid).
+//     flags a thin citation as HARD unconditionally, for every spec
+//     regardless of layer. It used to WARN-only for a spec loaded from
+//     specfmt.LayerEmbedded (the builtin bool this package's functions
+//     still take — see BUILTIN SCOPING below, which is unrelated and
+//     unchanged) as a documented interim allowance while packet 1.2's 45
+//     mechanically-marshalled built-ins had not yet been back-filled with
+//     real citations; docket tc-o14i5.4's Phase 3 packet 1 (tc-o14i5.4.3)
+//     completed that back-fill for all 46 embedded built-ins, so the
+//     allowance is resolved and this check is HARD everywhere. A literally
+//     EMPTY citation never reaches this check at all — specfmt.Validate
+//     already rejects it unconditionally (see LintInvalid).
 //
 //  2. Danger-shaped-flag role check. A flag whose SPELLING matches one of
 //     the P13 danger-shaped patterns (-o, --output*, --exec*, -c,
@@ -74,8 +78,9 @@
 // LATER phase's scope, not this packet's) is a cmddesc/registry.go
 // correctness question, not a spec-FORMAT question this linter exists to
 // re-litigate. Checks 2 and 3 therefore take a builtin bool and are
-// SKIPPED entirely when builtin is true; check 1's WARN/HARD split and
-// check 4 apply regardless of builtin.
+// SKIPPED entirely when builtin is true; check 1 (now unconditionally HARD
+// — see its own doc comment above) and check 4 apply regardless of
+// builtin.
 //
 // A caller determines builtin from which specfmt.Layer a spec was loaded
 // from: LayerEmbedded is builtin; LayerUser and LayerRepo (and any spec

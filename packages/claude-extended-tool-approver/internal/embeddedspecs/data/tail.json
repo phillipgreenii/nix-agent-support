@@ -7,16 +7,16 @@
     "provenance": "tail (GNU coreutils) 9.11, tail --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+        "source": "tail --help: \"Usage: tail [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+        "source": "tail --help: \"With no FILE, or when FILE is -, read standard input.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+        "source": "tail --help: \"Print the last 10 lines of each FILE to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+        "source": "tail --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-c, --bytes=[+]NUM output the last NUM bytes;\""
         }
       },
       "--follow": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-f, --follow[={name|descriptor}] output appended data as the file grows;\""
         }
       },
       "--lines": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10;\""
         }
       },
       "--pid": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"--pid=PID with -f, exit after PID no longer exists;\""
         }
       },
       "--quiet": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-q, --quiet, --silent never output headers giving file names\""
         }
       },
       "--silent": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-q, --quiet, --silent never output headers giving file names\""
         }
       },
       "--verbose": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-v, --verbose always output headers giving file names\""
         }
       },
       "--zero-terminated": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-z, --zero-terminated line delimiter is NUL, not newline\""
         }
       },
       "-F": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-F same as --follow=name --retry\""
         }
       },
       "-c": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-c, --bytes=[+]NUM output the last NUM bytes;\""
         }
       },
       "-f": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-f, --follow[={name|descriptor}] output appended data as the file grows;\""
         }
       },
       "-n": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-n, --lines=[+]NUM output the last NUM lines, instead of the last 10;\""
         }
       },
       "-q": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-q, --quiet, --silent never output headers giving file names\""
         }
       },
       "-v": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-v, --verbose always output headers giving file names\""
         }
       },
       "-z": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+          "source": "tail --help: \"-z, --zero-terminated line delimiter is NUL, not newline\""
         }
       }
     },
@@ -212,7 +212,7 @@
       },
       "stdinToken": "-",
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tail\"]"
+        "source": "tail --help: \"Usage: tail [OPTION]... [FILE]...\""
       }
     },
     "stdin": "when-no-path-operands",

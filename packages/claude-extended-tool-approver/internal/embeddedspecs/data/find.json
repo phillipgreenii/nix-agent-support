@@ -7,19 +7,19 @@
     "provenance": "bfs 4.1.1 via Claude Code's find shell function (`type find`; `bfs --version`), GNU findutils-compatible primaries, this host 2026-09-07",
     "citations": {
       "interpreter": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: \"-exec COMMAND ; -exec COMMAND {} + -ok COMMAND ;\" -- documents find's own program/command-invocation shape (interpreter \"find\")"
       },
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: \"Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: \"Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: \"Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -32,7 +32,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+        "source": "find --help: \"Usage: find [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\""
       }
     },
     "stdin": "never",

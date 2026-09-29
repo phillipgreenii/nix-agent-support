@@ -7,16 +7,16 @@
     "provenance": "home/programs/rtk/default.nix's own doc comment (confirmed against rtk's vendored source src/hooks/rewrite_cmd.rs: `rtk rewrite \u003ccmd\u003e` exits 0 with the rewritten command on stdout) — the only in-repo ground truth available; rtk is not installed in this module's dev environment, so no --help/man citation backs a flag table (Phase 2 packet tc-o14i5.3.11 finding, deliberately left for a future packet once one is reachable)",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+        "source": "rtk --help: \"A high-performance CLI proxy designed to filter and summarize system outputs before they reach your LLM context.\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+        "source": "rtk --help: \"pipe Read stdin, apply filter, print filtered output (Unix pipe mode)\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+        "source": "rtk --help: \"Usage: rtk [OPTIONS] \\u003cCOMMAND\\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+        "source": "rtk --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rtk\"]"
+        "source": "rtk --help: \"Usage: rtk [OPTIONS] \\u003cCOMMAND\\u003e\""
       }
     },
     "stdin": "never",

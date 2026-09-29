@@ -7,19 +7,19 @@
     "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
     "citations": {
       "interpreter": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl\")"
       },
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: \"create Create a resource from a file or from stdin\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: \"kubectl [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -32,7 +32,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--as='':\""
         }
       },
       "--as-group": {
@@ -44,7 +44,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--as-group=[]:\""
         }
       },
       "--as-uid": {
@@ -56,7 +56,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--as-uid='':\""
         }
       },
       "--cluster": {
@@ -68,7 +68,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--cluster='':\""
         }
       },
       "--context": {
@@ -80,7 +80,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--context='':\""
         }
       },
       "--kubeconfig": {
@@ -92,7 +92,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--kubeconfig='':\""
         }
       },
       "--namespace": {
@@ -104,7 +104,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-n, --namespace='':\""
         }
       },
       "--output": {
@@ -116,7 +116,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl get --help (representative -o/--output documentation, shared across kubectl subcommands): \"-o, --output='':\""
         }
       },
       "--password": {
@@ -128,7 +128,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--password='':\""
         }
       },
       "--server": {
@@ -140,7 +140,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-s, --server='':\""
         }
       },
       "--token": {
@@ -152,7 +152,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--token='':\""
         }
       },
       "--user": {
@@ -164,7 +164,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--user='':\""
         }
       },
       "--username": {
@@ -176,7 +176,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"--username='':\""
         }
       },
       "--v": {
@@ -188,7 +188,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-v, --v=0:\""
         }
       },
       "-n": {
@@ -200,7 +200,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-n, --namespace='':\""
         }
       },
       "-o": {
@@ -212,7 +212,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl get --help (representative -o/--output documentation, shared across kubectl subcommands): \"-o, --output='':\""
         }
       },
       "-s": {
@@ -224,7 +224,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-s, --server='':\""
         }
       },
       "-v": {
@@ -236,7 +236,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          "source": "kubectl options: \"-v, --v=0:\""
         }
       }
     },
@@ -250,7 +250,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        "source": "kubectl --help: \"kubectl [flags] [options]\""
       }
     },
     "stdin": "never",
@@ -264,16 +264,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl annotate --help: \"Update the annotations on one or more resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl annotate --help: \"kubectl annotate [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl annotate --help: \"kubectl annotate [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl annotate --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -286,7 +286,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl annotate --help: \"kubectl annotate [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\""
           }
         },
         "implicitEffects": [
@@ -297,7 +297,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl annotate --help: \"kubectl annotate [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -311,16 +311,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-resources --help: \"Print the supported API resources on the server.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-resources --help: \"kubectl api-resources [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-resources --help: \"kubectl api-resources [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-resources --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -333,7 +333,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-resources --help: \"kubectl api-resources [flags] [options]\""
           }
         },
         "implicitEffects": [
@@ -344,7 +344,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl api-resources --help: \"kubectl api-resources [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -358,16 +358,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-versions --help: \"Print the supported API versions on the server, in the form of \\\"group/version\\\".\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-versions --help: \"kubectl api-versions [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-versions --help: \"kubectl api-versions [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-versions --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -380,7 +380,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl api-versions --help: \"kubectl api-versions [options]\""
           }
         },
         "implicitEffects": [
@@ -391,7 +391,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl api-versions --help: \"kubectl api-versions [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -405,19 +405,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl apply --help: \"Apply a configuration to a resource by file name or stdin. The resource name must be specified. This resource will be created if it doesn't exist yet. To use 'apply', always create the resource initially with either 'apply' or 'create --save-config'.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl apply --help: \"Apply a configuration to a resource by file name or stdin. The resource name must be specified. This resource will be created if it doesn't exist yet. To use 'apply', always create the resource initially with either 'apply' or 'create --save-config'.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl apply --help: \"kubectl apply (-f FILENAME | -k DIRECTORY) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl apply --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -430,7 +430,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=none": {
@@ -442,7 +442,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=server": {
@@ -454,7 +454,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"--dry-run='none':\""
             }
           },
           "--filename": {
@@ -466,7 +466,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -478,7 +478,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -490,7 +490,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -502,7 +502,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -516,7 +516,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl apply --help: \"kubectl apply (-f FILENAME | -k DIRECTORY) [options]\""
           }
         },
         "implicitEffects": [
@@ -527,7 +527,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl apply --help: \"kubectl apply (-f FILENAME | -k DIRECTORY) [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -542,16 +542,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl attach --help: \"Attach to a process that is already running inside an existing container.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl attach --help: \"# Switch to raw terminal mode; sends stdin to 'bash' in ruby-container from pod mypod\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl attach --help: \"# and sends stdout/stderr from 'bash' back to the client\""
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl attach --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -564,7 +564,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl attach --help: \"kubectl attach (POD | TYPE/NAME) -c CONTAINER [options]\""
           }
         },
         "implicitEffects": [
@@ -576,7 +576,7 @@
             "remoteFamily": "kubectl",
             "remotePersistent": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl attach --help: \"kubectl attach (POD | TYPE/NAME) -c CONTAINER [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           },
           {
@@ -585,7 +585,7 @@
             },
             "target": "attach's remote container/session content is not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl attach --help: \"kubectl attach (POD | TYPE/NAME) -c CONTAINER [options]\" -- documents the optional/omittable operand shape this implicit default (target \"attach's remote container/session content is not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -599,16 +599,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cluster-info --help: \"Display addresses of the control plane and services with label kubernetes.io/cluster-service=true. To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cluster-info --help: \"kubectl cluster-info [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cluster-info --help: \"kubectl cluster-info [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cluster-info --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -621,7 +621,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cluster-info --help: \"kubectl cluster-info [flags] [options]\""
           }
         },
         "implicitEffects": [
@@ -632,7 +632,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cluster-info --help: \"kubectl cluster-info [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -646,16 +646,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl config --help: \"Modify kubeconfig files using subcommands like \\\"kubectl config set current-context my-context\\\".\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl config --help: \"kubectl config SUBCOMMAND [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl config --help: \"kubectl config SUBCOMMAND [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl config --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "positionals": {
@@ -668,7 +668,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl config --help: \"kubectl config SUBCOMMAND [options]\""
           }
         },
         "stdin": "never",
@@ -681,16 +681,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config current-context --help: \"Display the current-context.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config current-context --help: \"kubectl config current-context [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config current-context --help: \"kubectl config current-context [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config current-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -703,7 +703,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config current-context --help: \"kubectl config current-context [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -714,7 +714,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config current-context --help: \"kubectl config current-context [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -728,16 +728,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-cluster --help: \"Delete the specified cluster from the kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-cluster --help: \"kubectl config delete-cluster NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-cluster --help: \"kubectl config delete-cluster NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-cluster --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -750,7 +750,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-cluster --help: \"kubectl config delete-cluster NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -761,7 +761,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config delete-cluster --help: \"kubectl config delete-cluster NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -775,16 +775,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-context --help: \"Delete the specified context from the kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-context --help: \"kubectl config delete-context NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-context --help: \"kubectl config delete-context NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -797,7 +797,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-context --help: \"kubectl config delete-context NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -808,7 +808,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config delete-context --help: \"kubectl config delete-context NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -822,16 +822,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-user --help: \"Delete the specified user from the kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-user --help: \"kubectl config delete-user NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-user --help: \"kubectl config delete-user NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-user --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -844,7 +844,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config delete-user --help: \"kubectl config delete-user NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -855,7 +855,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config delete-user --help: \"kubectl config delete-user NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -869,16 +869,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-clusters --help: \"Display clusters defined in the kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-clusters --help: \"kubectl config get-clusters [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-clusters --help: \"kubectl config get-clusters [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-clusters --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -891,7 +891,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-clusters --help: \"kubectl config get-clusters [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -902,7 +902,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config get-clusters --help: \"kubectl config get-clusters [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -916,16 +916,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-contexts --help: \"Display one or many contexts from the kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-contexts --help: \"kubectl config get-contexts [(-o|--output=)name)] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-contexts --help: \"kubectl config get-contexts [(-o|--output=)name)] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-contexts --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -938,7 +938,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-contexts --help: \"kubectl config get-contexts [(-o|--output=)name)] [options]\""
               }
             },
             "implicitEffects": [
@@ -949,7 +949,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config get-contexts --help: \"kubectl config get-contexts [(-o|--output=)name)] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -963,16 +963,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-users --help: \"Display users defined in the kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-users --help: \"kubectl config get-users [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-users --help: \"kubectl config get-users [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-users --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -985,7 +985,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config get-users --help: \"kubectl config get-users [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -996,7 +996,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config get-users --help: \"kubectl config get-users [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1010,16 +1010,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config rename-context --help: \"Renames a context from the kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config rename-context --help: \"kubectl config rename-context CONTEXT_NAME NEW_NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config rename-context --help: \"kubectl config rename-context CONTEXT_NAME NEW_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config rename-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1032,7 +1032,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config rename-context --help: \"kubectl config rename-context CONTEXT_NAME NEW_NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -1043,7 +1043,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config rename-context --help: \"kubectl config rename-context CONTEXT_NAME NEW_NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1057,16 +1057,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set --help: \"Set an individual value in a kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set --help: \"kubectl config set PROPERTY_NAME PROPERTY_VALUE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set --help: \"kubectl config set PROPERTY_NAME PROPERTY_VALUE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1079,7 +1079,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set --help: \"kubectl config set PROPERTY_NAME PROPERTY_VALUE [options]\""
               }
             },
             "implicitEffects": [
@@ -1090,7 +1090,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config set --help: \"kubectl config set PROPERTY_NAME PROPERTY_VALUE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1104,16 +1104,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-cluster --help: \"Set a cluster entry in kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-cluster --help: \"kubectl config set-cluster NAME [--server=server] [--certificate-authority=path/to/certificate/authority] [--insecure-skip-tls-verify=true] [--tls-server-name=example.com] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-cluster --help: \"kubectl config set-cluster NAME [--server=server] [--certificate-authority=path/to/certificate/authority] [--insecure-skip-tls-verify=true] [--tls-server-name=example.com] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-cluster --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1126,7 +1126,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-cluster --help: \"kubectl config set-cluster NAME [--server=server] [--certificate-authority=path/to/certificate/authority] [--insecure-skip-tls-verify=true] [--tls-server-name=example.com] [options]\""
               }
             },
             "implicitEffects": [
@@ -1137,7 +1137,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config set-cluster --help: \"kubectl config set-cluster NAME [--server=server] [--certificate-authority=path/to/certificate/authority] [--insecure-skip-tls-verify=true] [--tls-server-name=example.com] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1151,16 +1151,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-context --help: \"Set a context entry in kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-context --help: \"kubectl config set-context [NAME | --current] [--cluster=cluster_nickname] [--user=user_nickname] [--namespace=namespace] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-context --help: \"kubectl config set-context [NAME | --current] [--cluster=cluster_nickname] [--user=user_nickname] [--namespace=namespace] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1173,7 +1173,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-context --help: \"kubectl config set-context [NAME | --current] [--cluster=cluster_nickname] [--user=user_nickname] [--namespace=namespace] [options]\""
               }
             },
             "implicitEffects": [
@@ -1184,7 +1184,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config set-context --help: \"kubectl config set-context [NAME | --current] [--cluster=cluster_nickname] [--user=user_nickname] [--namespace=namespace] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1198,16 +1198,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-credentials --help: \"Set a user entry in kubeconfig.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-credentials --help: \"kubectl config set-credentials NAME [--client-certificate=path/to/certfile] [--client-key=path/to/keyfile] [--token=bearer_token] [--username=basic_user] [--password=basic_password] [--auth-provider=provider_name] [--auth-provider-arg=key=value] [--exec-command=exec_command] [--exec-api-version=exec_api_version] [--exec-arg=arg] [--exec-env=key=value] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-credentials --help: \"kubectl config set-credentials NAME [--client-certificate=path/to/certfile] [--client-key=path/to/keyfile] [--token=bearer_token] [--username=basic_user] [--password=basic_password] [--auth-provider=provider_name] [--auth-provider-arg=key=value] [--exec-command=exec_command] [--exec-api-version=exec_api_version] [--exec-arg=arg] [--exec-env=key=value] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-credentials --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1220,7 +1220,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config set-credentials --help: \"kubectl config set-credentials NAME [--client-certificate=path/to/certfile] [--client-key=path/to/keyfile] [--token=bearer_token] [--username=basic_user] [--password=basic_password] [--auth-provider=provider_name] [--auth-provider-arg=key=value] [--exec-command=exec_command] [--exec-api-version=exec_api_version] [--exec-arg=arg] [--exec-env=key=value] [options]\""
               }
             },
             "implicitEffects": [
@@ -1231,7 +1231,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config set-credentials --help: \"kubectl config set-credentials NAME [--client-certificate=path/to/certfile] [--client-key=path/to/keyfile] [--token=bearer_token] [--username=basic_user] [--password=basic_password] [--auth-provider=provider_name] [--auth-provider-arg=key=value] [--exec-command=exec_command] [--exec-api-version=exec_api_version] [--exec-arg=arg] [--exec-env=key=value] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1245,16 +1245,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config unset --help: \"Unset an individual value in a kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config unset --help: \"kubectl config unset PROPERTY_NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config unset --help: \"kubectl config unset PROPERTY_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config unset --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1267,7 +1267,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config unset --help: \"kubectl config unset PROPERTY_NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -1278,7 +1278,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config unset --help: \"kubectl config unset PROPERTY_NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1292,16 +1292,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config use-context --help: \"Set the current-context in a kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config use-context --help: \"kubectl config use-context CONTEXT_NAME [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config use-context --help: \"kubectl config use-context CONTEXT_NAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config use-context --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1314,7 +1314,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config use-context --help: \"kubectl config use-context CONTEXT_NAME [options]\""
               }
             },
             "implicitEffects": [
@@ -1325,7 +1325,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config use-context --help: \"kubectl config use-context CONTEXT_NAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1339,16 +1339,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config view --help: \"Display merged kubeconfig settings or a specified kubeconfig file.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config view --help: \"kubectl config view [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config view --help: \"kubectl config view [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config view --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -1361,7 +1361,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl config view --help: \"kubectl config view [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -1372,7 +1372,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl config view --help: \"kubectl config view [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -1388,16 +1388,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cordon --help: \"Mark node as unschedulable.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cordon --help: \"kubectl cordon NODE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cordon --help: \"kubectl cordon NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cordon --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1410,7 +1410,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cordon --help: \"kubectl cordon NODE [options]\""
           }
         },
         "implicitEffects": [
@@ -1421,7 +1421,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cordon --help: \"kubectl cordon NODE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -1435,19 +1435,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-cp\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cp --help: \"Copy files and directories to and from containers.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cp --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1460,7 +1460,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cp --help: \"-c, --container='':\""
             }
           },
           "--no-preserve": {
@@ -1472,7 +1472,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cp --help: \"--no-preserve=false:\""
             }
           },
           "--retries": {
@@ -1484,7 +1484,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cp --help: \"--retries=0:\""
             }
           },
           "-c": {
@@ -1496,7 +1496,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl cp --help: \"-c, --container='':\""
             }
           }
         },
@@ -1510,7 +1510,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl cp --help: \"kubectl cp \\u003cfile-spec-src\\u003e \\u003cfile-spec-dest\\u003e [options]\""
           }
         },
         "stdin": "never",
@@ -1524,19 +1524,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl create --help: \"Create a resource from a file or from stdin.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl create --help: \"Create a resource from a file or from stdin.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl create --help: \"kubectl create -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl create --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1549,7 +1549,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=none": {
@@ -1561,7 +1561,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=server": {
@@ -1573,7 +1573,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"--dry-run='none':\""
             }
           },
           "--filename": {
@@ -1585,7 +1585,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -1597,7 +1597,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -1609,7 +1609,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -1621,7 +1621,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -1635,7 +1635,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl create --help: \"kubectl create -f FILENAME [options]\""
           }
         },
         "implicitEffects": [
@@ -1646,7 +1646,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl create --help: \"kubectl create -f FILENAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -1661,16 +1661,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl debug --help: \"Debug cluster resources using interactive debugging containers.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl debug --help: \"If true, wait for the container to start running, and then attach as if 'kubectl attach ...' were called. Default false, unless '-i/--stdin' is set, in which case the default is true.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl debug --help: \"kubectl debug (POD | TYPE[[.VERSION].GROUP]/NAME) [ -- COMMAND [args...] ] [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl debug --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1683,7 +1683,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl debug --help: \"kubectl debug (POD | TYPE[[.VERSION].GROUP]/NAME) [ -- COMMAND [args...] ] [options]\""
           }
         },
         "implicitEffects": [
@@ -1694,7 +1694,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl debug --help: \"kubectl debug (POD | TYPE[[.VERSION].GROUP]/NAME) [ -- COMMAND [args...] ] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           },
           {
@@ -1703,7 +1703,7 @@
             },
             "target": "debug's remote container/session content is not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl debug --help: \"kubectl debug (POD | TYPE[[.VERSION].GROUP]/NAME) [ -- COMMAND [args...] ] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"debug's remote container/session content is not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -1717,19 +1717,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl delete --help: \"Delete resources by file names, stdin, resources and names, or by resources and label selector.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl delete --help: \"Delete resources by file names, stdin, resources and names, or by resources and label selector.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl delete --help: \"kubectl delete ([-f FILENAME] | [-k DIRECTORY] | TYPE [(NAME | -l label | --all)]) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl delete --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1742,7 +1742,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=none": {
@@ -1754,7 +1754,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=server": {
@@ -1766,7 +1766,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"--dry-run='none':\""
             }
           },
           "--filename": {
@@ -1778,7 +1778,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -1790,7 +1790,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -1802,7 +1802,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -1814,7 +1814,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -1828,7 +1828,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl delete --help: \"kubectl delete ([-f FILENAME] | [-k DIRECTORY] | TYPE [(NAME | -l label | --all)]) [options]\""
           }
         },
         "implicitEffects": [
@@ -1839,7 +1839,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl delete --help: \"kubectl delete ([-f FILENAME] | [-k DIRECTORY] | TYPE [(NAME | -l label | --all)]) [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -1854,16 +1854,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl describe --help: \"Show details of a specific resource or group of resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl describe --help: \"kubectl describe (-f FILENAME | TYPE [NAME_PREFIX | -l label] | TYPE/NAME) [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl describe --help: \"kubectl describe (-f FILENAME | TYPE [NAME_PREFIX | -l label] | TYPE/NAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl describe --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -1876,7 +1876,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl describe --help: \"kubectl describe (-f FILENAME | TYPE [NAME_PREFIX | -l label] | TYPE/NAME) [options]\""
           }
         },
         "implicitEffects": [
@@ -1887,7 +1887,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl describe --help: \"kubectl describe (-f FILENAME | TYPE [NAME_PREFIX | -l label] | TYPE/NAME) [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -1901,19 +1901,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl diff --help: \"Diff configurations specified by file name or stdin between the current online configuration, and the configuration as it would be if applied.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl diff --help: \"Diff configurations specified by file name or stdin between the current online configuration, and the configuration as it would be if applied.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl diff --help: \"kubectl diff -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl diff --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -1926,7 +1926,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl diff --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -1938,7 +1938,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl diff --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -1950,7 +1950,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl diff --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -1962,7 +1962,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl diff --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -1976,7 +1976,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl diff --help: \"kubectl diff -f FILENAME [options]\""
           }
         },
         "implicitEffects": [
@@ -1987,7 +1987,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl diff --help: \"kubectl diff -f FILENAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2002,16 +2002,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl drain --help: \"Drain node in preparation for maintenance.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl drain --help: \"kubectl drain NODE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl drain --help: \"kubectl drain NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl drain --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2024,7 +2024,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl drain --help: \"kubectl drain NODE [options]\""
           }
         },
         "implicitEffects": [
@@ -2035,7 +2035,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl drain --help: \"kubectl drain NODE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2049,16 +2049,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl edit --help: \"Edit a resource from the default editor.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl edit --help: \"kubectl edit (RESOURCE/NAME | -f FILENAME) [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl edit --help: \"kubectl edit (RESOURCE/NAME | -f FILENAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl edit --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2071,7 +2071,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl edit --help: \"kubectl edit (RESOURCE/NAME | -f FILENAME) [options]\""
           }
         },
         "implicitEffects": [
@@ -2082,7 +2082,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl edit --help: \"kubectl edit (RESOURCE/NAME | -f FILENAME) [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2096,16 +2096,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl exec --help: \"Execute a command in a container.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl exec --help: \"# Switch to raw terminal mode; sends stdin to 'bash' in ruby-container from pod mypod\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl exec --help: \"# and sends stdout/stderr from 'bash' back to the client\""
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl exec --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2118,7 +2118,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl exec --help: \"kubectl exec (POD | TYPE/NAME) [-c CONTAINER] [flags] -- COMMAND [args...] [options]\""
           }
         },
         "implicitEffects": [
@@ -2130,7 +2130,7 @@
             "remoteFamily": "kubectl",
             "remotePersistent": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl exec --help: \"kubectl exec (POD | TYPE/NAME) [-c CONTAINER] [flags] -- COMMAND [args...] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           },
           {
@@ -2139,7 +2139,7 @@
             },
             "target": "exec's remote container/session content is not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl exec --help: \"kubectl exec (POD | TYPE/NAME) [-c CONTAINER] [flags] -- COMMAND [args...] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"exec's remote container/session content is not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -2153,16 +2153,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl explain --help: \"Describe fields and structure of various resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl explain --help: \"kubectl explain TYPE [--recursive=FALSE|TRUE] [--api-version=api-version-group] [-o|--output=plaintext|plaintext-openapiv2] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl explain --help: \"kubectl explain TYPE [--recursive=FALSE|TRUE] [--api-version=api-version-group] [-o|--output=plaintext|plaintext-openapiv2] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl explain --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2175,7 +2175,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl explain --help: \"kubectl explain TYPE [--recursive=FALSE|TRUE] [--api-version=api-version-group] [-o|--output=plaintext|plaintext-openapiv2] [options]\""
           }
         },
         "implicitEffects": [
@@ -2186,7 +2186,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl explain --help: \"kubectl explain TYPE [--recursive=FALSE|TRUE] [--api-version=api-version-group] [-o|--output=plaintext|plaintext-openapiv2] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2200,16 +2200,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl expose --help: \"Expose a resource as a new Kubernetes service.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl expose --help: \"kubectl expose (-f FILENAME | TYPE NAME) [--port=port] [--protocol=TCP|UDP|SCTP] [--target-port=number-or-name] [--name=name] [--external-ip=external-ip-of-service] [--type=type] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl expose --help: \"kubectl expose (-f FILENAME | TYPE NAME) [--port=port] [--protocol=TCP|UDP|SCTP] [--target-port=number-or-name] [--name=name] [--external-ip=external-ip-of-service] [--type=type] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl expose --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2222,7 +2222,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl expose --help: \"kubectl expose (-f FILENAME | TYPE NAME) [--port=port] [--protocol=TCP|UDP|SCTP] [--target-port=number-or-name] [--name=name] [--external-ip=external-ip-of-service] [--type=type] [options]\""
           }
         },
         "implicitEffects": [
@@ -2233,7 +2233,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl expose --help: \"kubectl expose (-f FILENAME | TYPE NAME) [--port=port] [--protocol=TCP|UDP|SCTP] [--target-port=number-or-name] [--name=name] [--external-ip=external-ip-of-service] [--type=type] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2247,16 +2247,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl get --help: \"Display one or many resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl get --help: \"kubectl get [(-o|--output=)json|yaml|kyaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide] (TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl get --help: \"kubectl get [(-o|--output=)json|yaml|kyaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide] (TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl get --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2269,7 +2269,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl get --help: \"kubectl get [(-o|--output=)json|yaml|kyaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide] (TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]\""
           }
         },
         "implicitEffects": [
@@ -2280,7 +2280,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl get --help: \"kubectl get [(-o|--output=)json|yaml|kyaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide] (TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2294,16 +2294,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl label --help: \"Update the labels on a resource.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl label --help: \"kubectl label [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl label --help: \"kubectl label [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl label --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2316,7 +2316,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl label --help: \"kubectl label [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\""
           }
         },
         "implicitEffects": [
@@ -2327,7 +2327,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl label --help: \"kubectl label [--overwrite] (-f FILENAME | TYPE NAME) KEY_1=VAL_1 ... KEY_N=VAL_N [--resource-version=version] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2341,16 +2341,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl logs --help: \"Print the logs for a container in a pod or specified resource. If the pod has only one container, the container name is optional.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl logs --help: \"kubectl logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl logs --help: \"kubectl logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl logs --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2363,7 +2363,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl logs --help: \"kubectl logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER] [options]\""
           }
         },
         "implicitEffects": [
@@ -2374,7 +2374,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl logs --help: \"kubectl logs [-f] [-p] (POD | TYPE/NAME) [-c CONTAINER] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2388,19 +2388,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl patch --help: \"Update fields of a resource using strategic merge patch, a JSON merge patch, or a JSON patch.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl patch --help: \"kubectl patch (-f FILENAME | TYPE NAME) [-p PATCH|--patch-file FILE] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl patch --help: \"kubectl patch (-f FILENAME | TYPE NAME) [-p PATCH|--patch-file FILE] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl patch --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2413,7 +2413,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=none": {
@@ -2425,7 +2425,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=server": {
@@ -2437,7 +2437,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"--dry-run='none':\""
             }
           },
           "--filename": {
@@ -2449,7 +2449,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -2461,7 +2461,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -2473,7 +2473,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -2485,7 +2485,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -2499,7 +2499,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl patch --help: \"kubectl patch (-f FILENAME | TYPE NAME) [-p PATCH|--patch-file FILE] [options]\""
           }
         },
         "implicitEffects": [
@@ -2510,7 +2510,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl patch --help: \"kubectl patch (-f FILENAME | TYPE NAME) [-p PATCH|--patch-file FILE] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2525,16 +2525,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl port-forward --help: \"Forward one or more local ports to a pod.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl port-forward --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2547,7 +2547,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\""
           }
         },
         "implicitEffects": [
@@ -2558,7 +2558,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           },
           {
@@ -2567,7 +2567,7 @@
             },
             "target": "port-forward's remote container/session content is not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl port-forward --help: \"kubectl port-forward TYPE/NAME [options] [LOCAL_PORT:]REMOTE_PORT [...[LOCAL_PORT_N:]REMOTE_PORT_N]\" -- documents the optional/omittable operand shape this implicit default (target \"port-forward's remote container/session content is not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -2581,16 +2581,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl proxy --help: \"Creates a proxy server or application-level gateway between localhost and the Kubernetes API server. It also allows serving static content over specified HTTP path. All incoming data enters through one port and gets forwarded to the remote Kubernetes API server port, except for the path matching the static content path.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl proxy --help: \"kubectl proxy [--port=PORT] [--www=static-dir] [--www-prefix=prefix] [--api-prefix=prefix] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl proxy --help: \"# The chosen port for the server will be output to stdout\""
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl proxy --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -2603,7 +2603,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl proxy --help: \"kubectl proxy [--port=PORT] [--www=static-dir] [--www-prefix=prefix] [--api-prefix=prefix] [options]\""
           }
         },
         "implicitEffects": [
@@ -2614,7 +2614,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl proxy --help: \"kubectl proxy [--port=PORT] [--www=static-dir] [--www-prefix=prefix] [--api-prefix=prefix] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           },
           {
@@ -2623,7 +2623,7 @@
             },
             "target": "proxy's remote container/session content is not modeled",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl proxy --help: \"kubectl proxy [--port=PORT] [--www=static-dir] [--www-prefix=prefix] [--api-prefix=prefix] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"proxy's remote container/session content is not modeled\", role \"unmodeled\") is derived from"
             }
           }
         ],
@@ -2637,19 +2637,19 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "interpreter": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-manifest\")"
           },
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl replace --help: \"Replace a resource by file name or stdin.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl replace --help: \"Replace a resource by file name or stdin.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl replace --help: \"kubectl replace -f FILENAME [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl replace --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "flags": {
@@ -2662,7 +2662,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=none": {
@@ -2674,7 +2674,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"--dry-run='none':\""
             }
           },
           "--dry-run=server": {
@@ -2686,7 +2686,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"--dry-run='none':\""
             }
           },
           "--filename": {
@@ -2698,7 +2698,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"-f, --filename=[]:\""
             }
           },
           "--kustomize": {
@@ -2710,7 +2710,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"-k, --kustomize='':\""
             }
           },
           "-f": {
@@ -2722,7 +2722,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"-f, --filename=[]:\""
             }
           },
           "-k": {
@@ -2734,7 +2734,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"-k, --kustomize='':\""
             }
           }
         },
@@ -2748,7 +2748,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl replace --help: \"kubectl replace -f FILENAME [options]\""
           }
         },
         "implicitEffects": [
@@ -2759,7 +2759,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl replace --help: \"kubectl replace -f FILENAME [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2774,16 +2774,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl rollout --help: \"Manage the rollout of one or many resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl rollout --help: \"kubectl rollout SUBCOMMAND [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl rollout --help: \"kubectl rollout SUBCOMMAND [options]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl rollout --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "positionals": {
@@ -2796,7 +2796,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl rollout --help: \"kubectl rollout SUBCOMMAND [options]\""
           }
         },
         "stdin": "never",
@@ -2809,16 +2809,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout history --help: \"View previous rollout revisions and configurations.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout history --help: \"kubectl rollout history (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout history --help: \"kubectl rollout history (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout history --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2831,7 +2831,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout history --help: \"kubectl rollout history (TYPE NAME | TYPE/NAME) [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -2842,7 +2842,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout history --help: \"kubectl rollout history (TYPE NAME | TYPE/NAME) [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2856,16 +2856,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout pause --help: \"Mark the provided resource as paused.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout pause --help: \"kubectl rollout pause RESOURCE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout pause --help: \"kubectl rollout pause RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout pause --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2878,7 +2878,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout pause --help: \"kubectl rollout pause RESOURCE [options]\""
               }
             },
             "implicitEffects": [
@@ -2889,7 +2889,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout pause --help: \"kubectl rollout pause RESOURCE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2903,16 +2903,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout restart --help: \"Restart a resource.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout restart --help: \"kubectl rollout restart RESOURCE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout restart --help: \"kubectl rollout restart RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout restart --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2925,7 +2925,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout restart --help: \"kubectl rollout restart RESOURCE [options]\""
               }
             },
             "implicitEffects": [
@@ -2936,7 +2936,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout restart --help: \"kubectl rollout restart RESOURCE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2950,16 +2950,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout resume --help: \"Resume a paused resource.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout resume --help: \"kubectl rollout resume RESOURCE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout resume --help: \"kubectl rollout resume RESOURCE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout resume --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -2972,7 +2972,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout resume --help: \"kubectl rollout resume RESOURCE [options]\""
               }
             },
             "implicitEffects": [
@@ -2983,7 +2983,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout resume --help: \"kubectl rollout resume RESOURCE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -2997,16 +2997,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout status --help: \"Show the status of the rollout.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout status --help: \"kubectl rollout status (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout status --help: \"kubectl rollout status (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout status --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -3019,7 +3019,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout status --help: \"kubectl rollout status (TYPE NAME | TYPE/NAME) [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -3030,7 +3030,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout status --help: \"kubectl rollout status (TYPE NAME | TYPE/NAME) [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -3044,16 +3044,16 @@
             "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout undo --help: \"Roll back to a previous rollout.\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout undo --help: \"kubectl rollout undo (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout undo --help: \"kubectl rollout undo (TYPE NAME | TYPE/NAME) [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout undo --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
             "positionals": {
@@ -3066,7 +3066,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                "source": "kubectl rollout undo --help: \"kubectl rollout undo (TYPE NAME | TYPE/NAME) [flags] [options]\""
               }
             },
             "implicitEffects": [
@@ -3077,7 +3077,7 @@
                 },
                 "remoteFamily": "kubectl",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                  "source": "kubectl rollout undo --help: \"kubectl rollout undo (TYPE NAME | TYPE/NAME) [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
                 }
               }
             ],
@@ -3093,16 +3093,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl run --help: \"Create and run a particular image in a pod.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl run --help: \"If true, wait for the Pod to start running, and then attach to the Pod as if 'kubectl attach ...' were called. Default false, unless '-i/--stdin' is set, in which case the default is true. With '--restart=Never' the exit code of the container process is returned.\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl run --help: \"kubectl run NAME --image=image [--env=\\\"key=value\\\"] [--port=port] [--dry-run=server|client] [--overrides=inline-json] [--command] -- [COMMAND] [args...] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl run --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3115,7 +3115,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl run --help: \"kubectl run NAME --image=image [--env=\\\"key=value\\\"] [--port=port] [--dry-run=server|client] [--overrides=inline-json] [--command] -- [COMMAND] [args...] [options]\""
           }
         },
         "implicitEffects": [
@@ -3126,7 +3126,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl run --help: \"kubectl run NAME --image=image [--env=\\\"key=value\\\"] [--port=port] [--dry-run=server|client] [--overrides=inline-json] [--command] -- [COMMAND] [args...] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3140,16 +3140,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl scale --help: \"Set a new size for a deployment, replica set, replication controller, or stateful set.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl scale --help: \"kubectl scale [--resource-version=version] [--current-replicas=count] --replicas=COUNT (-f FILENAME | TYPE NAME) [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl scale --help: \"kubectl scale [--resource-version=version] [--current-replicas=count] --replicas=COUNT (-f FILENAME | TYPE NAME) [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl scale --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3162,7 +3162,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl scale --help: \"kubectl scale [--resource-version=version] [--current-replicas=count] --replicas=COUNT (-f FILENAME | TYPE NAME) [options]\""
           }
         },
         "implicitEffects": [
@@ -3173,7 +3173,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl scale --help: \"kubectl scale [--resource-version=version] [--current-replicas=count] --replicas=COUNT (-f FILENAME | TYPE NAME) [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3187,16 +3187,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl set --help: \"Configure application resources.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl set --help: \"kubectl set SUBCOMMAND [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl set --help: \"kubectl set SUBCOMMAND [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl set --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3209,7 +3209,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl set --help: \"kubectl set SUBCOMMAND [options]\""
           }
         },
         "implicitEffects": [
@@ -3220,7 +3220,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl set --help: \"kubectl set SUBCOMMAND [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3234,16 +3234,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl taint --help: \"Update the taints on one or more nodes.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl taint --help: \"kubectl taint NODE NAME KEY_1=VAL_1:TAINT_EFFECT_1 ... KEY_N=VAL_N:TAINT_EFFECT_N [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl taint --help: \"kubectl taint NODE NAME KEY_1=VAL_1:TAINT_EFFECT_1 ... KEY_N=VAL_N:TAINT_EFFECT_N [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl taint --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3256,7 +3256,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl taint --help: \"kubectl taint NODE NAME KEY_1=VAL_1:TAINT_EFFECT_1 ... KEY_N=VAL_N:TAINT_EFFECT_N [options]\""
           }
         },
         "implicitEffects": [
@@ -3267,7 +3267,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl taint --help: \"kubectl taint NODE NAME KEY_1=VAL_1:TAINT_EFFECT_1 ... KEY_N=VAL_N:TAINT_EFFECT_N [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3281,16 +3281,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl top --help: \"Display resource (CPU/memory) usage.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl top --help: \"kubectl top [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl top --help: \"kubectl top [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl top --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3303,7 +3303,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl top --help: \"kubectl top [flags] [options]\""
           }
         },
         "implicitEffects": [
@@ -3314,7 +3314,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl top --help: \"kubectl top [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3328,16 +3328,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl uncordon --help: \"Mark node as schedulable.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl uncordon --help: \"kubectl uncordon NODE [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl uncordon --help: \"kubectl uncordon NODE [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl uncordon --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3350,7 +3350,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl uncordon --help: \"kubectl uncordon NODE [options]\""
           }
         },
         "implicitEffects": [
@@ -3361,7 +3361,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl uncordon --help: \"kubectl uncordon NODE [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],
@@ -3375,16 +3375,16 @@
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl version --help: \"Print the client and server version information for the current context.\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl version --help: \"kubectl version [flags] [options]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl version --help: \"kubectl version [flags] [options]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl version --help: `kubectl get --this-is-not-a-real-flag` -\u003e \"error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
         "positionals": {
@@ -3397,7 +3397,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            "source": "kubectl version --help: \"kubectl version [flags] [options]\""
           }
         },
         "implicitEffects": [
@@ -3408,7 +3408,7 @@
             },
             "remoteFamily": "kubectl",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              "source": "kubectl version --help: \"kubectl version [flags] [options]\" -- documents the optional/omittable operand shape this implicit default (target \"kubectl\", role \"remote\") is derived from"
             }
           }
         ],

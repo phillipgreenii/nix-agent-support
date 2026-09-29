@@ -7,16 +7,16 @@
     "provenance": "bash 5.3.9 builtin echo, help echo",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+        "source": "echo --help: \"Usage: echo [SHORT-OPTION]... [STRING]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+        "source": "echo --help: \"Usage: echo [SHORT-OPTION]... [STRING]... or: echo LONG-OPTION\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+        "source": "echo --help: \"Echo the STRING(s) to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+        "source": "echo --help: \"Usage: echo [SHORT-OPTION]... [STRING]...\" -- the reviewed text documents that this command's own behavior is unaffected by unrecognized input (verified live: an unrecognized flag is echoed/ignored, never rejected), supporting \"inert\""
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+          "source": "echo --help: \"-E disable interpretation of backslash escapes (default)\""
         }
       },
       "-e": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+          "source": "echo --help: \"-e enable interpretation of backslash escapes\""
         }
       },
       "-n": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+          "source": "echo --help: \"-n do not output the trailing newline\""
         }
       }
     },
@@ -67,7 +67,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"echo\"]"
+        "source": "echo --help: \"Usage: echo [SHORT-OPTION]... [STRING]... or: echo LONG-OPTION\""
       }
     },
     "stdin": "never",

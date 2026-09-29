@@ -7,16 +7,16 @@
     "provenance": "ugrep 7.8.4 (GNU-grep-compatible CLI), grep --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+        "source": "grep --help: \"Usage: grep [OPTION]... PATTERNS [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+        "source": "grep --help: \"--label=LABEL use LABEL as the standard input file name prefix\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+        "source": "grep --help: \"Usage: grep [OPTION]... PATTERNS [FILE]...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+        "source": "grep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-A, --after-context=NUM print NUM lines of trailing context\""
         }
       },
       "--basic-regexp": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-G, --basic-regexp PATTERNS are basic regular expressions\""
         }
       },
       "--before-context": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-B, --before-context=NUM print NUM lines of leading context\""
         }
       },
       "--color": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"--color[=WHEN],\""
         }
       },
       "--colour": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"--colour[=WHEN] use markers to highlight the matching strings; WHEN is 'always', 'never', or 'auto'\""
         }
       },
       "--context": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-C, --context=NUM print NUM lines of output context\""
         }
       },
       "--count": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-c, --count print only a count of selected lines per FILE\""
         }
       },
       "--decompress": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help + man grep: reviewed in full; neither documents a --decompress option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --decompress` -\u003e \"grep: unrecognized option '--decompress'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
         }
       },
       "--dereference-recursive": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-R, --dereference-recursive likewise, but follow all symlinks\""
         }
       },
       "--exclude": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"--exclude=GLOB skip files that match GLOB\""
         }
       },
       "--exclude-dir": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"--exclude-dir=GLOB skip directories that match GLOB\""
         }
       },
       "--extended-regexp": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-E, --extended-regexp PATTERNS are extended regular expressions\""
         }
       },
       "--file": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-f, --file=FILE take PATTERNS from FILE\""
         }
       },
       "--files-with-matches": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-l, --files-with-matches print only names of FILEs with selected lines\""
         }
       },
       "--files-without-match": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-L, --files-without-match print only names of FILEs with no selected lines\""
         }
       },
       "--fixed-strings": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-F, --fixed-strings PATTERNS are strings\""
         }
       },
       "--ignore-case": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-i, --ignore-case ignore case distinctions in patterns and data\""
         }
       },
       "--include": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"--include=GLOB search only files that match GLOB (a file pattern)\""
         }
       },
       "--invert-match": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-v, --invert-match select non-matching lines\""
         }
       },
       "--line-number": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-n, --line-number print line number with output lines\""
         }
       },
       "--line-regexp": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-x, --line-regexp match only whole lines\""
         }
       },
       "--max-count": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-m, --max-count=NUM stop after NUM selected lines\""
         }
       },
       "--min-count": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help + man grep: reviewed in full; neither documents a --min-count option, and live invocation confirms this ugrep 7.8.4 build rejects it (`grep --min-count=1` -\u003e \"grep: unrecognized option '--min-count=1'\", exit 2) -- FACT MISMATCH discovered during citation backfill (flag/role structure left unchanged per Binding decisions; recorded via bd comment)"
         }
       },
       "--no-filename": {
@@ -305,7 +305,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-h, --no-filename suppress the file name prefix on output\""
         }
       },
       "--no-messages": {
@@ -317,7 +317,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-s, --no-messages suppress error messages\""
         }
       },
       "--only-matching": {
@@ -329,7 +329,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-o, --only-matching show only nonempty parts of lines that match\""
         }
       },
       "--perl-regexp": {
@@ -341,7 +341,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-P, --perl-regexp PATTERNS are Perl regular expressions\""
         }
       },
       "--quiet": {
@@ -353,7 +353,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-q, --quiet, --silent suppress all normal output\""
         }
       },
       "--recursive": {
@@ -365,7 +365,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-r, --recursive like --directories=recurse\""
         }
       },
       "--regexp": {
@@ -377,7 +377,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-e, --regexp=PATTERNS use PATTERNS for matching\""
         }
       },
       "--silent": {
@@ -389,7 +389,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-q, --quiet, --silent suppress all normal output\""
         }
       },
       "--text": {
@@ -401,7 +401,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-a, --text equivalent to --binary-files=text\""
         }
       },
       "--with-filename": {
@@ -413,7 +413,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-H, --with-filename print file name with output lines\""
         }
       },
       "--word-regexp": {
@@ -425,7 +425,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-w, --word-regexp match only whole words\""
         }
       },
       "-A": {
@@ -437,7 +437,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-A, --after-context=NUM print NUM lines of trailing context\""
         }
       },
       "-B": {
@@ -449,7 +449,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-B, --before-context=NUM print NUM lines of leading context\""
         }
       },
       "-C": {
@@ -461,7 +461,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-C, --context=NUM print NUM lines of output context\""
         }
       },
       "-E": {
@@ -473,7 +473,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-E, --extended-regexp PATTERNS are extended regular expressions\""
         }
       },
       "-F": {
@@ -485,7 +485,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-F, --fixed-strings PATTERNS are strings\""
         }
       },
       "-G": {
@@ -497,7 +497,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-G, --basic-regexp PATTERNS are basic regular expressions\""
         }
       },
       "-H": {
@@ -509,7 +509,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-H, --with-filename print file name with output lines\""
         }
       },
       "-L": {
@@ -521,7 +521,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-L, --files-without-match print only names of FILEs with no selected lines\""
         }
       },
       "-P": {
@@ -533,7 +533,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-P, --perl-regexp PATTERNS are Perl regular expressions\""
         }
       },
       "-R": {
@@ -545,7 +545,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-R, --dereference-recursive likewise, but follow all symlinks\""
         }
       },
       "-a": {
@@ -557,7 +557,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-a, --text equivalent to --binary-files=text\""
         }
       },
       "-c": {
@@ -569,7 +569,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-c, --count print only a count of selected lines per FILE\""
         }
       },
       "-e": {
@@ -581,7 +581,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-e, --regexp=PATTERNS use PATTERNS for matching\""
         }
       },
       "-f": {
@@ -593,7 +593,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-f, --file=FILE take PATTERNS from FILE\""
         }
       },
       "-h": {
@@ -605,7 +605,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-h, --no-filename suppress the file name prefix on output\""
         }
       },
       "-i": {
@@ -617,7 +617,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-i, --ignore-case ignore case distinctions in patterns and data\""
         }
       },
       "-l": {
@@ -629,7 +629,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-l, --files-with-matches print only names of FILEs with selected lines\""
         }
       },
       "-m": {
@@ -641,7 +641,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-m, --max-count=NUM stop after NUM selected lines\""
         }
       },
       "-n": {
@@ -653,7 +653,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-n, --line-number print line number with output lines\""
         }
       },
       "-o": {
@@ -665,7 +665,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-o, --only-matching show only nonempty parts of lines that match\""
         }
       },
       "-q": {
@@ -677,7 +677,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-q, --quiet, --silent suppress all normal output\""
         }
       },
       "-r": {
@@ -689,7 +689,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-r, --recursive like --directories=recurse\""
         }
       },
       "-s": {
@@ -701,7 +701,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-s, --no-messages suppress error messages\""
         }
       },
       "-v": {
@@ -713,7 +713,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-v, --invert-match select non-matching lines\""
         }
       },
       "-w": {
@@ -725,7 +725,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-w, --word-regexp match only whole words\""
         }
       },
       "-x": {
@@ -737,7 +737,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-x, --line-regexp match only whole lines\""
         }
       },
       "-z": {
@@ -749,7 +749,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-z, --null-data a data line ends in 0 byte, not newline\""
         }
       }
     },
@@ -769,7 +769,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+        "source": "grep --help: \"Usage: grep [OPTION]... PATTERNS [FILE]...\""
       }
     },
     "implicitEffects": [
@@ -781,7 +781,7 @@
         "whenNoRestPositionals": true,
         "whenFlags": ["-r", "-R", "--recursive", "--dereference-recursive"],
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"grep\"]"
+          "source": "grep --help: \"-r, --recursive like --directories=recurse / -R, --dereference-recursive likewise, but follow all symlinks\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
         }
       }
     ],

@@ -7,16 +7,16 @@
     "provenance": "jq 1.8.2, jq --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+        "source": "jq --help: \"jq - commandline JSON processor [version 1.8.2]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+        "source": "jq --help: \"Usage: jq [options] \\u003cjq filter\\u003e [file...] jq [options] --args \\u003cjq filter\\u003e [strings...] jq [options] --jsonargs \\u003cjq filter\\u003e [JSON_TEXTS...]\" (no explicit stdin wording in the reviewed text; classified \"when-no-path-operands\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+        "source": "jq --help: \"standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+        "source": "jq --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -37,7 +37,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--arg name value set $name to the string value;\""
         }
       },
       "--argjson": {
@@ -57,7 +57,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--argjson name value set $name to the JSON value;\""
         }
       },
       "--args": {
@@ -69,7 +69,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--args consume remaining arguments as positional string values;\""
         }
       },
       "--ascii-output": {
@@ -81,7 +81,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-a, --ascii-output output strings by only ASCII characters using escape sequences;\""
         }
       },
       "--build-configuration": {
@@ -93,7 +93,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--build-configuration show jq's build configuration;\""
         }
       },
       "--color-output": {
@@ -105,7 +105,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-C, --color-output colorize JSON output;\""
         }
       },
       "--compact-output": {
@@ -117,7 +117,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-c, --compact-output compact instead of pretty-printed output;\""
         }
       },
       "--exit-status": {
@@ -129,7 +129,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-e, --exit-status set exit status code based on the output;\""
         }
       },
       "--from-file": {
@@ -141,7 +141,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-f, --from-file load the filter from a file;\""
         }
       },
       "--help": {
@@ -153,7 +153,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-h, --help show the help;\""
         }
       },
       "--indent": {
@@ -165,7 +165,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--indent n use n spaces for indentation (max 7 spaces);\""
         }
       },
       "--join-output": {
@@ -177,7 +177,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-j, --join-output implies -r and output without newline after each output;\""
         }
       },
       "--jsonargs": {
@@ -189,7 +189,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--jsonargs consume remaining arguments as positional JSON values;\""
         }
       },
       "--library-path": {
@@ -201,7 +201,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-L, --library-path dir search modules from the directory;\""
         }
       },
       "--monochrome-output": {
@@ -213,7 +213,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-M, --monochrome-output disable colored output;\""
         }
       },
       "--null-input": {
@@ -225,7 +225,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-n, --null-input use `null` as the single input value;\""
         }
       },
       "--raw-input": {
@@ -237,7 +237,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-R, --raw-input read each line as string instead of JSON;\""
         }
       },
       "--raw-output": {
@@ -249,7 +249,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-r, --raw-output output strings without escapes and quotes;\""
         }
       },
       "--raw-output0": {
@@ -261,7 +261,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--raw-output0 implies -r and output NUL after each output;\""
         }
       },
       "--rawfile": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--rawfile name file set $name to string contents of file;\""
         }
       },
       "--seq": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--seq parse input/output as application/json-seq;\""
         }
       },
       "--slurp": {
@@ -305,7 +305,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-s, --slurp read all inputs into an array and use it as the single input value;\""
         }
       },
       "--slurpfile": {
@@ -325,7 +325,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--slurpfile name file set $name to an array of JSON values read from the file;\""
         }
       },
       "--sort-keys": {
@@ -337,7 +337,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-S, --sort-keys sort keys of each object on output;\""
         }
       },
       "--stream": {
@@ -349,7 +349,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--stream parse the input value in streaming fashion;\""
         }
       },
       "--stream-errors": {
@@ -361,7 +361,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--stream-errors implies --stream and report parse error as an array;\""
         }
       },
       "--tab": {
@@ -373,7 +373,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--tab use tabs for indentation;\""
         }
       },
       "--unbuffered": {
@@ -385,7 +385,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"--unbuffered flush output stream after each output;\""
         }
       },
       "--version": {
@@ -397,7 +397,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-V, --version show the version;\""
         }
       },
       "-C": {
@@ -409,7 +409,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-C, --color-output colorize JSON output;\""
         }
       },
       "-L": {
@@ -421,7 +421,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-L, --library-path dir search modules from the directory;\""
         }
       },
       "-M": {
@@ -433,7 +433,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-M, --monochrome-output disable colored output;\""
         }
       },
       "-R": {
@@ -445,7 +445,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-R, --raw-input read each line as string instead of JSON;\""
         }
       },
       "-S": {
@@ -457,7 +457,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-S, --sort-keys sort keys of each object on output;\""
         }
       },
       "-V": {
@@ -469,7 +469,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-V, --version show the version;\""
         }
       },
       "-a": {
@@ -481,7 +481,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-a, --ascii-output output strings by only ASCII characters using escape sequences;\""
         }
       },
       "-c": {
@@ -493,7 +493,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-c, --compact-output compact instead of pretty-printed output;\""
         }
       },
       "-e": {
@@ -505,7 +505,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-e, --exit-status set exit status code based on the output;\""
         }
       },
       "-f": {
@@ -517,7 +517,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-f, --from-file load the filter from a file;\""
         }
       },
       "-h": {
@@ -529,7 +529,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-h, --help show the help;\""
         }
       },
       "-j": {
@@ -541,7 +541,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-j, --join-output implies -r and output without newline after each output;\""
         }
       },
       "-n": {
@@ -553,7 +553,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-n, --null-input use `null` as the single input value;\""
         }
       },
       "-r": {
@@ -565,7 +565,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-r, --raw-output output strings without escapes and quotes;\""
         }
       },
       "-s": {
@@ -577,7 +577,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+          "source": "jq --help: \"-s, --slurp read all inputs into an array and use it as the single input value;\""
         }
       }
     },
@@ -598,7 +598,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"jq\"]"
+        "source": "jq --help: \"Usage: jq [options] \\u003cjq filter\\u003e [file...] jq [options] --args \\u003cjq filter\\u003e [strings...] jq [options] --jsonargs \\u003cjq filter\\u003e [JSON_TEXTS...]\""
       }
     },
     "stdin": "when-no-path-operands",

@@ -78,18 +78,19 @@ func isThinCitation(c specfmt.Citation) bool {
 }
 
 // citationFinding returns a Finding for a thin citation at field within
-// specName, or nil if c is not thin. builtin controls WARN (true) vs HARD
-// (false) severity per this package's binding decision (doc.go).
+// specName, or nil if c is not thin. Always HARD, regardless of builtin —
+// docket tc-o14i5.4's Phase 3 packet 1 (tc-o14i5.4.3) back-filled real
+// citations for all 46 embedded built-in specs, so the WARN staging this
+// function used to apply to the embedded/builtin layer (a documented
+// interim allowance for packet 1.2's mechanically-marshalled, not-yet-cited
+// specs) is resolved: a thin citation is now unconditionally a real-content
+// gap, never an expected staging artifact.
 func citationFinding(specName, field string, c specfmt.Citation, builtin bool) *Finding {
 	if !isThinCitation(c) {
 		return nil
 	}
-	sev := SeverityHard
-	if builtin {
-		sev = SeverityWarn
-	}
 	return &Finding{
-		Severity: sev,
+		Severity: SeverityHard,
 		Check:    CheckCitationPresence,
 		Spec:     specName,
 		Field:    field,

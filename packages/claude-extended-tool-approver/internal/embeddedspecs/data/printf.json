@@ -7,16 +7,16 @@
     "provenance": "bash 5.3.9 builtin printf, help printf",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"printf\"]"
+        "source": "printf --help: \"Usage: printf FORMAT [ARGUMENT]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"printf\"]"
+        "source": "printf --help: \"Usage: printf FORMAT [ARGUMENT]... or: printf OPTION\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"printf\"]"
+        "source": "printf --help: \"Usage: printf FORMAT [ARGUMENT]... or: printf OPTION\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"printf\"]"
+        "source": "printf --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"printf\"]"
+        "source": "printf --help: \"Usage: printf FORMAT [ARGUMENT]... or: printf OPTION\""
       }
     },
     "stdin": "never",

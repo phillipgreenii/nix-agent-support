@@ -7,16 +7,16 @@
     "provenance": "treefmt v2.6.0 (this host, treefmt --version / --help), 2026-09-08",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+        "source": "treefmt --help: \"The formatter multiplexer\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+        "source": "treefmt --help: \"--stdin Format the context passed in via stdin.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+        "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+        "source": "treefmt --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--allow-missing-formatter Do not exit with error if a configured formatter is missing. (env $TREEFMT_ALLOW_MISSING_FORMATTER)\""
         }
       },
       "--ci": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--ci Runs treefmt in a CI mode, enabling --no-cache, --fail-on-change and adjusting some other settings best suited to a CI use case. (env $TREEFMT_CI)\""
         }
       },
       "--completion": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--completion string [bash|zsh|fish] Generate shell completion scripts for the specified shell.\""
         }
       },
       "--config-file": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--config-file string Load the config file from the given path (defaults to searching upwards for treefmt.toml or .treefmt.toml).\""
         }
       },
       "--cpu-profile": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--cpu-profile string The file into which a cpu profile will be written. (env $TREEFMT_CPU_PROFILE)\""
         }
       },
       "--excludes": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--excludes strings Exclude files or directories matching the specified globs. (env $TREEFMT_EXCLUDES)\""
         }
       },
       "--fail-on-change": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--fail-on-change Exit with error if any changes were made. Useful for CI. (env $TREEFMT_FAIL_ON_CHANGE)\""
         }
       },
       "--formatters": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-f, --formatters strings Specify formatters to apply. Defaults to all configured formatters. (env $TREEFMT_FORMATTERS)\""
         }
       },
       "--help": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-h, --help help for treefmt\""
         }
       },
       "--init": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-i, --init Create a treefmt.toml file in the current directory.\""
         }
       },
       "--no-cache": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--no-cache Ignore the evaluation cache entirely. Useful for CI. (env $TREEFMT_NO_CACHE)\""
         }
       },
       "--on-unmatched": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are \\u003cdebug|info|warn|error|fatal\\u003e. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
         }
       },
       "--quiet": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-q, --quiet Disable all logs except errors. (env $TREEFMT_QUIET)\""
         }
       },
       "--stdin": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--stdin Format the context passed in via stdin.\""
         }
       },
       "--verbose": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-v, --verbose count Set the verbosity of logs e.g. -vv. (env $TREEFMT_VERBOSE)\""
         }
       },
       "--version": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--version version for treefmt\""
         }
       },
       "--walk": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"--walk string The method used to traverse the files within the tree root. Currently supports \\u003cauto|git|jujutsu|filesystem\\u003e. (env $TREEFMT_WALK) (default \\\"auto\\\")\""
         }
       },
       "-f": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-f, --formatters strings Specify formatters to apply. Defaults to all configured formatters. (env $TREEFMT_FORMATTERS)\""
         }
       },
       "-h": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-h, --help help for treefmt\""
         }
       },
       "-i": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-i, --init Create a treefmt.toml file in the current directory.\""
         }
       },
       "-q": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-q, --quiet Disable all logs except errors. (env $TREEFMT_QUIET)\""
         }
       },
       "-u": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-u, --on-unmatched string Log paths that did not match any formatters at the specified log level. Possible values are \\u003cdebug|info|warn|error|fatal\\u003e. (env $TREEFMT_ON_UNMATCHED) (default \\\"info\\\")\""
         }
       },
       "-v": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-v, --verbose count Set the verbosity of logs e.g. -vv. (env $TREEFMT_VERBOSE)\""
         }
       }
     },
@@ -308,7 +308,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+        "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\""
       }
     },
     "implicitEffects": [
@@ -319,7 +319,7 @@
         "target": ".",
         "whenNoPositionals": true,
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"treefmt \\u003cpaths...\\u003e [flags]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-modify\") is derived from"
         }
       },
       {
@@ -329,7 +329,7 @@
         "target": "treefmt.toml",
         "whenFlags": ["-i", "--init"],
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"treefmt\"]"
+          "source": "treefmt --help: \"-i, --init Create a treefmt.toml file in the current directory.\" -- documents the optional/omittable operand shape this implicit default (target \"treefmt.toml\", role \"path-create\") is derived from"
         }
       }
     ],

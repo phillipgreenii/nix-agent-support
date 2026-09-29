@@ -7,16 +7,16 @@
     "provenance": "yq (mikefarah) v4.53.2, yq --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+        "source": "yq --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+        "source": "yq --help: \"# yq tries to auto-detect the file format based off the extension, and defaults to YAML if it's unknown (or piping through STDIN)\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+        "source": "yq --help: \"yq [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+        "source": "yq --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-C, --colors force print with colors\""
         }
       },
       "--csv-auto-parse": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--csv-auto-parse parse CSV YAML/JSON values (default true)\""
         }
       },
       "--csv-separator": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--csv-separator char CSV Separator character (default ,)\""
         }
       },
       "--debug-node-info": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--debug-node-info debug node info\""
         }
       },
       "--exit-status": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
         }
       },
       "--expression": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--expression string forcibly set the expression argument. Useful when yq argument detection thinks your expression is a file.\""
         }
       },
       "--from-file": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--from-file string Load expression from specified file.\""
         }
       },
       "--front-matter": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
         }
       },
       "--header-preprocess": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--header-preprocess Slurp any header comments and separators before processing expression. (default true)\""
         }
       },
       "--help": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-h, --help help for yq\""
         }
       },
       "--indent": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-I, --indent int sets indent level for output (default 2)\""
         }
       },
       "--inplace": {
@@ -161,7 +161,7 @@
           "kind": "in-place"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-i, --inplace update the file in place of first file given.\""
         }
       },
       "--input-format": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
         }
       },
       "--lua-globals": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--lua-globals output keys as top-level global variables\""
         }
       },
       "--lua-prefix": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--lua-prefix string prefix (default \\\"return \\\")\""
         }
       },
       "--lua-suffix": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--lua-suffix string suffix (default \\\";\\\\n\\\")\""
         }
       },
       "--lua-unquoted": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--lua-unquoted output unquoted string keys (e.g. {foo=\\\"bar\\\"})\""
         }
       },
       "--no-colors": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-M, --no-colors force print with no colors\""
         }
       },
       "--no-doc": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-N, --no-doc Don't print document separators (---)\""
         }
       },
       "--nul-output": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
         }
       },
       "--null-input": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
         }
       },
       "--output-format": {
@@ -281,7 +281,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
         }
       },
       "--prettyPrint": {
@@ -293,7 +293,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
         }
       },
       "--properties-array-brackets": {
@@ -305,7 +305,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--properties-array-brackets use [x] in array paths (e.g. for SpringBoot)\""
         }
       },
       "--properties-separator": {
@@ -317,7 +317,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--properties-separator string separator to use between keys and values (default \\\" = \\\")\""
         }
       },
       "--security-disable-env-ops": {
@@ -329,7 +329,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--security-disable-env-ops Disable env related operations.\""
         }
       },
       "--security-disable-file-ops": {
@@ -341,7 +341,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--security-disable-file-ops Disable file related operations (e.g. load)\""
         }
       },
       "--shell-key-separator": {
@@ -353,7 +353,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--shell-key-separator string separator for shell variable key paths (default \\\"_\\\")\""
         }
       },
       "--string-interpolation": {
@@ -365,7 +365,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--string-interpolation Toggles strings interpolation of \\\\(exp) (default true)\""
         }
       },
       "--tsv-auto-parse": {
@@ -377,7 +377,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--tsv-auto-parse parse TSV YAML/JSON values (default true)\""
         }
       },
       "--unwrapScalar": {
@@ -389,7 +389,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
         }
       },
       "--verbose": {
@@ -401,7 +401,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-v, --verbose verbose mode\""
         }
       },
       "--version": {
@@ -413,7 +413,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-V, --version Print version information and quit\""
         }
       },
       "--xml-attribute-prefix": {
@@ -425,7 +425,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-attribute-prefix string prefix for xml attributes (default \\\"+@\\\")\""
         }
       },
       "--xml-content-name": {
@@ -437,7 +437,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-content-name string name for xml content (if no attribute name is present). (default \\\"+content\\\")\""
         }
       },
       "--xml-directive-name": {
@@ -449,7 +449,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
         }
       },
       "--xml-keep-namespace": {
@@ -461,7 +461,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-keep-namespace enables keeping namespace after parsing attributes (default true)\""
         }
       },
       "--xml-proc-inst-prefix": {
@@ -473,7 +473,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
         }
       },
       "--xml-raw-token": {
@@ -485,7 +485,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-raw-token enables using RawToken method instead Token. Commonly disables namespace translations. See https://pkg.go.dev/encoding/xml#Decoder.RawToken for details. (default true)\""
         }
       },
       "--xml-skip-directives": {
@@ -497,7 +497,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
         }
       },
       "--xml-skip-proc-inst": {
@@ -509,7 +509,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
         }
       },
       "--xml-strict-mode": {
@@ -521,7 +521,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--xml-strict-mode enables strict parsing of XML. See https://pkg.go.dev/encoding/xml for more details.\""
         }
       },
       "--yaml-compact-seq-indent": {
@@ -533,7 +533,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
         }
       },
       "--yaml-fix-merge-anchor-to-spec": {
@@ -545,7 +545,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"--yaml-fix-merge-anchor-to-spec Fix merge anchor to match YAML spec. Will default to true in late 2025\""
         }
       },
       "-0": {
@@ -557,7 +557,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
         }
       },
       "-C": {
@@ -569,7 +569,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-C, --colors force print with colors\""
         }
       },
       "-I": {
@@ -581,7 +581,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-I, --indent int sets indent level for output (default 2)\""
         }
       },
       "-M": {
@@ -593,7 +593,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-M, --no-colors force print with no colors\""
         }
       },
       "-N": {
@@ -605,7 +605,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-N, --no-doc Don't print document separators (---)\""
         }
       },
       "-P": {
@@ -617,7 +617,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
         }
       },
       "-V": {
@@ -629,7 +629,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-V, --version Print version information and quit\""
         }
       },
       "-c": {
@@ -641,7 +641,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
         }
       },
       "-e": {
@@ -653,7 +653,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
         }
       },
       "-f": {
@@ -665,7 +665,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
         }
       },
       "-h": {
@@ -677,7 +677,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-h, --help help for yq\""
         }
       },
       "-i": {
@@ -689,7 +689,7 @@
           "kind": "in-place"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-i, --inplace update the file in place of first file given.\""
         }
       },
       "-n": {
@@ -701,7 +701,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
         }
       },
       "-o": {
@@ -713,7 +713,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
         }
       },
       "-p": {
@@ -725,7 +725,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
         }
       },
       "-r": {
@@ -737,7 +737,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
         }
       },
       "-v": {
@@ -749,7 +749,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+          "source": "yq --help: \"-v, --verbose verbose mode\""
         }
       }
     },
@@ -763,7 +763,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+        "source": "yq --help: \"yq [flags]\""
       }
     },
     "stdin": "never",
@@ -776,16 +776,16 @@
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq e --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq e --help: \"# Pipe from STDIN\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq e --help: \"yq eval [expression] [yaml_file1]... [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq e --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -798,7 +798,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-C, --colors force print with colors\""
             }
           },
           "--csv-auto-parse": {
@@ -810,7 +810,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--csv-auto-parse parse CSV YAML/JSON values (default true)\""
             }
           },
           "--csv-separator": {
@@ -822,7 +822,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--csv-separator char CSV Separator character (default ,)\""
             }
           },
           "--debug-node-info": {
@@ -834,7 +834,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--debug-node-info debug node info\""
             }
           },
           "--exit-status": {
@@ -846,7 +846,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "--expression": {
@@ -858,7 +858,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--expression string forcibly set the expression argument. Useful when yq argument detection thinks your expression is a file.\""
             }
           },
           "--from-file": {
@@ -870,7 +870,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--from-file string Load expression from specified file.\""
             }
           },
           "--front-matter": {
@@ -882,7 +882,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "--header-preprocess": {
@@ -894,7 +894,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--header-preprocess Slurp any header comments and separators before processing expression. (default true)\""
             }
           },
           "--help": {
@@ -906,7 +906,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-h, --help help for eval\""
             }
           },
           "--indent": {
@@ -918,7 +918,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "--inplace": {
@@ -930,7 +930,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "--input-format": {
@@ -942,7 +942,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "--lua-globals": {
@@ -954,7 +954,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--lua-globals output keys as top-level global variables\""
             }
           },
           "--lua-prefix": {
@@ -966,7 +966,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--lua-prefix string prefix (default \\\"return \\\")\""
             }
           },
           "--lua-suffix": {
@@ -978,7 +978,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--lua-suffix string suffix (default \\\";\\\\n\\\")\""
             }
           },
           "--lua-unquoted": {
@@ -990,7 +990,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--lua-unquoted output unquoted string keys (e.g. {foo=\\\"bar\\\"})\""
             }
           },
           "--no-colors": {
@@ -1002,7 +1002,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "--no-doc": {
@@ -1014,7 +1014,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "--nul-output": {
@@ -1026,7 +1026,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "--null-input": {
@@ -1038,7 +1038,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "--output-format": {
@@ -1050,7 +1050,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "--prettyPrint": {
@@ -1062,7 +1062,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "--properties-array-brackets": {
@@ -1074,7 +1074,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--properties-array-brackets use [x] in array paths (e.g. for SpringBoot)\""
             }
           },
           "--properties-separator": {
@@ -1086,7 +1086,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--properties-separator string separator to use between keys and values (default \\\" = \\\")\""
             }
           },
           "--security-disable-env-ops": {
@@ -1098,7 +1098,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--security-disable-env-ops Disable env related operations.\""
             }
           },
           "--security-disable-file-ops": {
@@ -1110,7 +1110,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--security-disable-file-ops Disable file related operations (e.g. load)\""
             }
           },
           "--shell-key-separator": {
@@ -1122,7 +1122,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--shell-key-separator string separator for shell variable key paths (default \\\"_\\\")\""
             }
           },
           "--string-interpolation": {
@@ -1134,7 +1134,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--string-interpolation Toggles strings interpolation of \\\\(exp) (default true)\""
             }
           },
           "--tsv-auto-parse": {
@@ -1146,7 +1146,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--tsv-auto-parse parse TSV YAML/JSON values (default true)\""
             }
           },
           "--unwrapScalar": {
@@ -1158,7 +1158,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "--verbose": {
@@ -1170,7 +1170,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-v, --verbose verbose mode\""
             }
           },
           "--version": {
@@ -1182,7 +1182,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "--xml-attribute-prefix": {
@@ -1194,7 +1194,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-attribute-prefix string prefix for xml attributes (default \\\"+@\\\")\""
             }
           },
           "--xml-content-name": {
@@ -1206,7 +1206,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-content-name string name for xml content (if no attribute name is present). (default \\\"+content\\\")\""
             }
           },
           "--xml-directive-name": {
@@ -1218,7 +1218,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -1230,7 +1230,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-keep-namespace enables keeping namespace after parsing attributes (default true)\""
             }
           },
           "--xml-proc-inst-prefix": {
@@ -1242,7 +1242,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -1254,7 +1254,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-raw-token enables using RawToken method instead Token. Commonly disables namespace translations. See https://pkg.go.dev/encoding/xml#Decoder.RawToken for details. (default true)\""
             }
           },
           "--xml-skip-directives": {
@@ -1266,7 +1266,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -1278,7 +1278,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
             }
           },
           "--xml-strict-mode": {
@@ -1290,7 +1290,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--xml-strict-mode enables strict parsing of XML. See https://pkg.go.dev/encoding/xml for more details.\""
             }
           },
           "--yaml-compact-seq-indent": {
@@ -1302,7 +1302,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "--yaml-fix-merge-anchor-to-spec": {
@@ -1314,7 +1314,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"--yaml-fix-merge-anchor-to-spec Fix merge anchor to match YAML spec. Will default to true in late 2025\""
             }
           },
           "-0": {
@@ -1326,7 +1326,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "-C": {
@@ -1338,7 +1338,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-C, --colors force print with colors\""
             }
           },
           "-I": {
@@ -1350,7 +1350,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "-M": {
@@ -1362,7 +1362,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "-N": {
@@ -1374,7 +1374,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "-P": {
@@ -1386,7 +1386,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "-V": {
@@ -1398,7 +1398,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "-c": {
@@ -1410,7 +1410,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "-e": {
@@ -1422,7 +1422,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "-f": {
@@ -1434,7 +1434,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "-h": {
@@ -1446,7 +1446,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-h, --help help for eval\""
             }
           },
           "-i": {
@@ -1458,7 +1458,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "-n": {
@@ -1470,7 +1470,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "-o": {
@@ -1482,7 +1482,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "-p": {
@@ -1494,7 +1494,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "-r": {
@@ -1506,7 +1506,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "-v": {
@@ -1518,7 +1518,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq e --help: \"-v, --verbose verbose mode\""
             }
           }
         },
@@ -1538,7 +1538,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq e --help: \"yq eval [expression] [yaml_file1]... [flags]\""
           }
         },
         "stdin": "when-no-path-operands",
@@ -1551,16 +1551,16 @@
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq ea --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq ea --help: \"# Pipe from STDIN\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq ea --help: \"yq eval-all [expression] [yaml_file1]... [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq ea --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1573,7 +1573,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-C, --colors force print with colors\""
             }
           },
           "--csv-auto-parse": {
@@ -1585,7 +1585,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--csv-auto-parse parse CSV YAML/JSON values (default true)\""
             }
           },
           "--csv-separator": {
@@ -1597,7 +1597,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--csv-separator char CSV Separator character (default ,)\""
             }
           },
           "--debug-node-info": {
@@ -1609,7 +1609,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--debug-node-info debug node info\""
             }
           },
           "--exit-status": {
@@ -1621,7 +1621,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "--expression": {
@@ -1633,7 +1633,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--expression string forcibly set the expression argument. Useful when yq argument detection thinks your expression is a file.\""
             }
           },
           "--from-file": {
@@ -1645,7 +1645,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--from-file string Load expression from specified file.\""
             }
           },
           "--front-matter": {
@@ -1657,7 +1657,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "--header-preprocess": {
@@ -1669,7 +1669,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--header-preprocess Slurp any header comments and separators before processing expression. (default true)\""
             }
           },
           "--help": {
@@ -1681,7 +1681,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-h, --help help for eval-all\""
             }
           },
           "--indent": {
@@ -1693,7 +1693,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "--inplace": {
@@ -1705,7 +1705,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "--input-format": {
@@ -1717,7 +1717,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "--lua-globals": {
@@ -1729,7 +1729,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--lua-globals output keys as top-level global variables\""
             }
           },
           "--lua-prefix": {
@@ -1741,7 +1741,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--lua-prefix string prefix (default \\\"return \\\")\""
             }
           },
           "--lua-suffix": {
@@ -1753,7 +1753,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--lua-suffix string suffix (default \\\";\\\\n\\\")\""
             }
           },
           "--lua-unquoted": {
@@ -1765,7 +1765,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--lua-unquoted output unquoted string keys (e.g. {foo=\\\"bar\\\"})\""
             }
           },
           "--no-colors": {
@@ -1777,7 +1777,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "--no-doc": {
@@ -1789,7 +1789,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "--nul-output": {
@@ -1801,7 +1801,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "--null-input": {
@@ -1813,7 +1813,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "--output-format": {
@@ -1825,7 +1825,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "--prettyPrint": {
@@ -1837,7 +1837,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "--properties-array-brackets": {
@@ -1849,7 +1849,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--properties-array-brackets use [x] in array paths (e.g. for SpringBoot)\""
             }
           },
           "--properties-separator": {
@@ -1861,7 +1861,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--properties-separator string separator to use between keys and values (default \\\" = \\\")\""
             }
           },
           "--security-disable-env-ops": {
@@ -1873,7 +1873,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--security-disable-env-ops Disable env related operations.\""
             }
           },
           "--security-disable-file-ops": {
@@ -1885,7 +1885,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--security-disable-file-ops Disable file related operations (e.g. load)\""
             }
           },
           "--shell-key-separator": {
@@ -1897,7 +1897,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--shell-key-separator string separator for shell variable key paths (default \\\"_\\\")\""
             }
           },
           "--string-interpolation": {
@@ -1909,7 +1909,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--string-interpolation Toggles strings interpolation of \\\\(exp) (default true)\""
             }
           },
           "--tsv-auto-parse": {
@@ -1921,7 +1921,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--tsv-auto-parse parse TSV YAML/JSON values (default true)\""
             }
           },
           "--unwrapScalar": {
@@ -1933,7 +1933,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "--verbose": {
@@ -1945,7 +1945,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-v, --verbose verbose mode\""
             }
           },
           "--version": {
@@ -1957,7 +1957,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "--xml-attribute-prefix": {
@@ -1969,7 +1969,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-attribute-prefix string prefix for xml attributes (default \\\"+@\\\")\""
             }
           },
           "--xml-content-name": {
@@ -1981,7 +1981,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-content-name string name for xml content (if no attribute name is present). (default \\\"+content\\\")\""
             }
           },
           "--xml-directive-name": {
@@ -1993,7 +1993,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -2005,7 +2005,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-keep-namespace enables keeping namespace after parsing attributes (default true)\""
             }
           },
           "--xml-proc-inst-prefix": {
@@ -2017,7 +2017,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -2029,7 +2029,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-raw-token enables using RawToken method instead Token. Commonly disables namespace translations. See https://pkg.go.dev/encoding/xml#Decoder.RawToken for details. (default true)\""
             }
           },
           "--xml-skip-directives": {
@@ -2041,7 +2041,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -2053,7 +2053,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
             }
           },
           "--xml-strict-mode": {
@@ -2065,7 +2065,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--xml-strict-mode enables strict parsing of XML. See https://pkg.go.dev/encoding/xml for more details.\""
             }
           },
           "--yaml-compact-seq-indent": {
@@ -2077,7 +2077,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "--yaml-fix-merge-anchor-to-spec": {
@@ -2089,7 +2089,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"--yaml-fix-merge-anchor-to-spec Fix merge anchor to match YAML spec. Will default to true in late 2025\""
             }
           },
           "-0": {
@@ -2101,7 +2101,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "-C": {
@@ -2113,7 +2113,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-C, --colors force print with colors\""
             }
           },
           "-I": {
@@ -2125,7 +2125,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "-M": {
@@ -2137,7 +2137,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "-N": {
@@ -2149,7 +2149,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "-P": {
@@ -2161,7 +2161,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "-V": {
@@ -2173,7 +2173,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "-c": {
@@ -2185,7 +2185,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "-e": {
@@ -2197,7 +2197,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "-f": {
@@ -2209,7 +2209,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "-h": {
@@ -2221,7 +2221,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-h, --help help for eval-all\""
             }
           },
           "-i": {
@@ -2233,7 +2233,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "-n": {
@@ -2245,7 +2245,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "-o": {
@@ -2257,7 +2257,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "-p": {
@@ -2269,7 +2269,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "-r": {
@@ -2281,7 +2281,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "-v": {
@@ -2293,7 +2293,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq ea --help: \"-v, --verbose verbose mode\""
             }
           }
         },
@@ -2313,7 +2313,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq ea --help: \"yq eval-all [expression] [yaml_file1]... [flags]\""
           }
         },
         "stdin": "when-no-path-operands",
@@ -2326,16 +2326,16 @@
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval --help: \"# Pipe from STDIN\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval --help: \"yq eval [expression] [yaml_file1]... [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2348,7 +2348,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-C, --colors force print with colors\""
             }
           },
           "--csv-auto-parse": {
@@ -2360,7 +2360,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--csv-auto-parse parse CSV YAML/JSON values (default true)\""
             }
           },
           "--csv-separator": {
@@ -2372,7 +2372,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--csv-separator char CSV Separator character (default ,)\""
             }
           },
           "--debug-node-info": {
@@ -2384,7 +2384,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--debug-node-info debug node info\""
             }
           },
           "--exit-status": {
@@ -2396,7 +2396,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "--expression": {
@@ -2408,7 +2408,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--expression string forcibly set the expression argument. Useful when yq argument detection thinks your expression is a file.\""
             }
           },
           "--from-file": {
@@ -2420,7 +2420,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--from-file string Load expression from specified file.\""
             }
           },
           "--front-matter": {
@@ -2432,7 +2432,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "--header-preprocess": {
@@ -2444,7 +2444,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--header-preprocess Slurp any header comments and separators before processing expression. (default true)\""
             }
           },
           "--help": {
@@ -2456,7 +2456,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-h, --help help for eval\""
             }
           },
           "--indent": {
@@ -2468,7 +2468,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "--inplace": {
@@ -2480,7 +2480,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "--input-format": {
@@ -2492,7 +2492,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "--lua-globals": {
@@ -2504,7 +2504,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--lua-globals output keys as top-level global variables\""
             }
           },
           "--lua-prefix": {
@@ -2516,7 +2516,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--lua-prefix string prefix (default \\\"return \\\")\""
             }
           },
           "--lua-suffix": {
@@ -2528,7 +2528,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--lua-suffix string suffix (default \\\";\\\\n\\\")\""
             }
           },
           "--lua-unquoted": {
@@ -2540,7 +2540,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--lua-unquoted output unquoted string keys (e.g. {foo=\\\"bar\\\"})\""
             }
           },
           "--no-colors": {
@@ -2552,7 +2552,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "--no-doc": {
@@ -2564,7 +2564,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "--nul-output": {
@@ -2576,7 +2576,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "--null-input": {
@@ -2588,7 +2588,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "--output-format": {
@@ -2600,7 +2600,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "--prettyPrint": {
@@ -2612,7 +2612,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "--properties-array-brackets": {
@@ -2624,7 +2624,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--properties-array-brackets use [x] in array paths (e.g. for SpringBoot)\""
             }
           },
           "--properties-separator": {
@@ -2636,7 +2636,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--properties-separator string separator to use between keys and values (default \\\" = \\\")\""
             }
           },
           "--security-disable-env-ops": {
@@ -2648,7 +2648,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--security-disable-env-ops Disable env related operations.\""
             }
           },
           "--security-disable-file-ops": {
@@ -2660,7 +2660,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--security-disable-file-ops Disable file related operations (e.g. load)\""
             }
           },
           "--shell-key-separator": {
@@ -2672,7 +2672,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--shell-key-separator string separator for shell variable key paths (default \\\"_\\\")\""
             }
           },
           "--string-interpolation": {
@@ -2684,7 +2684,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--string-interpolation Toggles strings interpolation of \\\\(exp) (default true)\""
             }
           },
           "--tsv-auto-parse": {
@@ -2696,7 +2696,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--tsv-auto-parse parse TSV YAML/JSON values (default true)\""
             }
           },
           "--unwrapScalar": {
@@ -2708,7 +2708,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "--verbose": {
@@ -2720,7 +2720,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-v, --verbose verbose mode\""
             }
           },
           "--version": {
@@ -2732,7 +2732,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "--xml-attribute-prefix": {
@@ -2744,7 +2744,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-attribute-prefix string prefix for xml attributes (default \\\"+@\\\")\""
             }
           },
           "--xml-content-name": {
@@ -2756,7 +2756,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-content-name string name for xml content (if no attribute name is present). (default \\\"+content\\\")\""
             }
           },
           "--xml-directive-name": {
@@ -2768,7 +2768,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -2780,7 +2780,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-keep-namespace enables keeping namespace after parsing attributes (default true)\""
             }
           },
           "--xml-proc-inst-prefix": {
@@ -2792,7 +2792,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -2804,7 +2804,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-raw-token enables using RawToken method instead Token. Commonly disables namespace translations. See https://pkg.go.dev/encoding/xml#Decoder.RawToken for details. (default true)\""
             }
           },
           "--xml-skip-directives": {
@@ -2816,7 +2816,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -2828,7 +2828,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
             }
           },
           "--xml-strict-mode": {
@@ -2840,7 +2840,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--xml-strict-mode enables strict parsing of XML. See https://pkg.go.dev/encoding/xml for more details.\""
             }
           },
           "--yaml-compact-seq-indent": {
@@ -2852,7 +2852,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "--yaml-fix-merge-anchor-to-spec": {
@@ -2864,7 +2864,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"--yaml-fix-merge-anchor-to-spec Fix merge anchor to match YAML spec. Will default to true in late 2025\""
             }
           },
           "-0": {
@@ -2876,7 +2876,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "-C": {
@@ -2888,7 +2888,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-C, --colors force print with colors\""
             }
           },
           "-I": {
@@ -2900,7 +2900,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "-M": {
@@ -2912,7 +2912,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "-N": {
@@ -2924,7 +2924,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "-P": {
@@ -2936,7 +2936,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "-V": {
@@ -2948,7 +2948,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "-c": {
@@ -2960,7 +2960,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "-e": {
@@ -2972,7 +2972,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "-f": {
@@ -2984,7 +2984,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "-h": {
@@ -2996,7 +2996,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-h, --help help for eval\""
             }
           },
           "-i": {
@@ -3008,7 +3008,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "-n": {
@@ -3020,7 +3020,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "-o": {
@@ -3032,7 +3032,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "-p": {
@@ -3044,7 +3044,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "-r": {
@@ -3056,7 +3056,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "-v": {
@@ -3068,7 +3068,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval --help: \"-v, --verbose verbose mode\""
             }
           }
         },
@@ -3088,7 +3088,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval --help: \"yq eval [expression] [yaml_file1]... [flags]\""
           }
         },
         "stdin": "when-no-path-operands",
@@ -3101,16 +3101,16 @@
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval-all --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval-all --help: \"# Pipe from STDIN\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval-all --help: \"yq eval-all [expression] [yaml_file1]... [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval-all --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -3123,7 +3123,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-C, --colors force print with colors\""
             }
           },
           "--csv-auto-parse": {
@@ -3135,7 +3135,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--csv-auto-parse parse CSV YAML/JSON values (default true)\""
             }
           },
           "--csv-separator": {
@@ -3147,7 +3147,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--csv-separator char CSV Separator character (default ,)\""
             }
           },
           "--debug-node-info": {
@@ -3159,7 +3159,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--debug-node-info debug node info\""
             }
           },
           "--exit-status": {
@@ -3171,7 +3171,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "--expression": {
@@ -3183,7 +3183,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--expression string forcibly set the expression argument. Useful when yq argument detection thinks your expression is a file.\""
             }
           },
           "--from-file": {
@@ -3195,7 +3195,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--from-file string Load expression from specified file.\""
             }
           },
           "--front-matter": {
@@ -3207,7 +3207,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "--header-preprocess": {
@@ -3219,7 +3219,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--header-preprocess Slurp any header comments and separators before processing expression. (default true)\""
             }
           },
           "--help": {
@@ -3231,7 +3231,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-h, --help help for eval-all\""
             }
           },
           "--indent": {
@@ -3243,7 +3243,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "--inplace": {
@@ -3255,7 +3255,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "--input-format": {
@@ -3267,7 +3267,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "--lua-globals": {
@@ -3279,7 +3279,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--lua-globals output keys as top-level global variables\""
             }
           },
           "--lua-prefix": {
@@ -3291,7 +3291,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--lua-prefix string prefix (default \\\"return \\\")\""
             }
           },
           "--lua-suffix": {
@@ -3303,7 +3303,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--lua-suffix string suffix (default \\\";\\\\n\\\")\""
             }
           },
           "--lua-unquoted": {
@@ -3315,7 +3315,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--lua-unquoted output unquoted string keys (e.g. {foo=\\\"bar\\\"})\""
             }
           },
           "--no-colors": {
@@ -3327,7 +3327,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "--no-doc": {
@@ -3339,7 +3339,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "--nul-output": {
@@ -3351,7 +3351,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "--null-input": {
@@ -3363,7 +3363,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "--output-format": {
@@ -3375,7 +3375,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "--prettyPrint": {
@@ -3387,7 +3387,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "--properties-array-brackets": {
@@ -3399,7 +3399,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--properties-array-brackets use [x] in array paths (e.g. for SpringBoot)\""
             }
           },
           "--properties-separator": {
@@ -3411,7 +3411,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--properties-separator string separator to use between keys and values (default \\\" = \\\")\""
             }
           },
           "--security-disable-env-ops": {
@@ -3423,7 +3423,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--security-disable-env-ops Disable env related operations.\""
             }
           },
           "--security-disable-file-ops": {
@@ -3435,7 +3435,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--security-disable-file-ops Disable file related operations (e.g. load)\""
             }
           },
           "--shell-key-separator": {
@@ -3447,7 +3447,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--shell-key-separator string separator for shell variable key paths (default \\\"_\\\")\""
             }
           },
           "--string-interpolation": {
@@ -3459,7 +3459,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--string-interpolation Toggles strings interpolation of \\\\(exp) (default true)\""
             }
           },
           "--tsv-auto-parse": {
@@ -3471,7 +3471,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--tsv-auto-parse parse TSV YAML/JSON values (default true)\""
             }
           },
           "--unwrapScalar": {
@@ -3483,7 +3483,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "--verbose": {
@@ -3495,7 +3495,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-v, --verbose verbose mode\""
             }
           },
           "--version": {
@@ -3507,7 +3507,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "--xml-attribute-prefix": {
@@ -3519,7 +3519,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-attribute-prefix string prefix for xml attributes (default \\\"+@\\\")\""
             }
           },
           "--xml-content-name": {
@@ -3531,7 +3531,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-content-name string name for xml content (if no attribute name is present). (default \\\"+content\\\")\""
             }
           },
           "--xml-directive-name": {
@@ -3543,7 +3543,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-directive-name string name for xml directives (e.g. \\u003c!DOCTYPE thing cat\\u003e) (default \\\"+directive\\\")\""
             }
           },
           "--xml-keep-namespace": {
@@ -3555,7 +3555,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-keep-namespace enables keeping namespace after parsing attributes (default true)\""
             }
           },
           "--xml-proc-inst-prefix": {
@@ -3567,7 +3567,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-proc-inst-prefix string prefix for xml processing instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e) (default \\\"+p_\\\")\""
             }
           },
           "--xml-raw-token": {
@@ -3579,7 +3579,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-raw-token enables using RawToken method instead Token. Commonly disables namespace translations. See https://pkg.go.dev/encoding/xml#Decoder.RawToken for details. (default true)\""
             }
           },
           "--xml-skip-directives": {
@@ -3591,7 +3591,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-skip-directives skip over directives (e.g. \\u003c!DOCTYPE thing cat\\u003e)\""
             }
           },
           "--xml-skip-proc-inst": {
@@ -3603,7 +3603,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-skip-proc-inst skip over process instructions (e.g. \\u003c?xml version=\\\"1\\\"?\\u003e)\""
             }
           },
           "--xml-strict-mode": {
@@ -3615,7 +3615,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--xml-strict-mode enables strict parsing of XML. See https://pkg.go.dev/encoding/xml for more details.\""
             }
           },
           "--yaml-compact-seq-indent": {
@@ -3627,7 +3627,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "--yaml-fix-merge-anchor-to-spec": {
@@ -3639,7 +3639,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"--yaml-fix-merge-anchor-to-spec Fix merge anchor to match YAML spec. Will default to true in late 2025\""
             }
           },
           "-0": {
@@ -3651,7 +3651,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-0, --nul-output Use NUL char to separate values. If unwrap scalar is also set, fail if unwrapped scalar contains NUL char.\""
             }
           },
           "-C": {
@@ -3663,7 +3663,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-C, --colors force print with colors\""
             }
           },
           "-I": {
@@ -3675,7 +3675,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-I, --indent int sets indent level for output (default 2)\""
             }
           },
           "-M": {
@@ -3687,7 +3687,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-M, --no-colors force print with no colors\""
             }
           },
           "-N": {
@@ -3699,7 +3699,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-N, --no-doc Don't print document separators (---)\""
             }
           },
           "-P": {
@@ -3711,7 +3711,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-P, --prettyPrint pretty print, shorthand for '... style = \\\"\\\"'\""
             }
           },
           "-V": {
@@ -3723,7 +3723,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq --help: \"-V, --version Print version information and quit\""
             }
           },
           "-c": {
@@ -3735,7 +3735,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-c, --yaml-compact-seq-indent Use compact sequence indentation where '- ' is considered part of the indentation.\""
             }
           },
           "-e": {
@@ -3747,7 +3747,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-e, --exit-status set exit status if there are no matches or null or false is returned\""
             }
           },
           "-f": {
@@ -3759,7 +3759,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-f, --front-matter string (extract|process) first input as yaml front-matter. Extract will pull out the yaml content, process will run the expression against the yaml content, leaving the remaining data intact\""
             }
           },
           "-h": {
@@ -3771,7 +3771,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-h, --help help for eval-all\""
             }
           },
           "-i": {
@@ -3783,7 +3783,7 @@
               "kind": "in-place"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-i, --inplace update the file in place of first file given.\""
             }
           },
           "-n": {
@@ -3795,7 +3795,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-n, --null-input Don't read input, simply evaluate the expression given. Useful for creating docs from scratch.\""
             }
           },
           "-o": {
@@ -3807,7 +3807,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-o, --output-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \\\"auto\\\")\""
             }
           },
           "-p": {
@@ -3819,7 +3819,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-p, --input-format string [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \\\"auto\\\")\""
             }
           },
           "-r": {
@@ -3831,7 +3831,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-r, --unwrapScalar unwrap scalar, print the value with no quotes, colours or comments. Defaults to true for yaml (default true)\""
             }
           },
           "-v": {
@@ -3843,7 +3843,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+              "source": "yq eval-all --help: \"-v, --verbose verbose mode\""
             }
           }
         },
@@ -3863,7 +3863,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"yq\"]"
+            "source": "yq eval-all --help: \"yq eval-all [expression] [yaml_file1]... [flags]\""
           }
         },
         "stdin": "when-no-path-operands",

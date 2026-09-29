@@ -7,16 +7,16 @@
     "provenance": "sleep (GNU coreutils) 9.11",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        "source": "sleep --help: \"Usage: sleep NUMBER[SUFFIX]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        "source": "sleep --help: \"Usage: sleep NUMBER[SUFFIX]... or: sleep OPTION\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        "source": "sleep --help: \"Usage: sleep NUMBER[SUFFIX]... or: sleep OPTION\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        "source": "sleep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+          "source": "sleep --help: \"--help display this help and exit\""
         }
       },
       "--version": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+          "source": "sleep --help: \"--version output version information and exit\""
         }
       }
     },
@@ -55,7 +55,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        "source": "sleep --help: \"Usage: sleep NUMBER[SUFFIX]... or: sleep OPTION\""
       }
     },
     "stdin": "never",

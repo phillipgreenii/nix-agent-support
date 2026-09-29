@@ -7,16 +7,16 @@
     "provenance": "bash 5.3.9 builtin export, help export",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+        "source": "bash builtin: help export: \"export: export [-fn] [name[=value] ...] or export -p [-f]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+        "source": "bash builtin: help export: \"export: export [-fn] [name[=value] ...] or export -p [-f]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+        "source": "bash builtin: help export: \"export: export [-fn] [name[=value] ...] or export -p [-f]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+        "source": "bash builtin: help export: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+          "source": "bash builtin: help export: \"-p display a list of all exported variables or functions\""
         }
       }
     },
@@ -43,7 +43,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"export\"]"
+        "source": "bash builtin: help export: \"export: export [-fn] [name[=value] ...] or export -p [-f]\""
       }
     },
     "stdin": "never",

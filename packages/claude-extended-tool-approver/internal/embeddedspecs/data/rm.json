@@ -7,16 +7,16 @@
     "provenance": "rm (GNU coreutils) 9.11, rm --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+        "source": "rm --help: \"Usage: rm [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+        "source": "rm --help: \"Usage: rm [OPTION]... [FILE]...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+        "source": "rm --help: \"Usage: rm [OPTION]... [FILE]...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+        "source": "rm --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-d, --dir remove empty directories\""
         }
       },
       "--force": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-f, --force ignore nonexistent files and arguments, never prompt\""
         }
       },
       "--interactive": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"--interactive[=WHEN] prompt according to WHEN: never, once (-I), or always (-i);\""
         }
       },
       "--no-preserve-root": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"--no-preserve-root do not treat '/' specially\""
         }
       },
       "--one-file-system": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"--one-file-system when removing a hierarchy recursively,\""
         }
       },
       "--preserve-root": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"--preserve-root[=all] do not remove '/' (default);\""
         }
       },
       "--recursive": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-r, -R, --recursive remove directories and their contents recursively\""
         }
       },
       "--verbose": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-v, --verbose explain what is being done\""
         }
       },
       "-I": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-I prompt once before removing more than three files,\""
         }
       },
       "-R": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-r, -R, --recursive remove directories and their contents recursively\""
         }
       },
       "-d": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-d, --dir remove empty directories\""
         }
       },
       "-f": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-f, --force ignore nonexistent files and arguments, never prompt\""
         }
       },
       "-i": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-i prompt before every removal\""
         }
       },
       "-r": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-r, -R, --recursive remove directories and their contents recursively\""
         }
       },
       "-v": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+          "source": "rm --help: \"-v, --verbose explain what is being done\""
         }
       }
     },
@@ -211,7 +211,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"rm\"]"
+        "source": "rm --help: \"Usage: rm [OPTION]... [FILE]...\""
       }
     },
     "stdin": "never",

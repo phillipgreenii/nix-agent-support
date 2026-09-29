@@ -1709,16 +1709,18 @@
 
               # claude-extended-tool-approver-spec-lint — Phase 1 packet 1.3
               # (tc-o14i5.2.3): runs the new `lint --embedded` CLI subcommand
-              # (internal/speclint, cmd_lint.go) over packet 1.2's 45
+              # (internal/speclint, cmd_lint.go) over packet 1.2's 46
               # generated embedded built-in command specs
               # (internal/embeddedspecs/data/*.json), failing the check on
-              # any HARD finding — citation-presence is WARN-staged for
-              # exactly this embedded/builtin layer (Phase 3 back-fill turns
-              # it HARD later), the danger-shaped-flag-role and
-              # UnknownFlagInert-justification checks are skipped for the
-              # same builtin layer (see internal/speclint's doc.go for why:
-              # they are authorial-judgment checks over hand-written specs,
-              # and the 45 built-ins are a mechanical marshalling of
+              # any HARD finding — citation-presence is HARD for this
+              # embedded/builtin layer too (docket tc-o14i5.4's Phase 3
+              # packet 1, tc-o14i5.4.3, back-filled real per-fact citations
+              # for all 46 built-ins and flipped this check from its prior
+              # WARN staging), the danger-shaped-flag-role and
+              # UnknownFlagInert-justification checks are still skipped for
+              # the same builtin layer (see internal/speclint's doc.go for
+              # why: they are authorial-judgment checks over hand-written
+              # specs, and the 46 built-ins are a mechanical marshalling of
               # cmddesc/registry.go's already-reviewed schemas, not
               # hand-written at the spec-format level), and
               # overrides-conflict is structurally impossible with only one

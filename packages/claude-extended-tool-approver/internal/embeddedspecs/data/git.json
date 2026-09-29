@@ -7,16 +7,16 @@
     "provenance": "git version 2.54.0, git --help / git help git",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+        "source": "git -h: \"usage: git [-v | --version] [-h | --help] [-C \\u003cpath\\u003e] [-c \\u003cname\\u003e=\\u003cvalue\\u003e]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+        "source": "git -h: \"usage: git [-v | --version] [-h | --help] [-C \\u003cpath\\u003e] [-c \\u003cname\\u003e=\\u003cvalue\\u003e] [--exec-path[=\\u003cpath\\u003e]] [--html-path] [--man-path] [--info-path] [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch] [--no-optional-locks] [--no-advice] [--bare] [--git-dir=\\u003cpath\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+        "source": "git -h: \"usage: git [-v | --version] [-h | --help] [-C \\u003cpath\\u003e] [-c \\u003cname\\u003e=\\u003cvalue\\u003e] [--exec-path[=\\u003cpath\\u003e]] [--html-path] [--man-path] [--info-path] [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch] [--no-optional-locks] [--no-advice] [--bare] [--git-dir=\\u003cpath\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+        "source": "git -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h (full): \"--glob-pathspecs Add \\\"glob\\\" magic to all pathspec. This is equivalent to setting the\""
         }
       },
       "--icase-pathspecs": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h (full): \"--icase-pathspecs Add \\\"icase\\\" magic to all pathspec. This is equivalent to setting the\""
         }
       },
       "--literal-pathspecs": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h (full): \"--literal-pathspecs Treat pathspecs literally (i.e. no globbing, no pathspec magic). This\""
         }
       },
       "--no-optional-locks": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[--no-optional-locks] [--no-advice] [--bare] [--git-dir=\\u003cpath\\u003e]\""
         }
       },
       "--no-pager": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       },
       "--no-replace-objects": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       },
       "--noglob-pathspecs": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h (full): \"--noglob-pathspecs Add \\\"literal\\\" magic to all pathspec. This is equivalent to setting the\""
         }
       },
       "--paginate": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       },
       "-P": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       },
       "-p": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+          "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       }
     },
@@ -151,7 +151,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+        "source": "git -h: \"usage: git [-v | --version] [-h | --help] [-C \\u003cpath\\u003e] [-c \\u003cname\\u003e=\\u003cvalue\\u003e] [--exec-path[=\\u003cpath\\u003e]] [--html-path] [--man-path] [--info-path] [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch] [--no-optional-locks] [--no-advice] [--bare] [--git-dir=\\u003cpath\\u003e]\""
       }
     },
     "stdin": "never",
@@ -164,16 +164,16 @@
         "provenance": "git version 2.54.0, git add -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git add -h: \"usage: git add [\\u003coptions\\u003e] [--] \\u003cpathspec\\u003e...\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git add -h: \"usage: git add [\\u003coptions\\u003e] [--] \\u003cpathspec\\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git add -h: \"usage: git add [\\u003coptions\\u003e] [--] \\u003cpathspec\\u003e...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git add -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -186,7 +186,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-A, --[no-]all add changes from all tracked and untracked files\""
             }
           },
           "--dry-run": {
@@ -198,7 +198,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "--force": {
@@ -210,7 +210,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-f, --[no-]force allow adding otherwise ignored files\""
             }
           },
           "--intent-to-add": {
@@ -222,7 +222,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-N, --[no-]intent-to-add record only the fact that the path will be added later\""
             }
           },
           "--patch": {
@@ -234,7 +234,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-p, --[no-]patch select hunks interactively\""
             }
           },
           "--update": {
@@ -246,7 +246,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-u, --[no-]update update tracked files\""
             }
           },
           "--verbose": {
@@ -258,7 +258,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-v, --[no-]verbose be verbose\""
             }
           },
           "-A": {
@@ -270,7 +270,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-A, --[no-]all add changes from all tracked and untracked files\""
             }
           },
           "-N": {
@@ -282,7 +282,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-N, --[no-]intent-to-add record only the fact that the path will be added later\""
             }
           },
           "-f": {
@@ -294,7 +294,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-f, --[no-]force allow adding otherwise ignored files\""
             }
           },
           "-n": {
@@ -306,7 +306,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "-p": {
@@ -318,7 +318,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-p, --[no-]patch select hunks interactively\""
             }
           },
           "-u": {
@@ -330,7 +330,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-u, --[no-]update update tracked files\""
             }
           },
           "-v": {
@@ -342,7 +342,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"-v, --[no-]verbose be verbose\""
             }
           }
         },
@@ -356,7 +356,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git add -h: \"usage: git add [\\u003coptions\\u003e] [--] \\u003cpathspec\\u003e...\""
           }
         },
         "implicitEffects": [
@@ -366,7 +366,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git add -h: \"usage: git add [\\u003coptions\\u003e] [--] \\u003cpathspec\\u003e...\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-modify\") is derived from"
             }
           }
         ],
@@ -380,16 +380,16 @@
         "provenance": "git version 2.54.0, git branch -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git branch -h: \"usage: git branch [\\u003coptions\\u003e] [-r | -a] [--merged] [--no-merged]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git branch -h: \"usage: git branch [\\u003coptions\\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\\u003coptions\\u003e] [-f] [--recurse-submodules] \\u003cbranch-name\\u003e [\\u003cstart-point\\u003e] or: git branch [\\u003coptions\\u003e] [-l] [\\u003cpattern\\u003e...] or: git branch [\\u003coptions\\u003e] [-r] (-d | -D) \\u003cbranch-name\\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git branch -h: \"usage: git branch [\\u003coptions\\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\\u003coptions\\u003e] [-f] [--recurse-submodules] \\u003cbranch-name\\u003e [\\u003cstart-point\\u003e] or: git branch [\\u003coptions\\u003e] [-l] [\\u003cpattern\\u003e...] or: git branch [\\u003coptions\\u003e] [-r] (-d | -D) \\u003cbranch-name\\u003e...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git branch -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -402,7 +402,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-a, --all list both remote-tracking and local branches\""
             }
           },
           "--contains": {
@@ -414,7 +414,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"--contains \\u003ccommit\\u003e print only branches that contain the commit\""
             }
           },
           "--format": {
@@ -426,7 +426,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"or: git branch [\\u003coptions\\u003e] [-r | -a] [--format]\""
             }
           },
           "--list": {
@@ -438,7 +438,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-l, --[no-]list list branch names\""
             }
           },
           "--merged": {
@@ -450,7 +450,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"--merged \\u003ccommit\\u003e print only branches that are merged\""
             }
           },
           "--no-merged": {
@@ -462,7 +462,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"--no-merged \\u003ccommit\\u003e print only branches that are not merged\""
             }
           },
           "--remotes": {
@@ -474,7 +474,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-r, --remotes act on remote-tracking branches\""
             }
           },
           "--show-current": {
@@ -486,7 +486,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"--[no-]show-current show current branch name\""
             }
           },
           "--verbose": {
@@ -498,7 +498,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-v, --[no-]verbose show hash and subject, give twice for upstream branch\""
             }
           },
           "-a": {
@@ -510,7 +510,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-a, --all list both remote-tracking and local branches\""
             }
           },
           "-l": {
@@ -522,7 +522,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-l, --[no-]list list branch names\""
             }
           },
           "-r": {
@@ -534,7 +534,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-r, --remotes act on remote-tracking branches\""
             }
           },
           "-v": {
@@ -546,7 +546,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git branch -h: \"-v, --[no-]verbose show hash and subject, give twice for upstream branch\""
             }
           }
         },
@@ -561,7 +561,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git branch -h: \"usage: git branch [\\u003coptions\\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\\u003coptions\\u003e] [-f] [--recurse-submodules] \\u003cbranch-name\\u003e [\\u003cstart-point\\u003e] or: git branch [\\u003coptions\\u003e] [-l] [\\u003cpattern\\u003e...] or: git branch [\\u003coptions\\u003e] [-r] (-d | -D) \\u003cbranch-name\\u003e...\""
           }
         },
         "stdin": "never",
@@ -574,16 +574,16 @@
         "provenance": "git version 2.54.0, git clean -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git clean -h: \"usage: git clean [-d] [-f] [-i] [-n] [-q] [-e \\u003cpattern\\u003e] [-x | -X] [--] [\\u003cpathspec\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git clean -h: \"usage: git clean [-d] [-f] [-i] [-n] [-q] [-e \\u003cpattern\\u003e] [-x | -X] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git clean -h: \"usage: git clean [-d] [-f] [-i] [-n] [-q] [-e \\u003cpattern\\u003e] [-x | -X] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git clean -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -596,7 +596,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-e, --exclude \\u003cpattern\\u003e add \\u003cpattern\\u003e to ignore rules\""
             }
           },
           "--force": {
@@ -608,7 +608,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-f, --[no-]force force\""
             }
           },
           "--quiet": {
@@ -620,7 +620,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-q, --[no-]quiet do not print names of files removed\""
             }
           },
           "-X": {
@@ -632,7 +632,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-X remove only ignored files\""
             }
           },
           "-d": {
@@ -644,7 +644,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-d remove whole directories\""
             }
           },
           "-e": {
@@ -656,7 +656,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-e, --exclude \\u003cpattern\\u003e add \\u003cpattern\\u003e to ignore rules\""
             }
           },
           "-f": {
@@ -668,7 +668,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-f, --[no-]force force\""
             }
           },
           "-q": {
@@ -680,7 +680,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-q, --[no-]quiet do not print names of files removed\""
             }
           },
           "-x": {
@@ -692,7 +692,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"-x remove ignored files, too\""
             }
           }
         },
@@ -706,7 +706,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git clean -h: \"usage: git clean [-d] [-f] [-i] [-n] [-q] [-e \\u003cpattern\\u003e] [-x | -X] [--] [\\u003cpathspec\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -717,7 +717,7 @@
             "target": ".",
             "whenNoPositionals": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git clean -h: \"usage: git clean [-d] [-f] [-i] [-n] [-q] [-e \\u003cpattern\\u003e] [-x | -X] [--] [\\u003cpathspec\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-delete\") is derived from"
             }
           }
         ],
@@ -731,16 +731,16 @@
         "provenance": "git version 2.54.0, git commit -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend] [--dry-run] [(-c | -C | --squash) \\u003ccommit\\u003e | --fixup [(amend|reword):]\\u003ccommit\\u003e] [-F \\u003cfile\\u003e | -m \\u003cmsg\\u003e] [--reset-author] [--allow-empty] [--allow-empty-message] [--no-verify] [-e] [--author=\\u003cauthor\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend] [--dry-run] [(-c | -C | --squash) \\u003ccommit\\u003e | --fixup [(amend|reword):]\\u003ccommit\\u003e] [-F \\u003cfile\\u003e | -m \\u003cmsg\\u003e] [--reset-author] [--allow-empty] [--allow-empty-message] [--no-verify] [-e] [--author=\\u003cauthor\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git commit -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -753,7 +753,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-a, --[no-]all commit all changed files\""
             }
           },
           "--allow-empty": {
@@ -765,7 +765,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"[-F \\u003cfile\\u003e | -m \\u003cmsg\\u003e] [--reset-author] [--allow-empty]\""
             }
           },
           "--amend": {
@@ -777,7 +777,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend]\""
             }
           },
           "--author": {
@@ -789,7 +789,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"[--allow-empty-message] [--no-verify] [-e] [--author=\\u003cauthor\\u003e]\""
             }
           },
           "--file": {
@@ -801,7 +801,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-F, --[no-]file \\u003cfile\\u003e read message from file\""
             }
           },
           "--message": {
@@ -813,7 +813,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-m, --[no-]message \\u003cmessage\\u003e commit message\""
             }
           },
           "--no-edit": {
@@ -825,7 +825,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-e, --[no-]edit force edit of commit\""
             }
           },
           "--quiet": {
@@ -837,7 +837,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-q, --[no-]quiet suppress summary after successful commit\""
             }
           },
           "--signoff": {
@@ -849,7 +849,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-s, --[no-]signoff add a Signed-off-by trailer\""
             }
           },
           "--verbose": {
@@ -861,7 +861,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-v, --[no-]verbose show diff in commit message template\""
             }
           },
           "--verify": {
@@ -873,7 +873,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"--verify opposite of --no-verify\""
             }
           },
           "-F": {
@@ -885,7 +885,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-F, --[no-]file \\u003cfile\\u003e read message from file\""
             }
           },
           "-a": {
@@ -897,7 +897,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-a, --[no-]all commit all changed files\""
             }
           },
           "-m": {
@@ -909,7 +909,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-m, --[no-]message \\u003cmessage\\u003e commit message\""
             }
           },
           "-q": {
@@ -921,7 +921,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-q, --[no-]quiet suppress summary after successful commit\""
             }
           },
           "-s": {
@@ -933,7 +933,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-s, --[no-]signoff add a Signed-off-by trailer\""
             }
           },
           "-v": {
@@ -945,7 +945,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"-v, --[no-]verbose show diff in commit message template\""
             }
           }
         },
@@ -959,7 +959,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend] [--dry-run] [(-c | -C | --squash) \\u003ccommit\\u003e | --fixup [(amend|reword):]\\u003ccommit\\u003e] [-F \\u003cfile\\u003e | -m \\u003cmsg\\u003e] [--reset-author] [--allow-empty] [--allow-empty-message] [--no-verify] [-e] [--author=\\u003cauthor\\u003e]\""
           }
         },
         "implicitEffects": [
@@ -969,7 +969,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git commit -h: \"usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[\\u003cmode\\u003e]] [--amend] [--dry-run] [(-c | -C | --squash) \\u003ccommit\\u003e | --fixup [(amend|reword):]\\u003ccommit\\u003e] [-F \\u003cfile\\u003e | -m \\u003cmsg\\u003e] [--reset-author] [--allow-empty] [--allow-empty-message] [--no-verify] [-e] [--author=\\u003cauthor\\u003e]\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-modify\") is derived from"
             }
           }
         ],
@@ -983,16 +983,16 @@
         "provenance": "git version 2.54.0, git config -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git config -h: \"usage: git config list [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git config -h: \"usage: git config list [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes] or: git config get [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes] [--all] [--regexp] [--value=\\u003cpattern\\u003e] [--fixed-value] [--default=\\u003cdefault\\u003e] [--url=\\u003curl\\u003e] \\u003cname\\u003e or: git config set [\\u003cfile-option\\u003e] [--type=\\u003ctype\\u003e] [--all] [--value=\\u003cpattern\\u003e] [--fixed-value] \\u003cname\\u003e \\u003cvalue\\u003e or: git config unset [\\u003cfile-option\\u003e] [--all] [--value=\\u003cpattern\\u003e] [--fixed-value] \\u003cname\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git config -h: \"or: git config [\\u003cfile-option\\u003e] --get-colorbool \\u003cname\\u003e [\\u003cstdout-is-tty\\u003e]\""
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git config -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1005,7 +1005,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"--get \\u003cname\\u003e [\\u003cvalue-pattern\\u003e] Replaced by git config get [--value=\\u003cpattern\\u003e] \\u003cname\\u003e.\""
             }
           },
           "--get-all": {
@@ -1017,7 +1017,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"--get-all \\u003cname\\u003e [\\u003cvalue-pattern\\u003e] Replaced by git config get [--value=\\u003cpattern\\u003e] --all \\u003cname\\u003e.\""
             }
           },
           "--get-regexp": {
@@ -1029,7 +1029,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"--get-regexp \\u003cname-regexp\\u003e Replaced by git config get --all --show-names --regexp \\u003cname-regexp\\u003e.\""
             }
           },
           "--list": {
@@ -1041,7 +1041,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"-l, --list Replaced by git config list.\""
             }
           },
           "--show-origin": {
@@ -1053,7 +1053,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"--show-origin Augment the output of all queried config options with the origin type\""
             }
           },
           "-l": {
@@ -1065,7 +1065,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git config -h (full): \"-l, --list Replaced by git config list.\""
             }
           }
         },
@@ -1080,7 +1080,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git config -h: \"usage: git config list [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes] or: git config get [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes] [--all] [--regexp] [--value=\\u003cpattern\\u003e] [--fixed-value] [--default=\\u003cdefault\\u003e] [--url=\\u003curl\\u003e] \\u003cname\\u003e or: git config set [\\u003cfile-option\\u003e] [--type=\\u003ctype\\u003e] [--all] [--value=\\u003cpattern\\u003e] [--fixed-value] \\u003cname\\u003e \\u003cvalue\\u003e or: git config unset [\\u003cfile-option\\u003e] [--all] [--value=\\u003cpattern\\u003e] [--fixed-value] \\u003cname\\u003e\""
           }
         },
         "stdin": "never",
@@ -1093,16 +1093,16 @@
         "provenance": "git version 2.54.0, git help diff",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] [--merge-base] \\u003ccommit\\u003e [\\u003ccommit\\u003e...] \\u003ccommit\\u003e [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] \\u003ccommit\\u003e...\\u003ccommit\\u003e [--] [\\u003cpath\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] [--merge-base] \\u003ccommit\\u003e [\\u003ccommit\\u003e...] \\u003ccommit\\u003e [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] \\u003ccommit\\u003e...\\u003ccommit\\u003e [--] [\\u003cpath\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git diff -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1115,7 +1115,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...]\""
             }
           },
           "--name-only": {
@@ -1127,7 +1127,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"--name-only show only names of changed files.\""
             }
           },
           "--name-status": {
@@ -1139,7 +1139,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"--name-status show names and status of changed files.\""
             }
           },
           "--output": {
@@ -1151,7 +1151,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h (full): \"--output=\\u003cfile\\u003e Output to a specific file instead of stdout.\""
             }
           },
           "--staged": {
@@ -1163,7 +1163,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h (full): \"not given, it shows all staged changes. --staged is a synonym of\""
             }
           },
           "--stat": {
@@ -1175,7 +1175,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"--stat show diffstat instead of patch.\""
             }
           },
           "-G": {
@@ -1187,7 +1187,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h (full): \"When -S or -G finds a change, show all the changes in that changeset,\""
             }
           },
           "-S": {
@@ -1199,7 +1199,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"show all files diff when -S is used and hit is found.\""
             }
           },
           "-p": {
@@ -1211,7 +1211,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"-p output patch format.\""
             }
           }
         },
@@ -1225,7 +1225,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] [--merge-base] \\u003ccommit\\u003e [\\u003ccommit\\u003e...] \\u003ccommit\\u003e [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] \\u003ccommit\\u003e...\\u003ccommit\\u003e [--] [\\u003cpath\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -1235,7 +1235,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] [--merge-base] \\u003ccommit\\u003e [\\u003ccommit\\u003e...] \\u003ccommit\\u003e [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] \\u003ccommit\\u003e...\\u003ccommit\\u003e [--] [\\u003cpath\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -1249,16 +1249,16 @@
         "provenance": "git version 2.54.0, git help log",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git log -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git log -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git log -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git log -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1271,7 +1271,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--since=\\u003cdate\\u003e, --after=\\u003cdate\\u003e Show commits more recent than \\u003cdate\\u003e.\""
             }
           },
           "--author": {
@@ -1283,7 +1283,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--author=\\u003cpattern\\u003e, --committer=\\u003cpattern\\u003e Limit the commits output to ones with author/committer header lines\""
             }
           },
           "--before": {
@@ -1295,7 +1295,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--until=\\u003cdate\\u003e, --before=\\u003cdate\\u003e Show commits older than \\u003cdate\\u003e.\""
             }
           },
           "--format": {
@@ -1307,7 +1307,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--format=raw.\""
             }
           },
           "--grep": {
@@ -1319,7 +1319,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--grep=\\u003cpattern\\u003e further limits to commits whose log message has a line that matches \\u003cpattern\\u003e), unless otherwise noted.\""
             }
           },
           "--max-count": {
@@ -1331,7 +1331,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"-\\u003cnumber\\u003e, -n \\u003cnumber\\u003e, --max-count=\\u003cnumber\\u003e Limit the output to \\u003cnumber\\u003e commits.\""
             }
           },
           "--name-only": {
@@ -1343,7 +1343,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--name-only Show only the name of each changed file in the post-image tree. The\""
             }
           },
           "--name-status": {
@@ -1355,7 +1355,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--name-status Show only the name(s) and status of each changed file. See the de-\""
             }
           },
           "--oneline": {
@@ -1367,7 +1367,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--oneline. It also overrides the log.abbrevCommit variable.\""
             }
           },
           "--output": {
@@ -1379,7 +1379,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--output=\\u003cfile\\u003e Output to a specific file instead of stdout.\""
             }
           },
           "--pretty": {
@@ -1391,7 +1391,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--pretty[=\\u003cformat\\u003e], --format=\\u003cformat\\u003e Pretty-print the contents of the commit logs in a given format, where\""
             }
           },
           "--since": {
@@ -1403,7 +1403,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--since=\\u003cdate1\\u003e limits to commits newer than \\u003cdate1\\u003e, and using it with\""
             }
           },
           "--stat": {
@@ -1415,7 +1415,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--stat[=\\u003cwidth\\u003e[,\\u003cname-width\\u003e[,\\u003ccount\\u003e]]] Generate a diffstat. By default, as much space as necessary will be\""
             }
           },
           "--until": {
@@ -1427,7 +1427,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"--until=\\u003cdate\\u003e, --before=\\u003cdate\\u003e Show commits older than \\u003cdate\\u003e.\""
             }
           },
           "-G": {
@@ -1439,7 +1439,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"tions (-S, -G).\""
             }
           },
           "-S": {
@@ -1451,7 +1451,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"tions (-S, -G).\""
             }
           },
           "-n": {
@@ -1463,7 +1463,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"-\\u003cnumber\\u003e, -n \\u003cnumber\\u003e, --max-count=\\u003cnumber\\u003e Limit the output to \\u003cnumber\\u003e commits.\""
             }
           },
           "-p": {
@@ -1475,7 +1475,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h (full): \"-p, -u, --patch Generate patch (see the section called \\\"GENERATING PATCH TEXT WITH\""
             }
           }
         },
@@ -1489,7 +1489,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git log -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\""
           }
         },
         "implicitEffects": [
@@ -1499,7 +1499,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git log -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -1513,16 +1513,16 @@
         "provenance": "git version 2.54.0, git mv -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git mv -h: \"usage: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e \\u003cdestination\\u003e\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git mv -h: \"usage: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e \\u003cdestination\\u003e or: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e... \\u003cdestination-directory\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git mv -h: \"usage: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e \\u003cdestination\\u003e or: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e... \\u003cdestination-directory\\u003e\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git mv -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1535,7 +1535,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "--force": {
@@ -1547,7 +1547,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-f, --[no-]force force move/rename even if target exists\""
             }
           },
           "--verbose": {
@@ -1559,7 +1559,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-v, --[no-]verbose be verbose\""
             }
           },
           "-f": {
@@ -1571,7 +1571,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-f, --[no-]force force move/rename even if target exists\""
             }
           },
           "-k": {
@@ -1583,7 +1583,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-k skip move/rename errors\""
             }
           },
           "-n": {
@@ -1595,7 +1595,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "-v": {
@@ -1607,7 +1607,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"-v, --[no-]verbose be verbose\""
             }
           }
         },
@@ -1627,7 +1627,7 @@
             }
           ],
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git mv -h: \"usage: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e \\u003cdestination\\u003e or: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e... \\u003cdestination-directory\\u003e\""
           }
         },
         "implicitEffects": [
@@ -1637,7 +1637,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git mv -h: \"usage: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e \\u003cdestination\\u003e or: git mv [-v] [-f] [-n] [-k] \\u003csource\\u003e... \\u003cdestination-directory\\u003e\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-modify\") is derived from"
             }
           }
         ],
@@ -1651,16 +1651,16 @@
         "provenance": "git version 2.54.0, git push -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git push -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -1673,7 +1673,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]branches alias of --all\""
             }
           },
           "--atomic": {
@@ -1685,7 +1685,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]atomic request atomic transaction on remote side\""
             }
           },
           "--branches": {
@@ -1697,7 +1697,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]tags push tags (can't be used with --all or --branches or --mirror)\""
             }
           },
           "--delete": {
@@ -1709,7 +1709,7 @@
               "kind": "delete-ref"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-d, --[no-]delete delete refs\""
             }
           },
           "--dry-run": {
@@ -1721,7 +1721,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "--exec": {
@@ -1733,7 +1733,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]exec \\u003creceive-pack\\u003e receive pack program\""
             }
           },
           "--follow-tags": {
@@ -1745,7 +1745,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]follow-tags push missing but relevant tags\""
             }
           },
           "--force": {
@@ -1757,7 +1757,7 @@
               "kind": "force"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-f, --[no-]force force updates\""
             }
           },
           "--force-with-lease": {
@@ -1769,7 +1769,7 @@
               "kind": "force"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]force-with-lease[=\\u003crefname\\u003e:\\u003cexpect\\u003e] require old value of ref to be at this value\""
             }
           },
           "--no-atomic": {
@@ -1781,7 +1781,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]atomic request atomic transaction on remote side\""
             }
           },
           "--no-progress": {
@@ -1793,7 +1793,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]progress force progress reporting\""
             }
           },
           "--no-thin": {
@@ -1805,7 +1805,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]thin use thin pack\""
             }
           },
           "--porcelain": {
@@ -1817,7 +1817,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]porcelain machine-readable output\""
             }
           },
           "--progress": {
@@ -1829,7 +1829,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]progress force progress reporting\""
             }
           },
           "--prune": {
@@ -1841,7 +1841,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]prune prune locally removed refs\""
             }
           },
           "--push-option": {
@@ -1853,7 +1853,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-o, --[no-]push-option \\u003cserver-specific\\u003e option to transmit\""
             }
           },
           "--quiet": {
@@ -1865,7 +1865,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-q, --[no-]quiet be more quiet\""
             }
           },
           "--receive-pack": {
@@ -1877,7 +1877,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]receive-pack \\u003creceive-pack\\u003e receive pack program\""
             }
           },
           "--set-upstream": {
@@ -1889,7 +1889,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-u, --[no-]set-upstream set upstream for git pull/status\""
             }
           },
           "--tags": {
@@ -1901,7 +1901,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]tags push tags (can't be used with --all or --branches or --mirror)\""
             }
           },
           "--thin": {
@@ -1913,7 +1913,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"--[no-]thin use thin pack\""
             }
           },
           "--verbose": {
@@ -1925,7 +1925,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-v, --[no-]verbose be more verbose\""
             }
           },
           "-d": {
@@ -1937,7 +1937,7 @@
               "kind": "delete-ref"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-d, --[no-]delete delete refs\""
             }
           },
           "-f": {
@@ -1949,7 +1949,7 @@
               "kind": "force"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-f, --[no-]force force updates\""
             }
           },
           "-n": {
@@ -1961,7 +1961,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "-o": {
@@ -1973,7 +1973,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-o, --[no-]push-option \\u003cserver-specific\\u003e option to transmit\""
             }
           },
           "-q": {
@@ -1985,7 +1985,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-q, --[no-]quiet be more quiet\""
             }
           },
           "-u": {
@@ -1997,7 +1997,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-u, --[no-]set-upstream set upstream for git pull/status\""
             }
           },
           "-v": {
@@ -2009,7 +2009,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"-v, --[no-]verbose be more verbose\""
             }
           }
         },
@@ -2030,7 +2030,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\""
           }
         },
         "implicitEffects": [
@@ -2043,7 +2043,7 @@
             "dynamic": true,
             "whenNoPositionals": true,
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git push -h: \"usage: git push [\\u003coptions\\u003e] [\\u003crepository\\u003e [\\u003crefspec\\u003e...]]\" -- documents the optional/omittable operand shape this implicit default (target \"\u003cdefault-remote\u003e\", role \"remote\") is derived from"
             }
           }
         ],
@@ -2057,16 +2057,16 @@
         "provenance": "git version 2.54.0, git help rev-list",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-list -h: \"usage: git rev-list [\\u003coptions\\u003e] \\u003ccommit\\u003e... [--] [\\u003cpath\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-list -h: \"--stdin\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-list -h: \"usage: git rev-list [\\u003coptions\\u003e] \\u003ccommit\\u003e... [--] [\\u003cpath\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-list -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2079,7 +2079,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--since=\\u003cdate\\u003e, --after=\\u003cdate\\u003e Show commits more recent than \\u003cdate\\u003e.\""
             }
           },
           "--author": {
@@ -2091,7 +2091,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--author=\\u003cpattern\\u003e, --committer=\\u003cpattern\\u003e Limit the commits output to ones with author/committer header lines\""
             }
           },
           "--before": {
@@ -2103,7 +2103,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--until=\\u003cdate\\u003e, --before=\\u003cdate\\u003e Show commits older than \\u003cdate\\u003e.\""
             }
           },
           "--grep": {
@@ -2115,7 +2115,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--grep=\\u003cpattern\\u003e further limits to commits whose log message has a line that matches \\u003cpattern\\u003e), unless otherwise noted.\""
             }
           },
           "--max-count": {
@@ -2127,7 +2127,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h: \"--max-count=\\u003cn\\u003e\""
             }
           },
           "--since": {
@@ -2139,7 +2139,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--since=\\u003cdate1\\u003e limits to commits newer than \\u003cdate1\\u003e, and using it with\""
             }
           },
           "--until": {
@@ -2151,7 +2151,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"--until=\\u003cdate\\u003e, --before=\\u003cdate\\u003e Show commits older than \\u003cdate\\u003e.\""
             }
           },
           "-n": {
@@ -2163,7 +2163,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h (full): \"-\\u003cnumber\\u003e, -n \\u003cnumber\\u003e, --max-count=\\u003cnumber\\u003e Limit the output to \\u003cnumber\\u003e commits.\""
             }
           }
         },
@@ -2177,7 +2177,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-list -h: \"usage: git rev-list [\\u003coptions\\u003e] \\u003ccommit\\u003e... [--] [\\u003cpath\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -2187,7 +2187,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-list -h: \"usage: git rev-list [\\u003coptions\\u003e] \\u003ccommit\\u003e... [--] [\\u003cpath\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -2201,16 +2201,16 @@
         "provenance": "git version 2.54.0, git help rev-parse",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-parse -h: \"usage: git rev-parse --parseopt [\\u003coptions\\u003e] -- [\\u003cargs\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-parse -h: \"usage: git rev-parse --parseopt [\\u003coptions\\u003e] -- [\\u003cargs\\u003e...] or: git rev-parse --sq-quote [\\u003carg\\u003e...] or: git rev-parse [\\u003coptions\\u003e] [\\u003carg\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-parse -h: \"usage: git rev-parse --parseopt [\\u003coptions\\u003e] -- [\\u003cargs\\u003e...] or: git rev-parse --sq-quote [\\u003carg\\u003e...] or: git rev-parse [\\u003coptions\\u003e] [\\u003carg\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-parse -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2223,7 +2223,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h (full): \"--abbrev-ref[=(strict|loose)] A non-ambiguous short name of the objects name. The option core.war-\""
             }
           },
           "--git-dir": {
@@ -2235,7 +2235,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h (full): \"--git-dir Show $GIT_DIR if defined. Otherwise show the path to the .git direc-\""
             }
           },
           "--short": {
@@ -2247,7 +2247,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h (full): \"--short[=\\u003clength\\u003e] Same as --verify but shortens the object name to a unique prefix with\""
             }
           },
           "--show-toplevel": {
@@ -2259,7 +2259,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h (full): \"--show-toplevel Show the (by default, absolute) path of the top-level directory of the\""
             }
           },
           "--verify": {
@@ -2271,7 +2271,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h (full): \"--verify Verify that exactly one parameter is provided, and that it can be\""
             }
           }
         },
@@ -2285,7 +2285,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rev-parse -h: \"usage: git rev-parse --parseopt [\\u003coptions\\u003e] -- [\\u003cargs\\u003e...] or: git rev-parse --sq-quote [\\u003carg\\u003e...] or: git rev-parse [\\u003coptions\\u003e] [\\u003carg\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -2295,7 +2295,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rev-parse -h: \"usage: git rev-parse --parseopt [\\u003coptions\\u003e] -- [\\u003cargs\\u003e...] or: git rev-parse --sq-quote [\\u003carg\\u003e...] or: git rev-parse [\\u003coptions\\u003e] [\\u003carg\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -2309,16 +2309,16 @@
         "provenance": "git version 2.54.0, git rm -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch] [--quiet] [--pathspec-from-file=\\u003cfile\\u003e [--pathspec-file-nul]] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch] [--quiet] [--pathspec-from-file=\\u003cfile\\u003e [--pathspec-file-nul]] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rm -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2331,7 +2331,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch]\""
             }
           },
           "--dry-run": {
@@ -2343,7 +2343,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "--force": {
@@ -2355,7 +2355,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch]\""
             }
           },
           "--ignore-unmatch": {
@@ -2367,7 +2367,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch]\""
             }
           },
           "--quiet": {
@@ -2379,7 +2379,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"[--quiet] [--pathspec-from-file=\\u003cfile\\u003e [--pathspec-file-nul]]\""
             }
           },
           "-f": {
@@ -2391,7 +2391,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"-f, --[no-]force override the up-to-date check\""
             }
           },
           "-n": {
@@ -2403,7 +2403,7 @@
               "kind": "dry-run"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"-n, --[no-]dry-run dry run\""
             }
           },
           "-q": {
@@ -2415,7 +2415,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"-q, --[no-]quiet do not list removed files\""
             }
           },
           "-r": {
@@ -2427,7 +2427,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"-r allow recursive removal\""
             }
           }
         },
@@ -2441,7 +2441,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch] [--quiet] [--pathspec-from-file=\\u003cfile\\u003e [--pathspec-file-nul]] [--] [\\u003cpathspec\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -2451,7 +2451,7 @@
             },
             "target": ".git",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git rm -h: \"usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch] [--quiet] [--pathspec-from-file=\\u003cfile\\u003e [--pathspec-file-nul]] [--] [\\u003cpathspec\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".git\", role \"path-modify\") is derived from"
             }
           }
         ],
@@ -2465,16 +2465,16 @@
         "provenance": "git version 2.54.0, git help show",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git show -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git show -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git show -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git show -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2487,7 +2487,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--format=raw.\""
             }
           },
           "--name-only": {
@@ -2499,7 +2499,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--name-only Show only the name of each changed file in the post-image tree. The\""
             }
           },
           "--name-status": {
@@ -2511,7 +2511,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--name-status Show only the name(s) and status of each changed file. See the de-\""
             }
           },
           "--output": {
@@ -2523,7 +2523,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--output=\\u003cfile\\u003e Output to a specific file instead of stdout.\""
             }
           },
           "--pretty": {
@@ -2535,7 +2535,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--pretty[=\\u003cformat\\u003e], --format=\\u003cformat\\u003e Pretty-print the contents of the commit logs in a given format, where\""
             }
           },
           "--stat": {
@@ -2547,7 +2547,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"--stat[=\\u003cwidth\\u003e[,\\u003cname-width\\u003e[,\\u003ccount\\u003e]]] Generate a diffstat. By default, as much space as necessary will be\""
             }
           },
           "-p": {
@@ -2559,7 +2559,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h (full): \"-p, -u, --patch Generate patch (see the section called \\\"GENERATING PATCH TEXT WITH\""
             }
           }
         },
@@ -2573,7 +2573,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git show -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\""
           }
         },
         "implicitEffects": [
@@ -2583,7 +2583,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git show -h: \"usage: git log [\\u003coptions\\u003e] [\\u003crevision-range\\u003e] [[--] \\u003cpath\\u003e...] or: git show [\\u003coptions\\u003e] \\u003cobject\\u003e...\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -2597,16 +2597,16 @@
         "provenance": "git version 2.54.0, git status -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git status -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "flags": {
@@ -2619,7 +2619,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]ahead-behind compute full ahead/behind values\""
             }
           },
           "--branch": {
@@ -2631,7 +2631,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-b, --[no-]branch show branch information\""
             }
           },
           "--column": {
@@ -2643,7 +2643,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]column[=\\u003cstyle\\u003e] list untracked files in columns\""
             }
           },
           "--ignore-submodules": {
@@ -2655,7 +2655,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]ignore-submodules[=\\u003cwhen\\u003e] ignore changes to submodules, optional when: all, dirty, untracked. (Default: all)\""
             }
           },
           "--ignored": {
@@ -2667,7 +2667,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]ignored[=\\u003cmode\\u003e] show ignored files, optional modes: traditional, matching, no. (Default: traditional)\""
             }
           },
           "--long": {
@@ -2679,7 +2679,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]long show status in long format (default)\""
             }
           },
           "--no-ahead-behind": {
@@ -2691,7 +2691,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]ahead-behind compute full ahead/behind values\""
             }
           },
           "--no-column": {
@@ -2703,7 +2703,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]column[=\\u003cstyle\\u003e] list untracked files in columns\""
             }
           },
           "--no-lock-index": {
@@ -2715,7 +2715,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git help status (full) + git(1): reviewed in full; neither documents a --lock-index/--no-lock-index option for git-status, and live invocation confirms git 2.54.0 rejects it (`git status --no-lock-index` -\u003e \"error: unknown option `no-lock-index'\", exit 129) -- FACT MISMATCH discovered during citation backfill (this repo's flag/role structure is left unchanged per this packet's own Binding decisions; recorded via bd comment, not silently corrected)"
             }
           },
           "--no-renames": {
@@ -2727,7 +2727,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--no-renames do not detect renames\""
             }
           },
           "--porcelain": {
@@ -2739,7 +2739,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]porcelain[=\\u003cversion\\u003e] machine-readable output\""
             }
           },
           "--renames": {
@@ -2751,7 +2751,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--renames opposite of --no-renames\""
             }
           },
           "--short": {
@@ -2763,7 +2763,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-s, --[no-]short show status concisely\""
             }
           },
           "--show-stash": {
@@ -2775,7 +2775,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"--[no-]show-stash show stash information\""
             }
           },
           "--untracked-files": {
@@ -2787,7 +2787,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-u, --[no-]untracked-files[=\\u003cmode\\u003e] show untracked files, optional modes: all, normal, no. (Default: all)\""
             }
           },
           "--verbose": {
@@ -2799,7 +2799,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-v, --[no-]verbose be verbose\""
             }
           },
           "-b": {
@@ -2811,7 +2811,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-b, --[no-]branch show branch information\""
             }
           },
           "-s": {
@@ -2823,7 +2823,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-s, --[no-]short show status concisely\""
             }
           },
           "-u": {
@@ -2835,7 +2835,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-u, --[no-]untracked-files[=\\u003cmode\\u003e] show untracked files, optional modes: all, normal, no. (Default: all)\""
             }
           },
           "-v": {
@@ -2847,7 +2847,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-v, --[no-]verbose be verbose\""
             }
           },
           "-z": {
@@ -2859,7 +2859,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"-z, --[no-]null terminate entries with NUL\""
             }
           }
         },
@@ -2873,7 +2873,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\""
           }
         },
         "implicitEffects": [
@@ -2883,7 +2883,7 @@
             },
             "target": ".",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+              "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
             }
           }
         ],
@@ -2897,16 +2897,16 @@
         "provenance": "git version 2.54.0, git worktree -h",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git worktree -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git worktree -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e] or: git worktree list [-v | --porcelain [-z]] or: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git worktree -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e] or: git worktree list [-v | --porcelain [-z]] or: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git worktree -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "positionals": {
@@ -2919,7 +2919,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+            "source": "git worktree -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e] or: git worktree list [-v | --porcelain [-z]] or: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\""
           }
         },
         "stdin": "never",
@@ -2932,16 +2932,16 @@
             "provenance": "git version 2.54.0, git worktree add -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree add -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -2954,7 +2954,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
                 }
               },
               "--detach": {
@@ -2966,7 +2966,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
                 }
               },
               "--force": {
@@ -2978,7 +2978,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-f, --[no-]force checkout \\u003cbranch\\u003e even if already checked out in other worktree\""
                 }
               },
               "--guess-remote": {
@@ -2990,7 +2990,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"--[no-]guess-remote try to match the new branch name with a remote-tracking branch\""
                 }
               },
               "--lock": {
@@ -3002,7 +3002,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
                 }
               },
               "--orphan": {
@@ -3014,7 +3014,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"[--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e]\""
                 }
               },
               "--quiet": {
@@ -3026,7 +3026,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-q, --[no-]quiet suppress progress reporting\""
                 }
               },
               "--reason": {
@@ -3038,7 +3038,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]]\""
                 }
               },
               "--relative-paths": {
@@ -3050,7 +3050,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"--[no-]relative-paths use relative paths for worktrees\""
                 }
               },
               "--track": {
@@ -3062,7 +3062,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"--[no-]track set up tracking mode (see git-branch(1))\""
                 }
               },
               "-B": {
@@ -3074,7 +3074,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-B \\u003cbranch\\u003e create or reset a branch\""
                 }
               },
               "-b": {
@@ -3086,7 +3086,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-b \\u003cbranch\\u003e create a new branch\""
                 }
               },
               "-d": {
@@ -3098,7 +3098,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-d, --[no-]detach detach HEAD at named commit\""
                 }
               },
               "-f": {
@@ -3110,7 +3110,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-f, --[no-]force checkout \\u003cbranch\\u003e even if already checked out in other worktree\""
                 }
               },
               "-q": {
@@ -3122,7 +3122,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree add -h: \"-q, --[no-]quiet suppress progress reporting\""
                 }
               }
             },
@@ -3141,7 +3141,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree add -h: \"usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason \\u003cstring\\u003e]] [--orphan] [(-b | -B) \\u003cnew-branch\\u003e] \\u003cpath\\u003e [\\u003ccommit-ish\\u003e]\""
               }
             },
             "stdin": "never",
@@ -3154,16 +3154,16 @@
             "provenance": "git version 2.54.0, git worktree list -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree list -h: \"usage: git worktree list [-v | --porcelain [-z]]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree list -h: \"usage: git worktree list [-v | --porcelain [-z]]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree list -h: \"usage: git worktree list [-v | --porcelain [-z]]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree list -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3176,7 +3176,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree list -h: \"usage: git worktree list [-v | --porcelain [-z]]\""
                 }
               },
               "--verbose": {
@@ -3188,7 +3188,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree list -h: \"-v, --[no-]verbose show extended annotations and reasons, if available\""
                 }
               },
               "-v": {
@@ -3200,7 +3200,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree list -h: \"-v, --[no-]verbose show extended annotations and reasons, if available\""
                 }
               },
               "-z": {
@@ -3212,7 +3212,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree list -h: \"-z terminate records with a NUL character\""
                 }
               }
             },
@@ -3226,7 +3226,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree list -h: \"usage: git worktree list [-v | --porcelain [-z]]\""
               }
             },
             "stdin": "never",
@@ -3239,16 +3239,16 @@
             "provenance": "git version 2.54.0, git worktree lock -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree lock -h: \"usage: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree lock -h: \"usage: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree lock -h: \"usage: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree lock -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3261,7 +3261,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree lock -h: \"usage: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\""
                 }
               }
             },
@@ -3276,7 +3276,7 @@
               },
               "minRest": 1,
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree lock -h: \"usage: git worktree lock [--reason \\u003cstring\\u003e] \\u003cworktree\\u003e\""
               }
             },
             "stdin": "never",
@@ -3289,16 +3289,16 @@
             "provenance": "git version 2.54.0, git worktree move -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree move -h: \"usage: git worktree move \\u003cworktree\\u003e \\u003cnew-path\\u003e\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree move -h: \"usage: git worktree move \\u003cworktree\\u003e \\u003cnew-path\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree move -h: \"usage: git worktree move \\u003cworktree\\u003e \\u003cnew-path\\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree move -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3311,7 +3311,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree move -h: \"-f, --[no-]force force move even if worktree is dirty or locked\""
                 }
               },
               "--relative-paths": {
@@ -3323,7 +3323,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree move -h: \"--[no-]relative-paths use relative paths for worktrees\""
                 }
               },
               "-f": {
@@ -3335,7 +3335,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree move -h: \"-f, --[no-]force force move even if worktree is dirty or locked\""
                 }
               }
             },
@@ -3357,7 +3357,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree move -h: \"usage: git worktree move \\u003cworktree\\u003e \\u003cnew-path\\u003e\""
               }
             },
             "stdin": "never",
@@ -3370,16 +3370,16 @@
             "provenance": "git version 2.54.0, git worktree prune -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree prune -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3392,7 +3392,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"-n, --[no-]dry-run do not remove, show only\""
                 }
               },
               "--expire": {
@@ -3404,7 +3404,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\""
                 }
               },
               "--verbose": {
@@ -3416,7 +3416,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"-v, --[no-]verbose report pruned working trees\""
                 }
               },
               "-n": {
@@ -3428,7 +3428,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"-n, --[no-]dry-run do not remove, show only\""
                 }
               },
               "-v": {
@@ -3440,7 +3440,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"-v, --[no-]verbose report pruned working trees\""
                 }
               }
             },
@@ -3454,7 +3454,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\""
               }
             },
             "implicitEffects": [
@@ -3464,7 +3464,7 @@
                 },
                 "target": ".git/worktrees",
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree prune -h: \"usage: git worktree prune [-n] [-v] [--expire \\u003cexpire\\u003e]\" -- documents the optional/omittable operand shape this implicit default (target \".git/worktrees\", role \"path-read\") is derived from"
                 }
               }
             ],
@@ -3478,16 +3478,16 @@
             "provenance": "git version 2.54.0, git worktree remove -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree remove -h: \"usage: git worktree remove [-f] \\u003cworktree\\u003e\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree remove -h: \"usage: git worktree remove [-f] \\u003cworktree\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree remove -h: \"usage: git worktree remove [-f] \\u003cworktree\\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree remove -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3500,7 +3500,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree remove -h: \"-f, --[no-]force force removal even if worktree is dirty or locked\""
                 }
               },
               "-f": {
@@ -3512,7 +3512,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree remove -h: \"-f, --[no-]force force removal even if worktree is dirty or locked\""
                 }
               }
             },
@@ -3527,7 +3527,7 @@
               },
               "minRest": 1,
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree remove -h: \"usage: git worktree remove [-f] \\u003cworktree\\u003e\""
               }
             },
             "stdin": "never",
@@ -3540,16 +3540,16 @@
             "provenance": "git version 2.54.0, git worktree repair -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree repair -h: \"usage: git worktree repair [\\u003cpath\\u003e...]\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree repair -h: \"usage: git worktree repair [\\u003cpath\\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree repair -h: \"usage: git worktree repair [\\u003cpath\\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree repair -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "flags": {
@@ -3562,7 +3562,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                  "source": "git worktree repair -h: \"--[no-]relative-paths use relative paths for worktrees\""
                 }
               }
             },
@@ -3576,7 +3576,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree repair -h: \"usage: git worktree repair [\\u003cpath\\u003e...]\""
               }
             },
             "stdin": "never",
@@ -3589,16 +3589,16 @@
             "provenance": "git version 2.54.0, git worktree unlock -h",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree unlock -h: \"usage: git worktree unlock \\u003cworktree\\u003e\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree unlock -h: \"usage: git worktree unlock \\u003cworktree\\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree unlock -h: \"usage: git worktree unlock \\u003cworktree\\u003e\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree unlock -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
               }
             },
             "positionals": {
@@ -3612,7 +3612,7 @@
               },
               "minRest": 1,
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"git\"]"
+                "source": "git worktree unlock -h: \"usage: git worktree unlock \\u003cworktree\\u003e\""
               }
             },
             "stdin": "never",

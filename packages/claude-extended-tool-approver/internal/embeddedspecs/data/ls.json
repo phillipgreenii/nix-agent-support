@@ -7,16 +7,16 @@
     "provenance": "ls (GNU coreutils) 9.11, ls --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+        "source": "ls --help: \"Usage: ls [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+        "source": "ls --help: \"Usage: ls [OPTION]... [FILE]...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+        "source": "ls --help: \"standard output is connected to a terminal. The LS_COLORS environment\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+        "source": "ls --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-a, --all do not ignore entries starting with .\""
         }
       },
       "--almost-all": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-A, --almost-all do not list implied . and ..\""
         }
       },
       "--classify": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=\\u003e@|) to entries WHEN\""
         }
       },
       "--color": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"--color[=WHEN] color the output WHEN; more info below\""
         }
       },
       "--directory": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-d, --directory list directories themselves, not their contents\""
         }
       },
       "--human-readable": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-h, --human-readable with -l and -s, print sizes like 1K 234M 2G etc.\""
         }
       },
       "--no-group": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-G, --no-group in a long listing, don't print group names\""
         }
       },
       "--recursive": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-R, --recursive list subdirectories recursively\""
         }
       },
       "--reverse": {
@@ -125,7 +125,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-r, --reverse reverse order while sorting\""
         }
       },
       "-1": {
@@ -137,7 +137,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-1 list one file per line\""
         }
       },
       "-A": {
@@ -149,7 +149,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-A, --almost-all do not list implied . and ..\""
         }
       },
       "-F": {
@@ -161,7 +161,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-F, --classify[=WHEN] append indicator (one of */=\\u003e@|) to entries WHEN\""
         }
       },
       "-G": {
@@ -173,7 +173,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-G, --no-group in a long listing, don't print group names\""
         }
       },
       "-R": {
@@ -185,7 +185,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-R, --recursive list subdirectories recursively\""
         }
       },
       "-S": {
@@ -197,7 +197,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-S sort by file size, largest first\""
         }
       },
       "-a": {
@@ -209,7 +209,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-a, --all do not ignore entries starting with .\""
         }
       },
       "-d": {
@@ -221,7 +221,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-d, --directory list directories themselves, not their contents\""
         }
       },
       "-h": {
@@ -233,7 +233,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-h, --human-readable with -l and -s, print sizes like 1K 234M 2G etc.\""
         }
       },
       "-l": {
@@ -245,7 +245,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-l use a long listing format\""
         }
       },
       "-r": {
@@ -257,7 +257,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-r, --reverse reverse order while sorting\""
         }
       },
       "-t": {
@@ -269,7 +269,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"-t sort by time, newest first; see --time\""
         }
       }
     },
@@ -283,7 +283,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+        "source": "ls --help: \"Usage: ls [OPTION]... [FILE]...\""
       }
     },
     "implicitEffects": [
@@ -294,7 +294,7 @@
         "target": ".",
         "whenNoPositionals": true,
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"ls\"]"
+          "source": "ls --help: \"Usage: ls [OPTION]... [FILE]...\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
         }
       }
     ],

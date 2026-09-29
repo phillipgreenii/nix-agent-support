@@ -7,16 +7,16 @@
     "provenance": "nix (Nix) 2.34.8 (this host, nix --version / nix run --help), 2026-09-08",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+        "source": "nix --help: \"nix - a tool for reproducible and declarative configuration\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+        "source": "nix --help: \"nix [option...] subcommand\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+        "source": "nix --help: \"nix [option...] subcommand\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+        "source": "nix --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "positionals": {
@@ -29,7 +29,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+        "source": "nix --help: \"nix [option...] subcommand\""
       }
     },
     "stdin": "never",
@@ -42,16 +42,16 @@
         "provenance": "nix (Nix) 2.34.8 (this host, nix run --help), 2026-09-08",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix run --help: \"nix run - run a Nix application\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix run --help: \"· --arg-from-stdin name\""
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix run --help: \"nix run [option...] installable args...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
         "positionals": {
@@ -64,7 +64,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            "source": "nix run --help: \"nix run [option...] installable args...\""
           }
         },
         "stdin": "never",

@@ -7,16 +7,16 @@
     "provenance": "tee (GNU coreutils) 9.11, tee --help",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+        "source": "tee --help: \"Usage: tee [OPTION]... [FILE]...\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+        "source": "tee --help: \"Copy standard input to each FILE, and also to standard output.\""
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+        "source": "tee --help: \"Copy standard input to each FILE, and also to standard output.\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+        "source": "tee --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "append"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"-a, --append append to the given FILEs, do not overwrite\""
         }
       },
       "--ignore-interrupts": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"-i, --ignore-interrupts ignore interrupt signals\""
         }
       },
       "--output-error": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"--output-error[=MODE] set behavior on write error. See MODE below\""
         }
       },
       "-a": {
@@ -65,7 +65,7 @@
           "kind": "append"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"-a, --append append to the given FILEs, do not overwrite\""
         }
       },
       "-i": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"-i, --ignore-interrupts ignore interrupt signals\""
         }
       },
       "-p": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+          "source": "tee --help: \"-p operate in a more appropriate MODE with pipes\""
         }
       }
     },
@@ -103,7 +103,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"tee\"]"
+        "source": "tee --help: \"Usage: tee [OPTION]... [FILE]...\""
       }
     },
     "stdin": "always",

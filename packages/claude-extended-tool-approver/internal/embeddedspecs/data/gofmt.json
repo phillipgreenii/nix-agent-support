@@ -7,16 +7,16 @@
     "provenance": "gofmt (go1.26), gofmt -h",
     "citations": {
       "provenance": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+        "source": "gofmt -h: \"usage: gofmt [flags] [path ...]\""
       },
       "stdin": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+        "source": "gofmt -h: \"usage: gofmt [flags] [path ...] -cpuprofile string write cpu profile to this file -d display diffs instead of rewriting files\" (no explicit stdin wording in the reviewed text; classified \"when-no-path-operands\" from the documented operand/argument shape in this same synopsis)"
       },
       "stdout": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+        "source": "gofmt -h: \"-w write result to (source) file instead of stdout\""
       },
       "unknownFlag": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+        "source": "gofmt -h: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-cpuprofile string write cpu profile to this file\""
         }
       },
       "-d": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-d display diffs instead of rewriting files\""
         }
       },
       "-e": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-e report all errors (not just the first 10 on different lines)\""
         }
       },
       "-l": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-l list files whose formatting differs from gofmt's\""
         }
       },
       "-r": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-r string rewrite rule (e.g., 'a[b:len(a)] -\\u003e a[b:]')\""
         }
       },
       "-s": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-s simplify code\""
         }
       },
       "-w": {
@@ -101,7 +101,7 @@
           "kind": "in-place"
         },
         "citation": {
-          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+          "source": "gofmt -h: \"-w write result to (source) file instead of stdout\""
         }
       }
     },
@@ -115,7 +115,7 @@
         }
       },
       "citation": {
-        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"gofmt\"]"
+        "source": "gofmt -h: \"usage: gofmt [flags] [path ...] -cpuprofile string write cpu profile to this file -d display diffs instead of rewriting files\""
       }
     },
     "stdin": "when-no-path-operands",
