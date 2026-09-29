@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgpr"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
@@ -311,6 +312,19 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// its neighbours does not matter: "pg-pr" is recognized by no other
 		// rule in this chain.
 		pgpr.New(),
+		// pg-connector approves the `pg-connector issue show/comment/update/
+		// close` verb family already granted by
+		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),
+		// authoritatively -- rather than leaving it to Claude Code's own
+		// native --allowedTools text-prefix match, which breaks under the
+		// escalation-triager's prompt-mandated PG_CONNECTOR_ISSUE_BEADS_DIR=
+		// env-var prefix (bead pg2-r848s; see that package's doc comment for
+		// the full root-cause account). Like pgpr/pgccaudit/pnwf above, it
+		// takes no consumer config -- the classification mirrors a fixed,
+		// already-authorized grant and applies uniformly. Ordering relative
+		// to its neighbours does not matter: "pg-connector" is recognized by
+		// no other rule in this chain.
+		pgconnector.New(),
 		// rc-preflight approves/gates phillipg-nix-ziprecruiter's zr-refactor
 		// plugin's worktree-pool lifecycle script per its own per-flag
 		// classification (bead pg2-o9rcj, follow-up to pg2-xf564) -- see that

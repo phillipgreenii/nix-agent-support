@@ -1159,6 +1159,10 @@ func TestSafecmds_Help_SubcommandKnown_Approve(t *testing.T) {
 		"cargo test --help",
 		"npm install --help",
 		"bd create --help",
+		// pg2-r848s: pg-connector's own subcommand groups (issue, pr, ci, scm,
+		// ...) are the same "$command $subcommand" shape as the entries above.
+		"pg-connector issue --help",
+		"pg-connector pr --help",
 	}
 	for _, cmd := range approve {
 		input := &hookio.HookInput{
@@ -1177,13 +1181,15 @@ func TestSafecmds_Help_SubcommandForm_Approve(t *testing.T) {
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
-		"go help",            // known command, bare help
-		"go help build",      // known command, help + subcommand
-		"cargo help test",    // known command, help + subcommand
-		"kubectl help apply", // known command, help + subcommand
-		"git help rebase",    // known command, help + subcommand
-		"npm help install",   // known command, help + subcommand
-		"bd help",            // known command, bare help
+		"go help",                 // known command, bare help
+		"go help build",           // known command, help + subcommand
+		"cargo help test",         // known command, help + subcommand
+		"kubectl help apply",      // known command, help + subcommand
+		"git help rebase",         // known command, help + subcommand
+		"npm help install",        // known command, help + subcommand
+		"bd help",                 // known command, bare help
+		"pg-connector help",       // pg2-r848s: known command, bare help
+		"pg-connector help issue", // pg2-r848s: known command, help + subcommand
 	}
 	for _, cmd := range approve {
 		input := &hookio.HookInput{

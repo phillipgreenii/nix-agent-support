@@ -736,6 +736,25 @@ var hasSubcommands = map[string]bool{
 	"gradle": true, "gradlew": true,
 	"helm": true, "terraform": true, "aws": true, "gcloud": true,
 	"bd": true,
+	// pg-connector (pg2-r848s): the first-party umbrella connector CLI's own
+	// resource/verb groups (issue, pr, ci, scm, thread, calendar, agentsession,
+	// attention, search, ledger, cache, auth, config — root.go's AddCommand
+	// list) are exactly the "$command $subcommand" shape this map exists for,
+	// so `pg-connector issue --help` (and `pg-connector help issue`, etc.) is
+	// as safe as `git rebase --help`/`kubectl apply --help` above. Root cause
+	// this closes: `pg-connector` was previously absent from this map, so its
+	// 2-arg `--help` form fell to isHelpRequest's unknown-command branch and
+	// abstained — the SAME shape TestSafecmds_Help_NotApproved already pins as
+	// unapproved for "unknowncmd sub --help" — leaving it to Claude Code's own
+	// native --allowedTools text-prefix match, which the escalation-triager's
+	// prompt-mandated `PG_CONNECTOR_ISSUE_BEADS_DIR=<dir>` env-var prefix
+	// (docs/superpowers/specs/2026-09-22-pg-router-ccpool-escalation-design.md's
+	// "Tracker targeting" section) breaks (same class as ADR 0070's
+	// export/inline-env-var-prefix finding), so it was denied outright under
+	// permissionMode=dontAsk despite the bare 1-arg `pg-connector --help` form
+	// working fine (that form matches this file's unconditional 1-arg branch,
+	// which needs no hasSubcommands entry at all).
+	"pg-connector": true,
 }
 
 // isHelpRequest returns true if the args represent a safe help invocation.
