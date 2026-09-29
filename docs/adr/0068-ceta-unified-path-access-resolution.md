@@ -1,8 +1,16 @@
 # CETA: unify zone/deletable/secret path classification into one per-path Read/Write/Delete resolution
 
-**Status**: Proposed (design decided in discussion; not yet implemented)
+**Status**: Implemented
 **Date**: 2026-09-13
 **Deciders**: Phillip Green II
+
+> **Later note (2026-09-28, `ADR 0075`).** Verified against current code as part of `ADR 0075`'s
+> ratification of the effect engine: this ADR's five decision points (P1: `internal/deletable`
+> renamed to `internal/pathspec`, core `Verdict`/`PathAccess` types, per-facet fold algorithm; P2:
+> OS spec; P3: session/config spec; P4: secret handling; P5: policy-layer collapse into
+> `PathAccessPolicy`) each shipped as their own closed packet (`tc-mkpaz.1` through `tc-mkpaz.5`),
+> and the code carries explicit `ADR 0068 P<n>` citations matching each point. Status moves from
+> Proposed to **Implemented**.
 
 > This ADR redesigns path-access resolution ONLY inside `internal/effectpolicy` — the not-yet-landed
 > effect-graph spike (`ADR 0067`; landing is `tc-8og1` item 8, explicitly not yet approved) — not

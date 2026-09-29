@@ -1,18 +1,22 @@
 # CETA effect-graph spike: a unified effect model to replace per-command policy rules
 
-**Status**: Proposed (implemented in a workforest spike, not yet approved for landing — see
-"Status and landing", below)
+**Status**: Accepted
 **Date**: 2026-09-09
 **Deciders**: Phillip Green II
 
-> This ADR documents an architecture that exists today only in the workforest worktree
+> **Later note (2026-09-25, `ADR 0075`).** Operator ruling R1/R3 ratify this architecture and the
+> 2026-09-14 spike landing: the effect engine described here REPLACES RuleChain +
+> `internal/rules/*` outright, with no shadow/veto mode. This ADR's Status is now **Accepted**;
+> the note below, describing an earlier not-yet-approved state, is historical.
+>
+> This ADR documents an architecture that, at the time it was written, existed only in the
+> workforest worktree
 > `/home/tcadmin/workspace/.workforests/ceta-effect-graph-spike/nix-agent-support`, branch
-> `ceta-effect-graph-spike`, module root `packages/claude-extended-tool-approver`. It is **not**
-> wired into `internal/setup.RuleChain` and has **no effect on production CETA behavior**. Landing
-> it — merging the branch, wiring it into `RuleChain`, and retiring or migrating
-> `internal/rules/*` — is `tc-8og1` work item 8, and is **explicitly not yet approved**: "i will do
-> a deeper dive and review before 8 is approved" (Phillip, 2026-09-09, via `/unblock-human-beads`).
-> Nothing here should be read as describing current production policy.
+> `ceta-effect-graph-spike`, module root `packages/claude-extended-tool-approver`. It was **not**
+> wired into `internal/setup.RuleChain` and had **no effect on production CETA behavior** at that
+> time. Landing it — merging the branch, wiring it into `RuleChain`, and retiring or migrating
+> `internal/rules/*` — was `tc-8og1` work item 8; per the later note above, that approval has since
+> been given (`ADR 0075`).
 
 ## Context
 

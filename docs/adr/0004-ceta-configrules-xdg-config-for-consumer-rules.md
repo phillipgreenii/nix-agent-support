@@ -1,6 +1,7 @@
 # CETA configrules: XDG Config File for Consumer-Specific Rules
 
-**Status**: Accepted (Superseded in part by [0033](0033-ceta-config-driven-kubectl-buildtools.md))
+**Status**: Accepted (Superseded in part by [0033](0033-ceta-config-driven-kubectl-buildtools.md);
+amended by `ADR 0075` P7)
 **Date**: 2026-05-01
 **Deciders**: phillipg
 
@@ -9,6 +10,12 @@
 > consumer-config file now ALSO carries structured `kubectl {}` / `buildtools {}`
 > blocks (injected into their rules via DI) so that the base binary holds no
 > consumer-specific kc/kubectl or build-tools literals.
+>
+> **Amended by `ADR 0075` P7 (2026-09-25).** This ADR's `$XDG_CONFIG_HOME`-based location for
+> `claude-extended-tool-approver/rules.json` is narrowed: P7 requires security-relevant config
+> locations to resolve from the user's home directory directly, not `$XDG_CONFIG_HOME`, under the
+> effect engine's config layers (`ADR 0075` P17). The flat `approvedCommands`/`blockedCommands`
+> schema itself is unaffected by this amendment.
 
 ## Context
 

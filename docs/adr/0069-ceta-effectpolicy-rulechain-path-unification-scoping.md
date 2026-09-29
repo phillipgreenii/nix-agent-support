@@ -1,6 +1,6 @@
 # CETA: scoping HOW to unify `internal/effectpolicy`'s path resolver with production's RuleChain
 
-**Status**: Proposed
+**Status**: Superseded by `ADR 0075`
 **Date**: 2026-09-14
 **Deciders**: autonomous design pass (bead `tc-uxknt`); no operator was in the loop for this call —
 this ADR scopes options and recommends a direction, it does not itself decide which option ships.
@@ -12,6 +12,12 @@ Decisions" — this document exists only to answer the HOW/WHEN question the ope
 > approach, and sketch phases suitable as input to a later `plan-decompose`/`epic-decompose` pass.
 > No source file under `internal/effectpolicy/`, `internal/rules/*`, `internal/engine`, or
 > `internal/setup` is touched by this ADR.
+>
+> **Later note (2026-09-25, `ADR 0075`).** Operator ruling R1 supersedes this ADR's scoping
+> question outright: rather than unifying `internal/effectpolicy`'s path resolver with production's
+> RuleChain, the effect engine REPLACES RuleChain + `internal/rules/*` wholesale. The HOW/WHEN
+> unification question this ADR scoped no longer applies once there is no RuleChain left to unify
+> with.
 
 ## Context
 
