@@ -1731,6 +1731,60 @@
                     touch $out
                   '';
 
+              # claude-extended-tool-approver-spec-help-drift — Phase 3
+              # packet tc-o14i5.4.2: runs the new `spec-drift-check
+              # --embedded` CLI subcommand (internal/specdrift,
+              # cmd_spec_drift_check.go) in its default --check mode over
+              # packet 1.2's 46 embedded built-in command specs
+              # (internal/embeddedspecs/data/*.json), comparing each
+              # command's LIVE --help output (SHA-256 hash) against the
+              # committed, embedded internal/embeddedspecs/data/help-hashes.json
+              # -- one of the mechanical fact-ACCURACY gates P13/P14 name
+              # ("a flake check that diffs each command spec's flag set
+              # against the pinned binary's captured --help, hash recorded,
+              # drift => failure"; "fact accuracy is verified
+              # mechanically"). cd/export are pure shell builtins (no
+              # separate on-PATH binary) and are exempt; every OTHER of the
+              # 44 non-exempt command names below needs its real nixpkgs
+              # binary on PATH here or this check fails with "binary not on
+              # PATH" instead of comparing anything -- see
+              # internal/specdrift/doc.go for the exemption/failure-mode
+              # split. `spec-drift-check` itself exits 1 on any drift, so
+              # this check needs no extra assertion beyond running it.
+              claude-extended-tool-approver-spec-help-drift =
+                pkgs.runCommand "check-claude-extended-tool-approver-spec-help-drift"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.coreutils # cat/cp/echo/false/head/ls/mkdir/printf/rm/sleep/sort/tail/tee/true/wc/test/[
+                      pkgs.findutils # find/xargs
+                      pkgs.gnused # sed
+                      pkgs.gawk # awk/gawk
+                      pkgs.procps # ps/pgrep
+                      pkgs.which
+                      pkgs.jq
+                      pkgs.curl
+                      pkgs.git
+                      pkgs.openssh # ssh/scp
+                      pkgs.kubectl
+                      pkgs.nodejs # npm
+                      pkgs.go # go, gofmt
+                      pkgs.just
+                      pkgs.devbox
+                      pkgs.treefmt
+                      pkgs.yq-go # yq (mikefarah) -- see internal/embeddedspecs/data/yq.json's own provenance
+                      pkgs.bash # bash, sh
+                      pkgs.nix
+                      # No top-level bd/rtk overlay attr in THIS standalone flake --
+                      # resolve them the same way pb-contract (above) already does.
+                      (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+                      (pkgs.llm-agentsPkgs.rtk or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.rtk)
+                    ];
+                  }
+                  ''
+                    ${pkgs.claude-extended-tool-approver}/bin/claude-extended-tool-approver spec-drift-check --embedded
+                    touch $out
+                  '';
+
               # plugin-conformance — pg2-amzvw: wires pg2-z3u4f's
               # plugin-conformance-check tool into `nix flake check` against
               # THIS repo's own claude-marketplace/ tree. Every extracted

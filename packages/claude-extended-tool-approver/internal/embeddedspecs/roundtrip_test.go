@@ -45,8 +45,25 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(merged.Invalid) != 0 {
-		t.Fatalf("Invalid = %#v, want none", merged.Invalid)
+	// data/help-hashes.json (tc-o14i5.4.2, Phase 3's "--help drift check")
+	// is a DELIBERATE non-spec sibling file colocated in data/ alongside
+	// the 46 spec JSON files this test round-trips (see
+	// internal/specdrift/doc.go's "Command-name source" and this packet's
+	// own Contract/Produces "Hash-recording convention"). It correctly
+	// fails specfmt.Validate (it isn't a Spec document at all -- no
+	// version/kind/name) and is therefore correctly excluded from
+	// merged.Commands via the SAME InvalidSpec path a genuinely malformed
+	// spec would take; this loop tolerates only that one, already-expected
+	// entry, so a real regression elsewhere still fails loudly below.
+	var unexpectedInvalid []specfmt.InvalidSpec
+	for _, inv := range merged.Invalid {
+		if inv.Path == "data/help-hashes.json" {
+			continue
+		}
+		unexpectedInvalid = append(unexpectedInvalid, inv)
+	}
+	if len(unexpectedInvalid) != 0 {
+		t.Fatalf("Invalid = %#v, want none (data/help-hashes.json excepted)", unexpectedInvalid)
 	}
 	if len(merged.Conflicts) != 0 {
 		t.Fatalf("Conflicts = %#v, want none", merged.Conflicts)
