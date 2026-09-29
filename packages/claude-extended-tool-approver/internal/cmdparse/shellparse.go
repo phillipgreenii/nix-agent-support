@@ -1402,7 +1402,27 @@ type braceToken struct {
 // apart itself.
 func (lw *lowering) wordTokens(w *syntax.Word) []braceToken {
 	if cp := braceExpandCopy(w); cp != nil {
-		if alts := expand.Braces(cp); len(alts) > 0 {
+		// expand.Braces is deprecated in favor of BracesSeq, which yields
+		// words lazily via iter.Seq2 and reports an error instead of
+		// letting a pathological sequence (e.g. nested {1..100} ranges)
+		// allocate unbounded memory. cfg is nil because BracesSeq's own
+		// doc states the parameter is "entirely unused for now". On
+		// error (expansion too large) we deliberately fall through to
+		// the single-token path below, same as the pre-existing
+		// len(alts) > 0 guard did for the "no alternatives" case: this
+		// function has no error return, and an unparsed-but-oversized
+		// brace expression is safer treated as a plain literal token
+		// than dropped entirely.
+		var alts []*syntax.Word
+		overflowed := false
+		for alt, err := range expand.BracesSeq(nil, cp) {
+			if err != nil {
+				overflowed = true
+				break
+			}
+			alts = append(alts, alt)
+		}
+		if !overflowed && len(alts) > 0 {
 			out := make([]braceToken, len(alts))
 			for i, alt := range alts {
 				tok, procSubs := lw.renderWordParts(alt.Parts)
