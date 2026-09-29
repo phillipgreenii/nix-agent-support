@@ -1,14 +1,19 @@
 package effectpolicy
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/specfmt"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/targetspec"
 )
 
 // TestPathAccessPolicy_Delete walks PathAccessPolicy's AccessDelete ladder
@@ -617,6 +622,218 @@ func TestRemotePathGuard(t *testing.T) {
 		f, applies := (remotePathGuard{PathAccessPolicy{}}).Judge(tc.e, wildcardCtx)
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+}
+
+// targetLookupEntry is one fixture row for buildTargetLookup.
+type targetLookupEntry struct {
+	name  string
+	kind  targetspec.TargetKind
+	class targetspec.TargetClass
+}
+
+// buildTargetLookup builds a real *targetspec.Lookup (via
+// targetspec.Repository, an in-memory embedded fs.FS layer — never a fake/
+// hand-rolled stand-in) from entries, exactly mirroring how a real caller
+// would load one. This is deliberately NOT a hand-built struct literal:
+// targetspec.Lookup's field is unexported, and going through the real
+// Repository is what proves TargetSpecPolicy composes correctly with the
+// actual loader this packet's Contract promises, not just with a shape that
+// happens to satisfy PolicyContext.TargetSpec's type.
+func buildTargetLookup(t *testing.T, entries []targetLookupEntry) *targetspec.Lookup {
+	t.Helper()
+	fsys := fstest.MapFS{}
+	for i, e := range entries {
+		spec := specfmt.Spec{
+			Version: specfmt.FormatVersion,
+			Kind:    specfmt.KindTarget,
+			Name:    e.name,
+			Target: &specfmt.TargetSpecV1{
+				TargetKind: e.kind,
+				Class:      e.class,
+				Citation:   specfmt.Citation{Source: "test fixture"},
+			},
+		}
+		data, err := json.Marshal(spec)
+		if err != nil {
+			t.Fatalf("marshal target fixture %d: %v", i, err)
+		}
+		fsys[fmt.Sprintf("%d.json", i)] = &fstest.MapFile{Data: data}
+	}
+	lookup, conflicts, invalid, err := targetspec.NewRepository(fsys, "", "").Load()
+	if err != nil {
+		t.Fatalf("targetspec Load: %v", err)
+	}
+	if len(conflicts) != 0 || len(invalid) != 0 {
+		t.Fatalf("targetspec Load: conflicts=%#v invalid=%#v, want none", conflicts, invalid)
+	}
+	return lookup
+}
+
+// TestTargetSpecPolicy_Kubectl exercises TargetSpecPolicy's P8 ladder
+// (docket tc-o14i5.3, packet tc-o14i5.3.4) against kubectl EffectRemote
+// effects: production rejects, unlisted abstains, trusted-dev defers
+// (applies=false), a "read" Operation never applies, and a dynamic/unnamed
+// context is Unknown regardless of configuration.
+func TestTargetSpecPolicy_Kubectl(t *testing.T) {
+	lookup := buildTargetLookup(t, []targetLookupEntry{
+		{"prod-k8s", targetspec.TargetKindKubeContext, targetspec.TargetClassProduction},
+		{"dev", targetspec.TargetKindKubeContext, targetspec.TargetClassTrustedDev},
+	})
+	ctx := PolicyContext{TargetSpec: lookup}
+
+	kube := func(op, context string, dynamic bool) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectRemote, Operation: op, Resource: context, Family: "kubectl", Dynamic: dynamic}
+	}
+
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		applies bool
+		verdict FindingVerdict
+	}{
+		{"production mutation rejected", kube("mutation", "prod-k8s", false), true, Forbidden},
+		{"production exec rejected (Binding decision d: exec folds into mutation-class)", kube("exec", "prod-k8s", false), true, Forbidden},
+		{"unlisted context abstains", kube("mutation", "staging", false), true, Unknown},
+		{"trusted-dev defers to the effect (applies=false)", kube("mutation", "dev", false), false, Unknown},
+		{"read never applies, any context", kube("read", "prod-k8s", false), false, Unknown},
+		{"dynamic context is Unknown even if it matches a configured name", kube("mutation", "prod-k8s", true), true, Unknown},
+		{"empty context (no --context at all) is Unknown", kube("mutation", "", false), true, Unknown},
+	}
+	for _, tc := range cases {
+		f, applies := (TargetSpecPolicy{}).Judge(tc.e, ctx)
+		if applies != tc.applies {
+			t.Errorf("%s: applies=%v, want %v (finding=%+v)", tc.name, applies, tc.applies, f)
+			continue
+		}
+		if applies && f.Verdict != tc.verdict {
+			t.Errorf("%s: verdict=%s (%s), want %s", tc.name, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+
+	if _, applies := (TargetSpecPolicy{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, ctx); applies {
+		t.Error("applied to a path effect with no Remote")
+	}
+}
+
+// TestTargetSpecPolicy_SSH exercises the same P8 ladder against ssh/scp
+// remote-scope EffectPath effects: a WRITE-class access to a production ssh
+// host rejects, an unlisted host abstains, a trusted-dev host defers, and a
+// READ is never judged by this policy (remotePathGuard's own remote-abstain
+// default governs reads).
+func TestTargetSpecPolicy_SSH(t *testing.T) {
+	lookup := buildTargetLookup(t, []targetLookupEntry{
+		{"prod.internal", targetspec.TargetKindSSHHost, targetspec.TargetClassProduction},
+		{"dev.internal", targetspec.TargetKindSSHHost, targetspec.TargetClassTrustedDev},
+	})
+	ctx := PolicyContext{TargetSpec: lookup}
+
+	path := func(access cmddesc.PathAccess, remote string) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectPath, Access: access, Path: "/etc/x", Remote: remote}
+	}
+
+	cases := []struct {
+		name    string
+		e       cmddesc.Effect
+		applies bool
+		verdict FindingVerdict
+	}{
+		{"write to production host rejected", path(cmddesc.AccessTruncate, "prod.internal"), true, Forbidden},
+		{"delete on production host rejected", path(cmddesc.AccessDelete, "prod.internal"), true, Forbidden},
+		{"write to unlisted host abstains", path(cmddesc.AccessModify, "other.internal"), true, Unknown},
+		{"write to trusted-dev host defers (applies=false)", path(cmddesc.AccessCreate, "dev.internal"), false, Unknown},
+		{"read on production host never applies", path(cmddesc.AccessRead, "prod.internal"), false, Unknown},
+		{"local (non-remote) write never applies", path(cmddesc.AccessTruncate, ""), false, Unknown},
+	}
+	for _, tc := range cases {
+		f, applies := (TargetSpecPolicy{}).Judge(tc.e, ctx)
+		if applies != tc.applies {
+			t.Errorf("%s: applies=%v, want %v (finding=%+v)", tc.name, applies, tc.applies, f)
+			continue
+		}
+		if applies && f.Verdict != tc.verdict {
+			t.Errorf("%s: verdict=%s (%s), want %s", tc.name, f.Verdict, f.Reason, tc.verdict)
+		}
+	}
+}
+
+// TestTargetSpecPolicy_NilTargetSpecIsCompleteNoOp is the P6 rollback
+// regression guard: an operator who has never configured ANY target-spec
+// data (PolicyContext.TargetSpec's zero value, nil) must see TargetSpecPolicy
+// contribute NOTHING — applies=false for every effect it would otherwise
+// judge, including a production-NAMED context, so every pre-existing
+// KubeContexts-based verdict (KubeContextPolicy) is byte-identical to before
+// this policy existed. Without this, EVERY kubectl mutation on EVERY
+// operator who has not yet adopted target-spec would silently downgrade
+// from whatever KubeContexts already permitted to Abstain (found=false =>
+// "unlisted", for every context, since none would ever be listed) — this
+// test is what caught exactly that regression during this packet's own
+// implementation.
+func TestTargetSpecPolicy_NilTargetSpecIsCompleteNoOp(t *testing.T) {
+	ctx := PolicyContext{} // TargetSpec is nil — the zero value
+	effects := []cmddesc.Effect{
+		{Kind: cmddesc.EffectRemote, Operation: "mutation", Resource: "prod", Family: "kubectl"},
+		{Kind: cmddesc.EffectRemote, Operation: "exec", Resource: "prod", Family: "kubectl"},
+		{Kind: cmddesc.EffectPath, Access: cmddesc.AccessTruncate, Path: "/etc/x", Remote: "prod.internal"},
+	}
+	for _, e := range effects {
+		if _, applies := (TargetSpecPolicy{}).Judge(e, ctx); applies {
+			t.Errorf("%s: applies=true with a nil TargetSpec, want false (P6 rollback no-op)", e)
+		}
+	}
+}
+
+// TestTargetSpecKubectlFlagScanAnywhereAbstains is an end-to-end
+// (Evaluate()-driven) check that the cmddesc-level "anywhere in argv" fix
+// (interpreter_kubectl.go's kubectlScanTargetFlags) actually reaches the
+// SAME Abstain outcome KubeContextPolicy already gives a dynamic/unnamed
+// context — this packet's Validation item 2 ("kubectl flag scan finds
+// --kubeconfig/--server anywhere in argv, not only leading position;
+// KUBECONFIG= env assignment triggers the same unlisted-target Abstain
+// path"). This does not need PolicyContext.TargetSpec configured at all:
+// forcing Dynamic true is what routes the effect into KubeContextPolicy's
+// own pre-existing Dynamic-is-Unknown branch (and would ALSO route into
+// TargetSpecPolicy's identical branch were TargetSpec configured) — the
+// fix's whole point is to make BOTH policies see the SAME "this context's
+// identity is not trustworthy" signal, not just this packet's own new
+// policy.
+func TestTargetSpecKubectlFlagScanAnywhereAbstains(t *testing.T) {
+	reg := cmddesc.DefaultRegistry()
+	policies := DefaultPolicies()
+
+	cases := []struct {
+		name string
+		cmd  string
+	}{
+		{"--context after the subcommand still resolves (sanity: not itself an abstain case)", "kubectl --context dev get pods"},
+		{"--server given anywhere alongside --context forces abstain", "kubectl --context dev get pods --server https://other"},
+		{"--kubeconfig given anywhere alongside --context forces abstain", "kubectl get pods --context dev --kubeconfig /tmp/other.yaml"},
+		{"inline KUBECONFIG= env assignment alongside --context forces abstain", "KUBECONFIG=/tmp/other.yaml kubectl --context dev get pods"},
+	}
+	// Every case above uses a context name ("dev") that is NOT configured in
+	// KubeContextDefaultAllow/KubeContexts, so absent the kubeconfig/server
+	// override every one of them abstains anyway (an unconfigured context is
+	// Unknown by KubeContextPolicy's own default) -- to prove the override
+	// specifically is what forces the SAME context name that WOULD otherwise
+	// resolve to Abstain, configure "dev" as a fully-permitted context and
+	// confirm the override cases still abstain despite that.
+	req := evalcontract.Request{
+		CWD: "/repo", ProjectRoot: "/repo",
+		KubeContexts: map[string]evalcontract.KubeContextRule{"dev": {Allow: []string{"read"}}},
+	}
+
+	for _, tc := range cases {
+		req.Command = tc.cmd
+		resp := Evaluate(req, reg, policies, DefaultGraphPolicies())
+		if tc.name == "--context after the subcommand still resolves (sanity: not itself an abstain case)" {
+			if resp.Decision != evalcontract.Approve {
+				t.Errorf("%s: decision=%s, want approve (dev's own KubeContexts entry allows read)", tc.cmd, resp.Decision)
+			}
+			continue
+		}
+		if resp.Decision != evalcontract.Abstain {
+			t.Errorf("%s: decision=%s, want abstain (reason: %s)", tc.cmd, resp.Decision, resp.Reason)
 		}
 	}
 }

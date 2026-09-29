@@ -300,6 +300,7 @@ func implicitToV1(e cmddesc.ImplicitEffect, citation Citation) ImplicitEffectV1 
 		WhenNoRestPositionals: e.WhenNoRestPositionals,
 		WhenFlags:             e.WhenFlags,
 		RemoteFamily:          e.RemoteFamily,
+		RemotePersistent:      e.RemotePersistent,
 		Citation:              citation,
 	}
 }
@@ -317,6 +318,7 @@ func implicitFromV1(e ImplicitEffectV1) (cmddesc.ImplicitEffect, error) {
 		WhenNoRestPositionals: e.WhenNoRestPositionals,
 		WhenFlags:             e.WhenFlags,
 		RemoteFamily:          e.RemoteFamily,
+		RemotePersistent:      e.RemotePersistent,
 	}, nil
 }
 

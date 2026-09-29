@@ -26,7 +26,9 @@
 // Command field), but a later phase can add KindPath/KindTarget alongside it
 // without changing the envelope, the Repository, or the merge/override
 // machinery below — none of that code branches on Kind except to route to
-// the right typed field.
+// the right typed field. (Docket tc-o14i5.3, packet tc-o14i5.3.4, P8: KindTarget
+// is now populated too, via Spec.Target/TargetSpecV1 — see v1.go's own doc
+// comments. KindPath remains reserved.)
 //
 // # The Repository (three-layer loader)
 //

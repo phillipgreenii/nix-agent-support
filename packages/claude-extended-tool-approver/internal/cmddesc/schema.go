@@ -525,6 +525,11 @@ type ImplicitEffect struct {
 	// SEPARATE policy is needed rather than widening RemoteMutation's fixed
 	// per-Operation table.
 	RemoteFamily string
+	// RemotePersistent sets Effect.RemotePersistent on a KindRemote implicit
+	// effect (P8, docket tc-o14i5.3, packet tc-o14i5.3.4) — see that field's
+	// own doc comment on Effect. False (the default) is unchanged from every
+	// pre-existing ImplicitEffect.
+	RemotePersistent bool
 }
 
 // CommandSchema is the schema VALUE for one command. Provenance records the

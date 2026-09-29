@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/pathspec"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/secretpath"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/targetspec"
 )
 
 // FindingVerdict is a policy's judgement of one effect.
@@ -82,6 +83,30 @@ type PolicyContext struct {
 	// evalcontract.Request.BuildToolVerbs's and VerbScopedApproval's own
 	// doc comments. TrustedCheckoutExec is the only reader.
 	BuildToolVerbs []evalcontract.VerbScopedApproval
+	// TargetSpec is OPERATOR CONFIGURATION for P8 (docket tc-o14i5.3, packet
+	// tc-o14i5.3.4): the merged target-spec Lookup (internal/targetspec,
+	// itself built on internal/specfmt's Repository) naming which
+	// docker/kube/vault/ssh targets are trusted-dev vs production.
+	// TargetSpecPolicy is the only reader. Threading a live
+	// internal/targetspec.Repository disk-load into evalcontract.Request/
+	// claudecodeadapter — this field's own "future rules.json/user-level
+	// config binding" — is a deliberate follow-up (P8's own Binding
+	// decision: "Target-spec files are covered by P18; their locations come
+	// from user-level config (P7/P17)"), mirroring RemoteLifecycle/
+	// KubeContexts/RemotePaths/BuildToolVerbs's own identical "production
+	// wiring is a follow-up" precedent above — a nil Lookup (this field's
+	// zero value) makes TargetSpecPolicy treat every target as unlisted
+	// (Abstain), the safe default, exactly like KubeContexts' own nil
+	// default treats every context as unconfigured.
+	TargetSpec *targetspec.Lookup
+}
+
+// TargetSpecClass returns the P8 target-spec class for (name, kind) and
+// whether the target is listed at all — see targetspec.Lookup.Class's own
+// doc comment (a nil TargetSpec, like a nil *targetspec.Lookup, always
+// reports !found).
+func (c PolicyContext) TargetSpecClass(name string, kind targetspec.TargetKind) (targetspec.TargetClass, bool) {
+	return c.TargetSpec.Class(name, kind)
 }
 
 // RemoteLifecycleClass returns the operator-configured verdict class for a
@@ -172,6 +197,7 @@ func DefaultPolicies() []Policy {
 		NetworkAccess{},
 		RemoteMutation{},
 		KubeContextPolicy{},
+		TargetSpecPolicy{},
 		StdioIsLocal{},
 		ProgramInterpreted{},
 		EnvAssignment{},
@@ -1010,6 +1036,113 @@ func (KubeContextPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bo
 		return Finding{Verdict: Permitted, Reason: fmt.Sprintf("kube context %q is not configured; operator default allows %s (tc-vn5z)", context, op)}, true
 	}
 	return Finding{Verdict: Unknown, Reason: fmt.Sprintf("kube context %q is not configured (default: needs consent, tc-vn5z)", context)}, true
+}
+
+// TargetSpecPolicy judges P8 target-spec mutation policy (docket tc-o14i5.3,
+// packet tc-o14i5.3.4): mutation of a PRODUCTION-classed target is
+// unconditionally Forbidden; mutation of an UNLISTED target (no target-spec
+// entry at all, or one whose identity cannot be statically resolved) is
+// Unknown (Abstain); mutation of a TRUSTED-DEV target reports applies=false
+// — this policy defers entirely, letting whatever effect-level policy
+// already judges the SAME effect (KubeContextPolicy for kubectl,
+// PathAccessPolicy/remotePathGuard for ssh/scp) own the verdict alone, per
+// Binding decision P8's own wording ("of trusted-dev: judged by effects").
+// This is a SEPARATE, ADDITIONAL policy — not a replacement for either of
+// those — so a production-classed target REJECTS even when the effect-level
+// policy would otherwise have permitted it (judgeNode's
+// Forbidden-outranks-everything fold, effectpolicy/evaluate.go), and an
+// unlisted target does not relax whatever that other policy already says
+// (Unknown never demotes an existing Forbidden — see judgeNode).
+//
+// Two effect shapes are judged:
+//
+//   - kubectl (EffectRemote, Family=="kubectl", Operation != "read"): covers
+//     both ordinary mutations and the exec-class Operation=="exec" — Binding
+//     decision "d"'s "exec into a persistent container/pod" folds into the
+//     SAME mutation-class treatment as any other kubectl mutation (both
+//     persistent and non-persistent exec-class verbs already carry
+//     Operation=="exec"; RemotePersistent further identifies WHICH verbs are
+//     which — see cmddesc.Effect's own doc comment — but this policy does
+//     not need to branch on it separately, since neither is a "read").
+//     Resource holds the kube context name (kubectlScanTargetFlags);
+//     Dynamic — forced true by a --kubeconfig/--server/KUBECONFIG override
+//     even when Resource's text is visible, see that function's own doc
+//     comment — makes the target unresolvable, judged identically to an
+//     unlisted target (Unknown) per P3.
+//
+//   - ssh/scp (EffectPath, Remote != "", a WRITE-class Access): Remote holds
+//     the destination host (cmddesc.Effect.Remote's own doc comment — ssh's
+//     remote-scope stamping, and scp's direct per-operand stamping). A READ
+//     is never judged here — reading FROM a production host is not the
+//     mutation P8 is about; remotePathGuard's own remote-abstain-by-default
+//     already governs every remote read regardless.
+//
+// docker and vault are OUT OF SCOPE for this policy: internal/cmddesc has no
+// interpreter/schema for either tool yet (Ground Truth, verified
+// 2026-09-29 — the only "docker"/"vault" handling anywhere in this tree is
+// the OLD engine's internal/rules/docker and internal/rules/vault, which R1
+// forbids touching), so there is no cmddesc.Effect shape a docker/vault
+// mutation could be judged AGAINST yet. The target-spec DATA layer
+// (internal/targetspec) is already kind-agnostic — TargetKindDockerContext/
+// TargetKindDockerHost/TargetKindVaultAddress exist today — so a future
+// packet that adds a docker/vault interpreter only needs to teach IT to
+// stamp Family/Resource (or Remote) the same way kubectl/ssh already do;
+// this policy would then gain a third case, but the DATA it reads needs no
+// change. git-remote is explicitly this packet's sibling's concern (K9
+// git-protection, K10 push-policy — see this packet's own "Out of scope"
+// section), not read by this policy at all.
+type TargetSpecPolicy struct{}
+
+// Name implements Policy.
+func (TargetSpecPolicy) Name() string { return "target-spec-policy" }
+
+// Judge implements Policy.
+func (TargetSpecPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
+	// P6 rollback: a nil TargetSpec means the operator has not adopted
+	// target-spec configuration AT ALL (as opposed to having adopted it but
+	// not listing THIS particular target) — this policy is then a complete
+	// no-op, applies=false for every effect, so every pre-existing
+	// KubeContexts/RemotePaths-based verdict is completely UNCHANGED by this
+	// policy's mere existence. Without this early return, every operator who
+	// has never touched target-spec at all would see every kubectl mutation
+	// they'd already configured Permitted via KubeContexts silently
+	// downgrade to Abstain (found=false => "unlisted" for every context),
+	// which is exactly the regression P8's own "the old keys remain for
+	// rollback" promises does NOT happen.
+	if ctx.TargetSpec == nil {
+		return Finding{}, false
+	}
+	switch {
+	case e.Kind == cmddesc.EffectRemote && e.Family == "kubectl":
+		if e.Operation == "read" {
+			return Finding{}, false
+		}
+		return judgeTargetSpecMutation(ctx, e.Resource, targetspec.TargetKindKubeContext, e.Dynamic, "kube context")
+	case e.Kind == cmddesc.EffectPath && e.Remote != "" && e.Access.IsWrite():
+		return judgeTargetSpecMutation(ctx, e.Remote, targetspec.TargetKindSSHHost, e.Dynamic, "ssh host")
+	default:
+		return Finding{}, false
+	}
+}
+
+// judgeTargetSpecMutation is the ONE P8 verdict ladder (production =>
+// Forbidden; unresolvable/unlisted => Unknown; trusted-dev => defer, applies
+// false), shared by every effect shape TargetSpecPolicy.Judge recognises so
+// the ladder itself is written once rather than duplicated per shape.
+func judgeTargetSpecMutation(ctx PolicyContext, name string, kind targetspec.TargetKind, dynamic bool, label string) (Finding, bool) {
+	if dynamic || name == "" {
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s is not statically known: cannot resolve its P8 target-spec class", label)}, true
+	}
+	class, found := ctx.TargetSpecClass(name, kind)
+	if !found {
+		return Finding{Verdict: Unknown, Reason: fmt.Sprintf("%s %q is not a declared P8 target: abstain (unlisted target)", label, name)}, true
+	}
+	if class == targetspec.TargetClassProduction {
+		return Finding{Verdict: Forbidden, Reason: fmt.Sprintf("%s %q is a production-classed P8 target: mutation rejected", label, name)}, true
+	}
+	// trusted-dev: defer entirely to whatever effect-level policy already
+	// judges this SAME effect (P8's own "judged by effects").
+	return Finding{}, false
 }
 
 // secretRead reports whether a statically known path is a secret path, via

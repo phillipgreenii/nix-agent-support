@@ -586,12 +586,13 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 		}
 	case ie.Role.Kind == KindRemote:
 		st.effects = append(st.effects, Effect{
-			Kind:      EffectRemote,
-			Resource:  ie.Target,
-			Operation: ie.Role.Operation,
-			Dynamic:   ie.Dynamic,
-			Family:    ie.RemoteFamily,
-			Source:    "implicit",
+			Kind:             EffectRemote,
+			Resource:         ie.Target,
+			Operation:        ie.Role.Operation,
+			Dynamic:          ie.Dynamic,
+			Family:           ie.RemoteFamily,
+			RemotePersistent: ie.RemotePersistent,
+			Source:           "implicit",
 		})
 	case ie.Role.Kind == KindChdir:
 		st.chdir(ie.Target, ie.Dynamic, "implicit")

@@ -1311,8 +1311,22 @@ func kubectlSubcommands() map[string]CommandSchema {
 	}
 	m["rollout"] = kubectlRolloutSchema()
 	m["config"] = kubectlConfigSchema()
-	for _, v := range []string{"exec", "port-forward", "attach", "debug", "proxy"} {
-		m[v] = kubectlExecClassVerb(v)
+	// Persistent-target classification (P8, docket tc-o14i5.3, packet
+	// tc-o14i5.3.4, Binding decision "d": "exec into persistent
+	// containers/pods = remote-persistent scope"): "exec" and "attach"
+	// verified against `kubectl exec --help`/`kubectl attach --help`
+	// (kubectlProvenance) run a command in, or attach to, an EXISTING,
+	// already-running container — kubectl attach's own synopsis: "Attach to
+	// a running container". "port-forward"/"debug"/"proxy" are NOT marked
+	// persistent: port-forward and proxy forward network traffic rather
+	// than running inside a container at all, and debug (`kubectl debug
+	// --help`) creates a NEW, throwaway ephemeral debug container/pod of
+	// its own rather than reusing one that already exists.
+	for _, v := range []string{"exec", "attach"} {
+		m[v] = kubectlExecClassVerb(v, true)
+	}
+	for _, v := range []string{"port-forward", "debug", "proxy"} {
+		m[v] = kubectlExecClassVerb(v, false)
 	}
 	m["cp"] = kubectlCpSchema
 	return m
@@ -1472,7 +1486,13 @@ func kubectlConfigSchema() CommandSchema {
 // registry, which would wrongly judge remote container code as if it were a
 // local command. Modeling that properly (a genuinely remote child scope) is
 // a documented follow-up, not attempted this slice.
-func kubectlExecClassVerb(name string) CommandSchema {
+//
+// persistent (P8, docket tc-o14i5.3, packet tc-o14i5.3.4) stamps the
+// Remote("exec") effect's RemotePersistent field — see its own doc comment
+// on cmddesc.Effect for the exec/attach-vs-port-forward/debug/proxy
+// classification and citations; the caller (kubectlSubcommands) passes it
+// per verb rather than this function guessing from name.
+func kubectlExecClassVerb(name string, persistent bool) CommandSchema {
 	return CommandSchema{
 		Name:         name,
 		Provenance:   kubectlProvenance,
@@ -1480,7 +1500,7 @@ func kubectlExecClassVerb(name string) CommandSchema {
 		UnknownFlag:  UnknownFlagInert,
 		EndOfOptions: true,
 		ImplicitEffects: []ImplicitEffect{
-			{Role: Remote("exec"), RemoteFamily: "kubectl"},
+			{Role: Remote("exec"), RemoteFamily: "kubectl", RemotePersistent: persistent},
 			{Role: Unmodeled, Target: name + "'s remote container/session content is not modeled"},
 		},
 	}

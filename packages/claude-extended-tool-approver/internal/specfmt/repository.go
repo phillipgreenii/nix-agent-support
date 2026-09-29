@@ -61,10 +61,17 @@ func DefaultRepoDir(repoRoot string) string {
 
 // key identifies a spec by its (Kind, Name) pair — the merge key the
 // Repository keys ALL layers by, regardless of kind, so the merge machinery
-// stays spec-kind-agnostic (see doc.go).
+// stays spec-kind-agnostic (see doc.go). SubKind additively namespaces Name
+// for a KindTarget spec (P8, docket tc-o14i5.3, packet tc-o14i5.3.4): it
+// holds the spec's TargetSpecV1.TargetKind so two different target kinds
+// sharing a Name (a docker context and an ssh host both named "prod") merge
+// as DISTINCT entries instead of colliding — see TargetKind's own doc
+// comment. SubKind is always "" for every other Kind (KindCommand, KindPath),
+// so this field changes nothing about their existing merge behavior.
 type key struct {
-	Kind SpecKind
-	Name string
+	Kind    SpecKind
+	Name    string
+	SubKind string
 }
 
 // loaded is one spec as read from one layer, kept until merge time so a
@@ -91,13 +98,19 @@ type Conflict struct {
 
 // MergedSet is the result of loading and merging all three layers.
 // Commands holds the winning CommandSpecV1 for every KindCommand name seen
-// (already validated and precedence-resolved); Conflicts lists every
-// override that was not declared (see Conflict); Invalid lists every spec
-// file that Validate rejected — those specs are EXCLUDED from Commands
+// (already validated and precedence-resolved); Targets holds the winning
+// TargetSpecV1 for every KindTarget (TargetKind, Name) pair seen (P8, docket
+// tc-o14i5.3, packet tc-o14i5.3.4) — populated by the SAME winners loop
+// Commands always was, just routed to a second map keyed by TargetKey
+// instead of a bare string, since a target's identity needs TargetKind too
+// (see TargetKind's own doc comment). Conflicts lists every override that
+// was not declared (see Conflict); Invalid lists every spec file that
+// Validate rejected — those specs are EXCLUDED from Commands/Targets
 // entirely (fail-closed, not silently merged) rather than aborting the
 // whole Load.
 type MergedSet struct {
 	Commands  map[string]CommandSpecV1
+	Targets   map[TargetKey]TargetSpecV1
 	Conflicts []Conflict
 	Invalid   []InvalidSpec
 }
@@ -174,7 +187,7 @@ func (r *Repository) Load() (*MergedSet, error) {
 		return all[i].path < all[j].path
 	})
 
-	merged := &MergedSet{Commands: map[string]CommandSpecV1{}}
+	merged := &MergedSet{Commands: map[string]CommandSpecV1{}, Targets: map[TargetKey]TargetSpecV1{}}
 	winners := map[key]loaded{}
 
 	for _, l := range all {
@@ -183,6 +196,9 @@ func (r *Repository) Load() (*MergedSet, error) {
 			continue
 		}
 		k := key{Kind: l.spec.Kind, Name: l.spec.Name}
+		if l.spec.Kind == KindTarget && l.spec.Target != nil {
+			k.SubKind = string(l.spec.Target.TargetKind)
+		}
 		if prev, ok := winners[k]; ok {
 			if !l.spec.Overrides {
 				merged.Conflicts = append(merged.Conflicts, Conflict{
@@ -199,10 +215,14 @@ func (r *Repository) Load() (*MergedSet, error) {
 	}
 
 	for k, l := range winners {
-		if k.Kind != KindCommand {
-			continue
+		switch k.Kind {
+		case KindCommand:
+			merged.Commands[k.Name] = *l.spec.Command
+		case KindTarget:
+			if l.spec.Target != nil {
+				merged.Targets[TargetKey{Kind: l.spec.Target.TargetKind, Name: k.Name}] = *l.spec.Target
+			}
 		}
-		merged.Commands[k.Name] = *l.spec.Command
 	}
 
 	return merged, nil

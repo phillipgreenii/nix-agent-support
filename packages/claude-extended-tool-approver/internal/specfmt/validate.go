@@ -16,12 +16,12 @@ import (
 // spec author (or packet 1.3's linter) fixing a file wants the whole list at
 // once, not one round trip per mistake.
 //
-// Validate does NOT reject an unrecognised SpecKind by itself: KindPath and
-// KindTarget are reserved names with no populated fields yet (see v1.go), so
-// a Spec naming one of them with no Command/Path/Target payload is
-// well-formed but empty. It DOES reject Kind == KindCommand with a nil
-// Command (payload required once a kind is claimed) and any Kind this
-// package has never heard of at all.
+// Validate does NOT reject an unrecognised SpecKind by itself: KindPath is a
+// reserved name with no populated fields yet (see v1.go), so a Spec naming
+// it with no payload is well-formed but empty. It DOES reject Kind ==
+// KindCommand with a nil Command, Kind == KindTarget with a nil Target
+// (payload required once a kind is claimed), and any Kind this package has
+// never heard of at all.
 func Validate(s Spec) error {
 	var errs []error
 
@@ -39,13 +39,39 @@ func Validate(s Spec) error {
 		} else {
 			errs = append(errs, validateCommand(s.Name, *s.Command)...)
 		}
-	case KindPath, KindTarget:
+	case KindTarget:
+		if s.Target == nil {
+			errs = append(errs, fmt.Errorf("spec %q: kind %q requires a target payload", s.Name, s.Kind))
+		} else {
+			errs = append(errs, validateTarget(s.Name, *s.Target)...)
+		}
+	case KindPath:
 		// Reserved, no payload defined yet in this packet's scope.
 	default:
 		errs = append(errs, fmt.Errorf("spec %q: unknown spec kind %q", s.Name, s.Kind))
 	}
 
 	return errors.Join(errs...)
+}
+
+// validateTarget checks one KindTarget spec's payload (P8, docket
+// tc-o14i5.3, packet tc-o14i5.3.4): TargetKind must be registered
+// (IsKnownTargetKind — P3's "unknown => never approve" reach into spec
+// authoring itself: an unrecognised target kind is a malformed spec, not
+// silently merged), Class must be one of the two recognised values, and
+// Citation is mandatory (TargetSpecV1's own doc comment).
+func validateTarget(specName string, t TargetSpecV1) []error {
+	var errs []error
+	if !IsKnownTargetKind(t.TargetKind) {
+		errs = append(errs, fmt.Errorf("spec %q target: unknown target kind %q", specName, t.TargetKind))
+	}
+	if t.Class != TargetClassProduction && t.Class != TargetClassTrustedDev {
+		errs = append(errs, fmt.Errorf("spec %q target: unknown class %q (want %q or %q)", specName, t.Class, TargetClassProduction, TargetClassTrustedDev))
+	}
+	if t.Citation.empty() {
+		errs = append(errs, fmt.Errorf("spec %q target: missing citation", specName))
+	}
+	return errs
 }
 
 func validateCommand(specName string, c CommandSpecV1) []error {

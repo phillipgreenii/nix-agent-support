@@ -55,3 +55,35 @@ func IsKnownRemoteFamily(name string) bool {
 func RegisterRemoteFamily(name string) {
 	remoteFamilies[name] = true
 }
+
+// targetKinds is this package's own small registry for TargetSpecV1.TargetKind
+// (P8, docket tc-o14i5.3, packet tc-o14i5.3.4) — mirroring
+// verbFamilies/remoteFamilies's own convention exactly: seeded from every
+// TargetKind constant v1.go declares today, widened later by
+// RegisterTargetKind the same way RegisterVerbFamily/RegisterRemoteFamily
+// let a caller widen those two, rather than a future packet needing to
+// modify this map literal directly. Unlike VerbFamily/RemoteFamily, the
+// empty string is NOT a valid TargetKind — a KindTarget spec's Target field
+// is required (see Validate), so there is no "no target kind" case to carve
+// out.
+var targetKinds = map[TargetKind]bool{
+	TargetKindDockerContext: true,
+	TargetKindDockerHost:    true,
+	TargetKindKubeContext:   true,
+	TargetKindKubeServer:    true,
+	TargetKindVaultAddress:  true,
+	TargetKindSSHHost:       true,
+	TargetKindGitRemote:     true,
+}
+
+// IsKnownTargetKind reports whether kind is a registered TargetKind.
+func IsKnownTargetKind(kind TargetKind) bool {
+	return targetKinds[kind]
+}
+
+// RegisterTargetKind adds kind to the known TargetKind set. It exists for
+// tests and extension; it is not safe to call concurrently with Validate or
+// Repository.Load.
+func RegisterTargetKind(kind TargetKind) {
+	targetKinds[kind] = true
+}

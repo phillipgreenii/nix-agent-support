@@ -367,6 +367,32 @@ type Effect struct {
 	// new field.
 	Family string
 
+	// RemotePersistent (P8, docket tc-o14i5.3, packet tc-o14i5.3.4, Binding
+	// decision "d": "exec into persistent containers/pods = remote-persistent
+	// scope") is true for a Family=="kubectl" EffectRemote whose Operation
+	// is "exec" AND the verb attaches to an EXISTING, already-running
+	// container/pod (`kubectl exec`, `kubectl attach` — kubectl's own
+	// --help text: "exec: Execute a command in a container", "attach:
+	// Attach to a running container") rather than one that starts a NEW,
+	// throwaway session of its own (`kubectl debug` creates a fresh
+	// ephemeral debug container; `kubectl port-forward`/`kubectl proxy`
+	// forward traffic rather than running a command inside a container at
+	// all — see kubectlExecClassVerb, registry_breadth.go, for the full
+	// per-verb classification and its citations). It is field-general (not
+	// exec-specific in name) in case a future remote family needs the same
+	// marker, though only kubectl's exec-class verbs set it true today; the
+	// zero value (false) is exactly today's PRE-EXISTING behavior for every
+	// other producer, so this field is purely additive.
+	//
+	// effectpolicy.TargetSpecPolicy is the one reader: a RemotePersistent
+	// effect is judged as a MUTATION-class action against the exec target's
+	// P8 target-spec class (production => Reject, unlisted => Abstain,
+	// trusted-dev => deferred to the effect itself), exactly like an
+	// ordinary kubectl "mutation" Operation — see that policy's own doc
+	// comment. It is NOT itself a verdict (P14): this field only records
+	// WHICH KIND of session was requested.
+	RemotePersistent bool
+
 	// EffectOpaque detail (and free text for any kind).
 	Detail string
 }
@@ -421,6 +447,9 @@ func (e Effect) String() string {
 		fmt.Fprintf(&b, ":%s %s", e.Operation, e.Resource)
 		if e.Family != "" {
 			fmt.Fprintf(&b, " {%s}", e.Family)
+		}
+		if e.RemotePersistent {
+			b.WriteString(" (persistent)")
 		}
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")

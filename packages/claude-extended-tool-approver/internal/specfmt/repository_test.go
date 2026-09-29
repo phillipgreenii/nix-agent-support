@@ -127,6 +127,69 @@ func TestRepository_MissingLayerDirsAreEmpty(t *testing.T) {
 	}
 }
 
+// minimalTarget builds a well-formed (passes Validate) target Spec — P8,
+// docket tc-o14i5.3, packet tc-o14i5.3.4.
+func minimalTarget(name string, kind TargetKind, class TargetClass) Spec {
+	return Spec{
+		Version: FormatVersion,
+		Kind:    KindTarget,
+		Name:    name,
+		Target: &TargetSpecV1{
+			TargetKind: kind,
+			Class:      class,
+			Citation:   cite("test fixture"),
+		},
+	}
+}
+
+// TestRepository_TargetLayeringAndCrossKindNamespacing exercises the SAME
+// three-layer Repository loader Commands already used (round-trip load of
+// embedded+user+repo layers, precedence, undeclared-override Conflict) for
+// KindTarget specs — this packet's own "reuse, don't duplicate" contract —
+// plus the one thing genuinely NEW to target specs: two different
+// TargetKinds sharing a Name ("prod" as both a kube context and an ssh
+// host) merge as two DISTINCT entries rather than colliding (TargetKind's
+// own doc comment; repository.go's key.SubKind).
+func TestRepository_TargetLayeringAndCrossKindNamespacing(t *testing.T) {
+	embedded := mapFSFor(t, map[string]Spec{
+		"kinfra.json": minimalTarget("kinfra", TargetKindKubeContext, TargetClassTrustedDev),
+	})
+	userDir := t.TempDir()
+	writeSpecFile(t, userDir, "kinfra.json", minimalTarget("kinfra", TargetKindKubeContext, TargetClassProduction))
+	writeSpecFile(t, userDir, "prod-ssh.json", minimalTarget("prod", TargetKindSSHHost, TargetClassProduction))
+	writeSpecFile(t, userDir, "prod-kube.json", minimalTarget("prod", TargetKindKubeContext, TargetClassTrustedDev))
+
+	repo := NewRepository(embedded, userDir, "")
+	merged, err := repo.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Undeclared override: user's kinfra.json replaces embedded's without
+	// Overrides set.
+	if len(merged.Conflicts) != 1 {
+		t.Fatalf("Conflicts = %#v, want exactly 1", merged.Conflicts)
+	}
+	if got := merged.Targets[TargetKey{Kind: TargetKindKubeContext, Name: "kinfra"}].Class; got != TargetClassProduction {
+		t.Fatalf("kinfra kube-context class = %q, want %q (user layer wins)", got, TargetClassProduction)
+	}
+
+	// Cross-kind namespacing: "prod" as an ssh-host and as a kube-context
+	// are two DISTINCT entries, neither shadowing the other and neither
+	// producing a Conflict.
+	sshProd, ok := merged.Targets[TargetKey{Kind: TargetKindSSHHost, Name: "prod"}]
+	if !ok || sshProd.Class != TargetClassProduction {
+		t.Fatalf("ssh-host %q = %#v, ok=%v, want production", "prod", sshProd, ok)
+	}
+	kubeProd, ok := merged.Targets[TargetKey{Kind: TargetKindKubeContext, Name: "prod"}]
+	if !ok || kubeProd.Class != TargetClassTrustedDev {
+		t.Fatalf("kube-context %q = %#v, ok=%v, want trusted-dev", "prod", kubeProd, ok)
+	}
+	if len(merged.Targets) != 3 {
+		t.Fatalf("Targets = %#v, want exactly 3 entries", merged.Targets)
+	}
+}
+
 func TestRepository_InvalidSpecExcludedNotSilentlyMerged(t *testing.T) {
 	bad := minimalCommand("bad", "bad tool 1.0", false)
 	bad.Command.Interpreter = "not-a-real-interpreter"

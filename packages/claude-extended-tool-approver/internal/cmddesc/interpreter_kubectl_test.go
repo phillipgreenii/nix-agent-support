@@ -95,6 +95,123 @@ func TestKubectlContextCapture(t *testing.T) {
 	})
 }
 
+// TestKubectlTargetFlagsAnywhereInArgv (P8, docket tc-o14i5.3, packet
+// tc-o14i5.3.4): --context/--kubeconfig/--server are found wherever they
+// appear in argv, not only before the subcommand — the gap
+// kubectlScanTargetFlags fixes (see its own doc comment). A --context given
+// AFTER the verb is now resolved exactly like one given before it; a
+// --kubeconfig/--server given anywhere ALONGSIDE a --context forces Dynamic,
+// since a caller-supplied kubeconfig/server can redefine what that context
+// name means; a --kubeconfig/--server with NO --context at all leaves the
+// pre-existing Resource=="" (Unknown) behavior untouched.
+func TestKubectlTargetFlagsAnywhereInArgv(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, _ := reg.Lookup("kubectl")
+	in, _ := LookupInterpreter(schema.Interpreter)
+
+	remoteEffect := func(effects []Effect) (Effect, bool) {
+		for _, e := range effects {
+			if e.Kind == EffectRemote {
+				return e, true
+			}
+		}
+		return Effect{}, false
+	}
+
+	t.Run("--context after the subcommand", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl get pods --context dev"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || e.Dynamic {
+			t.Errorf("got %+v", e)
+		}
+	})
+	t.Run("--kubeconfig after the subcommand, no --context: unchanged Unknown", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl get pods --kubeconfig /tmp/other.yaml"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "" || e.Dynamic {
+			t.Errorf("got %+v, want Resource==\"\" and Dynamic==false, matching the pre-existing --server-without--context case", e)
+		}
+	})
+	t.Run("--server after the subcommand, alongside --context: forces Dynamic", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl --context dev get pods --server https://other"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || !e.Dynamic {
+			t.Errorf("got %+v, want Resource==\"dev\" (text still visible) but Dynamic==true (untrustworthy under a different --server)", e)
+		}
+	})
+	t.Run("--kubeconfig before --context: forces Dynamic regardless of order", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl --kubeconfig /tmp/other.yaml --context dev get pods"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || !e.Dynamic {
+			t.Errorf("got %+v, want Dynamic==true", e)
+		}
+	})
+	t.Run("-s short form after the subcommand, alongside --context: forces Dynamic", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl --context dev get pods -s https://other"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || !e.Dynamic {
+			t.Errorf("got %+v, want Dynamic==true", e)
+		}
+	})
+	t.Run("glued --context=value form, after the subcommand", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl get pods --context=dev"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || e.Dynamic {
+			t.Errorf("got %+v", e)
+		}
+	})
+	t.Run("inline KUBECONFIG= env assignment forces Dynamic", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "KUBECONFIG=/tmp/other.yaml kubectl --context dev get pods"), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || !e.Dynamic {
+			t.Errorf("got %+v, want Dynamic==true (KUBECONFIG env assignment is a kubeconfig override)", e)
+		}
+	})
+	t.Run("ambient KUBECONFIG (process env) forces Dynamic", func(t *testing.T) {
+		got := in.Interpret(leaf(t, "kubectl --context dev get pods"), schema, Context{Env: map[string]string{"KUBECONFIG": "/home/x/.kube/other"}})
+		e, ok := remoteEffect(got.Effects)
+		if !ok || e.Resource != "dev" || !e.Dynamic {
+			t.Errorf("got %+v, want Dynamic==true (ambient KUBECONFIG is a kubeconfig override)", e)
+		}
+	})
+}
+
+// TestKubectlExecClassPersistentScope (P8, docket tc-o14i5.3, packet
+// tc-o14i5.3.4, Binding decision "d": "exec into persistent containers/pods
+// = remote-persistent scope"): exec/attach mark RemotePersistent true
+// (running-container semantics); port-forward/debug/proxy do not.
+func TestKubectlExecClassPersistentScope(t *testing.T) {
+	reg := DefaultRegistry()
+	schema, _ := reg.Lookup("kubectl")
+	in, _ := LookupInterpreter(schema.Interpreter)
+
+	remoteEffect := func(effects []Effect) (Effect, bool) {
+		for _, e := range effects {
+			if e.Kind == EffectRemote {
+				return e, true
+			}
+		}
+		return Effect{}, false
+	}
+
+	persistent := map[string]bool{
+		"exec": true, "attach": true,
+		"port-forward": false, "debug": false, "proxy": false,
+	}
+	for verb, want := range persistent {
+		cmd := "kubectl --context dev " + verb + " pod"
+		got := in.Interpret(leaf(t, cmd), schema, Context{})
+		e, ok := remoteEffect(got.Effects)
+		if !ok {
+			t.Errorf("%s: no EffectRemote, got %+v", cmd, got.Effects)
+			continue
+		}
+		if e.RemotePersistent != want {
+			t.Errorf("%s: RemotePersistent = %v, want %v", cmd, e.RemotePersistent, want)
+		}
+	}
+}
+
 // TestKubectlKubeconfigIsPathRead: --kubeconfig FILE is a genuine PathRead
 // effect, unlike a plain subcommand-dispatch schema's global flags, which
 // never get resolve()'d at all (see kubectlInterpreter's own doc comment for

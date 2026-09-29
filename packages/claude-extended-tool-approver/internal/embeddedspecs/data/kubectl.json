@@ -574,6 +574,7 @@
               "operation": "exec"
             },
             "remoteFamily": "kubectl",
+            "remotePersistent": true,
             "citation": {
               "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
             }
@@ -2127,6 +2128,7 @@
               "operation": "exec"
             },
             "remoteFamily": "kubectl",
+            "remotePersistent": true,
             "citation": {
               "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
             }

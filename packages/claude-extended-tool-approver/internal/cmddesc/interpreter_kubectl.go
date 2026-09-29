@@ -96,7 +96,7 @@ func (kubectlInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 		}
 	}
 
-	contextName, contextDynamic := kubectlContextValue(st)
+	contextName, contextDynamic := kubectlScanTargetFlags(leaf, ctx.Env)
 	for i := range effects {
 		if effects[i].Kind == EffectRemote && effects[i].Family == "kubectl" {
 			effects[i].Resource = contextName
@@ -116,20 +116,93 @@ func (kubectlInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 	}
 }
 
-// kubectlContextValue reads the --context global flag's value as scanned by
-// scanGlobal: the LAST occurrence wins (ordinary CLI convention); absent
-// entirely, name is "" — Unknown to KubeContextPolicy regardless of whether
-// --server/--cluster named the cluster some other way (this interpreter
-// never reads THEIR values for context purposes, so their mere presence
-// changes nothing here, which is exactly the ruling's "--server/--cluster
-// make the context Unknown unless --context is also given").
-func kubectlContextValue(st *interpState) (name string, dynamic bool) {
-	vals := st.flagValues("--context")
-	if len(vals) == 0 {
-		return "", false
+// kubectlTargetIdentifyingFlags are the kubectl global flags this function
+// scans for anywhere in argv (P8, docket tc-o14i5.3, packet tc-o14i5.3.4,
+// Binding decision "d": "kubectl flags anywhere, --kubeconfig/KUBECONFIG/
+// --server => unlisted target => Abstain"). None of the three take a short
+// alias this schema itself does not already list for the OTHER purpose
+// (--server's is "-s", verified against `kubectl options`, kubectlProvenance);
+// "--cluster" is deliberately excluded — naming a cluster that way, without
+// --context, already leaves the context "" (Unknown), the pre-existing
+// behavior this function preserves unchanged (see kubectlScanTargetFlags's
+// own doc comment).
+var kubectlTargetIdentifyingFlags = map[string]bool{"--context": true, "--kubeconfig": true, "--server": true, "-s": true}
+
+// kubectlScanTargetFlags reads --context's value (LAST occurrence wins,
+// ordinary CLI convention) and whether --kubeconfig or --server/-s appear at
+// all, ANYWHERE in leaf's full argv — not only before the subcommand.
+//
+// Real kubectl accepts every global flag in any position, before or after
+// the verb, interspersed with verb-specific flags (`kubectl get pods
+// --context dev` and `kubectl --context dev get pods` are equivalent). This
+// interpreter's own scanGlobal (interpreter_subcommand.go) stops scanning at
+// the first positional token and hands everything after it to the
+// SUBCOMMAND's own schema (kubectlRemoteVerb/kubectlManifestVerb/
+// kubectlExecClassVerb), none of which lists these three flags in its own
+// (UnknownFlagInert) Flags table — so a --context/--kubeconfig/--server given
+// AFTER the verb was previously invisible to this interpreter entirely
+// (Resource stayed "" — Unknown, the SAFE fallback, but not the CORRECT
+// classification a target-spec lookup on a real --context value needs). This
+// function scans the raw argv directly, independent of scan/scanGlobal's
+// positional-stop behaviour, so a target-identifying flag is found wherever
+// it appears.
+//
+// context/dynamic mirror the pre-existing (now-removed) kubectlContextValue's
+// own contract exactly for every case that function already handled
+// (absent => "", false; present => its value and ArgIsLiveExpansion; last
+// occurrence wins) — this is a superset fix, not a behavior change for any
+// pre-subcommand case. The genuinely NEW case: when --kubeconfig or
+// --server/-s appears ANYWHERE alongside a --context that IS given, dynamic
+// is forced true even though context's own text is statically known. A
+// kubeconfig FILE (or an explicit API server URL) can redefine what a
+// context NAME resolves to — effectpolicy.TargetSpecPolicy's P8 target-spec
+// class lookup assumes the DEFAULT kubeconfig's own naming, so a context
+// name resolved under a DIFFERENT, caller-supplied kubeconfig is not
+// trustworthy for that lookup even though the text itself parses cleanly
+// (P3: unresolvable => Abstain). When --context is ABSENT, context already
+// stays "" regardless — the pre-existing Resource=="" => Unknown path
+// (effectpolicy.KubeContextPolicy) already covers that case identically
+// whether or not --kubeconfig/--server also appear, so dynamic is
+// deliberately NOT forced there (this matches TestKubectlContextCapture's
+// pre-existing "server and cluster given, no --context" case unchanged).
+//
+// KUBECONFIG env var: an inline `KUBECONFIG=... kubectl ...` assignment
+// (leaf.EnvVars) or an ambient KUBECONFIG already set in the caller's
+// environment (env, normally ctx.Env) is treated exactly like a --kubeconfig
+// flag for this same forcing rule — same redefinition risk, different
+// spelling.
+func kubectlScanTargetFlags(leaf cmdparse.ParsedCommand, env map[string]string) (context string, dynamic bool) {
+	args := leaf.Args
+	var kubeconfigOrServer bool
+	for i := 0; i < len(args); i++ {
+		name, value, hasValue := strings.Cut(args[i], "=")
+		if !kubectlTargetIdentifyingFlags[name] {
+			continue
+		}
+		switch name {
+		case "--kubeconfig", "--server", "-s":
+			kubeconfigOrServer = true
+		case "--context":
+			if hasValue {
+				context, dynamic = value, leaf.ArgIsLiveExpansion(i)
+			} else if i+1 < len(args) {
+				i++
+				context, dynamic = args[i], leaf.ArgIsLiveExpansion(i)
+			}
+		}
 	}
-	last := vals[len(vals)-1]
-	return last.tok, st.leaf.ArgIsLiveExpansion(last.idx)
+	for _, ev := range leaf.EnvVars {
+		if ev.Name == "KUBECONFIG" {
+			kubeconfigOrServer = true
+		}
+	}
+	if _, ok := env["KUBECONFIG"]; ok {
+		kubeconfigOrServer = true
+	}
+	if context != "" && kubeconfigOrServer {
+		dynamic = true
+	}
+	return context, dynamic
 }
 
 // kubectlManifestInterpreter runs the ordinary generic scan (so -f/-k's

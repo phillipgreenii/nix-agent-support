@@ -131,11 +131,62 @@ func TestValidate_RejectsCommandKindWithoutPayload(t *testing.T) {
 }
 
 func TestValidate_ReservedKindsAcceptedEmpty(t *testing.T) {
-	for _, k := range []SpecKind{KindPath, KindTarget} {
+	// KindTarget was CLAIMED by docket tc-o14i5.3, packet tc-o14i5.3.4 (P8) —
+	// see TestValidate_TargetKind below for its now-required-payload
+	// behavior. Only KindPath remains reserved/empty here.
+	for _, k := range []SpecKind{KindPath} {
 		s := Spec{Version: FormatVersion, Kind: k, Name: "reserved"}
 		if err := Validate(s); err != nil {
 			t.Fatalf("Validate(kind=%s, no payload) = %v, want nil (reserved, no fields defined yet)", k, err)
 		}
+	}
+}
+
+// TestValidate_TargetKind exercises KindTarget's own validation (P8, docket
+// tc-o14i5.3, packet tc-o14i5.3.4): a nil Target is rejected (payload
+// required once a kind is claimed, mirroring KindCommand's own nil-Command
+// rejection); a well-formed Target is accepted; an unknown TargetKind,
+// unrecognised Class, or missing Citation is rejected.
+func TestValidate_TargetKind(t *testing.T) {
+	valid := Spec{
+		Version: FormatVersion, Kind: KindTarget, Name: "kinfra",
+		Target: &TargetSpecV1{
+			TargetKind: TargetKindKubeContext,
+			Class:      TargetClassTrustedDev,
+			Citation:   cite("homelab machine-registry inventory"),
+		},
+	}
+	if err := Validate(valid); err != nil {
+		t.Fatalf("Validate(well-formed target) = %v, want nil", err)
+	}
+
+	noPayload := Spec{Version: FormatVersion, Kind: KindTarget, Name: "kinfra"}
+	if err := Validate(noPayload); err == nil || !strings.Contains(err.Error(), "requires a target payload") {
+		t.Fatalf("Validate(nil target) = %v, want a missing-payload error", err)
+	}
+
+	unknownKind := valid
+	badKind := *valid.Target
+	badKind.TargetKind = TargetKind("bogus")
+	unknownKind.Target = &badKind
+	if err := Validate(unknownKind); err == nil || !strings.Contains(err.Error(), "unknown target kind") {
+		t.Fatalf("Validate(unknown target kind) = %v, want an unknown-target-kind error", err)
+	}
+
+	badClass := valid
+	badClassTarget := *valid.Target
+	badClassTarget.Class = TargetClass("bogus")
+	badClass.Target = &badClassTarget
+	if err := Validate(badClass); err == nil || !strings.Contains(err.Error(), "unknown class") {
+		t.Fatalf("Validate(unknown class) = %v, want an unknown-class error", err)
+	}
+
+	noCitation := valid
+	noCitationTarget := *valid.Target
+	noCitationTarget.Citation = Citation{}
+	noCitation.Target = &noCitationTarget
+	if err := Validate(noCitation); err == nil || !strings.Contains(err.Error(), "missing citation") {
+		t.Fatalf("Validate(missing citation) = %v, want a missing-citation error", err)
 	}
 }
 
