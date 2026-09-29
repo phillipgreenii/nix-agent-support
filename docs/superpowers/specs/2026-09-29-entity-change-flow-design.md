@@ -1123,25 +1123,17 @@ tables and use `entity_type`/`entity_id` throughout for consistency with the rea
 they reference, rather than the shorter `type`/`id` this design's envelope/view use at the JSON
 layer (6.6).
 
-**Two stages (Recommended).** The old `sync` keeps running until the flip (14 steps 5-7), and it
-reads `ledger`, writes `interpretation.sync_error` and reads the old `annotation` columns. The
-DDL below is therefore applied in two stages, not as one block:
-
-- **Additive stage (Migration step 3):** the `entity` columns, `change_log`, `consumer`, and
-  `annotation_v2` created and populated but NOT yet swapped in. While `sync` is live, pg-desk's
-  store layer dual-writes `hidden`/`wip`/`disposition` to both the old `annotation` columns and
-  `annotation_v2`; new code reads only `annotation_v2`. Nothing old code depends on is dropped.
-- **Destructive stage (Migration step 9):** `DROP COLUMN sync_error`, `DROP TABLE annotation` and
-  the rename of `annotation_v2`, and `DROP TABLE ledger`, applied with the deletion of `internal/sync`.
-
-The statements are marked `[additive]` or `[destructive]` below.
+**Applied once, at the cutover (14 step 7).** The whole block below runs as one migration during the
+maintenance window in which `sync` is stopped; nothing runs against the old and new schema at the
+same time. Because the store code lands before the cutover, a build that contains it MUST NOT be
+deployed until the cutover (Migration step 3), and pg-desk MUST refuse to open a store that has not
+been migrated with a clear error rather than half-working.
 
 ```sql
 ALTER TABLE entity ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE entity ADD COLUMN hydrated_at TEXT;
 ALTER TABLE entity ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
 
--- [destructive]
 ALTER TABLE interpretation DROP COLUMN sync_error;
 
 CREATE TABLE change_log (
@@ -1196,11 +1188,9 @@ SELECT repo, entity_type, entity_id, 'disposition.' || comment_id, disposition,
        'pg-desk', set_by, set_at
 FROM annotation WHERE comment_id != '' AND disposition IS NOT NULL;
 
--- [destructive]
 DROP TABLE annotation;
 ALTER TABLE annotation_v2 RENAME TO annotation;
 
--- [destructive]
 DROP TABLE ledger;
 ```
 
@@ -1219,17 +1209,17 @@ The single place every new or changed CLI's exit-code scheme is defined; contrac
 
 ## 10. Failure modes
 
-| Failure                                         | Effect              | Handling                                                                        |
-| ----------------------------------------------- | ------------------- | ------------------------------------------------------------------------------- |
-| a backend fails during `changes`                | partial source      | exit 2 (9.12); no `removed`/`closed` for unlisted entities; retried next poll   |
-| detail read fails for one entity                | stale snapshot      | previous snapshot kept; entity stays due                                        |
-| concurrent writers on one entity                | lost update         | optimistic `version` check; loser re-reads and re-classifies (6.8)              |
-| pg-desk crashes before cursor advance           | duplicate records   | harmless (idempotent deciders)                                                  |
-| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D (S12)                                                  |
-| decider write succeeds, refresh fails           | stale view          | dedup key prevents duplicate; next hydration catches up                         |
-| decider action keeps failing                    | no progress         | escalate after K runs (7.4)                                                     |
-| rule change deployed                            | old decisions stand | sweep within D; `--reset` for immediate (STORY-OP-7)                            |
-| old `sync` and deciders both writing at cutover | duplicate beads     | prevented by migration order (14): deciders are plan-only until one atomic flip |
+| Failure                                         | Effect              | Handling                                                                                     |
+| ----------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| a backend fails during `changes`                | partial source      | exit 2 (9.12); no `removed`/`closed` for unlisted entities; retried next poll                |
+| detail read fails for one entity                | stale snapshot      | previous snapshot kept; entity stays due                                                     |
+| concurrent writers on one entity                | lost update         | optimistic `version` check; loser re-reads and re-classifies (6.8)                           |
+| pg-desk crashes before cursor advance           | duplicate records   | harmless (idempotent deciders)                                                               |
+| pg-router crashes after read, before enqueue    | records lost        | sweep re-checks within D (S12)                                                               |
+| decider write succeeds, refresh fails           | stale view          | dedup key prevents duplicate; next hydration catches up                                      |
+| decider action keeps failing                    | no progress         | escalate after K runs (7.4)                                                                  |
+| rule change deployed                            | old decisions stand | sweep within D; `--reset` for immediate (STORY-OP-7)                                         |
+| old `sync` and deciders both writing at cutover | duplicate beads     | prevented by construction (14 step 7): `sync` is stopped and removed before deciders `apply` |
 
 ## 11. Observability
 
@@ -1275,7 +1265,7 @@ SHAPES with synthetic values, never real ones.
 | contracts (9.3-9.8)                   | golden JSON fixtures per contract version; adapter test from envelope to items; decider parses composite-view fixtures (including `node_id`, S19); role-prompt keys ⊆ work-item contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | console CLI (`open`/`show`, 6.7, 9.5) | `open` lists matching entities from local snapshots with per-entity `as_of` staleness; `show` returns the composite view with `as_of` and `links_as_of`; `show --refresh` hydrates the entity and its links first                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | observability (11)                    | `/metrics` exposes per-type records-by-kind/origin, hydration failures, due backlog, consumer lag and optimistic-concurrency retries; `status` reports the same; `doctor` flags an unresolvable watched query, a consumer stalled past 3x its period, and (with `--router-config`) which decider roles bind to each type, including the expected-empty issue/thread list (S20)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| live exercise                         | per this repo's rules, every new or changed pg-router query/role pair is exercised live once (`pg-router run-query` / `run-role` with realistic input, non-trivial outcome) as part of its own change; verify the RENDERED role config (cat the handler command dir's `<role>.json`, per repo CLAUDE.md — a role's real argv never lives in `config.toml`), with a negative control against the unwrapped binary under `env -i PATH=...` (the "config testing trap" recipe) to prove the backing command actually runs; migration step 4 (adapter): non-trivial = at least one real routed item with correct `type`/`metadata`; step 6 (deciders, plan-only): non-trivial = at least one real `plan` output with ≥1 action, or a correct skip, against a live entity; step 7 (the flip): non-trivial = at least one applied action visible on a real work item with its audit comment (7.6)                         |
+| live exercise                         | per this repo's rules, every new or changed pg-router query/role pair is exercised live once (`pg-router run-query` / `run-role` with realistic input, non-trivial outcome) as part of its own change; verify the RENDERED role config (cat the handler command dir's `<role>.json`, per repo CLAUDE.md — a role's real argv never lives in `config.toml`), with a negative control against the unwrapped binary under `env -i PATH=...` (the "config testing trap" recipe) to prove the backing command actually runs; all live exercise happens inside migration step 7 (the cutover): the adapter (non-trivial = at least one real routed item with correct `type`/`metadata`), deciders in `plan` mode (at least one real `plan` output with ≥1 action, or a correct skip, against a live entity), then `apply` (at least one applied action visible on a real work item with its audit comment, 7.6)           |
 | build gates                           | pg-connector schema/backend changes are gated by the existing `checks.<system>.pg-connector-go-tests` (`flake.nix`); pg-desk changes are gated by its own whole-module build — `packages/pg-desk/default.nix` sets no `subPackages`, so `nix build .#pg-desk`'s checkPhase already runs the full `go test ./...` (repo CLAUDE.md's package-versioning "Go test gate"; bead `pg2-3nb2t`) — no separate `checks.<system>.pg-desk-go-tests` attribute is needed                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ## 13. What is removed
@@ -1302,35 +1292,43 @@ SHAPES with synthetic values, never real ones.
    migration's two forced prompt edits: `pg-pr review submit` → `pg-connector pr review submit`
    (STORY-AGT-2, `modules/zm/pg-router/review-prompt.txt`).
 2. **pg-connector**: PR summary fields including `node_id` (5.1).
-3. **pg-desk**: store migration, additive stage only (9.11); issue and thread snapshots (per `.46`, reconciled per
-   step 0); hydration strategies; classifiers; change log; cursors; `changes`, `refresh`,
-   `history`, `show`, annotation verbs; `watch:` config (9.10) populated from the query names in
-   today's pg-router config; `heartbeat`/`heartbeat-item` removed (6.9, 13). This step's own forced
-   prompt edit: `pg-desk feedback ...` → `pg-desk pr feedback ...`
-   (`modules/zm/pg-router/feedback-prompt.txt`), matching 6.9's verbs-move-under-type change.
-4. **Adapter** (9.4): build; live-exercise per 12's "live exercise" row (non-trivial outcome: at
-   least one real routed item with correct `type`/`metadata`).
-5. **Deciders** in plan-only mode: port rules (7.3) including adoption — adoption's first pass MAY
-   also backfill `node_id` onto an already-adopted bead's `dedup_key` where the backend now
-   provides one (S19), rewriting it from `<repo>#<n>` form to `node_id` form; move the work-item
-   contract (7.8); run `plan` for every tracked PR alongside live pg-desk `sync` and diff until
-   parity (12's "adoption / parity" row), including the team-PR feedback-cycle exception (S16).
-   Old `sync` keeps writing throughout.
-6. **pg-router**: add the `pg-desk changes` sources and decider roles (9.9, explicit kinds only —
-   S22) with deciders still in plan-only mode; live-exercise per 12 (non-trivial outcome: at least
-   one real `plan` output with ≥1 action, or a correct skip, against a live entity); remove the
-   `desk-heartbeat` query/role (6.9, 13).
-7. **Flip, as one change**: deciders switch to `apply`; pg-desk `sync.mode = "off"`; old
-   pg-connector sources and `desk-*` ingest roles removed. There MUST be no deployed state in which
-   both `sync` apply and decider apply are enabled. Live-exercise per 12 (non-trivial outcome: at
-   least one applied action visible on a real work item with its audit comment, 7.6).
-8. **Rollback** (if needed after the flip): revert that one change — deciders back to plan-only,
-   `sync.mode = "apply"`, old sources and roles restored. Adoption makes either side safe to resume
-   over beads the other created.
-9. **Delete** pg-desk `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run`, and apply 9.11's
-   destructive stage, once the flip
-   has run cleanly for an agreed soak period. Pre-cutover `ledger` history is not carried forward
-   into this delete either (13) — it was already an accepted loss at the flip.
+3. **pg-desk** (built and tested, NOT deployed): the 9.11 migration as a runnable step; issue and
+   thread snapshots (per `.46`, reconciled per step 0); hydration strategies; classifiers; change
+   log; cursors; `changes`, `refresh`, `history`, `show`, annotation verbs; `watch:` config (9.10).
+   Old `sync`, `run`, `ledger` and `heartbeat` code stays in the tree and is deleted by step 7's
+   change. Because this code needs the migrated store, a build containing it MUST NOT be applied
+   before step 7. This step's own forced prompt edit: `pg-desk feedback ...` →
+   `pg-desk pr feedback ...` (`modules/zm/pg-router/feedback-prompt.txt`), matching 6.9's
+   verbs-move-under-type change; it ships with step 7.
+4. **Adapter** (9.4): build and test against envelope fixtures; live-exercise happens in step 7.
+5. **Deciders**: port rules (7.3) including adoption — adoption's first pass MAY also backfill
+   `node_id` onto an already-adopted bead's `dedup_key` where the backend now provides one (S19),
+   rewriting it from `<repo>#<n>` form to `node_id` form; move the work-item contract (7.8). Prove
+   parity on synthetic fixtures by running `plan` against the same fixtures fed through the old
+   `sync.mode = "plan"` (12's "adoption / parity" row), including the team-PR feedback-cycle
+   exception (S16). The old `sync` code still exists at this point, which is what makes the diff
+   possible; there is no live shadow run.
+6. **pg-router**: prepare (do not apply) the `pg-desk changes` sources and decider roles (9.9,
+   explicit kinds only — S22), the `watch:` queries taken from today's query names, both forced
+   prompt edits, and removal of the `desk-*` ingest roles and `desk-heartbeat` (6.9, 13). The
+   loader checks (S22, orphan producer/consumer) land in `pg-router`'s own tests.
+7. **Cutover, one operator-run maintenance window** (no parallel running):
+   1. Stop `sync`: disable the `desk-*` ingest roles so nothing writes beads or the store.
+   2. Back up the store file and record its path.
+   3. Apply one release containing: the 9.11 migration run against the store; deletion of pg-desk
+      `internal/sync`, `ledger`, `import-pg-pr-annotations`, `run`, `heartbeat` and `sync.mode`; the
+      adapter; the deciders; the prepared router config and both prompt edits.
+   4. Bootstrap: `pg-desk <type> changes --reset` per watched type to hydrate every active entity.
+   5. Live-exercise per 12 with deciders in `plan` mode: at least one real `plan` output with ≥1
+      action, or a correct skip, against a live entity.
+   6. Enable decider `apply`; live-exercise: at least one applied action visible on a real work
+      item with its audit comment (7.6).
+8. **Rollback** (if step 7 fails before item 6): restore the store backup, reapply the previous
+   release, re-enable the `desk-*` roles. Anything created after the cutover is lost from pg-desk's
+   store, but adoption (7.3) makes the previous release safe to resume over beads a decider created.
+   After item 6 the same procedure applies, with the same caveat.
+   Pre-cutover `ledger` history is not carried into `change_log` or the audit trail (13) — an
+   accepted loss, and the reason the backup is the only way back.
 
 ## 15. Glossary
 
