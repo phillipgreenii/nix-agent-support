@@ -1,0 +1,3420 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "kubectl",
+  "command": {
+    "name": "kubectl",
+    "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+    "citations": {
+      "interpreter": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      },
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      }
+    },
+    "flags": {
+      "--as": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--as-group": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--as-uid": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--cluster": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--context": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--kubeconfig": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--namespace": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--output": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--password": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--server": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--token": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--user": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--username": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "--v": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "-n": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "-o": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "-s": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      },
+      "-v": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "interpreter": "kubectl",
+    "subcommands": {
+      "annotate": {
+        "name": "annotate",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "api-resources": {
+        "name": "api-resources",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "api-versions": {
+        "name": "api-versions",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "apply": {
+        "name": "apply",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--dry-run=client": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "dry-run"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=none": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=server": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "attach": {
+        "name": "attach",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "exec"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "attach's remote container/session content is not modeled",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "cluster-info": {
+        "name": "cluster-info",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "config": {
+        "name": "config",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "current-context": {
+            "name": "current-context",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "delete-cluster": {
+            "name": "delete-cluster",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "delete-context": {
+            "name": "delete-context",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "delete-user": {
+            "name": "delete-user",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "get-clusters": {
+            "name": "get-clusters",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "get-contexts": {
+            "name": "get-contexts",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "get-users": {
+            "name": "get-users",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "rename-context": {
+            "name": "rename-context",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "set": {
+            "name": "set",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "set-cluster": {
+            "name": "set-cluster",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "set-context": {
+            "name": "set-context",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "set-credentials": {
+            "name": "set-credentials",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "unset": {
+            "name": "unset",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "use-context": {
+            "name": "use-context",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "view": {
+            "name": "view",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          }
+        }
+      },
+      "cordon": {
+        "name": "cordon",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "cp": {
+        "name": "cp",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--container": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--no-preserve": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--retries": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-c": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "interpreter": "kubectl-cp"
+      },
+      "create": {
+        "name": "create",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--dry-run=client": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "dry-run"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=none": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=server": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "debug": {
+        "name": "debug",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "exec"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "debug's remote container/session content is not modeled",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "delete": {
+        "name": "delete",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--dry-run=client": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "dry-run"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=none": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=server": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "describe": {
+        "name": "describe",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "diff": {
+        "name": "diff",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "drain": {
+        "name": "drain",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "edit": {
+        "name": "edit",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "exec": {
+        "name": "exec",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "exec"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "exec's remote container/session content is not modeled",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "explain": {
+        "name": "explain",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "expose": {
+        "name": "expose",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "get": {
+        "name": "get",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "label": {
+        "name": "label",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "logs": {
+        "name": "logs",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "patch": {
+        "name": "patch",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--dry-run=client": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "dry-run"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=none": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=server": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "port-forward": {
+        "name": "port-forward",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "exec"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "port-forward's remote container/session content is not modeled",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "proxy": {
+        "name": "proxy",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "exec"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "proxy's remote container/session content is not modeled",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "replace": {
+        "name": "replace",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "interpreter": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "flags": {
+          "--dry-run=client": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "dry-run"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=none": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--dry-run=server": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--filename": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "--kustomize": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          },
+          "-k": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true,
+        "interpreter": "kubectl-manifest"
+      },
+      "rollout": {
+        "name": "rollout",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "history": {
+            "name": "history",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "pause": {
+            "name": "pause",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "restart": {
+            "name": "restart",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "resume": {
+            "name": "resume",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "status": {
+            "name": "status",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "undo": {
+            "name": "undo",
+            "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutation"
+                },
+                "remoteFamily": "kubectl",
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          }
+        }
+      },
+      "run": {
+        "name": "run",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "scale": {
+        "name": "scale",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "set": {
+        "name": "set",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "taint": {
+        "name": "taint",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "top": {
+        "name": "top",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "uncordon": {
+        "name": "uncordon",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "mutation"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
+      "version": {
+        "name": "version",
+        "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "remoteFamily": "kubectl",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"kubectl\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      }
+    }
+  }
+}

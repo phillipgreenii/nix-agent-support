@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "sleep",
+  "command": {
+    "name": "sleep",
+    "provenance": "sleep (GNU coreutils) 9.11",
+    "citations": {
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sleep\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

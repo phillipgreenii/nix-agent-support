@@ -1,0 +1,219 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "bash",
+  "command": {
+    "name": "bash",
+    "provenance": "GNU bash 5.3.9, bash --help / help set",
+    "citations": {
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+      }
+    },
+    "flags": {
+      "+O": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "--login": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "--noprofile": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "--norc": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "--posix": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-O": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-c": {
+        "arity": "one",
+        "operand": {
+          "kind": "program",
+          "dialect": "shell"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-l": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-o": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      },
+      "-x": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "program",
+          "dialect": "shell-file"
+        }
+      ],
+      "leadingSkippedByFlags": ["-c"],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"bash\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "positionalsEndOptions": true
+  }
+}

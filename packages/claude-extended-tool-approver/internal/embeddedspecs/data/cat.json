@@ -1,0 +1,247 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "cat",
+  "command": {
+    "name": "cat",
+    "provenance": "GNU coreutils 9.x cat --help",
+    "citations": {
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+      }
+    },
+    "flags": {
+      "--number": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--number-nonblank": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--show-all": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--show-ends": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--show-nonprinting": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--show-tabs": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "--squeeze-blank": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-A": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-E": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-T": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-b": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-t": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "stdinToken": "-",
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"cat\"]"
+      }
+    },
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

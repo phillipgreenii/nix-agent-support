@@ -1,0 +1,43 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "find",
+  "command": {
+    "name": "find",
+    "provenance": "bfs 4.1.1 via Claude Code's find shell function (`type find`; `bfs --version`), GNU findutils-compatible primaries, this host 2026-09-07",
+    "citations": {
+      "interpreter": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      },
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"find\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "interpreter": "find"
+  }
+}
