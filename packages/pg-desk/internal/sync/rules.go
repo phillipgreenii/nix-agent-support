@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -27,6 +28,10 @@ type runContext struct {
 	interp   interpret.Interpretation
 	headSHA  string
 	now      string
+
+	// workBeads is Facts.WorkBeads, kept so handleClosure can find every
+	// open child of the anchor (type-blind), not only the classified ones.
+	workBeads json.RawMessage
 
 	ledgerAnchor, ledgerCycle, ledgerReview store.LedgerEntry
 
@@ -99,19 +104,18 @@ func (rc *runContext) upsertLedger(kind, beadID, contentHash, lastReviewedHeadSH
 // left a query (closureFromFacts, sync.go, only ever reports isClosure=true
 // from a real `pr show` re-read).
 //
-// This ports pg-pr's own cascade-close verbatim
-// (packages/pg-pr/internal/beadsbridge/bridge.go's cascadeClose /
-// CascadeCloseMergeRequest), which closes every direct child of the
-// merge-request bead type-blindly via ListChildrenOfPR — feedback cycles
-// AND review requests alike, with feedback's own grandchildren closed
-// separately — not only the feedback cycle. An earlier revision of this
-// function closed only the feedback cycle and left review-pr beads
-// untouched on this path, reasoning that a review-pr bead's completion is
-// "somebody else's write"; that reasoning does not match pg-pr's ported
-// behavior above, and produced exactly the asymmetry `pg2-ryexi` measured
-// live: review-pr cycles went stale at ~8x process-feedback's rate because
-// they were never cascade-closed here, only eventually caught by the
-// slower sweep re-verification path (section 7.5).
+// The cascade is type-blind, like pg-pr's own cascade-close
+// (packages/pg-pr/internal/beadsbridge/bridge.go's CascadeCloseMergeRequest,
+// which closed every direct child via ListChildrenOfPR): after the anchor and
+// the two ledger-tracked cycle beads, EVERY other open parent-child
+// dependent of the anchor found in Facts.WorkBeads is closed too (pg2-kftf9.7:
+// improvised children such as "Human: unblock ..." beads were left open
+// after merge). Unlike pg-pr this cannot enumerate children itself; it is
+// limited to what the work-beads query returned, and only reaches children
+// filed with --parent <anchor>. Feedback's own grandchildren are not
+// walked. History: pg2-ryexi added the review-pr request to the cascade
+// (it went stale at ~8x process-feedback's rate when only the feedback
+// cycle closed here).
 func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	_ = reason // names why (merged/closed/gone); no pinned bead/ledger field carries it (see design's Bead-shapes table)
 	if rc.anchorID == "" {
@@ -133,6 +137,16 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	}
 	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID); err != nil {
 		return err
+	}
+	for _, id := range openChildrenOf(rc.workBeads, rc.anchorID) {
+		if id == rc.cycleID || id == rc.reviewID {
+			continue // already closed above, with its ledger row
+		}
+		if rc.mode == ModeApply {
+			if err := rc.syncer.client.Transition(ctx, id, "closed"); err != nil {
+				return fmt.Errorf("sync: close anchor child %s: %w", id, err)
+			}
+		}
 	}
 	return nil
 }

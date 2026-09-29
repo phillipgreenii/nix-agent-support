@@ -145,16 +145,17 @@ func (s *Syncer) Sync(ctx context.Context, repo, entityID string, change gather.
 	}
 
 	rc := &runContext{
-		syncer:   s,
-		mode:     mode,
-		repo:     repo,
-		entityID: entityID,
-		prNumber: prNumber,
-		pr:       pr,
-		prOK:     prOK,
-		interp:   interp,
-		headSHA:  facts.HeadSHA,
-		now:      s.clock.Now().UTC().Format(rfc3339),
+		syncer:    s,
+		mode:      mode,
+		repo:      repo,
+		entityID:  entityID,
+		prNumber:  prNumber,
+		pr:        pr,
+		prOK:      prOK,
+		interp:    interp,
+		headSHA:   facts.HeadSHA,
+		workBeads: facts.WorkBeads,
+		now:       s.clock.Now().UTC().Format(rfc3339),
 	}
 
 	adopted := adoptFromWorkBeads(facts.WorkBeads, repo, prNumber)

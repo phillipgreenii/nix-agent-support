@@ -19,6 +19,7 @@ type workBeadEntity struct {
 	ID        string            `json:"id"`
 	Title     string            `json:"title"`
 	State     string            `json:"state"`
+	Parent    string            `json:"parent"`
 	Priority  string            `json:"priority"`
 	Labels    []string          `json:"labels"`
 	Metadata  map[string]string `json:"metadata"`
@@ -85,5 +86,28 @@ func adoptFromWorkBeads(raw json.RawMessage, repo string, prNumber int) adoption
 		}
 	}
 	out.Review = newestReview
+	return out
+}
+
+// openChildrenOf returns the ids of every not-yet-closed direct
+// parent-child dependent of anchorID among raw (Facts.WorkBeads), type-blind:
+// no title/metadata classification is applied, so beads a worker improvised
+// about the PR (e.g. a "Human: unblock ..." bead) are included as long as
+// they were created with --parent <anchor>. Malformed/empty raw yields nil,
+// matching adoptFromWorkBeads' best-effort stance.
+func openChildrenOf(raw json.RawMessage, anchorID string) []string {
+	if len(raw) == 0 || anchorID == "" {
+		return nil
+	}
+	var fanOut workBeadsFanOut
+	if err := json.Unmarshal(raw, &fanOut); err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range fanOut.Entities {
+		if e.Parent == anchorID && e.ID != anchorID && e.State != "closed" {
+			out = append(out, e.ID)
+		}
+	}
 	return out
 }

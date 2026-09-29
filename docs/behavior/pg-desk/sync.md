@@ -62,11 +62,13 @@ prompts that read these shapes, in the same change:
   only on a CONFIRMED closure — a `--change removed` re-read (or an ordinary/sweep `pr show`)
   reporting `merged` or `closed`, or a removed re-read's own `not_found` (a closure with reason
   `gone`) — never because the PR merely left a query. An already-closed anchor is never reopened.
-  This mirrors pg-pr's own cascade-close (`beadsbridge.CascadeCloseMergeRequest`), which closes
-  every direct child of the merge-request bead type-blindly; an earlier revision of this doc and
-  the code it described closed only the feedback cycle here, which left review-pr beads open at a
-  far higher stale rate than feedback cycles, caught only by the slower sweep re-verification
-  instead of cascading immediately (`pg2-ryexi`).
+  The cascade is type-blind, like pg-pr's own cascade-close
+  (`beadsbridge.CascadeCloseMergeRequest`): every open direct child of the anchor (a bead
+  filed with `--parent <anchor>`) that the work-beads query returned is closed too, whatever its
+  title or type (`pg2-kftf9.7`; e.g. an improvised "Human: unblock ..." bead). It reaches only
+  children present in the work-beads results, and does not walk grandchildren. An earlier
+  revision closed only the feedback cycle, leaving review-pr beads open at a far higher stale
+  rate (`pg2-ryexi`).
 - **Feedback cycle** — for every PR with unaddressed feedback (a disposition that is still
   `open`), ensure one open cycle keyed by title and deduplicated by the `fbsum` digest (a port of
   pg-pr's existing digest computation), carrying the `mine` label only when the PR's ownership

@@ -648,6 +648,51 @@ func TestSync_ConfirmedClosure_ClosesAnchorAndBothCycleTypes(t *testing.T) {
 	}
 }
 
+// TestSync_ConfirmedClosure_ClosesEveryOpenChildOfAnchor guards pg2-kftf9.7:
+// the cascade is type-blind — every open direct child of the anchor closes,
+// not just the ledger-tracked cycle/review beads (e.g. an improvised
+// "Human: unblock ..." bead). Closed children, children of other parents,
+// and parentless beads are left alone; a child that is also the ledger
+// cycle is transitioned exactly once.
+func TestSync_ConfirmedClosure_ClosesEveryOpenChildOfAnchor(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, cycleID, _ := seedExistingAnchorCycleAndReview(t, s)
+
+	facts := gather.Facts{
+		HeadSHA:      fixtureHeadSHA,
+		RemovedState: "merged",
+		WorkBeads: workBeadsFixture(
+			map[string]any{"id": cycleID, "title": "process-feedback: " + fixturePRKey, "state": "open", "parent": anchorID},
+			map[string]any{"id": "bd-human-1", "title": "Human: unblock stuck pending review on PR #42", "state": "open", "parent": anchorID},
+			map[string]any{"id": "bd-human-2", "title": "something else", "state": "in_progress", "parent": anchorID},
+			map[string]any{"id": "bd-already-closed", "title": "old", "state": "closed", "parent": anchorID},
+			map[string]any{"id": "bd-other-child", "title": "other pr's child", "state": "open", "parent": "bd-some-other-anchor"},
+			map[string]any{"id": "bd-orphan", "title": "no parent", "state": "open"},
+		),
+	}
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil)); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	closed := map[string]int{}
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue transition" && strings.Contains(strings.Join(r.Args, " "), "closed") {
+			closed[r.Args[2]]++
+		}
+	}
+	for _, id := range []string{anchorID, cycleID, "bd-human-1", "bd-human-2"} {
+		if closed[id] != 1 {
+			t.Errorf("%s closed %d times, want 1; all: %v", id, closed[id], closed)
+		}
+	}
+	for _, id := range []string{"bd-already-closed", "bd-other-child", "bd-orphan"} {
+		if closed[id] != 0 {
+			t.Errorf("%s must not be closed, was closed %d times", id, closed[id])
+		}
+	}
+}
+
 // --- test: review-request ACL matches the fixture set -----------------------
 
 func TestSync_ReviewRequestACL(t *testing.T) {
