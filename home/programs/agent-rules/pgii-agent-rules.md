@@ -160,6 +160,32 @@
   that imports it, so the binding needs no per-machine or per-repo file. An absolute path here
   would bind the rule to one checkout on one machine. MUST NOT reintroduce one.
 
+### File Beads In The Tracker Of The Repo Where The Fix Lands
+
+> `bd` resolves its database from the CURRENT WORKING DIRECTORY, so a session whose cwd sits in one
+> repo silently files tooling/personal-workspace bugs into THAT repo's tracker. Observed 2026-09-29
+> (bead `pg2-84y3y`): a review of one tracker migrated a dozen misfiled beads to the workspace
+> tracker, and a worker whose correct tracker was unreachable fell back to the wrong one. Each
+> repo's own `CLAUDE.md` "Beads Labels" section, and the workspace-level `CLAUDE.md` repo/label
+> lookup table (machine-local), say which repo owns which tracker; this rule does not restate them.
+
+- **BF-1** A bead MUST be filed in the tracker of the repo where the fix will LAND — not the
+  tracker of whichever repo the session's cwd happens to be in. The agent MUST determine that repo
+  first (from the work's subject and the repo `CLAUDE.md` / workspace lookup table), then run `bd`
+  against THAT tracker's root (e.g. `bd -C <tracker-root> create ...`, or with cwd at that root),
+  never from the incidental cwd.
+- **BF-2** If the correct tracker is unreachable (server down, "database not found", empty result),
+  the agent MUST NOT fall back to another repo's tracker. It MUST report the failure and escalate
+  (surface it to the operator or park the intended bead text in the session report) and MAY retry
+  the correct tracker once its reachability is restored.
+- **BF-3** A bead found already filed in the wrong tracker MUST be RECREATED in the correct tracker,
+  with provenance in the new body (original id, source tracker, date, reason), and the original MUST
+  be closed with a reason that names the new id. The agent MUST NOT leave the original open, and
+  MUST NOT move it by editing rows in place.
+- **BF-4** After creating a bead (or its dependency edges) the agent MUST verify with a read-back
+  run from the intended tracker root (`bd show <id>`, and `bd dep list <id>` if edges were added)
+  and confirm the id, title and labels landed where intended, before reporting it filed.
+
 ### Superseding Rulings
 
 > A bead body is what the autonomous queue HANDS to the next agent, so it is the one artifact a
