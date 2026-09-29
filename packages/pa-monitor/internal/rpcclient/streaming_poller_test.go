@@ -250,7 +250,15 @@ func TestStreamingPoller_WatchdogTripsOnSilence(t *testing.T) {
 
 	p := newStreamingPoller("", time.Second)
 	p.watch = watch
-	p.watchdogBudget = 20 * time.Millisecond
+	// 50ms (not e.g. 20ms): under CPU contention from concurrent nix/go builds
+	// on the same machine, the goroutine that delivers the first push can miss
+	// a much tighter budget purely on scheduling delay, tripping the watchdog
+	// before the push is even applied and failing the "connected" assertion
+	// below with no real hang involved (observed once under a concurrent
+	// `nix flake check`, bead pg2-7ms78). This is still tight relative to the
+	// outer 1s poll budget, so the test still exercises watchdog-trips-quickly
+	// behavior, just with more margin against scheduler jitter.
+	p.watchdogBudget = 50 * time.Millisecond
 	p.reconnectPause = time.Millisecond
 	p.start()
 	defer func() { _ = p.Close() }()
