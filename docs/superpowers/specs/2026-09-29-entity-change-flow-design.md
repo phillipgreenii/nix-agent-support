@@ -1,10 +1,13 @@
 # Entity change flow: pg-connector → pg-desk → pg-router → deciders — design
 
 - **Date**: 2026-09-29.
-- **Status**: DRAFT for operator review — NOT approved; nothing here authorizes implementation.
-  Approval MUST be recorded as an ADR (migration step 0, section 14) amending the 2026-09-09 design
-  (`2026-09-09-pg-desk-and-connector-discovery-design.md`) D8 and the sync part of D9 — D7 and D10
-  still hold. This design governs `pg2-2j5ac.46`
+- **Status**: Approved (operator, 2026-09-29, recorded on `pg2-2j5ac.51`). The approval and the
+  decisions in section 3 are recorded in ADR 0075 (`docs/adr/0075-entity-change-flow.md`), which
+  amends the 2026-09-09 design (`2026-09-09-pg-desk-and-connector-discovery-design.md`) D8 and the
+  sync part of D9 — D7 and D10 still hold. Two operator design questions, Q-A (what records PR
+  work-item links) and Q-B (how person-closed work is told from agent-closed), are still OPEN in
+  `pg2-2j5ac.52.1`; they are the only questions here without a recorded decision, and follow-up
+  `pg2-2j5ac.52.2.2` records the answers. This design governs `pg2-2j5ac.46`
   (`2026-09-23-pg-desk-generic-entity-pipeline-design.md`) where they overlap (decision log row
   S23; migration step 0). Per this repo's citation conventions, `docs/superpowers/specs/` files
   (including this one, and `.46`) are not durable citation targets — the ADR is.

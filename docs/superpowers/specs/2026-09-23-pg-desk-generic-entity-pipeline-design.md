@@ -1,10 +1,11 @@
 # pg-desk: a generic entity gather/interpret core, with issue-type entities as its first instance
 
 - **Date**: 2026-09-23 (rewritten to current design 2026-09-29)
-- **Status**: Draft — independently reviewed; pending final operator sign-off (`pg2-2j5ac.48`)
+- **Status**: Approved — independently reviewed; operator sign-off 2026-09-29 (`pg2-2j5ac.48`,
+  closed as approved)
 - **Bead**: `pg2-2j5ac.46`
 - **Governed by**: `docs/superpowers/specs/2026-09-29-entity-change-flow-design.md` (the entity
-  change flow design; not yet landed on main). That design owns triggering (pull-through
+  change flow design; approved 2026-09-29, decisions recorded in ADR 0075). That design owns triggering (pull-through
   `changes`), decisions (deciders), the store schema and the composite-view contract. This document
   owns only the generic gather/interpret core that hydrates an entity of a given type.
 - **Blocks**: `pg2-2j5ac.27` (daily-focus store-first, phase 15), which assumes issue-type

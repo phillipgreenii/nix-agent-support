@@ -72,7 +72,7 @@ phase named in brackets.
 | `pg-desk/internal/store`                                             | migration (one block, run at cutover), `entity` version/`hydrated_at`/`active`, `change_log`, cursors, key/value `annotation` | 3       |
 | `pg-desk/internal/gather`, `internal/interpret`, `internal/pipeline` | generic seam, PR/issue/thread hydration strategies, classifiers                                                               | 4, 5    |
 | `pg-desk/cmd/pg-desk`                                                | `changes`, `refresh`, `history`, `show`, `open`, annotation verbs                                                             | 6       |
-| `pg-router-source-pg-connector` (mode) or a new adapter binary       | envelope to pg-router items (decomposition decides which)                                                                     | 7       |
+| `pg-router-source-pg-desk` (new binary)                              | envelope to pg-router items                                                                                                   | 7       |
 | `pg-decider` (new package)                                           | decider binary: rule registry keyed by `<type>`, `plan`, `apply`, audit                                                       | 8       |
 | `pg-router/internal/config` (this repo)                              | loader checks: wildcard rejection, orphan producer/consumer                                                                   | 9       |
 | `pg-router` deployment config (deployment repo, out of this repo)    | sources, decider roles, prompt edits, `watch:` queries (prepared in 9, applied in 10)                                         | 9, 10   |
@@ -246,7 +246,7 @@ Phases 1 and 2 have no upstream dependencies and can start immediately, in paral
 
 **Files:**
 
-- Modify or create: `pg-router-source-pg-connector` (a new mode) or a new adapter binary; decomposition decides.
+- Create: `packages/pg-router-source-pg-desk` (a new binary, per the operator's 2026-09-29 ruling; not a mode of `pg-router-source-pg-connector`).
 
 **Interfaces:**
 
@@ -321,4 +321,4 @@ The only phase that touches the live system. It is operator-run and MUST NOT be 
 - **Proportion:** the plan is a program-level index. Phase 8 is the largest and is flagged for splitting.
 - **Spec change made alongside this plan:** the spec's Migration section is now a stop-the-world cutover (no shadow run, no dual-write, no soak) and 9.11 is again one migration block, run at cutover. This needs your review.
 - **Deployability:** the primary branch stays deployable at every phase, because old code and the old-schema store API are kept until Phase 10 and new-schema commands refuse on an old-schema store. Phases 1 and 2 are additive connector changes and can deploy independently.
-- **Open items for the operator:** whether the adapter is a new mode or a new binary (Phase 7).
+- **Open items for the operator:** none (the Phase 7 adapter form was ruled 2026-09-29: a new binary).
