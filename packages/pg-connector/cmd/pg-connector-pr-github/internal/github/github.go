@@ -529,15 +529,11 @@ func (p *Provider) listForAuthor(ctx context.Context, repo, author string) ([]ap
 // author, authorAssociation, body, closedAt, commentsCount, createdAt,
 // id, isDraft, isLocked, isPullRequest, labels, number, repository,
 // state, title, updatedAt, url. The remaining three fingerprint fields
-// (head OID, checks rollup, review count) are NOT in that list — List's
-// own supplemental per-matched-PR GetPR fetch (provider.go's
-// mergeSupplementalFields) fills those in instead, rather than switching
-// this call to a bespoke raw-GraphQL search query: GetPR's own
-// prListFields call already carries head OID/checks rollup today, and
-// bounding the per-PR fan-out via the SAME parallelMap helper
-// ListAttention's own per-candidate GetPR fan-out already uses (bead
-// pg2-zutee) keeps this packet's fetch mechanism a straight reuse of two
-// already-existing, already-tested code paths rather than a new one.
+// (head OID, checks rollup, review count) are NOT in that list — a
+// per-matched-PR GetPR fetch (prListFields carries head OID/checks
+// rollup/reviews) was the original way to fill them in; List now gets
+// head OID/checks rollup from SearchPRsEnriched's own batched GraphQL
+// query instead (bead pg2-aehpr, see searchBatchedQuery's doc comment).
 var searchPRFields = "number,title,url,state,body,isDraft,author,labels,repository,updatedAt,commentsCount"
 
 // ghSearchPR is `gh search prs --json <searchPRFields>`'s own decoded
@@ -1851,10 +1847,10 @@ query($owner: String!, $name: String!, $number: Int!) {
 `
 
 // ReviewThreadCount runs reviewThreadCountQuery for repo/number and returns
-// reviewThreads.totalCount — originally List's own supplemental-fetch
-// source for the one fingerprint field (bead pg2-2j5ac.30.6's own
-// mergeSupplementalFields extension left uncovered) that neither gh
-// search prs nor gh pr view can carry; no longer called by List as of
+// reviewThreads.totalCount — originally List's own per-matched-PR
+// fetch source for the one fingerprint field (left uncovered by bead
+// pg2-2j5ac.30.6) that neither gh search prs nor gh pr view can carry;
+// no longer called by List as of
 // bead pg2-aehpr (see reviewThreadCountQuery's own doc comment above).
 // Mirrors ReviewsWithCommit's own error handling exactly: a `gh`
 // failure (transient GraphQL error, auth failure, …) is returned unwrapped
