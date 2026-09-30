@@ -149,6 +149,27 @@ groups:
       # needing every type enumerated in Nix -- unlike launchd-health's
       # bounded label registry, pg-router's event types are not a static,
       # known-in-advance list.
+      #
+      # pg2-xepg6 (false-positive fix): metrics.go's gauge callback observes
+      # ONLY the types present in the queue right now, so a drained type has
+      # NO series at all (no explicit 0). A type that blips 0 -> 1-2 -> 0
+      # (routine: an event is enqueued, accepted and evicted between two
+      # scrapes) therefore leaves a few isolated non-zero samples, and
+      # delta() over [30m] compares just those (1 -> 2 reads as +1.6, +1.8
+      # after range extrapolation) -- positive for 15m, so it paged
+      # (issue.changed 2026-09-29, then pr.changed / review.ready) and then
+      # self-cleared as MissingSeries once the old samples left the window.
+      # The fix is rule-side (no change to the gauge's contract): growth
+      # only counts when the series was PRESENT on (nearly) every scrape of
+      # the window, i.e. the type never drained to zero for 30m --
+      # count_over_time(...) >= 54 of the 60 samples a 30s scrape interval
+      # yields (10% slack for a missed scrape), combined with delta > 0 so a
+      # steady-nonzero-but-flat or falling depth still does not page. The
+      # 15m `for:` then requires that to hold sustained. Fingerprint labels
+      # (rule uid, alertname, severity, type) are unchanged. Replay of the
+      # pg2-xepg6 samples and a synthetic sustained-growth series live in
+      # internal/alertrules/queue_depth_growing_test.go. If the scrape
+      # interval changes, update the 54 there and here together.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -159,7 +180,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue depth for type {{ $labels.type }} has been growing"
-          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm."
+          description: "delta(pg_router_queue_depth[30m]) has stayed positive for over 15 minutes for type {{ $labels.type }} while the type stayed non-empty on every scrape of the window (it never drained to zero) -- this event type is being retained faster than it is dispatched. This is the exact per-type buildup observed live in pg2-5sirm."
         data:
           - refId: A
             relativeTimeRange:
@@ -170,7 +191,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: delta(pg_router_queue_depth[30m])
+              expr: delta(pg_router_queue_depth[30m]) > 0 and count_over_time(pg_router_queue_depth[30m]) >= 54
           - refId: B
             datasourceUid: __expr__
             model:
