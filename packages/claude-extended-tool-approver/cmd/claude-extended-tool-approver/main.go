@@ -141,6 +141,8 @@ func main() {
 		handlePostToolUse(input)
 	case "PermissionDenied":
 		handlePermissionDenied(input)
+	case "PostToolUseFailure":
+		handlePostToolUseFailure(input)
 	case "SessionEnd":
 		handleSessionEnd(input)
 	default:
@@ -158,17 +160,18 @@ func projectDirForDetect(input *hookio.HookInput) string {
 	return input.CWD
 }
 
-// The five handlePreToolUse/handlePermissionRequest/handlePostToolUse/
-// handlePermissionDenied/handleSessionEnd hook handlers below are THE
-// RECORDER (pg2-cbihz's audit of every asklog.NewStore call site in this
-// package): each one inserts or updates rows (RecordPreToolDecision,
-// RecordRuleErrors, RecordPermissionRequest, ResolveApproved,
-// RegisterBackgroundShellFromPost, RecordPermissionDenied,
-// ResolveUnresolvedAll), and handlePreToolUse additionally needs a
-// read-write store to double as the killshell rule's shell-ownership store.
-// All five therefore genuinely need, and keep, the read-write
-// asklog.NewStore — unlike the read-only CLI subcommands (evaluate, show,
-// report, baseline, compare), which now use asklog.NewReadOnlyStore.
+// The six handlePreToolUse/handlePermissionRequest/handlePostToolUse/
+// handlePermissionDenied/handleSessionEnd/handlePostToolUseFailure hook
+// handlers below are THE RECORDER (pg2-cbihz's audit of every
+// asklog.NewStore call site in this package): each one inserts or updates
+// rows (RecordPreToolDecision, RecordRuleErrors, RecordPermissionRequest,
+// ResolveApproved, RegisterBackgroundShellFromPost, RecordPermissionDenied,
+// ResolveUnresolvedAll, RecordPostToolUseFailure), and handlePreToolUse
+// additionally needs a read-write store to double as the killshell rule's
+// shell-ownership store. All six therefore genuinely need, and keep, the
+// read-write asklog.NewStore — unlike the read-only CLI subcommands
+// (evaluate, show, report, baseline, compare), which now use
+// asklog.NewReadOnlyStore.
 func handlePreToolUse(input *hookio.HookInput) {
 	// Open the ask-log store first so it can double as the killshell rule's
 	// shell-ownership store. If it fails to open, fall back to a storeless engine
@@ -296,6 +299,26 @@ func handlePermissionDenied(input *hookio.HookInput) {
 	store.SetSandboxEnabled(sandboxdetect.Detect(projectDirForDetect(input)))
 
 	if err := asklog.RecordPermissionDenied(store, input); err != nil {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+	}
+	fmt.Println("{}")
+}
+
+// handlePostToolUseFailure records a PostToolUseFailure event: the tool call
+// was approved and ran, but the run itself failed. It is an observe-contract
+// handler like handlePostToolUse/handlePermissionDenied/handleSessionEnd —
+// it never influences the outcome, only records it, so it prints "{}"
+// unconditionally.
+func handlePostToolUseFailure(input *hookio.HookInput) {
+	store, err := asklog.NewStore(asklog.DefaultDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
+		fmt.Println("{}")
+		return
+	}
+	defer func() { _ = store.Close() }()
+
+	if err := asklog.RecordPostToolUseFailure(store, input); err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
 	}
 	fmt.Println("{}")

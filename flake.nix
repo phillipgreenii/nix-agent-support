@@ -5175,6 +5175,113 @@
                 assert disabled == [ ];
                 pkgs.runCommand "ceta-extra-readonly-roots-ok" { } "touch $out";
 
+              # Durable eval test (tc-o14i5.8.3, Track X.3): confirms ceta's OWN
+              # contribution to programs.claude-hook-router.delegates carries a SIXTH
+              # entry for PostToolUseFailure, observe-contract, alongside the original
+              # five from the ADR 0071 Phase C2 migration. Neither existing eval check
+              # covers this: test-ceta-extra-readonly-roots imports ceta standalone
+              # (router module never imported, so routerModulePresent is false and this
+              # branch never runs), and test-claude-hook-router imports the router
+              # standalone with a hand-written synthetic delegate (never ceta's real
+              # default.nix). This check imports BOTH real modules together with the
+              # router enabled, so a delegate ceta's own default.nix forgets to register
+              # fails here even though either module alone still evaluates fine.
+              test-ceta-router-delegates-posttoolusefailure =
+                let
+                  evalCfg =
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib inputs; };
+                      modules = [
+                        ./home/programs/claude-hook-router/default.nix
+                        ./home/programs/claude-extended-tool-approver/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Union of test-claude-hook-router's stubs (assertions,
+                            # marketplaces.nixProvided, settings.*) and
+                            # test-ceta-extra-readonly-roots's stubs (warnings,
+                            # home.homeDirectory, home.packages) — both real modules are
+                            # imported together here, so both stub sets are needed.
+                            options = {
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.unspecified;
+                                default = [ ];
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              phillipgreenii.programs.claude-code = {
+                                enable = lib.mkEnableOption "claude (stub)";
+                                settings = {
+                                  extraKnownMarketplaces = lib.mkOption {
+                                    type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                                    default = { };
+                                  };
+                                  enabledPlugins = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.bool;
+                                    default = { };
+                                  };
+                                  plugins = lib.mkOption {
+                                    type = lib.types.listOf lib.types.str;
+                                    default = [ ];
+                                  };
+                                };
+                                marketplaces = {
+                                  nixProvided = lib.mkOption {
+                                    type = lib.types.listOf lib.types.package;
+                                    default = [ ];
+                                  };
+                                  # Once claude-hook-router's own stub above declares
+                                  # `marketplaces.nixProvided`, `phillipgreenii.programs.
+                                  # claude-code ? marketplaces` becomes true, so ceta's
+                                  # marketplacesModulePresent-gated block (which writes
+                                  # `marketplaces.overrides`) fires too — this stub must
+                                  # exist for that write to land somewhere declared
+                                  # (same stub test-pg-wi-flow-module uses).
+                                  overrides = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.bool;
+                                    default = { };
+                                  };
+                                };
+                              };
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/home/test";
+                              };
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs = {
+                            claude-code.enable = true;
+                            claude-hook-router.enable = true;
+                            claude-extended-tool-approver.enable = true;
+                          };
+                        }
+                      ];
+                    }).config;
+
+                  delegates = evalCfg.phillipgreenii.programs.claude-hook-router.delegates;
+                  byEvent = lib.listToAttrs (
+                    map (d: {
+                      name = d.event;
+                      value = d;
+                    }) delegates
+                  );
+                in
+                assert lib.length delegates == 6;
+                assert lib.elem "PostToolUseFailure" (map (d: d.event) delegates);
+                assert byEvent.PostToolUseFailure.name == "ceta";
+                assert byEvent.PostToolUseFailure.contract == "observe";
+                assert byEvent.PostToolUseFailure.command == "claude-extended-tool-approver";
+                assert byEvent.PostToolUseFailure.matcher == null;
+                pkgs.runCommand "test-ceta-router-delegates-posttoolusefailure-ok" { } "touch $out";
+
               # Regression guard for pg2-1ygj: the claude-settings activation must
               # `marketplace add` every DIRECTORY-source extraKnownMarketplaces entry
               # BEFORE the per-plugin install loop (otherwise the first apply fails

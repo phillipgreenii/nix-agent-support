@@ -23,6 +23,12 @@ package asklog
 //	             session died, agent moved on) and got swept at SessionEnd by
 //	             ResolveUnresolvedAll. This is NOT a denial: nobody declined
 //	             anything.
+//	failed     — PostToolUseFailure fired: the tool was approved and ran, but
+//	             the call itself failed. Distinct from 'approved' (ran
+//	             WITHOUT error) so a systematically-failing tool path stays
+//	             visible without overloading approved's meaning. Written only
+//	             by RecordPostToolUseFailure, mirroring RecordPermissionDenied's
+//	             tool_use_id/hash correlation pattern.
 //
 // Before this split all three of denied/rejected/unresolved were written as
 // 'denied'. A bulk SessionEnd sweep therefore looked identical to a user
@@ -34,6 +40,7 @@ const (
 	OutcomeDenied     = "denied"
 	OutcomeRejected   = "rejected"
 	OutcomeUnresolved = "unresolved"
+	OutcomeFailed     = "failed"
 )
 
 // OutcomeIsDecision reports whether an outcome records that SOMETHING actually
@@ -46,9 +53,17 @@ const (
 // a miss. An unknown/future value is also treated as "no decision", which fails
 // closed: it can never be scored as a miss on a value this binary cannot
 // interpret.
+//
+// OutcomeFailed counts as a decision, for the same reason OutcomeApproved
+// does: PostToolUseFailure only fires for a call the hook already let
+// through (there is no PostToolUseFailure without a prior PreToolUse
+// approval), so the row still carries ground truth about the HOOK's
+// decision — allow. That the tool run itself subsequently errored is a
+// runtime outcome, not a hook permission failure, so it does not demote the
+// row to "no decision" the way an interrupted/abandoned call does.
 func OutcomeIsDecision(outcome string) bool {
 	switch outcome {
-	case OutcomeApproved, OutcomeDenied, OutcomeRejected:
+	case OutcomeApproved, OutcomeDenied, OutcomeRejected, OutcomeFailed:
 		return true
 	default:
 		return false

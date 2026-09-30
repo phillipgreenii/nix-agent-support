@@ -219,14 +219,14 @@ in
       # imports neither claude-hook-router nor claude-marketplaces).
 
       (lib.optionalAttrs routerModulePresent {
-        # ADR 0071 Phase C, C2: ceta's full real five-event surface, migrated
+        # ADR 0071 Phase C, C2: ceta's full real six-event surface, migrated
         # to the router's shared delegates registration point. PreToolUse is
         # the only event with real decision work (handlePreToolUse:
-        # permissionDecision/updatedInput); the other four (PostToolUse,
-        # PermissionRequest, PermissionDenied, SessionEnd) are pure
-        # side-effect handlers that unconditionally print `{}` (confirmed by
-        # re-reading cmd/claude-extended-tool-approver/main.go lines
-        # 129-311) -- i.e. observe-contract delegates. Every entry carries NO
+        # permissionDecision/updatedInput); the other five (PostToolUse,
+        # PermissionRequest, PermissionDenied, SessionEnd, PostToolUseFailure)
+        # are pure side-effect handlers that unconditionally print `{}`
+        # (confirmed by re-reading cmd/claude-extended-tool-approver/main.go)
+        # -- i.e. observe-contract delegates. Every entry carries NO
         # matcher (match-all), matching ceta's real claude-marketplace/
         # claude-extended-tool-approver/hooks/hooks.json registration today.
         # Ceta's own internal inputProcessors chain is unchanged by this
@@ -274,6 +274,14 @@ in
             {
               name = "ceta";
               event = "SessionEnd";
+              matcher = null;
+              command = "claude-extended-tool-approver";
+              contract = "observe";
+              priority = 1000;
+            }
+            {
+              name = "ceta";
+              event = "PostToolUseFailure";
               matcher = null;
               command = "claude-extended-tool-approver";
               contract = "observe";
