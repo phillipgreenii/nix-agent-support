@@ -579,7 +579,7 @@ type recordingHandlerFailureObserver struct {
 	calls                        int
 }
 
-func (r *recordingHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+func (r *recordingHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string, err error) {
 	r.eventID, r.evtType, r.listenerID = eventID, evtType, listenerID
 	r.calls++
 }
@@ -592,7 +592,7 @@ func TestHandlerFailureCountObserver_OnHandlerFailure_BumpsNamedListener(t *test
 	counts := map[string]*core.ListenerCounts{"df-feedback": {}}
 	obs := &handlerFailureCountObserver{counts: counts}
 
-	obs.OnHandlerFailure("evt-1", "x", "df-feedback")
+	obs.OnHandlerFailure("evt-1", "x", "df-feedback", nil)
 
 	if got := counts["df-feedback"].HandlerFailures.Load(); got != 1 {
 		t.Fatalf("HandlerFailures = %d, want 1", got)
@@ -609,7 +609,7 @@ func TestFanOutHandlerFailureObserver_CallsEveryObserver(t *testing.T) {
 	a, b := &recordingHandlerFailureObserver{}, &recordingHandlerFailureObserver{}
 	f := fanOutHandlerFailureObserver{a, b}
 
-	f.OnHandlerFailure("evt-1", "x", "df-feedback")
+	f.OnHandlerFailure("evt-1", "x", "df-feedback", nil)
 
 	if a.calls != 1 || b.calls != 1 {
 		t.Fatalf("calls = (%d,%d), want (1,1)", a.calls, b.calls)

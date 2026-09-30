@@ -64,6 +64,7 @@ package metrics
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,16 @@ const FailureClassDispatchFail = "dispatch-failure"
 // stays on FailureClassDeclined, via the pre-accept eventqueue.Observer
 // path, to avoid double-counting).
 const FailureClassHandlerError = "handler-error"
+
+// BudgetExceededSentinel is the documented, stable substring a handler's error
+// text carries when its session hit its budget (docs/behavior/interfaces.md,
+// "Budget-stop sentinel"). The core cannot errors.Is across the process
+// boundary, so it matches on this text. (pg2-irowq)
+const BudgetExceededSentinel = "session budget exceeded"
+
+// ReasonBudgetExceeded is the "reason" label a FailureClassHandlerError series
+// carries when the handler error contains BudgetExceededSentinel. (pg2-irowq)
+const ReasonBudgetExceeded = "budget-exceeded"
 
 // Emitter emits the core's declared metric catalog over an OTel meter. It
 // implements eventqueue.Observer (the queue's own hooks), core.IngestObserver
@@ -507,8 +518,15 @@ func (e *Emitter) OnDispatchFailure(_ string) {
 // FailureClassHandlerError. listenerID (this task, widening the interface
 // for a per-role handler-failure tally) is likewise not part of this
 // pool-wide metric's label set, so it is accepted and ignored here too.
-func (e *Emitter) OnHandlerFailure(_, _, _ string) {
-	e.RecordFailure(FailureClassHandlerError)
+func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("class", FailureClassHandlerError),
+		attribute.String("role", listenerID),
+	}
+	if err != nil && strings.Contains(err.Error(), BudgetExceededSentinel) {
+		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
+	}
+	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
 }
 
 // OnDeduped implements both the extended core.IngestObserver contract AND
@@ -550,12 +568,21 @@ func (e *Emitter) OnUnknownTypeRejected(evtType string) {
 // delivery-side class, has one place to land; it is exported for direct use
 // in tests.
 //
-// It is scoped DOWN, not repurposed: retryable / resource-limit / critical —
-// everything POST-accept — is permanently out of pg-router's measurement scope
-// (operator scope-cut 2026-07-28) and MUST NOT be recorded here. There is no
-// session-status callback to feed those classes from; internal/core dropped it
-// outright (see that package's doc) because nothing in pg-router consumed a
-// post-accept outcome.
+// It is scoped DOWN, not repurposed: retryable / critical — everything
+// POST-accept — is out of pg-router's measurement scope (operator scope-cut
+// 2026-07-28) and MUST NOT be recorded here. There is no session-status
+// callback to feed those classes from; internal/core dropped it outright (see
+// that package's doc) because nothing in pg-router consumed a post-accept
+// outcome.
+//
+// Operator ruling (Phillip, 2026-09-30, pg2-irowq) SUPERSEDES the earlier
+// blanket exclusion for ONE resource-limit case: a handler error carrying the
+// documented BudgetExceededSentinel is recorded under FailureClassHandlerError
+// with reason=ReasonBudgetExceeded and a config-bounded role label (see
+// OnHandlerFailure), so an operator can tell which role tripped its budget.
+// It rides the handler-error text the core already receives; it is NOT a new
+// session-status callback. Pool/limit/used/cap detail stays in the event text
+// and the handler's eventlog, never in labels (ADR 0057).
 func (e *Emitter) RecordFailure(class string) {
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("class", class)))
 }

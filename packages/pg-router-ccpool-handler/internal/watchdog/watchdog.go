@@ -4,6 +4,8 @@ package watchdog
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -18,6 +20,29 @@ import (
 // ErrBudgetExceeded is returned by Run when the session hit 100% of its budget.
 var ErrBudgetExceeded = errors.New("session budget exceeded")
 
+// BudgetError is the concrete error Run returns on a hard stop (pg2-irowq). It
+// satisfies errors.Is(err, ErrBudgetExceeded) handler-side. Its text STARTS with
+// the stable sentinel "session budget exceeded" (the documented contract the
+// core matches on, docs/behavior/interfaces.md) followed by key=value context.
+// It carries no prompt or bead content. Units: tokens = count, cost = USD,
+// time = seconds.
+type BudgetError struct {
+	Role, Pool, Bead, Session string
+	Limit                     budget.LimitKind
+	Used, Cap                 float64
+	Elapsed                   time.Duration
+}
+
+func (e *BudgetError) Error() string {
+	return fmt.Sprintf("%s: role=%s pool=%s bead=%s session=%s limit=%s used=%s cap=%s elapsed=%ss",
+		ErrBudgetExceeded.Error(), e.Role, e.Pool, e.Bead, e.Session, e.Limit,
+		strconv.FormatFloat(e.Used, 'f', -1, 64), strconv.FormatFloat(e.Cap, 'f', -1, 64),
+		strconv.FormatFloat(e.Elapsed.Seconds(), 'f', -1, 64))
+}
+
+// Unwrap makes errors.Is(err, ErrBudgetExceeded) hold.
+func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
+
 // GitRunner runs `git -C <dir> <args...>` (injectable for tests).
 type GitRunner interface {
 	Run(ctx context.Context, dir string, args ...string) error
@@ -25,11 +50,13 @@ type GitRunner interface {
 
 // Watchdog meters a session against a Budget and fires escalation actions.
 type Watchdog struct {
-	Reader                 usage.Reader
-	CC                     ccpool.Runner
-	BD                     beads.Runner
-	Log                    *eventlog.Writer // may be nil (no-op)
-	Budget                 budget.Budget
+	Reader usage.Reader
+	CC     ccpool.Runner
+	BD     beads.Runner
+	Log    *eventlog.Writer // may be nil (no-op)
+	Budget budget.Budget
+	// Role and Pool label the hard-stop error/eventlog (pg2-irowq); Pool "" prints as "default".
+	Role, Pool             string
 	RepoRoot, WorktreeDir  string
 	ReminderMsg, WrapUpMsg string
 	// Git is no longer read by this package's own hard-stop sequence
@@ -113,7 +140,8 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 	highest := budget.None
 	for {
 		snap, _ := w.Reader.Read(ctx, w.transcriptPath(ctx, sessionName))
-		_, level := w.Budget.Evaluate(snap, w.now().Sub(start))
+		elapsed := w.now().Sub(start)
+		_, level := w.Budget.Evaluate(snap, elapsed)
 		if level > highest {
 			highest = level
 			switch level {
@@ -135,8 +163,9 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 					map[string]any{"session": sessionName, "bead": beadID})
 			case budget.Hard:
 				if w.ClaimTerminal == nil || w.ClaimTerminal() {
-					w.terminal(ctx, sessionName, beadID)
-					return ErrBudgetExceeded
+					be := w.budgetError(snap, elapsed, sessionName, beadID)
+					w.terminal(ctx, sessionName, beadID, be)
+					return be
 				}
 				// Lost the terminal race: the bead-poll owns the outcome. Touch
 				// nothing; wait for the orchestrator to cancel, then exit. (pg2-c1vp)
@@ -166,4 +195,16 @@ func (w *Watchdog) transcriptPath(ctx context.Context, externalID string) string
 		}
 	}
 	return ""
+}
+
+func (w *Watchdog) budgetError(snap usage.Snapshot, elapsed time.Duration, sessionName, beadID string) *BudgetError {
+	trip := w.Budget.Binding(snap, elapsed)
+	pool := w.Pool
+	if pool == "" {
+		pool = "default"
+	}
+	return &BudgetError{
+		Role: w.Role, Pool: pool, Bead: beadID, Session: sessionName,
+		Limit: trip.Limit, Used: trip.Used, Cap: trip.Cap, Elapsed: elapsed,
+	}
 }

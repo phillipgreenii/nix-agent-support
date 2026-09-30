@@ -63,3 +63,25 @@ addition that makes the already-happening event visible, not a parallel tracking
 exact new `Entry.Outcome` vocabulary a source-side pass may report (`"produced"`, `"source_failed"`)
 are implementation detail with no behavioral consequence — substituting either preserves everything
 `INV-OBS-2` states — and are documented at the call site, not restated here.
+
+### `DEC-OBS-3` — a budget-stop handler error is counted with `reason` and `role` labels; pool/limit detail stays in the event text <!-- uuid: 852019c2-9f9f-41f6-92ff-f71838a8df0b -->
+
+**Decided** (operator ruling, Phillip, 2026-09-30; bead `pg2-irowq`). `INV-FAIL-1` said post-accept
+outcomes are the handler's own and the core does not classify or count them. That is amended by one
+narrow exception: a handler error whose text begins with the **budget-stop sentinel**
+(`session budget exceeded`, `interfaces.md`) is counted by the core under the existing
+`handler-error` failure class with `reason="budget-exceeded"`, and every `handler-error` series now
+carries a `role` label.
+
+**Why.** 72 budget stops (worker and review roles) were indistinguishable from unrelated failures
+in one recurring alert; the operator asked for errors to carry enough context to respond. The core
+already receives the handler's error text through the synchronous dispatch reply, so this adds no
+status callback and no new stream: `INV-FAIL-1`'s "no per-run status stream" and "never re-offers"
+clauses still hold.
+
+**Bounds.** `role` is config-bounded (one value per configured role). `pool`, `limit`, `used`,
+`cap`, `bead`, `session`, `elapsed` are NOT labels (unbounded or high-cardinality); they live in the
+error text and the handler's eventlog `hard_stop` record only. Matching is on the leading
+substring because the core cannot test error identity across the process boundary; the substring is
+therefore a documented contract (`interfaces.md`, "Budget-stop sentinel"). The alert rules split by
+this `reason` (`grafana/alerting/alerts.yaml`).

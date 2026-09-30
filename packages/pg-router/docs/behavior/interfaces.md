@@ -363,7 +363,9 @@ a **dispatch failure** where the core could not hand the event over at all (`INV
 The three **post-accept** classes — `retryable`, `resource-limit`, `critical` — pg-router merely **hands
 over**; they are the accepting **handler's own observability concern** and live on the handler's own
 surface (for a ccpool-backed handler, ccpool's own metrics and logs), so their absence from pg-router's
-metric catalog is the boundary working, not an oversight.
+metric catalog is the boundary working, not an oversight. The one deliberate exception is a
+`resource-limit` budget stop, whose handler error text carries the budget-stop sentinel below and is
+counted under `handler-error` with `reason="budget-exceeded"` (`DEC-OBS-3`).
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -375,6 +377,15 @@ metric catalog is the boundary working, not an oversight.
 The core itself re-offers **only on a pre-accept decline** — an `unavailable` report, or a **`busy`**
 decline when the handler is at capacity (`INV-CONC-1`). Once a handler **accepts** an event,
 retry/resume/persistence is the **handler's** responsibility (`INV-FAIL-1`), not the core's.
+
+**Budget-stop sentinel.** When a handler stops a session because it hit its budget (tokens, cost, or
+time), the error text it reports on exit **MUST begin with the stable substring
+`session budget exceeded`**, followed by `key=value` context: `role`, `pool`, `bead`, `session`,
+`limit` (`tokens` | `cost` | `time`), `used`, `cap` (tokens = count, cost = USD, time = seconds), and
+`elapsed` (seconds). It **MUST NOT** carry prompt or bead content. The core cannot test error identity
+across the process boundary, so it matches on this leading substring; the handler MAY use
+`errors.Is` on its own side. The substring is a **contract**: changing it breaks the core's
+`reason="budget-exceeded"` classification and the alert rules built on it (`DEC-OBS-3`).
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -437,9 +448,11 @@ sequenceDiagram
   - **failure rate** — counter, per **delivery-side** failure class, of which there are exactly two: a
     **pre-accept decline** (an `unavailable` self-report, or a **busy** decline from a handler at
     capacity, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the event over at
-    all. The post-accept classes are **not** counted here — after acceptance the handler owns the work
-    (`INV-FAIL-1`), so classifying its outcomes is the handler's own concern on the handler's own
-    surface;
+    all. A handler-reported error (`handler-error`) carries a bounded `role` label (the handler role
+    name, config-bounded), and a handler error carrying the **budget-stop sentinel** below is
+    additionally labelled `reason="budget-exceeded"` (`DEC-OBS-3`). The other post-accept classes are
+    **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
+    its outcomes is the handler's own concern on the handler's own surface;
   - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
     which under `INV-EVT-4` is a **genuine miss** and is the concrete "no event misses" signal
     (`INV-DISP-3`, its **declared but inactive this run** case together with the ordinary miss);

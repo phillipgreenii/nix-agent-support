@@ -84,7 +84,7 @@ type ResourceLimitObserver interface {
 // count can be recorded, mirroring eventqueue.Observer.OnDeclined's own
 // listenerID parameter.
 type HandlerFailureObserver interface {
-	OnHandlerFailure(eventID, evtType, listenerID string)
+	OnHandlerFailure(eventID, evtType, listenerID string, err error)
 }
 
 // roleListener implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
@@ -311,7 +311,7 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// above for why this is a widened, already-recorded gap rather than a
 	// regression this task introduces.
 	if err != nil && l.handlerFailureObs != nil {
-		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type, l.role.Name)
+		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type, l.role.Name, err)
 	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}

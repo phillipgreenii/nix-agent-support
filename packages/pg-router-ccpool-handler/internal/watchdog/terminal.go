@@ -54,7 +54,7 @@ var openGit gitOpener = func(ctx context.Context, dir string) (gitLocatorCleaner
 // teardownAll does not reach a stable-named session that a duplicate-absorb
 // re-attached to, so an open session let one dead session be re-absorbed 28
 // times (pg2-uwnjp, pg2-vwb4c). purge=false keeps the transcript.
-func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
+func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be *BudgetError) {
 	_ = w.CC.Cancel(ctx, sessionName) // 2nd cancel (idempotent/safe)
 
 	wt := w.sessionCWD(ctx, sessionName)
@@ -80,6 +80,8 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 	_ = beads.Unclaim(ctx, w.BD, beadID)
 	w.emit("error", "hard_stop", "budget hard stop reached", map[string]any{
 		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,
+		"role": be.Role, "pool": be.Pool, "limit": string(be.Limit),
+		"used": be.Used, "cap": be.Cap, "elapsed": be.Elapsed.Seconds(),
 	})
 }
 

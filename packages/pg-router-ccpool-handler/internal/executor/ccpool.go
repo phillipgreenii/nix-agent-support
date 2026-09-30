@@ -637,6 +637,8 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 		BD:          r.deps.BD,
 		Log:         r.deps.Log,
 		Budget:      d.Role.CCPool.Budget,
+		Role:        d.Role.Name,
+		Pool:        d.Role.CCPool.PoolDir,
 		RepoRoot:    r.deps.Cfg.RepoRoot,
 		WorktreeDir: worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
 		ReminderMsg: r.deps.Cfg.ReminderMsg,

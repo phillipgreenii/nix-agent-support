@@ -71,7 +71,7 @@ func TestTerminal_closesSession(t *testing.T) {
 	cc := &fakeCC{}
 	bd := &recBD{}
 	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
-	wd.terminal(context.Background(), "s", "zr-1")
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
 	if len(cc.closed) != 1 || cc.closed[0] != "s" {
 		t.Fatalf("hard stop must close session s exactly once; closed=%v", cc.closed)
 	}
@@ -84,7 +84,7 @@ func TestTerminal_unclaimsNotesNoHuman(t *testing.T) {
 	wd.Git = &recGit{}
 	// session cwd == repoRoot -> reset is a guarded no-op (the v1 reality)
 	cc.list = []ccpool.Session{{ExternalID: "s", CWD: "/repo"}}
-	wd.terminal(context.Background(), "s", "zr-1")
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
 	if !bd.has("update zr-1 --status=open --assignee=") {
 		t.Errorf("must unclaim; calls=%v", bd.calls)
 	}
@@ -351,7 +351,7 @@ func TestTerminal_boundsWedgedReset(t *testing.T) {
 	wd.WorktreeDir = filepath.Dir(repo)
 
 	start := time.Now()
-	wd.terminal(context.Background(), "s", "zr-1")
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
 	elapsed := time.Since(start)
 
 	// Bound: see TestSafeToReset_boundsWedgedToplevelProbe's identical

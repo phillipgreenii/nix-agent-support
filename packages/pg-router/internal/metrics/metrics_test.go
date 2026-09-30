@@ -391,8 +391,8 @@ func TestRecordFailure_AcceptsThreeClasses(t *testing.T) {
 // interface symmetry only and are not part of the failure-rate label set.
 func TestOnHandlerFailureFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.OnHandlerFailure("dsp-1", "review-requested", "role-a")
-	h.emitter.OnHandlerFailure("dsp-2", "push-requested", "role-b")
+	h.emitter.OnHandlerFailure("dsp-1", "review-requested", "role-a", errors.New("boom"))
+	h.emitter.OnHandlerFailure("dsp-2", "push-requested", "role-a", errors.New("boom"))
 
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassHandlerError); got != 2 {
@@ -914,5 +914,39 @@ func (h *harness) enqueue(t *testing.T, id, typ string, expiresIn time.Duration)
 	evt := eventqueue.Event{ID: id, Type: typ, ExpiresAt: h.clk.now().Add(expiresIn)}
 	if _, err := h.q.Enqueue(evt); err != nil {
 		t.Fatalf("enqueue %s: %v", id, err)
+	}
+}
+
+// pg2-irowq: a handler error containing the documented sentinel "session
+// budget exceeded" maps to reason=budget-exceeded, and every handler-error
+// carries the (config-bounded) role label. Other handler errors carry no
+// reason, so alert residual matchers keep covering them.
+func TestOnHandlerFailure_BudgetSentinelMapsToReasonAndRoleLabel(t *testing.T) {
+	h := newHarness(t)
+	budgetErr := fmt.Errorf(`wireclient: role "worker" exited 1: session budget exceeded: role=worker pool=p bead=zr-1 session=s limit=time used=1500 cap=1500 elapsed=1500s`)
+	h.emitter.OnHandlerFailure("dsp-1", "work-ready", "worker", budgetErr)
+	h.emitter.OnHandlerFailure("dsp-2", "work-ready", "worker", budgetErr)
+	h.emitter.OnHandlerFailure("dsp-3", "review-ready", "review", errors.New(`wireclient: role "review" exited 1: session exited before completing`))
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	s := m.Data.(metricdata.Sum[int64])
+	got := map[string]int64{}
+	for _, dp := range s.DataPoints {
+		cls, _ := dp.Attributes.Value("class")
+		role, _ := dp.Attributes.Value("role")
+		reason, _ := dp.Attributes.Value("reason")
+		got[cls.AsString()+"|"+role.AsString()+"|"+reason.AsString()] += dp.Value
+	}
+	want := map[string]int64{
+		"handler-error|worker|budget-exceeded": 2,
+		"handler-error|review|":                1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
 	}
 }

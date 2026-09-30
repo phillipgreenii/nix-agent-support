@@ -250,8 +250,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-router failure rate for class {{ $labels.class }} has been non-zero"
-          description: 'sum by (class) (rate(pg_router_failures_total{reason!="at-capacity"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} -- deliveries are failing. class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap) is excluded from this condition -- see pg2-v3qn6. See pg2-97539 for the failure-class catalog''s provenance and known limitations (no per-role breakdown).'
+          summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is empty for classes that carry none, e.g. declined) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the two causes handled elsewhere -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6) and reason=budget-exceeded (its own rule, pg-router-budget-stops). See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -262,7 +262,56 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class) (rate(pg_router_failures_total{reason!="at-capacity"}[10m]))
+              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded"}[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Budget stops (pg2-irowq, operator ruling 2026-09-30): a handler error
+      # carrying the documented "session budget exceeded" sentinel is counted by
+      # internal/metrics OnHandlerFailure as class=handler-error,
+      # reason=budget-exceeded with a config-bounded `role` label (DEC-OBS-3).
+      # Split out of pg-router-failure-rate so budget stops (pg2-uwnjp, pg2-k5rri)
+      # stop mixing with unrelated causes in one recurring alert bead. Pool /
+      # limit / used / cap detail is NOT a label: it is in the handler's error
+      # text and eventlog hard_stop record. Only `role` can be referenced in
+      # the annotation -- Grafana sees only labels present on the series.
+      - uid: pg-router-budget-stops
+        title: pg-router session budget stops (by role)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router role {{ $labels.role }} is hitting its session budget"
+          description: 'sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m])) has stayed above 0 for over 10 minutes for role {{ $labels.role }} -- sessions are being hard-stopped at their budget. Which limit (tokens/cost/time), pool, used-vs-cap and bead are in the handler error text and the handler''s eventlog hard_stop record, not in labels (DEC-OBS-3, pg2-irowq).'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:

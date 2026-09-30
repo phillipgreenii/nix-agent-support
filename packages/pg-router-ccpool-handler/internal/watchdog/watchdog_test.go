@@ -309,3 +309,74 @@ func TestRun_emitsEventsWhenLogSet(t *testing.T) {
 		}
 	}
 }
+
+// pg2-irowq: the hard-stop error text and the hard_stop eventlog record carry
+// role/pool/bead/session/limit/used/cap/elapsed, and the message starts with
+// the stable sentinel "session budget exceeded".
+func TestRun_budgetErrorCarriesContext(t *testing.T) {
+	cases := []struct {
+		name      string
+		b         budget.Budget
+		snap      usage.Snapshot
+		limit     string
+		used, cap float64
+		elapsed   time.Duration
+	}{
+		{"tokens", tokBudget(1000), usage.Snapshot{OutputTokens: 1000}, "tokens", 1000, 1000, 0},
+		{"time", budget.Budget{Time: 25 * time.Minute, Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.9, Hard: 1}}, usage.Snapshot{}, "time", 1500, 1500, 25 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := t.TempDir() + "/events.jsonl"
+			lw, err := eventlog.New(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+			wd := newWD(&fakeReader{seq: []usage.Snapshot{tc.snap}}, cc, &recBD{}, tc.b)
+			wd.Log, wd.Role, wd.Pool = lw, "worker", "pool-a"
+			var now time.Time = time.Unix(0, 0)
+			wd.Now = func() time.Time { t := now; now = now.Add(tc.elapsed); return t }
+			runErr := wd.Run(context.Background(), "s", "zr-1")
+			_ = lw.Close()
+			if !errors.Is(runErr, ErrBudgetExceeded) {
+				t.Fatalf("errors.Is(ErrBudgetExceeded) must hold, got %v", runErr)
+			}
+			msg := runErr.Error()
+			if !strings.HasPrefix(msg, "session budget exceeded") {
+				t.Errorf("sentinel must lead the message: %q", msg)
+			}
+			for _, want := range []string{"role=worker", "pool=pool-a", "bead=zr-1", "session=s", "limit=" + tc.limit, "used=", "cap=", "elapsed="} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("message %q missing %q", msg, want)
+				}
+			}
+			var be *BudgetError
+			if !errors.As(runErr, &be) || string(be.Limit) != tc.limit || be.Used != tc.used || be.Cap != tc.cap {
+				t.Errorf("BudgetError = %+v", be)
+			}
+			raw, _ := os.ReadFile(logPath)
+			var hard map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var rec map[string]any
+				if json.Unmarshal([]byte(line), &rec) == nil && rec["kind"] == "hard_stop" {
+					hard = rec
+				}
+			}
+			if hard == nil {
+				t.Fatalf("no hard_stop record in %s", raw)
+			}
+			for k, want := range map[string]any{"role": "worker", "pool": "pool-a", "bead": "zr-1", "session": "s", "limit": tc.limit, "used": tc.used, "cap": tc.cap} {
+				if hard[k] != want {
+					t.Errorf("hard_stop[%q] = %v, want %v", k, hard[k], want)
+				}
+			}
+			if _, ok := hard["elapsed"]; !ok {
+				t.Errorf("hard_stop missing elapsed: %v", hard)
+			}
+			if strings.Contains(msg, "prompt") {
+				t.Errorf("no prompt content allowed: %q", msg)
+			}
+		})
+	}
+}

@@ -54,6 +54,45 @@ func (b Budget) Evaluate(s usage.Snapshot, elapsed time.Duration) (float64, Leve
 	return pct, b.level(pct)
 }
 
+// LimitKind names a budget dimension.
+type LimitKind string
+
+const (
+	LimitTokens LimitKind = "tokens"
+	LimitCost   LimitKind = "cost"
+	LimitTime   LimitKind = "time"
+)
+
+// Trip describes the budget dimension closest to (or past) its cap. Units:
+// tokens = count, cost = USD, time = seconds.
+type Trip struct {
+	Limit LimitKind
+	Used  float64
+	Cap   float64
+}
+
+// Binding returns the dimension with the highest fraction-of-cap (the one
+// Evaluate's max is taken from). Limit is "" when every dimension is unlimited.
+func (b Budget) Binding(s usage.Snapshot, elapsed time.Duration) Trip {
+	var best Trip
+	bestPct := -1.0
+	consider := func(k LimitKind, used, cap float64) {
+		if pct := used / cap; pct > bestPct {
+			bestPct, best = pct, Trip{Limit: k, Used: used, Cap: cap}
+		}
+	}
+	if !b.Tokens.Unlimited() {
+		consider(LimitTokens, float64(s.Total()), float64(b.Tokens))
+	}
+	if !b.Cost.Unlimited() {
+		consider(LimitCost, float64(usage.EstimateCents(s, b.Prices))/100, float64(b.Cost)/100)
+	}
+	if b.Time > 0 {
+		consider(LimitTime, elapsed.Seconds(), b.Time.Seconds())
+	}
+	return best
+}
+
 func (b Budget) level(pct float64) Level {
 	switch {
 	case pct >= b.Thresholds.Hard:

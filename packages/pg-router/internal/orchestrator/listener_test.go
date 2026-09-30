@@ -183,9 +183,11 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 // test double recording every OnHandlerFailure call.
 type fakeHandlerFailureObserver struct {
 	calls []struct{ eventID, evtType, listenerID string }
+	errs  []error
 }
 
-func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string, err error) {
+	f.errs = append(f.errs, err)
 	f.calls = append(f.calls, struct{ eventID, evtType, listenerID string }{eventID, evtType, listenerID})
 }
 
@@ -320,5 +322,22 @@ func TestRoleListener_Offer_NoResourceLimitObserverIsSafe(t *testing.T) {
 	want := eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 	if got != want {
 		t.Fatalf("Offer() = %+v, want %+v", got, want)
+	}
+}
+
+// pg2-irowq: the handler error itself is forwarded to the observer so the
+// metrics layer can classify it (e.g. the "session budget exceeded" sentinel).
+func TestRoleListener_Offer_ForwardsHandlerErrorToObserver(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	dispatchErr := fmt.Errorf(`wireclient: role "worker" exited 1: session budget exceeded: role=worker`)
+	o.Handler = &fakeHandler{err: dispatchErr}
+	obs := &fakeHandlerFailureObserver{}
+	o.HandlerFailureObserver = obs
+	l := o.NewListener(context.Background(), roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}})
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-w1"}))
+	l.Offer(eventqueue.Offering{ID: "dsp-000000000000", Event: evt})
+	if len(obs.errs) != 1 || obs.errs[0] == nil || obs.errs[0].Error() != dispatchErr.Error() {
+		t.Fatalf("observer errs = %v, want [%v]", obs.errs, dispatchErr)
 	}
 }

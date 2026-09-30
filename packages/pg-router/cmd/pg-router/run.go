@@ -856,7 +856,7 @@ type handlerFailureCountObserver struct {
 	counts map[string]*core.ListenerCounts
 }
 
-func (h *handlerFailureCountObserver) OnHandlerFailure(_, _, listenerID string) {
+func (h *handlerFailureCountObserver) OnHandlerFailure(_, _, listenerID string, _ error) {
 	if c := h.counts[listenerID]; c != nil {
 		c.HandlerFailures.Add(1)
 	}
@@ -869,9 +869,9 @@ func (h *handlerFailureCountObserver) OnHandlerFailure(_, _, listenerID string) 
 // signal.
 type fanOutHandlerFailureObserver []orchestrator.HandlerFailureObserver
 
-func (f fanOutHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string) {
+func (f fanOutHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listenerID string, err error) {
 	for _, o := range f {
-		o.OnHandlerFailure(eventID, evtType, listenerID)
+		o.OnHandlerFailure(eventID, evtType, listenerID, err)
 	}
 }
 
