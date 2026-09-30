@@ -70,6 +70,12 @@ type Store struct {
 	// transaction after the entity write and before the change_log append;
 	// a non-nil return aborts the write. Test seam for the atomicity test.
 	betweenBumpAndAppend func() error
+
+	// betweenAnnotationAndAppend, when set, runs inside an annotation write's
+	// transaction after the annotation row changed and before the
+	// annotation_changed append; a non-nil return aborts the write. Test
+	// seam for the annotation atomicity test.
+	betweenAnnotationAndAppend func() error
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`

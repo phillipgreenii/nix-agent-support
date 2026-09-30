@@ -147,6 +147,31 @@ the reserved keys above; those belong to the work that uses these tables.
   own transaction uses the same append primitive.
 - These operations need the version-2 schema and refuse a version-1 store.
 
+## Annotations and cross-reference links (schema version 2)
+
+- Every annotation write (set or delete of a key) MUST append one `change_log` record with kind
+  `annotation_changed` in the SAME transaction as the write; if the append fails the annotation
+  write is rolled back. The record carries the entity's CURRENT version (a version of 0, a migrated
+  never-rehydrated entity, is valid) and the annotation's `origin` and time. An annotation write
+  MUST NOT bump `entity.version`.
+- Annotating (or deleting an annotation of) an entity that has no `entity` row MUST return an error
+  and write nothing. Deleting a key that does not exist changes nothing and appends nothing.
+- The reserved keys are `hidden` (JSON `{"value": true|false, "reason": text|null}`), `wip`
+  (`true`/`false`), `disposition.<comment_id>` (`will-fix`, `wont-fix` or `no-action`),
+  `suppress.<kind>`, `force_review`, `ready_to_land` and `decider.<name>.<k>`. Each row records
+  `origin`, `set_by` and `set_at`.
+- The key/value annotation API is separate from the old per-column annotation API, which keeps
+  working on a version-1 store only; the key/value API refuses a version-1 store.
+- Cross-reference links are read and written with `origin` and `relation`. Derived links (origin
+  `derived:<extractor>`, any entity type) for an entity are replaced as a set each time that entity
+  is hydrated: links still present keep their first-seen time and refresh last-confirmed, links no
+  longer present are deleted. Replacement never touches external rows or the legacy rows owned by the
+  old accessors.
+- External links (origin `external:<actor>`, with actor, time and optional reason) persist until
+  removed. Adding one when a derived link with the same source, target and relation exists is a
+  silent no-op: an external link MUST NOT override a derived one. Removing an external link removes
+  only the named actor's row; it MUST NOT remove a derived row or another actor's link.
+
 ## Exit codes, telemetry, and logs
 
 The store has no CLI surface of its own beyond `pg-desk migrate --cutover` above — it is a shared
