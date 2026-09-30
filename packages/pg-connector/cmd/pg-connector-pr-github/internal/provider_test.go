@@ -375,6 +375,23 @@ func TestBackend_List_SingleExpr(t *testing.T) {
 	}
 }
 
+func TestBackend_List_CarriesMergeable(t *testing.T) {
+	gh := &fakeGH{
+		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 1, State: "open", Mergeable: "UNKNOWN"}}, nil
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.List(context.Background(), []string{"is:open"}, false, nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Entities) != 1 || got.Entities[0].Mergeable != "UNKNOWN" {
+		t.Fatalf("Entities = %+v, want Mergeable carried verbatim (UNKNOWN)", got.Entities)
+	}
+}
+
 func TestBackend_List_MultipleExpressions_UnionDeduplicated(t *testing.T) {
 	calls := 0
 	gh := &fakeGH{

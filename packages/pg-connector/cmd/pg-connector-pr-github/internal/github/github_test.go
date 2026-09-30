@@ -970,6 +970,7 @@ const sampleBatchedSearchPage = `{
           "isDraft": false,
           "updatedAt": "2026-09-14T10:00:00Z",
           "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "CONFLICTING",
           "author": {"login": "octocat"},
           "repository": {"nameWithOwner": "owner/repo"},
           "labels": {"nodes": [{"name": "bug"}, {"name": "p1"}]},
@@ -1021,6 +1022,9 @@ func TestSearchPRsEnriched_ParsesAndConverts(t *testing.T) {
 	}
 	if pr.ReviewCount != 2 {
 		t.Fatalf("ReviewCount = %d, want 2", pr.ReviewCount)
+	}
+	if pr.Mergeable != "CONFLICTING" {
+		t.Fatalf("Mergeable = %q, want %q (carried verbatim)", pr.Mergeable, "CONFLICTING")
 	}
 	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
 		t.Fatalf("Labels = %v", pr.Labels)
@@ -1075,10 +1079,16 @@ func TestSearchPRsEnriched_QueryRequestsExpectedFields(t *testing.T) {
 		// whole token: as a bare substring it already sits inside "headRefOid".
 		"reviewDecision",
 		"reviews { totalCount }",
+		"mergeable",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected the query to contain %q: %v", want, gh.calls[0])
 		}
+	}
+	// merge_state_status moves with every CI status change and base-branch
+	// push, so it MUST stay show-path only (operator ruling 2026-09-29).
+	if strings.Contains(joined, "mergeStateStatus") {
+		t.Fatalf("the list query must NOT select mergeStateStatus: %v", gh.calls[0])
 	}
 	if !regexp.MustCompile(`(^|\s)id(\s|$)`).MatchString(joined) {
 		t.Fatalf("expected the query to select the PR's own id as a whole token: %v", gh.calls[0])

@@ -696,6 +696,12 @@ func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error
 // adoption), selected as its own token; comments{totalCount} counts
 // top-level PR comments only, not review-thread comments.
 //
+// mergeable (bead pg2-2j5ac.52.6.4) is requested so a PR that starts or stops
+// conflicting shows as changed on the next poll; it is carried verbatim
+// (MERGEABLE, CONFLICTING or UNKNOWN). mergeStateStatus is deliberately NOT
+// requested: it moves with every CI status change and base-branch push and
+// would flood the changes feed; it stays show-path only.
+//
 // repository{nameWithOwner} is included even though the design doc's own
 // query snippet omits it: this backend's id convention (formatPRID,
 // "<owner>/<repo>#<number>") and api.PR.Repo both need the matched PR's
@@ -720,7 +726,7 @@ query($q: String!, $after: String) {
     nodes {
       ... on PullRequest {
         id
-        number title url state body isDraft updatedAt reviewDecision
+        number title url state body isDraft updatedAt reviewDecision mergeable
         author { login }
         repository { nameWithOwner }
         labels(first: 20) { nodes { name } }
@@ -751,7 +757,10 @@ type ghBatchedSearchNode struct {
 	IsDraft        bool   `json:"isDraft"`
 	UpdatedAt      string `json:"updatedAt"`
 	ReviewDecision string `json:"reviewDecision"`
-	Author         struct {
+	// Mergeable (bead pg2-2j5ac.52.6.4) is MERGEABLE, CONFLICTING or UNKNOWN,
+	// carried verbatim (UNKNOWN included: GitHub computes it lazily).
+	Mergeable string `json:"mergeable"`
+	Author    struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	Repository struct {
@@ -854,6 +863,7 @@ func (n ghBatchedSearchNode) toAPI() api.PR {
 		NodeID:         n.ID,
 		ReviewDecision: n.ReviewDecision,
 		ReviewCount:    n.Reviews.TotalCount,
+		Mergeable:      n.Mergeable,
 	}
 	for _, l := range n.Labels.Nodes {
 		out.Labels = append(out.Labels, l.Name)
