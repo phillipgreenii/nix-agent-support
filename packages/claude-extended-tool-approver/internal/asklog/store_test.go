@@ -116,6 +116,37 @@ func TestNewStore_CreatesParentDir(t *testing.T) {
 	}
 }
 
+// TestNewStore_FilePermissions is the live check for this hardening: a
+// freshly created ask-log directory must be mode 0700 (owner-only) and its
+// SQLite file mode 0600 (owner-only), not the looser os.MkdirAll/SQLite
+// defaults (0755/0644) this repo's own asks.db was found running at.
+func TestNewStore_FilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "subdir")
+	dbPath := filepath.Join(dbDir, "test.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	dirInfo, err := os.Stat(dbDir)
+	if err != nil {
+		t.Fatalf("stat db dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Errorf("db dir mode = %o, want 0700", perm)
+	}
+
+	fileInfo, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat db file: %v", err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0o600 {
+		t.Errorf("db file mode = %o, want 0600", perm)
+	}
+}
+
 func TestNewStore_WALMode(t *testing.T) {
 	dir := t.TempDir()
 	s, err := NewStore(filepath.Join(dir, "test.db"))

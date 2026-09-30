@@ -126,10 +126,23 @@ func SetSynchronousForTests(value string) string {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	// 0o700: this directory holds the ask log's SQLite file (and its -wal/
+	// -shm siblings), which records every hook decision this repo's tools
+	// make — readable only by the owning user, not group/world.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
+	// Every pragma below is expressed as a DSN query parameter instead of a
+	// separate post-open PRAGMA statement, using modernc.org/sqlite's
+	// mattn-compatible shorthand keys (_busy_timeout, _foreign_keys,
+	// _journal_mode, _synchronous). The driver applies them itself, in a
+	// fixed order independent of how they appear in the DSN string:
+	// busy_timeout first, then (among others) foreign_keys, journal_mode,
+	// synchronous last — see modernc.org/sqlite's applyQueryParams. That
+	// fixed ordering is exactly what the comments below used to enforce by
+	// hand with sequential db.Exec calls, so it is preserved, not relaxed.
+	//
 	// _txlock=immediate makes every db.Begin()/db.BeginTx() on connections
 	// opened from this *sql.DB issue `BEGIN IMMEDIATE` instead of SQLite's
 	// lazy default (`BEGIN DEFERRED`), which takes no lock at all until the
@@ -137,52 +150,44 @@ func NewStore(dbPath string) (*Store, error) {
 	// it reads schema_version's MAX(version) INSIDE its transaction, so the
 	// BEGIN IMMEDIATE acquires SQLite's write lock before that read runs. A
 	// second connection's own BEGIN IMMEDIATE then blocks (bounded by the
-	// busy_timeout pragma set below) until this one commits or rolls back,
-	// so it can only re-read MAX(version) once this transaction's
-	// migrations, if any, are already visible — never the stale
-	// pre-migration value. Without this, two independent connections could
-	// both read the SAME pre-migration version before either takes a lock,
-	// decide to run the same pending migrations, and double-apply them
-	// (pg2-5lkyp: on this machine, every Bash tool call's hook opens a Store
-	// and thus calls migrate(), so concurrent openers are the normal case).
-	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
+	// busy_timeout pragma) until this one commits or rolls back, so it can
+	// only re-read MAX(version) once this transaction's migrations, if any,
+	// are already visible — never the stale pre-migration value. Without
+	// this, two independent connections could both read the SAME
+	// pre-migration version before either takes a lock, decide to run the
+	// same pending migrations, and double-apply them (pg2-5lkyp: on this
+	// machine, every Bash tool call's hook opens a Store and thus calls
+	// migrate(), so concurrent openers are the normal case).
+	//
+	// busy_timeout governs how long SQLite retries a lock acquisition
+	// (including the one the journal_mode=WAL conversion and the
+	// synchronous pragma need) instead of failing immediately with
+	// SQLITE_BUSY — see TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows,
+	// which exercises exactly that path.
+	dsn := dbPath + "?_txlock=immediate&_busy_timeout=3000&_foreign_keys=on&_journal_mode=WAL"
+	if synchronousPragma != "" {
+		dsn += "&_synchronous=" + synchronousPragma
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
-	}
-
-	// busy_timeout MUST be set FIRST, before any other pragma or statement
-	// on this connection: it governs how long SQLite retries a lock
-	// acquisition (including the one the journal_mode=WAL conversion and
-	// the synchronous pragma below need) instead of failing immediately
-	// with SQLITE_BUSY. Setting it later left those two statements with
-	// SQLite's default zero-retry budget, which a concurrent opener could
-	// (and, once exercised by
-	// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows, reliably did)
-	// trip on a brand-new database file — a second bug on the same
-	// concurrent-openers path as the migrate() race this pragma reordering
-	// was found alongside (pg2-5lkyp).
-	if _, err := db.Exec("PRAGMA busy_timeout=3000"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set busy_timeout: %w", err)
-	}
-	if synchronousPragma != "" {
-		if _, err := db.Exec("PRAGMA synchronous=" + synchronousPragma); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("set synchronous: %w", err)
-		}
-	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set WAL mode: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	// 0o600: tighten the DB file itself, whether this call just created it
+	// (subject to umask, which could otherwise leave it group/world
+	// readable) or opened one an earlier version of this code already
+	// created at the old, looser 0o644 default. migrate() above guarantees
+	// the file exists on disk by the time we get here (it always issues at
+	// least one real statement, either the fast pre-check read or the
+	// CREATE TABLE IF NOT EXISTS below it).
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set db file mode: %w", err)
 	}
 
 	return &Store{db: db}, nil
@@ -943,7 +948,44 @@ var migrations = []migration{
 	},
 }
 
+// latestMigrationVersion returns the highest version number among the known
+// migrations, for migrate()'s fast pre-check below.
+func latestMigrationVersion() int {
+	highest := 0
+	for _, m := range migrations {
+		if m.version > highest {
+			highest = m.version
+		}
+	}
+	return highest
+}
+
 func migrate(db *sql.DB) error {
+	// Fast path: a single, plain (unlocked) read of schema_version can often
+	// tell us "nothing is pending" without ever taking the BEGIN IMMEDIATE
+	// write lock below. On this machine, where nearly every Bash tool call's
+	// hook opens a Store (and thus calls migrate()), the overwhelmingly
+	// common case is an already-fully-migrated database, and today every one
+	// of those opens still pays for a BEGIN IMMEDIATE against the same file —
+	// serializing openers that have nothing to apply.
+	//
+	// This is an OPTIMIZATION ONLY and is never authoritative for the apply
+	// decision: if the table does not exist yet, the read errors for any
+	// other reason, or it shows anything MIGHT still be pending, control
+	// falls through unconditionally to the existing locked path below, which
+	// re-reads and re-decides from scratch under the write lock exactly as
+	// it did before this fast path existed. Weakening that re-verification
+	// would reopen the exact race pg2-5lkyp fixed; see
+	// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows, which is
+	// unmodified by this change and must keep passing.
+	if want := latestMigrationVersion(); want > 0 {
+		var have int
+		row := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`)
+		if err := row.Scan(&have); err == nil && have >= want {
+			return nil
+		}
+	}
+
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
 		return fmt.Errorf("create schema_version: %w", err)
 	}
