@@ -1,7 +1,9 @@
 # ccpool per-pool Grafana dashboard — implementation plan
 
-Status: DRAFT rev 9 (2026-09-29), revised after two independent reviews and the operator
-rulings of 2026-09-29 (section 3). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
+Status: DRAFT rev 10 (2026-09-30), revised after two independent reviews and the operator
+rulings of 2026-09-29 (section 3). Rev 10 replaces the interleaving-by-interleaving race
+handling of Beads R and B with an invariants-based contract (operator ruling, Phillip,
+2026-09-30, on bead `pg2-tmxy5`: "do the recommended"). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
 half) and possibly C ALSO change `phillipgreenii-nix-support-apps` (the otelcol pipeline);
 both repos share the `pg2-` tracker.
 
@@ -229,11 +231,28 @@ the plan is self-contained.
   (Phillip, 2026-09-29): "purge wins": when a `--purge` close races the hook, the run's
   result is the purge close's reason, not `exited`; the purge path writes its pending
   `end_reason` onto the open run before sending `/exit` and before deleting the row.
-- Reaper backstop: Reap Pass 0 ends any open run whose tmux session is gone with `exited`,
-  `ended_at = last_activity_at`, before any delete. Covers SIGKILL, power loss and rows
+- Reaper backstop: Reap Pass 0 ends any open run whose tmux session is gone, before any
+  delete, through the ONE shared finalize method (see "Run-lifecycle invariants" in Bead B):
+  it honors a pending `end_reason` if one exists, otherwise records `exited`,
+  `end_source=reaper`, `ended_at = last_activity_at`. Covers SIGKILL, power loss and rows
   predating the hook.
-- `session_runs` rows are removed together with the session row on `Store.Delete`
-  (cascade), and R MUST expose store methods B's delete helper can call to read a
+- **Shared finalize method (R owns it).** R MUST provide exactly one store method that ends
+  a run: a single conditional `UPDATE session_runs SET ... WHERE id = ? AND ended_at IS
+NULL`, idempotent (a second call is a no-op and reports it lost). The `SessionEnd` hook
+  (which takes no ccpool lock), `closeWithReason`, Pass 0, launch/resume and the delete
+  helper MUST all end runs only through it. Its signature is R's implementer's choice and
+  is recorded in R's closing note.
+- **Launch/resume ends a stale run first.** When launch or resume finds the session already
+  has an open run, it MUST end that run under the launch lock, BEFORE opening the new one:
+  with the pending `end_reason` if present, else `exited`, `end_source=reaper`,
+  `ended_at = last_activity_at`. A session MUST NOT ever have two open runs.
+- **Runs ended on dead-but-kept rows.** A run ended by Pass 0 or the hook on a row that is
+  kept (not deleted) is emitted at the START of the next reaper sweep (Bead B).
+- `session_runs` rows are removed together with the session row on `Store.Delete`. The
+  cascade MUST be pinned as an explicit `DELETE FROM session_runs WHERE session_id = ?`
+  inside `Store.Delete`, in the same transaction, because the live store sets no
+  `foreign_keys` pragma and an `ON DELETE CASCADE` clause alone would silently not fire.
+  A test MUST assert no orphan runs remain after `Store.Delete`. R MUST expose store methods B's delete helper can call to read a
   session's runs, INCLUDING open runs and any pending `end_reason`, and their end state
   (exact signatures are R's implementer's choice and are
   recorded in R's closing note, which B reads from the landed code). R's own acceptance MUST
@@ -257,35 +276,48 @@ the plan is self-contained.
   already closed" (the row keeps `close_reason` across resumes).
 - **Labels before delete.** Read `pool`, labels and run timestamps BEFORE `--purge` and
   Pass 0 delete the row.
-- **Every `Store.Delete` emits unemitted runs first.** The `SessionEnd` hook can end a run
-  (`end_source=hook`, `metrics_emitted=0`) at any time, including while a delete is in
-  flight, and after `Store.Delete` nothing can find that run. There are THREE call sites:
-  the `--purge` close (`cancel_close.go`), reap Pass 0 (`reap.go`), and the launch-time
-  phantom prune in the Create path (`session.go`, around lines 389-391). All three MUST go
-  through ONE shared helper (a Facade around `Store.Delete`) that, inside the per-
-  `external_id` lock and BEFORE deleting: (1) FINALIZES any still-open run of the session
-  (`ended_at` NULL), re-reading `ended_at` under the lock so it cannot double-end a run the
-  hook just ended: with the run's pending `end_reason` if one was written (the purge path
-  writes it before `/exit`, per "purge wins"), otherwise as `exited` with
-  `end_source=reaper` and `ended_at = last_activity_at` (the same rule as the Pass 0
-  backstop; this covers the launch-time phantom prune, where the row can be deleted while its
-  run is still open after SIGKILL or power loss); (2) emits every ended run of the session
-  with `metrics_emitted = 0`, whoever ended it; and (3) sets the flag; only then deletes.
-  If a purge's teardown fails before the delete, the pending `end_reason` stays on the open
-  run and the helper is not called; the run is finalized by the next attempt or by the
-  reaper backstop. Locking: `closeWithReason` and the Create path already hold the
-  per-`external_id` lock, so the helper MUST have a "caller already holds the lock" form for
-  them; reap Pass 0 holds no lock today, so Pass 0 MUST take the lock around the helper. A
-  direct `Store.Delete` call outside the helper MUST NOT exist (a test or lint check SHOULD
-  enforce it; there are exactly three non-test callers today). Tests MUST cover the
-  purge-versus-hook race, the phantom-prune path with an OPEN run, and Pass 0 with a
-  hook-ended unemitted run (each emitted exactly once). Bead R's store read methods MUST
-  return open runs and any pending `end_reason`.
-  Operator rulings, Phillip, 2026-09-29: all four items of the rev 7 reconcile abort
-  accepted ("continue") — shared helper on every delete site; runs cascade-delete with the
-  session row (safe because they are emitted first, and `external_id` is timestamped so it is
-  never reused); purge re-reads `ended_at` under the lock; historic runs default to
-  `metrics_emitted = 1`.
+- **Run-lifecycle invariants (rev 10; supersedes the per-interleaving race rules of revs 7-9).**
+  The `SessionEnd` hook, the reaper, `closeWithReason`, the launch-time phantom prune and
+  `--purge` all touch one run row, and the hook takes no ccpool lock. Rather than enumerate
+  interleavings, the implementer MUST satisfy these invariants, record in its closing note
+  the mechanism chosen for each, and test each one:
+  1. **Emitted at most once, and before its row is deleted.** Every run is emitted at most
+     once (the `metrics_emitted` flag, set after emission) and every ended run is emitted
+     before its session row is deleted.
+  2. **Finalization is conditional and idempotent.** A run is ended only through R's shared
+     finalize method (a single conditional `UPDATE ... WHERE ended_at IS NULL`). Losing that
+     race is a no-op, never an error and never a second end.
+  3. **Every delete/finalize decision is re-read under the lock.** Any decision to delete a
+     row or finalize a run MUST re-read the row (and its runs) under the per-`external_id`
+     lock immediately before acting. In particular reap Pass 0 MUST take the lock and re-read
+     the row, and skip the delete if it is no longer a phantom (for example it was resumed).
+  4. **Pending reason wins over the guess.** A run finalized by any path other than the hook
+     uses its pending `end_reason` if one was written (purge writes it before `/exit`,
+     "purge wins"), else `exited`, `end_source=reaper`, `ended_at = last_activity_at`.
+- **One delete Facade.** All three non-test `Store.Delete` callers (the `--purge` close in
+  `cancel_close.go`, reap Pass 0 in `reap.go`, and the launch-time phantom prune in
+  `session.go` near lines 389-391) MUST go through ONE shared helper. Inside the
+  per-`external_id` lock, and before deleting, it finalizes any open run (invariants 2-4),
+  emits every ended run with `metrics_emitted = 0` whoever ended it (invariant 1), sets the
+  flag, and only then deletes (which removes the runs, per R). It needs a "caller already
+  holds the lock" form for `closeWithReason` and the Create path. A direct `Store.Delete`
+  outside the helper MUST NOT exist (a test or lint check SHOULD enforce it). If a purge's
+  teardown fails before the delete, the pending `end_reason` stays on the open run and the
+  helper is not called; a later attempt or the reaper backstop finalizes it.
+- **Kept rows.** For runs ended on rows that are NOT deleted (the hook, or Pass 0 on a
+  dead-but-kept row), the reaper emits every ended run with `metrics_emitted = 0` at the
+  START of the next sweep, before Pass 0 runs.
+- **Required tests** (one per invariant, plus the historic races as regression cases):
+  purge versus hook; phantom prune with an OPEN run; Pass 0 over a hook-ended unemitted run;
+  Pass 0 racing a resume (row no longer a phantom, so no delete); launch/resume over a stale
+  open run; concurrent double finalize; no orphan runs after delete. Each emitted run is
+  counted exactly once.
+  Operator rulings, Phillip, 2026-09-29: shared helper on every delete site; runs
+  cascade-delete with the session row (safe because they are emitted first, and
+  `external_id` is timestamped so it is never reused); purge re-reads `ended_at` under the
+  lock; historic runs default to `metrics_emitted = 1`. Operator ruling, Phillip,
+  2026-09-30: adopt the invariants-based contract above in place of further interleaving
+  enumeration.
 - **Migration 010 default.** Runs already ended when the migration applies MUST default to
   `metrics_emitted = 1`, so the first reaper sweep does not emit a burst of historic
   metrics; only runs ended after it applies start at 0.
