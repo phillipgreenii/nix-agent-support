@@ -114,3 +114,42 @@ that object store, so the ref resolves locally.
 2. `echo "${SSH_AUTH_SOCK:-unset}"` in a dispatched session equals the
    interactive shell's value.
 3. Re-check dependents blocked on this bead (the review-bead lineage named on the bead).
+
+## Per-origin availability gate and alert (bead `pg2-x7euu`, gate `pg2-4gi2c`)
+
+The ccpool handler probes each watched git origin (INV-CCH-10) and declines
+dispatches into a repo whose origin is unavailable, with busy reason
+`origin-unavailable`. Other repos keep dispatching. Watched origins are set via
+`phillipgreenii.programs.pg-router-ccpool-handler.launchConfig.originProbe.*`
+(`origins`, `failureThreshold`, `ttlSeconds`, `timeoutSeconds`, `stateDir`).
+
+```mermaid
+flowchart LR
+    P["probe: git ls-remote per origin"] --> K{"K consecutive failures?"}
+    K -- no --> D["dispatch proceeds"]
+    K -- yes --> G["decline: reason origin-unavailable"]
+    G --> M["pg_router_failures_total{reason=origin-unavailable}"]
+    M --> A["Grafana alert pg-router-origin-unavailable (for 15m)"]
+```
+
+1. **Alert**: Grafana rule `pg-router-origin-unavailable`
+   (`packages/pg-router/grafana/alerting/alerts.yaml`) fires when
+   `rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) > 0` holds
+   for 15m. Its annotation is a static per-class remediation map only; it never
+   names the origin or carries error text.
+2. **Find the origin and class**: run `pg-router-ccpool-handler origin status`
+   (reads state files only; prints key, class, gated, ignored, since,
+   consecutive failures, last error tail) or read the handler logs.
+3. **Remediate by class**:
+
+| Class            | Remediation                                     |
+| ---------------- | ----------------------------------------------- |
+| mount-missing    | Check that the checkout volume is mounted.      |
+| auth-unavailable | Renew the step cert in an interactive shell.    |
+| network          | Check network/VPN connectivity to the git host. |
+| timeout          | Check network and git host health, then retry.  |
+| unknown          | Inspect the handler log for the origin.         |
+
+4. **Deliberately stop gating**: `pg-router-ccpool-handler origin ignore <key>`
+   disables the gate for that origin; `origin unignore <key>` undoes it.
+   The gate MUST NOT be left ignored once the origin is healthy again.

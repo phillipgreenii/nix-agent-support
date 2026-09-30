@@ -338,6 +338,55 @@ groups:
                     type: gt
                     params: [0]
 
+      # Origin unavailable (bead pg2-x7euu, gate from pg2-4gi2c / INV-CCH-10):
+      # the ccpool handler declines dispatches into a repo whose git origin
+      # probe is failing, surfacing as
+      # pg_router_failures_total{class="declined",reason="origin-unavailable"}.
+      # The alert carries NO per-origin or per-error detail: annotations are a
+      # STATIC per-class remediation map only (no stderr / user-supplied
+      # strings, which can leak URLs). Which origin and which class is looked
+      # up from handler logs / `pg-router-ccpool-handler origin status`
+      # (docs/runbooks/dispatched-session-git-origin-auth.md).
+      - uid: pg-router-origin-unavailable
+        title: pg-router dispatch origin is unavailable (dispatches declined)
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router is declining dispatches because a watched git origin is unavailable"
+          description: 'rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) has stayed above 0 for over 15 minutes. Find the origin and its class with `pg-router-ccpool-handler origin status` or the handler logs, then apply the matching remediation. mount-missing: check that the checkout volume is mounted. auth-unavailable: renew the step cert in an interactive shell. network: check network/VPN connectivity to the git host. timeout: check network and git host health, then retry. unknown: inspect the handler log for the origin. To stop gating an origin deliberately, use `pg-router-ccpool-handler origin ignore`. Runbook: docs/runbooks/dispatched-session-git-origin-auth.md.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(rate(pg_router_failures_total{reason="origin-unavailable"}[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # Source failure rate: pg_router_source_failures, emitted by
       # internal/discover/discover.go's SourceFailureObserver for every
       # query source (not scoped to any specific probe package), aggregated
