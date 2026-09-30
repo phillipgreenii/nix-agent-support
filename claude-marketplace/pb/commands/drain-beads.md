@@ -735,8 +735,9 @@ build` for nix repos, and the repo's tests, including a slow full suite
      `land-workforest` is responsible for verifying each member repo's own
      branch itself;
    - a lost FAST-FORWARD RACE or REJECTED NON-FAST-FORWARD PUSH is TRANSIENT:
-     re-rebase and re-invoke (at most 3 attempts), then report `stopped:` with
-     the reason;
+     re-rebase and re-invoke per the handler's OWN retry bound (FF-3 /
+     PR-1: stop at the second consecutive failure; do NOT substitute a larger
+     count of your own), then report `stopped:` with the reason;
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - the lander is itself a dispatched (non-top-level) subagent, so if any step
@@ -796,11 +797,12 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
 
    If landing returns `stopped:` due to a lost FAST-FORWARD RACE (another session
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most
-   ONCE more (it already retried 3× internally); a second failure is a GENUINE
+   ONCE more (the handler already made its own 2 attempts internally, per
+   FF-3); a second failure is a GENUINE
    stop → STUCK. The `pull-request` analogue is a REJECTED NON-FAST-FORWARD PUSH (a
    peer advanced the remote `drain/<id>`): also TRANSIENT — rebase onto the
    UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (it already
-   retried 3× internally); a second failure is a GENUINE stop → STUCK. Only route
+   made its own 2 attempts internally, per PR-1); a second failure is a GENUINE stop → STUCK. Only route
    to STUCK for a GENUINE stop (rebase-conflict, `stopped:ambiguous-remote`,
    `stopped:no-pr-host`, or a canonical off-primary/dirty halt — the latter
    only for a canonical-ADVANCING strategy: `pull-request`'s PR-0 surfaces it
