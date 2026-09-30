@@ -11,11 +11,17 @@ import (
 
 // TestRunNew_rejectsUnknownPermissionMode pins the CLI validation contract: an
 // unknown --permission-mode value is a usage error (exit 2), consistent with the
-// other usage failures in runNew, and is rejected BEFORE any config/store I/O.
+// other usage failures in runNew, and is rejected BEFORE any config/store I/O
+// and before any tmux/claude launch. It runs against a LAUNCHABLE per-test
+// sandbox (armedLaunchEnv), so a regressed guard is caught by assertNoLaunch
+// inside that sandbox instead of launching `cc-alpha` on the operator's real
+// default socket (pg2-7jaxd).
 func TestRunNew_rejectsUnknownPermissionMode(t *testing.T) {
-	if code := runNew([]string{"alpha", "--permission-mode", "nope"}); code != 2 {
+	a := armedLaunchEnv(t)
+	if code := runNew([]string{"alpha", "--permission-mode", "nope", "--cwd", a.cwd}); code != 2 {
 		t.Errorf("runNew with unknown --permission-mode = %d, want 2", code)
 	}
+	a.assertNoLaunch(t)
 }
 
 // TestRunNew_acceptsEachValidPermissionMode asserts every documented mode passes
