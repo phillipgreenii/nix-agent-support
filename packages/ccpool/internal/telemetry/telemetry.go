@@ -119,7 +119,7 @@ func Init(ctx context.Context) (shutdown func(context.Context) error) {
 		return noopShutdown
 	}
 
-	metricExp, err := otlpmetricgrpc.New(ctx)
+	metricExp, err := newOTLPMetricExporter(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"ccpool: OTel metric exporter init failed (%v); telemetry disabled\n", err)
@@ -179,4 +179,15 @@ func newOTLPLogExporter(ctx context.Context) (sdklog.Exporter, error) {
 	default:
 		return otlploghttp.New(ctx)
 	}
+}
+
+// newOTLPMetricExporter builds the gRPC OTLP metric exporter with DELTA
+// temporality: every ccpool invocation is a fresh short-lived process, so
+// cumulative counters would each restart from 0 into one shared series and
+// increase() would read 0. Gauges are unaffected by the selector.
+func newOTLPMetricExporter(ctx context.Context) (*otlpmetricgrpc.Exporter, error) {
+	return otlpmetricgrpc.New(
+		ctx,
+		otlpmetricgrpc.WithTemporalitySelector(sdkmetric.DeltaTemporalitySelector),
+	)
 }

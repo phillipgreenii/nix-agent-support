@@ -8,6 +8,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 	logglobal "go.opentelemetry.io/otel/log/global"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
@@ -107,4 +109,28 @@ func TestNewSlogHandler_NoProvider_NoError(t *testing.T) {
 		t.Fatal("NewSlogHandler returned nil")
 	}
 	slog.New(h).Warn("probe", "k", "v")
+}
+
+// TestNewOTLPMetricExporter_DeltaTemporality verifies counters and histograms
+// export as deltas (many short-lived processes share one series downstream)
+// while up-down counters and gauges keep the cumulative/default behavior.
+func TestNewOTLPMetricExporter_DeltaTemporality(t *testing.T) {
+	exp, err := newOTLPMetricExporter(context.Background())
+	if err != nil {
+		t.Fatalf("newOTLPMetricExporter: %v", err)
+	}
+	t.Cleanup(func() { _ = exp.Shutdown(context.Background()) })
+
+	for _, k := range []sdkmetric.InstrumentKind{
+		sdkmetric.InstrumentKindCounter,
+		sdkmetric.InstrumentKindHistogram,
+		sdkmetric.InstrumentKindObservableCounter,
+	} {
+		if got := exp.Temporality(k); got != metricdata.DeltaTemporality {
+			t.Errorf("Temporality(%v) = %v, want delta", k, got)
+		}
+	}
+	if got := exp.Temporality(sdkmetric.InstrumentKindGauge); got != metricdata.CumulativeTemporality {
+		t.Errorf("Temporality(Gauge) = %v, want cumulative", got)
+	}
 }
