@@ -1767,3 +1767,65 @@ func TestBeadsDirFor(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// TestDispatch_absorbDuplicate_readyNoPrompt_sendsPrompt is the pg2-oq6cy
+// regression: a launch timeout left a session that later reached ready but
+// never received its prompt. Every re-dispatch found it by stable name and
+// absorbed it WITHOUT ever sending, so each waited to the budget hard stop. A
+// live session still in `ready` (no working transition, i.e. no prompt ever
+// delivered) must get the nudge Sent to it (on its own ExternalID) instead.
+func TestDispatch_absorbDuplicate_readyNoPrompt_sendsPrompt(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	stuck := ccpool.Session{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady, CWD: t.TempDir()}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("dispatch should succeed once the prompt is sent (bead closes), got %v", err)
+	}
+	if got := cc.Sent; len(got) != 1 || got[0] != "att-1" {
+		t.Errorf("an idle-ready never-prompted duplicate must be Sent the prompt on its own id; Sent=%v", got)
+	}
+	if got := cc.Ensured; len(got) != 0 {
+		t.Errorf("must not launch a second session; Ensured=%v", got)
+	}
+}
+
+// TestDispatch_absorbDuplicate_readyNoPrompt_sendFails_closesAndUnclaims: if
+// the prompt cannot be delivered to the stranded ready session, purge-close it
+// (so the next dispatch relaunches fresh) and hand the bead back.
+func TestDispatch_absorbDuplicate_readyNoPrompt_sendFails_closesAndUnclaims(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+	stuck := ccpool.Session{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateReady, CWD: t.TempDir()}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{stuck}}, SendErr: ccpool.ErrPromptNotIngested}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+
+	res, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatalf("a failed send to the stranded session must surface an error")
+	}
+	if v := verbOf(res); v != report.Unclaimed {
+		t.Errorf("bead must be handed back unclaimed, got %q", v)
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != "att-1" || !cc.ClosedPurge[0] {
+		t.Errorf("stranded session must be purge-closed; Closed=%v purge=%v", cc.Closed, cc.ClosedPurge)
+	}
+}

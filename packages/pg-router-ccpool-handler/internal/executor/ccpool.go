@@ -507,6 +507,26 @@ func crashOrphaned(s ccpool.Session) bool {
 // a first-time dispatch of the same work would have reported.
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
 	cc := d.Role.CCPool
+	// pg2-oq6cy: a live session still in `ready` never took a turn — no prompt
+	// was ever delivered (a healthy dispatched session moves ready->working
+	// within seconds of Send, and afterwards settles at idle, never back to
+	// ready). This is the leftover of a launch that timed out after ccpool
+	// reported failure but before the session became ready: absorbing it
+	// without Send would wait to the budget hard stop on every re-dispatch
+	// (28 review budget events for one bead, pg2-uwnjp). Deliver the prompt to
+	// it instead, into its own worktree. If that fails, purge-close it so the
+	// next dispatch relaunches fresh, and hand the bead back.
+	if existing.Live && existing.State == ccpool.StateReady {
+		nudge := r.renderNudge(cc, d, existing.CWD)
+		slog.Warn("absorbed duplicate is ready but never received its prompt; sending it",
+			"role", d.Role.Name, "bead", d.Item.ID, "session", existing.ExternalID)
+		if err := r.deps.CC.Send(ctx, existing.ExternalID, nudge, ccpool.ModeNoWait); err != nil {
+			_ = r.deps.CC.Close(ctx, existing.ExternalID, true)
+			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+			return failureAction(report.Unclaimed, d.Item.ID),
+				fmt.Errorf("send %s: stranded ready session: %w", existing.ExternalID, err)
+		}
+	}
 	var werr error
 	if budgetUnlimited(cc.Budget) {
 		werr = r.waitDone(ctx, nil, d, existing.ExternalID)
