@@ -25,9 +25,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,21 +70,57 @@ func TestStaticSchemaChecks(t *testing.T) {
 // was resource contention starving the build, not a real regression — a
 // warm-cache build here normally finishes in ~1s. 5 minutes gives headroom
 // under load while still failing fast on a genuine build break.
+//
+// The binary is built ONCE per test process (pg2-3q2g6) and shared by every
+// live test: previously each of the five callers ran its own `go build`, so
+// under a saturated host the cold first compile and the later relinks each
+// competed for CPU; one build removes four of five link steps from the
+// critical path. The shared output dir is removed by TestMain.
 func buildHandlerBinary(t *testing.T) string {
 	t.Helper()
-	moduleRoot, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatalf("resolve module root: %v", err)
+	handlerBuild.once.Do(func() {
+		moduleRoot, err := filepath.Abs("..")
+		if err != nil {
+			handlerBuild.err = fmt.Errorf("resolve module root: %w", err)
+			return
+		}
+		dir, err := os.MkdirTemp("", "pg-router-ccpool-handler-conformance-")
+		if err != nil {
+			handlerBuild.err = fmt.Errorf("make build dir: %w", err)
+			return
+		}
+		handlerBuild.dir = dir
+		bin := filepath.Join(dir, "pg-router-ccpool-handler")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/pg-router-ccpool-handler")
+		cmd.Dir = moduleRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			handlerBuild.err = fmt.Errorf("go build ./cmd/pg-router-ccpool-handler: %w\n%s", err, out)
+			return
+		}
+		handlerBuild.bin = bin
+	})
+	if handlerBuild.err != nil {
+		t.Fatalf("%v", handlerBuild.err)
 	}
-	bin := filepath.Join(t.TempDir(), "pg-router-ccpool-handler")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/pg-router-ccpool-handler")
-	cmd.Dir = moduleRoot
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build ./cmd/pg-router-ccpool-handler: %v\n%s", err, out)
+	return handlerBuild.bin
+}
+
+// handlerBuild memoizes buildHandlerBinary's single build for the process.
+var handlerBuild struct {
+	once sync.Once
+	bin  string
+	dir  string
+	err  error
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if handlerBuild.dir != "" {
+		_ = os.RemoveAll(handlerBuild.dir)
 	}
-	return bin
+	os.Exit(code)
 }
 
 // runBinary invokes bin's subcommand with request piped on stdin, returning
