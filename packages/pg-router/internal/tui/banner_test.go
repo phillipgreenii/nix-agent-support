@@ -179,7 +179,7 @@ func TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields(t *testing.T) {
 			Core: CoreInfo{
 				State:      "started",
 				Version:    "0.0.0-8a00aeb8",
-				ConfigPath: "/Volumes/ziprecruiter/pristine/.pg-router/config.toml",
+				ConfigPath: "/Volumes/gitrepos/ziprecruiter/pristine/.pg-router/config.toml",
 				StartedAt:  time.Now().Add(-4 * time.Minute),
 			},
 		},
@@ -216,7 +216,7 @@ func TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields(t *testing.T) {
 	if !strings.Contains(lines[2], "gates: oper[.] cicd[.]") {
 		t.Errorf("line 3 must carry the gates summary; got %q", lines[2])
 	}
-	if !strings.Contains(lines[2], "config: ") || !strings.Contains(lines[2], "/Volumes/ziprecruiter/pristine/.pg-router/config.toml") {
+	if !strings.Contains(lines[2], "config: ") || !strings.Contains(lines[2], "/Volumes/gitrepos/ziprecruiter/pristine/.pg-router/config.toml") {
 		t.Errorf("line 3 must still carry the full config path; got %q", lines[2])
 	}
 }

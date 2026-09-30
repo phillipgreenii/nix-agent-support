@@ -125,7 +125,7 @@ func TestTranscriptPathSlugReplacesDots(t *testing.T) {
 	cases := []struct {
 		cwd, want string
 	}{
-		{"/Volumes/ziprecruiter/pg-router/worktrees/zr-0t0z7.3", "/home/.claude/projects/-Volumes-ziprecruiter-pg-router-worktrees-zr-0t0z7-3"},
+		{"/Volumes/gitrepos/ziprecruiter/pg-router/worktrees/zr-0t0z7.3", "/home/.claude/projects/-Volumes-gitrepos-ziprecruiter-pg-router-worktrees-zr-0t0z7-3"},
 		{"/Users/phil/repo/.claude/worktrees/pg2-2j5ac.27-daily-focus-design", "/home/.claude/projects/-Users-phil-repo--claude-worktrees-pg2-2j5ac-27-daily-focus-design"},
 	}
 	for _, c := range cases {
