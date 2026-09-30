@@ -7,9 +7,14 @@
 This ADR is the durable record of the decisions behind the entity change flow: how pg-connector,
 pg-desk, pg-router and per-type deciders divide the work of noticing that an entity (a PR, an
 issue, a thread) changed and of deciding what work should exist as a result. It transcribes the
-twenty-four rows of the design's decision log, each identified by its S-row label, and groups them into five clusters: ownership split, pull-through, log and cursors, deciders, and
+twenty-eight rows of the design's decision log, each identified by its S-row label, and groups them into five clusters: ownership split, pull-through, log and cursors, deciders, and
 cutover. Later phases of the program (epic `pg2-2j5ac.52`) cite this ADR by number instead of the
 design's decision log.
+
+**Amended 2026-09-30** (task `pg2-2j5ac.52.2.2`): rows S25 through S28 were added. S25 and S26
+answer the two design questions that were still open when this ADR was accepted (bead
+`pg2-2j5ac.52.1`); S27 and S28 record two further operator rulings from 2026-09-29. Each is in
+the cluster it belongs to, and the text it supersedes was rewritten in place.
 
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
@@ -41,7 +46,7 @@ decider split and overlaps this flow's triggering and store contract.
 
 ### Decision
 
-This cluster records S1, S2, S3, S10, S23.
+This cluster records S1, S2, S3, S10, S23, S25.
 
 - **S1** — pg-desk is a caching/decorating layer over pg-connector, multi-entity from the start.
   Operator, in session, 2026-09-25, restated 2026-09-29. Why: it generalizes pg-desk beyond being
@@ -69,6 +74,35 @@ This cluster records S1, S2, S3, S10, S23.
   split and assumed the existing `sync`/`run` triggering; most of its content is exactly the issue
   hydration this flow needs, so only its triggering and ledger parts conflict. The `.46`, `.48` and
   `.27` bead bodies were amended with this ruling the same day.
+- **S25** — Links (answering the open question Q-A, what records the PR-to-work-item link) are
+  BOTH derived and externally managed. Derived: "if we can extract a reference from one entity, we
+  should link it", for ANY entity type (a thread can link to PRs, Jira issues, commits, branches or
+  other threads and messages); each type's link extraction lives in pg-desk, and not every
+  extractor ships now, but the design MUST NOT be limited to PR-to-issue links. External: links
+  added and removed from outside pg-desk, by an operator or a decider, with
+  `pg-desk <type> link add <id> <type>:<id> [--relation R] [--reason TEXT]` and
+  `pg-desk <type> link remove <id> <type>:<id>`. Every link records its origin:
+  `derived:<extractor>`, or `external:<actor>` with when and an optional reason. External MUST NOT
+  override internal; external MAY add links and MAY remove links previously added externally.
+  `remove` on a link that exists only as derived errors ("derived from `<extractor>`; change the
+  source entity"); `add` on an already-derived link records the external claim too, so the link
+  survives if the source later changes. Derived links are rebuilt on every hydration of the entity
+  and external links are untouched by that; every `add` or `remove` appends a `link_changed`
+  record for both entities, and `show` lists each link on both entities with its origin.
+  Suppressing a derived link is not allowed for now (a separate suppress/unsuppress pair requiring
+  an explanation MAY come later). The minimum extractor set ships with the hydration phase:
+  work-item links from each work item's own work-item-contract fields (`repo` and `pr_number`; a
+  child's parent anchor), plus the existing Jira-key and thread scans rebuilt as extractors. A link
+  is derived whenever an entity's own data names the other entity; external is for everything
+  else. Operator ruling (Phillip), 2026-09-29, in the DECISION comment on bead `pg2-2j5ac.52.1`;
+  the first-extractor set and the derived-versus-external rule were the session's default, not
+  objected to. Why: the composite view's links, the `work_changed` change source and every PR rule
+  read linked work, and the old bead-to-PR mapping lived in the `ledger` table this flow drops.
+  Deriving links from data the entities already carry needs no extra writer, and external links
+  cover what no entity's data names. Recognizing work items only from work-item-contract metadata
+  fields and parent links keeps work-kind and `dedup_key` literals out of pg-desk, so pg-desk still
+  decides nothing. Beads stay as designed; routing work items directly to roles is a separate,
+  larger discussion (bead `pg2-v4fot`).
 
 The resulting ownership, from the design's architecture overview: pg-connector owns talking to
 external systems (summary-level `changes` with per-consumer cursors, targeted detail reads,
@@ -97,6 +131,11 @@ by routing; pg-desk depends on neither pg-router nor deciders. The flow MUST NOT
   `merge-request` anchor is kept.
 - The generic entity pipeline design keeps its gather/interpret core for issues, is marked
   approved, and now names the entity change flow design as its governing document.
+- pg-desk's `xref` table gains `origin`, `relation`, `actor`, `acted_at` and `reason` at the
+  cutover, keyed by link, relation and origin, so one link can carry a derived and an external
+  claim at once; every pre-cutover row becomes origin `derived:legacy`, relation `references`
+  (S25). A false-positive derived link cannot be hidden today; the fix is to change the source
+  entity, or later a dedicated suppress pair.
 
 ## Pull-through
 
@@ -104,14 +143,18 @@ by routing; pg-desk depends on neither pg-router nor deciders. The flow MUST NOT
 
 pg-router's sources called `pg-connector <type> changes` and then told pg-desk to ingest
 (`pg-desk run pr|issue|thread`), so change detection happened before the layer that holds the
-decorations, annotations and cross-entity links. pg-connector's PR summary already carried
-`head_sha`, `mergeable`, `merge_state_status` and `checks_rollup`, and `changes` hashes the whole
-summary, so pushes, CI and conflict changes were already detected. It lacked `updated_at`, a stable
-backend id and any review or comment signal, so new comments and reviews were missed.
+decorations, annotations and cross-entity links. pg-connector's `schema.PR` had `head_sha`,
+`mergeable`, `merge_state_status` and `checks_rollup`, and `changes` hashes the whole summary. The
+list query filled `head_sha` and `checks_rollup`, so pushes and CI changes were already detected,
+but it never selected `mergeable` or `merge_state_status` (the fact S28 corrects), so a conflict
+change was not. The summary lacked `updated_at`, a stable backend id and any review or comment
+signal, so new comments and reviews were missed. The exit-code schemes of pg-connector, pg-desk and
+pg-router also differ: pg-connector's behavior invariant `INV-EXIT-1` gives a targeted op 0/4/1,
+and pg-router's command-query runner discards a source's whole output on any non-zero exit.
 
 ### Decision
 
-This cluster records S4, S5, S6, S7, S19, S22.
+This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
 
 - **S4** — pg-router's timer polls pg-desk for changes; pg-desk returns one event per changed
   entity with its change kinds; events route to deciders. Operator, in session, 2026-09-29. Why: it
@@ -138,6 +181,30 @@ This cluster records S4, S5, S6, S7, S19, S22.
   `Matches` does `b == evt.Type`, and `internal/config/config.go`'s orphan checks compare
   emitted/bound strings the same way, so a wildcard bind would silently match nothing. Every
   source's `emits` and every role's `binds` MUST list each `<type>.<kind>` explicitly.
+- **S27** — Each tool keeps its own exit-code scheme; the schemes are not bound together, and an
+  adapter translates between what it calls and who calls it. `pg-connector pr review submit`
+  follows pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, including a
+  review that posted when the `supersede_pending` delete failed, which the JSON output reports;
+  4 = `not_found`; 1 = any other error. The source adapter translates pg-desk's codes into
+  pg-router's command-query contract instead of mirroring them: pg-desk 0 or 2 becomes exit 0,
+  emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3
+  becomes exit 1. Operator ruling (Phillip), 2026-09-29, on escalation bead `pg2-2j5ac.52.24`. Why:
+  "the adaptor should do whatever is expected based on who called it and what it calls ... we
+  shouldn't expect exit code specs to be exactly the same for pg-router, pg-connector, pg-desk. If
+  there is an obvious improvement between them, we can consider it, but we shouldn't bind them
+  together." The design's earlier review-submit scheme (0/2/3) conflicted with `INV-EXIT-1`, which
+  also forbids `not_found` sharing a code with a real failure; and because pg-router discards a
+  source's output on any non-zero exit, an adapter mirroring pg-desk's exit 2 (records written,
+  cursor advanced) would lose records.
+- **S28** — The GitHub backend's list query fills `mergeable`, carried verbatim (including
+  `UNKNOWN`); `merge_state_status` stays show-only. Operator ruling (Phillip), 2026-09-29, option 1
+  on the finding recorded on bead `pg2-2j5ac.52.6`, correcting a fact verified against code. Why:
+  the design had claimed both fields were already in the summary, but the list query selected
+  neither, so a PR turning conflicting surfaced only through another summary change or the age
+  sweep, not as a prompt `mergeability_changed`. `merge_state_status` moves with every CI status
+  change and base-branch push, so in the summary it would flood `changes`. GitHub computes
+  mergeability lazily; an `UNKNOWN` settling costs one `changed` (one re-hydration, no work), which
+  the operator accepted.
 
 **Addition beyond the design's decision log (not one of its rows): the Phase 7 adapter form.** The
 source adapter that translates pg-desk's change envelope into pg-router items is a new binary,
@@ -161,7 +228,14 @@ item. The adapter still MUST NOT add or drop records or decide anything.
   contract) is reshaped and not edited by this ADR: the adapter is now the new binary
   `pg-router-source-pg-desk`, fed by pg-desk's change envelope.
 - `schema.PR` gains fields additively (including `node_id`), so a pg-connector change here is
-  compatible with a consumer that has not yet learned the new fields.
+  compatible with a consumer that has not yet learned the new fields. Adding `mergeable` to the
+  list results changes every PR's summary hash once, so the first `changes` run after it ships
+  reports every already-tracked PR as changed once (S28). `base_sha` (the base commit that
+  `resolve-conflict`'s context needs, S26) and `merge_state_status` stay show-only, because each
+  moves with events outside the PR itself.
+- Every tool's exit codes are read in its own terms: a caller that needs another tool's outcome
+  translates it at the seam (S27), so pg-connector's `INV-EXIT-1` and its targeted-op
+  classification stay as they are.
 
 ## Log and cursors
 
@@ -213,7 +287,7 @@ PRs, what stops work, and which PRs a feedback cycle may touch.
 
 ### Decision
 
-This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24.
+This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24, S26.
 
 - **S9** — There may be deciders for every entity type. Operator, in session, 2026-09-29. Why: it
   keeps the decider contract generic across entity types; day one still ships only PR rules (S20).
@@ -256,6 +330,23 @@ This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24.
   `all.reopened` reopens it. To stop work on a PR, the operator uses `hide` (S15). Operator ruling
   ("C: always reopen"), 2026-09-29. Why: one suppression mechanism (`hide`) instead of a second,
   anchor-specific dismissal state; the anchor stays a faithful per-PR tracking object (S21).
+- **S26** — No decider rule may depend on who closed a work item (answering the open question
+  Q-B, how a person-closed work item is told from an agent-closed one: it is not). A `review-pr`,
+  `fix-ci`, `resolve-conflict` or `process-feedback` work item is not recreated for the same
+  context, however it was closed. The context per kind: `review-pr`, the head commit, with
+  `force-review` still the explicit override; `process-feedback`, the feedback, where more
+  feedback means a new unaddressed comment not covered by an earlier cycle and a changed digest
+  alone is not enough; `resolve-conflict`, the tuple (head branch, head commit, base branch, base
+  commit), never recreated or reopened for the same tuple, a different tuple being a different
+  conflict; `fix-ci`, one item per head commit carrying the list of failing build ids (a build id
+  is the CI run id plus its attempt number), where a new failing build id on the same commit
+  reopens the item if it was closed and adds the id, CI green closes it, and a new commit gets a
+  new item. Operator ruling (Phillip), 2026-09-29, in the DECISION comment on bead
+  `pg2-2j5ac.52.1`. Why: "if we can't consistently track who closed a bead, then we can't have any
+  rule which requires it." bd records a closer only in its Dolt events table, which no bd CLI verb
+  exposes, and even there only as reliably as actor discipline allows (the default actor is the
+  human's own name). "a review-pr, fix-ci, resolve-conflict, process-feedback should not be
+  recreated for the same context."
 
 ### Consequences
 
@@ -268,11 +359,16 @@ This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24.
   amendment.
 - The 2026-09-09 design's D26 (daily-focus's focus sync step) is reshaped and not edited by this
   ADR: the focus step becomes a focus decider, tracked as bead `pg2-2j5ac.27`.
-- Two operator design questions remain open in bead `pg2-2j5ac.52.1`: what records PR work-item
-  links, and how a person-closed work item is told from an agent-closed one. This ADR records no
-  answer to either and adds no rows for them. Follow-up task `pg2-2j5ac.52.2.2` (blocked by
-  `pg2-2j5ac.52.1`) records the answers as further decisions, and amends this ADR, once the
-  operator gives them.
+- S26 removes every closer-dependent mechanism from the design: the person-dismissed precedence
+  step of the PR decider rules, the person-dismiss operator control and the composite view's
+  per-link `closed_by` are dropped, and the `plan` skip reason `person-dismissed` becomes
+  `already handled` (a work item already exists for the current context). Closing a work item,
+  by anyone, simply marks that context handled.
+- S26's contexts need two connector fields: `schema.PR.BaseSHA` for `resolve-conflict` (bead
+  `pg2-2j5ac.52.6.2`, show path only) and `schema.CIRun.Attempt` for `fix-ci` (bead
+  `pg2-2j5ac.52.6.3`), because GitHub keeps a run's id when it is re-run. Each work kind's dedup
+  key names its context, so `resolve-conflict` never reopens a closed item, while a
+  `process-feedback` cycle created for new feedback is a new item rather than a reopened one.
 - Because no issue or thread decider ships on day one, pg-desk's issue and thread coverage is
   watched, hydrated and logged but never acted on until an operator configures a query/role pair
   for a decider of that type.
@@ -324,5 +420,7 @@ This cluster records S11.
   entity rule), and on ADR 0062's pg-connector Tier-1 umbrella and Tier-2 backend architecture.
 - Consistent with ADR 0064's pg-pr retirement: the flow does not depend on pg-pr, and the review
   role's `pg-pr review submit` call is one of the removals the flow makes.
-- Tracked under program epic `pg2-2j5ac.52`, docket `pg2-2j5ac.52.2`; open design questions in bead
-  `pg2-2j5ac.52.1`, with follow-up task `pg2-2j5ac.52.2.2`.
+- Tracked under program epic `pg2-2j5ac.52`, docket `pg2-2j5ac.52.2`. The design questions Q-A and
+  Q-B were answered in bead `pg2-2j5ac.52.1` (S25, S26), the exit-code ruling was made on
+  escalation bead `pg2-2j5ac.52.24` (S27) and the mergeability ruling on the `pg2-2j5ac.52.6`
+  finding (S28); task `pg2-2j5ac.52.2.2` recorded all four here.
