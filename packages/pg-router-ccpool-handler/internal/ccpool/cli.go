@@ -270,6 +270,16 @@ func (c *CLIRunner) Capacity(ctx context.Context) (Capacity, error) {
 	return capacity, nil
 }
 
+// EmitCapacity runs `ccpool capacity --emit-metrics`, which makes ccpool itself
+// push the ccpool_pool_capacity OTLP gauge (pool attribute = basename of the
+// pool's resolved root, resolved by ccpool from the CCPOOL_POOL this runner
+// sets). Opt-in: the admission-gate path uses Capacity (no flag), so it never
+// emits. Nothing is decoded; only success/failure matters.
+func (c *CLIRunner) EmitCapacity(ctx context.Context) error {
+	_, err := c.ccpool(ctx, quickCallTimeout, "capacity", "--emit-metrics")
+	return err
+}
+
 // List: ccpool list --all --json.
 func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
 	out, err := c.ccpool(ctx, quickCallTimeout, "list", "--all", "--json")

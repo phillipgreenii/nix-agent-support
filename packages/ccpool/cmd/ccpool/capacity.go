@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
 
 // runCapacity reports the pool's occupancy: max_sessions, live, preserved,
@@ -19,6 +20,9 @@ import (
 func runCapacity(args []string) int {
 	fs := flag.NewFlagSet("capacity", flag.ExitOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	// Opt-in, off by default: the dispatch/admission-gate path also calls
+	// `capacity --json` and must not emit metrics (bead pg2-om899.6).
+	emit := fs.Bool("emit-metrics", false, "also emit the ccpool_pool_capacity OTLP gauge")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -36,6 +40,16 @@ func runCapacity(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "capacity: %v\n", err)
 		return 1
+	}
+
+	if *emit {
+		if err := telemetry.RecordPoolCapacity(cfg.PoolRoot, telemetry.PoolCapacity{
+			MaxSessions: int64(c.MaxSessions), Live: int64(c.Live), Preserved: int64(c.Preserved),
+			Counted: int64(c.Counted), Free: int64(c.Free),
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "capacity: emit metrics: %v\n", err)
+			return 1
+		}
 	}
 
 	if *jsonOut {

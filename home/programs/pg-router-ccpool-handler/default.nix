@@ -255,16 +255,17 @@ let
       ]
     );
 
-  # mkPoolMetricsScript (bead pg2-mr0sl): the `poolMetrics` timer's
-  # ExecStart -- one `--pool <name>=<dir>` per role with `ccpool.pool.enable`
-  # (derived from `ccpoolRolesWithOwnPool`, defined further down once
-  # `cfg.roles` is in scope -- see that binding's own doc comment), then an
-  # atomic write of `pool-capacity`'s stdout to `outputPath` (a same-
-  # directory temp file, then `mv -f`, so a scraper never reads a
-  # half-written file). Unlike `mkRegisterExec` above (a single binary
-  # invocation, no redirection needed), this needs a real shell for the
-  # temp-file/redirect/rename dance, hence `pkgs.writeShellScript` rather
-  # than a bare `lib.concatStringsSep` argv string.
+  # mkPoolMetricsScript (bead pg2-mr0sl, reworked by pg2-om899.6): the
+  # `poolMetrics` timer's ExecStart -- one `--pool <name>=<dir>` per role with
+  # `ccpool.pool.enable` (derived from `ccpoolRolesWithOwnPool`, defined
+  # further down once `cfg.roles` is in scope). `pool-capacity` now makes
+  # ccpool push the ccpool_pool_capacity OTLP gauge itself (pool = basename
+  # of the resolved dir); the OTEL_* env comes from the caller (the darwin
+  # LaunchAgent's obs.mkEmitterEnv). The former pool-capacity.prom writer
+  # (mktemp with no trap, leaking a temp file on every failed run) is gone,
+  # so no shell redirection is needed -- but the script is kept as a
+  # derivation so the systemd/LaunchAgent wiring and its eval checks are
+  # unchanged.
   mkPoolMetricsScript =
     let
       poolArgs = lib.concatMapStrings (
@@ -273,11 +274,7 @@ let
     in
     pkgs.writeShellScript "pg-router-ccpool-handler-pool-metrics" ''
       set -eu
-      outputPath=${lib.escapeShellArg cfg.poolMetrics.outputPath}
-      mkdir -p "$(dirname "$outputPath")"
-      tmp="$(mktemp "$outputPath.XXXXXX")"
-      ${cfg.package}/bin/pg-router-ccpool-handler pool-capacity${poolArgs} > "$tmp"
-      mv -f "$tmp" "$outputPath"
+      exec ${cfg.package}/bin/pg-router-ccpool-handler pool-capacity${poolArgs}
     '';
 
   # roleFileFor renders one role's `roles` entry into the on-disk JSON shape
@@ -1156,8 +1153,10 @@ in
       enable = lib.mkEnableOption ''
         a systemd --user timer that periodically runs
         `pg-router-ccpool-handler pool-capacity` for every role with
-        `ccpool.pool.enable` set, writing Prometheus exposition-format text
-        to `outputPath`. On darwin,
+        `ccpool.pool.enable` set, making ccpool emit the
+        `ccpool_pool_capacity` OTLP gauge (needs OTEL_* env; the darwin
+        LaunchAgent supplies it via obs.mkEmitterEnv, the Linux systemd
+        unit does not). On darwin,
         `darwin/modules/pg-router-ccpool-handler/default.nix` mirrors this
         into a LaunchAgent with a `StartInterval` (this HM systemd unit
         alone is a darwin no-op, matching `periodicDrain`/`daemon`'s own
@@ -1180,26 +1179,13 @@ in
         default = 60;
         description = "Seconds between pool-capacity passes (OnUnitActiveSec/OnBootSec on Linux, StartInterval on darwin).";
       };
-      outputPath = lib.mkOption {
-        type = lib.types.str;
-        default = "${config.home.homeDirectory}/.local/state/pg-router-ccpool-handler/pool-capacity.prom";
-        description = ''
-          Where the rendered Prometheus exposition-format text is written.
-          Written atomically (a same-directory temp file, then renamed) so
-          a textfile-collector-style scraper never reads a half-written
-          file. Ends in `.prom` by convention (node_exporter's textfile
-          collector convention) -- this module does not itself run
-          node_exporter or wire any scrape config; that is
-          deployment-specific.
-        '';
-      };
       script = lib.mkOption {
         type = lib.types.package;
         readOnly = true;
         description = ''
           Read-only output: the rendered pool-capacity script
           (`mkPoolMetricsScript`) -- one `--pool <name>=<dir>` per role with
-          `ccpool.pool.enable`, then an atomic write to `outputPath`.
+          `ccpool.pool.enable`, which triggers ccpool's OTLP capacity emission.
           Exposed (mirroring `handlerCommandDir`/`launchConfigFile`'s own
           cross-module re-export pattern) so
           `darwin/modules/pg-router-ccpool-handler` can wire its own

@@ -3476,6 +3476,18 @@
                                   type = lib.types.attrsOf lib.types.anything;
                                   default = { };
                                 };
+                                # pg2-om899.6: the pool-metrics LaunchAgent merges
+                                # obs.mkEmitterEnv into EnvironmentVariables; a stub
+                                # helper lets the eval check prove that wiring.
+                                mkEmitterEnv = lib.mkOption {
+                                  type = lib.types.raw;
+                                  default =
+                                    { serviceName, protocol }:
+                                    {
+                                      OTEL_SERVICE_NAME = serviceName;
+                                      OTEL_EXPORTER_OTLP_PROTOCOL = protocol;
+                                    };
+                                };
                               };
                               home-manager.users = lib.mkOption {
                                 type = lib.types.attrsOf (
@@ -3704,6 +3716,11 @@
                 assert
                   darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".serviceConfig.StartInterval
                   == 45;
+                # pg2-om899.6: the LaunchAgent carries obs.mkEmitterEnv so the
+                # ccpool child it execs can push the capacity gauge over OTLP.
+                assert
+                  darwinWithPoolMetrics.phillipgreenii.system.launchdServices.userAgents."pg-router-ccpool-handler-pool-metrics".serviceConfig.EnvironmentVariables.OTEL_SERVICE_NAME
+                  == "ccpool";
                 # No HM user opted into poolMetrics -- no LaunchAgent at all
                 # (zero behavior change).
                 assert

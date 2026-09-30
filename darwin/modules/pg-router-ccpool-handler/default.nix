@@ -96,6 +96,21 @@ let
   # imports both -- same defensive pattern as darwin/modules/pa-monitor's/
   # pg-router's own `obs` binding.
   obs = config.phillipgreenii.observability;
+
+  # OTel emitter env for the pool-metrics LaunchAgent (bead pg2-om899.6),
+  # mirroring darwin/modules/ccpool's own pattern: the pool-capacity
+  # subcommand execs `ccpool capacity --emit-metrics` (inherits this env) so
+  # ccpool pushes the ccpool_pool_capacity OTLP gauge. serviceName "ccpool"
+  # because the emitting process is ccpool. `obs ? mkEmitterEnv` guards a
+  # narrower eval fixture / a machine without the observability stack.
+  emitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "ccpool";
+        protocol = "grpc";
+      }
+    else
+      { };
 in
 {
   options.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir = lib.mkOption {
@@ -203,6 +218,7 @@ in
         healthCheck = false; # a one-shot never reaches state=running (pg-ccaudit precedent)
         serviceConfig = {
           StartInterval = poolMetricsCfg.intervalSeconds;
+          EnvironmentVariables = emitterEnv;
           StandardErrorPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stderr.log";
           StandardOutPath = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-stdout.log";
         };
@@ -210,11 +226,10 @@ in
     })
     # pg2-fdtvv: same "no OTel/JSONL logging, default slog to stderr, format
     # = raw" reasoning as the -daemon logSources entry above -- `pool-
-    # capacity`'s own stdout is redirected into the .prom output file by
-    # mkPoolMetricsScript (home/programs/pg-router-ccpool-handler's own
-    # atomic-write wrapper), so this userAgent's StandardOutPath/
-    # StandardErrorPath carry only the wrapping script's/subcommand's
-    # stderr diagnostics -- still this agent's real (and only) log signal.
+    # capacity` now emits over OTLP (pg2-om899.6) and prints nothing on
+    # success, so this userAgent's StandardOutPath/StandardErrorPath carry
+    # only the subcommand's failure diagnostics -- still this agent's real
+    # log signal.
     (lib.mkIf (poolMetricsEnabledByAnyUser && (obs.enable or false)) {
       phillipgreenii.observability.logSources.pg-router-ccpool-handler-pool-metrics = {
         path = "${stateHome}/pg-router-ccpool-handler/pool-metrics-launchd-*.log";

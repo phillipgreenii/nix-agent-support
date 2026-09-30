@@ -297,6 +297,25 @@ func TestCLI_Capacity(t *testing.T) {
 	}
 }
 
+// EmitCapacity opts in to metric emission with --emit-metrics; the gate-path
+// Capacity call must never carry that flag (bead pg2-om899.6).
+func TestCLI_EmitCapacityPassesFlagAndCapacityDoesNot(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":1}`))
+	if err := cli.EmitCapacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join((*argv)[len(*argv)-1], " "); got != "capacity --emit-metrics" {
+		t.Fatalf("EmitCapacity argv = %q", got)
+	}
+	if _, err := cli.Capacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join((*argv)[len(*argv)-1], " "); strings.Contains(got, "emit") {
+		t.Fatalf("Capacity (admission gate) must not emit; argv = %q", got)
+	}
+}
+
 // Task 5 (ADR 0072): a handler-initiated close must always carry --reason
 // handler, whether or not it purges.
 func TestCLI_ClosePassesHandlerReason(t *testing.T) {

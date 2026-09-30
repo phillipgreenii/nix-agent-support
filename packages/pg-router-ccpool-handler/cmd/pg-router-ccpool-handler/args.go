@@ -37,10 +37,10 @@ Subcommands:
 
   pool-capacity NOT part of the wire contract above (never spawned by
                  pg-router core) — an operational/observability tool run
-                 directly (e.g. by a periodic timer): reports each named
-                 ccpool pool's live capacity as Prometheus exposition-format
-                 text on stdout (--pool <name>=<dir>, repeatable; bead
-                 pg2-mr0sl's per-role dedicated-pool metric)
+                 directly (e.g. by a periodic timer): makes ccpool emit
+                 each named pool's capacity as the ccpool_pool_capacity OTLP
+                 gauge (--pool <name>=<dir>, repeatable; OTEL_* env from the
+                 caller; failures on stderr; bead pg2-mr0sl / pg2-om899.6)
 
 Exit codes: 0 ok, 1 unexpected error, 2 usage, 9 busy (a pre-accept decline).
 `

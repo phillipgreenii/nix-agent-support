@@ -15,21 +15,6 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
-// metricPoolCapacity names the Prometheus exposition-format gauge
-// runPoolCapacity/writePoolCapacity emit (bead pg2-mr0sl's "per-pool/per-role
-// capacity metric" acceptance criterion). Deliberately NOT `pg_router_*`:
-// that prefix names packages/pg-router core's own OTel-emitted catalog
-// (internal/metrics's ten declared INV-OBS-1 members, exposed via
-// cmd/pg-router/metrics_http.go) — a wholly different process and transport
-// from this one. This subcommand runs in the pg-router-ccpool-handler
-// binary and writes Prometheus TEXT EXPOSITION FORMAT directly (no OTel SDK,
-// no core dependency, ADR 0065's boundary-crossing floor: pg-router core
-// stays unaware ccpool exists at all), so naming it as if it belonged to
-// that catalog would misattribute it and risk silent drift against
-// INV-OBS-1's own "ten members total" count. The `pg_router_ccpool_handler_`
-// prefix instead names the actual emitting component.
-const metricPoolCapacity = "pg_router_ccpool_handler_pool_capacity"
-
 // poolEntry is one parsed `--pool name=dir` occurrence: name is the
 // operator-facing label (this module's own role name, e.g. "review"/
 // "feedback"/"worker" — home/programs/pg-router-ccpool-handler's nix module
@@ -64,20 +49,21 @@ func (p *poolFlag) Set(v string) error {
 	return nil
 }
 
-// poolCapacityFn resolves one named pool's live ccpool.Capacity — the seam
-// runPoolCapacity's production wiring (ccpoolCapacityFor) and this file's
-// own tests (a fake, zero real processes) both satisfy.
-type poolCapacityFn func(ctx context.Context, dir string) (ccpool.Capacity, error)
+// poolEmitFn asks ONE pool to emit its capacity gauge — the seam
+// runPoolCapacity's production wiring (ccpoolEmitFor) and this file's tests
+// (a fake, zero real processes) both satisfy. It receives only the pool
+// directory: the name half of --pool name=dir is a display label and is
+// never passed to ccpool, so it cannot influence the metric's pool attribute.
+type poolEmitFn func(ctx context.Context, dir string) error
 
-// ccpoolCapacityFor is the production poolCapacityFn: a real
-// ccpool.NewCLIRunnerForPool scoped to dir (the SAME per-pool crossing
-// dispatch.go's own buildDeps uses — INTF-CCH-CCPOOL), reused rather than
-// re-implemented so a query against pool dir goes through the identical
-// CCPOOL_POOL-override mechanism a real dispatch would. config.Default() is
-// safe here: Capacity's own `ccpool capacity --json` call reads none of
-// Config's launch-flag fields (Effort/Model/PermissionMode/...).
-func ccpoolCapacityFor(ctx context.Context, dir string) (ccpool.Capacity, error) {
-	return ccpool.NewCLIRunnerForPool(config.Default(), dir).Capacity(ctx)
+// ccpoolEmitFor is the production poolEmitFn: a real
+// ccpool.NewCLIRunnerForPool scoped to dir (CCPOOL_POOL override) running
+// `ccpool capacity --emit-metrics`. ccpool resolves the pool root through
+// symlinks and emits ccpool_pool_capacity{pool=basename(root),dim=...} over
+// OTLP using the OTEL_* env this process inherited (obs.mkEmitterEnv on the
+// LaunchAgent). config.Default() is safe: no launch-flag fields are read.
+func ccpoolEmitFor(ctx context.Context, dir string) error {
+	return ccpool.NewCLIRunnerForPool(config.Default(), dir).EmitCapacity(ctx)
 }
 
 // runPoolCapacity implements the `pool-capacity` subcommand (bead pg2-mr0sl).
@@ -112,51 +98,25 @@ func runPoolCapacity(args []string) int {
 		fmt.Fprintln(os.Stderr, "pool-capacity: at least one --pool name=dir is required")
 		return conformance.ExitUsage
 	}
-	return writePoolCapacity(os.Stdout, pools.entries, ccpoolCapacityFor)
+	return emitPoolCapacity(os.Stderr, pools.entries, ccpoolEmitFor)
 }
 
-// writePoolCapacity renders each entry's live capacity as Prometheus
-// exposition-format text to w: one gauge sample per Capacity dimension
-// (max_sessions/live/preserved/counted/free), labeled role=<name>,
-// pool=<dir>. Entries are sorted by name first for deterministic output —
-// callers (and diffs of captured output in tests) must not depend on
-// argv order.
-//
-// A pool whose capacity lookup fails (ccpool unreachable, pool dir
-// unreadable, ...) is reported as a `#`-prefixed comment naming the
-// failure and excluded from the metric series — one broken pool must not
-// blank out the other pools' real numbers, and a comment line is inert to
-// any Prometheus text-format parser (ignored, never a parse error).
-// Returns conformance.ExitError iff at least one pool failed (so a caller's
-// own log/journal still notices), conformance.ExitOK otherwise — either way
-// every pool that COULD be queried was already written.
-func writePoolCapacity(w io.Writer, pools []poolEntry, capacityFor poolCapacityFn) int {
+// emitPoolCapacity triggers capacity emission for every entry, sorted by name
+// for deterministic ordering. A failing pool is reported on w as a
+// `pool-capacity:` line and does not stop the other pools; the result is
+// conformance.ExitError iff at least one pool failed. Nothing is written for
+// healthy pools: the data goes out over OTLP, not stdout (the former
+// pool-capacity.prom exposition text and its temp-file writer are retired).
+func emitPoolCapacity(w io.Writer, pools []poolEntry, emit poolEmitFn) int {
 	sorted := append([]poolEntry(nil), pools...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].name < sorted[j].name })
-
-	fmt.Fprintf(w, "# HELP %s ccpool pool capacity, per role/pool and dimension (bead pg2-mr0sl)\n", metricPoolCapacity)
-	fmt.Fprintf(w, "# TYPE %s gauge\n", metricPoolCapacity)
 
 	ctx := context.Background()
 	failed := 0
 	for _, p := range sorted {
-		c, err := capacityFor(ctx, p.dir)
-		if err != nil {
+		if err := emit(ctx, p.dir); err != nil {
 			failed++
-			fmt.Fprintf(w, "# pool-capacity: role=%q pool=%q: %v\n", p.name, p.dir, err)
-			continue
-		}
-		for _, dim := range []struct {
-			name string
-			val  int
-		}{
-			{"max_sessions", c.MaxSessions},
-			{"live", c.Live},
-			{"preserved", c.Preserved},
-			{"counted", c.Counted},
-			{"free", c.Free},
-		} {
-			fmt.Fprintf(w, "%s{role=%q,pool=%q,dim=%q} %d\n", metricPoolCapacity, p.name, p.dir, dim.name, dim.val)
+			fmt.Fprintf(w, "pool-capacity: role=%q dir=%q: %v\n", p.name, p.dir, err)
 		}
 	}
 	if failed > 0 {
