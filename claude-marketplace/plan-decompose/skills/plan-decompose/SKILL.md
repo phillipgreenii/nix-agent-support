@@ -479,8 +479,9 @@ mid-decomposition (`curating`, `failed:<phase>`, and the like belong to mode `de
 RESUME). Run steps 3–6 with NO `amend-design`: skip steps 1–2 (no pre-check, no `pd_rev`
 bump), take `R` = the docket's current `pd_rev`, and set `pd_phase=reconciling:<R>` for the
 run. Step 3's multi-revision test reads each earlier revision's amended sections from the run
-that bumped `pd_rev` to it, or from a diff of the recoverable design texts. Head step 6's report `catch-up at <R>, no amendment` — it is never
-the amended-sections record for any revision. This is the remedy whenever a stamp-mismatch
+that bumped `pd_rev` to it, or from a diff of the recoverable design texts. Head step 6's
+report `catch-up at <R>, no amendment` — it is never the amended-sections record for any
+revision. This is the remedy whenever a stamp-mismatch
 release lands on a docket whose last reconcile completed.
 
 **Resuming `reconciling:<R>`** (an aborted or interrupted reconcile): with no new amendment,
