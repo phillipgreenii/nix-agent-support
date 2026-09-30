@@ -572,3 +572,33 @@ state:
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+// TestCanonicalHash_MergeableUnknownDoesNotFlap pins bead pg2-tgkuk:
+// GitHub's transient "UNKNOWN" mergeable state must not change the hash
+// (else every PR re-emits "changed" after each base push), while a real
+// conflict start/stop still must.
+func TestCanonicalHash_MergeableUnknownDoesNotFlap(t *testing.T) {
+	mk := func(m string) json.RawMessage {
+		data, err := json.Marshal(map[string]any{"id": "r#1", "title": "t", "mergeable": m})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	h := func(m string) string {
+		s, err := canonicalHash(mk(m))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if h("MERGEABLE") != h("UNKNOWN") {
+		t.Error("MERGEABLE and UNKNOWN must hash alike")
+	}
+	if h("MERGEABLE") == h("CONFLICTING") {
+		t.Error("CONFLICTING must hash differently from MERGEABLE")
+	}
+	if h("UNKNOWN") == h("CONFLICTING") {
+		t.Error("CONFLICTING must hash differently from UNKNOWN")
+	}
+}

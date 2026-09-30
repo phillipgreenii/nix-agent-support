@@ -353,12 +353,37 @@ func canonicalHash(entity json.RawMessage) (string, error) {
 	}
 	delete(fields, "as_of")
 	delete(fields, "stale")
+	normalizeMergeableForHash(fields)
 	data, err := json.Marshal(fields)
 	if err != nil {
 		return "", fmt.Errorf("ledger: encode entity for hashing: %w", err)
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// normalizeMergeableForHash collapses a PR's "mergeable" field to its
+// conflict signal for hashing only (bead pg2-tgkuk). GitHub recomputes
+// mergeability lazily after every base-branch push and reports the interim
+// state as "UNKNOWN", so the raw value flaps MERGEABLE -> UNKNOWN ->
+// MERGEABLE across polls with no real change; hashing it verbatim made
+// every open PR report "changed" repeatedly (pr.changed bursts of ~every
+// open PR). The only transition consumers care about is a PR starting or
+// stopping conflicting, so anything other than "CONFLICTING" hashes alike.
+// The emitted entity keeps the verbatim value; only the hash is normalized.
+func normalizeMergeableForHash(fields map[string]json.RawMessage) {
+	raw, ok := fields["mergeable"]
+	if !ok {
+		return
+	}
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return
+	}
+	if v == "CONFLICTING" {
+		return
+	}
+	delete(fields, "mergeable")
 }
 
 // entityID extracts entity's own "id" field — every schema entity type
