@@ -125,6 +125,28 @@ The cutover makes these changes, and no others:
 The cutover does not append to `change_log`, register any consumer, or write any key other than
 the reserved keys above; those belong to the work that uses these tables.
 
+## Entity versions and the change log (schema version 2)
+
+`entity.version` and `change_log` move together, through one write primitive.
+
+- An entity write MUST be conditional on the version the writer read. The write updates the row
+  only where `version` still equals that value, sets `version` to that value plus one, and appends
+  one `change_log` row naming the new version, all in ONE transaction. Either both persist or
+  neither does, so a log record's version always names a snapshot that exists.
+- When the stored version differs from the one the writer read (a newer snapshot exists, or the
+  row is absent and the writer expected a nonzero version), the write MUST change nothing and MUST
+  report a typed version conflict. An older snapshot MUST NOT overwrite a newer one. Retrying (re-read,
+  re-classify, write again) is the caller's policy, not the store's.
+- A first write (expected version 0) inserts the row with version 1. A row the cutover left at
+  version 0 is updated in place. When two first writers race for an absent entity, exactly one
+  wins and the other gets the version conflict.
+- Every lost race is counted; the count is exposed for the observability metric.
+- Reads return the entity with its version. On a version-1 store the version reads as 0.
+- `change_log` is append-only. Helpers read it after a given `seq` for one entity type (ascending
+  by `seq`, limited) and per entity (newest first, limited). A caller that must append inside its
+  own transaction uses the same append primitive.
+- These operations need the version-2 schema and refuse a version-1 store.
+
 ## Exit codes, telemetry, and logs
 
 The store has no CLI surface of its own beyond `pg-desk migrate --cutover` above — it is a shared

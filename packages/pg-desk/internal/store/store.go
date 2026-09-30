@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
 )
@@ -60,6 +61,15 @@ func DefaultPath() string {
 type Store struct {
 	sql  *sql.DB
 	path string
+
+	// conflicts counts entity writes that lost an optimistic-version race
+	// (WriteEntityWithLog returning ErrVersionConflict) on this handle.
+	conflicts atomic.Int64
+
+	// betweenBumpAndAppend, when set, runs inside WriteEntityWithLog's
+	// transaction after the entity write and before the change_log append;
+	// a non-nil return aborts the write. Test seam for the atomicity test.
+	betweenBumpAndAppend func() error
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`

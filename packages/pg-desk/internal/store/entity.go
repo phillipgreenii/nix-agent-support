@@ -25,6 +25,12 @@ type Entity struct {
 	Stale       bool
 	ContentHash string
 	HeadSHA     string // set for files/commits only; empty otherwise
+
+	// Version is the optimistic-concurrency version of the row (new schema
+	// only; always 0 when read from an old-schema store). Populated by
+	// reads; UpsertEntity ignores it. WriteEntityWithLog takes the version
+	// the caller read as its expectedVersion and ignores this field.
+	Version int64
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
@@ -50,14 +56,18 @@ func (s *Store) UpsertEntity(e Entity) error {
 // GetEntity returns the entity row for (repo, entityType, entityID), or
 // found=false if no such row exists.
 func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, found bool, err error) {
+	versionCol, err := s.entityVersionColumn()
+	if err != nil {
+		return Entity{}, false, err
+	}
 	var headSHA sql.NullString
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+versionCol+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
@@ -88,8 +98,12 @@ func (s *Store) CountEntities() (int, error) {
 // own "iterate every entity currently in the store" driver reads this list
 // rather than requiring a caller to invent its own full-table scan.
 func (s *Store) ListEntities() ([]Entity, error) {
+	versionCol, err := s.entityVersionColumn()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + versionCol + `
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -101,7 +115,7 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	for rows.Next() {
 		var e Entity
 		var headSHA sql.NullString
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA); err != nil {
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
@@ -111,6 +125,21 @@ func (s *Store) ListEntities() ([]Entity, error) {
 		return nil, fmt.Errorf("store: list entities: %w", err)
 	}
 	return out, nil
+}
+
+// entityVersionColumn returns the SELECT expression for Entity.Version: the
+// version column on the new schema, the constant 0 on the old one (which has
+// no such column). Called before the query is issued, never while a result
+// set is open (see isNewSchema).
+func (s *Store) entityVersionColumn() (string, error) {
+	isNew, err := s.isNewSchema()
+	if err != nil {
+		return "", err
+	}
+	if isNew {
+		return "version", nil
+	}
+	return "0", nil
 }
 
 // nullableString maps an empty Go string to a SQL NULL, so optional
