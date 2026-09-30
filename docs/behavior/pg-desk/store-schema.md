@@ -1,14 +1,18 @@
 # pg-desk — store and schema
 
 `pg-desk` keeps one SQLite store at `$XDG_STATE_HOME/pg-desk/store.db`, migrated with a version
-ladder the same way `pg-pr`'s store is. It MUST be opened in WAL mode with a busy timeout, so
+ladder the same way `pg-pr`'s store is, plus one explicit schema cutover (see "Schema versions and
+the cutover" below). It MUST be opened in WAL mode with a busy timeout, so
 `serve`, the CLI, and `run` can overlap safely. Every pipeline run MUST take a per-`(type, id)`
 lock (the same per-entity locking discipline `pg-pr` uses today) so a cascaded re-run and a direct
 run for the same entity serialize rather than race — this will matter once `pr-pool` dispatches
 handlers in parallel. Rows are keyed by `repo`, so a second repository is additive to the schema
 even though Phase 9 supports exactly one (see "Out of scope" below).
 
-## The six tables
+## The six tables (schema version 1)
+
+These are the tables the migration ladder builds, and the shape of every store until the cutover
+below. "Schema version 2 tables" describes what the cutover changes.
 
 - **`entity`** — the last-gathered facts per `(type, id)`, as of the time `pg-connector` reported
   them, with a staleness flag and a content hash (`head_sha` too, for files/commits). Written only
@@ -41,10 +45,90 @@ even though Phase 9 supports exactly one (see "Out of scope" below).
   this same table but not yet written by any command (a separate, pre-existing gap; not this
   bead's scope).
 
+## Schema versions and the cutover
+
+The store exists in two schema versions. **Version 1** is the six tables above and is what the
+migration ladder builds and maintains. **Version 2** is the schema the entity change flow needs:
+it reshapes some of those tables and adds two. A store moves from version 1 to version 2 only
+through one explicit operator command, never as a side effect of opening the store.
+
+The version is SQLite's `user_version`; `meta.schema_version` mirrors it so that `pg-desk status`
+can print it.
+
+### `pg-desk migrate --cutover`
+
+- It MUST apply the whole version-2 change as ONE transaction. Either every part lands and the
+  store reports version 2, or the store is left exactly as it was (same schema, same rows, same
+  version).
+- It MUST set `user_version` and `meta.schema_version` to 2 inside that same transaction.
+- It MUST be idempotent: on a store already at version 2 it does nothing and exits 0.
+- It MUST refuse a store that is neither at version 1 nor at version 2. A file with no schema at
+  all has nothing to cut over.
+- It is NOT a rung of the migration ladder, so no other command ever runs it. It is meant to run
+  in a maintenance window in which sync is stopped: nothing runs against the old and new schema at
+  the same time.
+
+### Opening the store across the two versions
+
+- Opening the store for ordinary use MUST run the migration ladder (which stops at version 1) and
+  MUST NOT run the cutover.
+- Until the old code paths are retired, that ordinary open MUST accept a store at version 1 or 2.
+  It MUST refuse a store newer than version 2, and it MUST NOT rewrite `meta.schema_version` on a
+  version-2 store.
+- `migrate --cutover`, `status` and `doctor` MUST open the store without running migrations and
+  without the version gate, so they can inspect or change a store in any state, including one that
+  has not been cut over yet and one that has no schema at all. `status` and `doctor` MUST NOT fail
+  merely because the store is on the old schema.
+- A binary built before the cutover MUST refuse a version-2 store loudly (its own version gate
+  reports the store as newer than it supports). That refusal is what makes rolling back after the
+  cutover safe.
+- Every command that needs the version-2 schema MUST check for it right after opening the store,
+  and on a version-1 store MUST refuse with an error that says to run
+  `pg-desk migrate --cutover`.
+- Until the old code paths are retired, access to `entity`, `interpretation` and `xref` MUST work
+  on both versions, because the cutover adds columns to `entity`, drops `interpretation.sync_error`
+  and rebuilds `xref`. The old `annotation` and `ledger` access is available on version 1 only.
+
+## Schema version 2 tables
+
+The cutover makes these changes, and no others:
+
+- **`entity`** gains `version` (integer, not null, default 0), `hydrated_at` (nullable text) and
+  `active` (integer, not null, default 1). Existing rows take the defaults.
+- **`interpretation`** loses `sync_error`. On version 2 a write that carries a sync error is an
+  error, not a silent drop.
+- **`change_log`** is new and append-only: `seq` (integer, autoincrementing primary key), `repo`,
+  `entity_type`, `entity_id`, `version` (integer), `kinds` (a JSON array), `origin` and `at`, all
+  not null, with an index on `(repo, entity_type, entity_id, seq)`. The cutover creates it empty.
+- **`consumer`** is new: `name`, `type`, `cursor` (integer, not null, default 0) and `seen_at`
+  (nullable), keyed by `(name, type)`. The cutover creates it empty.
+- **`annotation`** becomes key/value: `repo`, `entity_type`, `entity_id`, `key`, `value`, `origin`,
+  `set_by`, `set_at`, keyed by `(repo, entity_type, entity_id, key)`. The cutover copies existing
+  state onto reserved keys, each with `origin` `pg-desk` and the original `set_by` and `set_at`:
+  - a PR-level row with a `hidden` value becomes key `hidden`, whose value is the JSON object
+    `{"value": <true|false>, "reason": <text|null>}` (a JSON boolean, not a number);
+  - a PR-level row with a `wip` value becomes key `wip`, whose value is the text `true` or `false`;
+  - a per-comment row with a `disposition` becomes key `disposition.<comment_id>`, whose value is
+    the disposition text;
+  - a row carrying none of those produces no key.
+- **`xref`** records where a link came from and what it means: it gains `origin` (`derived:<extractor>`
+  or `external:<actor>`), `relation`, `actor`, `acted_at` and `reason`, and its first-seen and
+  last-confirmed times are kept. Its primary key becomes
+  `(repo, from_type, from_id, to_type, to_id, relation, origin)`. Derived rows for an entity are
+  replaced on each of that entity's hydrations; external rows persist until removed; no suppression
+  state is stored. Every row that exists at the cutover becomes `origin` `derived:legacy`,
+  `relation` `references` (the legacy marker), and the old cross-reference accessors read and write
+  exactly those rows on a version-2 store.
+- **`ledger`** is dropped. Its sync state is not carried over.
+- **`meta`** is unchanged in shape; `schema_version` becomes `2`.
+
+The cutover does not append to `change_log`, register any consumer, or write any key other than
+the reserved keys above; those belong to the work that uses these tables.
+
 ## Exit codes, telemetry, and logs
 
-The store has no CLI surface of its own — it is a shared data layer every other `pg-desk` command
-opens. A failure to open or migrate it surfaces as the _calling_ command's own failure: for `run`,
+The store has no CLI surface of its own beyond `pg-desk migrate --cutover` above — it is a shared
+data layer every other `pg-desk` command opens. A failure to open or migrate it surfaces as the _calling_ command's own failure: for `run`,
 that is exit `1` (a store error, per [`pipeline-run.md`](pipeline-run.md)); every other command's
 floor is `0` on success and non-zero when the store cannot be opened.
 

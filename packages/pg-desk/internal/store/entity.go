@@ -9,6 +9,13 @@ import (
 // single (repo, entity_type, entity_id), as JSON, per the design doc's
 // section 7.6. Written by the gather stage (a later packet in this
 // docket); this packet exposes the writer/reader only.
+//
+// Schema-dual: the cutover adds version, hydrated_at and active to the
+// entity table, all with defaults. This struct and its accessors name only
+// the original columns, so they work unchanged on both schema versions: on
+// the new schema an upsert leaves the new columns at their defaults (or at
+// whatever the new-schema API last set) and a read ignores them. The
+// accessors for those columns belong to the new API.
 type Entity struct {
 	Repo        string
 	EntityType  string

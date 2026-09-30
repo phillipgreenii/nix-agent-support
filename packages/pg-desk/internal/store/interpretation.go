@@ -31,37 +31,86 @@ type Interpretation struct {
 	Panel          string
 	ReadyToPromote bool
 	Degraded       bool
-	SyncError      string // Phase 10 only; this phase never writes it
+	SyncError      string // old schema only (the cutover drops the column); always empty on the new schema
 	AsOf           string // RFC3339 timestamp
 }
 
+// interpretationSelectList is the column list the readers select. It is
+// schema-dual: the new schema has no sync_error column (the cutover drops
+// it), so there the same position is filled with NULL and SyncError reads
+// back empty.
+func interpretationSelectList(newSchema bool) string {
+	syncError := "sync_error"
+	if newSchema {
+		syncError = "NULL"
+	}
+	return `repo, entity_type, entity_id, ownership, enrichment, urgency, category,
+		        dispositions, approvals, gate_state, match_reasons, panel,
+		        ready_to_promote, degraded, ` + syncError + `, as_of`
+}
+
 // UpsertInterpretation inserts or replaces the interpretation row keyed by
-// (Repo, EntityType, EntityID).
+// (Repo, EntityType, EntityID). It works on both schema versions; on the
+// new schema, which has no sync_error column, a non-empty SyncError is an
+// error rather than a silently dropped write.
 func (s *Store) UpsertInterpretation(i Interpretation) error {
-	_, err := s.sql.Exec(
-		`INSERT INTO interpretation (
-		   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
-		   dispositions, approvals, gate_state, match_reasons, panel,
-		   ready_to_promote, degraded, sync_error, as_of
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
-		   ownership = excluded.ownership,
-		   enrichment = excluded.enrichment,
-		   urgency = excluded.urgency,
-		   category = excluded.category,
-		   dispositions = excluded.dispositions,
-		   approvals = excluded.approvals,
-		   gate_state = excluded.gate_state,
-		   match_reasons = excluded.match_reasons,
-		   panel = excluded.panel,
-		   ready_to_promote = excluded.ready_to_promote,
-		   degraded = excluded.degraded,
-		   sync_error = excluded.sync_error,
-		   as_of = excluded.as_of`,
-		i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
-		i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
-		i.ReadyToPromote, i.Degraded, nullableString(i.SyncError), i.AsOf,
-	)
+	newSchema, err := s.isNewSchema()
+	if err != nil {
+		return fmt.Errorf("store: upsert interpretation (%s,%s,%s): %w", i.Repo, i.EntityType, i.EntityID, err)
+	}
+	if newSchema {
+		if i.SyncError != "" {
+			return fmt.Errorf("store: upsert interpretation (%s,%s,%s): SyncError is not stored on the new schema", i.Repo, i.EntityType, i.EntityID)
+		}
+		_, err = s.sql.Exec(
+			`INSERT INTO interpretation (
+			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
+			   dispositions, approvals, gate_state, match_reasons, panel,
+			   ready_to_promote, degraded, as_of
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
+			   ownership = excluded.ownership,
+			   enrichment = excluded.enrichment,
+			   urgency = excluded.urgency,
+			   category = excluded.category,
+			   dispositions = excluded.dispositions,
+			   approvals = excluded.approvals,
+			   gate_state = excluded.gate_state,
+			   match_reasons = excluded.match_reasons,
+			   panel = excluded.panel,
+			   ready_to_promote = excluded.ready_to_promote,
+			   degraded = excluded.degraded,
+			   as_of = excluded.as_of`,
+			i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
+			i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
+			i.ReadyToPromote, i.Degraded, i.AsOf,
+		)
+	} else {
+		_, err = s.sql.Exec(
+			`INSERT INTO interpretation (
+			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
+			   dispositions, approvals, gate_state, match_reasons, panel,
+			   ready_to_promote, degraded, sync_error, as_of
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
+			   ownership = excluded.ownership,
+			   enrichment = excluded.enrichment,
+			   urgency = excluded.urgency,
+			   category = excluded.category,
+			   dispositions = excluded.dispositions,
+			   approvals = excluded.approvals,
+			   gate_state = excluded.gate_state,
+			   match_reasons = excluded.match_reasons,
+			   panel = excluded.panel,
+			   ready_to_promote = excluded.ready_to_promote,
+			   degraded = excluded.degraded,
+			   sync_error = excluded.sync_error,
+			   as_of = excluded.as_of`,
+			i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
+			i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
+			i.ReadyToPromote, i.Degraded, nullableString(i.SyncError), i.AsOf,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("store: upsert interpretation (%s,%s,%s): %w", i.Repo, i.EntityType, i.EntityID, err)
 	}
@@ -73,10 +122,12 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 // docket's packet 7 (serve) routes rows into a fixed set of panel arrays
 // and needs a stable order across calls, not incidental SQLite scan order.
 func (s *Store) ListInterpretations() ([]Interpretation, error) {
+	newSchema, err := s.isNewSchema()
+	if err != nil {
+		return nil, fmt.Errorf("store: list interpretations: %w", err)
+	}
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, ownership, enrichment, urgency, category,
-		        dispositions, approvals, gate_state, match_reasons, panel,
-		        ready_to_promote, degraded, sync_error, as_of
+		`SELECT ` + interpretationSelectList(newSchema) + `
 		 FROM interpretation ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -118,11 +169,13 @@ func (s *Store) HasAnyInterpretation() (bool, error) {
 // GetInterpretation returns the interpretation row for
 // (repo, entityType, entityID), or found=false if no such row exists.
 func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Interpretation, found bool, err error) {
+	newSchema, err := s.isNewSchema()
+	if err != nil {
+		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
 	var syncError sql.NullString
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, ownership, enrichment, urgency, category,
-		        dispositions, approvals, gate_state, match_reasons, panel,
-		        ready_to_promote, degraded, sync_error, as_of
+		`SELECT `+interpretationSelectList(newSchema)+`
 		 FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)

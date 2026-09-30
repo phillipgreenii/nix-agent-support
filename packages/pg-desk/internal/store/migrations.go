@@ -2,13 +2,22 @@ package store
 
 import "fmt"
 
-// schemaVersion is the current schema. Bump it and append a migration step
-// whenever the DDL changes. Stored in SQLite's user_version pragma (ported
+// schemaVersion is the top of the migration ladder below: the schema Open
+// builds and maintains. Stored in SQLite's user_version pragma (ported
 // convention from packages/pg-pr/internal/store/migrate.go) and mirrored
 // into the meta table's "schema_version" key, since `pg-desk status`
 // (design doc section 7.7) reads the schema version out of meta directly
 // rather than issuing a PRAGMA.
+//
+// It is deliberately NOT bumped to NewSchemaVersion: the version-2 cutover
+// (cutover.go) is an explicit maintenance step, not a ladder rung, so this
+// ladder stops at 1 and Open never runs it.
 const schemaVersion = 1
+
+// NewSchemaVersion is the schema version the cutover produces and that
+// new-schema commands require (RequireNewSchema). Open accepts a store at
+// schemaVersion or at NewSchemaVersion and refuses anything newer.
+const NewSchemaVersion = 2
 
 // migrations is the ordered list of DDL applied to reach schemaVersion.
 // Index i migrates user_version i -> i+1.
@@ -99,15 +108,23 @@ CREATE TABLE meta (
 }
 
 // migrate applies any pending migrations (comparing SQLite's user_version
-// pragma against schemaVersion) and mirrors the resulting version into
-// meta's "schema_version" key.
+// pragma against the ladder) and mirrors the resulting version into meta's
+// "schema_version" key.
+//
+// A store already at NewSchemaVersion is accepted and left completely
+// alone: no migration runs, and meta.schema_version is NOT rewritten (it
+// says "2" and the ladder would otherwise overwrite it with "1"). Anything
+// newer than NewSchemaVersion is refused.
 func migrate(s *Store) error {
 	var current int
 	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
 	}
-	if current > len(migrations) {
-		return fmt.Errorf("database schema version %d is newer than this binary supports (%d)", current, len(migrations))
+	if current > NewSchemaVersion {
+		return fmt.Errorf("database schema version %d is newer than this binary supports (%d)", current, NewSchemaVersion)
+	}
+	if current >= NewSchemaVersion {
+		return nil
 	}
 
 	for i := current; i < len(migrations); i++ {

@@ -266,9 +266,26 @@ func runDoctor(cmd *cobra.Command) error {
 	// failure to compute it is reported like every other check above;
 	// finding stranded cycles is not itself a failure (this is an
 	// observability report, not a gate).
-	if st, err := deskStoreOpen(); err != nil {
+	//
+	// doctor opens the store RAW (no migrations, no version gate) so it can
+	// inspect a store in any schema state — including one that has not been
+	// cut over yet, or has no schema at all — instead of failing to open it.
+	// What doctor should REPORT about an unmigrated store is deliberately
+	// not decided here.
+	if st, err := deskStoreOpenRaw(); err != nil {
 		fmt.Fprintf(w, "stranded cycles: FAIL (open store: %v)\n", err)
 		failures = append(failures, "stranded cycles")
+	} else if version, verr := st.SchemaVersion(); verr != nil {
+		_ = st.Close()
+		fmt.Fprintf(w, "stranded cycles: FAIL (read schema version: %v)\n", verr)
+		failures = append(failures, "stranded cycles")
+	} else if version == 0 {
+		// No schema at all (a store that has never been written): there are
+		// no interpretation rows to be stranded or carry a sync_error, and
+		// querying would fail on the missing tables.
+		_ = st.Close()
+		fmt.Fprintln(w, "sync_error rows: 0")
+		fmt.Fprintln(w, "stranded cycles: 0")
 	} else {
 		stranded, err := doctorStrandedCycles(ctx, cfg, st)
 		// sync_error check (pg2-kftf9.5): a row with a recorded sync_error

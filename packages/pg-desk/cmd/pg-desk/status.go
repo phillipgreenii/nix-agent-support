@@ -45,7 +45,9 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command) error {
-	st, err := deskStoreOpen()
+	// status must work on a store in ANY schema state (old, cut over, or not
+	// yet initialized), so it opens raw: no migrations, no version gate.
+	st, err := deskStoreOpenRaw()
 	if err != nil {
 		return fmt.Errorf("status: open store: %w", err)
 	}
@@ -53,38 +55,53 @@ func runStatus(cmd *cobra.Command) error {
 
 	w := cmd.OutOrStdout()
 
-	schemaVersion, _, err := st.GetMeta(store.MetaKeySchemaVersion)
+	// The raw open leaves an empty file empty. With no schema there is
+	// nothing to count, and querying would fail on the missing tables, so
+	// report the same shape with zeros.
+	version, err := st.SchemaVersion()
 	if err != nil {
-		return fmt.Errorf("status: read meta.schema_version: %w", err)
+		return fmt.Errorf("status: read schema version: %w", err)
 	}
-	entityCount, err := st.CountEntities()
-	if err != nil {
-		return fmt.Errorf("status: count entities: %w", err)
-	}
-	interps, err := st.ListInterpretations()
-	if err != nil {
-		return fmt.Errorf("status: list interpretations: %w", err)
-	}
-	degraded, syncErrors := 0, 0
-	for _, i := range interps {
-		if i.Degraded {
-			degraded++
+	initialized := version > 0
+
+	var (
+		schemaVersion, lastHeartbeat, lastRun, lastSweep string
+		entityCount, syncErrors, degraded                int
+		interps                                          []store.Interpretation
+	)
+	if initialized {
+		schemaVersion, _, err = st.GetMeta(store.MetaKeySchemaVersion)
+		if err != nil {
+			return fmt.Errorf("status: read meta.schema_version: %w", err)
 		}
-		if i.SyncError != "" {
-			syncErrors++
+		entityCount, err = st.CountEntities()
+		if err != nil {
+			return fmt.Errorf("status: count entities: %w", err)
 		}
-	}
-	lastHeartbeat, _, err := st.GetMeta(store.MetaKeyLastHeartbeat)
-	if err != nil {
-		return fmt.Errorf("status: read meta.last_heartbeat: %w", err)
-	}
-	lastRun, _, err := st.GetMeta(store.MetaKeyLastRun)
-	if err != nil {
-		return fmt.Errorf("status: read meta.last_run: %w", err)
-	}
-	lastSweep, _, err := st.GetMeta(store.MetaKeyLastSweep)
-	if err != nil {
-		return fmt.Errorf("status: read meta.last_sweep: %w", err)
+		interps, err = st.ListInterpretations()
+		if err != nil {
+			return fmt.Errorf("status: list interpretations: %w", err)
+		}
+		for _, i := range interps {
+			if i.Degraded {
+				degraded++
+			}
+			if i.SyncError != "" {
+				syncErrors++
+			}
+		}
+		lastHeartbeat, _, err = st.GetMeta(store.MetaKeyLastHeartbeat)
+		if err != nil {
+			return fmt.Errorf("status: read meta.last_heartbeat: %w", err)
+		}
+		lastRun, _, err = st.GetMeta(store.MetaKeyLastRun)
+		if err != nil {
+			return fmt.Errorf("status: read meta.last_run: %w", err)
+		}
+		lastSweep, _, err = st.GetMeta(store.MetaKeyLastSweep)
+		if err != nil {
+			return fmt.Errorf("status: read meta.last_sweep: %w", err)
+		}
 	}
 
 	fmt.Fprintf(w, "store: %s\n", store.DefaultPath())
@@ -101,7 +118,10 @@ func runStatus(cmd *cobra.Command) error {
 	// failure here degrades to skipping this section rather than failing
 	// status entirely — status's own exit-code contract is "1 when the
 	// store cannot be opened" only; config resolution is doctor's check.
-	if cfg, cfgErr := deskConfigLoad(cmd.Context()); cfgErr == nil && cfg.Sync.Mode == sync.ModePlan {
+	// The ledger only exists on the old schema (version 1): the cutover
+	// drops it, and an uninitialized store never had one, so there is
+	// nothing to plan there.
+	if cfg, cfgErr := deskConfigLoad(cmd.Context()); cfgErr == nil && cfg.Sync.Mode == sync.ModePlan && version == 1 {
 		if err := printPlannedSyncRows(w, st); err != nil {
 			return fmt.Errorf("status: %w", err)
 		}

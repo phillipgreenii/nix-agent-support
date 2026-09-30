@@ -51,7 +51,7 @@ back here — not the full list.
 
 | Doc                                                          | Covers                                                                                                 |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, and its six tables                                               |
+| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, schema cutover and tables                                        |
 | [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`                                                  |
 | [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation                                                      |
 | [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)                                               |

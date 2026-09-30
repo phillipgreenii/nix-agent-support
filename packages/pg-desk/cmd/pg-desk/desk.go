@@ -24,6 +24,16 @@ var deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return 
 
 var deskStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
+// deskStoreOpenRaw is the store seam for the commands that must work on a
+// store in ANY schema state: `migrate --cutover` (which changes it),
+// `status` and `doctor` (which report on it). It opens with store.OpenRaw —
+// no migrations and no schema-version gate — so it neither upgrades an
+// old-schema store behind the operator's back nor refuses one. It is
+// deliberately a SEPARATE seam from deskStoreOpen: deskStoreOpen is shared
+// by hide, wip, feedback, show, open, heartbeat and others, which must keep
+// opening through the migrating, version-gated store.Open.
+var deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(store.DefaultPath()) }
+
 // entityTypePR is the one entity type every command in this packet operates
 // on — Phase 9 supports PR entities only (docs/behavior/pg-desk/README.md's
 // "Scope" section); issue/thread commands are later phases.

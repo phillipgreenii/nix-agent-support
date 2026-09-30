@@ -377,20 +377,25 @@ func openTestStore(t *testing.T) (seed *store.Store, openFresh func() (*store.St
 	return s, func() (*store.Store, error) { return store.Open(path) }
 }
 
-// withOpenSeams stubs deskConfigLoad/deskStoreOpen for the duration of one
-// test, restoring both on cleanup. openFresh is normally openTestStore's
-// second return value; doctor's own tests (which never open a store) pass
-// nil.
+// withOpenSeams stubs deskConfigLoad/deskStoreOpen/deskStoreOpenRaw for the
+// duration of one test, restoring all three on cleanup. openFresh is
+// normally openTestStore's second return value; both store seams are pointed
+// at it (the raw seam serves status, doctor and migrate, which must not open
+// through deskStoreOpen). A test that needs the two seams to differ
+// overrides one after this call.
 func withOpenSeams(t *testing.T, cfg *config.Config, openFresh func() (*store.Store, error)) {
 	t.Helper()
 	origConfigLoad := deskConfigLoad
 	origStoreOpen := deskStoreOpen
+	origStoreOpenRaw := deskStoreOpenRaw
 	t.Cleanup(func() {
 		deskConfigLoad = origConfigLoad
 		deskStoreOpen = origStoreOpen
+		deskStoreOpenRaw = origStoreOpenRaw
 	})
 	deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
 	deskStoreOpen = openFresh
+	deskStoreOpenRaw = openFresh
 }
 
 func runOpenCmd(t *testing.T, f openFlags) (stdout, stderr string, err error) {
