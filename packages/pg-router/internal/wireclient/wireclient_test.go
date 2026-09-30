@@ -1,9 +1,12 @@
 package wireclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -297,5 +300,28 @@ func TestNew_defaultsRunnerToOSRunner(t *testing.T) {
 	c := New(fixedCommand("h"))
 	if _, ok := c.Runner.(OSRunner); !ok {
 		t.Fatalf("New must default Runner to OSRunner{}, got %T", c.Runner)
+	}
+}
+
+// TestOSRunner_forwardsHandlerStderr locks bead pg2-7pp2m: the handler
+// subprocess's stderr (its slog output, e.g. "dispatch: worktree removed")
+// MUST reach the configured writer, and stdout MUST stay the reply body only.
+// A nil cmd.Stderr would send it to /dev/null.
+func TestOSRunner_forwardsHandlerStderr(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "h.sh")
+	body := "#!/bin/sh\ncat >/dev/null\necho 'level=INFO msg=\"dispatch: worktree removed\"' >&2\necho '{\"ok\":true}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var errBuf bytes.Buffer
+	out, code, err := OSRunner{Stderr: &errBuf}.Run(context.Background(), []string{script}, []byte("{}"))
+	if err != nil || code != 0 {
+		t.Fatalf("Run: code=%d err=%v", code, err)
+	}
+	if !bytes.Contains(errBuf.Bytes(), []byte("dispatch: worktree removed")) {
+		t.Fatalf("handler stderr not forwarded; got %q", errBuf.String())
+	}
+	if bytes.Contains(out, []byte("worktree removed")) {
+		t.Fatalf("stderr leaked into reply stdout: %q", out)
 	}
 }

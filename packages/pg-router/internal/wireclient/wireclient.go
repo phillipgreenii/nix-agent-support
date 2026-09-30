@@ -32,6 +32,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -110,9 +112,19 @@ type Runner interface {
 
 // OSRunner is the production Runner: a real subprocess, matching DEC-WIRE-1's
 // default transport (a CLI invocation carrying JSON on stdin/stdout).
-type OSRunner struct{}
+//
+// The handler's stderr is FORWARDED to Stderr (default: this process's own
+// os.Stderr), never discarded. exec.Cmd with a nil Stderr wires the child's
+// fd 2 to /dev/null, which silently dropped every slog line the handler
+// emits (e.g. "dispatch: worktree removed" / "worktree cleanup deferred",
+// bead pg2-7pp2m). Inheriting os.Stderr lands them in the daemon's own
+// launchd StandardErrorPath log.
+type OSRunner struct {
+	// Stderr receives the handler subprocess's stderr. nil means os.Stderr.
+	Stderr io.Writer
+}
 
-func (OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
+func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 	if len(argv) == 0 {
 		return nil, 0, errors.New("wireclient: empty argv")
 	}
@@ -120,6 +132,11 @@ func (OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, i
 	cmd.Stdin = bytes.NewReader(stdin)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	if r.Stderr != nil {
+		cmd.Stderr = r.Stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	switch {
