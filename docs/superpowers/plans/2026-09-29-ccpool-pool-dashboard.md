@@ -1,6 +1,6 @@
 # ccpool per-pool Grafana dashboard — implementation plan
 
-Status: DRAFT rev 6 (2026-09-29), revised after two independent reviews and the operator
+Status: DRAFT rev 7 (2026-09-29), revised after two independent reviews and the operator
 rulings of 2026-09-29 (section 3). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
 half) and possibly C ALSO change `phillipgreenii-nix-support-apps` (the otelcol pipeline);
 both repos share the `pg2-` tracker.
@@ -251,6 +251,14 @@ the plan is self-contained.
   already closed" (the row keeps `close_reason` across resumes).
 - **Labels before delete.** Read `pool`, labels and run timestamps BEFORE `--purge` and
   Pass 0 delete the row.
+- **Purge must emit unemitted runs.** Because "purge wins" (P4/Bead R), the `SessionEnd`
+  hook can end a run (`end_source=hook`, `metrics_emitted=0`) while a `--purge` close is
+  still in flight, and after `Store.Delete` the reaper can no longer find that run. The
+  `--purge` path MUST therefore, before `Store.Delete`, emit every run of the session that
+  is ended-or-pending with `metrics_emitted = 0` (whoever ended it) and set the flag. A
+  test MUST cover the purge-versus-hook race (hook ends the run mid-purge; the metric is
+  emitted exactly once). Design amendment 2026-09-29, from the rev 6 reconcile post-check
+  (operator: "continue", accepting the recommended fix).
 - **Histogram.** `metric.WithUnit("s")` for OTel correctness (with
   `UnderscoreEscapingWithoutSuffixes` no suffix is added, so names are
   `ccpool_session_duration_seconds_bucket|_sum|_count`) and explicit bucket boundaries via
