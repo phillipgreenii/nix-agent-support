@@ -835,8 +835,22 @@ func TestThreeWayGateRace(t *testing.T) {
 // actor: concurrent status reads racing live Enqueue/Dispatch/Expire churn
 // at a scale far beyond the pairwise smoke tests, still without a race (run
 // with -race) or a deadlock, and a final schema-valid reply.
+//
+// The queue is built WithEarlyEviction on purpose (pg2-93yf4): with the
+// default retention every accepted event stays queued until its 1h expiry, so
+// the 10k churn loop grows the queue to 10k entries and each Dispatch (headFor
+// scan) and Expire pass is O(queue) — quadratic overall (~30s under -race on
+// an idle host, observed stalling past the 10m go test timeout on a heavily
+// loaded nix-sandbox host). Early eviction retires each event as soon as its
+// only listener accepts it, keeping the queue near-empty and the work linear,
+// while still exercising the same Enqueue/Dispatch/Expire-vs-status races.
 func TestStatusRacesDispatchAt10k(t *testing.T) {
 	svc := startedServiceForStatus(t, activity.New(16))
+	q, err := eventqueue.New(eventqueue.NewMemStore(), eventqueue.WithEarlyEviction())
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	svc.q = q
 	svc.q.Register(&alwaysAcceptListener{id: "h1", typ: "t"})
 
 	const n = 10000
