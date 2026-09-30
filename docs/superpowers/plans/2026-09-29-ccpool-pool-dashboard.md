@@ -1,6 +1,6 @@
 # ccpool per-pool Grafana dashboard — implementation plan
 
-Status: DRAFT rev 8 (2026-09-29), revised after two independent reviews and the operator
+Status: DRAFT rev 9 (2026-09-29), revised after two independent reviews and the operator
 rulings of 2026-09-29 (section 3). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
 half) and possibly C ALSO change `phillipgreenii-nix-support-apps` (the otelcol pipeline);
 both repos share the `pg2-` tracker.
@@ -234,7 +234,8 @@ the plan is self-contained.
   predating the hook.
 - `session_runs` rows are removed together with the session row on `Store.Delete`
   (cascade), and R MUST expose store methods B's delete helper can call to read a
-  session's runs and their end state (exact signatures are R's implementer's choice and are
+  session's runs, INCLUDING open runs and any pending `end_reason`, and their end state
+  (exact signatures are R's implementer's choice and are
   recorded in R's closing note, which B reads from the landed code). R's own acceptance MUST
   NOT depend on `metrics_emitted`: that column arrives with B's migration 010.
 
@@ -262,12 +263,24 @@ the plan is self-contained.
   the `--purge` close (`cancel_close.go`), reap Pass 0 (`reap.go`), and the launch-time
   phantom prune in the Create path (`session.go`, around lines 389-391). All three MUST go
   through ONE shared helper (a Facade around `Store.Delete`) that, inside the per-
-  `external_id` lock and BEFORE deleting, (1) ends any still-open run itself when the path
-  is a purge, re-reading `ended_at` under the lock so it cannot double-end a run the hook
-  just ended, (2) emits every ended run of the session with `metrics_emitted = 0`, whoever
-  ended it, and (3) sets the flag; only then deletes. A direct `Store.Delete` call outside
-  the helper MUST NOT exist (a test or lint check SHOULD enforce it). Tests MUST cover the
-  purge-versus-hook race and the phantom-prune path (hook-ended run emitted exactly once).
+  `external_id` lock and BEFORE deleting: (1) FINALIZES any still-open run of the session
+  (`ended_at` NULL), re-reading `ended_at` under the lock so it cannot double-end a run the
+  hook just ended: with the run's pending `end_reason` if one was written (the purge path
+  writes it before `/exit`, per "purge wins"), otherwise as `exited` with
+  `end_source=reaper` and `ended_at = last_activity_at` (the same rule as the Pass 0
+  backstop; this covers the launch-time phantom prune, where the row can be deleted while its
+  run is still open after SIGKILL or power loss); (2) emits every ended run of the session
+  with `metrics_emitted = 0`, whoever ended it; and (3) sets the flag; only then deletes.
+  If a purge's teardown fails before the delete, the pending `end_reason` stays on the open
+  run and the helper is not called; the run is finalized by the next attempt or by the
+  reaper backstop. Locking: `closeWithReason` and the Create path already hold the
+  per-`external_id` lock, so the helper MUST have a "caller already holds the lock" form for
+  them; reap Pass 0 holds no lock today, so Pass 0 MUST take the lock around the helper. A
+  direct `Store.Delete` call outside the helper MUST NOT exist (a test or lint check SHOULD
+  enforce it; there are exactly three non-test callers today). Tests MUST cover the
+  purge-versus-hook race, the phantom-prune path with an OPEN run, and Pass 0 with a
+  hook-ended unemitted run (each emitted exactly once). Bead R's store read methods MUST
+  return open runs and any pending `end_reason`.
   Operator rulings, Phillip, 2026-09-29: all four items of the rev 7 reconcile abort
   accepted ("continue") — shared helper on every delete site; runs cascade-delete with the
   session row (safe because they are emitted first, and `external_id` is timestamped so it is
