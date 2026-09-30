@@ -51,7 +51,9 @@ flowchart TD
 - **Trigger bead** — a plain task, sibling of its phase bead (same parent, not its child),
   created alongside it by `epic-decompose` and later claimed and run by `phase-decompose`; see
   `skills/phase-decompose/SKILL.md`. It carries the `phase-trigger` label — a _different_ bead
-  from its phase-bead sibling, despite the similar names.
+  from its phase-bead sibling, despite the similar names. It is created at its phase bead's
+  priority: consumers such as drain skip epics, so the phase bead is never claimed itself and the
+  trigger's priority is the phase's effective priority in the queue.
 - **Packet** — one self-contained work-packet bead created by `plan-decompose` itself; the
   authoritative mechanics live in `skills/plan-decompose/SKILL.md`.
 

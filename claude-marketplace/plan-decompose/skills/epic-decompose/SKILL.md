@@ -155,12 +155,26 @@ ambiguous "same source, different intended round" case.
      Title: `Phase <k>: <phase scope>`.
    - **Trigger bead**: a plain task, sibling of the phase bead — SAME `--parent` as the phase
      bead in this same step, NOT a child of it:
-     ``bd create <title> -t task --parent <program-epic> --no-inherit-labels --label phase-trigger -p 3 -d "Run \`phase-decompose\` on \`<phase-bead-id>\`."``,
+     ``bd create <title> -t task --parent <program-epic> --no-inherit-labels --label phase-trigger -p <phase-priority> -d "Run \`phase-decompose\` on \`<phase-bead-id>\`."``,
      title `Phase <k> decompose-trigger: <phase scope>`. `--no-inherit-labels` on the
      TRIGGER bead is not itself design-stated for this bead shape — it is this skill's own
      safety analogy to the phase bead's identical hazard: the trigger bead is also created
      with `--parent` in this same step, so without `--no-inherit-labels` it would inherit the
      same unwanted program-epic labels (e.g. `phased-epic`).
+
+     **Priority — the trigger MUST carry its own phase bead's priority, never a fixed value.**
+     `<phase-priority>` is the priority of the phase bead created just above, READ BACK from it
+     (`bd show <phase-bead-id> --json`, jq path `.data[0].priority`) rather than retyped, so it
+     is right whether the brief named a priority for that phase bead or `bd`'s own default
+     applied. Why: the phase bead is `-t epic` precisely so drain-style consumers skip it
+     (drain's `--exclude-type epic`), which means it is never itself claimed — its trigger is
+     the ONLY path by which the phase ever gets worked, so the trigger's priority IS the
+     phase's effective priority. A fixed priority (an earlier revision of this step hard-coded
+     `-p 3`) silently demotes every phase below all ready work of a higher priority, however
+     important the program is — observed on program epic `pg2-2j5ac.52` (bead `pg2-39owl`):
+     P2 phase beads under a P1 program epic got P3 triggers, which sat ready and unclaimed
+     behind unrelated ready P2 tasks.
+
    - **Wire — never a mixed epic/task edge.** `bd` 1.2.2 rejects `blocks` edges that mix an
      epic and a task in either direction ("epics can only block other epics, not tasks" /
      "tasks can only block other tasks, not epics" — verified 2026-09-10, memory
@@ -224,6 +238,13 @@ ambiguous "same source, different intended round" case.
 
      Verify every edge by read-back (`bd dep list`); run `bd dep cycles` after the bulk
      wiring, filtered to this program epic's beads.
+
+     Verify every trigger's priority the same way: read back `.data[0].priority` from
+     `bd show <id> --json` for each new trigger AND its phase bead, and compare. A mismatch
+     here is an error this run just made (no person has had a chance to re-prioritize
+     either bead yet), so correct it — `bd update <trigger> --priority <phase-priority>`, then
+     re-read — before releasing the program epic's claim, and name the correction in the
+     step 9 report.
 
 9. **Label and report.** Label the program epic `phased-epic` (idempotent) and `write-report`
    the phase-split report (phase index, per-phase design-section coverage, review outcome,

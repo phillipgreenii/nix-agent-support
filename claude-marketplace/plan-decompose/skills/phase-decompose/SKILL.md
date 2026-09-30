@@ -178,6 +178,17 @@ dep list <this phase's own trigger-bead id> --direction=up` — `bd`'s reverse-d
      blocker. Verify the new edges by read-back (`bd dep list <downstream trigger>`) before
      proceeding. If the `--direction=up` query returns nothing, there is nothing to promote —
      proceed directly to closing.
+   - **Priority drift check — WARN only, never fix.** For each downstream trigger the
+     promotion step above handled, compare its priority with its own phase bead's
+     (`.data[0].priority` from `bd show <id> --json` on each — the two beads that step already
+     reads). `epic-decompose` creates them equal and verifies that, because the trigger carries
+     the phase's effective priority (consumers skip the epic-typed phase bead, so the trigger
+     is the only thing ever claimed). A difference now means one of the two was re-prioritized
+     since, and which one reflects the intended priority is an operator's judgment, not a
+     mechanical correction — so change neither. State the mismatch (both ids, both
+     priorities) in the promotion `bd comment` above and in your report back to your
+     dispatcher. This covers only the downstream triggers this step already touches; it is
+     not a sweep of every trigger under the program epic.
    - `bd close` the trigger bead with a reason citing the release. Because `bd` dependency
      edges self-clear when their blocker closes, this automatically unblocks every downstream
      trigger that was wired `--blocked-by` one of THIS phase's packets (real edges, from the
