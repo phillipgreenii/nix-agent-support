@@ -1309,9 +1309,15 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	}
 
 	// postStartupAll (pg2-oju6w.15) fires right after bootCore succeeds,
-	// before the gated drain loop even starts — by the time the core is
-	// discoverable it must already have fired, once, for the ENABLED role
-	// only (never declaredRoles' disabled r2).
+	// before the gated drain loop even starts — but the core becomes
+	// discoverable INSIDE bootCore, before postStartupAll runs on the
+	// goroutine under test (pg2-g3gqe: racy under low parallelism). So wait
+	// (bounded) for the hook to arrive, then require it fired exactly once,
+	// for the ENABLED role only (never declaredRoles' disabled r2).
+	hookDeadline := time.Now().Add(5 * time.Second)
+	for len(fh.postStartupCalls()) == 0 && time.Now().Before(hookDeadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if got := fh.postStartupCalls(); len(got) != 1 || got[0] != "r1" {
 		t.Fatalf("postStartup calls = %v, want exactly [r1] (disabled r2 must never get the hook)", got)
 	}
@@ -1336,6 +1342,10 @@ func TestRunUntilIdleGated_reachableAnswersIngestNoDispatch(t *testing.T) {
 	}
 	if len(fh.dispatchedCalls()) != 0 {
 		t.Fatalf("gated run-until-idle must dispatch nothing; dispatched = %v", fh.dispatchedCalls())
+	}
+	// Re-check after the run finished: no late postStartup (e.g. for disabled r2).
+	if got := fh.postStartupCalls(); len(got) != 1 || got[0] != "r1" {
+		t.Fatalf("postStartup calls after run = %v, want exactly [r1]", got)
 	}
 	// preShutdownAll fires at the same point TeardownAll used to, exactly
 	// once per shutdown (pg2-asr8z dedup) — with only one enabled role here,
