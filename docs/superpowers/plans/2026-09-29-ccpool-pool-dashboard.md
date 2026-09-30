@@ -1,6 +1,6 @@
 # ccpool per-pool Grafana dashboard — implementation plan
 
-Status: DRAFT rev 7 (2026-09-29), revised after two independent reviews and the operator
+Status: DRAFT rev 8 (2026-09-29), revised after two independent reviews and the operator
 rulings of 2026-09-29 (section 3). Repo: `phillipgreenii-nix-agent-support`. Beads T (collector
 half) and possibly C ALSO change `phillipgreenii-nix-support-apps` (the otelcol pipeline);
 both repos share the `pg2-` tracker.
@@ -232,6 +232,11 @@ the plan is self-contained.
 - Reaper backstop: Reap Pass 0 ends any open run whose tmux session is gone with `exited`,
   `ended_at = last_activity_at`, before any delete. Covers SIGKILL, power loss and rows
   predating the hook.
+- `session_runs` rows are removed together with the session row on `Store.Delete`
+  (cascade), and R MUST expose store methods B's delete helper can call to read a
+  session's runs and their end state (exact signatures are R's implementer's choice and are
+  recorded in R's closing note, which B reads from the landed code). R's own acceptance MUST
+  NOT depend on `metrics_emitted`: that column arrives with B's migration 010.
 
 ### Bead B — run lifecycle metrics
 
@@ -251,14 +256,26 @@ the plan is self-contained.
   already closed" (the row keeps `close_reason` across resumes).
 - **Labels before delete.** Read `pool`, labels and run timestamps BEFORE `--purge` and
   Pass 0 delete the row.
-- **Purge must emit unemitted runs.** Because "purge wins" (P4/Bead R), the `SessionEnd`
-  hook can end a run (`end_source=hook`, `metrics_emitted=0`) while a `--purge` close is
-  still in flight, and after `Store.Delete` the reaper can no longer find that run. The
-  `--purge` path MUST therefore, before `Store.Delete`, emit every run of the session that
-  is ended-or-pending with `metrics_emitted = 0` (whoever ended it) and set the flag. A
-  test MUST cover the purge-versus-hook race (hook ends the run mid-purge; the metric is
-  emitted exactly once). Design amendment 2026-09-29, from the rev 6 reconcile post-check
-  (operator: "continue", accepting the recommended fix).
+- **Every `Store.Delete` emits unemitted runs first.** The `SessionEnd` hook can end a run
+  (`end_source=hook`, `metrics_emitted=0`) at any time, including while a delete is in
+  flight, and after `Store.Delete` nothing can find that run. There are THREE call sites:
+  the `--purge` close (`cancel_close.go`), reap Pass 0 (`reap.go`), and the launch-time
+  phantom prune in the Create path (`session.go`, around lines 389-391). All three MUST go
+  through ONE shared helper (a Facade around `Store.Delete`) that, inside the per-
+  `external_id` lock and BEFORE deleting, (1) ends any still-open run itself when the path
+  is a purge, re-reading `ended_at` under the lock so it cannot double-end a run the hook
+  just ended, (2) emits every ended run of the session with `metrics_emitted = 0`, whoever
+  ended it, and (3) sets the flag; only then deletes. A direct `Store.Delete` call outside
+  the helper MUST NOT exist (a test or lint check SHOULD enforce it). Tests MUST cover the
+  purge-versus-hook race and the phantom-prune path (hook-ended run emitted exactly once).
+  Operator rulings, Phillip, 2026-09-29: all four items of the rev 7 reconcile abort
+  accepted ("continue") — shared helper on every delete site; runs cascade-delete with the
+  session row (safe because they are emitted first, and `external_id` is timestamped so it is
+  never reused); purge re-reads `ended_at` under the lock; historic runs default to
+  `metrics_emitted = 1`.
+- **Migration 010 default.** Runs already ended when the migration applies MUST default to
+  `metrics_emitted = 1`, so the first reaper sweep does not emit a burst of historic
+  metrics; only runs ended after it applies start at 0.
 - **Histogram.** `metric.WithUnit("s")` for OTel correctness (with
   `UnderscoreEscapingWithoutSuffixes` no suffix is added, so names are
   `ccpool_session_duration_seconds_bucket|_sum|_count`) and explicit bucket boundaries via
