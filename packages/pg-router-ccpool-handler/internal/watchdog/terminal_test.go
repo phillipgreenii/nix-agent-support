@@ -62,6 +62,21 @@ func TestSafeToReset_guard(t *testing.T) {
 	}
 }
 
+// TestTerminal_closesSession: the hard stop MUST close the session (pg2-vwb4c),
+// else a same-named dispatch re-attaches to the dead session and re-times-out
+// (28x for zr-6hrfd.2), and the close MUST precede the unclaim so the bead is
+// not re-dispatched while the session is still findable. purge=false keeps the
+// transcript for forensics.
+func TestTerminal_closesSession(t *testing.T) {
+	cc := &fakeCC{}
+	bd := &recBD{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, tokBudget(1000))
+	wd.terminal(context.Background(), "s", "zr-1")
+	if len(cc.closed) != 1 || cc.closed[0] != "s" {
+		t.Fatalf("hard stop must close session s exactly once; closed=%v", cc.closed)
+	}
+}
+
 func TestTerminal_unclaimsNotesNoHuman(t *testing.T) {
 	cc := &fakeCC{}
 	bd := &recBD{}

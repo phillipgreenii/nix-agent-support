@@ -49,8 +49,11 @@ var openGit gitOpener = func(ctx context.Context, dir string) (gitLocatorCleaner
 }
 
 // terminal runs the 100% hard-stop sequence: 2nd cancel, guarded worktree reset,
-// budget note, unclaim, eventlog. (Session close is done by the orchestrator's
-// pass-level teardownAll, as in A.) Each step is best-effort.
+// session close, budget note, unclaim, eventlog. Each step is best-effort.
+// The session MUST be closed here, BEFORE the unclaim: the pass-level
+// teardownAll does not reach a stable-named session that a duplicate-absorb
+// re-attached to, so an open session let one dead session be re-absorbed 28
+// times (pg2-uwnjp, pg2-vwb4c). purge=false keeps the transcript.
 func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 	_ = w.CC.Cancel(ctx, sessionName) // 2nd cancel (idempotent/safe)
 
@@ -70,6 +73,8 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string) {
 			}
 		}
 	}
+
+	_ = w.CC.Close(ctx, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")
 	_ = beads.Unclaim(ctx, w.BD, beadID)
