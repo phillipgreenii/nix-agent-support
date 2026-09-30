@@ -946,6 +946,89 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version: 9,
+		up: func(tx *sql.Tx) error {
+			// ResolveApproved (recorder.go) stops writing the raw PostToolUse
+			// tool_response payload into the tool_response column for NEW rows
+			// (tc-o14i5.8.1 — Track X.1: PostToolUse resolution hygiene). These
+			// four nullable columns carry the replacement summary shape instead:
+			//   tool_response_hash       — sha256 hex of the raw payload, so two
+			//     resolutions can still be compared/deduped without keeping the
+			//     content itself.
+			//   tool_response_size       — byte length of the raw payload.
+			//   tool_response_exit_code  — 0/1 proxy derived from the payload's
+			//     is_error key (references/database-schema.md's "tool_response
+			//     shape" documents is_error as the cross-tool failure signal;
+			//     there is no literal numeric process exit code in this
+			//     payload). NULL when is_error is absent/unparseable.
+			//   tool_response_excerpt    — a short, secret-scrubbed excerpt
+			//     (stdout+stderr when present, else the raw payload), truncated
+			//     to maxToolResponseExcerptLen — enough to eyeball what
+			//     happened without retaining the full response.
+			// Per P12 (additive, nullable-columns-only migrations), the old
+			// tool_response column is untouched: it keeps existing rows'
+			// content, and a rollback to an older binary that still reads it
+			// keeps working. Only new writes stop populating it.
+			//
+			// Guarded per-column by existingColumns rather than a bare ALTER,
+			// unlike migrations 2/4/5's unconditional ADD COLUMN: SQLite has no
+			// `ADD COLUMN IF NOT EXISTS` (confirmed against this module's
+			// modernc.org/sqlite build — the syntax errors), and this migration
+			// specifically DOES get re-applied in practice by
+			// TestNewStore_Migration7_SplitsDeniedByProvenance, which resets
+			// schema_version to replay every migration after 6 (migrate() has
+			// no per-version applied-set, only a MAX(version) high-water mark,
+			// so replaying migration 7 unavoidably replays 8 and 9 with it — the
+			// same reason migration 8 above uses CREATE TABLE IF NOT EXISTS). A
+			// bare unconditional ADD COLUMN would fail that replay with
+			// "duplicate column name".
+			existing, err := existingColumns(tx, "tool_decisions")
+			if err != nil {
+				return err
+			}
+			for _, col := range []struct{ name, ddl string }{
+				{"tool_response_hash", "ALTER TABLE tool_decisions ADD COLUMN tool_response_hash TEXT"},
+				{"tool_response_size", "ALTER TABLE tool_decisions ADD COLUMN tool_response_size INTEGER"},
+				{"tool_response_exit_code", "ALTER TABLE tool_decisions ADD COLUMN tool_response_exit_code INTEGER"},
+				{"tool_response_excerpt", "ALTER TABLE tool_decisions ADD COLUMN tool_response_excerpt TEXT"},
+			} {
+				if existing[col.name] {
+					continue
+				}
+				if _, err := tx.Exec(col.ddl); err != nil {
+					return fmt.Errorf("add column %s: %w", col.name, err)
+				}
+			}
+			return nil
+		},
+	},
+}
+
+// existingColumns returns the set of column names currently present on table,
+// read via PRAGMA table_info inside the given transaction. Used by migrations
+// whose ADD COLUMN statements must tolerate being re-applied (SQLite has no
+// `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, unlike CREATE TABLE/INDEX).
+func existingColumns(tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, fmt.Errorf("read table_info(%s): %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return nil, fmt.Errorf("scan table_info(%s): %w", table, err)
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
 }
 
 // latestMigrationVersion returns the highest version number among the known

@@ -171,23 +171,35 @@ func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSugges
 }
 
 // ResolveApproved marks the pending row for this tool call as approved and
-// records the PostToolUse tool_response. It is a pure UPDATE: it only sets
-// outcome/resolved_at/outcome_notes/tool_response and never touches columns set
-// at PreToolUse (permission_mode, prompt_id, transcript_path, agent_type). If no
+// records a summary of the PostToolUse tool_response (see
+// summarizeToolResponse and migration 9) — hash/size/exit-code-proxy plus a
+// scrubbed excerpt, NOT the raw payload. It is a pure UPDATE: it only sets
+// outcome/resolved_at/outcome_notes/tool_response_* and never touches columns
+// set at PreToolUse (permission_mode, prompt_id, transcript_path, agent_type).
+// The old tool_response column is left untouched (NULL) for rows resolved
+// this way; it still holds raw content only on pre-tc-o14i5.8.1 rows. If no
 // pending row matches (by tool_use_id, then by hash), there is NO INSERT
-// fallback — the tool_response is dropped, since without a PreToolUse row there
-// is no context to attach it to.
+// fallback — the tool_response summary is dropped, since without a
+// PreToolUse row there is no context to attach it to.
+//
+// The hash-fallback branch below targets exactly the single most-recent
+// matching pending row (via the id-subquery idiom RecordPermissionRequest
+// already uses), so it can never affect more than one row when several
+// pending rows share the same session/tool-name/input-hash.
 func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) error {
 	now := nowISO()
-	toolResponse := nilIfEmpty(string(input.ToolResponse))
+	respHash, respSize, respExitCode, respExcerpt := summarizeToolResponse(input.ToolResponse)
 
 	if input.ToolUseID != "" {
 		res, err := s.db.Exec(
 			`
 			UPDATE tool_decisions
-			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?, tool_response = ?
+			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?,
+				tool_response_hash = ?, tool_response_size = ?,
+				tool_response_exit_code = ?, tool_response_excerpt = ?
 			WHERE tool_use_id = ? AND outcome = 'pending'`,
-			now, nilIfEmpty(outcomeNotes), toolResponse, input.ToolUseID,
+			now, nilIfEmpty(outcomeNotes), respHash, respSize, respExitCode, respExcerpt,
+			input.ToolUseID,
 		)
 		if err != nil {
 			return err
@@ -201,9 +213,15 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	_, err := s.db.Exec(
 		`
 		UPDATE tool_decisions
-		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?, tool_response = ?
-		WHERE session_id = ? AND tool_name = ? AND tool_input_hash = ? AND outcome = 'pending'`,
-		now, nilIfEmpty(outcomeNotes), toolResponse,
+		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?,
+			tool_response_hash = ?, tool_response_size = ?,
+			tool_response_exit_code = ?, tool_response_excerpt = ?
+		WHERE id = (
+			SELECT id FROM tool_decisions
+			WHERE session_id = ? AND tool_name = ? AND tool_input_hash = ? AND outcome = 'pending'
+			ORDER BY id DESC LIMIT 1
+		)`,
+		now, nilIfEmpty(outcomeNotes), respHash, respSize, respExitCode, respExcerpt,
 		input.SessionID, input.ToolName, hash,
 	)
 	return err

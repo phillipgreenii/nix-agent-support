@@ -1,8 +1,11 @@
 package asklog
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -738,6 +741,21 @@ func queryHookContext(t *testing.T, s *Store, sessionID string) (permMode, promp
 	return
 }
 
+// queryToolResponseSummary returns the v9 tool_response_* summary columns
+// (ResolveApproved's replacement for the raw tool_response column) for the
+// most recent row in the given session.
+func queryToolResponseSummary(t *testing.T, s *Store, sessionID string) (hash, excerpt *string, size, exitCode *int) {
+	t.Helper()
+	err := s.db.QueryRow(
+		`SELECT tool_response_hash, tool_response_excerpt, tool_response_size, tool_response_exit_code
+		 FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&hash, &excerpt, &size, &exitCode)
+	if err != nil {
+		t.Fatalf("query tool_response summary: %v", err)
+	}
+	return
+}
+
 func TestRecordPreToolDecision_PersistsHookContext(t *testing.T) {
 	for _, trace := range []bool{false, true} {
 		name := "non-trace"
@@ -778,7 +796,7 @@ func TestRecordPreToolDecision_PersistsHookContext(t *testing.T) {
 	}
 }
 
-func TestResolveApproved_SetsToolResponse_NoClobber(t *testing.T) {
+func TestResolveApproved_SetsToolResponseSummary_NoClobber(t *testing.T) {
 	s := testStore(t)
 	input := testInput("tr", "Bash", "tool-tr", json.RawMessage(`{"command":"ls"}`))
 	input.PermissionMode = "default"
@@ -794,15 +812,30 @@ func TestResolveApproved_SetsToolResponse_NoClobber(t *testing.T) {
 		t.Fatalf("ResolveApproved: %v", err)
 	}
 
-	pm, pid, _, tr := queryHookContext(t, s, "tr")
+	pm, pid, _, rawToolResp := queryHookContext(t, s, "tr")
 	if pm == nil || *pm != "default" {
 		t.Errorf("permission_mode clobbered by PostToolUse = %v, want default", pm)
 	}
 	if pid == nil || *pid != "prompt-1" {
 		t.Errorf("prompt_id clobbered by PostToolUse = %v, want prompt-1", pid)
 	}
-	if tr == nil || *tr != `{"stdout":"hi","is_error":false}` {
-		t.Errorf("tool_response = %v, want the raw payload", tr)
+	if rawToolResp != nil {
+		t.Errorf("legacy tool_response = %v, want nil (ResolveApproved no longer writes raw content there)", *rawToolResp)
+	}
+
+	hash, excerpt, size, exitCode := queryToolResponseSummary(t, s, "tr")
+	wantHash := fmt.Sprintf("%x", sha256.Sum256(input.ToolResponse))
+	if hash == nil || *hash != wantHash {
+		t.Errorf("tool_response_hash = %v, want %s", hash, wantHash)
+	}
+	if size == nil || *size != len(input.ToolResponse) {
+		t.Errorf("tool_response_size = %v, want %d", size, len(input.ToolResponse))
+	}
+	if exitCode == nil || *exitCode != 0 {
+		t.Errorf("tool_response_exit_code = %v, want 0 (is_error:false)", exitCode)
+	}
+	if excerpt == nil || *excerpt != "hi" {
+		t.Errorf("tool_response_excerpt = %v, want %q", excerpt, "hi")
 	}
 	if o := getOutcome(t, s, "tr"); o != "approved" {
 		t.Errorf("outcome = %q, want approved", o)
@@ -818,9 +851,68 @@ func TestResolveApproved_NoPendingRow_DropsToolResponse(t *testing.T) {
 		t.Fatalf("ResolveApproved: %v", err)
 	}
 	// No pending PreToolUse row existed → ResolveApproved does NOT INSERT a
-	// fallback row, so the tool_response is dropped on the floor.
+	// fallback row, so the tool_response summary is dropped on the floor.
 	if n := countRows(t, s, "1=1"); n != 0 {
 		t.Errorf("rows = %d, want 0 (ResolveApproved has no INSERT fallback)", n)
+	}
+}
+
+func TestResolveApproved_ExcerptIsScrubbed(t *testing.T) {
+	s := testStore(t)
+	input := testInput("scrub", "Bash", "tool-scrub", json.RawMessage(`{"command":"env"}`))
+	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "ask"}
+	if err := RecordPreToolDecision(s, input, result); err != nil {
+		t.Fatalf("RecordPreToolDecision: %v", err)
+	}
+
+	input.ToolResponse = json.RawMessage(`{"stdout":"API_KEY=sk_live_abcdef1234567890","is_error":false}`)
+	if err := ResolveApproved(s, input, ""); err != nil {
+		t.Fatalf("ResolveApproved: %v", err)
+	}
+
+	_, excerpt, _, _ := queryToolResponseSummary(t, s, "scrub")
+	if excerpt == nil {
+		t.Fatalf("tool_response_excerpt = nil, want a scrubbed excerpt")
+	}
+	if strings.Contains(*excerpt, "sk_live_abcdef1234567890") {
+		t.Errorf("tool_response_excerpt = %q, leaked the secret value", *excerpt)
+	}
+}
+
+// TestResolveApproved_HashFallback_UpdatesOnlySingleMostRecentRow guards the
+// fix to ResolveApproved's hash-fallback branch: two PENDING rows sharing the
+// same session/tool/input-hash (both lacking a tool_use_id, forcing the
+// fallback path) must NOT both flip to approved from one ResolveApproved
+// call — only the single most-recent matching pending row may, mirroring
+// RecordPermissionRequest's existing id-subquery idiom.
+func TestResolveApproved_HashFallback_UpdatesOnlySingleMostRecentRow(t *testing.T) {
+	s := testStore(t)
+	toolInput := json.RawMessage(`{"command":"ls"}`)
+	result := hookio.RuleResult{Decision: hookio.Ask, Reason: "ask"}
+
+	input1 := testInput("fb", "Bash", "", toolInput)
+	input2 := testInput("fb", "Bash", "", toolInput)
+	if err := RecordPreToolDecision(s, input1, result); err != nil {
+		t.Fatalf("RecordPreToolDecision 1: %v", err)
+	}
+	if err := RecordPreToolDecision(s, input2, result); err != nil {
+		t.Fatalf("RecordPreToolDecision 2: %v", err)
+	}
+	if n := countRows(t, s, "session_id='fb' AND outcome='pending'"); n != 2 {
+		t.Fatalf("pending rows before resolve = %d, want 2", n)
+	}
+
+	resolveInput := testInput("fb", "Bash", "", toolInput)
+	resolveInput.ToolResponse = json.RawMessage(`{"stdout":"done","is_error":false}`)
+	if err := ResolveApproved(s, resolveInput, "resolved"); err != nil {
+		t.Fatalf("ResolveApproved: %v", err)
+	}
+
+	if n := countRows(t, s, "session_id='fb' AND outcome='approved'"); n != 1 {
+		t.Errorf("approved rows = %d, want exactly 1 (hash-fallback must target only the single most-recent pending row)", n)
+	}
+	if n := countRows(t, s, "session_id='fb' AND outcome='pending'"); n != 1 {
+		t.Errorf("pending rows after resolve = %d, want 1 (the older sibling row must remain untouched)", n)
 	}
 }
 

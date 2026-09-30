@@ -218,8 +218,8 @@ func TestNewStore_SchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 8 {
-		t.Errorf("schema_version = %d, want 8", version)
+	if version != 9 {
+		t.Errorf("schema_version = %d, want 9", version)
 	}
 }
 
@@ -484,8 +484,8 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 	// Verify schema version is now 3
 	var version int
 	_ = s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
-	if version != 8 {
-		t.Errorf("schema_version = %d, want 8", version)
+	if version != 9 {
+		t.Errorf("schema_version = %d, want 9", version)
 	}
 
 	// Verify old row has excluded = 0 (default)
@@ -539,8 +539,8 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
-	if version != 8 {
-		t.Errorf("schema_version = %d, want 8", version)
+	if version != 9 {
+		t.Errorf("schema_version = %d, want 9", version)
 	}
 }
 
@@ -562,8 +562,8 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 
 	var count int
 	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
-	if count != 8 {
-		t.Errorf("schema_version rows = %d, want 8", count)
+	if count != 9 {
+		t.Errorf("schema_version rows = %d, want 9", count)
 	}
 }
 
