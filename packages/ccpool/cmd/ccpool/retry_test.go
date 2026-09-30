@@ -556,7 +556,7 @@ func TestMaybeRetry_recordsCarryPoolAndAllowlistedLabels(t *testing.T) {
 		}
 		m := map[string]string{}
 		for _, kv := range got[0] {
-			m[string(kv.Key)] = kv.Value.Emit()
+			m[string(kv.Key)] = kv.Value.String()
 		}
 		if !reflect.DeepEqual(m, want) {
 			t.Errorf("%s attrs = %v, want %v", name, m, want)

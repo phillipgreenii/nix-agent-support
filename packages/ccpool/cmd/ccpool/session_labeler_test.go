@@ -337,7 +337,7 @@ func TestRunHook_retryExhaustedMetricCarriesPoolAndLabels(t *testing.T) {
 
 	m := map[string]string{}
 	for _, kv := range got {
-		m[string(kv.Key)] = kv.Value.Emit()
+		m[string(kv.Key)] = kv.Value.String()
 	}
 	want := map[string]string{"pool": "pg-router-ccpool-review", "pgrouter.role": "review"}
 	if !reflect.DeepEqual(m, want) {

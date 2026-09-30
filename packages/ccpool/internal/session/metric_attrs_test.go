@@ -64,7 +64,7 @@ func seedReviewLabels(t *testing.T, st *store.Store, externalID string) {
 func attrMap(attrs []attribute.KeyValue) map[string]string {
 	m := make(map[string]string, len(attrs))
 	for _, a := range attrs {
-		m[string(a.Key)] = a.Value.Emit()
+		m[string(a.Key)] = a.Value.String()
 	}
 	return m
 }
