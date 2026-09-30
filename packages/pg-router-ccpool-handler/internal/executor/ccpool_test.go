@@ -2,10 +2,12 @@ package executor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1181,6 +1183,30 @@ func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
 	}
 	if len(cc.ClosedPurge) != 1 || !cc.ClosedPurge[0] {
 		t.Errorf("ensure failure's close must purge, got ClosedPurge=%v", cc.ClosedPurge)
+	}
+}
+
+// TestDispatch_ensureFailCloseFails_loggedAndRetried is pg2-rkjbu's regression:
+// a failing purge-close of the abandoned session must not be swallowed. It is
+// retried once and the error is logged.
+func TestDispatch_ensureFailCloseFails_loggedAndRetried(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
+	cc := &dtest.FakeCC{EnsureErr: errors.New("ccpool new: did not reach ready"), CloseErr: errors.New("ccpool close: boom")}
+	if _, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w"); err == nil {
+		t.Fatal("ensure failure should error")
+	}
+	if len(cc.Closed) != 2 {
+		t.Errorf("failing close must be retried once (2 attempts), got Closed=%v", cc.Closed)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "purge-close of abandoned session failed after retry") || !strings.Contains(out, "ccpool close: boom") {
+		t.Errorf("close failure must be logged with its error, got log:\n%s", out)
 	}
 }
 

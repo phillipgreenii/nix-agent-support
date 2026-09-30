@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	ct "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
@@ -20,6 +21,9 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 	"github.com/phillipgreenii/x/gitclient"
 )
+
+// purgeCloseTimeout bounds the abandoned-session purge-close (both attempts).
+const purgeCloseTimeout = 2 * time.Minute
 
 type ccpoolExecutor struct{}
 
@@ -176,7 +180,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// got far enough to create a row at all, ccpool close on an unknown
 		// external_id just errors, which this ignores exactly like every other
 		// best-effort Close call in this file.
-		_ = r.deps.CC.Close(ctx, r.deps.ExternalID, true)
+		r.purgeAbandonedSession(ctx, d.Item.ID)
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)
@@ -221,6 +225,29 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt)
 	}
 	return r.finishWait(ctx, cc, d, r.deps.ExternalID, wt, werr)
+}
+
+// purgeAbandonedSession purge-closes the session of a failed launch and, unlike
+// the other best-effort Close calls in this file, does NOT discard the result
+// (pg2-rkjbu): a failed close left the session to reach ready AFTER the launch
+// was reported failed (2026-09-29 incident), so a failure is logged with its
+// error and retried once. The close runs on a context detached from ctx's
+// cancellation, since the launch failure is often ctx expiry ("did not reach
+// ready before timeout") and a close on a dead ctx would fail for that reason
+// alone. A close that still fails after the retry is logged at Error level.
+func (r *ccpoolRun) purgeAbandonedSession(ctx context.Context, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	err := r.deps.CC.Close(cctx, r.deps.ExternalID, true)
+	if err == nil {
+		return
+	}
+	slog.Warn("purge-close of abandoned session failed; retrying once",
+		"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	if err = r.deps.CC.Close(cctx, r.deps.ExternalID, true); err != nil {
+		slog.Error("purge-close of abandoned session failed after retry; session may still be live and reach ready",
+			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	}
 }
 
 // waitFailureResult maps a wait-path error to the verb actually applied to the

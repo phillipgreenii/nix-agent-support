@@ -70,6 +70,7 @@ type FakeCC struct {
 	ClosedPurge []bool
 	SendErr     error
 	EnsureErr   error
+	CloseErr    error              // when set, every Close call is recorded and then returns it
 	ListSeq     [][]ccpool.Session // one entry consumed per List call (last repeats)
 	ListIdx     int
 	ListErr     error // when set, every List call returns (nil, ListErr) instead of consuming ListSeq
@@ -99,7 +100,7 @@ func (f *FakeCC) Cancel(_ context.Context, _ string) error { return nil }
 func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 	f.Closed = append(f.Closed, externalID)
 	f.ClosedPurge = append(f.ClosedPurge, purge)
-	return nil
+	return f.CloseErr
 }
 
 // Capacity serves the scripted Cap/CapErr, defaulting an entirely-unset
