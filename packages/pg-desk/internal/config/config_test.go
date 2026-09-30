@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -91,11 +90,15 @@ func (f fakeEnv) Getenv(k string) string       { return f.vars[k] }
 func (f fakeEnv) UserHomeDir() (string, error) { return f.home, nil }
 
 // testdataFixture returns the absolute path to a fixture under this
-// package's testdata/ directory, resolved relative to this source file so
-// it works regardless of the test binary's working directory.
+// package's testdata/ directory. go test runs with the package directory as
+// the working directory, so a relative path works (runtime.Caller does not:
+// -trimpath rewrites its file path to a module path).
 func testdataFixture(name string) string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(thisFile), "testdata", name)
+	abs, err := filepath.Abs(filepath.Join("testdata", name))
+	if err != nil {
+		panic(err)
+	}
+	return abs
 }
 
 // TestLoadFile_FullExample loads the checked-in testdata/config.example.yaml
