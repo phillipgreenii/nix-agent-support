@@ -68,8 +68,11 @@ in
     (lib.mkIf sweepEnabledByAnyUser {
       phillipgreenii.system.launchdServices.userAgents.pg-ccaudit-ingest = {
         label = "com.phillipg.pg-ccaudit-ingest";
+        # --quiet (pg2-jdfbj): suppress per-batch "progress:" lines so the
+        # append-only StandardOutPath log gets only the header + one summary line
+        # per run, instead of dozens of lines per run growing without bound.
         script = ''
-          exec ${pkg}/bin/pg-ccaudit ingest${lib.optionalString thinking " --thinking"}
+          exec ${pkg}/bin/pg-ccaudit ingest --quiet${lib.optionalString thinking " --thinking"}
         '';
         runAtLoad = true;
         # `pg-ccaudit ingest` is a periodic short task (StartInterval), not a

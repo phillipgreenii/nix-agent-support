@@ -106,6 +106,23 @@ func TestSecondIngestReportsZeroWork(t *testing.T) {
 	}
 }
 
+// pg2-jdfbj: --quiet (used by the launchd agent) keeps ingest.out.log bounded:
+// no per-batch "progress:" lines, but the final summary is still printed.
+func TestIngestQuietSuppressesProgressKeepsSummary(t *testing.T) {
+	root, dbPath := corpus(t)
+	out, _, err := captureRun(t, "ingest", "--quiet", "--progress-every", "1",
+		"--root", root, "--db", dbPath, "--final-after", "0")
+	if err != nil {
+		t.Fatalf("ingest --quiet: %v", err)
+	}
+	if strings.Contains(out, "progress:") {
+		t.Errorf("--quiet still emitted progress lines:\n%s", out)
+	}
+	if !strings.Contains(out, "bytes=") {
+		t.Errorf("--quiet dropped the final summary:\n%s", out)
+	}
+}
+
 // T-12 at the CLI boundary: a second concurrent ingest exits NON-ERROR having
 // done nothing. This is what keeps an overlapping launchd tick from logging an
 // alarm — and, more importantly, from racing the first writer's resume offsets.
