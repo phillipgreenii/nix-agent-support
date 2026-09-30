@@ -220,6 +220,10 @@ func handlePreToolUse(input *hookio.HookInput) {
 		}
 	}
 
+	output := hookio.FormatOutput(result, updatedInput)
+	_, _ = os.Stdout.Write(output)
+	fmt.Fprintln(os.Stdout)
+
 	if store != nil {
 		if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
@@ -230,17 +234,13 @@ func handlePreToolUse(input *hookio.HookInput) {
 		// call, so without this flush "a systematically-failing resolver is
 		// detectable" would be false no matter how carefully the counter was kept.
 		//
-		// AFTER the decision has been made and BEFORE the output is written, so a
-		// failure to persist an observability row can neither change the verdict nor
-		// be mistaken for one.
+		// AFTER the decision has been made and the output has already been written to
+		// stdout, so a failure to persist an observability row can neither change the
+		// verdict nor be mistaken for one.
 		if err := asklog.RecordRuleErrors(store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
 			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog rule_errors: %v\n", err)
 		}
 	}
-
-	output := hookio.FormatOutput(result, updatedInput)
-	_, _ = os.Stdout.Write(output)
-	fmt.Fprintln(os.Stdout)
 }
 
 func handlePermissionRequest(input *hookio.HookInput) {
