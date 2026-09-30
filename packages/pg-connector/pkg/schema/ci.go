@@ -4,16 +4,11 @@
 // (multiple simultaneously-registered CI backends, matching pr/issue)
 // (INV-REG-1).
 //
-// The field set is carried over from this repo's existing
+// The field set began as this repo's existing
 // packages/pg-pr/pkg/api.CIRun type, per this repo's general carry-over
-// convention for pg-connector's schemas — with one
-// addition: PRID. The design defines CI as "a build/run, linked to a PR," and
-// today's api.CIRun has no explicit PR-linkage field of its own (the link
-// is implicit in caller context, e.g. ListRuns(ctx, repo, prNumber)'s own
-// arguments) — PRID makes a CIRun value self-describing (interfaces.md's op catalog).
-// api.CIRun's Description field is deliberately not carried over here: this
-// packet's contract names exactly ID, Name, Status, Conclusion, URL,
-// Provider, HeadSHA, and PRID as CIRun's field set.
+// convention for pg-connector's schemas, and has since grown by additions
+// (PRID, Repo, AsOf, Stale, Attempt; see each field's own doc comment).
+// api.CIRun's Description field is deliberately not carried over here.
 package schema
 
 // CISchemaVersion is the ci capability's own schema version, populated into
@@ -39,7 +34,11 @@ package schema
 // a backend-local correlation store
 // (pg-connector-ci-github-actions/internal/run_store.go, left in place for
 // the removals packet blocked-by this one).
-const CISchemaVersion = 3
+//
+// Bumped 3 -> 4 by bead pg2-2j5ac.52.6.3, which added the Attempt field
+// below (additive, omitempty; one bump per field-shape change, as with
+// PRSchemaVersion).
+const CISchemaVersion = 4
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by
@@ -71,6 +70,13 @@ type CIRun struct {
 	// identity-linkage field, always populated by a well-behaved provider,
 	// mirroring PR.ID's own non-omitempty convention in pr.go.
 	PRID string `json:"pr_id"`
+
+	// Attempt is the run's GitHub Actions attempt number. GitHub keeps a
+	// run's databaseId (ID) when it is re-run and increments the attempt
+	// instead, so (ID, Attempt) identifies one build. 0 (omitted) when the
+	// backend reports no attempt; it is never synthesized. gh reports only
+	// each run's latest attempt.
+	Attempt int `json:"attempt,omitempty"`
 
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
 	// pg2-4aoeg, extending the pr capability's own AsOf/Stale contract

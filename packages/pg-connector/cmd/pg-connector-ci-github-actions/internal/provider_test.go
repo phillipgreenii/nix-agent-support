@@ -576,6 +576,65 @@ func TestListRuns_HeadSHAPropagated(t *testing.T) {
 	}
 }
 
+func TestListRuns_AttemptDecoded(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(`[
+  {"databaseId": 2001, "name": "ci", "status": "completed", "conclusion": "failure",
+   "url": "https://github.com/foo/bar/actions/runs/2001", "headBranch": "feat/x",
+   "headSha": "deadbeef", "attempt": 2},
+  {"databaseId": 2002, "name": "lint", "status": "completed", "conclusion": "success",
+   "url": "https://github.com/foo/bar/actions/runs/2002", "headBranch": "feat/x",
+   "headSha": "deadbeef"}
+]`)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+
+	runs, err := p.ListRuns(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if runs[0].ID != "2001" || runs[0].Attempt != 2 {
+		t.Errorf("run[0]: ID=%q Attempt=%d, want 2001 / 2", runs[0].ID, runs[0].Attempt)
+	}
+	// attempt absent from gh's output maps to 0 (never synthesized).
+	if runs[1].Attempt != 0 {
+		t.Errorf("run[1] Attempt = %d, want 0 when gh reports none", runs[1].Attempt)
+	}
+}
+
+// TestListRuns_RequestsAttemptField checks the --json argument actually
+// passed to gh (the fake returns canned JSON regardless of arguments, so a
+// decode test alone cannot prove attempt is requested).
+func TestListRuns_RequestsAttemptField(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["run list"] = []byte(sampleRunList)
+	p := NewWithDeps(gh, &fakePR{repo: "foo/bar", branch: "feat/x"})
+	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	var jsonArg string
+	for i, a := range last {
+		if a == "--json" && i+1 < len(last) {
+			jsonArg = last[i+1]
+		}
+	}
+	if jsonArg == "" {
+		t.Fatalf("no --json argument in gh call: %v", last)
+	}
+	found := false
+	for _, f := range strings.Split(jsonArg, ",") {
+		if f == "attempt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("--json fields %q do not include attempt", jsonArg)
+	}
+}
+
 func TestCheckAuth_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["api graphql"] = errors.New("boom")

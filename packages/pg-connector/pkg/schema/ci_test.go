@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -16,6 +17,7 @@ func TestCIRun_JSONRoundTrip(t *testing.T) {
 		HeadSHA:    "deadbeef",
 		Repo:       "owner/repo",
 		PRID:       "pr-1",
+		Attempt:    2,
 		AsOf:       "2026-09-09T00:00:00Z",
 		Stale:      false,
 	}
@@ -93,4 +95,30 @@ func TestCISchemaVersion_IndependentOfPRSchemaVersion(t *testing.T) {
 	// fields — this test's own point is that nothing here couples them).
 	_ = CISchemaVersion
 	_ = PRSchemaVersion
+}
+
+func TestCIRun_AttemptOmittedWhenZero(t *testing.T) {
+	raw, err := json.Marshal(CIRun{ID: "run-1", PRID: "pr-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["attempt"]; ok {
+		t.Fatalf("attempt present in %s, want omitted when 0", raw)
+	}
+	raw, _ = json.Marshal(CIRun{ID: "run-1", Attempt: 3})
+	if !strings.Contains(string(raw), `"attempt":3`) {
+		t.Fatalf("attempt missing when set: %s", raw)
+	}
+}
+
+// TestCISchemaVersion_IsCurrent pins CISchemaVersion at its current value
+// so a bump is a deliberate, reviewed change.
+func TestCISchemaVersion_IsCurrent(t *testing.T) {
+	if CISchemaVersion != 4 {
+		t.Fatalf("CISchemaVersion = %d, want 4", CISchemaVersion)
+	}
 }

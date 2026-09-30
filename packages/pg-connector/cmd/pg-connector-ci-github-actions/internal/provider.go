@@ -81,7 +81,7 @@ var (
 )
 
 // ghRun is the JSON shape returned by `gh run list --json …`, carried over
-// unchanged from ghactions.go.
+// from ghactions.go plus Attempt (the run's latest attempt number).
 type ghRun struct {
 	DatabaseID int64  `json:"databaseId"`
 	Name       string `json:"name"`
@@ -90,6 +90,7 @@ type ghRun struct {
 	URL        string `json:"url"`
 	HeadBranch string `json:"headBranch"`
 	HeadSHA    string `json:"headSha"`
+	Attempt    int    `json:"attempt"`
 }
 
 // toSchema converts one gh run into this capability's wire shape, setting
@@ -106,12 +107,13 @@ func (r ghRun) toSchema(prID string) schema.CIRun {
 		Provider:   ProviderName,
 		HeadSHA:    r.HeadSHA,
 		PRID:       prID,
+		Attempt:    r.Attempt,
 	}
 }
 
 // runListFields is the JSON projection requested from gh, carried over
-// unchanged from ghactions.go.
-const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha"
+// from ghactions.go plus attempt.
+const runListFields = "databaseId,name,status,conclusion,url,headBranch,headSha,attempt"
 
 // ListRuns implements ci.Provider.ListRuns: resolves prID's repo and head
 // branch via pr (resolver.go), then enumerates workflow runs for that
