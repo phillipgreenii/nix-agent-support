@@ -48,3 +48,17 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   (`conformance.ExitBusy`, reason `low-disk`), mutating no bead, so the core simply re-offers
   the event later with backoff. This is consistent with `INV-CCH-3`/`INV-CCH-6`: a system-wide
   resource shortage is a pre-accept signal, not a post-accept or per-bead outcome.
+- **`INV-CCH-9`** — whenever this module records why a handler session failed, or why a check
+  it runs before launching one failed, it MUST name the cause as exactly one failure signature
+  from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`, or
+  `unknown`. It MUST NOT use a free-form or empty label. The signature MUST come from one
+  classification that every caller in this module shares, applied in a fixed precedence order,
+  so two callers never label the same failure text differently. Text that matches no rule is
+  `unknown`. That includes text that shows success even though the process exited non-zero, and
+  a word such as "oauth" in unrelated prose. Any evidence recorded beside the signature MUST be
+  the matched context with credentials masked (URL userinfo, bearer tokens, provider-prefixed
+  tokens, long hex/base64 runs, private-key blocks). The masking MUST happen BEFORE the evidence
+  is cut to at most 300 characters, so a credential that straddles the cut cannot leave a
+  fragment behind. The raw failure text MUST never be logged or returned. Naming a cause is a
+  judgment about the work, not an observed session fact, so this classification lives on the
+  handler side and never in ccpool (`phillipgreenii-nix-agent-support` ADR 0015's "Decision").

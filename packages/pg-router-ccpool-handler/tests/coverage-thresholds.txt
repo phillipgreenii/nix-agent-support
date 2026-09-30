@@ -27,3 +27,8 @@ internal/budget 85
 internal/prompt 95
 internal/complete 95
 internal/beads 70
+# internal/failsig was created with 100.0% statement coverage (pg2-jw9rr). It is
+# the credential-redaction boundary, so an untested branch there is a potential
+# leak. The bar is 95, which leaves the usual small margin below the measured
+# value.
+internal/failsig 95
