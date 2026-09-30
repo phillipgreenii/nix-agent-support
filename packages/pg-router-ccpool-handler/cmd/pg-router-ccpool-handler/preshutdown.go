@@ -229,9 +229,22 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // this function orphaned its pg-router/<beadID> anchor branch forever until
 // now.
 func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session) bool {
+	return closeSession(ctx, cc, open, repoRoot, s, false)
+}
+
+// closeSession is closeSessionAndWorktree with an explicit keepWorktree
+// switch (pg2-u3t04): when true the session is still purged but its
+// worktree and anchor branch are left in place because another live session
+// still uses the same directory.
+func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
+	}
+	if keepWorktree {
+		slog.Info("teardown: worktree kept -- another live session still uses it",
+			"session", s.ExternalID, "cwd", s.CWD)
+		return true
 	}
 	if wm, err := open(ctx, s.CWD); err != nil {
 		slog.Warn("teardown: worktree remove failed (cwd may not be inside a git repository)",

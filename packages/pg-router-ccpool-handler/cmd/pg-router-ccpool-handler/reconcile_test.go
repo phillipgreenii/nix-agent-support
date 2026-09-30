@@ -261,3 +261,59 @@ func TestReconcileClosedBeadSessions_listFailureIsSoft(t *testing.T) {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 0 on a list failure", n)
 	}
 }
+
+// TestReconcileClosedBeadSessions_keepsWorktreeSharedWithLivePeer is the
+// pg2-u3t04 / pg2-aqpqx regression: two sessions (e.g. review + feedback)
+// share one per-bead worktree. The idle one's bead is closed, so it is
+// purged, but the worktree must survive while the peer is still working.
+func TestReconcileClosedBeadSessions_keepsWorktreeSharedWithLivePeer(t *testing.T) {
+	const cwd = "/wt/zr-shared"
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{
+			ExternalID: "pg-router-review-zr-shared",
+			State:      ccpool.StateIdle,
+			Live:       true,
+			CWD:        cwd,
+			Meta:       map[string]string{ccpool.MetaKeyBead: "zr-shared"},
+		},
+		{
+			ExternalID: "pg-router-feedback-zr-shared",
+			State:      ccpool.StateWorking,
+			Live:       true,
+			CWD:        cwd,
+			Meta:       map[string]string{ccpool.MetaKeyBead: "zr-shared"},
+		},
+	}}}
+	br := fakeBR{out: map[string]string{"show zr-shared --json": `{"status":"closed"}`}}
+	wo := &fakeWorktreeOpener{}
+	n := reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root")
+	if n != 1 || len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-review-zr-shared" {
+		t.Fatalf("idle session must still be purged; n=%d closed=%v", n, cc.Closed)
+	}
+	if len(wo.Removed) != 0 {
+		t.Errorf("worktree shared with a working peer must not be removed; removed=%v", wo.Removed)
+	}
+	if len(wo.BranchDeletes) != 0 {
+		t.Errorf("anchor branch must be kept too; deletes=%v", wo.BranchDeletes)
+	}
+}
+
+// TestReconcileClosedBeadSessions_removesWorktreeWhenNoLivePeer guards the
+// other direction: a sole idle session's worktree is still reclaimed.
+func TestReconcileClosedBeadSessions_removesWorktreeWhenNoLivePeer(t *testing.T) {
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{
+			ExternalID: "pg-router-review-zr-solo",
+			State:      ccpool.StateIdle,
+			Live:       true,
+			CWD:        "/wt/zr-solo",
+			Meta:       map[string]string{ccpool.MetaKeyBead: "zr-solo"},
+		},
+	}}}
+	br := fakeBR{out: map[string]string{"show zr-solo --json": `{"status":"closed"}`}}
+	wo := &fakeWorktreeOpener{}
+	reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root")
+	if len(wo.Removed) != 1 || wo.Removed[0] != "/wt/zr-solo" {
+		t.Errorf("sole session's worktree must be removed; removed=%v", wo.Removed)
+	}
+}

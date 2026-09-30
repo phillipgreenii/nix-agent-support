@@ -78,7 +78,7 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 		if !beadAlreadyClosed(ctx, br, s) {
 			continue
 		}
-		if closeSessionAndWorktree(ctx, cc, open, repoRoot, s) {
+		if closeSession(ctx, cc, open, repoRoot, s, worktreeInUseByPeer(sessions, s)) {
 			closed++
 		}
 	}
@@ -94,4 +94,26 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 // so it must never race a session that might still be doing something.
 func reconcilableState(s ccpool.SessionState) bool {
 	return s == ccpool.StateIdle || s == ccpool.StateNeedsInput
+}
+
+// worktreeInUseByPeer reports whether another session in sessions is still
+// actively using s's working directory (pg2-u3t04 / pg2-aqpqx). A per-bead
+// worktree path is keyed by bead id alone (worktree.Ensure), so every role's
+// session for one bead (review, feedback, ...) shares it: purging one idle
+// closed-bead session must not delete the directory out from under a peer
+// that is starting, ready or working. A peer that is itself idle/needs_input
+// is not protected here: the same sweep reclaims it on the same terms.
+func worktreeInUseByPeer(sessions []ccpool.Session, s ccpool.Session) bool {
+	if s.CWD == "" {
+		return false
+	}
+	for _, o := range sessions {
+		if o.ExternalID == s.ExternalID || o.CWD != s.CWD || !o.Live {
+			continue
+		}
+		if !reconcilableState(o.State) && o.State != ccpool.StateErrored {
+			return true
+		}
+	}
+	return false
 }
