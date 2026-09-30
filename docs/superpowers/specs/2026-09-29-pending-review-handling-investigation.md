@@ -3,6 +3,7 @@
 - **Date**: 2026-09-29
 - **Bead**: `pg2-kftf9.10` (P0 bug; parent epic `pg2-kftf9`; related `pg2-me72g`, `pg2-kftf9.8`)
 - **Status**: RECOMMENDATION APPROVED by the operator (Phillip, 2026-09-29): delete-and-recreate (section 4.3), guarded by full agent authorship, unedited content, a different commit, and archive-before-delete. Prerequisites are NOT yet proven; section 2.3 is the binding proof plan. Nothing here authorizes implementation until the experiment bead (section 8, item 1) has passed. Section 8 lists proposed beads, which are NOT yet created.
+- **Experiment results (2026-09-30, bead `pg2-kftf9.11`)**: see `2026-09-30-pending-review-prerequisites-results.md` in this directory. P2, P4, P5, P7, P8 PASS; P1 and P3 PASS on the API-observable parts; P1(b), P3 web-UI edit, and P6 fine-grained matrix remain unproven gaps.
 - **Operator ruling (verbatim, 2026-09-29)**: "recommendation is good, make sure we can proove all of the pre-req. secondly, if we hit this stiaution and you can't remove it, then we need to escalte this so that i see it quicker." This supersedes the earlier draft's "dashboard state only" handling of an unremovable pending review.
 - **Evidence legend**: **[doc]** = read from public GitHub docs on 2026-09-29; **[code]** = read from this repo or the ZR repo; **[PROVE]** = a prerequisite taken from memory or inference that MUST be demonstrated by the section 2.3 experiment, with captured evidence, before any implementation bead that depends on it is workable. A **[PROVE]** item is an assumption, not a fact.
 
