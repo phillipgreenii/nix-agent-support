@@ -6,8 +6,8 @@
 // backend on an existing one.
 //
 // schema.CalendarEvent is an INDEPENDENTLY-defined type: it is not a
-// re-export or wrapper of osx-bridge-api's internal/calendarapi.Event
-// (phillipgreenii-nix-support-apps/packages/osx-bridge-api is a separate Go module, and everything under
+// re-export or wrapper of pg-osx-bridge-api's internal/calendarapi.Event
+// (phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api is a separate Go module, and everything under
 // it is internal/-scoped) — its field set is read for FIELD-SHAPE
 // REFERENCE only. It carries every fact calendarapi.Event has that has a
 // calendar-domain meaning, plus a NEW calendar_priority field this docket
@@ -30,7 +30,7 @@ package schema
 // checkSchemaVersions — mirrors ThreadSchemaVersion's identical precedent.
 const CalendarSchemaVersion = 1
 
-// CalendarAttendee mirrors osx-bridge-api's internal/calendarapi.Attendee
+// CalendarAttendee mirrors pg-osx-bridge-api's internal/calendarapi.Attendee
 // field set (field-shape reference only — see this file's own package doc
 // comment for why this is an independently-defined type, not a re-export).
 // Attendees are read-only from EventKit; there is no write path for this
@@ -93,7 +93,7 @@ type CalendarEvent struct {
 	// all — so "organizer matching" against a configured important_people
 	// list (INV-CAL-1, packages/pg-connector/docs/behavior/invariants.md)
 	// necessarily degrades to attendee-list matching only, unless and
-	// until osx-bridge-api's own wire shape gains a distinct Organizer
+	// until pg-osx-bridge-api's own wire shape gains a distinct Organizer
 	// field. A concrete Provider implementation MUST NOT paper over this:
 	// it is a real, verified constraint of the underlying system, not an
 	// oversight in this schema.

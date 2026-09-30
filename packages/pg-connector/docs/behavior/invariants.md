@@ -345,7 +345,7 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   `schema.CalendarEvent` (ported from `calendarapi.Event` [landed: `pg2-p9ap3`]) carries no
   separate `Organizer` field — only an `Attendees` list with no is-organizer marker at all — so
   there is no way to test "is this important person the organizer specifically" until
-  `osx-bridge-api`'s own wire shape gains one. A backend MUST NOT paper over this: it is a real,
+  `pg-osx-bridge-api`'s own wire shape gains one. A backend MUST NOT paper over this: it is a real,
   verified constraint of the underlying system, not an oversight in this invariant.
 
 ## Goal

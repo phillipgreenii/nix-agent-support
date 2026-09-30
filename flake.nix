@@ -204,7 +204,7 @@
           # gomod2nixToml) as every sibling backend entry above, building
           # the standalone scriptout-only binary from
           # packages/pg-connector/pg-connector-calendar-osx-bridge.nix. Its
-          # Tier-2 implementation talks only to osx-bridge-api's local
+          # Tier-2 implementation talks only to pg-osx-bridge-api's local
           # Unix-domain socket [landed: pg2-p9ap3, pg2-tk57n; the daemon now
           # lives in phillipgreenii-nix-support-apps, bead pg2-19rtu], never
           # EventKit/go-eventkit directly.

@@ -57,12 +57,12 @@ mkGoApp {
   # No help2man/completions postInstall, no wrapProgram (matches
   # pg-connector-thread-slack.nix and every other Tier-2 backend): this
   # binary speaks only the scriptout wire protocol and has no independent
-  # CLI identity a human types directly. It talks only to osx-bridge-api's
+  # CLI identity a human types directly. It talks only to pg-osx-bridge-api's
   # already-installed local Unix-domain socket [landed: pg2-p9ap3,
   # pg2-tk57n] — no runtime dependency to wrap in.
 
   meta = with lib; {
-    description = "pg-connector's calendar capability Tier-2 backend, transporting over osx-bridge-api's local Unix-domain socket (EventKit-backed) — a scriptout-only binary with no independent CLI identity";
+    description = "pg-connector's calendar capability Tier-2 backend, transporting over pg-osx-bridge-api's local Unix-domain socket (EventKit-backed) — a scriptout-only binary with no independent CLI identity";
     platforms = platforms.all;
   };
 }

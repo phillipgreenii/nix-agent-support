@@ -4,11 +4,11 @@
 // human-facing CLI identity — mirroring
 // cmd/pg-connector-thread-slack/main.go's identical structure. It
 // implements pkg/provider/calendar.Provider by talking ONLY to
-// osx-bridge-api's local Unix-domain socket for the calendar service (see
+// pg-osx-bridge-api's local Unix-domain socket for the calendar service (see
 // internal/client.go) — no direct EventKit/go-eventkit import anywhere in
 // this package.
 //
-// It implements no pkg/provider.AuthChecker: osx-bridge-api requires no
+// It implements no pkg/provider.AuthChecker: pg-osx-bridge-api requires no
 // credential from its own client at all — TCC consent is the daemon's own
 // concern, already handled [landed: pg2-p9ap3, pg2-tk57n] — mirroring
 // pg-connector-thread-slack's identical "resolves no credential of its

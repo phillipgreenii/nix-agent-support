@@ -5,17 +5,17 @@
 // pattern, adapted to a net.Dial("unix", ...) socket client rather than an
 // os/exec transport.
 //
-// phillipgreenii-nix-support-apps/packages/osx-bridge-api is a WHOLLY SEPARATE Go module (its own go.mod,
-// module path github.com/phillipgreenii/osx-bridge-api) from this module,
+// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api is a WHOLLY SEPARATE Go module (its own go.mod,
+// module path github.com/phillipgreenii/pg-osx-bridge-api) from this module,
 // and every symbol this backend needs from it lives under an internal/
 // directory — Go's own internal-visibility rule forbids importing
-// anything under .../osx-bridge-api/internal/... from a package whose
+// anything under .../pg-osx-bridge-api/internal/... from a package whose
 // import path does not share that prefix, which this backend's own
 // cmd/pg-connector-calendar-osx-bridge import path never can. So this file
-// defines its OWN LOCAL Go types mirroring osx-bridge-api's JSON field
+// defines its OWN LOCAL Go types mirroring pg-osx-bridge-api's JSON field
 // shapes BY STRUCT TAG, replicated from reading
-// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/wire/{envelope.go,errors.go} and
-// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/calendarapi/types.go directly — never
+// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/internal/wire/{envelope.go,errors.go} and
+// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/internal/calendarapi/types.go directly — never
 // an import, and never a replace directive pulling that module in.
 package internal
 
@@ -33,19 +33,19 @@ import (
 )
 
 // socketEnvVar and defaultSocketPath's own construction mirror
-// phillipgreenii-nix-support-apps/packages/osx-bridge-api/cmd/osx-bridge-api/main.go's identical
+// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/cmd/pg-osx-bridge-api/main.go's identical
 // socketEnvVar/defaultSocketPath resolution EXACTLY [landed: pg2-p9ap3] —
 // this backend is a CLIENT of that same daemon socket, so it resolves the
 // identical env var/default rather than inventing a second,
 // backend-specific one.
-const socketEnvVar = "OSX_BRIDGE_API_SOCKET"
+const socketEnvVar = "PG_OSX_BRIDGE_API_SOCKET"
 
-// wireProtocolVersion mirrors osx-bridge-api's internal/wire.ProtocolVersion
+// wireProtocolVersion mirrors pg-osx-bridge-api's internal/wire.ProtocolVersion
 // [landed: pg2-p9ap3] — the socket transport's own envelope version, sent
 // on every request this client makes.
 const wireProtocolVersion = 1
 
-// serviceName, opCalendars, and opEvents mirror osx-bridge-api's
+// serviceName, opCalendars, and opEvents mirror pg-osx-bridge-api's
 // internal/calendarapi.{ServiceName,OpCalendars,OpEvents} [landed:
 // pg2-p9ap3] exactly, by value (never imported).
 const (
@@ -56,9 +56,9 @@ const (
 
 // ResolveSocketPath resolves the daemon's socket path: socketEnvVar when
 // getenv reports it set, else
-// ${XDG_STATE_HOME:-$HOME/.local/state}/osx-bridge-api/osx-bridge-api.sock
+// ${XDG_STATE_HOME:-$HOME/.local/state}/pg-osx-bridge-api/pg-osx-bridge-api.sock
 // — byte-for-byte the same algorithm
-// phillipgreenii-nix-support-apps/packages/osx-bridge-api/cmd/osx-bridge-api/main.go's own
+// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/cmd/pg-osx-bridge-api/main.go's own
 // socketEnvVar/defaultSocketPath resolution uses [landed: pg2-p9ap3],
 // since this backend is a client of that same socket and MUST resolve the
 // identical default a caller who never set the env var would still reach.
@@ -74,11 +74,11 @@ func ResolveSocketPath(getenv func(string) string) (string, error) {
 		}
 		stateHome = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(stateHome, "osx-bridge-api", "osx-bridge-api.sock"), nil
+	return filepath.Join(stateHome, "pg-osx-bridge-api", "pg-osx-bridge-api.sock"), nil
 }
 
 // ---------------------------------------------------------------------
-// Local mirrors of osx-bridge-api's own wire shapes (field-shape
+// Local mirrors of pg-osx-bridge-api's own wire shapes (field-shape
 // reference only — see this file's package doc comment for why these are
 // independently-defined types, never an import).
 // ---------------------------------------------------------------------
@@ -108,7 +108,7 @@ type wireResponse struct {
 }
 
 // ---------------------------------------------------------------------
-// Local mirrors of osx-bridge-api's calendarapi JSON shapes (field-shape
+// Local mirrors of pg-osx-bridge-api's calendarapi JSON shapes (field-shape
 // reference only, see this file's package doc comment).
 // ---------------------------------------------------------------------
 
@@ -158,7 +158,7 @@ type apiEventsQuery struct {
 	Search      string    `json:"search,omitempty"`
 }
 
-// wireCodeToSentinel maps osx-bridge-api's six wire error codes [landed:
+// wireCodeToSentinel maps pg-osx-bridge-api's six wire error codes [landed:
 // pg2-p9ap3] onto this backend's own outward-facing pkg/scriptout.Err*
 // sentinels — a straight six-way string-to-sentinel mapping, not a new
 // taxonomy and not a claim of exact six-way equality with scriptout.Err*'s
@@ -184,7 +184,7 @@ func classifyWireError(body *wireErrorBody) error {
 	if !ok {
 		sentinel = scriptout.ErrUnavailable
 	}
-	return scriptout.WrapError(sentinel, "osx-bridge-api: "+body.Message)
+	return scriptout.WrapError(sentinel, "pg-osx-bridge-api: "+body.Message)
 }
 
 // Transport is this backend's own injectable seam over the calendar
@@ -198,8 +198,8 @@ type Transport interface {
 }
 
 // SocketClient is the production Transport: it dials
-// OSX_BRIDGE_API_SOCKET (or the resolved default path) fresh for every
-// call — one connection per call, mirroring osx-bridge-api's own
+// PG_OSX_BRIDGE_API_SOCKET (or the resolved default path) fresh for every
+// call — one connection per call, mirroring pg-osx-bridge-api's own
 // ServeConn's "one request, one response, one connection" framing
 // [landed: pg2-p9ap3] — writes one locally-defined wireRequest, and reads
 // back one locally-defined wireResponse.
@@ -243,13 +243,13 @@ func (c *SocketClient) resolvePath() (string, error) {
 func (c *SocketClient) call(ctx context.Context, op string, args any) (json.RawMessage, error) {
 	path, err := c.resolvePath()
 	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "osx-bridge-api: resolve socket path: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-osx-bridge-api: resolve socket path: "+err.Error())
 	}
 
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", path)
 	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("osx-bridge-api: dial %s: %v", path, err))
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("pg-osx-bridge-api: dial %s: %v", path, err))
 	}
 	defer func() { _ = conn.Close() }()
 	if dl, ok := ctx.Deadline(); ok {
@@ -258,16 +258,16 @@ func (c *SocketClient) call(ctx context.Context, op string, args any) (json.RawM
 
 	argsRaw, err := json.Marshal(args)
 	if err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "osx-bridge-api: marshal args: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "pg-osx-bridge-api: marshal args: "+err.Error())
 	}
 	req := wireRequest{ProtocolVersion: wireProtocolVersion, Service: serviceName, Op: op, Args: argsRaw}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "osx-bridge-api: write request: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-osx-bridge-api: write request: "+err.Error())
 	}
 
 	var resp wireResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "osx-bridge-api: read response: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-osx-bridge-api: read response: "+err.Error())
 	}
 	if resp.Error != nil {
 		return nil, classifyWireError(resp.Error)
@@ -285,7 +285,7 @@ func (c *SocketClient) Calendars(ctx context.Context) ([]apiCalendar, error) {
 		Calendars []apiCalendar `json:"calendars"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "osx-bridge-api: decode calendars result: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-osx-bridge-api: decode calendars result: "+err.Error())
 	}
 	return result.Calendars, nil
 }
@@ -300,7 +300,7 @@ func (c *SocketClient) Events(ctx context.Context, q apiEventsQuery) ([]apiEvent
 		Events []apiEvent `json:"events"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "osx-bridge-api: decode events result: "+err.Error())
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pg-osx-bridge-api: decode events result: "+err.Error())
 	}
 	return result.Events, nil
 }

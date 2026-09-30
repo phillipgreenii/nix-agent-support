@@ -16,8 +16,8 @@ import (
 
 // startFakeSocket starts a minimal, hand-rolled Unix-socket listener that
 // decodes exactly one JSON request per connection (a bare map, not
-// osx-bridge-api's own wire.Request) and replies with whatever handle
-// returns — deliberately NOT importing phillipgreenii-nix-support-apps/packages/osx-bridge-api's own
+// pg-osx-bridge-api's own wire.Request) and replies with whatever handle
+// returns — deliberately NOT importing phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api's own
 // socketserver/wire/calendarapi packages: this backend's own Contract
 // requires this client to be exercised against nothing but its own
 // locally-defined mirror types (see client.go's package doc comment), so
@@ -30,7 +30,7 @@ func startFakeSocket(t *testing.T, handle func(req map[string]any) any) (sockPat
 	// embeds the (possibly long) test name in the path, and
 	// sockaddr_un.sun_path is capped well under that length on darwin/
 	// Linux — mirrors
-	// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/socketserver/server_test.go's
+	// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/internal/socketserver/server_test.go's
 	// identical startServer precedent.
 	dir, err := os.MkdirTemp("", "pgcob")
 	if err != nil {
@@ -240,7 +240,7 @@ func TestResolveSocketPath_XDGStateHomeDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSocketPath: %v", err)
 	}
-	want := filepath.Join("/xdg-state", "osx-bridge-api", "osx-bridge-api.sock")
+	want := filepath.Join("/xdg-state", "pg-osx-bridge-api", "pg-osx-bridge-api.sock")
 	if got != want {
 		t.Fatalf("got = %q, want %q", got, want)
 	}
@@ -257,7 +257,7 @@ func TestResolveSocketPath_HomeFallbackDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSocketPath: %v", err)
 	}
-	want := filepath.Join("/home/phillip", ".local", "state", "osx-bridge-api", "osx-bridge-api.sock")
+	want := filepath.Join("/home/phillip", ".local", "state", "pg-osx-bridge-api", "pg-osx-bridge-api.sock")
 	if got != want {
 		t.Fatalf("got = %q, want %q", got, want)
 	}

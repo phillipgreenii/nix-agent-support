@@ -2,8 +2,8 @@
 // — pkg/scriptout/conformance's existing Backend/ExecBackend/driver.Run
 // suite (unchanged; this packet is a NEW consumer of it, not a modifier)
 // run against the REAL COMPILED pg-connector-calendar-osx-bridge binary,
-// with a FAKE osx-bridge-api socket listener standing in for the real
-// daemon, resolved via t.Setenv("OSX_BRIDGE_API_SOCKET", <fake listener's
+// with a FAKE pg-osx-bridge-api socket listener standing in for the real
+// daemon, resolved via t.Setenv("PG_OSX_BRIDGE_API_SOCKET", <fake listener's
 // path>) — the SAME env var internal/client.go's own socketEnvVar/
 // ResolveSocketPath resolution reads, mirroring
 // cmd/pg-connector-thread-slack/conformance_test.go's own
@@ -31,9 +31,9 @@ import (
 
 // osxBridgeAPISocketEnvVar mirrors internal/client.go's own (unexported)
 // socketEnvVar constant by value — this backend is a client of
-// osx-bridge-api's real daemon socket and resolves this exact env var, so
+// pg-osx-bridge-api's real daemon socket and resolves this exact env var, so
 // the fake listener below must be wired in under the identical name.
-const osxBridgeAPISocketEnvVar = "OSX_BRIDGE_API_SOCKET"
+const osxBridgeAPISocketEnvVar = "PG_OSX_BRIDGE_API_SOCKET"
 
 // buildCalendarOsxBridgeBinary compiles this package's own real binary via
 // `go build -o <dir>/pg-connector-calendar-osx-bridge .`, run with THIS
@@ -56,8 +56,8 @@ func buildCalendarOsxBridgeBinary(t *testing.T) string {
 }
 
 // startFakeOsxBridgeSocket starts a minimal, hand-rolled Unix-socket
-// listener standing in for the real osx-bridge-api daemon — never
-// importing phillipgreenii-nix-support-apps/packages/osx-bridge-api's own socketserver/wire/calendarapi
+// listener standing in for the real pg-osx-bridge-api daemon — never
+// importing phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api's own socketserver/wire/calendarapi
 // packages (this backend's own Contract: this package talks to that
 // daemon over the wire only, never as a Go import; see internal/client.go's
 // package doc comment). It answers well-formed "calendars"/"events"
@@ -77,7 +77,7 @@ func startFakeOsxBridgeSocket(t *testing.T) string {
 	// A short, dedicated temp dir rather than t.TempDir(): sockaddr_un's
 	// own path-length cap is well under what a t.TempDir() path (which
 	// embeds the test name) can produce — mirrors
-	// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/socketserver/server_test.go's own
+	// phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api/internal/socketserver/server_test.go's own
 	// startServer precedent.
 	dir, err := os.MkdirTemp("", "pgcobfake")
 	if err != nil {
@@ -124,7 +124,7 @@ func startFakeOsxBridgeSocket(t *testing.T) string {
 				default:
 					resp = map[string]any{
 						"protocolVersion": 1,
-						"error":           map[string]any{"code": "unknown_op", "message": "fake osx-bridge-api: unknown op"},
+						"error":           map[string]any{"code": "unknown_op", "message": "fake pg-osx-bridge-api: unknown op"},
 					}
 				}
 				_ = json.NewEncoder(conn).Encode(resp)
@@ -138,7 +138,7 @@ func startFakeOsxBridgeSocket(t *testing.T) string {
 // TestConformance_RealBinary_FakeOsxBridgeSocketOnEnvOverride is this
 // packet's own required proof: "the full conformance suite passes when
 // run against the real compiled pg-connector-calendar-osx-bridge binary
-// with a fake osx-bridge-api socket listener" [design: acceptance
+// with a fake pg-osx-bridge-api socket listener" [design: acceptance
 // criterion 3].
 func TestConformance_RealBinary_FakeOsxBridgeSocketOnEnvOverride(t *testing.T) {
 	bin := buildCalendarOsxBridgeBinary(t)

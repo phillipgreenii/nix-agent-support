@@ -1,12 +1,12 @@
 // backend.go: Backend implements pkg/provider/calendar.Provider by
-// talking ONLY to osx-bridge-api's local Unix-domain socket via a
+// talking ONLY to pg-osx-bridge-api's local Unix-domain socket via a
 // Transport (client.go) — no direct EventKit/go-eventkit import anywhere
 // in this package [design: "no direct EventKit/go-eventkit import in this
 // package"]. It additionally implements the OPTIONAL cross-cutting
 // attention.Provider/search.Provider interfaces, asserted via type-check
 // exactly like pg-connector-pr-github/pg-connector-issue-beads/
 // pg-connector-issue-jira already do. It implements NO
-// pkg/provider.AuthChecker (Binding decision): osx-bridge-api requires no
+// pkg/provider.AuthChecker (Binding decision): pg-osx-bridge-api requires no
 // credential from its own client — TCC consent is the daemon's own
 // concern, already handled [landed: pg2-p9ap3, pg2-tk57n] — mirroring
 // pg-connector-thread-slack's identical "resolves no credential of its
