@@ -31,6 +31,9 @@ type hookPayload struct {
 	// (verified against the installed Claude Code binary's own hookInput
 	// construction, 2026-09-21); empty/absent for the other hook events.
 	NotificationType string `json:"notification_type"`
+	// Reason is populated for the SessionEnd `end` event: clear | resume | logout
+	// | prompt_input_exit | other.
+	Reason string `json:"reason"`
 }
 
 // askToolInput is the AskUserQuestion tool_input shape (claude 2.1.177): a list of
@@ -125,6 +128,9 @@ func handleHookN(event string, stdin io.Reader, st *store.Store, envExternalID s
 	// it must additionally parse the question text — so it is handled separately.
 	if event == "ask" {
 		return handleAskHook(stdin, st, envExternalID, n, on, autonomous, denyOut)
+	}
+	if event == "end" {
+		return handleEndHook(stdin, st, envExternalID)
 	}
 	to, ok := eventState[event]
 	if !ok {
@@ -354,6 +360,35 @@ func askQuestionText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+// handleEndHook is the SessionEnd hook: it ends the session's open run as a
+// natural exit. It takes NO ccpool lock and writes only the local store (no OTLP).
+// The shared FinalizeRun keeps a pending end_reason (a ccpool-initiated close,
+// including --purge, wrote it BEFORE /exit) and otherwise records `exited`;
+// end_source is `hook` and ended_at the hook's own timestamp either way. A
+// SessionEnd of reason clear|resume is a Claude-level session change, not the end
+// of the tmux process, so it MUST NOT end the run as exited. A row with no open
+// run (legacy, or already ended) is a no-op.
+func handleEndHook(stdin io.Reader, st *store.Store, envExternalID string) error {
+	var p hookPayload
+	if err := json.NewDecoder(stdin).Decode(&p); err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+	if p.Reason == "clear" || p.Reason == "resume" {
+		return nil
+	}
+	ctx := context.Background()
+	externalID, ok, err := resolveExternalID(ctx, st, p.SessionID, envExternalID)
+	if err != nil || !ok {
+		return err
+	}
+	run, ok, err := st.OpenRunFor(ctx, externalID)
+	if err != nil || !ok {
+		return err
+	}
+	_, err = st.FinalizeRun(ctx, run.ID, "exited", store.RunEndHook, st.Now().Unix())
+	return err
 }
 
 // resolveExternalID finds the row's external_id by claude_session_id==session_id,

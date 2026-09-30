@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/eventlog"
@@ -138,5 +139,9 @@ func Open(dbPath string, c clock.Clock, opts ...Option) (*Store, error) {
 	}
 	return s, nil
 }
+
+// Now reads the store's injected clock (used by the lock-free SessionEnd hook to
+// stamp a run end with its own exact time).
+func (s *Store) Now() time.Time { return s.clock.Now() }
 
 func (s *Store) Close() error { return s.db.Close() }

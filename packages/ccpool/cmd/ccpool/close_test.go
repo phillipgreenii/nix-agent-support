@@ -39,7 +39,7 @@ func TestClose_rejectsUnknownReasonFlag(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (stderr: %s)", code, out)
 	}
-	for _, want := range []string{"idle_ttl", "cap_eviction", "operator", "handler"} {
+	for _, want := range []string{"idle_ttl", "cap_eviction", "operator", "handler", "exited"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stderr %q must name the close-reason vocabulary (missing %q)", out, want)
 		}

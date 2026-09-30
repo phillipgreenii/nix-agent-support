@@ -205,13 +205,13 @@ func (s *Store) SetPendingQuestion(ctx context.Context, externalID, q string) er
 
 // CloseReasons is the closed vocabulary SetCloseReason accepts (ADR 0072,
 // Decision 4).
-var CloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true, "handler": true}
+var CloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true, "handler": true, "exited": true}
 
 // SetCloseReason stamps close_reason/closed_at and appends a "close" event. It
 // does NOT change State (ADR 0015: the row keeps its last observed state).
 func (s *Store) SetCloseReason(ctx context.Context, externalID, reason string) error {
 	if !CloseReasons[reason] {
-		return fmt.Errorf("close reason %q not one of idle_ttl|cap_eviction|operator|handler", reason)
+		return fmt.Errorf("close reason %q not one of idle_ttl|cap_eviction|operator|handler|exited", reason)
 	}
 	now := s.clock.Now().Unix()
 	res, err := s.db.ExecContext(ctx,
@@ -235,16 +235,27 @@ func (s *Store) Poll(ctx context.Context, externalID string) (int64, State, bool
 	return sess.Generation, sess.State, true, nil
 }
 
-// Delete removes the row for external_id AND its session metadata. Deleting a
+// Delete removes the row for external_id AND its session metadata and runs. Deleting a
 // missing row is not an error.
 func (s *Store) Delete(ctx context.Context, externalID string) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE external_id = ?`, externalID); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return fmt.Errorf("delete %q: %w", externalID, err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM session_metadata WHERE external_id = ?`, externalID); err != nil {
+	defer func() { _ = tx.Rollback() }()
+	// Explicit run removal: the live store sets no foreign_keys pragma, so an
+	// ON DELETE CASCADE would silently not fire.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM session_runs WHERE session_id IN (SELECT id FROM sessions WHERE external_id = ?)`, externalID); err != nil {
+		return fmt.Errorf("delete runs for %q: %w", externalID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE external_id = ?`, externalID); err != nil {
+		return fmt.Errorf("delete %q: %w", externalID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_metadata WHERE external_id = ?`, externalID); err != nil {
 		return fmt.Errorf("delete meta for %q: %w", externalID, err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Upsert ensures a row exists for external_id; if absent it is inserted as

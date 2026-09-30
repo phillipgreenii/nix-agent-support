@@ -163,6 +163,13 @@ func (s *Service) closeWithReason(ctx context.Context, externalID, reason string
 				return err
 			}
 		}
+		// Pending end_reason on the open run, BEFORE /exit (also for --purge, which
+		// skips the close_reason stamp): the SessionEnd hook then finds a reason and
+		// keeps it ("purge wins"), so a ccpool-initiated close is never recorded as
+		// a natural `exited`.
+		if err := s.d.Store.SetRunPendingReason(ctx, externalID, reason); err != nil {
+			return err
+		}
 		tmuxName := TmuxName(s.d.Prefix, externalID)
 		if s.d.Tmux.HasSession(tmuxName) {
 			// deliverCommand clears the input line itself, so no separate clear here.
@@ -174,6 +181,10 @@ func (s *Service) closeWithReason(ctx context.Context, externalID, reason string
 					return fmt.Errorf("force kill: %w", err)
 				}
 			}
+		}
+		// Teardown succeeded: end the run (a no-op if the hook already won).
+		if err := s.endOpenRun(ctx, externalID, reason, store.RunEndClose, s.now().Unix()); err != nil {
+			return err
 		}
 		if purge {
 			return s.d.Store.Delete(ctx, externalID)

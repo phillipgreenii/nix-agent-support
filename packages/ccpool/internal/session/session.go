@@ -92,6 +92,11 @@ type (
 		SetMeta(ctx context.Context, externalID, key, value string) error
 		// SetCloseReason stamps close_reason/closed_at (ADR 0072, Decision 4).
 		SetCloseReason(ctx context.Context, externalID, reason string) error
+		// Run lifecycle (session_runs). FinalizeRun is the ONE method that ends a run.
+		OpenRun(ctx context.Context, externalID string) (int64, error)
+		OpenRunFor(ctx context.Context, externalID string) (store.Run, bool, error)
+		SetRunPendingReason(ctx context.Context, externalID, reason string) error
+		FinalizeRun(ctx context.Context, runID int64, reason, source string, endedAt int64) (bool, error)
 	}
 )
 
@@ -371,6 +376,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 			// Flip to `starting` BEFORE launch so `list` doesn't show the stale prior
 			// outcome during the launch window, and snapshot THAT generation as the
 			// wait baseline.
+			if err := s.startRun(ctx, row); err != nil {
+				return Handle{}, err
+			}
 			if _, err := s.d.Store.Transition(ctx, externalID, store.Starting, "", ""); err != nil {
 				return Handle{}, fmt.Errorf("mark resuming: %w", err)
 			}
@@ -398,6 +406,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	if exists {
 		// A fresh `starting` row whose Claude session isn't on disk yet: keep the
 		// row, resume-launch by its csid (the SessionStart hook should land shortly).
+		if err := s.startRun(ctx, row); err != nil {
+			return Handle{}, err
+		}
 		if _, err := s.d.Store.Transition(ctx, externalID, store.Starting, "", ""); err != nil {
 			return Handle{}, fmt.Errorf("mark resuming: %w", err)
 		}
@@ -421,6 +432,9 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	}); err != nil {
 		return Handle{}, fmt.Errorf("insert row: %w", err)
 	}
+	if err := s.startRun(ctx, store.Session{ExternalID: externalID}); err != nil {
+		return Handle{}, err
+	}
 	since, err := s.currentGeneration(ctx, externalID)
 	if err != nil {
 		return Handle{}, err
@@ -430,6 +444,32 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		PermissionMode: opts.PermissionMode, Effort: opts.Effort, AllowedTools: opts.AllowedTools,
 	})
 	return s.launchAndWait(ctx, externalID, tmuxName, csid, opts.Name, cwd, since, argv, opts.Env, opts.Autonomous, "brand_new")
+}
+
+// startRun opens a new session_runs row for a launch or resume. It first ends
+// any stale open run of the session (a session never has two open runs) through
+// the shared FinalizeRun: the pending end_reason if present, else `exited`,
+// end_source=reaper, ended_at = the row's last_activity_at (read BEFORE the
+// Starting transition bumps it). Callers hold the per-external_id launch lock.
+func (s *Service) startRun(ctx context.Context, row store.Session) error {
+	if err := s.endOpenRun(ctx, row.ExternalID, "exited", store.RunEndReaper, row.LastActivityAt); err != nil {
+		return fmt.Errorf("end stale run: %w", err)
+	}
+	if _, err := s.d.Store.OpenRun(ctx, row.ExternalID); err != nil {
+		return fmt.Errorf("open run: %w", err)
+	}
+	return nil
+}
+
+// endOpenRun finalizes externalID's open run, if any, through the one shared
+// FinalizeRun. A run someone else already ended is a no-op.
+func (s *Service) endOpenRun(ctx context.Context, externalID, reason, source string, endedAt int64) error {
+	run, ok, err := s.d.Store.OpenRunFor(ctx, externalID)
+	if err != nil || !ok {
+		return err
+	}
+	_, err = s.d.Store.FinalizeRun(ctx, run.ID, reason, source, endedAt)
+	return err
 }
 
 // claudeSessionResumable reports whether the row's Claude session still exists on

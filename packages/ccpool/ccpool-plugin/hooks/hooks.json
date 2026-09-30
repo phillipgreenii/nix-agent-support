@@ -9,6 +9,13 @@
     "StopFailure": [
       { "hooks": [{ "type": "command", "command": "ccpool hook fail" }] }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "ccpool hook end", "timeout": 10 }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt|idle_prompt",

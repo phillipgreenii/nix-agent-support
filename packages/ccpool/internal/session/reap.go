@@ -86,15 +86,18 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			live = append(live, r)
 			continue
 		}
-		if !s.claudeSessionResumable(r) && !s.isFreshStarting(r) {
-			if err := s.d.Store.Delete(ctx, r.ExternalID); err != nil {
-				return err
-			}
-			recordReapPhantomPruned()
-			slog.Info("ccpool: reap pruned phantom session", sessionLogArgs(r.ExternalID)...)
-			continue
+		// The classification above was made without the lock; the decision to
+		// finalize or delete is re-read under the per-external_id lock.
+		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID)
+		if err != nil {
+			return err
 		}
-		deadKept = append(deadKept, r)
+		switch kind {
+		case deadLive:
+			live = append(live, cur)
+		case deadKeptRow:
+			deadKept = append(deadKept, cur)
+		}
 	}
 	recordSessionStates(sessionStateCounts(live, deadKept))
 
@@ -160,6 +163,54 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)...)
 	}
 	return nil
+}
+
+type deadRowKind int
+
+const (
+	deadGone    deadRowKind = iota // pruned, or no longer present
+	deadLive                       // resumed since the unlocked check
+	deadKeptRow                    // dead but resumable / fresh: kept
+)
+
+// reapDeadRow is Pass 0 for one not-live row. Under the per-external_id lock it
+// re-reads the row and skips one that is no longer dead (for example it was
+// resumed). A phantom (not live, Claude session gone, not fresh-starting) has
+// its open run finalized through the shared FinalizeRun (pending end_reason if
+// any, else `exited`, end_source=reaper, ended_at=last_activity_at) BEFORE the
+// row is deleted. A dead-but-kept row is finalized the same way unless it is a
+// fresh `starting` row.
+func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKind, store.Session, error) {
+	kind := deadGone
+	var out store.Session
+	err := s.withLock(externalID, func() error {
+		r, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+		if err != nil || !ok {
+			return err
+		}
+		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, externalID)) {
+			kind, out = deadLive, r
+			return nil
+		}
+		fresh := s.isFreshStarting(r)
+		phantom := !s.claudeSessionResumable(r) && !fresh
+		if phantom || !fresh {
+			if err := s.endOpenRun(ctx, externalID, "exited", store.RunEndReaper, r.LastActivityAt); err != nil {
+				return err
+			}
+		}
+		if phantom {
+			if err := s.d.Store.Delete(ctx, externalID); err != nil {
+				return err
+			}
+			recordReapPhantomPruned()
+			slog.Info("ccpool: reap pruned phantom session", sessionLogArgs(externalID)...)
+			return nil
+		}
+		kind, out = deadKeptRow, r
+		return nil
+	})
+	return kind, out, err
 }
 
 // sessionStateCounts buckets the surviving registry rows by (state, live) for
