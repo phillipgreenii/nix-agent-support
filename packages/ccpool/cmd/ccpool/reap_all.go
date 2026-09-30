@@ -64,10 +64,17 @@ func reapOnePool(root string) error {
 	if !cfg.Pool.AutoReap {
 		return nil // opted out of the timer-driven sweep
 	}
+	// buildServiceFor makes THIS pool's store the process-global session
+	// labeler (re-set on every pool iteration); an unopenable store sets
+	// nothing. Clear it as the store closes, so no later narration in this
+	// multi-pool process resolves against a closed or another pool's store.
 	svc, st, code := buildServiceFor(cfg)
 	if code != 0 {
 		return fmt.Errorf("build service failed (exit %d)", code)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		setSessionLabeler(nil)
+		_ = st.Close()
+	}()
 	return svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL))
 }

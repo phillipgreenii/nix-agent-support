@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
 )
 
@@ -83,6 +84,7 @@ func buildServiceFor(cfg config.Config) (*session.Service, *store.Store, int) {
 		slog.Error("store open failed", "err", err)
 		return nil, nil, 1
 	}
+	setSessionLabeler(st)
 	return session.New(newSessionDeps(cfg, st, el)), st, 0
 }
 
@@ -116,6 +118,22 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 		Sleep:                    time.Sleep,
 	}
 }
+
+// sessionLabelSource is the store surface telemetry.SetSessionLabeler consumes
+// (*store.Store's Labels), restated here because telemetry keeps its own
+// interface unexported.
+type sessionLabelSource interface {
+	Labels(externalID string) (map[string]string, error)
+}
+
+// setSessionLabeler points the process-global telemetry.SessionAttrs at l;
+// nil clears it. Every command path that opens a store calls it right after a
+// SUCCESSFUL store.Open (never on a failed one — the labeler is then simply
+// left unset, the degraded-but-safe outcome SessionAttrs already defines), so
+// per-session slog narration carries the session's marked labels. It is a
+// package-level indirection — the same spy seam as recordRetry in retry.go —
+// so tests can observe the set/clear sequence reap-all makes across pools.
+var setSessionLabeler = func(l sessionLabelSource) { telemetry.SetSessionLabeler(l) }
 
 // openEventLog opens the active pool's append-only JSONL event log. A failure is
 // non-fatal — it logs to stderr and returns nil (a nil *eventlog.Logger is a

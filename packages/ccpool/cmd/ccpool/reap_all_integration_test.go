@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,6 +219,108 @@ timeout = "10s"
 	time.Sleep(400 * time.Millisecond)
 	if hasSession(socketN, "november") {
 		t.Error("manual `ccpool reap` must still reap an auto_reap=false pool")
+	}
+}
+
+// TestReapAll_closureNarrationResolvesEachPoolsOwnLabels: two registered pools,
+// one labelled session each with a DIFFERENT role. One reap-all process closes
+// both, and each "reap closed session" record carries its OWN pool's label —
+// the labeler is re-set to each pool's store per iteration, never left on the
+// first pool's (or a closed) store.
+func TestReapAll_closureNarrationResolvesEachPoolsOwnLabels(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	base := t.TempDir()
+	bin := filepath.Join(base, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ccpool := filepath.Join(bin, "ccpool")
+	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	src, err := os.ReadFile("testdata/fake-claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(bin, "fake-claude")
+	if err := os.WriteFile(fake, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every pool: max_sessions=0 so a ready session is over cap and reaped.
+	poolCfg := "[pool]\nmax_sessions = 0\nidle_ttl = \"0s\"\n" +
+		"[claude]\nbin = \"" + fake + "\"\nplugin_dir = \"/unused\"\n" +
+		"[wait]\ntimeout = \"10s\"\n[notify]\nadapter = \"none\"\n"
+	defSocket := config.SocketFor(base) // default pool: unique, never the live "ccpool" socket
+	cfgDir := filepath.Join(base, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("[tmux]\nsocket = \""+defSocket+"\"\n"+poolCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(
+		envWithoutOTel(),
+		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
+		"XDG_DATA_HOME="+filepath.Join(base, "data"),
+		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
+		"CCPOOL_REGISTRY_DIR="+filepath.Join(base, "reg"),
+		"HOME="+base, "CCPOOL_BIN="+ccpool, "PATH="+bin+":"+os.Getenv("PATH"),
+	)
+	run := func(extraEnv []string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(ccpool, args...)
+		cmd.Env = append(append([]string{}, env...), extraEnv...)
+		cmd.Dir = base
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("ccpool %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+
+	poolA := filepath.Join(base, "A")
+	poolB := filepath.Join(base, "B")
+	var sockets []string
+	t.Cleanup(func() {
+		for _, s := range append(sockets, defSocket) {
+			_ = exec.Command("tmux", "-L", s, "kill-server").Run()
+		}
+	})
+	// Register each pool via ccpool's own create-on-first-resolve, then drop in
+	// its config (see TestReapAll_governsRegisteredPools for why this order).
+	for _, p := range []string{poolA, poolB} {
+		run(nil, "--pool", p, "list")
+		if err := os.WriteFile(filepath.Join(p, "config.toml"), []byte(poolCfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sockets = append(sockets, config.SocketFor(mustEval(t, p)))
+	}
+
+	// Each pool's first `new` starts that pool's tmux server, so its transcript
+	// env is per pool.
+	run([]string{"FAKE_CLAUDE_TRANSCRIPT=" + filepath.Join(base, "alpha.jsonl")},
+		"--pool", poolA, "new", "alpha", "--meta", "pgrouter.role=review", "--label", "pgrouter.role")
+	run([]string{"FAKE_CLAUDE_TRANSCRIPT=" + filepath.Join(base, "bravo.jsonl")},
+		"--pool", poolB, "new", "bravo", "--meta", "pgrouter.role=worker", "--label", "pgrouter.role")
+	// Cap eviction closes only a session whose turn has ended (ADR 0072), so
+	// run one blocking turn on each: fake-claude's Stop leaves it idle.
+	run(nil, "--pool", poolA, "reply", "alpha", "ping")
+	run(nil, "--pool", poolB, "reply", "bravo", "ping")
+
+	out := run(nil, "reap-all")
+
+	lineA := narrationLine(out, "ccpool: reap closed session", "alpha")
+	lineB := narrationLine(out, "ccpool: reap closed session", "bravo")
+	if !strings.Contains(lineA, " pgrouter.role=review") || strings.Contains(lineA, "worker") {
+		t.Errorf("pool A closure must carry ONLY its own pgrouter.role=review; got %q\n%s", lineA, out)
+	}
+	if !strings.Contains(lineB, " pgrouter.role=worker") || strings.Contains(lineB, "review") {
+		t.Errorf("pool B closure must carry ONLY its own pgrouter.role=worker; got %q\n%s", lineB, out)
 	}
 }
 

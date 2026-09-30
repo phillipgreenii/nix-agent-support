@@ -53,6 +53,7 @@ func runReply(args []string) int {
 		slog.Error("reply: store open failed", "err", err)
 		return 1
 	}
+	setSessionLabeler(st)
 	defer func() { _ = st.Close() }()
 
 	svc := session.New(newSessionDeps(cfg, st, el))

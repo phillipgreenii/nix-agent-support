@@ -89,6 +89,8 @@ func runHook(args []string) int {
 		logHook(stateDir, fmt.Sprintf("hook %s: store open: %v", event, err))
 		return 0
 	}
+	// The StopFailure retry path narrates per session (retry policy exhausted).
+	setSessionLabeler(st)
 	defer func() { _ = st.Close() }()
 
 	n := notify.FromConfig(cfg.Notify.Adapter, cfg.Notify.Command)

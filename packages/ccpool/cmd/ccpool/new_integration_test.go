@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/ccpool/internal/clock"
+	"github.com/phillipgreenii/ccpool/internal/config"
+	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
 func TestNew_launchesFakeClaude_reachesReadyAndLive(t *testing.T) {
@@ -173,5 +177,117 @@ timeout = "10s"
 	}
 	if got := strings.TrimSpace(string(out)); got != "zr-1" {
 		t.Errorf("meta get pgrouter.bead = %q, want zr-1", got)
+	}
+}
+
+// TestNew_labelFlag_carriesLabelIntoSessionNarration is the end-to-end label
+// wiring check through the real CLI: a session created with
+// `--meta pgrouter.role=review --label pgrouter.role` carries that label on
+// later per-session slog narration (the reuse_live launch outcome of a second
+// `new` and of `reply`), unmarked metadata never rides along, and a sibling
+// created with --meta but no --label (is_label=0) stays unlabelled with no
+// backfill. The first `new`'s own launch record cannot carry the label: the
+// label is marked only after Ensure (and its narration) returns.
+func TestNew_labelFlag_carriesLabelIntoSessionNarration(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	base := t.TempDir()
+	bin := filepath.Join(base, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ccpool := filepath.Join(bin, "ccpool")
+	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	src, err := os.ReadFile("testdata/fake-claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeClaude := filepath.Join(bin, "fake-claude")
+	if err := os.WriteFile(fakeClaude, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	socket := config.SocketFor(base) // unique per run; never the live "ccpool" socket
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", socket, "kill-server").Run() })
+	cfgDir := filepath.Join(base, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[tmux]\nsocket = \"" + socket + "\"\n" +
+		"[claude]\nbin = \"" + fakeClaude + "\"\nplugin_dir = \"/unused-in-fake\"\n" +
+		"[wait]\ntimeout = \"10s\"\n[notify]\nadapter = \"none\"\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(
+		envWithoutOTel(),
+		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
+		"XDG_DATA_HOME="+filepath.Join(base, "data"),
+		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
+		"CCPOOL_REGISTRY_DIR="+filepath.Join(base, "reg"),
+		"HOME="+base,
+		"CCPOOL_BIN="+ccpool,
+		"FAKE_CLAUDE_TRANSCRIPT="+filepath.Join(base, "t.jsonl"),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+	)
+	proj := filepath.Join(base, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(ccpool, args...)
+		cmd.Env = env
+		cmd.Dir = base
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("ccpool %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+
+	run("new", "ext-lbl", "--cwd", proj,
+		"--meta", "pgrouter.role=review", "--meta", "pgrouter.bead=zr-1", "--label", "pgrouter.role")
+	run("new", "ext-plain", "--cwd", proj, "--meta", "pgrouter.role=worker")
+
+	// A second `new` on the live session narrates a reuse_live launch outcome.
+	out := run("new", "ext-lbl", "--cwd", proj)
+	line := narrationLine(out, "ccpool: launch outcome", "ext-lbl")
+	if !strings.Contains(line, "route=reuse_live") || !strings.Contains(line, " pgrouter.role=review") {
+		t.Errorf("new reuse_live narration missing pgrouter.role=review:\n%s", out)
+	}
+	if strings.Contains(line, "pgrouter.bead") {
+		t.Errorf("unmarked pgrouter.bead leaked into narration: %s", line)
+	}
+
+	// reply opens its own store: its Ensure narration carries the label too.
+	out = run("reply", "ext-lbl", "ping", "--no-wait")
+	if line := narrationLine(out, "ccpool: launch outcome", "ext-lbl"); !strings.Contains(line, " pgrouter.role=review") {
+		t.Errorf("reply narration missing pgrouter.role=review:\n%s", out)
+	}
+
+	// is_label=0: metadata without --label is unlabelled in narration...
+	out = run("new", "ext-plain", "--cwd", proj)
+	line = narrationLine(out, "ccpool: launch outcome", "ext-plain")
+	if line == "" {
+		t.Fatalf("no launch outcome narration for ext-plain:\n%s", out)
+	}
+	if strings.Contains(line, "pgrouter.role") {
+		t.Errorf("is_label=0 session must be unlabelled, got: %s", line)
+	}
+	// ...and nothing backfilled is_label on it.
+	st, err := store.Open(filepath.Join(base, "data", "ccpool", "store.db"), clock.Real{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if labels, err := st.Labels("ext-plain"); err != nil || len(labels) != 0 {
+		t.Errorf("Labels(ext-plain) = %v, %v; want empty (no backfill)", labels, err)
+	}
+	if labels, err := st.Labels("ext-lbl"); err != nil || labels["pgrouter.role"] != "review" || len(labels) != 1 {
+		t.Errorf("Labels(ext-lbl) = %v, %v; want only pgrouter.role=review", labels, err)
 	}
 }

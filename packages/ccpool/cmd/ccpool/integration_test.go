@@ -51,6 +51,33 @@ func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args 
 	return out.String(), code
 }
 
+// envWithoutOTel returns os.Environ() minus every OTEL_* variable, so a
+// subprocess ccpool (and the tmux server/hooks it starts) never exports
+// telemetry to a collector inherited from the developer's shell.
+func envWithoutOTel() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "OTEL_") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// narrationLine returns the first stderr text-handler slog line whose msg is
+// msg and whose external_id is exactly externalID ("" when none matches).
+func narrationLine(out, msg, externalID string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, `msg="`+msg+`"`) {
+			continue
+		}
+		if strings.Contains(line, " external_id="+externalID+" ") || strings.HasSuffix(line, " external_id="+externalID) {
+			return line
+		}
+	}
+	return ""
+}
+
 func TestEndToEnd_hookLifecycleReflectedInList(t *testing.T) {
 	bin := buildCCPool(t)
 	base := t.TempDir()
