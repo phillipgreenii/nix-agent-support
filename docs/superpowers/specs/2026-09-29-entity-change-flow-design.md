@@ -2,7 +2,7 @@
 
 - **Date**: 2026-09-29.
 - **Status**: Approved (operator, 2026-09-29, recorded on `pg2-2j5ac.51`). The approval and the
-  decisions in section 3 are recorded in ADR 0075 (`docs/adr/0075-entity-change-flow.md`), which
+  decisions in section 3 are recorded in ADR 0077 (`docs/adr/0077-entity-change-flow.md`), which
   amends the 2026-09-09 design (`2026-09-09-pg-desk-and-connector-discovery-design.md`) D8 and the
   sync part of D9 — D7 and D10 still hold. Two operator design questions, Q-A (what records PR
   work-item links) and Q-B (how person-closed work is told from agent-closed), are still OPEN in

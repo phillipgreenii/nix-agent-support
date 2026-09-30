@@ -5,7 +5,7 @@
   closed as approved)
 - **Bead**: `pg2-2j5ac.46`
 - **Governed by**: `docs/superpowers/specs/2026-09-29-entity-change-flow-design.md` (the entity
-  change flow design; approved 2026-09-29, decisions recorded in ADR 0075). That design owns triggering (pull-through
+  change flow design; approved 2026-09-29, decisions recorded in ADR 0077). That design owns triggering (pull-through
   `changes`), decisions (deciders), the store schema and the composite-view contract. This document
   owns only the generic gather/interpret core that hydrates an entity of a given type.
 - **Blocks**: `pg2-2j5ac.27` (daily-focus store-first, phase 15), which assumes issue-type
