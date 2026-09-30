@@ -383,8 +383,10 @@ load-bearing:
      intervening revision too. Revision `k`'s amended sections come from the amendment itself
      for this run's own revision, and otherwise from the report of the run that bumped
      `pd_rev` to `k` (step 6's `pd_rev <k-1> -> <k>` report, completed or ABORTED) — never
-     from a catch-up's report. A revision whose amended sections cannot be established that
-     way makes every packet stamped below it AFFECTED;
+     from a catch-up's report — or from a diff of the two revisions' design texts when both
+     are recoverable (e.g. from the design source's version history). A revision whose
+     amended sections cannot be established either way makes every packet stamped below it
+     AFFECTED;
    - any of its citations names a section that no longer exists at `R` (removed, renamed, or
      renumbered);
    - an ADDED section is placed on it (below);
@@ -477,7 +479,7 @@ mid-decomposition (`curating`, `failed:<phase>`, and the like belong to mode `de
 RESUME). Run steps 3–6 with NO `amend-design`: skip steps 1–2 (no pre-check, no `pd_rev`
 bump), take `R` = the docket's current `pd_rev`, and set `pd_phase=reconciling:<R>` for the
 run. Step 3's multi-revision test reads each earlier revision's amended sections from the run
-that bumped `pd_rev` to it. Head step 6's report `catch-up at <R>, no amendment` — it is never
+that bumped `pd_rev` to it, or from a diff of the recoverable design texts. Head step 6's report `catch-up at <R>, no amendment` — it is never
 the amended-sections record for any revision. This is the remedy whenever a stamp-mismatch
 release lands on a docket whose last reconcile completed.
 
