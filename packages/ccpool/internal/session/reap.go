@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
@@ -99,7 +101,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			deadKept = append(deadKept, cur)
 		}
 	}
-	recordSessionStates(sessionStateCounts(live, deadKept))
+	recordSessionStates(sessionStateCounts(live, deadKept), s.poolMetricAttrs())
 
 	// Keep only live sessions (derived liveness), oldest-activity first.
 	sort.Slice(live, func(i, j int) bool { return live[i].LastActivityAt < live[j].LastActivityAt })
@@ -142,27 +144,62 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// live rows, not a per-session event, so it has no D11 narration pair (design
 	// D6/D11 list only retry-exhausted/cancel-outcome/reap-closure-or-phantom-
 	// prune/launch-outcome as per-session narration points).
-	var preserved int64
-	for _, r := range live {
-		if preservedForHuman(r) {
-			preserved++
-		}
-	}
-	recordSessionsPreservedForHuman(preserved)
+	s.recordPreservedForHuman(live)
 
 	for _, r := range live {
 		reason, ok := toClose[r.ExternalID]
 		if !ok {
 			continue
 		}
+		// Attributes are resolved per session, inside the loop, BEFORE the
+		// close (never once per process: reap touches sessions with different
+		// roles).
+		attrs := s.metricAttrs(r.ExternalID)
+		logArgs := append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)
 		if err := s.closeWithReason(ctx, r.ExternalID, reason, false); err != nil {
 			return err
 		}
-		recordReapClosure(reason)
-		slog.Info("ccpool: reap closed session",
-			append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)...)
+		recordReapClosure(reason, attrs)
+		slog.Info("ccpool: reap closed session", logArgs...)
 	}
 	return nil
+}
+
+// recordPreservedForHuman emits ccpool_sessions_preserved_for_human: ONE value
+// per (pool, allowlisted label set) over the live rows, counting those
+// preservedForHuman. Every label set that has a live row is emitted, zeros
+// included, so a set whose sessions were all cleared reads 0 rather than a
+// stale prior value; a pool with no live rows emits a single pool-only 0. The
+// grouping key is each row's resolved attribute set, resolved per row (the
+// labels differ per session).
+func (s *Service) recordPreservedForHuman(live []store.Session) {
+	type group struct {
+		attrs []attribute.KeyValue
+		count int64
+	}
+	groups := map[attribute.Distinct]*group{}
+	var order []attribute.Distinct // first-seen order (live is activity-sorted): deterministic emission
+	for _, r := range live {
+		attrs := s.metricAttrs(r.ExternalID)
+		set := attribute.NewSet(attrs...)
+		key := set.Equivalent()
+		g, ok := groups[key]
+		if !ok {
+			g = &group{attrs: attrs}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if preservedForHuman(r) {
+			g.count++
+		}
+	}
+	if len(order) == 0 {
+		recordSessionsPreservedForHuman(0, s.poolMetricAttrs())
+		return
+	}
+	for _, key := range order {
+		recordSessionsPreservedForHuman(groups[key].count, groups[key].attrs)
+	}
 }
 
 type deadRowKind int
@@ -200,11 +237,16 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKi
 			}
 		}
 		if phantom {
+			// Resolve the metric attributes and log args BEFORE the delete:
+			// Store.Delete also removes the session's metadata, so anything
+			// resolved afterwards would always be unlabelled.
+			attrs := s.metricAttrs(externalID)
+			logArgs := sessionLogArgs(externalID)
 			if err := s.d.Store.Delete(ctx, externalID); err != nil {
 				return err
 			}
-			recordReapPhantomPruned()
-			slog.Info("ccpool: reap pruned phantom session", sessionLogArgs(externalID)...)
+			recordReapPhantomPruned(attrs)
+			slog.Info("ccpool: reap pruned phantom session", logArgs...)
 			return nil
 		}
 		kind, out = deadKeptRow, r

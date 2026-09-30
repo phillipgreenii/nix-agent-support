@@ -7,13 +7,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/clock"
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 	ct "github.com/phillipgreenii/claude-transcript"
 )
 
@@ -363,8 +367,8 @@ func withRetrySpies(t *testing.T, fn func(retryCalls *[]string, exhaustedCalls *
 
 	var retryCalls []string
 	var exhaustedCalls int
-	recordRetry = func(class string) { retryCalls = append(retryCalls, class) }
-	recordRetryExhausted = func() { exhaustedCalls++ }
+	recordRetry = func(class string, _ []attribute.KeyValue) { retryCalls = append(retryCalls, class) }
+	recordRetryExhausted = func([]attribute.KeyValue) { exhaustedCalls++ }
 	fn(&retryCalls, &exhaustedCalls)
 }
 
@@ -501,6 +505,98 @@ func TestMaybeRetry_exhaustedNotFiredOnNonPolicyDeclines(t *testing.T) {
 			t.Errorf("recordRetryExhausted called %d times, want 0 (no classifiable error, never reached !doRetry)", *exhaustedCalls)
 		}
 	})
+}
+
+// TestMaybeRetry_recordsCarryPoolAndAllowlistedLabels: both retry metric
+// records (ccpool_retries_total, and ccpool_retry_exhausted_total at genuine
+// exhaustion) carry the actuator's pool (the basename of its pool root) and
+// the session's allowlisted pgrouter.role, and never the non-allowlisted
+// pgrouter.bead.
+func TestMaybeRetry_recordsCarryPoolAndAllowlistedLabels(t *testing.T) {
+	origRetry, origExhausted := recordRetry, recordRetryExhausted
+	t.Cleanup(func() { recordRetry, recordRetryExhausted = origRetry, origExhausted })
+	var retryAttrs, exhaustedAttrs [][]attribute.KeyValue
+	recordRetry = func(_ string, attrs []attribute.KeyValue) { retryAttrs = append(retryAttrs, attrs) }
+	recordRetryExhausted = func(attrs []attribute.KeyValue) { exhaustedAttrs = append(exhaustedAttrs, attrs) }
+
+	clk := &clock.Fake{T: time.Unix(2000, 0).UTC()}
+	st := newRetryStore(t, clk)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{
+		ExternalID: "ext-a", State: store.Working, TmuxSession: "cc-ext-a", RetryCount: 3, // == MaxAttempts: exhausted
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"pgrouter.role": "review", "pgrouter.bead": "zr-secret"} {
+		if err := st.SetMeta(ctx, "ext-a", k, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.MarkAsLabel("ext-a", k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	telemetry.SetSessionLabeler(st)
+	t.Cleanup(func() { telemetry.SetSessionLabeler(nil) })
+
+	tp := writeAPIErrorTranscript(t, ct.ErrServerError, "API Error: 500 Internal server error")
+	a := &retryActuator{
+		cfg: defaultRetryCfg(), store: st, nudger: &fakeNudger{}, now: clk.Now, sleep: func(time.Duration) {},
+		poolRoot: "/Users/x/pools/pg-router-ccpool-review", labelAllowlist: []string{"pgrouter.role"},
+	}
+	sess, _, _ := st.GetByExternalID(ctx, "ext-a")
+	if _, err := a.maybeRetry(ctx, sess, tp); err != nil {
+		t.Fatalf("maybeRetry err = %v", err)
+	}
+
+	want := map[string]string{"pool": "pg-router-ccpool-review", "pgrouter.role": "review"}
+	for name, got := range map[string][][]attribute.KeyValue{"recordRetry": retryAttrs, "recordRetryExhausted": exhaustedAttrs} {
+		if len(got) != 1 {
+			t.Errorf("%s calls = %d, want 1", name, len(got))
+			continue
+		}
+		m := map[string]string{}
+		for _, kv := range got[0] {
+			m[string(kv.Key)] = kv.Value.Emit()
+		}
+		if !reflect.DeepEqual(m, want) {
+			t.Errorf("%s attrs = %v, want %v", name, m, want)
+		}
+	}
+}
+
+// TestMaybeRetry_defaultModeAndUnsetAllowlist: an actuator with no pool root
+// (default mode) reports the literal default pool, and an unset allowlist
+// fails closed (no labels).
+func TestMaybeRetry_defaultModeAndUnsetAllowlist(t *testing.T) {
+	origRetry := recordRetry
+	t.Cleanup(func() { recordRetry = origRetry })
+	var got []attribute.KeyValue
+	recordRetry = func(_ string, attrs []attribute.KeyValue) { got = attrs }
+
+	clk := &clock.Fake{T: time.Unix(2000, 0).UTC()}
+	st := newRetryStore(t, clk)
+	ctx := context.Background()
+	if err := st.Insert(ctx, store.Session{ExternalID: "ext-a", State: store.Working, TmuxSession: "cc-ext-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMeta(ctx, "ext-a", "pgrouter.role", "review"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkAsLabel("ext-a", "pgrouter.role"); err != nil {
+		t.Fatal(err)
+	}
+	telemetry.SetSessionLabeler(st)
+	t.Cleanup(func() { telemetry.SetSessionLabeler(nil) })
+
+	tp := writeAPIErrorTranscript(t, ct.ErrServerError, "API Error: 500 Internal server error")
+	a := &retryActuator{cfg: defaultRetryCfg(), store: st, nudger: &fakeNudger{}, now: clk.Now, sleep: func(time.Duration) {}}
+	sess, _, _ := st.GetByExternalID(ctx, "ext-a")
+	if _, err := a.maybeRetry(ctx, sess, tp); err != nil {
+		t.Fatalf("maybeRetry err = %v", err)
+	}
+	if len(got) != 1 || got[0].Key != "pool" || got[0].Value.AsString() != "default" {
+		t.Errorf("attrs = %v, want exactly pool=default", got)
+	}
 }
 
 // --- hook integration: fail event ---

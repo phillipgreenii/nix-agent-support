@@ -112,6 +112,7 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 		PluginDir:                cfg.Claude.PluginDir,
 		ClaudeBin:                cfg.Claude.Bin,
 		PoolPath:                 cfg.PoolRoot,
+		MetricLabelAllowlist:     cfg.Telemetry.MetricLabelAllowlist,
 		CanonicalMCPSettingsPath: cfg.Claude.CanonicalMCPSettingsPath,
 		NewUUID:                  func() string { return uuid.NewString() },
 		Now:                      time.Now,

@@ -289,6 +289,72 @@ func TestRunHook_retryExhaustedNarrationCarriesStoreLabels(t *testing.T) {
 	}
 }
 
+// TestRunHook_retryExhaustedMetricCarriesPoolAndLabels drives runHook in
+// pool-dir mode (CCPOOL_POOL set, as main does for --pool) for a StopFailure
+// whose retry budget is spent: the hook's retryActuator must be wired with
+// that pool and the config's allowlist, so the ccpool_retry_exhausted_total
+// record carries pool=<basename> and the allowlisted pgrouter.role, and not
+// the unallowlisted pgrouter.bead.
+func TestRunHook_retryExhaustedMetricCarriesPoolAndLabels(t *testing.T) {
+	base := isolateLabelerEnv(t)
+	pool := newRegisteredPool(t, base, "pg-router-ccpool-review")
+	t.Setenv("CCPOOL_POOL", pool)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp := writeAPIErrorTranscript(t, ct.ErrServerError, "API Error: 500 Internal server error")
+	st, err := store.Open(cfg.DBPath, clock.Real{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Insert(context.Background(), store.Session{
+		ExternalID: "ext-lbl", ClaudeSessionID: "csid-x", State: store.Working,
+		TmuxSession: "cc-ext-lbl", TranscriptPath: tp, RetryCount: 3, // == default MaxAttempts
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	seedMeta(t, cfg.DBPath, "ext-lbl", "pgrouter.role", "review", true)
+	seedMeta(t, cfg.DBPath, "ext-lbl", "pgrouter.bead", "zr-secret", true)
+
+	f, err := os.Open(writeHookPayload(t, fmt.Sprintf(failPayloadRetry, tp)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() { os.Stdin = origStdin; _ = f.Close() })
+
+	origExhausted := recordRetryExhausted
+	t.Cleanup(func() { recordRetryExhausted = origExhausted })
+	var got []attribute.KeyValue
+	recordRetryExhausted = func(attrs []attribute.KeyValue) { got = attrs }
+
+	if code := runHook([]string{"fail"}); code != 0 {
+		t.Fatalf("runHook exit = %d, want 0 (never-fail)", code)
+	}
+
+	m := map[string]string{}
+	for _, kv := range got {
+		m[string(kv.Key)] = kv.Value.Emit()
+	}
+	want := map[string]string{"pool": "pg-router-ccpool-review", "pgrouter.role": "review"}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("retry-exhausted metric attrs = %v, want %v", m, want)
+	}
+}
+
+// writeHookPayload writes a hook stdin payload file and returns its path.
+func writeHookPayload(t *testing.T, payload string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "payload.json")
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestRunReapAll_eachPoolResolvesAgainstItsOwnStore is the two-pool reap-all
 // scenario: one process sweeps the default pool plus two registered pools
 // whose sessions carry DIFFERENT role labels. The labeler must be re-set to

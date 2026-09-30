@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/telemetry"
@@ -152,6 +154,19 @@ type retryActuator struct {
 	nudger Nudger
 	now    func() time.Time
 	sleep  func(time.Duration)
+	// poolRoot is the active pool's canonical dir ("" = default mode); its
+	// basename is the pool attribute of every metric record the actuator emits.
+	// Threaded explicitly (config.Config.PoolRoot), never read from CCPOOL_POOL.
+	poolRoot string
+	// labelAllowlist is the metric-label cardinality guard
+	// (config [telemetry] metric_label_allowlist); nil fails closed (pool only).
+	labelAllowlist []string
+}
+
+// metricAttrs is the attribute set for a per-session metric record: pool plus
+// the session's marked labels filtered through the allowlist.
+func (a *retryActuator) metricAttrs(externalID string) []attribute.KeyValue {
+	return telemetry.MetricAttrs(a.poolRoot, a.labelAllowlist, telemetry.SessionAttrs(externalID))
 }
 
 // maybeRetry is the StopFailure decision+actuation. It returns retried=true when
@@ -174,7 +189,7 @@ func (a *retryActuator) maybeRetry(ctx context.Context, sess store.Session, tran
 	// ccpool_retries_total: unconditional, at retryDecision/RetryClass's own
 	// call site — every classifiable API error reaching this point counts,
 	// regardless of what retryDecision itself then decides (design D6).
-	recordRetry(retryClassName(class))
+	recordRetry(retryClassName(class), a.metricAttrs(sess.ExternalID))
 	now := a.now().Unix()
 	doRetry, backoff := retryDecision(a.cfg, class, sess.RetryCount, sess.RetryWindowStartedAt, now)
 	if !doRetry {
@@ -187,7 +202,7 @@ func (a *retryActuator) maybeRetry(ctx context.Context, sess store.Session, tran
 		// code stays unchanged (design D6 round-2 semantic post-check finding
 		// — ccpool_retry_exhausted_total MUST NOT fire for the first two).
 		if a.cfg.Enabled && retrySet(a.cfg.Classes)[retryClassName(class)] {
-			recordRetryExhausted()
+			recordRetryExhausted(a.metricAttrs(sess.ExternalID))
 			slog.Warn("ccpool: retry policy exhausted", sessionLogArgs(sess.ExternalID)...)
 		}
 		return false, nil

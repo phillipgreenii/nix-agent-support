@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -370,5 +371,56 @@ classes = ["transient_network"]
 	}
 	if len(c.Retry.Classes) != 1 || c.Retry.Classes[0] != "transient_network" {
 		t.Errorf("Retry.Classes = %v, want [transient_network] (replace-list)", c.Retry.Classes)
+	}
+}
+
+// TestLoad_metricLabelAllowlistDefaultsToRole: with no [telemetry] config the
+// metric-label allowlist is exactly pgrouter.role (the dotted Go/OTel key).
+func TestLoad_metricLabelAllowlistDefaultsToRole(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"pgrouter.role"}
+	if !reflect.DeepEqual(c.Telemetry.MetricLabelAllowlist, want) {
+		t.Errorf("Telemetry.MetricLabelAllowlist = %v, want %v", c.Telemetry.MetricLabelAllowlist, want)
+	}
+}
+
+// TestLoad_metricLabelAllowlistConfigurable: [telemetry] metric_label_allowlist
+// REPLACES the default (it is not merged with it), and an explicit empty list
+// means "no session labels on metrics".
+func TestLoad_metricLabelAllowlistConfigurable(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"replaces default", "[telemetry]\nmetric_label_allowlist = [\"pgrouter.kind\", \"pgrouter.tier\"]\n", []string{"pgrouter.kind", "pgrouter.tier"}},
+		{"explicit empty list", "[telemetry]\nmetric_label_allowlist = []\n", []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgDir := filepath.Join(dir, "cfg", "ccpool")
+			if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+			t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !reflect.DeepEqual(c.Telemetry.MetricLabelAllowlist, tc.want) {
+				t.Errorf("MetricLabelAllowlist = %#v, want %#v", c.Telemetry.MetricLabelAllowlist, tc.want)
+			}
+		})
 	}
 }

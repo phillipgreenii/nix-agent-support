@@ -103,6 +103,9 @@ func runHook(args []string) int {
 		nudger: newTmuxNudger(cfg.Tmux.Socket),
 		now:    time.Now,
 		sleep:  time.Sleep,
+		// Every retry metric record carries this pool and the allowlisted labels.
+		poolRoot:       cfg.PoolRoot,
+		labelAllowlist: cfg.Telemetry.MetricLabelAllowlist,
 	}
 	autonomous := os.Getenv("CCPOOL_AUTONOMOUS") == "1"
 	if err := handleHookN(event, os.Stdin, st, os.Getenv("CCPOOL_EXTERNAL_ID"), n, cfg.Notify.On, ra, autonomous, os.Stdout); err != nil {

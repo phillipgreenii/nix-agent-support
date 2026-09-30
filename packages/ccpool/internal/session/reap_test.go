@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
@@ -296,9 +298,9 @@ func withReapSpies(t *testing.T, fn func(closures *[]string, phantomPruned *int,
 	var closures []string
 	var phantomPruned int
 	var preserved []int64
-	recordReapClosure = func(reason string) { closures = append(closures, reason) }
-	recordReapPhantomPruned = func() { phantomPruned++ }
-	recordSessionsPreservedForHuman = func(count int64) { preserved = append(preserved, count) }
+	recordReapClosure = func(reason string, _ []attribute.KeyValue) { closures = append(closures, reason) }
+	recordReapPhantomPruned = func([]attribute.KeyValue) { phantomPruned++ }
+	recordSessionsPreservedForHuman = func(count int64, _ []attribute.KeyValue) { preserved = append(preserved, count) }
 	fn(&closures, &phantomPruned, &preserved)
 }
 
@@ -520,7 +522,7 @@ func TestReap_recordsSessionStates(t *testing.T) {
 	orig := recordSessionStates
 	t.Cleanup(func() { recordSessionStates = orig })
 	var got []telemetry.SessionStateCount
-	recordSessionStates = func(c []telemetry.SessionStateCount) { got = c }
+	recordSessionStates = func(c []telemetry.SessionStateCount, _ []attribute.KeyValue) { got = c }
 
 	ctx := context.Background()
 	now := time.Unix(10_000, 0)

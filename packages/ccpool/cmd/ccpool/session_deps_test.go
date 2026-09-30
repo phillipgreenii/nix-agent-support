@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
@@ -47,5 +48,46 @@ func TestNewSessionDeps_wiresCanonicalMCPSettingsPath(t *testing.T) {
 	deps = newSessionDeps(cfg, nil, nil)
 	if deps.CanonicalMCPSettingsPath != "/some/canonical/settings.local.json" {
 		t.Errorf("CanonicalMCPSettingsPath = %q, want /some/canonical/settings.local.json", deps.CanonicalMCPSettingsPath)
+	}
+}
+
+// TestNewSessionDeps_wiresPoolAndMetricLabelAllowlist: every production
+// session.Deps carries the pool root (whose basename is every metric record's
+// pool attribute) and the metric-label allowlist of THE POOL'S OWN config. It
+// loads configs through config.LoadForPool, the exact seam reap-all uses to
+// govern many pools in one process, so each pool's Service is built with its
+// own PoolPath (no shared or environment-derived state).
+func TestNewSessionDeps_wiresPoolAndMetricLabelAllowlist(t *testing.T) {
+	base := isolateLabelerEnv(t)
+	poolA := newRegisteredPool(t, base, "poolA")
+	poolB := newRegisteredPool(t, base, "poolB")
+	if err := os.WriteFile(filepath.Join(poolB, "config.toml"),
+		[]byte("[telemetry]\nmetric_label_allowlist = [\"pgrouter.role\", \"pgrouter.kind\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCPOOL_POOL", "/pools/ENV-MUST-BE-IGNORED")
+
+	cases := []struct {
+		name, root, wantPath string
+		wantAllow            []string
+	}{
+		{"default pool", "", "", []string{"pgrouter.role"}},
+		{"pool A", poolA, poolA, []string{"pgrouter.role"}},
+		{"pool B (configured)", poolB, poolB, []string{"pgrouter.role", "pgrouter.kind"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := config.LoadForPool(tc.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deps := newSessionDeps(cfg, nil, nil)
+			if deps.PoolPath != tc.wantPath {
+				t.Errorf("Deps.PoolPath = %q, want %q", deps.PoolPath, tc.wantPath)
+			}
+			if !reflect.DeepEqual(deps.MetricLabelAllowlist, tc.wantAllow) {
+				t.Errorf("Deps.MetricLabelAllowlist = %v, want %v", deps.MetricLabelAllowlist, tc.wantAllow)
+			}
+		})
 	}
 }

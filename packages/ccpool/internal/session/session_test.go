@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/wait"
@@ -720,7 +722,7 @@ func withLaunchOutcomeSpy(t *testing.T, fn func(calls *[]launchOutcomeCall)) {
 	orig := recordLaunchOutcomeFn
 	t.Cleanup(func() { recordLaunchOutcomeFn = orig })
 	var calls []launchOutcomeCall
-	recordLaunchOutcomeFn = func(route, outcome string) {
+	recordLaunchOutcomeFn = func(route, outcome string, _ []attribute.KeyValue) {
 		calls = append(calls, launchOutcomeCall{route, outcome})
 	}
 	fn(&calls)

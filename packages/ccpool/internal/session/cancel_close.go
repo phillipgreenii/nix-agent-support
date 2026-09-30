@@ -139,7 +139,7 @@ func (s *Service) cancelLocked(ctx context.Context, externalID string) error {
 // outcome states this metric tracks (design binding decision, round-1
 // finding: "only ErrCancelUnconfirmed is the non-success outcome").
 func (s *Service) recordCancelOutcome(externalID, outcome string) {
-	recordCancel(outcome)
+	recordCancel(outcome, s.metricAttrs(externalID))
 	args := append([]any{"outcome", outcome}, sessionLogArgs(externalID)...)
 	if outcome == "success" {
 		slog.Info("ccpool: cancel outcome", args...)
@@ -187,7 +187,15 @@ func (s *Service) closeWithReason(ctx context.Context, externalID, reason string
 			return err
 		}
 		if purge {
-			return s.d.Store.Delete(ctx, externalID)
+			// Resolve the narration args BEFORE the delete: Store.Delete also
+			// removes the session's metadata, so labels resolved afterwards would
+			// always be empty.
+			args := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
+			if err := s.d.Store.Delete(ctx, externalID); err != nil {
+				return err
+			}
+			slog.Info("ccpool: purged session", args...)
+			return nil
 		}
 		// Non-purge close: do nothing else. No fabricated state.
 		return nil

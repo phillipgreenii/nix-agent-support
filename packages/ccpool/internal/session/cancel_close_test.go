@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
@@ -220,7 +222,7 @@ func withCancelSpy(t *testing.T, fn func(calls *[]string)) {
 	orig := recordCancel
 	t.Cleanup(func() { recordCancel = orig })
 	var calls []string
-	recordCancel = func(outcome string) { calls = append(calls, outcome) }
+	recordCancel = func(outcome string, _ []attribute.KeyValue) { calls = append(calls, outcome) }
 	fn(&calls)
 }
 

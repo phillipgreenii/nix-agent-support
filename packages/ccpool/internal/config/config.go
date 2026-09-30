@@ -20,11 +20,29 @@ type Config struct {
 	Notify Notify `toml:"notify"`
 	Retry  Retry  `toml:"retry"`
 
+	Telemetry Telemetry `toml:"telemetry"`
+
 	// Resolved (not from TOML):
 	DBPath     string `toml:"-"`
 	StateDir   string `toml:"-"`
 	RuntimeDir string `toml:"-"`
 	PoolRoot   string `toml:"-"` // canonical pool dir; "" in default mode
+}
+
+// Telemetry configures what ccpool's metrics carry.
+type Telemetry struct {
+	// MetricLabelAllowlist is the cardinality guard for session labels on
+	// METRICS: every ccpool metric record carries a `pool` attribute plus those
+	// of the session's marked labels whose key is listed here, and no others
+	// (non-listed labels are dropped from metrics but still appear on logs).
+	// Entries are the dotted Go/OTel label keys (for example "pgrouter.role"),
+	// never the underscored Prometheus form; the collector turns the dot into
+	// an underscore on export (pgrouter_role). The default is pgrouter.role
+	// only. Setting this key REPLACES the default; an empty list means no
+	// session labels on metrics (pool only). List only bounded, low-cardinality
+	// keys: never an id-like or path-like label (external_id, session_id, bead
+	// ids, filesystem paths), which would make metric series unbounded.
+	MetricLabelAllowlist []string `toml:"metric_label_allowlist"`
 }
 
 type Notify struct {
@@ -117,6 +135,7 @@ func defaults() Config {
 			Timeout:     Duration(60 * time.Second),
 			Classes:     []string{"transient_server", "transient_network"},
 		},
+		Telemetry: Telemetry{MetricLabelAllowlist: []string{"pgrouter.role"}},
 	}
 }
 

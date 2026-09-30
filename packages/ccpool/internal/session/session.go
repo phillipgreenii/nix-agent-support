@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/phillipgreenii/ccpool/internal/eventlog"
 	"github.com/phillipgreenii/ccpool/internal/launch"
 	"github.com/phillipgreenii/ccpool/internal/mcpconsent"
@@ -39,6 +41,24 @@ var (
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
 	recordSessionStates             = telemetry.RecordSessionStates
 )
+
+// metricAttrs returns the attribute set for a per-session metric record: the
+// pool (derived from the existing Deps.PoolPath, never from the CCPOOL_POOL
+// environment: reap-all drives many Services in one process) plus the
+// session's marked labels filtered through Deps.MetricLabelAllowlist (see
+// telemetry.MetricAttrs for the cardinality guard). Labels are resolved fresh
+// on every call, per session. A caller about to delete the session MUST call
+// this BEFORE the delete: Store.Delete also removes the session's metadata,
+// after which no labels resolve.
+func (s *Service) metricAttrs(externalID string) []attribute.KeyValue {
+	return telemetry.MetricAttrs(s.d.PoolPath, s.d.MetricLabelAllowlist, telemetry.SessionAttrs(externalID))
+}
+
+// poolMetricAttrs is the attribute set for a pool-wide snapshot record that
+// aggregates many sessions (ccpool_session_states): pool only, no labels.
+func (s *Service) poolMetricAttrs() []attribute.KeyValue {
+	return telemetry.MetricAttrs(s.d.PoolPath, nil, nil)
+}
 
 // sessionLogArgs returns the slog key/value args carrying externalID and its
 // current telemetry.SessionAttrs (design D11) — the two fixed fields every
@@ -187,7 +207,7 @@ type Deps struct {
 	Exister   SessionExister
 	Socket    string
 	Prefix    string
-	PoolPath  string // canonical pool dir; injected as CCPOOL_POOL into sessions; "" = default mode
+	PoolPath  string // canonical pool dir; injected as CCPOOL_POOL into sessions; "" = default mode; its basename is every metric record's pool attribute
 	PluginDir string
 	ClaudeBin string
 	NewUUID   func() string
@@ -203,6 +223,12 @@ type Deps struct {
 	// entirely — pure default-deny, unchanged from before this field existed
 	// (docs/adr/0052-ccpool-mcp-consent-canonical-decisions-consultation.md).
 	CanonicalMCPSettingsPath string
+	// MetricLabelAllowlist is the cardinality guard for session labels on
+	// METRICS: the dotted label keys (for example "pgrouter.role") that may
+	// appear as metric attributes next to pool. Every other label is dropped
+	// from metrics (logs still carry all of them). nil or empty fails closed:
+	// pool only. Wired from config [telemetry] metric_label_allowlist.
+	MetricLabelAllowlist []string
 }
 
 type Service struct{ d Deps }
@@ -567,7 +593,7 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 // narration log (design D6/D11). success narrates at Info; timeout/error at
 // Warn.
 func (s *Service) recordLaunchOutcome(externalID, route, outcome string) {
-	recordLaunchOutcomeFn(route, outcome)
+	recordLaunchOutcomeFn(route, outcome, s.metricAttrs(externalID))
 	args := append([]any{"route", route, "outcome", outcome}, sessionLogArgs(externalID)...)
 	if outcome == "success" {
 		slog.Info("ccpool: launch outcome", args...)
