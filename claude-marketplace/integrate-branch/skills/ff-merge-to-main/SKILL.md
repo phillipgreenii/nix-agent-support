@@ -230,21 +230,46 @@ clean, so exit 0 here cannot be the autostash false-success FF-0b describes.
     committing the relock only if it produced a diff:
 
     ```bash
+    conflicted_inputs="$(awk '/^<<<<<<<|^>>>>>>>/{c=!c; next} c' "$WT/flake.lock" \
+      | grep -E '^    "[^"]+": \{' | sed -E 's/^    "([^"]+)": \{.*/\1/' | sort -u | tr '\n' ' ')"
     git -C "$WT" checkout --theirs -- flake.lock
     git -C "$WT" add flake.lock
     git -C "$WT" rebase --continue
-    (cd "$WT" && nix flake lock)
+    if [ -n "$conflicted_inputs" ]; then
+      (cd "$WT" && nix flake update $conflicted_inputs)
+    else
+      (cd "$WT" && nix flake update)
+    fi
     if [ -n "$(git -C "$WT" status --porcelain -- flake.lock)" ]; then
       git -C "$WT" add flake.lock
       git -C "$WT" commit -m 'chore: relock flake.lock after rebase'
     fi
     ```
 
+    The `conflicted_inputs` extraction MUST run BEFORE the `checkout --theirs`
+    below (which removes the conflict markers it reads) — it scans between the
+    `<<<<<<<`/`>>>>>>>` markers for top-level `nodes` entries (`flake.lock`'s
+    nix-generated pretty-printer always indents a node name at exactly 4
+    spaces, e.g. `    "nixpkgs": {`, one level shallower than any field inside
+    it) and passes ONLY those names to `nix flake update`. **`nix flake update`
+    with no arguments MUST NOT be used here as the default** — it force-refreshes
+    EVERY input, including unrelated third-party ones (e.g. `nixpkgs`) that had
+    nothing to do with the conflict, silently pulling untested upstream changes
+    into an otherwise-mechanical relock that then gets auto-committed and landed
+    unattended. Falling back to the bare form is permitted ONLY when the
+    extraction finds no node names (an unexpected shape for this conflict).
     `--theirs` is an arbitrary pick here — `--ours` resolves the conflict
-    equally well — because the `nix flake lock` that follows recomputes the
-    file from the flake's own `inputs{}` rather than trusting either side's
-    picked content; the checkout only needs to hand `rebase --continue` some
-    resolved, non-conflicted `flake.lock`. Do **not** stop for this case, and
+    equally well — because the targeted `nix flake update` that follows
+    recomputes those specific inputs from the flake's own `inputs{}` rather than
+    trusting either side's picked content; the checkout only needs to hand
+    `rebase --continue` some resolved, non-conflicted `flake.lock`. A bare
+    `nix flake lock` (distinct from `nix flake update`) MUST NOT be substituted
+    either way — it only fills MISSING lock entries and leaves an already-pinned
+    input at its stale, conflicting revision, which silently defeats this whole
+    resolution (observed live: a conflict resolved this way passed
+    `rebase --continue` but left two sibling inputs pinned to their pre-conflict
+    revs, caught only by a later `flake-lock-fresh` doctor check). Do
+    **not** stop for this case, and
     do **not** apply either confidence branch below — it is a mechanical
     resolution, not a hand-resolved one. Continue to FF-1b, and record in the
     outcome report which side was picked and whether the relock produced a
@@ -492,7 +517,7 @@ flowchart TD
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
     P -->|"Yes — conflict"| CL{"conflicted paths (diff --name-only --diff-filter=U) exactly flake.lock?"}
-    CL -->|Yes| FLOCK["checkout --theirs flake.lock, add, rebase --continue, nix flake lock, commit relock if changed"] --> F1B
+    CL -->|Yes| FLOCK["checkout --theirs flake.lock, add, rebase --continue, nix flake update &lt;conflicted inputs&gt;, commit relock if changed"] --> F1B
     CL -->|No| C2{"confident in the resolution?"}
     C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
@@ -608,12 +633,19 @@ false` write to `<CC>`'s `.git/config` — that would also disable rerere for
 - Before applying that confidence judgment, the handler MUST list every
   conflicted path (`git -C "$WT" diff --name-only --diff-filter=U`). When
   that list is exactly `flake.lock` and nothing else, the handler MUST
-  resolve it mechanically — pick either side, stage it, continue the rebase,
-  then run `nix flake lock` in `<WT>` and commit the relock only if it
-  changed the file — rather than hand-resolving the JSON or reasoning about
-  which side is newer, and MUST NOT treat this case as needing the
-  confidence judgment above. It MUST record which side was picked and
-  whether the relock produced a diff in the outcome report. When any other
+  resolve it mechanically, rather than hand-resolving the JSON or reasoning
+  about which side is newer, and MUST NOT treat this case as needing the
+  confidence judgment above: pick either side, stage it, continue the
+  rebase, then run `nix flake update` scoped to the specific inputs that
+  were actually in conflict (extracted from the conflict markers before
+  they are discarded) in `<WT>` and commit the relock only if it changed
+  the file. The handler MUST NOT run a bare `nix flake update` (no args) as
+  the default — that force-refreshes every input, including unrelated
+  third-party ones the conflict never touched — and MUST NOT substitute a
+  bare `nix flake lock`, which only fills missing lock entries and leaves
+  an already-pinned input stale. It MUST
+  record which side was picked and whether the relock produced a diff in the
+  outcome report. When any other
   path is conflicted (including `flake.lock` alongside another path), the
   confidence-based discipline above applies unchanged.
 - On a **refused** rebase (non-zero exit with NO rebase in progress) the handler

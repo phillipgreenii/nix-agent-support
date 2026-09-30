@@ -174,16 +174,27 @@ classify the failure rather than treating every non-zero exit the same way.
         configure.) When that list is exactly `flake.lock` and nothing
         else, resolve it the same mechanical way FF-1's flake.lock-only
         sub-step does — pick either side, stage it, continue the rebase,
-        then run `nix flake lock` in `<WT>` and commit the relock only if it
-        changed the file, rather than hand-resolving the JSON — and record
-        which side was picked and whether the relock produced a diff in the
-        outcome report:
+        then run `nix flake update` SCOPED to the specific inputs that were
+        actually in conflict (extracted from the conflict markers before
+        `checkout --theirs` discards them — never a bare `nix flake update`,
+        which force-refreshes every input including unrelated third-party
+        ones, and never a bare `nix flake lock`, which only fills missing
+        lock entries and leaves an already-pinned input stale) in `<WT>` and
+        commit the relock only if it changed the file, rather than
+        hand-resolving the JSON — and record which side was picked and
+        whether the relock produced a diff in the outcome report:
 
         ```bash
+        conflicted_inputs="$(awk '/^<<<<<<<|^>>>>>>>/{c=!c; next} c' "$WT/flake.lock" \
+          | grep -E '^    "[^"]+": \{' | sed -E 's/^    "([^"]+)": \{.*/\1/' | sort -u | tr '\n' ' ')"
         git -C "$WT" checkout --theirs -- flake.lock
         git -C "$WT" add flake.lock
         git -C "$WT" rebase --continue
-        (cd "$WT" && nix flake lock)
+        if [ -n "$conflicted_inputs" ]; then
+          (cd "$WT" && nix flake update $conflicted_inputs)
+        else
+          (cd "$WT" && nix flake update)
+        fi
         if [ -n "$(git -C "$WT" status --porcelain -- flake.lock)" ]; then
           git -C "$WT" add flake.lock
           git -C "$WT" commit -m 'chore: relock flake.lock after rebase'
@@ -371,10 +382,15 @@ discipline `ff-merge-to-main` follows for its `landed` report.
   (`git -C "$WT" diff --name-only --diff-filter=U`). When that list is
   exactly `flake.lock` and nothing else, the handler MUST resolve it
   mechanically the same way `ff-merge-to-main`'s FF-1 does — pick either
-  side, stage it, continue the rebase, then run `nix flake lock` in `<WT>`
+  side, stage it, continue the rebase, then run `nix flake update` SCOPED to
+  the specific inputs that were actually in conflict (never a bare
+  `nix flake update`, which force-refreshes every input including unrelated
+  third-party ones, and never a bare `nix flake lock`, which only fills
+  missing lock entries and leaves an already-pinned input stale) in `<WT>`
   and commit the relock only if it changed the file — rather than
-  hand-resolving the JSON, and MUST record which side was picked and whether
-  the relock produced a diff in the outcome report. When any other path is
+  hand-resolving the JSON, and MUST record which side was picked and
+  whether the relock produced a diff in the
+  outcome report. When any other path is
   conflicted (including `flake.lock` alongside another path), PR-1's
   confident-resolve-or-abort discipline applies unchanged.
 - On an auth failure the handler MUST halt immediately and report
