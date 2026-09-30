@@ -136,6 +136,15 @@ func runDispatch(args []string) int {
 	overlayBudgetThresholds(role, cfg)
 
 	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload)}
+	// Origin availability gate (INV-CCH-10, bead pg2-4gi2c): decline BEFORE
+	// buildDeps, reconciliation, or any executor step, so a decline makes no bd
+	// or ccpool call and mutates no bead. orchestrator.gated() is untouched —
+	// the gate lives here, at the handler boundary, because only the handler
+	// knows which repo a dispatch runs in.
+	if reason, declined := originGate(context.Background(), newOriginProber(cfg), role, cfg, dctx.Item.ID); declined {
+		writeBusyReply(os.Stdout, reason)
+		return conformance.ExitBusy
+	}
 	deps := buildDeps(cfg, role)
 	// Stamp a fresh per-attempt ExternalID here — the call the old monolithic
 	// internal/orchestrator made before invoking the ccpool executor

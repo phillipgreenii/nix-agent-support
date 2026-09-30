@@ -12,7 +12,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   want a registered handler participant to run an agent session on my behalf through `ccpool` (or
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
-  `INV-CCH-9`.)_
+  `INV-CCH-9`, `INV-CCH-10`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -38,6 +38,9 @@ Extensions:
 
 - 2a. The role is already at capacity: this module declines `busy` before starting a session; the
   core re-offers per `INTF-HANDLER`'s pre-accept decline rule.
+- 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
+  `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
+  are unaffected, and dispatch resumes on the first successful probe.
 - 3a. The session hits a post-accept failure (`retryable`, `resource-limit`, `critical`): this
   module surfaces it on its own logs/metrics or as a new event, never as anything but the opaque
   completion outcome the core already stores (`INV-CCH-3`).

@@ -3369,6 +3369,19 @@
                       worktreeDir = "/tmp/pg2-qsred-repo/.worktrees";
                       permissionMode = "plan";
                       prTool = "pg-pr";
+                      # originProbe (pg2-4gi2c): one watched origin plus
+                      # non-default scalars, proving the rendered JSON
+                      # carries them under the keys the Go decoder reads.
+                      originProbe = {
+                        origins = [
+                          {
+                            key = "git.example.test/org/repo";
+                            repoRoot = "/tmp/pg2-qsred-repo";
+                          }
+                        ];
+                        failureThreshold = 3;
+                        ttlSeconds = 30;
+                      };
                     };
                   };
                   launchConfigFile =
@@ -3671,6 +3684,18 @@
                         [ "$(jq -r .reminderPct "$launchConfigFile")" = 0.725 ]
                         [ "$(jq -r .cancelPct "$launchConfigFile")" = 0.9 ]
                         [ "$(jq -r .hardPct "$launchConfigFile")" = 1.0 ]
+
+                        # originProbe (pg2-4gi2c, INV-CCH-10): keys match
+                        # internal/config.OriginProbe's json tags; durations
+                        # render as nanoseconds; an empty remote is omitted.
+                        [ "$(jq -r '.originProbe.origins[0].key' "$launchConfigFile")" = git.example.test/org/repo ]
+                        [ "$(jq -r '.originProbe.origins[0].repoRoot' "$launchConfigFile")" = /tmp/pg2-qsred-repo ]
+                        [ "$(jq -r '.originProbe.origins[0] | has("remote")' "$launchConfigFile")" = false ]
+                        [ "$(jq -r '.originProbe.failureThreshold' "$launchConfigFile")" -eq 3 ]
+                        [ "$(jq -r '.originProbe.ttl' "$launchConfigFile")" = 30000000000 ]
+                        [ "$(jq -r '.originProbe.timeout' "$launchConfigFile")" = 20000000000 ]
+                        [ "$(jq -r '.originProbe.origins | length' "$defaultLaunchConfigFile")" -eq 0 ]
+                        [ "$(jq -r '.originProbe.failureThreshold' "$defaultLaunchConfigFile")" -eq 2 ]
 
                         # defaultLaunchConfigFile: every field but repoRoot/
                         # worktreeDir matches internal/config.Default()'s own

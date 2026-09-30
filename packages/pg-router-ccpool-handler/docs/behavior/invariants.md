@@ -62,3 +62,40 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   fragment behind. The raw failure text MUST never be logged or returned. Naming a cause is a
   judgment about the work, not an observed session fact, so this classification lives on the
   handler side and never in ccpool (`phillipgreenii-nix-agent-support` ADR 0015's "Decision").
+- **`INV-CCH-10`** — before accepting a dispatch, the handler MUST decline it when the git
+  origin the dispatch needs is unavailable, and MUST NOT decline a dispatch for any other
+  reason of origin state. Availability is per origin, keyed by a normalized repo key
+  `<host>/<org>/<repo>`; a dispatch whose repo root is not a watched origin's repo root has no
+  origin and MUST NEVER be gated, and a gated origin MUST NOT decline a dispatch into a different
+  origin. The decline is the transport's pre-accept busy decline (`conformance.ExitBusy`) with the
+  fixed reason `origin-unavailable`: it MUST mutate no bead, make no beads or ccpool call, set no
+  `human`, and trigger no per-bead escalation, and the core re-offers the event as for
+  `INV-CCH-6`/`INV-CCH-8`. The origin key MUST appear only in the handler's own log and event
+  records, never in the reason, so the reason stays a bounded label. The gate lives here, at the
+  handler boundary, because only the handler knows which repo a dispatch runs in; the core's
+  global gate over its fixed named set (`INV-LIFE-2`) is not changed by it.
+  - The probe MUST check that the repo root exists and holds a git checkout, then MUST ask the
+    origin for its HEAD under a hard timeout, in the same hermetic git environment every other git
+    child of this module gets (repository-naming variables dropped; credential delivery such as
+    the ssh agent socket kept) with terminal prompts disabled. It MUST name the outcome as one of
+    `ok`, `mount-missing`, `auth-unavailable`, `network`, `timeout`, or `unknown`, deriving all but
+    `ok`, `timeout`, and a missing repo root from the shared failure-signature classification of
+    `INV-CCH-9` rather than any table of its own. Anything it records or logs about a failure MUST
+    be that classifier's redacted output; raw probe output MUST NOT be logged or persisted.
+  - An origin MUST be gated only after K consecutive failed probes (default 2), so one transient
+    failure does not gate; the first ok probe MUST clear it. A result MAY be reused for a TTL
+    (default 60 seconds), except that a result showing fewer than K consecutive failures MUST NOT
+    be reused, so a confirming probe is not delayed. While gated, each dispatch attempt MUST
+    re-probe subject to the TTL, so recovery is noticed without a timer.
+  - An operator MUST be able to list watched origins with their class, since, and last error, and
+    to switch a single origin's probe off (a kill switch under which the probe is a no-op and the
+    origin never declines). An operator MUST NOT be offered a hand-set "pause this origin": the
+    automatic clear would fight it, and the existing global pg-router pause is the tool for that.
+  - **Trade-off.** A declined event is re-offered only until it expires (`INV-EVT-4`). An outage
+    longer than the event lifetime therefore lets events expire. That is accepted: events
+    re-derive from their source on discovery once the origin returns.
+  - **Telemetry.** The handler has no metrics emitter. The decline reaches
+    `pg_router_failures{class=declined,reason=origin-unavailable}` through the core's existing
+    handling of a busy decline's reason. Gated and cleared transitions are structured log and
+    event-log records carrying the origin key, class, duration, and redacted stderr tail. An alert
+    on them is separate work.

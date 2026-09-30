@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity> [flags]"
+const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity|origin> [flags]"
 
 const helpText = `pg-router-ccpool-handler — the ccpool/command participant for pg-router.
 
@@ -41,6 +41,11 @@ Subcommands:
                  each named pool's capacity as the ccpool_pool_capacity OTLP
                  gauge (--pool <name>=<dir>, repeatable; OTEL_* env from the
                  caller; failures on stderr; bead pg2-mr0sl / pg2-om899.6)
+
+  origin        NOT part of the wire contract — an operator tool for the
+                 per-origin availability probe (INV-CCH-10): origin status,
+                 origin ignore <key>, origin unignore <key>. Configured by
+                 the launch config's originProbe block (bead pg2-4gi2c)
 
 Exit codes: 0 ok, 1 unexpected error, 2 usage, 9 busy (a pre-accept decline).
 `

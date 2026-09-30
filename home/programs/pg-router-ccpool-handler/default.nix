@@ -430,6 +430,22 @@ let
       reminderPct = cfg.launchConfig.budget.reminderPct;
       cancelPct = cfg.launchConfig.budget.cancelPct;
       hardPct = cfg.launchConfig.budget.hardPct;
+      # originProbe (bead pg2-4gi2c, INV-CCH-10): the per-origin availability
+      # probe/decline gate. Durations render as nanosecond integers for the same
+      # reason confirmIngest does. `remote` is omitted when empty so the Go
+      # side's own default ("origin") applies.
+      originProbe = {
+        origins = map (
+          o:
+          {
+            inherit (o) key repoRoot;
+          }
+          // lib.optionalAttrs (o.remote != "") { inherit (o) remote; }
+        ) cfg.launchConfig.originProbe.origins;
+        inherit (cfg.launchConfig.originProbe) failureThreshold stateDir;
+        ttl = cfg.launchConfig.originProbe.ttlSeconds * 1000000000;
+        timeout = cfg.launchConfig.originProbe.timeoutSeconds * 1000000000;
+      };
     }
   );
 
@@ -957,6 +973,77 @@ in
           empirically for this bead, pg2-qsred). Default 90 matches
           `internal/config.Default()`'s own `90 * time.Second`.
         '';
+      };
+      originProbe = {
+        origins = lib.mkOption {
+          type = lib.types.listOf (
+            lib.types.submodule {
+              options = {
+                key = lib.mkOption {
+                  type = lib.types.strMatching "[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+";
+                  example = "git.example.com/org/repo";
+                  description = ''
+                    The normalized repo key `<host>/<org>/<repo>`. Names the origin
+                    in its state file, logs, and the `origin status|ignore`
+                    subcommands.
+                  '';
+                };
+                repoRoot = lib.mkOption {
+                  type = lib.types.str;
+                  description = ''
+                    The checkout the probe runs `git ls-remote` in. A dispatch
+                    whose repo root equals this path (worktree/none isolation:
+                    `launchConfig.repoRoot`; path isolation: the role's fixed
+                    path) is declined while the origin is unavailable. A role
+                    whose repo root matches no entry is never gated.
+                  '';
+                };
+                remote = lib.mkOption {
+                  type = lib.types.str;
+                  default = "";
+                  description = "Remote name or URL for `git ls-remote`. Empty means `origin`.";
+                };
+              };
+            }
+          );
+          default = [ ];
+          description = ''
+            OriginProbe.Origins in the launch config: git origins the handler
+            probes before accepting a dispatch (INV-CCH-10). An unavailable
+            origin (mount missing, ssh-agent/step cert unusable, network down,
+            timeout) makes the handler decline dispatches into THAT repo with
+            busy reason `origin-unavailable`; other repos keep dispatching.
+            Empty (the default) disables the feature.
+          '';
+        };
+        failureThreshold = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 2;
+          description = "OriginProbe.FailureThreshold (K): consecutive failed probes before an origin is gated. Matches the Go default.";
+        };
+        ttlSeconds = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 60;
+          description = ''
+            OriginProbe.TTL in SECONDS (rendered as nanoseconds): how long a
+            probe result is reused before the next dispatch re-probes.
+          '';
+        };
+        timeoutSeconds = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 20;
+          description = "OriginProbe.Timeout in SECONDS (rendered as nanoseconds): the hard bound on one `git ls-remote`.";
+        };
+        stateDir = lib.mkOption {
+          type = lib.types.str;
+          default = "";
+          description = ''
+            OriginProbe.StateDir. Empty resolves to
+            `$XDG_STATE_HOME/pg-router-ccpool-handler`, else
+            `~/.local/state/pg-router-ccpool-handler`; per-origin state lives in
+            its `origin-state/` subdirectory.
+          '';
+        };
       };
       budget = {
         tokens = lib.mkOption {

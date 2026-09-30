@@ -23,6 +23,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
@@ -108,6 +109,100 @@ type Config struct {
 	ReminderPct  float64
 	CancelPct    float64
 	HardPct      float64
+	// OriginProbe configures the per-origin availability probe and decline
+	// gate (bead pg2-4gi2c, INV-CCH-10). The zero-origin default watches
+	// nothing, so a deployment that never sets it is unchanged.
+	OriginProbe OriginProbe
+}
+
+// WatchedOrigin is one git origin the handler probes before accepting a
+// dispatch that runs in its repository.
+type WatchedOrigin struct {
+	// Key is the normalized repo key <host>/<org>/<repo>. It names the origin
+	// in state files, logs, and the `origin` subcommands.
+	Key string `json:"key"`
+	// RepoRoot is the checkout the probe runs `git -C` in. A dispatch whose
+	// repo root equals it (after path cleaning) is gated by this origin.
+	RepoRoot string `json:"repoRoot"`
+	// Remote is the remote name or URL passed to `git ls-remote`. Empty means
+	// "origin".
+	Remote string `json:"remote,omitempty"`
+}
+
+// OriginProbe is the origin probe's configuration. All durations are
+// nanosecond integers on the wire, like the rest of Config.
+type OriginProbe struct {
+	// Origins is the watched set. Empty disables the feature.
+	Origins []WatchedOrigin `json:"origins"`
+	// FailureThreshold is K: an origin is gated only after K consecutive
+	// failed probes.
+	FailureThreshold int `json:"failureThreshold"`
+	// TTL is how long a probe result is reused before the next dispatch
+	// re-probes. A result showing 0 < failures < K is never reused, so the
+	// confirming probe is not delayed by a TTL.
+	TTL time.Duration `json:"ttl"`
+	// Timeout is the hard bound on one `git ls-remote`.
+	Timeout time.Duration `json:"timeout"`
+	// StateDir is the handler state directory; the per-origin state files live
+	// in its origin-state/ subdirectory. Empty resolves to
+	// $XDG_STATE_HOME/pg-router-ccpool-handler, else
+	// ~/.local/state/pg-router-ccpool-handler.
+	StateDir string `json:"stateDir"`
+}
+
+// DefaultOriginProbe is OriginProbe's baseline: no origins, K=2, 60s TTL, 20s
+// probe timeout.
+func DefaultOriginProbe() OriginProbe {
+	return OriginProbe{FailureThreshold: 2, TTL: 60 * time.Second, Timeout: 20 * time.Second}
+}
+
+// Validate rejects a malformed OriginProbe.
+func (o OriginProbe) Validate() error {
+	if o.FailureThreshold < 1 {
+		return fmt.Errorf("originProbe.failureThreshold %d: must be >= 1", o.FailureThreshold)
+	}
+	if o.TTL < 0 {
+		return fmt.Errorf("originProbe.ttl %v: must be >= 0", o.TTL)
+	}
+	if o.Timeout <= 0 {
+		return fmt.Errorf("originProbe.timeout %v: must be > 0", o.Timeout)
+	}
+	seen := map[string]bool{}
+	for i, w := range o.Origins {
+		if !validOriginKey(w.Key) {
+			return fmt.Errorf("originProbe.origins[%d].key %q: want <host>/<org>/<repo>", i, w.Key)
+		}
+		if seen[w.Key] {
+			return fmt.Errorf("originProbe.origins[%d].key %q: duplicate", i, w.Key)
+		}
+		seen[w.Key] = true
+		if w.RepoRoot == "" {
+			return fmt.Errorf("originProbe.origins[%d] (%s): repoRoot is required", i, w.Key)
+		}
+	}
+	return nil
+}
+
+// validOriginKey reports whether k has exactly three non-empty segments of
+// [A-Za-z0-9._-] separated by "/". That charset keeps the key safe to embed in
+// a file name once the separators are replaced.
+func validOriginKey(k string) bool {
+	parts := strings.Split(k, "/")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return false
+		}
+		for _, r := range p {
+			ok := r == '.' || r == '_' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+			if !ok {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // validPermissionModes is the set of claude --permission-mode values this
@@ -138,7 +233,7 @@ func (c Config) Validate() error {
 	if !validPermissionModes[c.PermissionMode] {
 		return fmt.Errorf("invalid permissionMode %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
 	}
-	return nil
+	return c.OriginProbe.Validate()
 }
 
 // WorkerBudget builds the budget.Budget a worker/review role's CCPoolConfig
@@ -219,5 +314,6 @@ func Default() Config {
 		ReminderPct:         0.725,
 		CancelPct:           0.90,
 		HardPct:             1.00,
+		OriginProbe:         DefaultOriginProbe(),
 	}
 }
