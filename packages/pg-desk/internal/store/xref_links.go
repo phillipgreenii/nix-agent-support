@@ -6,11 +6,12 @@ import (
 	"strings"
 )
 
-// The origin/relation xref API (schema version 2 only). Links are either
-// derived (origin "derived:<extractor>", replaced on every hydration of the
-// entity they start from) or externally managed (origin "external:<actor>",
-// persisting until that actor removes them). An external link never
-// overrides a derived one, and no suppression state is stored.
+// The origin/relation xref API (schema version 2 only). Each row is one
+// claim on a link: derived (origin "derived:<extractor>", replaced on every
+// hydration of the entity it starts from) or externally managed (origin
+// "external:<actor>", persisting until that actor removes it). One link can
+// carry a derived and an external claim at once, as two rows; an external
+// claim never overrides a derived one, and no suppression state is stored.
 //
 // Rows owned by the old xref accessors (origin xrefLegacyOrigin) are never
 // touched by this API's writes; they are returned by its list functions.
@@ -120,10 +121,13 @@ func (s *Store) ReplaceDerivedXrefs(repo, fromType, fromID string, links []XrefL
 }
 
 // AddExternalXref records an externally managed link (origin
-// "external:<x.Actor>"). It is a silent no-op when any derived row exists
-// for the same (repo, from, to, relation): an external link never overrides
-// a derived one. Adding the same actor's link again refreshes its
-// last_confirmed, reason and acted_at.
+// "external:<x.Actor>"). The external claim is its own row, so it is
+// recorded even when a derived row exists for the same (repo, from, to,
+// relation): the link then survives through its external origin if a later
+// hydration no longer derives it. It never writes, replaces or removes a
+// derived row, so an external link cannot override a derived one. Adding the
+// same actor's link again refreshes its evidence, last_confirmed, acted_at
+// and reason and keeps its first_seen.
 func (s *Store) AddExternalXref(x XrefLink) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
@@ -134,24 +138,10 @@ func (s *Store) AddExternalXref(x XrefLink) error {
 	if x.Actor == "" || x.Relation == "" {
 		return wrap(fmt.Errorf("actor and relation are required"))
 	}
+	// The origin is always external:<actor>, so the conflict target below can
+	// only ever match this actor's own external row, never a derived one.
 	origin := xrefExternalPrefix + x.Actor
-	tx, err := s.sql.Begin()
-	if err != nil {
-		return wrap(err)
-	}
-	defer func() { _ = tx.Rollback() }() // no-op after Commit
-
-	var derived int
-	if err := tx.QueryRow(
-		`SELECT COUNT(*) FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ? AND to_id = ? AND relation = ? AND origin LIKE 'derived:%'`,
-		x.Repo, x.FromType, x.FromID, x.ToType, x.ToID, x.Relation,
-	).Scan(&derived); err != nil {
-		return wrap(err)
-	}
-	if derived > 0 {
-		return nil
-	}
-	if _, err := tx.Exec(
+	if _, err := s.sql.Exec(
 		`INSERT INTO xref (repo, from_type, from_id, to_type, to_id, origin, relation, evidence, first_seen, last_confirmed, actor, acted_at, reason)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, from_type, from_id, to_type, to_id, relation, origin) DO UPDATE SET
@@ -162,9 +152,6 @@ func (s *Store) AddExternalXref(x XrefLink) error {
 		x.Repo, x.FromType, x.FromID, x.ToType, x.ToID, origin, x.Relation, nullableString(x.Evidence),
 		x.FirstSeen, x.LastConfirmed, x.Actor, nullableString(x.ActedAt), nullableString(x.Reason),
 	); err != nil {
-		return wrap(err)
-	}
-	if err := tx.Commit(); err != nil {
 		return wrap(err)
 	}
 	return nil

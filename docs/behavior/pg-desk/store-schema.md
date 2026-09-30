@@ -168,9 +168,14 @@ the reserved keys above; those belong to the work that uses these tables.
   longer present are deleted. Replacement never touches external rows or the legacy rows owned by the
   old accessors.
 - External links (origin `external:<actor>`, with actor, time and optional reason) persist until
-  removed. Adding one when a derived link with the same source, target and relation exists is a
-  silent no-op: an external link MUST NOT override a derived one. Removing an external link removes
-  only the named actor's row; it MUST NOT remove a derived row or another actor's link.
+  removed. Each row is one claim on a link, so one link can carry a derived and an external claim
+  at once, as two rows. Adding an external link when a derived link with the same source, target
+  and relation exists MUST still record the external claim as its own row, so the link survives
+  through that claim if a later hydration of the source entity no longer derives it. An external
+  link MUST NOT override a derived one: adding, refreshing or removing an external claim MUST NOT
+  write, replace or remove a derived row, and while a derived row exists it stays exactly as the
+  last hydration left it. Removing an external link removes only the named actor's row; it MUST
+  NOT remove a derived row or another actor's link.
 
 ## Consumer cursors and change-log pruning (schema version 2)
 

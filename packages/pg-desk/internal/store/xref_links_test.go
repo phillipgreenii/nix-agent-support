@@ -88,24 +88,129 @@ func TestReplaceDerivedXrefsValidatesLinks(t *testing.T) {
 	}
 }
 
-func TestExternalXrefCannotOverrideDerived(t *testing.T) {
-	s := OpenNewSchemaForTest(t)
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "t1")}); err != nil {
+// linksByOrigin lists the links leaving the test entity to (issue, toID)
+// with relation, keyed by origin.
+func linksByOrigin(t *testing.T, s *Store, toID, relation string) map[string]XrefLink {
+	t.Helper()
+	links, err := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddExternalXref(externalLink("A-1", "fixes", "alice")); err != nil {
-		t.Fatalf("add over derived must be a silent no-op, got %v", err)
+	out := map[string]XrefLink{}
+	for _, l := range links {
+		if l.ToType == "issue" && l.ToID == toID && l.Relation == relation {
+			out[l.Origin] = l
+		}
 	}
-	links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
-	if len(links) != 1 || links[0].Origin != "derived:body" {
-		t.Fatalf("links = %+v, want only the derived row", links)
+	return out
+}
+
+// An external claim on an already-derived link is recorded as its own
+// external-origin row, beside the derived row, and never changes that row.
+func TestExternalXrefCannotOverrideDerived(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	derived := derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")
+	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
+		t.Fatal(err)
+	}
+	ext := externalLink("A-1", "fixes", "alice")
+	ext.Evidence = "external evidence"
+	if err := s.AddExternalXref(ext); err != nil {
+		t.Fatal(err)
+	}
+	got := linksByOrigin(t, s, "A-1", "fixes")
+	if len(got) != 2 {
+		t.Fatalf("links = %+v, want the derived row and alice's external row", got)
+	}
+	if d := got["derived:body"]; d != derived {
+		t.Fatalf("derived row changed by the external claim: got %+v, want %+v", d, derived)
+	}
+	e := got["external:alice"]
+	if e.Actor != "alice" || e.ActedAt != "2026-09-15T00:00:00Z" || e.Reason != "because" || e.Evidence != "external evidence" {
+		t.Fatalf("external claim on a derived link = %+v", e)
+	}
+	// Re-adding refreshes only alice's row; the derived row is still untouched.
+	again := externalLink("A-1", "fixes", "alice")
+	again.LastConfirmed, again.ActedAt, again.Reason = "2026-09-20T00:00:00Z", "2026-09-20T00:00:00Z", "still"
+	if err := s.AddExternalXref(again); err != nil {
+		t.Fatal(err)
+	}
+	got = linksByOrigin(t, s, "A-1", "fixes")
+	if d := got["derived:body"]; len(got) != 2 || d != derived {
+		t.Fatalf("after re-add = %+v, want the derived row unchanged", got)
+	}
+	if e := got["external:alice"]; e.FirstSeen != "2026-09-15T00:00:00Z" || e.LastConfirmed != "2026-09-20T00:00:00Z" || e.Reason != "still" {
+		t.Fatalf("re-added external row = %+v", e)
 	}
 	// A different relation to the same target is a distinct link and is allowed.
 	if err := s.AddExternalXref(externalLink("A-1", "blocks", "alice")); err != nil {
 		t.Fatal(err)
 	}
-	if links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID); len(links) != 2 {
-		t.Fatalf("links = %+v, want 2", links)
+	if links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID); len(links) != 3 {
+		t.Fatalf("links = %+v, want 3", links)
+	}
+}
+
+// A link that is both derived and externally claimed survives, through its
+// external origin, a re-hydration that no longer finds it.
+func TestExternalClaimKeepsLinkWhenDerivedSourceDisappears(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddExternalXref(externalLink("A-1", "fixes", "alice")); err != nil {
+		t.Fatal(err)
+	}
+	// A hydration that still finds the link keeps both claims.
+	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-05T00:00:00Z")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := linksByOrigin(t, s, "A-1", "fixes"); len(got) != 2 {
+		t.Fatalf("after confirming hydration = %+v, want both claims", got)
+	}
+	// The source entity changes: re-hydration no longer derives the link.
+	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := linksByOrigin(t, s, "A-1", "fixes")
+	e, ok := got["external:alice"]
+	if len(got) != 1 || !ok {
+		t.Fatalf("after the derived row was dropped = %+v, want only alice's external claim", got)
+	}
+	if e.Actor != "alice" || e.Reason != "because" {
+		t.Fatalf("surviving external claim = %+v", e)
+	}
+	// The reverse lookup still sees the link too.
+	to, err := s.ListXrefLinksTo(kvRepo, "issue", "A-1")
+	if err != nil || len(to) != 1 || to[0].Origin != "external:alice" {
+		t.Fatalf("ListXrefLinksTo = %+v, %v", to, err)
+	}
+}
+
+// Removing an external claim from a link that is also derived removes only
+// that claim; the derived link stays intact.
+func TestRemoveExternalClaimLeavesDerivedLink(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	derived := derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")
+	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddExternalXref(externalLink("A-1", "fixes", "alice")); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || !removed {
+		t.Fatalf("remove alice's claim = (%v, %v)", removed, err)
+	}
+	got := linksByOrigin(t, s, "A-1", "fixes")
+	if d := got["derived:body"]; len(got) != 1 || d != derived {
+		t.Fatalf("after removing the external claim = %+v, want only the derived row, unchanged", got)
+	}
+	// With no external claim left, a second remove removes nothing.
+	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || removed {
+		t.Fatalf("second remove = (%v, %v)", removed, err)
+	}
+	if got := linksByOrigin(t, s, "A-1", "fixes"); len(got) != 1 {
+		t.Fatalf("after second remove = %+v", got)
 	}
 }
 
