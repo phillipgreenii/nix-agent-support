@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/goldencorpus"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
 )
@@ -148,6 +150,117 @@ func TestReplayAttribution_IsNotTheFirstTraceEntry(t *testing.T) {
 	}
 	if first.Decision != hookio.NoOpinion {
 		t.Errorf("trace[0] %s decided %v; expected an abstain, i.e. a rule that did NOT decide this input", first.RuleName, first.Decision)
+	}
+}
+
+// --- --corpus: unit tests over the three-way vocabulary grading rule ---
+
+// TestGradeCorpusRow_ThreeWayVocabulary pins the P2 corpus contract's
+// acceptance rule (internal/goldencorpus's package doc comment, verbatim):
+// "not-approve = abstain or reject acceptable ... must-reject rows MUST be
+// deny." Approve and Reject each require an exact decision match; NotApprove
+// accepts either Abstain or Reject and rejects only Approve (and the
+// reserved, currently-unemitted Ask decision, which the contract does not
+// name as acceptable for a not-approve row).
+func TestGradeCorpusRow_ThreeWayVocabulary(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		expected goldencorpus.Verdict
+		decision evalcontract.Decision
+		want     bool
+	}{
+		{"approve row + approve decision", goldencorpus.Approve, evalcontract.Approve, true},
+		{"approve row + reject decision", goldencorpus.Approve, evalcontract.Reject, false},
+		{"approve row + abstain decision", goldencorpus.Approve, evalcontract.Abstain, false},
+		{"approve row + ask decision", goldencorpus.Approve, evalcontract.Ask, false},
+
+		{"reject row + reject decision", goldencorpus.Reject, evalcontract.Reject, true},
+		{"reject row + abstain decision", goldencorpus.Reject, evalcontract.Abstain, false},
+		{"reject row + approve decision", goldencorpus.Reject, evalcontract.Approve, false},
+		{"reject row + ask decision", goldencorpus.Reject, evalcontract.Ask, false},
+
+		{"not-approve row + reject decision", goldencorpus.NotApprove, evalcontract.Reject, true},
+		{"not-approve row + abstain decision", goldencorpus.NotApprove, evalcontract.Abstain, true},
+		{"not-approve row + approve decision", goldencorpus.NotApprove, evalcontract.Approve, false},
+		{"not-approve row + ask decision", goldencorpus.NotApprove, evalcontract.Ask, false},
+	} {
+		if got := gradeCorpusRow(tc.expected, tc.decision); got != tc.want {
+			t.Errorf("%s: gradeCorpusRow(%q, %v) = %v, want %v", tc.name, tc.expected, tc.decision, got, tc.want)
+		}
+	}
+}
+
+// TestConvertRulesConfigFixture_RoundTrips pins the goldencorpus ->
+// evalcontract field-for-field conversion --corpus mode relies on: every
+// value that goes in must come out unchanged (only the declared type
+// changes).
+func TestConvertRulesConfigFixture_RoundTrips(t *testing.T) {
+	kube := convertKubeContexts(map[string]goldencorpus.KubeContextRule{
+		"prod": {Allow: []string{"read"}},
+	})
+	if got := kube["prod"].Allow; len(got) != 1 || got[0] != "read" {
+		t.Errorf("convertKubeContexts: got %+v, want Allow=[read]", kube)
+	}
+	if convertKubeContexts(nil) != nil {
+		t.Error("convertKubeContexts(nil) should stay nil")
+	}
+
+	paths := convertRemotePaths(map[string][]goldencorpus.RemotePathRule{
+		"host": {{Prefix: "/srv", Category: "trusted"}},
+	})
+	if got := paths["host"]; len(got) != 1 || got[0].Prefix != "/srv" || got[0].Category != "trusted" {
+		t.Errorf("convertRemotePaths: got %+v, want [{/srv trusted}]", paths)
+	}
+	if convertRemotePaths(nil) != nil {
+		t.Error("convertRemotePaths(nil) should stay nil")
+	}
+
+	verbs := convertBuildToolVerbs([]goldencorpus.VerbScopedApproval{
+		{Tool: "make", Verb: "build", Class: "trusted"},
+	})
+	if len(verbs) != 1 || verbs[0].Tool != "make" || verbs[0].Verb != "build" || verbs[0].Class != "trusted" {
+		t.Errorf("convertBuildToolVerbs: got %+v, want [{make build trusted <nil>}]", verbs)
+	}
+	if convertBuildToolVerbs(nil) != nil {
+		t.Error("convertBuildToolVerbs(nil) should stay nil")
+	}
+}
+
+// TestLoadCorpusRows_ConcatenatesMultipleFiles: --corpus is repeatable
+// (evaluate --corpus a.json --corpus b.json) specifically so a caller can
+// grade corpus.json and corpus_legacy.json together in one run.
+func TestLoadCorpusRows_ConcatenatesMultipleFiles(t *testing.T) {
+	dir := t.TempDir()
+	a := dir + "/a.json"
+	b := dir + "/b.json"
+	if err := os.WriteFile(a, []byte(`[{"case":"a1","expected_verdict":"approve"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(`[{"case":"b1","expected_verdict":"reject"},{"case":"b2","expected_verdict":"not-approve"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := loadCorpusRows([]string{a, b})
+	if err != nil {
+		t.Fatalf("loadCorpusRows: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	var cases []string
+	for _, r := range rows {
+		cases = append(cases, r.Case)
+	}
+	if cases[0] != "a1" || cases[1] != "b1" || cases[2] != "b2" {
+		t.Errorf("cases = %v, want [a1 b1 b2] in file order", cases)
+	}
+}
+
+// TestLoadCorpusRows_MissingFile refuses with an actionable error rather
+// than silently grading zero rows.
+func TestLoadCorpusRows_MissingFile(t *testing.T) {
+	if _, err := loadCorpusRows([]string{"/nonexistent/corpus.json"}); err == nil {
+		t.Fatal("loadCorpusRows on a missing file: want an error, got nil")
 	}
 }
 

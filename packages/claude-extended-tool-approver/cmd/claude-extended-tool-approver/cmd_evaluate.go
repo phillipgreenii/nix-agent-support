@@ -7,6 +7,11 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/claudecodeadapter"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/effectpolicy"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/goldencorpus"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/settingseval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
@@ -55,6 +60,7 @@ func newEvaluateCmd() *cobra.Command {
 	var days int
 	var since, settingsPath, format, approvalSource, baseline string
 	var missesOnly bool
+	var corpusPaths []string
 	cmd := &cobra.Command{
 		Use:   "evaluate",
 		Short: "Replay logged decisions and categorize them as correct or miss",
@@ -102,9 +108,29 @@ less-restrictive and attributed to the deciding rule:
 A baseline captured under different filters (--days/--since/--approval-source/
 --misses-only/--settings) is refused rather than silently diffed. The default
 bare-array --format json shape (and the jq recipe above) is unchanged when
---baseline is not given.`,
+--baseline is not given.
+
+--corpus <path> switches evaluate to an entirely different grading source: the
+labeled internal/goldencorpus corpus (e.g.
+internal/goldencorpus/testdata/corpus.json and/or
+internal/goldencorpus/testdata/corpus_legacy.json — repeat the flag to grade
+more than one file together) instead of the ask log. Each corpus row's own
+tool_input is replayed through the new effect engine
+(claudecodeadapter.Evaluate) and graded against the row's own expected_verdict
+under the corpus's three-way vocabulary (approve/reject/not-approve — see
+internal/goldencorpus's package doc comment for the acceptance rule). --corpus
+cannot be combined with the ask-log-only flags (--days/--since/--settings/
+--approval-source/--baseline/--misses-only).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(corpusPaths) > 0 {
+				if days > 0 || since != "" || settingsPath != "" || approvalSource != "" || baseline != "" || missesOnly {
+					fmt.Fprintln(os.Stderr, "error: --corpus cannot be combined with --days/--since/--settings/--approval-source/--baseline/--misses-only (it grades a fixed corpus file, not the ask log)")
+					os.Exit(1)
+				}
+				runEvaluateCorpus(corpusPaths, format)
+				return nil
+			}
 			runEvaluate(days, since, settingsPath, format, approvalSource, baseline, missesOnly)
 			return nil
 		},
@@ -116,6 +142,7 @@ bare-array --format json shape (and the jq recipe above) is unchanged when
 	cmd.Flags().StringVar(&approvalSource, "approval-source", "", "Only evaluate rows with this approval_source (unknown|bypass|auto|settings|hook|user)")
 	cmd.Flags().StringVar(&baseline, "baseline", "", "Path to a baseline report: captures it if absent, compares against it and reports the decision delta if present")
 	cmd.Flags().BoolVar(&missesOnly, "misses-only", false, "Only show rows where hook is wrong")
+	cmd.Flags().StringArrayVar(&corpusPaths, "corpus", nil, "Path to a goldencorpus JSON file (repeatable); grades the corpus's own expected_verdict instead of replaying the ask log")
 	return cmd
 }
 
@@ -363,5 +390,222 @@ func decisionToDBString(d hookio.Decision) string {
 		return "abstain"
 	default:
 		return "unknown"
+	}
+}
+
+// --- --corpus: grade the labeled goldencorpus instead of the ask log ---
+//
+// Track X.5 (docket tc-o14i5.8): evaluate's OTHER grading path. The rows
+// above replay real historical ask-log calls and grade them against what a
+// human (or the hook itself) decided at the time (row.Outcome /
+// row.CorrectDec) -- a moving, production-shaped ground truth. A corpus row
+// carries no such history: it is a hand-authored fixture whose own
+// expected_verdict IS the ground truth (internal/goldencorpus's package doc
+// comment, the P2 corpus contract). The two ground truths do not share a
+// join key (an ask-log row has no "case" name and a corpus row has no
+// database id), so this is a SEPARATE loop over a separate row source, not a
+// new column on the existing one -- hence the new --corpus flag rather than
+// a change to the default asklog-replay behavior (see this packet's own
+// Freedom section).
+//
+// Replay here goes through claudecodeadapter.Evaluate (the new effect
+// engine), not setup.EngineCache's old internal/engine+internal/rules chain
+// that the asklog path above still uses. Three reasons, all from prior
+// work this packet only reads: (1) internal/goldencorpus's own doc comment
+// says its RulesConfigFixture mirrors internal/evalcontract's Request shape
+// "field-for-field" -- it is data modeled for the NEW engine's config, and
+// has no equivalent shape the old configrules.Config accepts; (2) a corpus
+// row's CWDPathState.CWD is a synthetic fixture path ("/repo", etc.), not a
+// real directory on this machine, so EngineCache.EngineForCWD's os.Stat
+// staleness check would mark every corpus row stale-cwd -- claudecodeadapter
+// does no such check; (3) internal/legacyextract.CompareAgainstNewEngine
+// already established this exact pattern (goldencorpus row ->
+// claudecodeadapter.Evaluate) for grading corpus rows against the new
+// engine, so this reuses prior art rather than inventing a second one.
+
+// corpusEvalResult is one graded goldencorpus row: the corpus's own
+// identifying fields plus the replay verdict and the category it earned.
+type corpusEvalResult struct {
+	Case            string               `json:"case"`
+	Tags            []string             `json:"tags,omitempty"`
+	ToolName        string               `json:"tool_name"`
+	ExpectedVerdict goldencorpus.Verdict `json:"expected_verdict"`
+	ReplayDecision  string               `json:"replay_decision"`
+	ReplayReason    string               `json:"replay_reason,omitempty"`
+	Category        string               `json:"category"`
+}
+
+// gradeCorpusRow reports whether decision satisfies expected under the P2
+// corpus contract's three-way acceptability rule (internal/goldencorpus's
+// package doc comment, verbatim): "not-approve = abstain or reject
+// acceptable ... must-reject rows MUST be deny." Approve and Reject each
+// require decision to match EXACTLY; NotApprove accepts EITHER Abstain or
+// Reject -- Approve is the only decision a NotApprove row disqualifies (an
+// Ask decision is reserved/unemitted today -- see evalcontract.Decision's
+// own doc comment -- and is graded as disqualifying for NotApprove too,
+// since the contract names only "abstain or reject" as acceptable).
+func gradeCorpusRow(expected goldencorpus.Verdict, decision evalcontract.Decision) bool {
+	switch expected {
+	case goldencorpus.Approve:
+		return decision == evalcontract.Approve
+	case goldencorpus.Reject:
+		return decision == evalcontract.Reject
+	case goldencorpus.NotApprove:
+		return decision == evalcontract.Reject || decision == evalcontract.Abstain
+	default:
+		return false
+	}
+}
+
+// convertKubeContexts/convertRemotePaths/convertBuildToolVerbs adapt a
+// corpus row's RulesConfigFixture sub-shapes to the new engine's own
+// evalcontract-typed equivalents. goldencorpus's package doc comment
+// explains why these are separate, mirrored declarations rather than a
+// shared import (goldencorpus does not depend on evalcontract), so a small
+// field-for-field conversion is required at this one consuming boundary.
+func convertKubeContexts(m map[string]goldencorpus.KubeContextRule) map[string]evalcontract.KubeContextRule {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]evalcontract.KubeContextRule, len(m))
+	for k, v := range m {
+		out[k] = evalcontract.KubeContextRule{Allow: v.Allow}
+	}
+	return out
+}
+
+func convertRemotePaths(m map[string][]goldencorpus.RemotePathRule) map[string][]evalcontract.RemotePathRule {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string][]evalcontract.RemotePathRule, len(m))
+	for k, rules := range m {
+		converted := make([]evalcontract.RemotePathRule, len(rules))
+		for i, r := range rules {
+			converted[i] = evalcontract.RemotePathRule{Prefix: r.Prefix, Category: r.Category}
+		}
+		out[k] = converted
+	}
+	return out
+}
+
+func convertBuildToolVerbs(in []goldencorpus.VerbScopedApproval) []evalcontract.VerbScopedApproval {
+	if in == nil {
+		return nil
+	}
+	out := make([]evalcontract.VerbScopedApproval, len(in))
+	for i, v := range in {
+		out[i] = evalcontract.VerbScopedApproval{Tool: v.Tool, Verb: v.Verb, Class: v.Class}
+	}
+	return out
+}
+
+// loadCorpusRows reads and concatenates every corpus JSON file named by
+// paths. internal/goldencorpus exposes no loader of its own outside its
+// _test.go files (unexported, package-private), so this reads the
+// checked-in JSON array shape directly against the exported goldencorpus.Row
+// type -- read-only consumption of the corpus format, not a change to the
+// goldencorpus package itself.
+func loadCorpusRows(paths []string) ([]goldencorpus.Row, error) {
+	var rows []goldencorpus.Row
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("reading corpus %s: %w", p, err)
+		}
+		var fileRows []goldencorpus.Row
+		if err := json.Unmarshal(data, &fileRows); err != nil {
+			return nil, fmt.Errorf("parsing corpus %s: %w", p, err)
+		}
+		rows = append(rows, fileRows...)
+	}
+	return rows, nil
+}
+
+// runEvaluateCorpus is --corpus's own entry point: load every named corpus
+// file, replay each row's tool_input through the new effect engine, and
+// grade it against the row's own expected_verdict (gradeCorpusRow). A row
+// naming a tool the new engine has no opinion on (anything but Bash/Write/
+// Edit/MultiEdit) is reported "not-comparable", mirroring
+// internal/legacyextract.CompareAgainstNewEngine's own established
+// Comparable/NotComparable split for the same underlying reason.
+func runEvaluateCorpus(corpusPaths []string, format string) {
+	rows, err := loadCorpusRows(corpusPaths)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	reg := cmddesc.DefaultRegistry()
+	policies := effectpolicy.DefaultPolicies()
+	graphPolicies := effectpolicy.DefaultGraphPolicies()
+
+	counts := map[string]int{"correct": 0, "miss": 0, "not-comparable": 0}
+	var results []corpusEvalResult
+
+	for _, row := range rows {
+		r := corpusEvalResult{
+			Case:            row.Case,
+			Tags:            row.Tags,
+			ToolName:        row.ToolInput.ToolName,
+			ExpectedVerdict: row.ExpectedVerdict,
+		}
+
+		if row.ToolInput.ToolName != "Bash" && !claudecodeadapter.IsFileEditTool(row.ToolInput.ToolName) {
+			r.Category = "not-comparable"
+			counts["not-comparable"]++
+			results = append(results, r)
+			continue
+		}
+
+		raw, err := json.Marshal(row.ToolInput.ToolInput)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: marshalling tool_input for case %s: %v\n", row.Case, err)
+			os.Exit(1)
+		}
+		input := &hookio.HookInput{
+			ToolName:  row.ToolInput.ToolName,
+			ToolInput: raw,
+			CWD:       row.CWDPathState.CWD,
+		}
+		cfg := claudecodeadapter.RequestConfig{
+			ProjectRoot:     row.CWDPathState.ProjectRoot,
+			VettedHosts:     row.RulesConfig.VettedHosts,
+			RemoteLifecycle: row.RulesConfig.RemoteLifecycle,
+			KubeContexts:    convertKubeContexts(row.RulesConfig.KubeContexts),
+			RemotePaths:     convertRemotePaths(row.RulesConfig.RemotePaths),
+			BuildToolVerbs:  convertBuildToolVerbs(row.RulesConfig.BuildToolVerbs),
+		}
+
+		resp, evalErr := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
+		if evalErr != nil {
+			r.Category = "not-comparable"
+			r.ReplayReason = evalErr.Error()
+			counts["not-comparable"]++
+			results = append(results, r)
+			continue
+		}
+
+		r.ReplayDecision = resp.Decision.String()
+		r.ReplayReason = resp.Reason
+		if gradeCorpusRow(row.ExpectedVerdict, resp.Decision) {
+			r.Category = "correct"
+		} else {
+			r.Category = "miss"
+		}
+		counts[r.Category]++
+		results = append(results, r)
+	}
+
+	switch format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(results)
+	default:
+		fmt.Printf("Total rows:          %5d\n", len(results))
+		fmt.Printf("Correct:             %5d\n", counts["correct"])
+		fmt.Printf("Miss:                %5d\n", counts["miss"])
+		fmt.Printf("Not comparable:      %5d\n", counts["not-comparable"])
 	}
 }
