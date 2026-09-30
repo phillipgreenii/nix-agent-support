@@ -271,3 +271,41 @@ func TestLoadRole_decodesBeadsDir(t *testing.T) {
 		t.Errorf("BeadsDir=%q Completion=%q", role.CCPool.BeadsDir, role.CCPool.Completion)
 	}
 }
+
+// TestLoadRole_budgetStopEscalateAfter (bead pg2-6akgz): absent => 3, explicit 0
+// => 0 (kill switch), explicit N => N, negative rejected; budget unchanged.
+func TestLoadRole_budgetStopEscalateAfter(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"worker","type":"ccpool","ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p","budget":{"tokens":5000,"cost":250,"time":"25m"}` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra string
+		want        int
+		wantErr     bool
+	}{
+		{"absent defaults to 3", "", 3, false},
+		{"explicit zero disables", `,"budgetStopEscalateAfter":0`, 0, false},
+		{"explicit 5", `,"budgetStopEscalateAfter":5`, 5, false},
+		{"negative rejected", `,"budgetStopEscalateAfter":-1`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := role.CCPool.BudgetStopEscalateAfter; got != tc.want {
+				t.Errorf("BudgetStopEscalateAfter = %d, want %d", got, tc.want)
+			}
+			b := role.CCPool.Budget
+			if b.Tokens != 5000 || b.Cost != 250 || b.Time != 25*time.Minute {
+				t.Errorf("budget must be unchanged by the threshold, got %+v", b)
+			}
+		})
+	}
+}

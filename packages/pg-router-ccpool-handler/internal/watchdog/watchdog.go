@@ -56,9 +56,15 @@ type Watchdog struct {
 	Log    *eventlog.Writer // may be nil (no-op)
 	Budget budget.Budget
 	// Role and Pool label the hard-stop error/eventlog (pg2-irowq); Pool "" prints as "default".
-	Role, Pool             string
-	RepoRoot, WorktreeDir  string
-	ReminderMsg, WrapUpMsg string
+	Role, Pool string
+	// BudgetStopEscalateAfter is the per-bead budget-stop escalation threshold
+	// (bead pg2-6akgz, part 1/3). > 0 makes every hard stop record a per-session
+	// budget-stop label on the bead (before the unclaim) and comment
+	// "budget stop <n> of <threshold> (session <id>)"; <= 0 (the zero value)
+	// records nothing. It never alters Budget: budgets stay fixed.
+	BudgetStopEscalateAfter int
+	RepoRoot, WorktreeDir   string
+	ReminderMsg, WrapUpMsg  string
 	// Git is no longer read by this package's own hard-stop sequence
 	// (terminal/safeToReset migrated onto x/gitclient's Cleaner+Locator
 	// roles, bead pg2-ljyaj -- see terminal.go's openGit). The field stays

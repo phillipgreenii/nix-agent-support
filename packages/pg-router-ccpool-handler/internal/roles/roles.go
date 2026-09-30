@@ -61,6 +61,12 @@ type CCPoolConfig struct {
 	// Unclaim, Comment -- resolves against it, and the dispatched session's
 	// BEADS_DIR is BeadsDir/.beads. "" (default) keeps cfg.RepoRoot.
 	BeadsDir string
+	// BudgetStopEscalateAfter (bead pg2-6akgz): the per-bead budget-stop count
+	// at which later beads escalate (split-review, then human). This part only
+	// RECORDS and counts stops; 0 disables recording (kill switch). Loaded from
+	// the role config; the loader defaults an absent value to 3. Budgets are
+	// never changed by it.
+	BudgetStopEscalateAfter int
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

@@ -312,6 +312,7 @@ let
             budget = {
               inherit (roleCfg.ccpool.budget) tokens cost time;
             };
+            budgetStopEscalateAfter = roleCfg.ccpool.budgetStopEscalateAfter;
             isolation = {
               Type = roleCfg.ccpool.isolation.type;
               Path = roleCfg.ccpool.isolation.path;
@@ -566,6 +567,18 @@ let
                   pool-wide and are not settable per role here). Every field
                   left at its default renders the unlimited zero value: no
                   watchdog runs for this role.
+                '';
+              };
+              budgetStopEscalateAfter = lib.mkOption {
+                type = lib.types.ints.unsigned;
+                default = 3;
+                description = ''
+                  Per-bead budget-stop threshold (`roleFile.CCPool.BudgetStopEscalateAfter`,
+                  TOML key `budget_stop_escalate_after`, bead pg2-6akgz): each watchdog
+                  hard stop records a per-session `budget-stop:<session>` label on the
+                  bead before unclaiming it, and comments `budget stop <n> of <threshold>
+                  (session <id>)`. Budgets are NEVER changed by it. `0` disables the
+                  record entirely (kill switch).
                 '';
               };
               isolation = lib.mkOption {

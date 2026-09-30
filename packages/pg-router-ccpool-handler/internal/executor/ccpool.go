@@ -311,6 +311,11 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 		// (mirrors run()'s own pool-launch-fail removal after a successful
 		// Ensure, line 118). Best-effort.
 		_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-evicted")
+		// The budget-stop record is cleared only once the bead is CLOSED; a
+		// reopened bead keeps its history (pg2-6akgz).
+		if cc.BudgetStopEscalateAfter > 0 {
+			_ = beads.ClearBudgetStops(ctx, r.deps.BD, d.Item.ID)
+		}
 	}
 	return r.waitFailureResult(cc, d.Item.ID, werr), werr
 }
@@ -643,18 +648,20 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 	claimTerminal := func() bool { return owner.CompareAndSwap(false, true) }
 
 	wd := &watchdog.Watchdog{
-		Reader:      r.deps.reader(),
-		CC:          r.deps.CC,
-		BD:          r.deps.BD,
-		Log:         r.deps.Log,
-		Budget:      d.Role.CCPool.Budget,
-		Role:        d.Role.Name,
-		Pool:        d.Role.CCPool.PoolDir,
-		RepoRoot:    r.deps.Cfg.RepoRoot,
-		WorktreeDir: worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
-		ReminderMsg: r.deps.Cfg.ReminderMsg,
-		WrapUpMsg:   r.deps.Cfg.WrapUpMsg,
-		Git:         r.deps.git(),
+		Reader: r.deps.reader(),
+		CC:     r.deps.CC,
+		BD:     r.deps.BD,
+		Log:    r.deps.Log,
+		Budget: d.Role.CCPool.Budget,
+		Role:   d.Role.Name,
+		Pool:   d.Role.CCPool.PoolDir,
+		// Per-bead budget-stop counter (pg2-6akgz); 0 = disabled.
+		BudgetStopEscalateAfter: d.Role.CCPool.BudgetStopEscalateAfter,
+		RepoRoot:                r.deps.Cfg.RepoRoot,
+		WorktreeDir:             worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
+		ReminderMsg:             r.deps.Cfg.ReminderMsg,
+		WrapUpMsg:               r.deps.Cfg.WrapUpMsg,
+		Git:                     r.deps.git(),
 		// FirstTurnStarted gates the budget NUDGES on a real model turn so a worker
 		// that never ingested its task is never prompted (pg2-yukh #3b). The hard
 		// STOP is NOT gated — it unclaims, it does not nudge.

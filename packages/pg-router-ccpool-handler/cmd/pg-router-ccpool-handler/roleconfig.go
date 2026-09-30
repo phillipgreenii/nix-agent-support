@@ -29,6 +29,10 @@ const (
 	envConfig     = "PG_ROUTER_CCPOOL_HANDLER_CONFIG"
 )
 
+// defaultBudgetStopEscalateAfter is the default budget_stop_escalate_after
+// (bead pg2-6akgz): stops of one bead before escalation; 0 disables.
+const defaultBudgetStopEscalateAfter = 3
+
 // roleFile is the on-disk JSON shape --role-config decodes. Completion/
 // FailureAction/DispatchFailAction already implement encoding.TextUnmarshaler
 // (internal/roles/enums.go), so encoding/json calls those directly for the
@@ -73,6 +77,10 @@ type roleFile struct {
 		// role's items live in, when not cfg.RepoRoot's. See
 		// roles.CCPoolConfig.BeadsDir.
 		BeadsDir string `json:"beadsDir"`
+		// BudgetStopEscalateAfter (TOML key budget_stop_escalate_after, bead
+		// pg2-6akgz): per-bead budget-stop threshold. Absent => defaultBudgetStopEscalateAfter
+		// (3); 0 => disabled (kill switch). A pointer distinguishes absent from 0.
+		BudgetStopEscalateAfter *int `json:"budgetStopEscalateAfter"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -115,6 +123,13 @@ func loadRole(path string) (roles.Role, error) {
 				return roles.Role{}, fmt.Errorf("role config %s: parse budget.time %q: %w", path, rf.CCPool.Budget.Time, err)
 			}
 		}
+		stopAfter := defaultBudgetStopEscalateAfter
+		if rf.CCPool.BudgetStopEscalateAfter != nil {
+			stopAfter = *rf.CCPool.BudgetStopEscalateAfter
+		}
+		if stopAfter < 0 {
+			return roles.Role{}, fmt.Errorf("role config %s: budgetStopEscalateAfter %d must be >= 0", path, stopAfter)
+		}
 		r.CCPool = &roles.CCPoolConfig{
 			Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,
 			Completion: rf.CCPool.Completion, OnFailure: rf.CCPool.OnFailure, OnDispatchFail: rf.CCPool.OnDispatchFail,
@@ -127,6 +142,8 @@ func loadRole(path string) (roles.Role, error) {
 			Isolation: rf.CCPool.Isolation,
 			PoolDir:   rf.CCPool.PoolDir,
 			BeadsDir:  rf.CCPool.BeadsDir,
+
+			BudgetStopEscalateAfter: stopAfter,
 		}
 	case "command":
 		if rf.Command == nil {

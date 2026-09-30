@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -77,13 +78,48 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	_ = w.CC.Close(ctx, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")
+	stops, counted := w.recordBudgetStop(ctx, sessionName, beadID)
 	_ = beads.Unclaim(ctx, w.BD, beadID)
-	w.emit("error", "hard_stop", "budget hard stop reached", map[string]any{
+	fields := map[string]any{
 		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,
 		"role": be.Role, "pool": be.Pool, "limit": string(be.Limit),
 		"failure_signature": "budget",
 		"used":              be.Used, "cap": be.Cap, "elapsed": be.Elapsed.Seconds(),
-	})
+	}
+	if counted {
+		fields["budget_stops"] = stops
+	}
+	w.emit("error", "hard_stop", "budget hard stop reached", fields)
+}
+
+// recordBudgetStop writes this session's budget-stop record on the bead and
+// returns the resulting distinct-session count (bead pg2-6akgz). It MUST run
+// BEFORE the unclaim, and is reached only from terminal, i.e. only by the
+// watchdog that OWNS the terminal outcome (ClaimTerminal), so the watchdog
+// losing the race to waitDone never counts. Disabled (BudgetStopEscalateAfter
+// <= 0) it does nothing. On any bd failure it logs and reports counted=false,
+// so the caller falls back to today's plain unclaim (the safe direction); the
+// Budget is never touched.
+func (w *Watchdog) recordBudgetStop(ctx context.Context, sessionName, beadID string) (stops int, counted bool) {
+	if w.BudgetStopEscalateAfter <= 0 {
+		return 0, false
+	}
+	if err := beads.RecordBudgetStop(ctx, w.BD, beadID, sessionName); err != nil {
+		w.emit("warn", "budget_stop_record_failed", "budget-stop record failed; plain unclaim", map[string]any{
+			"session": sessionName, "bead": beadID, "err": err.Error(),
+		})
+		return 0, false
+	}
+	n, err := beads.BudgetStops(ctx, w.BD, beadID)
+	if err != nil {
+		w.emit("warn", "budget_stop_record_failed", "budget-stop count failed; plain unclaim", map[string]any{
+			"session": sessionName, "bead": beadID, "err": err.Error(),
+		})
+		return 0, false
+	}
+	_ = beads.Comment(ctx, w.BD, beadID,
+		fmt.Sprintf("budget stop %d of %d (session %s)", n, w.BudgetStopEscalateAfter, sessionName))
+	return n, true
 }
 
 func (w *Watchdog) sessionCWD(ctx context.Context, externalID string) string {

@@ -111,3 +111,16 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
     handling of a busy decline's reason. Gated and cleared transitions are structured log and
     event-log records carrying the origin key, class, duration, and redacted stderr tail. An alert
     on them is separate work.
+- **`INV-CCH-11`** — when the budget watchdog hard-stops a session it owns the terminal outcome
+  of (it won the single-terminal claim against the bead-poll), the handler MUST record that stop
+  on the bead BEFORE returning it to the pool, and MUST NOT change any budget. The record is one
+  label `budget-stop:<session-id>` per stopped session; the per-bead count is the number of
+  DISTINCT such labels, so writing the same session id again is a no-op and two racing writers
+  cannot lose an increment. It is written through the same bd runner (and tracker) the handler
+  already uses for that bead. On any bd failure the handler MUST log it and fall back to today's
+  plain unclaim (the safe direction). Each recorded stop adds the bead comment
+  `budget stop <n> of <threshold> (session <id>)` and the `hard_stop` event-log record gains
+  `budget_stops=<n>`. The record is cleared only when the bead is CLOSED; a reopened bead keeps
+  its history. The threshold is the role setting `budget_stop_escalate_after` (default 3, `0`
+  disables all of the above). This invariant only counts; acting on the count is separate work.
+  The handler has no metrics emitter, so it emits no metric for this.
