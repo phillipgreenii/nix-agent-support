@@ -6,6 +6,12 @@
     "name": "kubectl",
     "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
     "citations": {
+      "dangerFlagInert:--output": {
+        "source": "kubectl get --help: -o/--output selects an OUTPUT FORMAT string (e.g. json/yaml/wide), never a file-write destination (tc-6v2dm)."
+      },
+      "dangerFlagInert:-o": {
+        "source": "kubectl get --help: -o/--output selects an OUTPUT FORMAT string (e.g. json/yaml/wide), never a file-write destination (tc-6v2dm)."
+      },
       "interpreter": {
         "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl\")"
       },
@@ -1434,6 +1440,9 @@
         "name": "cp",
         "provenance": "kubectl v1.36.3 (client), kubectl --help / kubectl \u003cverb\u003e --help / kubectl options, this host 2026-09-07",
         "citations": {
+          "dangerFlagInert:-c": {
+            "source": "kubectl cp --help: -c/--container names the CONTAINER within the pod to copy to/from, not a config-file effect (tc-6v2dm)."
+          },
           "interpreter": {
             "source": "kubectl --help: \"kubectl controls the Kubernetes cluster manager.\" -- documents kubectl's own program/command-invocation shape (interpreter \"kubectl-cp\")"
           },

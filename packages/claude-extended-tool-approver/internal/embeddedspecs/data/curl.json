@@ -6,6 +6,9 @@
     "name": "curl",
     "provenance": "curl 8.21.0, curl --help all",
     "citations": {
+      "dangerFlagInert:-f": {
+        "source": "curl --help all: \"-f, --fail Fail fast with no output on HTTP errors\" — a boolean error-handling toggle, not a force/overwrite effect (tc-6v2dm)."
+      },
       "interpreter": {
         "source": "curl --help: \"Usage: curl [options...] \\u003curl\\u003e\" -- documents curl's own program/command-invocation shape (interpreter \"curl\")"
       },

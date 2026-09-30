@@ -6,6 +6,18 @@
     "name": "jq",
     "provenance": "jq 1.8.2, jq --help",
     "citations": {
+      "dangerFlagInert:-R": {
+        "source": "jq --help: \"-R, --raw-input read each line as string instead of JSON\" — an input-parsing-mode toggle, not a remote/recursive effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-c": {
+        "source": "jq --help: \"-c, --compact-output compact instead of pretty-printed output\" — an output-formatting toggle, not a config-file effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-e": {
+        "source": "jq --help: \"-e, --exit-status set exit status code based on the output\" — an exit-code toggle, not an exec effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-r": {
+        "source": "jq --help: \"-r, --raw-output output strings without escapes and quotes\" — an output-formatting toggle, not a recursive/force effect (tc-6v2dm)."
+      },
       "provenance": {
         "source": "jq --help: \"jq - commandline JSON processor [version 1.8.2]\""
       },

@@ -6,6 +6,9 @@
     "name": "sed",
     "provenance": "sed (GNU sed) 4.10, sed --help",
     "citations": {
+      "dangerFlagInert:-r": {
+        "source": "sed --help: \"-E, -r, --regexp-extended use extended regular expressions in the script\" — a regex-dialect toggle (alias of -E), not a recursive/force effect (tc-6v2dm)."
+      },
       "provenance": {
         "source": "sed --help: \"Usage: sed [OPTION]... {script-only-if-no-other-script} [input-file]...\""
       },

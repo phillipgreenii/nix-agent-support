@@ -6,6 +6,21 @@
     "name": "ssh",
     "provenance": "OpenSSH 10.5p1 (openssh-10.5p1, /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/ssh, resolved via /run/current-system/sw/bin/ssh), ssh(1) option table for that release; this host 2026-09-07 (ssh -V itself is intercepted by this repo's own configured ssh rule, \"ssh with no host\" — see this schema's own doc comment)",
     "citations": {
+      "dangerFlagInert:-R": {
+        "source": "ssh (bare invocation, usage banner): -R address is a remote-port-forward spec; this schema's own doc comment (registry_breadth.go, sshSchema) already documents -R's behavioural difference does not change the shape this process observes from its own argv (tc-6v2dm)."
+      },
+      "dangerFlagInert:-c": {
+        "source": "ssh (bare invocation, usage banner): -c cipher_spec names a cipher/MAC/kex-algorithm spec, not a config-file effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-e": {
+        "source": "ssh (bare invocation, usage banner): -e escape_char sets the escape character, not an exec effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-f": {
+        "source": "ssh (bare invocation, usage banner, full): -f backgrounds ssh just before command execution; a boolean toggle, not a force effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-o": {
+        "source": "ssh (bare invocation, usage banner): -o option is a literal ssh_config(5) option string; this schema's own doc comment (registry_breadth.go, sshSchema) already documents the ProxyCommand=... out-of-scope limitation as a deliberate, larger-undertaking gap, not an oversight (tc-6v2dm)."
+      },
       "interpreter": {
         "source": "man ssh: \"[command [argument ...]]\" -- documents ssh's own program/command-invocation shape (interpreter \"ssh\")"
       },

@@ -190,6 +190,59 @@ func TestLintCommand_DangerFlagRole(t *testing.T) {
 		}
 	})
 
+	t.Run("value-taking danger flag with a real dangerFlagInert justification is not flagged", func(t *testing.T) {
+		// tc-6v2dm: a spelling like "-o"/"--output" collides across
+		// unrelated commands (kubectl's -o/--output is an output FORMAT
+		// string, not a file write) — a real, non-thin justification
+		// citation trusts the author's already-cited role assignment.
+		c := minimalCommand()
+		c.Flags = map[string]specfmt.FlagSpecV1{
+			"--output": {
+				Arity:    "one",
+				Operand:  specfmt.OperandRoleV1{Kind: "literal"},
+				Citation: realCite("man x(1), --output"),
+			},
+		}
+		c.Citations["dangerFlagInert:--output"] = realCite("man x(1), --output: prints in the given FORMAT, never writes a file")
+		findings := LintCommand("x", c, false)
+		if found := findFinding(findings, CheckDangerFlagRole, "flag --output"); found != nil {
+			t.Errorf("unexpected danger-flag-role finding: %#v", found)
+		}
+	})
+
+	t.Run("boolean danger flag with a real dangerFlagInert justification is not flagged", func(t *testing.T) {
+		c := minimalCommand()
+		c.Flags = map[string]specfmt.FlagSpecV1{
+			"--force": {
+				Arity:    "none",
+				Citation: realCite("man x(1), --force"),
+			},
+		}
+		c.Citations["dangerFlagInert:--force"] = realCite("man x(1), --force: an unrelated synonym for --interactive here, no destructive effect")
+		findings := LintCommand("x", c, false)
+		if found := findFinding(findings, CheckDangerFlagRole, "flag --force"); found != nil {
+			t.Errorf("unexpected danger-flag-role finding: %#v", found)
+		}
+	})
+
+	t.Run("a thin dangerFlagInert justification does not excuse a danger flag, and is itself flagged", func(t *testing.T) {
+		c := minimalCommand()
+		c.Flags = map[string]specfmt.FlagSpecV1{
+			"--force": {
+				Arity:    "none",
+				Citation: realCite("man x(1), --force"),
+			},
+		}
+		c.Citations["dangerFlagInert:--force"] = realCite(thinCite)
+		findings := LintCommand("x", c, false)
+		if findFinding(findings, CheckDangerFlagRole, "flag --force") == nil {
+			t.Errorf("expected a danger-flag-role finding when the justification citation is thin, got %#v", findings)
+		}
+		if findFinding(findings, CheckCitationPresence, "dangerFlagInert:--force") == nil {
+			t.Errorf("expected the thin justification citation to also be flagged by citation-presence, got %#v", findings)
+		}
+	})
+
 	t.Run("skipped entirely for a builtin spec", func(t *testing.T) {
 		c := minimalCommand()
 		c.Flags = map[string]specfmt.FlagSpecV1{

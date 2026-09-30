@@ -47,7 +47,18 @@
 //     --config*, --command, -e, --*-program, --*-hook*, --receive-pack,
 //     --upload-pack, --prune, --mirror, --all, --delete, -f/--force*,
 //     -r/-R/--recursive) but whose modeled role carries no effect is
-//     flagged HARD.
+//     flagged HARD — UNLESS the spec's own Citations carries a real
+//     (non-thin) "dangerFlagInert:<flag>" entry justifying that specific
+//     flag's role (tc-6v2dm; see dangerFlagJustificationKey's own doc
+//     comment). dangerPatterns matches on bare spelling with zero awareness
+//     of which command a flag belongs to, so a spelling this generic
+//     routinely collides with an unrelated flag in some other command
+//     (xargs -e is an EOF-string delimiter, not "exec"; kubectl -o/--output
+//     is an output FORMAT string, not a file write) — the justification
+//     entry is the same "trust a real citation" mechanism check 3 already
+//     applies to UnknownFlagInert, scoped to one already-named flag rather
+//     than every unknown one, so (unlike UnknownFlagInert) it is NOT
+//     forbidden in a skill-generated spec.
 //
 //  3. UnknownFlagInert justification. A command using
 //     cmddesc.UnknownFlagInert ("inert" on the wire) MUST cite a real

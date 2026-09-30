@@ -6,6 +6,18 @@
     "name": "scp",
     "provenance": "OpenSSH 10.5p1 (same package tree as ssh — /nix/store/28hprrw9sdi4iarzyxa3r1a22b3dq5pn-openssh-10.5p1/bin/scp, resolved via /run/current-system/sw/bin/scp), scp(1) man page for that release; this host 2026-09-07 (scp itself is intercepted by this repo's own configured ssh rule before the binary ever runs, identically to ssh -V — see this schema's own doc comment)",
     "citations": {
+      "dangerFlagInert:-R": {
+        "source": "scp (bare invocation, usage banner, full): -R copies directly between two remote hosts; this schema's own doc comment (registry_breadth.go, scpSchema) already documents that whichever mode scp uses, the REMOTE-to-REMOTE shape this process observes from its own argv is identical (tc-6v2dm)."
+      },
+      "dangerFlagInert:-c": {
+        "source": "scp (bare invocation, usage banner): usage banner -c cipher names a cipher, not a config-file effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-o": {
+        "source": "scp (bare invocation, usage banner): -o ssh_option is a literal ssh_config(5) option string, the identical ProxyCommand=... out-of-scope limitation ssh's own -o doc comment documents (tc-6v2dm)."
+      },
+      "dangerFlagInert:-r": {
+        "source": "scp (bare invocation, usage banner, full): -r recursively copies directories; per the operator's own delete-access ruling (effectpolicy.DeleteAccess), a recursive copy's source/destination get the SAME per-path classification a single-file copy would (tc-6v2dm)."
+      },
       "interpreter": {
         "source": "man scp: \"[-P port] [-S program] [-X sftp_option] source ... target\" -- documents scp's own program/command-invocation shape (interpreter \"scp\")"
       },

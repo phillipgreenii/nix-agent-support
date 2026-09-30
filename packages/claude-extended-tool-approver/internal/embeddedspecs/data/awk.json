@@ -6,6 +6,12 @@
     "name": "awk",
     "provenance": "GNU Awk 5.4.1 (gawk --version, gawk --help), this host 2026-09-07",
     "citations": {
+      "dangerFlagInert:-c": {
+        "source": "awk --help: \"-c --traditional\" — a POSIX-compatibility-mode toggle, not a config-file effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-r": {
+        "source": "awk --help: \"-r --re-interval\" — enables interval expressions in regexes, not a recursive/force effect (tc-6v2dm)."
+      },
       "provenance": {
         "source": "awk --help: \"Usage: awk [POSIX or GNU style options] -f progfile [--] file ...\""
       },

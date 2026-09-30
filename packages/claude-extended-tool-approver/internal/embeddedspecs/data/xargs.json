@@ -6,6 +6,15 @@
     "name": "xargs",
     "provenance": "xargs (GNU findutils) 4.10.0, xargs --help",
     "citations": {
+      "dangerFlagInert:-e": {
+        "source": "xargs --help: \"-e, --eof[=END] equivalent to -E END if END is specified; otherwise, there is no end-of-file string\" — this -e sets an EOF-marker string, unrelated to any exec/config/force/output/recursive effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-o": {
+        "source": "xargs --help: \"-o, --open-tty Reopen stdin as /dev/tty in the child process before executing the command\" — a boolean tty-reopen toggle, not a file/output-write effect (tc-6v2dm)."
+      },
+      "dangerFlagInert:-r": {
+        "source": "xargs --help: \"-r, --no-run-if-empty if there are no arguments, then do not run COMMAND\" — a boolean skip-if-empty toggle, not a recursive-delete/force effect (tc-6v2dm)."
+      },
       "interpreter": {
         "source": "xargs --help: \"Usage: xargs [OPTION]... COMMAND [INITIAL-ARGS]...\" -- documents xargs's own program/command-invocation shape (interpreter \"xargs\")"
       },

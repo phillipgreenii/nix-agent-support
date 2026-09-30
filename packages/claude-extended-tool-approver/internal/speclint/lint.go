@@ -139,6 +139,47 @@ func isDangerShaped(flagName string) bool {
 	return false
 }
 
+// dangerFlagJustificationKey names the OPTIONAL per-flag entry a spec author
+// MAY add to CommandSpecV1.Citations to justify a specific danger-shaped
+// flag's non-effect role — bug tc-6v2dm: dangerPatterns matches on bare
+// SPELLING only, with no awareness of which command a flag belongs to, so a
+// single-letter spelling like "-o"/"-c"/"-e"/"-f"/"-r"/"-R" (and even a
+// longer one like "--output") routinely collides with a flag that means
+// something else entirely in a given command (xargs -e is an EOF-string
+// delimiter, not "exec"; kubectl -o/--output is an output FORMAT string, not
+// a file write). specfmt.Validate places no constraint on which keys a spec
+// author puts in Citations beyond the handful it itself requires (see
+// validateCommand), so this is a plain additive convention, not a wire-
+// format change: "dangerFlagInert:" + the exact flag spelling.
+//
+// This mirrors unknownFlagInertFindings' own escape hatch (a real, non-thin
+// citation is trusted) but is DELIBERATELY separate from that flag's own
+// mandatory Citation field: that field only attests "this is the flag's
+// arity/role", not "I reviewed this specific role against the danger-shaped
+// pattern it happens to match and confirm it carries no effect" — see
+// dangerFlagFindings' own doc comment for why conflating the two would let
+// an uncritiqued citation silently launder a genuine mis-model.
+//
+// Unlike UnknownFlagInert (doc.go item 3, unconditionally forbidden in a
+// skill-generated spec per P13), this escape hatch is NOT restricted by
+// IsSkillGenerated: UnknownFlagInert blanket-trusts EVERY unknown flag a
+// command might ever be given, which a skill could hallucinate broadly,
+// whereas this hatch only trusts ONE already-cited, already-named flag's
+// role assignment — exactly the real --help/man-evidence citation
+// methodology ceta-spec-gen's own SKILL.md (tc-o14i5.4.1) already requires,
+// which is precisely what this check should be trusting.
+func dangerFlagJustificationKey(flagName string) string {
+	return "dangerFlagInert:" + flagName
+}
+
+// dangerFlagJustified reports whether c's Citations carries a real
+// (non-thin) justification for flagName's danger-shaped role — see
+// dangerFlagJustificationKey.
+func dangerFlagJustified(c specfmt.CommandSpecV1, flagName string) bool {
+	cite, ok := c.Citations[dangerFlagJustificationKey(flagName)]
+	return ok && !isThinCitation(cite)
+}
+
 // Wire spellings mirrored from specfmt/convert.go's unexported constants —
 // see that file's own doc comment: "this package names its own wire
 // spellings ... documented here as the single source of truth for both
@@ -203,6 +244,12 @@ func flagParticipatesElsewhere(flagName string, c specfmt.CommandSpecV1) bool {
 // dangerFlagFindings runs check 2 (danger-shaped-flag role) over c's own
 // flags (not its subcommands' — LintCommand recurses separately). Skipped
 // entirely by the caller when builtin is true (doc.go's BUILTIN SCOPING).
+//
+// A flag matching dangerFlagJustified (tc-6v2dm) is skipped outright,
+// regardless of arity/role — the spec author has already recorded real
+// evidence that THIS flag's role is correctly, deliberately non-effect
+// despite its dangerous-looking spelling, which is exactly the case
+// dangerPatterns' pure name-glob match cannot itself distinguish.
 func dangerFlagFindings(specName string, c specfmt.CommandSpecV1) []Finding {
 	var findings []Finding
 	// Deterministic order.
@@ -214,6 +261,9 @@ func dangerFlagFindings(specName string, c specfmt.CommandSpecV1) []Finding {
 
 	for _, name := range names {
 		if !isDangerShaped(name) {
+			continue
+		}
+		if dangerFlagJustified(c, name) {
 			continue
 		}
 		f := c.Flags[name]
