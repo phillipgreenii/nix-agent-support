@@ -9,7 +9,7 @@
 // Unlike issue/pr, this capability has no create/update ops at this phase:
 // this docket's own decomposition found a real, load-bearing gap —
 // osx-bridge-api's already-landed calendarapi.Provider interface
-// (packages/osx-bridge-api/internal/calendarapi/types.go) exposes only
+// (phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/calendarapi/types.go) exposes only
 // Calendars()/Events() (read-only), and osx-bridge-api's own package doc
 // comment states the write ops were deliberately deferred to "a later
 // bead." Provider therefore declares only List/ListEvents — no Show,

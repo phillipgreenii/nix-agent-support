@@ -51,6 +51,5 @@
     ./programs/wtnew
     ./programs/wtdone
     ./programs/pg-wi-flow
-    ./programs/osx-bridge-api
   ];
 }

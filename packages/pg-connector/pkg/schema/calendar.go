@@ -7,7 +7,7 @@
 //
 // schema.CalendarEvent is an INDEPENDENTLY-defined type: it is not a
 // re-export or wrapper of osx-bridge-api's internal/calendarapi.Event
-// (packages/osx-bridge-api is a separate Go module, and everything under
+// (phillipgreenii-nix-support-apps/packages/osx-bridge-api is a separate Go module, and everything under
 // it is internal/-scoped) — its field set is read for FIELD-SHAPE
 // REFERENCE only. It carries every fact calendarapi.Event has that has a
 // calendar-domain meaning, plus a NEW calendar_priority field this docket

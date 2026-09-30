@@ -17,7 +17,7 @@ import (
 // startFakeSocket starts a minimal, hand-rolled Unix-socket listener that
 // decodes exactly one JSON request per connection (a bare map, not
 // osx-bridge-api's own wire.Request) and replies with whatever handle
-// returns — deliberately NOT importing packages/osx-bridge-api's own
+// returns — deliberately NOT importing phillipgreenii-nix-support-apps/packages/osx-bridge-api's own
 // socketserver/wire/calendarapi packages: this backend's own Contract
 // requires this client to be exercised against nothing but its own
 // locally-defined mirror types (see client.go's package doc comment), so
@@ -30,7 +30,7 @@ func startFakeSocket(t *testing.T, handle func(req map[string]any) any) (sockPat
 	// embeds the (possibly long) test name in the path, and
 	// sockaddr_un.sun_path is capped well under that length on darwin/
 	// Linux — mirrors
-	// packages/osx-bridge-api/internal/socketserver/server_test.go's
+	// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/socketserver/server_test.go's
 	// identical startServer precedent.
 	dir, err := os.MkdirTemp("", "pgcob")
 	if err != nil {

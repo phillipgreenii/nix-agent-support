@@ -5,7 +5,7 @@
 // pattern, adapted to a net.Dial("unix", ...) socket client rather than an
 // os/exec transport.
 //
-// packages/osx-bridge-api is a WHOLLY SEPARATE Go module (its own go.mod,
+// phillipgreenii-nix-support-apps/packages/osx-bridge-api is a WHOLLY SEPARATE Go module (its own go.mod,
 // module path github.com/phillipgreenii/osx-bridge-api) from this module,
 // and every symbol this backend needs from it lives under an internal/
 // directory — Go's own internal-visibility rule forbids importing
@@ -14,8 +14,8 @@
 // cmd/pg-connector-calendar-osx-bridge import path never can. So this file
 // defines its OWN LOCAL Go types mirroring osx-bridge-api's JSON field
 // shapes BY STRUCT TAG, replicated from reading
-// packages/osx-bridge-api/internal/wire/{envelope.go,errors.go} and
-// packages/osx-bridge-api/internal/calendarapi/types.go directly — never
+// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/wire/{envelope.go,errors.go} and
+// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/calendarapi/types.go directly — never
 // an import, and never a replace directive pulling that module in.
 package internal
 
@@ -33,7 +33,7 @@ import (
 )
 
 // socketEnvVar and defaultSocketPath's own construction mirror
-// packages/osx-bridge-api/cmd/osx-bridge-api/main.go's identical
+// phillipgreenii-nix-support-apps/packages/osx-bridge-api/cmd/osx-bridge-api/main.go's identical
 // socketEnvVar/defaultSocketPath resolution EXACTLY [landed: pg2-p9ap3] —
 // this backend is a CLIENT of that same daemon socket, so it resolves the
 // identical env var/default rather than inventing a second,
@@ -58,7 +58,7 @@ const (
 // getenv reports it set, else
 // ${XDG_STATE_HOME:-$HOME/.local/state}/osx-bridge-api/osx-bridge-api.sock
 // — byte-for-byte the same algorithm
-// packages/osx-bridge-api/cmd/osx-bridge-api/main.go's own
+// phillipgreenii-nix-support-apps/packages/osx-bridge-api/cmd/osx-bridge-api/main.go's own
 // socketEnvVar/defaultSocketPath resolution uses [landed: pg2-p9ap3],
 // since this backend is a client of that same socket and MUST resolve the
 // identical default a caller who never set the env var would still reach.

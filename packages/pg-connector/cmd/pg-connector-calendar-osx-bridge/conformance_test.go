@@ -57,7 +57,7 @@ func buildCalendarOsxBridgeBinary(t *testing.T) string {
 
 // startFakeOsxBridgeSocket starts a minimal, hand-rolled Unix-socket
 // listener standing in for the real osx-bridge-api daemon — never
-// importing packages/osx-bridge-api's own socketserver/wire/calendarapi
+// importing phillipgreenii-nix-support-apps/packages/osx-bridge-api's own socketserver/wire/calendarapi
 // packages (this backend's own Contract: this package talks to that
 // daemon over the wire only, never as a Go import; see internal/client.go's
 // package doc comment). It answers well-formed "calendars"/"events"
@@ -77,7 +77,7 @@ func startFakeOsxBridgeSocket(t *testing.T) string {
 	// A short, dedicated temp dir rather than t.TempDir(): sockaddr_un's
 	// own path-length cap is well under what a t.TempDir() path (which
 	// embeds the test name) can produce — mirrors
-	// packages/osx-bridge-api/internal/socketserver/server_test.go's own
+	// phillipgreenii-nix-support-apps/packages/osx-bridge-api/internal/socketserver/server_test.go's own
 	// startServer precedent.
 	dir, err := os.MkdirTemp("", "pgcobfake")
 	if err != nil {
