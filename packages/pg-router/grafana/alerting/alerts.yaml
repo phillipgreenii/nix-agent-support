@@ -338,7 +338,7 @@ groups:
                     type: gt
                     params: [0]
 
-      # Origin unavailable (bead pg2-x7euu, gate from pg2-4gi2c / INV-CCH-10):
+      # Origin unavailable (bead pg2-x7euu, per-origin probe gate from pg2-4gi2c; see packages/pg-router-ccpool-handler/docs/behavior):
       # the ccpool handler declines dispatches into a repo whose git origin
       # probe is failing, surfacing as
       # pg_router_failures_total{class="declined",reason="origin-unavailable"}.
