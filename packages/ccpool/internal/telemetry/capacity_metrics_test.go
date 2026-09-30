@@ -2,11 +2,31 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
+// gaugeErrMeter is a meter whose Int64Gauge construction fails.
+type gaugeErrMeter struct{ metricnoop.Meter }
+
+func (gaugeErrMeter) Int64Gauge(string, ...metric.Int64GaugeOption) (metric.Int64Gauge, error) {
+	return nil, errors.New("gauge boom")
+}
+
+// TestRecordPoolCapacityTo_propagatesInstrumentError: a failed instrument
+// registration surfaces as an error (ccpool capacity --emit-metrics then
+// exits 1) instead of being silently dropped.
+func TestRecordPoolCapacityTo_propagatesInstrumentError(t *testing.T) {
+	err := RecordPoolCapacityTo(context.Background(), gaugeErrMeter{}, "/p/pg-router-ccpool-review", PoolCapacity{MaxSessions: 1})
+	if err == nil || err.Error() != "gauge boom" {
+		t.Fatalf("err = %v, want gauge boom", err)
+	}
+}
 
 func collectCapacity(t *testing.T, root string, c PoolCapacity) map[string]map[string]int64 {
 	t.Helper()

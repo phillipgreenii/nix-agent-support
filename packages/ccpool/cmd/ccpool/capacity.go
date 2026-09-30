@@ -18,12 +18,7 @@ import (
 // reusing the exact same capacity definition Reap's Pass 2 already applies
 // (session.Service.Capacity -> countedSessions).
 func runCapacity(args []string) int {
-	fs := flag.NewFlagSet("capacity", flag.ExitOnError)
-	jsonOut := fs.Bool("json", false, "emit JSON")
-	// Opt-in, off by default: the dispatch/admission-gate path also calls
-	// `capacity --json` and must not emit metrics (bead pg2-om899.6).
-	emit := fs.Bool("emit-metrics", false, "also emit the ccpool_pool_capacity OTLP gauge")
-	_ = fs.Parse(args)
+	opts := parseCapacityArgs(args)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -42,17 +37,12 @@ func runCapacity(args []string) int {
 		return 1
 	}
 
-	if *emit {
-		if err := telemetry.RecordPoolCapacity(cfg.PoolRoot, telemetry.PoolCapacity{
-			MaxSessions: int64(c.MaxSessions), Live: int64(c.Live), Preserved: int64(c.Preserved),
-			Counted: int64(c.Counted), Free: int64(c.Free),
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "capacity: emit metrics: %v\n", err)
-			return 1
-		}
+	if err := emitCapacityMetrics(opts.emitMetrics, cfg.PoolRoot, c, telemetry.RecordPoolCapacity); err != nil {
+		fmt.Fprintf(os.Stderr, "capacity: emit metrics: %v\n", err)
+		return 1
 	}
 
-	if *jsonOut {
+	if opts.json {
 		b, err := json.Marshal(c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "capacity: %v\n", err)
@@ -63,6 +53,40 @@ func runCapacity(args []string) int {
 	}
 	fmt.Print(renderCapacityText(c))
 	return 0
+}
+
+// capacityOpts is `ccpool capacity`'s parsed flag set.
+type capacityOpts struct {
+	json        bool
+	emitMetrics bool
+}
+
+// parseCapacityArgs parses `ccpool capacity`'s flags. --emit-metrics is
+// opt-in and off by default: the dispatch/admission-gate path also calls
+// `capacity --json` and must not emit metrics (bead pg2-om899.6).
+func parseCapacityArgs(args []string) capacityOpts {
+	fs := flag.NewFlagSet("capacity", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	emit := fs.Bool("emit-metrics", false, "also emit the ccpool_pool_capacity OTLP gauge")
+	_ = fs.Parse(args)
+	return capacityOpts{json: *jsonOut, emitMetrics: *emit}
+}
+
+// capacityRecorder records one pool's capacity snapshot:
+// telemetry.RecordPoolCapacity in production, a spy in tests.
+type capacityRecorder func(poolRoot string, c telemetry.PoolCapacity) error
+
+// emitCapacityMetrics hands c to record, keyed by the canonical (symlink-
+// resolved) poolRoot whose basename becomes the gauge's pool attribute, iff
+// emit is set. With emit false it records nothing.
+func emitCapacityMetrics(emit bool, poolRoot string, c session.Capacity, record capacityRecorder) error {
+	if !emit {
+		return nil
+	}
+	return record(poolRoot, telemetry.PoolCapacity{
+		MaxSessions: int64(c.MaxSessions), Live: int64(c.Live), Preserved: int64(c.Preserved),
+		Counted: int64(c.Counted), Free: int64(c.Free),
+	})
 }
 
 // renderCapacityText is the pure human-line renderer for `ccpool capacity`.
