@@ -74,15 +74,15 @@ fall back to ad-hoc files or a different tracker.
 
 Keys use underscores (`pd_`), never hyphens. Values compare as strings.
 
-| Key                                                       | On     | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| --------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pd_rev`                                                  | docket | Design revision; bumped by RECONCILE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `pd_model`, `pd_budget`, `pd_read_target`                 | docket | Sizing policy for this decomposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `pd_phase`                                                | docket | `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `released:partial` / `reconciling:<rev>` / `failed:<phase>` — written at EVERY transition. `released:partial` is a DISTINCT literal from `released`, not a sub-case of it: it marks a release whose decomposition report's not-decomposed list (tracked live since step 3/5) was non-empty AT RELEASE — this docket's OWN scope is fully covered, but it deliberately left named design elements to a later decomposition. See mode `decompose` step 1 (routing) and step 10 (which literal gets written).                                                                                                                                                                                                                                                                                                                                                                              |
-| `pd_source`                                               | docket | Design-source identifier (path or issue id) for dedup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `pd_model`, `pd_budget`                                   | packet | Deviation ONLY; absent = docket policy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id). `pd_curated_rev` is the docket revision this packet's content is VERIFIED CURRENT against. Within `decompose` it is WRITE-ONCE per packet: `create-packet` (mode `decompose` step 3) stamps it to the docket's `pd_rev` AT THAT MOMENT and nothing else in `decompose` ever rewrites it — a step 5/6/7 fix-loop pass revising an already-created packet's content is a content-only edit, never a re-stamp. ONLY mode `reconcile` changes it again: for AFFECTED packets after re-curation (its step 3), and for UNAFFECTED packets after the affectedness check (its step 5, which runs only once the reconcile completes — an aborted or interrupted reconcile restamps no unaffected packet). So after a COMPLETED reconcile every non-closed packet is at the docket's `pd_rev` or carries `pd_stale`. An unaffected restamp changes `pd_curated_rev` only; `pd_curated_date`/`pd_curated_session` keep recording the last content curation. |
-| `pd_stale`                                                | packet | Set by a stamp-mismatch release (`<found-rev>`; never overwrites an existing value), by RECONCILE on a claimed affected packet (`reconcile-pending`), or by an aborted reconcile on its re-curated packets (`<new-rev>`, equal to their own `pd_curated_rev`). Cleared by a completing reconcile — by re-curation (its step 3), or, for an unaffected packet, by its restamp (its step 5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Key                                                       | On     | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pd_rev`                                                  | docket | Design revision; bumped by RECONCILE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pd_model`, `pd_budget`, `pd_read_target`                 | docket | Sizing policy for this decomposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `pd_phase`                                                | docket | `precheck` / `curating` / `prefilter` / `coldread` / `postcheck` / `wiring` / `releasing:<n>/<m>` / `released` / `released:partial` / `reconciling:<rev>` / `failed:<phase>` — written at EVERY transition. `released:partial` is a DISTINCT literal from `released`, not a sub-case of it: it marks a release whose decomposition report's not-decomposed list (tracked live since step 3/5) was non-empty AT RELEASE — this docket's OWN scope is fully covered, but it deliberately left named design elements to a later decomposition. See mode `decompose` step 1 (routing) and step 10 (which literal gets written).                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `pd_source`                                               | docket | Design-source identifier (path or issue id) for dedup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `pd_model`, `pd_budget`                                   | packet | Deviation ONLY; absent = docket policy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `pd_curated_rev`, `pd_curated_date`, `pd_curated_session` | packet | Curation stamp (session = the decomposer's session id). `pd_curated_rev` is the docket revision this packet's content is VERIFIED CURRENT against. Within `decompose` it is WRITE-ONCE per packet: `create-packet` (mode `decompose` step 3) stamps it to the docket's `pd_rev` AT THAT MOMENT and nothing else in `decompose` ever rewrites it — a step 5/6/7 fix-loop pass revising an already-created packet's content is a content-only edit, never a re-stamp. ONLY mode `reconcile` changes it again: for AFFECTED packets at re-curation (its step 3, which HOLDS them until its step 5 releases them), and for UNAFFECTED packets after the affectedness check (its step 5, which runs only once the reconcile completes — an aborted or interrupted reconcile restamps no unaffected packet). So after a COMPLETED reconcile every non-closed packet is at the docket's `pd_rev` or carries `pd_stale`. An unaffected restamp changes `pd_curated_rev` only; `pd_curated_date`/`pd_curated_session` keep recording the last content curation. |
+| `pd_stale`                                                | packet | Set by a stamp-mismatch release (`<found-rev>`, above the packet's own stamp; never overwrites an existing value), by RECONCILE on a claimed affected packet (`reconcile-pending`), and by RECONCILE as the HOLD marker on every packet it re-curates (`<new-rev>`, equal to the packet's own `pd_curated_rev`; an abort leaves it in place). Cleared only by a completing reconcile's step 5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 **Sizing resolution:** packet metadata → docket metadata → the fallback defaults. The
 fallback defaults — the ONLY place models or budgets are hardcoded — are: implementer
@@ -362,8 +362,9 @@ carries no prior design revision yet, full replacement text — or NO amendment 
 stamp catch-up (below). The binding's `amend-design` RESOLVES an amendment into the full
 amended design text (patch-applying a diff, or using full text as-is) before anything is
 written to the docket. Below, `R` is the docket's `pd_rev` once step 2 has run (the new
-revision). Revisions are integers: an equality check compares as strings (per the
-metadata-keys table), "below `R`" compares numerically. Order is load-bearing:
+revision). Revisions are integers and compare NUMERICALLY, for equality and order alike,
+after normalizing both sides (the medium may store a number or a string). Order is
+load-bearing:
 
 1. Run the pre-check on the RESOLVED amended design FIRST — the binding's `amend-design`
    Resolve step, not yet committed to the docket. Gaps ⇒ gap report, no amendment applied.
@@ -372,89 +373,126 @@ metadata-keys table), "below `R`" compares numerically. Order is load-bearing:
    `released` or `released:partial` in step 6 — whichever the not-decomposed list is
    currently at (step 3's re-curation may add to it or resolve entries from it; never assume
    the pre-reconcile literal still holds without re-checking the list).
-3. **Classify, then re-curate the affected.** Classify EVERY not-closed packet under the
-   docket (open, deferred, or claimed) as AFFECTED or UNAFFECTED. A packet is AFFECTED iff
-   any of:
+3. **Classify, then re-curate and HOLD the affected.** Classify EVERY not-closed packet under
+   the docket (open, deferred, or claimed) as AFFECTED or UNAFFECTED. A packet is AFFECTED
+   iff any of:
    - any of its `[design: <section>]` citations points into a section amended by ANY revision
      after its own `pd_curated_rev`, up to and including `R`. For a packet at `R`−1 that is
      just this run's own amendment; a packet stamped lower (a docket reconciled before step 5
      existed, or a leftover of an earlier claimed/aborted case) is checked against every
-     intervening revision too. Every revision other than this run's own amendment (all of
-     them, in a catch-up) is read from that revision's reconcile report — step 6 names each
-     revision's amended sections — and a revision whose amended sections cannot be
-     established from its report makes every packet stamped below it AFFECTED;
-   - its `pd_stale` is `reconcile-pending`, equals its own `pd_curated_rev` (what step 4's
-     abort path writes on a re-curation that never passed), or is malformed;
+     intervening revision too. Revision `k`'s amended sections come from the amendment itself
+     for this run's own revision, and otherwise from the report of the run that bumped
+     `pd_rev` to `k` (step 6's `pd_rev <k-1> -> <k>` report, completed or ABORTED) — never
+     from a catch-up's report. A revision whose amended sections cannot be established that
+     way makes every packet stamped below it AFFECTED;
+   - any of its citations names a section that no longer exists at `R` (removed, renamed, or
+     renumbered);
+   - an ADDED section is placed on it (below);
+   - its `pd_stale` is set to anything OTHER than a revision strictly above its own
+     `pd_curated_rev` (that one shape is a stamp-mismatch release, below): `reconcile-pending`,
+     a revision equal to its own stamp (this step's HOLD marker, still present if a run was
+     aborted or interrupted before step 5), a revision below it, or a malformed value;
    - its `pd_curated_rev` is missing or malformed.
 
-   The citation test is MECHANICAL at section granularity: a judgment that the cited clause
-   did not really change does NOT make a citing packet unaffected — re-curate it (a
-   re-curation that needs no text change is legitimate; report it as such). Every other
-   packet is UNAFFECTED: this step does not touch it — step 5 restamps it. Re-curate every
-   affected, UNCLAIMED packet; restamp it (`pd_curated_rev=R`); clear `pd_stale`. A
-   re-curated packet that was deferred on entry stays deferred until step 5. An affected
-   packet actively CLAIMED MUST NOT be rewritten OR restamped — set
-   `pd_stale=reconcile-pending` on it; the implementer's checkpoints catch it, and its old
-   stamp keeps failing the stamp check if it is released and re-claimed, until a later
-   reconcile (or catch-up) re-curates it (`reconcile-pending` makes it affected there).
+   A section is one heading's own text, up to the next heading of any level: an edit inside a
+   sub-heading amends that sub-heading, not its parent, and a citation to a label that is not
+   itself a heading (an item such as `3 P1`) points into the heading section containing it.
+   The citation test is MECHANICAL at that granularity — a judgment that the cited clause did
+   not really change does NOT make a citing packet unaffected: re-curate it (a re-curation
+   that needs no text change is legitimate; report it as such). A section ADDED by a revision
+   in range cannot be cited by a packet curated before it, so place each one explicitly:
+   every packet whose Objective or Contract it constrains is AFFECTED (and its re-curation
+   cites it), else the section goes on the not-decomposed list. Every other packet is
+   UNAFFECTED: this step does not touch it — step 5 restamps it.
+
+   Re-curate every affected, UNCLAIMED packet, restamp it (`pd_curated_rev=R`), and HOLD it —
+   deferred, with `pd_stale=R` — until step 5. The hold keeps a not-yet-verified re-curation
+   out of every consumer's hands (its stamp now matches `pd_rev`, but `pd_stale` is set), and
+   because the marker equals its own stamp, a resume after an interruption classifies it
+   AFFECTED and verifies it again. An affected packet actively CLAIMED MUST NOT be rewritten
+   OR restamped — set `pd_stale=reconcile-pending` on it; the implementer's checkpoints catch
+   it, and its old stamp keeps failing the stamp check if it is released and re-claimed,
+   until a later reconcile (or catch-up) re-curates it (`reconcile-pending` makes it affected
+   there).
 
 4. Re-run the pre-filter + cold-read on re-curated packets and a semantic pass SCOPED to the
-   amended sections, the re-curated packets, and their direct planned-ordering neighbors.
+   amended sections, the re-curated packets, and their direct planned-ordering neighbors —
+   plus, when a revision in range ADDED a section, a coverage check of each added section
+   against every not-closed packet's Objective and Contract (confirming step 3's placement).
    The full-set semantic check is for initial release and deliberate audits only. A packet
    step 3 classified unaffected that a finding here forces into a content fix is
-   RECLASSIFIED affected — re-curated, restamped, and re-cold-read like the rest, never left
-   for step 5. This pass gets the severity-gating and 2-round cap too (step 8's canonical
-   gate-and-cap rule, by reference — not restated here), but reconcile's OWN abort semantics
-   apply, not `decompose`'s: unlike a fresh decomposition, this pass runs on OPEN, UNCLAIMED
-   packets that step 3 already re-curated and RESTAMPED — nothing here was ever left
-   un-released. An abort at the cap MUST re-DEFER the re-curated packets, set
-   `pd_stale=<new-rev>` on them, leave `pd_phase=reconciling:<new-rev>` (so step 9's
-   dedup/resume logic treats it as an interrupted reconcile), and `write-report` (step 6's
-   contents, marked ABORTED) — it MUST NOT run step 5, and MUST NOT restore `released` OR
-   `released:partial` on an aborted reconcile; both are terminal-release literals and this
-   path is not a release. Unaffected packets therefore keep their old stamp and the stamp
-   check keeps refusing them until a resumed reconcile completes — correct, since the set's
-   seams are unverified at `R`; a consumer that claims one meanwhile takes the stamp-mismatch
-   release below, which the completing run's step 5 clears. Note also that this pass's scope
-   is narrower than `decompose`'s (seam consistency only, not full coverage), so most findings
-   here will legitimately be `blocking` — severity-gating buys this mode fewer skipped rounds
-   than it buys `decompose`.
+   RECLASSIFIED affected: unclaimed ⇒ re-curated, restamped, HELD, and re-cold-read like the
+   rest; claimed ⇒ step 3's claimed rule (`pd_stale=reconcile-pending`, no rewrite, no
+   restamp). Either way step 5 never restamps it as unaffected. This pass gets the
+   severity-gating and 2-round cap too (step 8's canonical gate-and-cap rule, by reference —
+   not restated here), but reconcile's OWN abort semantics apply, not `decompose`'s: unlike a
+   fresh decomposition, the packets here were already released once, so an abort must keep
+   them out of the pool actively. An abort at the cap MUST leave every re-curated packet HELD
+   (deferred, `pd_stale=<new-rev>`), leave `pd_phase=reconciling:<new-rev>` (so mode
+   `decompose` step 1's dedup/resume routing treats it as an interrupted reconcile), and
+   `write-report` (step 6's contents, marked ABORTED) — it MUST NOT run step 5, and MUST NOT
+   restore `released` OR `released:partial` on an aborted reconcile; both are
+   terminal-release literals and this path is not a release. Unaffected packets therefore
+   keep their old stamp and the stamp check keeps refusing them until a resumed reconcile
+   completes — correct, since the set's seams are unverified at `R`; a consumer that claims
+   one meanwhile takes the stamp-mismatch release below, which the completing run's step 5
+   clears. A packet step 8 halts stays HELD; step 5 skips it and step 6 reports it. Note also
+   that this pass's scope is narrower than `decompose`'s (seam consistency only, not full
+   coverage), so most findings here will legitimately be `blocking` — severity-gating buys
+   this mode fewer skipped rounds than it buys `decompose`.
 5. **Restamp the unaffected, release the held** — ONLY after step 4 finished without
    aborting (converged, or released at the cap per step 8); never earlier, so an aborted or
-   interrupted reconcile restamps NO unaffected packet. For every UNAFFECTED packet whose
-   `pd_curated_rev` is below `R`, claimed or not: set `pd_curated_rev=R` — metadata only,
-   content untouched. On a claimed packet this is the same metadata-only kind of write as
-   step 3's `reconcile-pending`: its implementer checks the stamp only at claim, so it is
-   unaffected, and a later release and re-claim now passes. When an unaffected packet carries
-   a stamp-mismatch `pd_stale` (a revision number above its old stamp — a consumer claimed it
-   before this step ran), clear `pd_stale` and undefer it. Then undefer every re-curated
-   packet step 3 held deferred. The step is idempotent (a packet already at `R` is skipped),
-   so a resumed run simply repeats it.
-6. **Report, then restore.** `write-report` the reconcile report: `R` and the design
-   sections revision `R` amended (a later reconcile's step 3 reads this for packets stamped
-   below `R`); every not-closed packet's outcome — re-curated (noting any with no text
-   change), marked `reconcile-pending` (claimed), or restamped unaffected (`<old>` → `R`,
-   plus any `pd_stale` cleared and packet undeferred); and the not-decomposed list. Only then
+   interrupted reconcile restamps NO unaffected packet and releases NO held one. Work from a
+   FRESH children read, never step 3's: consumers may have claimed, refused, or re-deferred
+   packets since. Then:
+   - For every UNAFFECTED packet whose `pd_curated_rev` is below `R`, claimed or not: if it
+     carries a stamp-mismatch `pd_stale` (a revision strictly above its OLD stamp — a consumer
+     refused it), clear `pd_stale` first and undefer it if deferred; then set
+     `pd_curated_rev=R` — metadata only, content untouched. On a claimed packet this is the
+     same metadata-only kind of write as step 3's `reconcile-pending`: its implementer checks
+     the stamp only at claim, so it is unaffected, and a later release and re-claim now
+     passes. An unaffected packet whose fresh read shows any OTHER `pd_stale` is not
+     restamped: step 6 reports it, and the next reconcile or catch-up classifies it AFFECTED.
+   - For every packet this run HELD (re-curated in step 3 or step 4), except one step 8
+     halted: clear `pd_stale` and undefer it.
+
+   The step is idempotent — a packet already at `R` with no `pd_stale` is skipped — so a
+   resumed run simply repeats it.
+
+6. **Report, then restore.** `write-report` the reconcile report, headed
+   `pd_rev <R-1> -> <R>`: the design sections revision `R` amended and any it ADDED (a later
+   reconcile's step 3 reads this for packets stamped below `R`); every not-closed packet's
+   outcome — re-curated (noting any with no text change, with its per-packet fixed-read
+   estimate as in mode `decompose` step 10), marked `reconcile-pending` (claimed), halted,
+   restamped unaffected (`<old>` → `R`, plus any `pd_stale` cleared and packet undeferred),
+   or left unrestamped (step 5's other-`pd_stale` case); and the not-decomposed list. Only then
    restore `released` or `released:partial` (per step 2).
 
 **Stamp catch-up (no amendment)** — the repair for a docket whose packets were left behind
 at an old stamp: every docket reconciled before step 5 existed (its unaffected packets kept
 their pre-reconcile stamp, so the stamp check refuses them forever and each refusal comments
 "reconcile owed"), and any docket holding a `reconcile-pending` packet whose claim has since
-ended. Run steps 3–6 with NO `amend-design`: skip steps 1–2 (no pre-check, no `pd_rev` bump),
-take `R` = the docket's current `pd_rev`, and set `pd_phase=reconciling:<R>` for the run, so
-an interruption resumes like any reconcile. Step 3's multi-revision test reads each
-revision's amended sections from the docket's existing reconcile reports; step 6's report
-says "catch-up, no amendment at `R`". This is the remedy whenever a stamp-mismatch release
-lands on a docket whose last reconcile completed.
+ended. Run it ONLY on a docket at `released`, `released:partial`, or `reconciling:<R>` — never
+mid-decomposition (`curating`, `failed:<phase>`, and the like belong to mode `decompose`'s
+RESUME). Run steps 3–6 with NO `amend-design`: skip steps 1–2 (no pre-check, no `pd_rev`
+bump), take `R` = the docket's current `pd_rev`, and set `pd_phase=reconciling:<R>` for the
+run. Step 3's multi-revision test reads each earlier revision's amended sections from the run
+that bumped `pd_rev` to it. Head step 6's report `catch-up at <R>, no amendment` — it is never
+the amended-sections record for any revision. This is the remedy whenever a stamp-mismatch
+release lands on a docket whose last reconcile completed.
+
+**Resuming `reconciling:<R>`** (an aborted or interrupted reconcile): with no new amendment,
+run the catch-up shape at `R` — never step 2 again for an amendment already committed; with a
+NEW amendment, run the full mode from step 1, bumping to `R`+1 (step 3's multi-revision test
+then covers revision `R` too).
 
 **Stamp-mismatch releases** (a consumer found rotted curation first): the release MUST
 re-DEFER the packet and set `pd_stale=<found-rev>` — never return it to the open pool, or
 every queue consumer claims/checks/releases it in an endless cross-session spin. It MUST NOT
-overwrite a `pd_stale` already set: `reconcile-pending` and an aborted reconcile's marker are
-what step 3 reads to know the packet still needs re-curation. A completing RECONCILE clears
-`pd_stale` and undefers — by re-curation (step 3) for an affected packet, by restamp (step 5)
-for an unaffected one; the docket report channel tells the operator a reconcile is owed.
+overwrite a `pd_stale` already set: `reconcile-pending` and the HOLD marker are what step 3
+reads to know the packet still needs re-curation. A completing RECONCILE clears `pd_stale`
+and undefers, in its step 5 — after re-curation (step 3) for an affected packet, directly for
+an unaffected one; the docket report channel tells the operator a reconcile is owed.
 
 ## Mode `report` — aggregate one docket's metrics (D10)
 
@@ -471,9 +509,10 @@ target.
 
 1. **Resolve the binding** (as in every mode) and confirm the argument is a docket (`pd_rev`
    set in its metadata); refuse otherwise.
-2. **Locate the estimate side once.** Read the docket's most recent decomposition/release
-   report (the `write-report` comment from `decompose` step 10, or the latest `reconcile`
-   re-curation report if newer) and extract its per-packet fixed-read/budget estimates. A
+2. **Locate the estimate side once.** Read the docket's decomposition/release report (the
+   `write-report` comment from `decompose` step 10) and any later `reconcile` step-6 reports,
+   and take each packet's fixed-read/budget estimate from the MOST RECENT report that carries
+   one for it (a reconcile report estimates only the packets it re-curated). A
    docket with no such report has no "estimated" side for step 4c — say so plainly rather than
    inventing a number; the other three metrics are unaffected.
 3. **Page over the children — never load the whole docket at once.** List the docket's

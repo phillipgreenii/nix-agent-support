@@ -24,8 +24,8 @@ otherwise.
    packet was merely untouched by the amendment": do not second-guess it by reading the
    design. On ANY mismatch or a malformed stamp: do NOT work it — release by re-deferring
    (`bd defer <packet>`), set `pd_stale=<docket-rev-you-found>` via `--set-metadata` ONLY if
-   `pd_stale` is unset (never overwrite an existing value — `reconcile-pending` or an aborted
-   reconcile's marker is what reconcile reads to know the packet still needs re-curation),
+   `pd_stale` is unset (never overwrite an existing value — `reconcile-pending` or reconcile's
+   HOLD marker is what reconcile reads to know the packet still needs re-curation),
    comment one line on the docket that a reconcile is owed (when the docket's last reconcile
    completed, that is the skill's stamp catch-up), and stop.
 3. **Read the packet content once** (`bd show <packet>`). Work from it. Read the files it

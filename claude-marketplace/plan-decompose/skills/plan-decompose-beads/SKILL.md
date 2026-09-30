@@ -155,17 +155,23 @@ current-value state in notes — notes are append-only narrative and cannot supe
 `pd_rev`. Remove a key with `bd update <id> --unset-metadata <key>` (listed by
 `bd update --help`, bd 1.2.2) — this is how `pd_stale` is cleared.
 
-**Reconcile restamps** (core skill mode `reconcile` steps 3 and 5): classify from ONE
-children read, `bd list --parent <docket> --status all -n 0 --json` (probed 2026-09-30, bd
-1.2.2: rows sit under `.data[]`, each with `id`, `status`, `assignee`, `metadata`), skipping
-`status == "closed"`; a row is CLAIMED when its `status` is `in_progress` or its `assignee`
-is non-null. Because a revision may be stored as a JSON number or a string (see above),
-compare revisions for ORDER through jq `tonumber` (e.g.
-`(.metadata.pd_curated_rev | tonumber) < R`), never lexically (`"10" < "9"` is true). The
-restamp is `bd update <packet-id> --set-metadata pd_curated_rev=<R>`; clearing a stamp-mismatch
-marker is `--unset-metadata pd_stale`; releasing a held packet is `bd undefer <packet-id>`.
-Read each restamped packet back (`read-metadata`) before listing it in the step-6 reconcile
-report.
+**Reconcile restamps** (core skill mode `reconcile` steps 3 and 5): each of the two steps
+takes its OWN fresh children read — step 5 MUST NOT reuse step 3's, because consumers may
+have claimed, refused, or re-deferred packets in between. The read is
+`bd list --parent <docket> --status all -n 0 --json` (probed 2026-09-30, bd 1.2.2: rows sit
+under `.data[]`, each with `id`, `status`, `assignee`, `metadata`), skipping
+`status == "closed"`. A row is CLAIMED when its `status` is `in_progress`, or its `status` is
+`open` with a non-empty `assignee` (neither null nor `""`); a DEFERRED row is never claimed,
+even with a leftover assignee — a deferred packet is not being worked. Because a revision may
+be stored as a JSON number or a string (see above), compare revisions — for order AND for
+equality — through jq `tonumber` on both sides (e.g.
+`(.metadata.pd_curated_rev | tonumber) < R`); never lexically (`"10" < "9"` is true) and
+never raw (`4 == "4"` is false). Mappings: HOLD a re-curated packet = `bd defer <packet-id>`
+plus `bd update <packet-id> --set-metadata pd_curated_rev=<R> --set-metadata pd_stale=<R>`;
+restamp an unaffected packet = `bd update <packet-id> --set-metadata pd_curated_rev=<R>`;
+clear a marker = `bd update <packet-id> --unset-metadata pd_stale`; release = `bd undefer
+<packet-id>`. Read each touched packet back (`read-metadata`) before listing it in the step-6
+reconcile report.
 
 ## `release-set`
 
@@ -217,9 +223,9 @@ Read, for mode `report` (scoped to one docket, paginated over its children — p
   a `reconcile` re-curation report), and read its per-packet fixed-read/budget estimates from
   that comment's text. When more than one such report exists, the estimate for a given
   packet id is the one from the MOST RECENT report that carries an estimate for it — an
-  initial release estimate superseded by a reconcile's re-estimate. A reconcile report that
-  lists a packet only as restamped-unaffected carries no estimate for it, so it does not
-  supersede an earlier one.
+  initial release estimate superseded by a reconcile's re-estimate (a reconcile step-6 report
+  estimates each packet it re-curated). A reconcile report that lists a packet only as
+  restamped-unaffected carries no estimate for it, so it does not supersede an earlier one.
 
 ## `amend-design`
 
