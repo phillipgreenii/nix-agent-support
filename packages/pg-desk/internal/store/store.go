@@ -76,6 +76,11 @@ type Store struct {
 	// annotation_changed append; a non-nil return aborts the write. Test
 	// seam for the annotation atomicity test.
 	betweenAnnotationAndAppend func() error
+
+	// consumerLocker overrides the Locker LockConsumer uses; nil means a
+	// default Locker (runtime-dir lock files). Tests set it via
+	// SetConsumerLockerOptions to point at a temp dir.
+	consumerLocker *Locker
 }
 
 // synchronousPragma, when non-empty, is applied as `PRAGMA synchronous=<value>`

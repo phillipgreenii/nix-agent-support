@@ -172,6 +172,34 @@ the reserved keys above; those belong to the work that uses these tables.
   silent no-op: an external link MUST NOT override a derived one. Removing an external link removes
   only the named actor's row; it MUST NOT remove a derived row or another actor's link.
 
+## Consumer cursors and change-log pruning (schema version 2)
+
+A consumer is a named reader of `change_log` for one entity type. Its `consumer` row holds the
+`cursor` (the highest `seq` it has been handed and confirmed) and `seen_at`.
+
+- Delivery is at-least-once. Reading and advancing are separate steps so the caller flushes its
+  output between them: a read returns records after the cursor (ascending by `seq`, optionally
+  limited) and MUST NOT move it; the caller advances to the last `seq` it delivered only after the
+  flush. A crash between flush and advance re-delivers the same records (a duplicate); it never
+  skips one. Consumers MUST tolerate duplicates.
+- A read registers the consumer on first use (cursor 0) and stamps `seen_at`. A peek (the read behind
+  `--cached`) has no side effect: it does not register, stamp `seen_at`, or move the cursor; an
+  unregistered consumer peeks from cursor 0.
+- The cursor only moves forward on advance: advancing to a `seq` at or below it changes nothing.
+  Advancing or resetting an unregistered consumer is a typed not-registered error. A reset sets the
+  cursor to 0 so the next read replays the log from the start (the only backward move).
+- Consumers can be listed (ordered by type, then name) and forgotten (forgetting an absent consumer is
+  not an error). These are store primitives; the CLI verbs belong to the `changes` phase.
+- Two callers for the same `(type, consumer)` serialize through a cross-process advisory lock the
+  caller holds across read, flush and advance; the second reads from the cursor the first advanced.
+  Different consumers or types do not contend.
+- Pruning deletes `change_log` rows that are older than the retention (default 14 days, by the row's
+  `at`) AND that every non-stale consumer of the row's entity type has passed. The horizon is per
+  type: only consumers registered for that type hold its rows back, and with no non-stale consumer
+  every row older than retention is prunable. A consumer is stale when its `seen_at` is NULL or older
+  than the stale-after parameter (default 7 days) and is excluded from the horizon. Retention and
+  stale-after are parameters; wiring them to configuration belongs to the `changes` phase.
+
 ## Exit codes, telemetry, and logs
 
 The store has no CLI surface of its own beyond `pg-desk migrate --cutover` above — it is a shared
