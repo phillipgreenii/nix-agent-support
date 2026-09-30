@@ -10,6 +10,11 @@ groups:
       # countdown to the window reset (resets_at - now). Threshold is gt 99 rather
       # than 100 because the classic threshold evaluator has no ">=" and the metric
       # reports the cap as ~100 (bead pg2-jfdz2 / pg2-memel).
+      # pg2-l7s2l: the percentage gauge alone can miss a real cap (the daemon also
+      # fires a limit-hit when a session is blocked on a terminal usage-limit while
+      # the account pct reads <=99, and a 1m eval can sample between emitter ticks),
+      # so the condition is (pct > 99) OR (limit_hits_total increased in 5m). The
+      # counter is `or vector(0)`-defaulted so its absence never yields NoData.
       - uid: pa-monitor-5h-usage-limit-hit
         title: pa-monitor 5h usage limit hit
         condition: C
@@ -44,6 +49,16 @@ groups:
               editorMode: code
               instant: true
               expr: clamp_min(max(pa_monitor_block_usage_resets_at) - time(), 0)
+          - refId: H
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: H
+              editorMode: code
+              instant: true
+              expr: sum(increase(pa_monitor_block_usage_limit_hits_total[5m])) or vector(0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -58,16 +73,29 @@ groups:
               type: reduce
               expression: R
               reducer: last
+          - refId: L
+            datasourceUid: __expr__
+            model:
+              refId: L
+              type: reduce
+              expression: H
+              reducer: last
+          - refId: M
+            datasourceUid: __expr__
+            model:
+              refId: M
+              type: math
+              expression: "($B > 99) || ($L > 0)"
           - refId: C
             datasourceUid: __expr__
             model:
               refId: C
               type: threshold
-              expression: B
+              expression: M
               conditions:
                 - evaluator:
                     type: gt
-                    params: [99]
+                    params: [0]
       # Weekly (7d) usage limit hit. Same shape, keyed off the weekly window
       # metrics. When the weekly window metrics are absent (unknown), noDataState
       # OK keeps it silent until they appear.
@@ -105,6 +133,16 @@ groups:
               editorMode: code
               instant: true
               expr: clamp_min(max(pa_monitor_week_usage_resets_at) - time(), 0)
+          - refId: H
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: H
+              editorMode: code
+              instant: true
+              expr: sum(increase(pa_monitor_week_usage_limit_hits_total[5m])) or vector(0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -119,13 +157,26 @@ groups:
               type: reduce
               expression: R
               reducer: last
+          - refId: L
+            datasourceUid: __expr__
+            model:
+              refId: L
+              type: reduce
+              expression: H
+              reducer: last
+          - refId: M
+            datasourceUid: __expr__
+            model:
+              refId: M
+              type: math
+              expression: "($B > 99) || ($L > 0)"
           - refId: C
             datasourceUid: __expr__
             model:
               refId: C
               type: threshold
-              expression: B
+              expression: M
               conditions:
                 - evaluator:
                     type: gt
-                    params: [99]
+                    params: [0]
