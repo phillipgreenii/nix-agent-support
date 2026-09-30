@@ -40,6 +40,7 @@ var (
 	recordSessionsPreservedForHuman = telemetry.RecordSessionsPreservedForHuman
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
 	recordSessionStates             = telemetry.RecordSessionStates
+	recordSessionInfo               = telemetry.RecordSessionInfo
 )
 
 // metricAttrs returns the attribute set for a per-session metric record: the

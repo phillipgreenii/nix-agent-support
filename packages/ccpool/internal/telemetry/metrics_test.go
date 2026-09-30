@@ -402,3 +402,52 @@ func TestSessionsPreservedForHuman_descriptionStatesLastValueWins(t *testing.T) 
 	}
 	t.Error("ccpool_sessions_preserved_for_human not collected")
 }
+
+// TestSessionInfo_gaugeValueOneWithClaudeSessionID: ccpool_session_info is an
+// Int64 gauge of value 1 carrying claude_session_id plus the supplied attrs;
+// an empty id records nothing.
+func TestSessionInfo_gaugeValueOneWithClaudeSessionID(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	attrs := []attribute.KeyValue{attribute.String("pgrouter.role", "review"), attribute.String("pool", "p1")}
+	inst.info(context.Background(), "csid-1", attrs)
+	inst.info(context.Background(), "", attrs)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var dps []metricdata.DataPoint[int64]
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "ccpool_session_info" {
+				g, ok := m.Data.(metricdata.Gauge[int64])
+				if !ok {
+					t.Fatalf("got %T, want Gauge[int64]", m.Data)
+				}
+				dps = g.DataPoints
+			}
+		}
+	}
+	if len(dps) != 1 {
+		t.Fatalf("data points = %d, want 1 (empty id must record nothing)", len(dps))
+	}
+	dp := dps[0]
+	if dp.Value != 1 {
+		t.Errorf("value = %d, want 1", dp.Value)
+	}
+	for k, want := range map[string]string{"claude_session_id": "csid-1", "pool": "p1", "pgrouter.role": "review"} {
+		v, ok := dp.Attributes.Value(attribute.Key(k))
+		if !ok || v.AsString() != want {
+			t.Errorf("attr %s = %q (present=%v), want %q", k, v.AsString(), ok, want)
+		}
+	}
+	if dp.Attributes.Len() != 3 {
+		t.Errorf("attrs = %v, want exactly 3", dp.Attributes)
+	}
+}

@@ -145,6 +145,14 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// D6/D11 list only retry-exhausted/cancel-outcome/reap-closure-or-phantom-
 	// prune/launch-outcome as per-session narration points).
 	s.recordPreservedForHuman(live)
+	// ccpool_session_info: one info point per live session, labels resolved
+	// here (before any close below deletes metadata). Emitted for every live
+	// row regardless of whether this sweep then closes it; a closed session's
+	// series simply goes stale. Phantoms were pruned in Pass 0 and are not in
+	// live, so they get none.
+	for _, r := range live {
+		recordSessionInfo(r.ClaudeSessionID, s.metricAttrs(r.ExternalID))
+	}
 
 	for _, r := range live {
 		reason, ok := toClose[r.ExternalID]

@@ -552,3 +552,64 @@ func TestReapAllShape_twoPoolsEachRecordCarriesItsOwnPool(t *testing.T) {
 	check("bravo", b, "bravo", "impl")
 	check("default", def, "default", "worker")
 }
+
+// TestReap_sessionInfoPerLiveSession: one ccpool_session_info per live session
+// carrying its claude_session_id and resolved pool/role; none for a pruned
+// phantom.
+func TestReap_sessionInfoPerLiveSession(t *testing.T) {
+	type infoCall struct {
+		csid  string
+		attrs []attribute.KeyValue
+	}
+	var calls []infoCall
+	orig := recordSessionInfo
+	t.Cleanup(func() { recordSessionInfo = orig })
+	recordSessionInfo = func(csid string, attrs []attribute.KeyValue) { calls = append(calls, infoCall{csid, attrs}) }
+	spyReap(t)
+
+	ctx := context.Background()
+	now := time.Unix(10_000, 0)
+	st := newMemStore(t)
+	live := map[string]bool{}
+	for _, r := range []struct{ id, role string }{{"a", "review"}, {"b", ""}} {
+		_ = st.Insert(ctx, store.Session{
+			ExternalID: r.id, ClaudeSessionID: "csid-" + r.id, State: store.Working,
+			TmuxSession: "cc-" + r.id, LastActivityAt: now.Unix() - 10,
+		})
+		live["cc-"+r.id] = true
+		if r.role != "" {
+			seedMeta(t, st, r.id, "pgrouter.role", r.role, true)
+		}
+	}
+	// A phantom: not live in tmux, transcript gone, not fresh.
+	_ = st.Insert(ctx, store.Session{
+		ExternalID: "ghost", ClaudeSessionID: "csid-ghost", TranscriptPath: "/p/ghost.jsonl", State: store.Idle,
+		TmuxSession: "cc-ghost", CreatedAt: now.Unix() - 7200, LastActivityAt: now.Unix() - 7200,
+	})
+	seedReviewLabels(t, st, "ghost")
+	wireLabeler(t, st)
+	s := New(Deps{
+		Tmux: &reapTmux{live: live, closed: map[string]bool{}}, Trust: &fakeTrust{}, Store: st,
+		Prefix: "cc-", Exister: existerByPath{}, PoolPath: "/pools/alpha", MetricLabelAllowlist: roleAllowlist,
+		Now: func() time.Time { return now },
+	})
+	if err := s.Reap(ctx, 6, time.Hour); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	if _, ok, _ := st.GetByExternalID(ctx, "ghost"); ok {
+		t.Fatal("fixture: the phantom must have been pruned")
+	}
+	got := map[string]map[string]string{}
+	for _, c := range calls {
+		got[c.csid] = attrMap(c.attrs)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("recordSessionInfo calls = %d (%v), want 2 (none for the phantom)", len(calls), got)
+	}
+	if m := got["csid-a"]; m["pool"] != "alpha" || m["pgrouter.role"] != "review" {
+		t.Errorf("csid-a attrs = %v, want pool=alpha role=review", m)
+	}
+	if m := got["csid-b"]; m["pool"] != "alpha" || m["pgrouter.role"] != "" {
+		t.Errorf("csid-b attrs = %v, want pool=alpha, no role", m)
+	}
+}

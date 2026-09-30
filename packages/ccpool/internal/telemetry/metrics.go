@@ -51,6 +51,7 @@ type metricsInstruments struct {
 	sessionsPreservedForHuman metric.Int64Gauge
 	launchOutcomeTotal        metric.Int64Counter
 	sessionStates             metric.Int64Gauge
+	sessionInfo               metric.Int64Gauge
 }
 
 // newMetricsInstruments builds the seven instruments against meter, under
@@ -109,6 +110,12 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 		metric.WithDescription("Sessions in the registry by store state and tmux liveness (live=true|false), snapshotted at each reap. live=false,state=working is dead-but-working; live=true,state=needs_input is a stuck/parked session."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_session_states: %w", err)
+	}
+	if m.sessionInfo, err = meter.Int64Gauge(
+		"ccpool_session_info",
+		metric.WithDescription("Info gauge, value 1 per live session: maps claude_session_id to pool (and allowlisted labels such as pgrouter.role), so a dashboard can join pa-monitor's per-session series to a pool. Emitted by each reap for live sessions only; a series goes stale once its session ends or is pruned."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_info: %w", err)
 	}
 
 	return m, nil
@@ -272,6 +279,24 @@ func (m metricsInstruments) states(ctx context.Context, counts []SessionStateCou
 	}
 }
 
+func (m metricsInstruments) info(ctx context.Context, claudeSessionID string, attrs []attribute.KeyValue) {
+	if m.sessionInfo == nil || claudeSessionID == "" {
+		return
+	}
+	m.sessionInfo.Record(ctx, 1, withAttrs(attrs, attribute.String(ClaudeSessionIDAttrKey, claudeSessionID)))
+}
+
+// ClaudeSessionIDAttrKey is the attribute key carrying a Claude session id on
+// ccpool_session_info, and on that gauge ONLY.
+//
+// EXCEPTION to the cardinality rule (packet A / design 3 P1): metric
+// attributes MUST NOT carry per-session ids (external_id, session_id, bead
+// ids, paths). This one is permitted because the gauge is bounded by LIVE
+// sessions (the same order as pa-monitor's own pa_monitor_session_info) and
+// exists solely to join pa-monitor's session series to a pool on the Claude
+// session id. Never add it to another instrument or to the label allowlist.
+const ClaudeSessionIDAttrKey = "claude_session_id"
+
 // Every Record* function below takes the record's attribute set as its LAST
 // parameter, `attrs []attribute.KeyValue` — the one form used by all of them,
 // so later instruments follow the same style. Callers build it with
@@ -369,4 +394,13 @@ type SessionStateCount struct {
 // on a synchronous gauge: no polling, no tracking state.
 func RecordSessionStates(counts []SessionStateCount, attrs []attribute.KeyValue) {
 	ensureInstruments().states(context.Background(), counts, attrs)
+}
+
+// RecordSessionInfo records ccpool_session_info = 1 for one live session:
+// claude_session_id (the documented cardinality exception, see
+// ClaudeSessionIDAttrKey) plus attrs (pool and allowlisted labels). An empty
+// claudeSessionID records nothing (nothing to join on). Synchronous gauge, one
+// point per live session per reap; no tracking state.
+func RecordSessionInfo(claudeSessionID string, attrs []attribute.KeyValue) {
+	ensureInstruments().info(context.Background(), claudeSessionID, attrs)
 }
