@@ -64,7 +64,12 @@ import "encoding/json"
 // are additive and omitempty, so every version-4 consumer keeps decoding
 // unchanged; the bump follows this const's own rule that ANY field-shape
 // change bumps the version, additive or not.
-const PRSchemaVersion = 5
+//
+// Bumped 5 -> 6 by bead pg2-2j5ac.52.6.2, which added PR's BaseSHA field (the
+// commit the PR's base branch points at). Additive and omitempty, so every
+// version-5 consumer keeps decoding unchanged; the bump follows this const's
+// own rule that ANY field-shape change bumps the version, additive or not.
+const PRSchemaVersion = 6
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -196,6 +201,14 @@ type PR struct {
 	// ReviewCount is the number of reviews on the PR, counted from the same
 	// reviews connection on every read path.
 	ReviewCount int `json:"review_count,omitempty"`
+	// BaseSHA is the commit the PR's base branch points at (bead
+	// pg2-2j5ac.52.6.2), so a conflict's context is (head branch, head
+	// commit, base branch, base commit). It is filled on the show path only:
+	// a list backend MUST leave it empty, because the entity-change flow
+	// diffs list results by a hash of the whole summary entity and a base
+	// commit there would mark every open PR changed whenever its base branch
+	// moves. Empty when the backend reports none; never synthesized.
+	BaseSHA string `json:"base_sha,omitempty"`
 }
 
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on

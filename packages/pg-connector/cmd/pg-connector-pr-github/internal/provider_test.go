@@ -916,3 +916,26 @@ func TestBackend_Show_CommentCountZeroWhenNoCommentsFetched(t *testing.T) {
 		t.Fatalf("CommentCount = %d, want 0", got.CommentCount)
 	}
 }
+
+// TestPRShowCarriesBaseSHA proves Show maps the GitHub layer's base commit
+// into schema.PR.BaseSHA and leaves it empty when absent (bead
+// pg2-2j5ac.52.6.2).
+func TestPRShowCarriesBaseSHA(t *testing.T) {
+	for _, tc := range []struct{ name, in string }{
+		{"present", "0123456789abcdef0123456789abcdef01234567"},
+		{"absent", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr := api.PR{Repo: "owner/repo", Number: 7, Title: "T", State: "open", BaseSHA: tc.in}
+			gh := &fakeGH{pr: &pr, comments: []api.Comment{}}
+			b := newTestBackend(t, gh)
+			got, err := b.Show(context.Background(), "owner/repo#7")
+			if err != nil {
+				t.Fatalf("Show: %v", err)
+			}
+			if got.BaseSHA != tc.in {
+				t.Errorf("BaseSHA = %q, want %q", got.BaseSHA, tc.in)
+			}
+		})
+	}
+}

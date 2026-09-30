@@ -157,7 +157,13 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 // schema.PR's node_id, updated_at and review_decision summary fields on the
 // show path. id is the PR object's own GraphQL node id (gh's export of the
 // PullRequest id field), the rename-proof key for dedup and adoption.
-var prListFields = "id,number,title,headRefName,headRefOid,baseRefName,url,author,isDraft,state,mergedAt,closedAt,updatedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews"
+//
+// baseRefOid was added by bead pg2-2j5ac.52.6.2 for schema.PR's base_sha on
+// the show path (ghPR.toAPI sets BaseSHA from it). The list op's queries
+// (searchBatchedQuery via SearchPRsEnriched, and SearchPRs) MUST NOT request
+// it; gh pr list callers (listForAuthor, lookupPRByBranch) picking it up is
+// harmless because neither feeds the list op.
+var prListFields = "id,number,title,headRefName,headRefOid,baseRefName,baseRefOid,url,author,isDraft,state,mergedAt,closedAt,updatedAt,additions,deletions,changedFiles,body,labels,reviewRequests,assignees,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,reviews"
 
 // ghPR is the JSON shape returned by `gh pr list/view --json prListFields`.
 type ghPR struct {
@@ -168,8 +174,11 @@ type ghPR struct {
 	HeadRefName string `json:"headRefName"`
 	HeadRefOid  string `json:"headRefOid"`
 	BaseRefName string `json:"baseRefName"`
-	URL         string `json:"url"`
-	Author      struct {
+	// BaseRefOid is the commit the base branch points at (bead
+	// pg2-2j5ac.52.6.2); see prListFields' own doc comment.
+	BaseRefOid string `json:"baseRefOid"`
+	URL        string `json:"url"`
+	Author     struct {
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	} `json:"author"`
@@ -308,6 +317,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
 		HeadSHA:          p.HeadRefOid,
+		BaseSHA:          p.BaseRefOid,
 		Body:             p.Body,
 		Mergeable:        p.Mergeable,
 		MergeStateStatus: p.MergeStateStatus,

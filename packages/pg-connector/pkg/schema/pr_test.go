@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -89,12 +90,12 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (bead pg2-2j5ac.52.6.1 bumped 4 -> 5) so an accidental future edit that
+// (bead pg2-2j5ac.52.6.2 bumped 5 -> 6) so an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 5 {
-		t.Fatalf("PRSchemaVersion = %d, want 5", PRSchemaVersion)
+	if PRSchemaVersion != 6 {
+		t.Fatalf("PRSchemaVersion = %d, want 6", PRSchemaVersion)
 	}
 }
 
@@ -255,5 +256,37 @@ func TestPRCommitsResult_JSONShape_EmptyCommitsIsEmptyArrayNotNull(t *testing.T)
 	want := `{"id":"pr-1","commits":[]}`
 	if string(raw) != want {
 		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
+// TestPR_BaseSHA_JSONRoundTrip asserts the v6 base_sha field round-trips under
+// its exact wire key and is omitted when empty (bead pg2-2j5ac.52.6.2).
+func TestPR_BaseSHA_JSONRoundTrip(t *testing.T) {
+	in := PR{ID: "pr-1", BaseSHA: "0123456789abcdef0123456789abcdef01234567"}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out PR
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", out, in)
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, ok := asMap["base_sha"]; !ok {
+		t.Errorf("wire JSON missing base_sha key: %s", raw)
+	}
+
+	empty, err := json.Marshal(PR{ID: "pr-1"})
+	if err != nil {
+		t.Fatalf("marshal empty: %v", err)
+	}
+	if strings.Contains(string(empty), "base_sha") {
+		t.Errorf("empty BaseSHA must be omitted: %s", empty)
 	}
 }

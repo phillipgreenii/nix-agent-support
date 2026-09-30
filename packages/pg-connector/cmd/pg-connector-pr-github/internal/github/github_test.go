@@ -2282,3 +2282,86 @@ func (f *pathFakeGH) RunStdin(_ context.Context, _ []byte, args ...string) ([]by
 	}
 	return []byte("{}"), nil
 }
+
+// TestGetPR_ParsesBaseSHA proves the show path decodes baseRefOid into
+// api.PR.BaseSHA (bead pg2-2j5ac.52.6.2) and requests it as a WHOLE field of
+// the --json argument (the fake runner returns canned JSON whatever the
+// arguments, so the decode alone cannot catch a missing field).
+func TestGetPR_ParsesBaseSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"baseRefOid": "0123456789abcdef0123456789abcdef01234567"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.BaseSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("BaseSHA = %q", pr.BaseSHA)
+	}
+
+	args := gh.calls[0]
+	jsonArg := ""
+	for i, a := range args {
+		if a == "--json" && i+1 < len(args) {
+			jsonArg = args[i+1]
+			break
+		}
+	}
+	if jsonArg == "" {
+		t.Fatalf("gh pr view call carries no --json argument: %v", args)
+	}
+	found := false
+	for _, f := range strings.Split(jsonArg, ",") {
+		if f == "baseRefOid" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("--json argument lacks the whole field baseRefOid: %s", jsonArg)
+	}
+}
+
+// TestGetPR_EmptyBaseRefOidIsEmptyBaseSHA proves an absent baseRefOid is never
+// synthesized into a BaseSHA.
+func TestGetPR_EmptyBaseRefOidIsEmptyBaseSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	pr, err := NewWithRunner(gh).GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.BaseSHA != "" {
+		t.Errorf("BaseSHA = %q, want empty", pr.BaseSHA)
+	}
+}
+
+// TestSearchPRsEnriched_NeverFillsBaseSHA proves the list path neither
+// requests nor fills the base commit (bead pg2-2j5ac.52.6.2): a base commit in
+// list summaries would mark every open PR changed whenever its base branch
+// moves.
+func TestSearchPRsEnriched_NeverFillsBaseSHA(t *testing.T) {
+	if strings.Contains(searchBatchedQuery, "baseRefOid") {
+		t.Fatal("searchBatchedQuery must not request baseRefOid")
+	}
+	page := strings.Replace(sampleBatchedSearchPage,
+		`"headRefOid": "deadbeef",`,
+		`"headRefOid": "deadbeef", "baseRefOid": "feedface",`, 1)
+	if page == sampleBatchedSearchPage {
+		t.Fatal("fixture substitution did not apply")
+	}
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	prs, err := NewWithRunner(gh).SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].BaseSHA != "" {
+		t.Errorf("BaseSHA = %q, want empty on the list path", prs[0].BaseSHA)
+	}
+}

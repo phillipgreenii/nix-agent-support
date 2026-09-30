@@ -717,6 +717,10 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 		ReviewDecision: in.ReviewDecision,
 		CommentCount:   topLevelCommentCount(in, comments),
 		ReviewCount:    in.ReviewCount,
+
+		// bead pg2-2j5ac.52.6.2: the base commit, filled by GetPR on the show
+		// path only; the list path's api.PR never carries it.
+		BaseSHA: in.BaseSHA,
 	}
 
 	byReview := make(map[string][]schema.PRComment, len(reviews))
