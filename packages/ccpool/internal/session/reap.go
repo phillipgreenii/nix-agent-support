@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
 
 // preservedForHuman reports whether a LIVE row is parked awaiting a human decision
@@ -79,6 +80,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// a finished/missing conversation. Guarded against the fresh-session race
 	// (don't prune a young `starting` row that hasn't written a transcript yet).
 	var live []store.Session
+	var deadKept []store.Session // not live, but not a phantom either (resumable / fresh)
 	for _, r := range rows {
 		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) {
 			live = append(live, r)
@@ -90,8 +92,11 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			}
 			recordReapPhantomPruned()
 			slog.Info("ccpool: reap pruned phantom session", sessionLogArgs(r.ExternalID)...)
+			continue
 		}
+		deadKept = append(deadKept, r)
 	}
+	recordSessionStates(sessionStateCounts(live, deadKept))
 
 	// Keep only live sessions (derived liveness), oldest-activity first.
 	sort.Slice(live, func(i, j int) bool { return live[i].LastActivityAt < live[j].LastActivityAt })
@@ -155,4 +160,31 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 			append([]any{"reason", reason}, sessionLogArgs(r.ExternalID)...)...)
 	}
 	return nil
+}
+
+// sessionStateCounts buckets the surviving registry rows by (state, live) for
+// ccpool_session_states. Every known state is emitted for both liveness values
+// (zeros included) so a bucket that emptied reads 0, not its stale last value.
+// live=false,state=working is the dead-but-working signal; live=true,
+// state=needs_input is a session parked for a human.
+func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCount {
+	states := []store.State{store.Starting, store.Ready, store.Working, store.NeedsInput, store.Idle, store.Errored}
+	counts := map[store.State][2]int64{} // [0]=dead, [1]=live
+	for _, r := range live {
+		c := counts[r.State]
+		c[1]++
+		counts[r.State] = c
+	}
+	for _, r := range dead {
+		c := counts[r.State]
+		c[0]++
+		counts[r.State] = c
+	}
+	out := make([]telemetry.SessionStateCount, 0, 2*len(states))
+	for _, st := range states {
+		out = append(out,
+			telemetry.SessionStateCount{State: string(st), Live: true, Count: counts[st][1]},
+			telemetry.SessionStateCount{State: string(st), Live: false, Count: counts[st][0]})
+	}
+	return out
 }

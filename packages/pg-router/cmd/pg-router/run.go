@@ -235,6 +235,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	var metricsOpts []metrics.Option
 	if runMode == core.RunModeLongRunning {
 		metricsOpts = append(metricsOpts, metrics.WithLiveness(func() bool { return true }))
+		if cfg.WorktreeDir != "" {
+			// Worktree pool count/size (pg2-kftf9.22): TTL-cached background scan.
+			metricsOpts = append(metricsOpts, metrics.WithWorktreePool(cfg.WorktreeDir, 0))
+		}
 	}
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {

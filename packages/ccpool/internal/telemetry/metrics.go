@@ -46,6 +46,7 @@ type metricsInstruments struct {
 	reapPhantomPrunedTotal    metric.Int64Counter
 	sessionsPreservedForHuman metric.Int64Gauge
 	launchOutcomeTotal        metric.Int64Counter
+	sessionStates             metric.Int64Gauge
 }
 
 // newMetricsInstruments builds the seven instruments against meter, under
@@ -98,6 +99,12 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 		metric.WithDescription("Session-launch outcomes, labeled by route and outcome, recorded once the outcome is resolved (not at branch selection)."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_launch_outcome_total: %w", err)
+	}
+	if m.sessionStates, err = meter.Int64Gauge(
+		"ccpool_session_states",
+		metric.WithDescription("Sessions in the registry by store state and tmux liveness (live=true|false), snapshotted at each reap. live=false,state=working is dead-but-working; live=true,state=needs_input is a stuck/parked session."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_states: %w", err)
 	}
 
 	return m, nil
@@ -236,4 +243,30 @@ func RecordLaunchOutcome(route, outcome string) {
 	}
 	i.launchOutcomeTotal.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("route", route), attribute.String("outcome", outcome)))
+}
+
+// SessionStateCount is one (state, live) bucket of the registry snapshot fed
+// to RecordSessionStates.
+type SessionStateCount struct {
+	State string
+	Live  bool
+	Count int64
+}
+
+// RecordSessionStates records ccpool_session_states: one gauge point per
+// supplied (state, live) bucket. Cardinality is bounded (states x 2), and the
+// caller MUST pass every bucket including zeros so a dashboard sees an
+// explicit 0 rather than a stale prior value. Like
+// RecordSessionsPreservedForHuman it is a per-invocation snapshot on a
+// synchronous gauge: no polling, no tracking state.
+func RecordSessionStates(counts []SessionStateCount) {
+	i := ensureInstruments()
+	if i.sessionStates == nil {
+		return
+	}
+	for _, c := range counts {
+		i.sessionStates.Record(context.Background(), c.Count, metric.WithAttributes(
+			attribute.String("state", c.State), attribute.Bool("live", c.Live),
+		))
+	}
 }

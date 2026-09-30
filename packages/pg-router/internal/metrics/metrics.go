@@ -223,8 +223,10 @@ var _ eventqueue.Observer = (*Emitter)(nil)
 type Option func(*options)
 
 type options struct {
-	isLive func() bool
-	now    func() time.Time
+	isLive  func() bool
+	now     func() time.Time
+	poolDir string
+	poolTTL time.Duration
 }
 
 // WithClock injects a clock seam (default time.Now) for deterministic tests
@@ -354,6 +356,12 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 				return nil
 			}),
 		); err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.poolDir != "" {
+		if err := registerWorktreePool(m, newPoolScanner(cfg.poolDir, cfg.poolTTL, cfg.now)); err != nil {
 			return nil, err
 		}
 	}

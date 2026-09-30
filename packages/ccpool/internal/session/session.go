@@ -37,6 +37,7 @@ var (
 	recordReapPhantomPruned         = telemetry.RecordReapPhantomPruned
 	recordSessionsPreservedForHuman = telemetry.RecordSessionsPreservedForHuman
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
+	recordSessionStates             = telemetry.RecordSessionStates
 )
 
 // sessionLogArgs returns the slog key/value args carrying externalID and its

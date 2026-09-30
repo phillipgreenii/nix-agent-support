@@ -140,4 +140,49 @@ func recordAllForTest() {
 	RecordReapPhantomPruned()
 	RecordSessionsPreservedForHuman(1)
 	RecordLaunchOutcome("resume", "success")
+	RecordSessionStates([]SessionStateCount{{State: "working", Live: false, Count: 1}})
+}
+
+// TestSessionStates_GaugePerBucket asserts ccpool_session_states registers as
+// a gauge and carries one point per (state, live) bucket recorded.
+func TestSessionStates_GaugePerBucket(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	ctx := context.Background()
+	inst.sessionStates.Record(ctx, 2, metric.WithAttributes(attribute.String("state", "working"), attribute.Bool("live", false)))
+	inst.sessionStates.Record(ctx, 0, metric.WithAttributes(attribute.String("state", "working"), attribute.Bool("live", true)))
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	found := false
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "ccpool_session_states" {
+				continue
+			}
+			g, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok {
+				t.Fatalf("ccpool_session_states: got %T, want Gauge[int64]", m.Data)
+			}
+			if len(g.DataPoints) != 2 {
+				t.Fatalf("got %d data points, want 2", len(g.DataPoints))
+			}
+			for _, dp := range g.DataPoints {
+				if !dp.Attributes.HasValue("state") || !dp.Attributes.HasValue("live") {
+					t.Errorf("data point missing state/live labels: %v", dp.Attributes)
+				}
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("ccpool_session_states not collected")
+	}
 }

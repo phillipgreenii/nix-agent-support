@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 )
 
 type reapTmux struct {
@@ -508,5 +509,43 @@ func TestReap_stampsCloseReasonOnRow(t *testing.T) {
 	}
 	if row.CloseReason != "cap_eviction" {
 		t.Fatalf("close_reason = %q, want cap_eviction", row.CloseReason)
+	}
+}
+
+// TestReap_recordsSessionStates confirms ccpool_session_states buckets rows by
+// (state, live): a stuck needs_input live row, a live working row, and a
+// dead-but-working row whose Claude session is still resumable (so it is not
+// pruned as a phantom). Zero buckets are emitted too.
+func TestReap_recordsSessionStates(t *testing.T) {
+	orig := recordSessionStates
+	t.Cleanup(func() { recordSessionStates = orig })
+	var got []telemetry.SessionStateCount
+	recordSessionStates = func(c []telemetry.SessionStateCount) { got = c }
+
+	ctx := context.Background()
+	now := time.Unix(10_000, 0)
+	st := newMemStore(t)
+	for id, state := range map[string]store.State{"stuck": store.NeedsInput, "busy": store.Working, "deadbusy": store.Working} {
+		_ = st.Insert(ctx, store.Session{
+			ExternalID: id, ClaudeSessionID: "csid-" + id, TranscriptPath: "/p/" + id + ".jsonl", State: state,
+			TmuxSession: "cc-" + id, LastActivityAt: now.Unix() - 10,
+		})
+	}
+	tm := &reapTmux{live: map[string]bool{"cc-stuck": true, "cc-busy": true}, closed: map[string]bool{}}
+	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Exister: fakeExister{ok: true}, Now: func() time.Time { return now }})
+	if err := s.Reap(ctx, 6, time.Hour); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	want := map[string]int64{
+		"needs_input/true": 1, "working/true": 1, "working/false": 1,
+	}
+	if len(got) != 12 {
+		t.Fatalf("got %d buckets, want 12 (6 states x live/dead): %v", len(got), got)
+	}
+	for _, c := range got {
+		key := c.State + "/" + map[bool]string{true: "true", false: "false"}[c.Live]
+		if c.Count != want[key] {
+			t.Errorf("bucket %s = %d, want %d", key, c.Count, want[key])
+		}
 	}
 }
