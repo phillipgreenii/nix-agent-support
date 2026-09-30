@@ -9,13 +9,16 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/originprobe"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -298,7 +301,35 @@ func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
 		CC:  cc,
 		BD:  beads.NewCLIRunnerForRepo(bdDir),
 		Cfg: cfg,
+		Log: newEventLog(cfg),
 	}
+}
+
+// handlerEventLogName is the JSONL file, inside the handler state directory,
+// that the executor's and watchdog's structured events (hard_stop,
+// needs_input, reminder, ...) are appended to (bead pg2-ui2gk).
+const handlerEventLogName = "events.jsonl"
+
+// newEventLog opens the handler's event log at
+// <stateDir>/events.jsonl (stateDir resolved exactly as the origin prober
+// resolves it: cfg.OriginProbe.StateDir, else the XDG/home default). It
+// never returns nil: executor.Deps.Log and watchdog.Watchdog.Log treat nil as
+// a silent no-op, which is the defect this fixes. If the file cannot be
+// opened the handler still must dispatch, so it falls back to a writer on
+// os.DevNull (events dropped, warning logged via slog) rather than nil.
+func newEventLog(cfg config.Config) *eventlog.Writer {
+	sd := cfg.OriginProbe.StateDir
+	if sd == "" {
+		sd = originprobe.DefaultStateDir()
+	}
+	w, err := eventlog.New(filepath.Join(sd, handlerEventLogName))
+	if err != nil {
+		slog.Warn("dispatch: event log unavailable; events dropped", "err", err)
+		if w, err = eventlog.New(os.DevNull); err != nil {
+			slog.Warn("dispatch: null event log unavailable", "err", err)
+		}
+	}
+	return w
 }
 
 func writeReply(w io.Writer, v any) {
