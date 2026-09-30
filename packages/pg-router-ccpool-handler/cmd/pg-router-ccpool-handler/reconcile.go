@@ -4,9 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 )
 
@@ -62,7 +64,12 @@ import (
 // StateIdle/StateNeedsInput qualify (reconcilableState below), matching
 // pg2-hrppg's own Ask verbatim: "if the bead is closed AND the session is
 // idle/needs_input (not actively working), close/purge the session."
-func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string) (closed int) {
+//
+// quiet (pg2-03icc) is the transcript-quiet guard: a session whose
+// transcript or subagent transcripts were written within the configured
+// window is skipped this sweep (idle-with-running-subagents, pg2-9fwft) and
+// retried by the next one. nil disables the guard.
+func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string, quiet quietCheck) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("reconcile: list failed", "err", err)
@@ -76,6 +83,10 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 			continue
 		}
 		if !beadAlreadyClosed(ctx, br, s) {
+			continue
+		}
+		if quiet != nil && !quiet(s) {
+			slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)
 			continue
 		}
 		if closeSession(ctx, cc, open, repoRoot, s, worktreeInUseByPeer(sessions, s)) {
@@ -116,4 +127,34 @@ func worktreeInUseByPeer(sessions []ccpool.Session, s ccpool.Session) bool {
 		}
 	}
 	return false
+}
+
+// quietCheck reports whether s has had no transcript activity recently
+// enough that its worktree is safe to reclaim.
+type quietCheck func(s ccpool.Session) bool
+
+// newTranscriptQuietCheck builds a quietCheck from the same mtime scan the
+// executor's waitSessionQuiet uses (session transcript plus sibling
+// subagents/*.jsonl). Unlike waitSessionQuiet it never blocks: a still-active
+// session is simply deferred to the next sweep. window <= 0, no transcript
+// path, or an unreadable transcript all report quiet (nothing observable, the
+// same fail direction as waitSessionQuiet). latest and now are injectable;
+// nil selects executor.LatestTranscriptActivity and time.Now.
+func newTranscriptQuietCheck(window time.Duration, latest func(string) (time.Time, bool), now func() time.Time) quietCheck {
+	if window <= 0 {
+		return nil
+	}
+	if latest == nil {
+		latest = executor.LatestTranscriptActivity
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return func(s ccpool.Session) bool {
+		if s.TranscriptPath == "" {
+			return true
+		}
+		t, ok := latest(s.TranscriptPath)
+		return !ok || now().Sub(t) >= window
+	}
 }

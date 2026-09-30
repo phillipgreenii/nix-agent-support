@@ -69,11 +69,11 @@ func TestLatestTranscriptActivity_includesSubagents(t *testing.T) {
 	old, fresh := time.Now().Add(-time.Hour), time.Now()
 	_ = os.Chtimes(tr, old, old)
 	_ = os.Chtimes(sub, fresh, fresh)
-	got, ok := latestTranscriptActivity(tr)
+	got, ok := LatestTranscriptActivity(tr)
 	if !ok || got.Before(fresh.Add(-time.Second)) {
 		t.Fatalf("got %v ok=%v, want subagent mtime %v", got, ok, fresh)
 	}
-	if _, ok := latestTranscriptActivity(filepath.Join(dir, "nope.jsonl")); ok {
+	if _, ok := LatestTranscriptActivity(filepath.Join(dir, "nope.jsonl")); ok {
 		t.Fatal("missing transcript must report ok=false")
 	}
 }

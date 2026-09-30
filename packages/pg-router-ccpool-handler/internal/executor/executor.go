@@ -70,7 +70,7 @@ type Deps struct {
 	// touch a real repo.
 	GitOpener worktree.Opener
 	// LatestActivity returns the newest write time among a session's
-	// transcript files (nil ⇒ filesystem scan, latestTranscriptActivity).
+	// transcript files (nil ⇒ filesystem scan, LatestTranscriptActivity).
 	// ok=false means nothing observable. Tests substitute a fake.
 	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
 }

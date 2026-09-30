@@ -58,7 +58,7 @@ func (r *ccpoolRun) waitSessionQuiet(ctx context.Context, name string) bool {
 	}
 	latest := r.deps.LatestActivity
 	if latest == nil {
-		latest = latestTranscriptActivity
+		latest = LatestTranscriptActivity
 	}
 	poll := r.deps.Cfg.PollInterval
 	if poll <= 0 {
@@ -80,9 +80,9 @@ func (r *ccpoolRun) waitSessionQuiet(ctx context.Context, name string) bool {
 	}
 }
 
-// latestTranscriptActivity returns the newest mtime among transcriptPath and
+// LatestTranscriptActivity returns the newest mtime among transcriptPath and
 // the sibling <transcript-without-.jsonl>/subagents/*.jsonl files.
-func latestTranscriptActivity(transcriptPath string) (time.Time, bool) {
+func LatestTranscriptActivity(transcriptPath string) (time.Time, bool) {
 	var newest time.Time
 	found := false
 	consider := func(p string) {

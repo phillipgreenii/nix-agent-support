@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 )
@@ -43,7 +44,7 @@ func TestReconcileClosedBeadSessions_closesIdleWithClosedBead(t *testing.T) {
 		},
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1; closed=%v", n, cc.Closed)
 	}
@@ -63,7 +64,7 @@ func TestReconcileClosedBeadSessions_closesNeedsInputWithClosedBead(t *testing.T
 		},
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-50s7h.2 --json": `{"status":"closed"}`}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1; closed=%v", n, cc.Closed)
 	}
@@ -81,7 +82,7 @@ func TestReconcileClosedBeadSessions_leavesWorkingSessionAlone(t *testing.T) {
 		},
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-working --json": `{"status":"closed"}`}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 0 || len(cc.Closed) != 0 {
 		t.Fatalf("reconcileClosedBeadSessions must not touch a working session; n=%d closed=%v", n, cc.Closed)
 	}
@@ -99,7 +100,7 @@ func TestReconcileClosedBeadSessions_leavesOpenBeadSessionAlone(t *testing.T) {
 		},
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-open --json": `{"status":"open"}`}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 0 || len(cc.Closed) != 0 {
 		t.Fatalf("reconcileClosedBeadSessions must not touch an open-bead session; n=%d closed=%v", n, cc.Closed)
 	}
@@ -112,7 +113,7 @@ func TestReconcileClosedBeadSessions_leavesUntaggedSessionAlone(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
 		{ExternalID: "pg-router-worker-zr-untagged", State: ccpool.StateIdle},
 	}}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root", nil)
 	if n != 0 || len(cc.Closed) != 0 {
 		t.Fatalf("reconcileClosedBeadSessions must not touch an untagged session; n=%d closed=%v", n, cc.Closed)
 	}
@@ -130,7 +131,7 @@ func TestReconcileClosedBeadSessions_leavesSessionAloneOnBdLookupError(t *testin
 		},
 	}}}
 	br := fakeBR{err: errors.New("bd down")}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 0 || len(cc.Closed) != 0 {
 		t.Fatalf("reconcileClosedBeadSessions must fail soft on a bd lookup error; n=%d closed=%v", n, cc.Closed)
 	}
@@ -150,7 +151,7 @@ func TestReconcileClosedBeadSessions_ignoresOtherStatesEvenWithClosedBead(t *tes
 			},
 		}}}
 		br := fakeBR{out: map[string]string{"show zr-" + string(state) + " --json": `{"status":"closed"}`}}
-		n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+		n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 		if n != 0 || len(cc.Closed) != 0 {
 			t.Fatalf("state %q: reconcileClosedBeadSessions must not touch it; n=%d closed=%v", state, n, cc.Closed)
 		}
@@ -168,7 +169,7 @@ func TestReconcileClosedBeadSessions_ignoresNonMatchingPrefix(t *testing.T) {
 		},
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 0 || len(cc.Closed) != 0 {
 		t.Fatalf("reconcileClosedBeadSessions must not touch a non-prefix-matching session; n=%d closed=%v", n, cc.Closed)
 	}
@@ -188,7 +189,7 @@ func TestReconcileClosedBeadSessions_removesWorktreeOfClosedSession(t *testing.T
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
 	open := &fakeWorktreeOpener{}
-	n := reconcileClosedBeadSessions(context.Background(), cc, open.Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, open.Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1", n)
 	}
@@ -214,7 +215,7 @@ func TestReconcileClosedBeadSessions_deletesAnchorBranch(t *testing.T) {
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
 	open := &fakeWorktreeOpener{}
-	n := reconcileClosedBeadSessions(context.Background(), cc, open.Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, open.Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1", n)
 	}
@@ -241,7 +242,7 @@ func TestReconcileClosedBeadSessions_mixedSweep(t *testing.T) {
 		"show zr-2 --json": `{"status":"open"}`,
 		"show zr-3 --json": `{"status":"closed"}`,
 	}}
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 1; closed=%v", n, cc.Closed)
 	}
@@ -256,7 +257,7 @@ func TestReconcileClosedBeadSessions_mixedSweep(t *testing.T) {
 func TestReconcileClosedBeadSessions_listFailureIsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	cc.listErr = errors.New("ccpool down")
-	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{}, "pg-router-", "/repo/root", nil)
 	if n != 0 {
 		t.Fatalf("reconcileClosedBeadSessions = %d, want 0 on a list failure", n)
 	}
@@ -286,7 +287,7 @@ func TestReconcileClosedBeadSessions_keepsWorktreeSharedWithLivePeer(t *testing.
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-shared --json": `{"status":"closed"}`}}
 	wo := &fakeWorktreeOpener{}
-	n := reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root")
+	n := reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root", nil)
 	if n != 1 || len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-review-zr-shared" {
 		t.Fatalf("idle session must still be purged; n=%d closed=%v", n, cc.Closed)
 	}
@@ -312,8 +313,42 @@ func TestReconcileClosedBeadSessions_removesWorktreeWhenNoLivePeer(t *testing.T)
 	}}}
 	br := fakeBR{out: map[string]string{"show zr-solo --json": `{"status":"closed"}`}}
 	wo := &fakeWorktreeOpener{}
-	reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root")
+	reconcileClosedBeadSessions(context.Background(), cc, wo.Open, br, "pg-router-", "/repo/root", nil)
 	if len(wo.Removed) != 1 || wo.Removed[0] != "/wt/zr-solo" {
 		t.Errorf("sole session's worktree must be removed; removed=%v", wo.Removed)
+	}
+}
+
+// TestReconcileClosedBeadSessions_defersRecentTranscriptActivity is
+// pg2-03icc item 1: an idle closed-bead session whose transcript (or
+// subagent transcripts) is still being written must be left alone this sweep.
+func TestReconcileClosedBeadSessions_defersRecentTranscriptActivity(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	mk := func() (*fakeCC, fakeBR) {
+		return &fakeCC{ListSeq: [][]ccpool.Session{{{
+				ExternalID:     "pg-router-worker-zr-done",
+				State:          ccpool.StateIdle,
+				TranscriptPath: "/t/x.jsonl",
+				Meta:           map[string]string{ccpool.MetaKeyBead: "zr-done"},
+			}}}},
+			fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
+	}
+	run := func(age time.Duration, ok bool) int {
+		cc, br := mk()
+		latest := func(string) (time.Time, bool) { return now.Add(-age), ok }
+		q := newTranscriptQuietCheck(2*time.Minute, latest, func() time.Time { return now })
+		return reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, "pg-router-", "/repo/root", q)
+	}
+	if n := run(30*time.Second, true); n != 0 {
+		t.Fatalf("recent transcript activity must defer the purge; closed=%d", n)
+	}
+	if n := run(5*time.Minute, true); n != 1 {
+		t.Fatalf("quiet transcript must be purged; closed=%d", n)
+	}
+	if n := run(0, false); n != 1 {
+		t.Fatalf("unobservable transcript must proceed; closed=%d", n)
+	}
+	if q := newTranscriptQuietCheck(0, nil, nil); q != nil {
+		t.Fatal("window <= 0 must disable the guard")
 	}
 }
