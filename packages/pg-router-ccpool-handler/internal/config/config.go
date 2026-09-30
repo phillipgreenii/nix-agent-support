@@ -52,6 +52,17 @@ type Config struct {
 	// MaxWait bounds how long a ccpool session may run before it is
 	// considered stuck (waitDone's deadline).
 	MaxWait time.Duration
+	// WorktreeQuietWindow is how long a finished dispatch's session (its
+	// transcript plus every subagents/*.jsonl beside it) must have shown no
+	// write activity before cleanupWorktree may remove its worktree
+	// (pg2-9fwft: Agent-tool child subagents are invisible to the pool but
+	// keep writing their transcripts). <= 0 disables the check (legacy
+	// remove-immediately behavior).
+	WorktreeQuietWindow time.Duration
+	// WorktreeQuietMax bounds how long cleanupWorktree waits for the quiet
+	// window; on expiry the worktree is LEFT in place (fail soft, for a later
+	// sweep) rather than removed under a still-active subagent.
+	WorktreeQuietMax time.Duration
 	// PollInterval is how often waitDone re-checks ccpool's session list.
 	PollInterval time.Duration
 	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
@@ -186,25 +197,27 @@ func defaultAllowedTools(prTool string) string {
 // unchanged behavior.
 func Default() Config {
 	return Config{
-		WorktreeDir:    "",
-		BeadsPrefix:    "zr",
-		MaxWait:        1800 * time.Second,
-		PollInterval:   10 * time.Second,
-		Effort:         "max",
-		Model:          "",
-		Autonomous:     true,
-		PermissionMode: "dontAsk",
-		PRTool:         "",
-		AllowedTools:   defaultAllowedTools(""),
-		SessionPrefix:  "pg-router-",
-		ReminderMsg:    "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
-		WrapUpMsg:      "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
-		ConfirmIngest:  90 * time.Second,
-		BudgetTokens:   0,                // unlimited until ccpool N3
-		BudgetCost:     0,                // unlimited until ccpool N3
-		BudgetTime:     25 * time.Minute, // strictly < MaxWait (30m)
-		ReminderPct:    0.725,
-		CancelPct:      0.90,
-		HardPct:        1.00,
+		WorktreeDir:         "",
+		BeadsPrefix:         "zr",
+		MaxWait:             1800 * time.Second,
+		PollInterval:        10 * time.Second,
+		WorktreeQuietWindow: 2 * time.Minute,
+		WorktreeQuietMax:    10 * time.Minute,
+		Effort:              "max",
+		Model:               "",
+		Autonomous:          true,
+		PermissionMode:      "dontAsk",
+		PRTool:              "",
+		AllowedTools:        defaultAllowedTools(""),
+		SessionPrefix:       "pg-router-",
+		ReminderMsg:         "You are nearing your budget for bead {{.BeadID}} — start wrapping up: record progress with bd comment {{.BeadID}}.",
+		WrapUpMsg:           "Budget nearly exhausted for bead {{.BeadID}}. Stop now: commit your notes with bd comment {{.BeadID}}, then finish or hand back. Do not start new work on any other bead.",
+		ConfirmIngest:       90 * time.Second,
+		BudgetTokens:        0,                // unlimited until ccpool N3
+		BudgetCost:          0,                // unlimited until ccpool N3
+		BudgetTime:          25 * time.Minute, // strictly < MaxWait (30m)
+		ReminderPct:         0.725,
+		CancelPct:           0.90,
+		HardPct:             1.00,
 	}
 }

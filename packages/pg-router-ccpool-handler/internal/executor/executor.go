@@ -69,6 +69,10 @@ type Deps struct {
 	// gitclient.New in production). Tests substitute a fake so they never
 	// touch a real repo.
 	GitOpener worktree.Opener
+	// LatestActivity returns the newest write time among a session's
+	// transcript files (nil ⇒ filesystem scan, latestTranscriptActivity).
+	// ok=false means nothing observable. Tests substitute a fake.
+	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
 }
 
 func (d Deps) git() watchdog.GitRunner {

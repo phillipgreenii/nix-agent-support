@@ -326,6 +326,11 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 			"session", name, "worktree", wt)
 		return
 	}
+	if !r.waitSessionQuiet(ctx, name) {
+		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
+			"session", name, "worktree", wt, "quietWindow", r.deps.Cfg.WorktreeQuietWindow)
+		return
+	}
 	wm, err := r.deps.gitOpener()(ctx, wt)
 	if err != nil {
 		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
