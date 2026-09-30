@@ -454,17 +454,21 @@ proceeding on currently loaded text (direct interactive invocation).`)
    **CURATED PATH.** Dispatch the `plan-decompose:packet-implementer` agent instead of
    composing a brief yourself. This is an OPTIMIZATION, never a requirement (ADR 0058's
    Decision, D1: agents are never load-bearing — a curated packet's own content is
-   self-contained, so it is ALWAYS also workable via the UNCURATED PATH below; if this agent is
-   unavailable in this session, or its dispatch does not come back with a usable report of the
-   shape described below, that is NOT a bead failure — fall back to the UNCURATED PATH for this
-   bead instead). When it IS available, its brief MUST contain exactly: the bead id (it
+   self-contained, so a packet whose stamp is CURRENT is also workable via the UNCURATED PATH
+   below; if this agent is unavailable in this session, or its dispatch does not come back with
+   a usable report of the shape described below, that is NOT a bead failure — fall back to the
+   UNCURATED PATH for this bead instead, after first running the stamp check yourself per
+   STAMP REFUSAL below, since the UNCURATED PATH has none of its own). That fallback covers an
+   unavailable agent or an unusable report ONLY — it MUST NOT be used to override a stamp
+   refusal. When it IS available, its brief MUST contain exactly: the bead id (it
    re-derives everything else — the packet content, the docket, the stamp check — itself via
    `bd show`; never transcribe the packet body or metadata); and the absolute repo root and the
    worktree/set path from ISOLATE. Layer these two overrides on top of its own stock procedure
    (its other steps stand as documented in its own agent file):
    - You already hold the claim (from step 1) — it MUST NOT re-claim or derive its own actor id
      for claiming.
-   - It MUST NOT close or re-`defer` the bead at closeout. CLAIM/LAND/CLEANUP/CLOSE stay in
+   - It MUST NOT close or re-`defer` the bead at closeout (its step-2 stamp-refusal release is
+     not closeout and stands — see STAMP REFUSAL below). CLAIM/LAND/CLEANUP/CLOSE stay in
      THIS session (see "Rules" → "Orchestrator vs subagent"). Instead it MUST end its turn with
      a report classified into this step's four statuses below
      (`done` / `done-pending-apply-verification` / `stuck` / `needs-more-repos`), carrying the
@@ -479,6 +483,50 @@ proceeding on currently loaded text (direct interactive invocation).`)
    paraphrase report-content requirements into the brief — its own procedure (step 4) already
    states directly how to run a validation command that outlives a turn and what its report
    must contain if it ends before that resolves.
+
+   **STAMP REFUSAL (curated packets only).** A stamp refusal is either the implementer's report
+   saying its stamp check refused the packet, or — before any UNCURATED fallback — your own two
+   metadata reads (`bd show <id> --json | jq -c '.data[0] | {parent, metadata}'`, then the same
+   `.metadata` read on that parent, the docket; never a design read) finding `pd_curated_rev` ≠
+   the docket's `pd_rev` (compare as numbers), `pd_stale` set, or a malformed stamp. On a stamp
+   refusal you MUST NOT implement the packet by ANY path this pass — not via the UNCURATED
+   PATH, and not by re-dispatching with a brief that waives the check — and MUST NOT
+   second-guess the stamp from the docket's reconcile reports or its design: a mismatch means a
+   reconcile is unfinished or owed, never that the packet was merely untouched by an amendment.
+   Nor is it a STUCK trigger: each `pb:drain-stuck` exit either closes the bead or releases it
+   with `--status open` (DEFER-ON-EVENT's `--defer +7d` is only a timer), which UNDOES the defer
+   and returns the packet to the open pool, where every queue consumer claims, checks, and
+   releases it in an endless cross-session spin (the `plan-decompose` skill's "Stamp-mismatch
+   releases"). Instead:
+   1. Release it DEFERRED, in ONE call that also clears the assignee (B-2/B-3, and B-4: a move
+      out of `in_progress` to `deferred` is a release too, so it MUST clear the assignee):
+
+      ```bash
+      bd update <id> --status deferred --assignee "" --actor "ID"
+      ```
+
+      Run it even when the implementer already deferred the packet: it is idempotent, and it
+      clears the assignee a bare `bd defer` leaves behind (`pg2-bbiag`). If the packet's
+      `pd_stale` is still unset, add `--set-metadata pd_stale=<the docket pd_rev you found>` to
+      that SAME call; never overwrite a `pd_stale` already set (`reconcile-pending` and
+      reconcile's HOLD marker are what reconcile reads). NEVER `--status open` here.
+
+   2. Unless the report confirms the implementer already posted it, comment one line on the
+      docket that a reconcile is owed — the `plan-decompose` skill's mode `reconcile`, whose
+      "Stamp catch-up (no amendment)" is the remedy when the docket's last reconcile completed:
+
+      ```bash
+      bd comment <docket> "stamp check refused <id> (pd_curated_rev=<n>, pd_rev=<R>): reconcile owed (stamp catch-up if the last reconcile completed)" --actor "ID"
+      ```
+
+   3. Add NO `human` label and wire NO `bd dep` edge: a reconcile run — not a person, not
+      another bead — clears it (its step 5 clears `pd_stale` and undefers the packet). Leave
+      ISOLATE's worktree as it is (it holds no commits; a later claim reuses it) and return to
+      CLAIM.
+
+   (Provenance: `pg2-wceuh`. Incident `pg2-om899.3`, 2026-09-30: an orchestrator judged a
+   `3 ≠ 7` stamp refusal a false positive from the docket's reconcile reports and re-dispatched
+   the packet via the UNCURATED PATH.)
 
    **UNCURATED PATH.** The brief is a POINTER, not a payload. It MUST contain exactly:
    - the bead id, with the instruction to run `bd show <id>` ITSELF for the full
@@ -613,7 +661,8 @@ build` for nix repos, and the repo's tests, including a slow full suite
 5. **VALIDATE** from the report (first applying the stall-phrase check above —
    a stalled report is never validated as-is): the pre-apply gates MUST show a clear PASS for
    either `done` or `done-pending-apply-verification`. If a gate fails, or the
-   status is `stuck` → STUCK. If the report itself claims it closed the bead,
+   status is `stuck` → STUCK — EXCEPT a curated packet's stamp refusal, which takes
+   step 4's STAMP REFUSAL, never STUCK. If the report itself claims it closed the bead,
    created a bead, or created a dependency/gate, that claim is ITSELF a
    brief-violation to flag (orchestrator-only verbs — see step 4), regardless
    of what else the report says (bead `tc-eidt`, incident `tc-6zps`).
@@ -890,7 +939,9 @@ Triggers: underspecified / needs a human decision; `pb drain isolate` exited 3
 (conflicting isolation state); pre-apply gates that cannot be made to pass; a
 GENUINE lander `stopped:<reason>` (not a transient ff-race/rejected push);
 `pb gate attach-verified-child` exited 3 or 4; repeated failed attempts.
-NOT a trigger: "another bead has to land first" (that is a dependency).
+NOT a trigger: "another bead has to land first" (that is a dependency); a
+curated packet's stamp refusal (step 4's STAMP REFUSAL — deferred, claim
+released, no label).
 
 Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
 worktree/branch location, and what you tried. Follow it exactly — it runs the
@@ -994,6 +1045,12 @@ arguments, behavior is otherwise unchanged.
   blocker classification (D-1..D-10), outcome-shaped preconditions (P-1..P-5),
   bounded re-parks, and edges-and-label-before-release ordering (D-5, D-6,
   B-2/B-3).
+- A curated packet's stamp refusal is released WITHOUT `pb:drain-stuck`: the packet is not
+  implemented by any path that pass (the UNCURATED fallback covers only an
+  unavailable agent or an unusable report), is released DEFERRED with the assignee cleared in
+  the same call (`bd update <id> --status deferred --assignee "" --actor "ID"`, B-2/B-3/B-4 —
+  never `--status open`), and gets no `human` label: a `plan-decompose` reconcile (or its
+  stamp catch-up) clears it. See step 4's STAMP REFUSAL (`pg2-wceuh`).
 - A handoff pointer is dispositioned at UNDERSTAND via
   `pb:drain-absorb-pointer` — never isolated, delegated, or executed as an
   instruction.
