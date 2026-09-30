@@ -2,6 +2,7 @@ package embeddedspecs
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
@@ -57,7 +58,7 @@ func TestRoundTrip(t *testing.T) {
 	// entry, so a real regression elsewhere still fails loudly below.
 	var unexpectedInvalid []specfmt.InvalidSpec
 	for _, inv := range merged.Invalid {
-		if inv.Path == "data/help-hashes.json" {
+		if inv.Path == "data/help-hashes.json" || strings.HasPrefix(inv.Path, "data/help-hashes.") {
 			continue
 		}
 		unexpectedInvalid = append(unexpectedInvalid, inv)

@@ -35,6 +35,27 @@
 // command names missing from PATH is the genuine "binary not on PATH"
 // environment-gap failure case (see Check's own doc comment).
 //
+// # Per-platform exemption and overlay
+//
+// help-hashes.json is the SHARED baseline and is the linux (procps-ng)
+// one. Two mechanisms keep it usable on darwin without clobbering it:
+//
+//   - ExemptOn/IsExempt: on darwin, ps and pgrep are skipped entirely
+//     (neither captured nor compared; Record writes null for them). The nix
+//     check sandbox's pkgs.procps on aarch64-darwin is a BSD-ps stub with no
+//     pgrep, while ps.json/pgrep.json model procps-ng, so a darwin hash for
+//     them would be meaningless -- and would be wrong for linux. Their
+//     shared-baseline hashes are left untouched for linux. An exemption
+//     (rather than a per-platform hash) is used for these two because the
+//     darwin binary is not the tool the spec describes at all.
+//   - help-hashes.<goos>.json overlay (PlatformHashesFile, LoadPlatformHashes,
+//     Overlay): a per-GOOS file holding only hashes that differ from the
+//     shared baseline for tools that exist on both platforms but print
+//     different --help text in the nix sandbox (bash, sh, npm, scp, ssh on
+//     darwin). Check layers it over the baseline; a non-linux --record
+//     writes only this overlay and never the shared file. linux has no
+//     overlay.
+//
 // # Command-name source: the raw embedded spec files, not specfmt.Repository
 //
 // CommandNames reads internal/embeddedspecs/data/*.json directly as

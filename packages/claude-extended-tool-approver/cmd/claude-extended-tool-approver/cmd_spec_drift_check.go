@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/embeddedspecs"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/specdrift"
@@ -33,7 +34,11 @@ Run this locally/in CI where the real tools are on PATH, then run this
 repo's formatter/prek over the written file before committing.
 
 cd and export are pure shell builtins with no separate on-PATH binary and
-are exempt from capture/compare (recorded/expected as null).`,
+are exempt from capture/compare (recorded/expected as null). On darwin ps
+and pgrep are also skipped (the nix sandbox has BSD ps and no pgrep).
+help-hashes.json is the shared (linux) baseline; a non-linux --record writes
+only that platform's differing hashes to help-hashes.<goos>.json, which
+--check layers over the baseline.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !embedded {
 				return fmt.Errorf("spec-drift-check: specify --embedded")
@@ -51,11 +56,30 @@ are exempt from capture/compare (recorded/expected as null).`,
 }
 
 func runSpecDriftRecord(cmd *cobra.Command, dir string) error {
-	hashes, err := specdrift.Record(embeddedspecs.FS, "data", specdrift.CaptureHelp)
+	goos := runtime.GOOS
+	hashes, err := specdrift.Record(embeddedspecs.FS, "data", goos, specdrift.CaptureHelp)
 	if err != nil {
 		return fmt.Errorf("spec-drift-check: %w", err)
 	}
 	path := filepath.Join(dir, specdrift.HelpHashesFile)
+	if goos != "linux" {
+		// The shared baseline is the linux one and MUST NOT be clobbered
+		// from another platform: write only this platform's differing
+		// hashes to its overlay file (see specdrift.Overlay).
+		base, err := specdrift.LoadHashes(os.DirFS(dir), specdrift.HelpHashesFile)
+		if err != nil {
+			return fmt.Errorf("spec-drift-check: %w", err)
+		}
+		hashes = specdrift.Overlay(goos, base, hashes)
+		path = filepath.Join(dir, specdrift.PlatformHashesFile(goos))
+		if len(hashes) == 0 {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("spec-drift-check: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "spec-drift-check: no %s overrides; %s not written\n", goos, path)
+			return nil
+		}
+	}
 	if err := specdrift.WriteHashes(path, hashes); err != nil {
 		return fmt.Errorf("spec-drift-check: %w", err)
 	}
@@ -64,11 +88,12 @@ func runSpecDriftRecord(cmd *cobra.Command, dir string) error {
 }
 
 func runSpecDriftCheck(cmd *cobra.Command) error {
-	recorded, err := specdrift.LoadHashes(embeddedspecs.FS, "data/"+specdrift.HelpHashesFile)
+	goos := runtime.GOOS
+	recorded, err := specdrift.LoadPlatformHashes(embeddedspecs.FS, "data", goos)
 	if err != nil {
 		return fmt.Errorf("spec-drift-check: %w", err)
 	}
-	drifts, err := specdrift.Check(embeddedspecs.FS, "data", recorded, specdrift.CaptureHelp)
+	drifts, err := specdrift.Check(embeddedspecs.FS, "data", goos, recorded, specdrift.CaptureHelp)
 	if err != nil {
 		return fmt.Errorf("spec-drift-check: %w", err)
 	}

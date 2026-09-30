@@ -30,6 +30,34 @@ var Exempt = map[string]bool{
 	"export": true,
 }
 
+// ExemptOn names, per GOOS, the commands whose on-PATH binary in the nix
+// check sandbox is not the one the embedded spec models, so Record/Check
+// MUST skip them on that platform (and only there). On darwin,
+// nixpkgs' pkgs.procps is a BSD-ps stub with no pgrep, while ps.json and
+// pgrep.json model procps-ng -- the shared baseline's ps/pgrep hashes stay
+// valid for Linux and are simply not consulted on darwin. See doc.go's
+// "Per-platform exemption and overlay".
+var ExemptOn = map[string]map[string]bool{
+	"darwin": {
+		"ps":    true,
+		"pgrep": true,
+	},
+}
+
+// IsExempt reports whether name is exempt from capture/compare on goos:
+// either universally (Exempt) or for that platform only (ExemptOn).
+func IsExempt(goos, name string) bool {
+	return Exempt[name] || ExemptOn[goos][name]
+}
+
+// PlatformHashesFile returns the name of the per-GOOS overlay file
+// ("help-hashes.<goos>.json") holding only the hashes that differ from the
+// shared HelpHashesFile baseline on that platform. The shared baseline is
+// the linux one; goos "linux" therefore has no overlay.
+func PlatformHashesFile(goos string) string {
+	return "help-hashes." + goos + ".json"
+}
+
 // HelpCapturer captures the live --help output for one command name,
 // returning the raw text this package hashes. CaptureHelp is the real,
 // exec.Command-backed implementation the CLI wires; tests substitute a
@@ -136,16 +164,16 @@ func CommandNames(fsys fs.FS, dataDir string) ([]string, error) {
 }
 
 // Record captures a fresh SHA-256 --help hash (via capture) for every non-
-// exempt name CommandNames(fsys, dataDir) returns, and nil for every exempt
-// name — the --record mode's in-memory result, ready for WriteHashes.
-func Record(fsys fs.FS, dataDir string, capture HelpCapturer) (map[string]*string, error) {
+// name CommandNames(fsys, dataDir) returns that is not IsExempt on goos, and
+// nil for every exempt name — the --record mode's in-memory result, ready for WriteHashes.
+func Record(fsys fs.FS, dataDir, goos string, capture HelpCapturer) (map[string]*string, error) {
 	names, err := CommandNames(fsys, dataDir)
 	if err != nil {
 		return nil, err
 	}
 	hashes := make(map[string]*string, len(names))
 	for _, name := range names {
-		if Exempt[name] {
+		if IsExempt(goos, name) {
 			hashes[name] = nil
 			continue
 		}
@@ -174,6 +202,46 @@ func WriteHashes(path string, hashes map[string]*string) error {
 		return fmt.Errorf("specdrift: writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// LoadPlatformHashes loads the shared baseline (dataDir/HelpHashesFile) and,
+// when dataDir/PlatformHashesFile(goos) exists, layers its entries over it.
+// A missing overlay is not an error (linux has none).
+func LoadPlatformHashes(fsys fs.FS, dataDir, goos string) (map[string]*string, error) {
+	base, err := LoadHashes(fsys, dataDir+"/"+HelpHashesFile)
+	if err != nil {
+		return nil, err
+	}
+	overlay, err := LoadHashes(fsys, dataDir+"/"+PlatformHashesFile(goos))
+	if errors.Is(err, fs.ErrNotExist) {
+		return base, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range overlay {
+		base[k] = v
+	}
+	return base, nil
+}
+
+// Overlay returns the entries of recorded that a per-platform overlay file
+// must carry on top of base: every non-nil hash that is absent from or
+// differs from base. Entries exempt on goos are never included (their
+// baseline is deliberately left to the shared file), and nil entries are
+// dropped.
+func Overlay(goos string, base, recorded map[string]*string) map[string]*string {
+	out := map[string]*string{}
+	for name, h := range recorded {
+		if h == nil || IsExempt(goos, name) {
+			continue
+		}
+		if b, ok := base[name]; ok && b != nil && *b == *h {
+			continue
+		}
+		out[name] = h
+	}
+	return out
 }
 
 // LoadHashes reads and decodes a help-hashes.json file from fsys at path.
@@ -213,14 +281,14 @@ type Drift struct {
 //     gap failure this packet's Binding decisions calls out — never
 //     silently skipped like an Exempt name.
 //   - the live hash differs from *recorded[name]: "--help drift".
-func Check(fsys fs.FS, dataDir string, recorded map[string]*string, capture HelpCapturer) ([]Drift, error) {
+func Check(fsys fs.FS, dataDir, goos string, recorded map[string]*string, capture HelpCapturer) ([]Drift, error) {
 	names, err := CommandNames(fsys, dataDir)
 	if err != nil {
 		return nil, err
 	}
 	var drifts []Drift
 	for _, name := range names {
-		if Exempt[name] {
+		if IsExempt(goos, name) {
 			continue
 		}
 		rec, ok := recorded[name]

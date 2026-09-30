@@ -1,6 +1,7 @@
 package specdrift
 
 import (
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -46,7 +47,7 @@ func TestSpecDriftCommandNamesSkipsHelpHashesFile(t *testing.T) {
 
 func TestSpecDriftRecordExemptsShellBuiltins(t *testing.T) {
 	stub := func(name string) (string, error) { return "usage: " + name, nil }
-	hashes, err := Record(fixtureFS(), "data", stub)
+	hashes, err := Record(fixtureFS(), "data", "linux", stub)
 	if err != nil {
 		t.Fatalf("Record: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestSpecDriftCheckDetectsDrift(t *testing.T) {
 		return "usage: " + name, nil
 	}
 
-	drifts, err := Check(fixtureFS(), "data", recorded, stub)
+	drifts, err := Check(fixtureFS(), "data", "linux", recorded, stub)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestSpecDriftCheckDetectsDrift(t *testing.T) {
 	// Negative control: the correct hash produces no drift.
 	correct := Hash(liveHelp)
 	recorded["jq"] = &correct
-	drifts, err = Check(fixtureFS(), "data", recorded, stub)
+	drifts, err = Check(fixtureFS(), "data", "linux", recorded, stub)
 	if err != nil {
 		t.Fatalf("Check (clean): %v", err)
 	}
@@ -110,7 +111,7 @@ func TestSpecDriftCheckReportsMissingEntry(t *testing.T) {
 		// jq intentionally absent.
 	}
 	stub := func(name string) (string, error) { return "usage: " + name, nil }
-	drifts, err := Check(fixtureFS(), "data", recorded, stub)
+	drifts, err := Check(fixtureFS(), "data", "linux", recorded, stub)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestSpecDriftCheckReportsUnreachableBinary(t *testing.T) {
 		}
 		return "usage: " + name, nil
 	}
-	drifts, err := Check(fixtureFS(), "data", recorded, stub)
+	drifts, err := Check(fixtureFS(), "data", "linux", recorded, stub)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -176,3 +177,113 @@ type stubErr string
 func (e stubErr) Error() string { return string(e) }
 
 const errNotFound = stubErr("exec: \"jq\": executable file not found in $PATH")
+
+func psFixtureFS() fstest.MapFS {
+	fsys := fixtureFS()
+	spec := fsys["data/jq.json"].Data
+	for _, n := range []string{"ps", "pgrep"} {
+		fsys["data/"+n+".json"] = &fstest.MapFile{Data: []byte(strings.ReplaceAll(string(spec), `"jq"`, `"`+n+`"`))}
+	}
+	return fsys
+}
+
+func TestIsExemptByPlatform(t *testing.T) {
+	cases := []struct {
+		goos, name string
+		want       bool
+	}{
+		{"linux", "cd", true},
+		{"darwin", "export", true},
+		{"darwin", "ps", true},
+		{"darwin", "pgrep", true},
+		{"linux", "ps", false},
+		{"linux", "pgrep", false},
+		{"darwin", "bash", false},
+	}
+	for _, c := range cases {
+		if got := IsExempt(c.goos, c.name); got != c.want {
+			t.Errorf("IsExempt(%q, %q) = %v, want %v", c.goos, c.name, got, c.want)
+		}
+	}
+}
+
+func TestSpecDriftPlatformExemptNeverCaptured(t *testing.T) {
+	recorded := map[string]*string{
+		"cd": nil, "export": nil,
+		"jq":    strPtr(Hash("usage: jq")),
+		"ps":    strPtr("0000"), // linux hash, meaningless on darwin
+		"pgrep": strPtr("0000"),
+	}
+	var captured []string
+	stub := func(name string) (string, error) {
+		captured = append(captured, name)
+		if name == "ps" || name == "pgrep" {
+			return "", errNotFound
+		}
+		return "usage: " + name, nil
+	}
+
+	drifts, err := Check(psFixtureFS(), "data", "darwin", recorded, stub)
+	if err != nil {
+		t.Fatalf("Check darwin: %v", err)
+	}
+	if len(drifts) != 0 {
+		t.Fatalf("Check darwin drifts = %+v, want none", drifts)
+	}
+	for _, n := range captured {
+		if n == "ps" || n == "pgrep" {
+			t.Errorf("Check darwin captured exempt command %q", n)
+		}
+	}
+
+	// Same inputs on linux: ps/pgrep are checked (unreachable binary here).
+	drifts, err = Check(psFixtureFS(), "data", "linux", recorded, stub)
+	if err != nil {
+		t.Fatalf("Check linux: %v", err)
+	}
+	if len(drifts) != 2 || drifts[0].Name != "pgrep" || drifts[1].Name != "ps" {
+		t.Fatalf("Check linux drifts = %+v, want pgrep and ps", drifts)
+	}
+
+	captured = nil
+	hashes, err := Record(psFixtureFS(), "data", "darwin", stub)
+	if err != nil {
+		t.Fatalf("Record darwin: %v", err)
+	}
+	if hashes["ps"] != nil || hashes["pgrep"] != nil {
+		t.Errorf("Record darwin ps/pgrep = %v/%v, want nil", hashes["ps"], hashes["pgrep"])
+	}
+	for _, n := range captured {
+		if n == "ps" || n == "pgrep" {
+			t.Errorf("Record darwin captured exempt command %q", n)
+		}
+	}
+}
+
+func TestLoadPlatformHashesAndOverlay(t *testing.T) {
+	fsys := fstest.MapFS{
+		"data/help-hashes.json":        {Data: []byte(`{"jq":"aa","ps":"bb"}`)},
+		"data/help-hashes.darwin.json": {Data: []byte(`{"jq":"cc"}`)},
+	}
+	got, err := LoadPlatformHashes(fsys, "data", "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got["jq"] != "cc" || *got["ps"] != "bb" {
+		t.Errorf("darwin merged = jq %q ps %q, want cc/bb", *got["jq"], *got["ps"])
+	}
+	got, err = LoadPlatformHashes(fsys, "data", "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got["jq"] != "aa" {
+		t.Errorf("linux jq = %q, want aa (no overlay)", *got["jq"])
+	}
+
+	base := map[string]*string{"jq": strPtr("aa"), "ps": strPtr("bb"), "sh": strPtr("dd")}
+	rec := map[string]*string{"jq": strPtr("cc"), "ps": nil, "sh": strPtr("dd"), "bash": strPtr("ee")}
+	ov := Overlay("darwin", base, rec)
+	if len(ov) != 2 || *ov["jq"] != "cc" || *ov["bash"] != "ee" {
+		t.Errorf("Overlay = %v, want only jq=cc and bash=ee", ov)
+	}
+}
