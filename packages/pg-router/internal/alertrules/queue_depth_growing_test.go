@@ -15,10 +15,12 @@ import (
 
 const (
 	// wantExpr MUST equal the expr of rule pg-router-queue-depth-growing.
-	wantExpr = `delta(pg_router_queue_depth[30m]) > 0 and count_over_time(pg_router_queue_depth[30m]) >= 54`
+	wantExpr = `delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54`
 
 	window      = 30 * time.Minute
-	minSamples  = 54 // 90% of the 60 samples a 30s scrape yields over 30m
+	minSamples  = 54   // 90% of the 60 samples a 30s scrape yields over 30m
+	minDelta    = 10   // absolute rise over the window
+	minRatio    = 0.25 // rise as a fraction of the window average
 	forDuration = 15 * time.Minute
 	evalEvery   = time.Minute
 	scrape      = 30 * time.Second
@@ -30,7 +32,7 @@ type sample struct {
 }
 
 // firingNow models the rule expression at instant t: the series must have
-// >= minSamples samples in (t-window, t] and last-first > 0 (delta, without
+// >= minSamples samples in (t-window, t] and last-first >= minDelta and > minRatio*avg (delta, without
 // range extrapolation, which cannot change the sign).
 func firingNow(series []sample, t time.Time) bool {
 	var in []sample
@@ -42,7 +44,12 @@ func firingNow(series []sample, t time.Time) bool {
 	if len(in) < minSamples {
 		return false
 	}
-	return in[len(in)-1].v-in[0].v > 0
+	d := in[len(in)-1].v - in[0].v
+	var sum float64
+	for _, s := range in {
+		sum += s.v
+	}
+	return d >= minDelta && d > minRatio*sum/float64(len(in))
 }
 
 // alerting models `for: 15m`: the expression must hold at every evaluation in
@@ -163,5 +170,31 @@ func TestFlatOrFallingDoesNotAlert(t *testing.T) {
 		if everAlerting(s, start, start.Add(60*time.Minute)) {
 			t.Errorf("%s series reached Alerting", name)
 		}
+	}
+}
+
+// pg2-7xvn8: a dense plateau in a 52-58 band with delta ~ +3 must not alert,
+// even with a slow upward drift (+3 over 30m) and noise.
+func TestDensePlateauNoiseDoesNotAlert(t *testing.T) {
+	var series []sample
+	start := at("10:00:00")
+	for i := 0; i < 360; i++ { // 3 hours of 30s scrapes
+		v := 55 + float64((i*7)%5) - 2 + float64(i%120)/40 // band ~53-60, drifts +3 per 60m cycle
+		series = append(series, sample{start.Add(time.Duration(i) * scrape), v})
+	}
+	if everAlerting(series, start, start.Add(180*time.Minute)) {
+		t.Fatal("dense plateau noise reached Alerting")
+	}
+}
+
+// Sustained growth on top of a non-trivial baseline must still alert.
+func TestSustainedGrowthFromBaselineAlerts(t *testing.T) {
+	var series []sample
+	start := at("10:00:00")
+	for i := 0; i < 240; i++ { // +1 every minute from 20
+		series = append(series, sample{start.Add(time.Duration(i) * scrape), float64(20 + i/2)})
+	}
+	if !everAlerting(series, start, start.Add(120*time.Minute)) {
+		t.Fatal("growth from baseline never reached Alerting")
 	}
 }

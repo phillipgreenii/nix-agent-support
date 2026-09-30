@@ -170,6 +170,14 @@ groups:
       # pg2-xepg6 samples and a synthetic sustained-growth series live in
       # internal/alertrules/queue_depth_growing_test.go. If the scrape
       # interval changes, update the 54 there and here together.
+      #
+      # pg2-7xvn8 (magnitude guard): the presence guard does not filter a
+      # DENSE series. pr.changed / pr.reconcile plateau at ~52-58 with
+      # delta ~ +3 (noise), so `delta > 0` still flapped Pending/Alerting.
+      # Growth now also needs an absolute rise of >= 10 over the window AND
+      # a rise of > 25% of the window's average depth (plateau noise is ~5%
+      # of the average). Constants are mirrored in
+      # internal/alertrules/queue_depth_growing_test.go; change together.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -191,7 +199,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: delta(pg_router_queue_depth[30m]) > 0 and count_over_time(pg_router_queue_depth[30m]) >= 54
+              expr: delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54
           - refId: B
             datasourceUid: __expr__
             model:
