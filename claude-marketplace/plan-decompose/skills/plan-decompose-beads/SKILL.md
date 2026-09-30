@@ -121,9 +121,13 @@ would create a duplicate packet) and MUST NOT pair the content update with
 `--set-metadata pd_curated_rev=...` or any other `write-metadata` touch to `pd_curated_rev`:
 that stamp is written once, at the packet's original `create-packet` call, pinned to the
 docket's `pd_rev` at that moment, and stays untouched by every later `decompose` fix-loop pass
-no matter how many rounds run. Only mode `reconcile`'s own step 3 (`bd update <packet-id>
---set-metadata pd_curated_rev=<new-pd_rev>`) ever changes it again, and only because `pd_rev`
-itself bumped.
+no matter how many rounds run. Only mode `reconcile` ever changes it again (`bd update
+<packet-id> --set-metadata pd_curated_rev=<new-pd_rev>`) — for AFFECTED packets after
+re-curation (its step 3), for UNAFFECTED packets after the affectedness check (its step 5,
+which runs only once the reconcile completes; an aborted reconcile restamps no unaffected
+packet) — and only because `pd_rev` itself bumped, or, in a stamp catch-up, because an earlier
+reconcile left the packet behind. See `read-metadata` / `write-metadata` below for the
+restamp mechanics.
 
 ## `wire-ordering`
 
@@ -148,7 +152,20 @@ validation, so a hyphenated key would be un-updatable: use `pd_` underscore keys
 (probed 2026-08-27: `--set-metadata pd-rev=2` errors, `pd_rev=2` succeeds). Compare values
 as strings (`k=2` stores a number; create-JSON strings stay strings). Never store
 current-value state in notes — notes are append-only narrative and cannot supersede
-`pd_rev`.
+`pd_rev`. Remove a key with `bd update <id> --unset-metadata <key>` (listed by
+`bd update --help`, bd 1.2.2) — this is how `pd_stale` is cleared.
+
+**Reconcile restamps** (core skill mode `reconcile` steps 3 and 5): classify from ONE
+children read, `bd list --parent <docket> --status all -n 0 --json` (probed 2026-09-30, bd
+1.2.2: rows sit under `.data[]`, each with `id`, `status`, `assignee`, `metadata`), skipping
+`status == "closed"`; a row is CLAIMED when its `status` is `in_progress` or its `assignee`
+is non-null. Because a revision may be stored as a JSON number or a string (see above),
+compare revisions for ORDER through jq `tonumber` (e.g.
+`(.metadata.pd_curated_rev | tonumber) < R`), never lexically (`"10" < "9"` is true). The
+restamp is `bd update <packet-id> --set-metadata pd_curated_rev=<R>`; clearing a stamp-mismatch
+marker is `--unset-metadata pd_stale`; releasing a held packet is `bd undefer <packet-id>`.
+Read each restamped packet back (`read-metadata`) before listing it in the step-6 reconcile
+report.
 
 ## `release-set`
 
@@ -199,8 +216,10 @@ Read, for mode `report` (scoped to one docket, paginated over its children — p
   recent comment matching the `write-report` packet-index shape (from `decompose` step 10 or
   a `reconcile` re-curation report), and read its per-packet fixed-read/budget estimates from
   that comment's text. When more than one such report exists, the estimate for a given
-  packet id is the one from the MOST RECENT report that names it — an initial release
-  estimate superseded by a reconcile's re-estimate.
+  packet id is the one from the MOST RECENT report that carries an estimate for it — an
+  initial release estimate superseded by a reconcile's re-estimate. A reconcile report that
+  lists a packet only as restamped-unaffected carries no estimate for it, so it does not
+  supersede an earlier one.
 
 ## `amend-design`
 

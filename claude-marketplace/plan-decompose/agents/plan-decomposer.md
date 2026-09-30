@@ -58,8 +58,10 @@ it by searching disk is both slower and redundant.
   packet's EXISTING content only (the beads binding's `bd update <packet> --body-file <file>`)
   — it MUST NOT call `create-packet` again for that packet and MUST NOT call `write-metadata`
   to touch `pd_curated_rev`: a fix-loop pass is not a curation revision, and only mode
-  `reconcile` ever re-stamps it. Bash stays for this plugin's helper scripts and your own
-  mechanical pre-filter checks.
+  `reconcile` ever re-stamps it — affected packets after re-curation (its step 3), unaffected
+  packets after the affectedness check (its step 5, only once the reconcile completes; an
+  aborted reconcile restamps no unaffected packet). Bash stays for this plugin's helper
+  scripts and your own mechanical pre-filter checks.
 - Gaps found by the pre-check HALT the run with a gap report to your dispatcher (and to the
   tracking bead via `write-report` when one was named). Sizing NEVER halts — split, or stamp
   a metadata deviation and proceed.
