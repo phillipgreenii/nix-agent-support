@@ -36,6 +36,35 @@ func (f syncerFunc) Sync(ctx context.Context, repo, entityID string, change gath
 	return f(ctx, repo, entityID, change, facts, interp)
 }
 
+// AnchorStale/StampClosedAnchor: the plain-func fake has no closed-anchor
+// audit behavior (nothing is ever stale).
+func (f syncerFunc) AnchorStale(ctx context.Context, repo, entityID string) (bool, error) {
+	return false, nil
+}
+
+func (f syncerFunc) StampClosedAnchor(ctx context.Context, repo, entityID, reason string) error {
+	return nil
+}
+
+// auditSyncer layers a closed-anchor audit fake over syncerFunc.
+type auditSyncer struct {
+	syncerFunc
+	stale  map[string]bool
+	stamps map[string]string
+	shows  int
+}
+
+func (a *auditSyncer) AnchorStale(ctx context.Context, repo, entityID string) (bool, error) {
+	a.shows++
+	return a.stale[entityID], nil
+}
+
+func (a *auditSyncer) StampClosedAnchor(ctx context.Context, repo, entityID, reason string) error {
+	a.stamps[entityID] = reason
+	delete(a.stale, entityID)
+	return nil
+}
+
 // testCfg is a minimal single-repo Config, matching Phase 9's "exactly
 // one repository" scope.
 func testCfg() *config.Config {
@@ -965,5 +994,43 @@ func TestPipelineReconcile_NoBudgetProcessesEverything(t *testing.T) {
 	}
 	if n != 3 || len(budgetLogLines(t, &out)) != 0 {
 		t.Fatalf("gathered %d, want 3 with no budget log", n)
+	}
+}
+
+// TestPipelineReconcile_RepairsClosedAnchorWithStaleMetadata is bead
+// pg2-a6aw6's acceptance test: a ledger-closed anchor whose bead metadata
+// is stale (state=open, no closed_at) is stamped with the truthful terminal
+// state by Reconcile alone; a non-stale closed anchor is only read; each is
+// audited once.
+func TestPipelineReconcile_RepairsClosedAnchorWithStaleMetadata(t *testing.T) {
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets"})
+		facts.RemovedState = "merged"
+		return facts, nil
+	}), nil)
+	seedReconcileEntity(t, p, "1", "closed") // stale metadata
+	seedReconcileEntity(t, p, "2", "closed") // already truthful
+	a := &auditSyncer{stale: map[string]bool{"1": true}, stamps: map[string]string{}}
+	p.syncer = a
+
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if a.stamps["1"] != "merged" {
+		t.Fatalf("stale closed anchor 1 not repaired: stamps=%v", a.stamps)
+	}
+	if _, ok := a.stamps["2"]; ok {
+		t.Fatalf("truthful closed anchor 2 was rewritten: %v", a.stamps)
+	}
+	if a.shows != 2 {
+		t.Fatalf("audited %d anchors, want 2", a.shows)
+	}
+
+	// Audited exactly once: a second pass reads and writes nothing.
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if a.shows != 2 || len(a.stamps) != 1 {
+		t.Fatalf("second Reconcile re-audited: shows=%d stamps=%v", a.shows, a.stamps)
 	}
 }

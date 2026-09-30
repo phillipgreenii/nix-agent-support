@@ -49,7 +49,8 @@ func newIssueClient(cfg *config.Config) *issueClient { return &issueClient{cfg: 
 // not import, but staying off pkg/schema keeps this package decoupled from
 // pg-connector's Go API, talking to it only over the CLI/wire surface).
 type issueResult struct {
-	ID string `json:"id"`
+	ID       string            `json:"id"`
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // createInput is the field set `issue create` accepts, mirroring
@@ -119,6 +120,14 @@ func (c *issueClient) Update(ctx context.Context, id string, in updateInput) err
 
 	_, err := c.targetedCall(ctx, args)
 	return err
+}
+
+// Show execs `pg-connector issue show <id>` and returns the issue's
+// metadata (the only field the closed-anchor audit reads).
+func (c *issueClient) Show(ctx context.Context, id string) (issueResult, error) {
+	args := []string{"issue", "show", id}
+	args = append(args, c.backendFlag()...)
+	return c.targetedCall(ctx, args)
 }
 
 // Transition execs `pg-connector issue transition <id> --state <state>`.

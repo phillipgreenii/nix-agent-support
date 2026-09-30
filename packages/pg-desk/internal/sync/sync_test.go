@@ -158,6 +158,15 @@ func helperMain() {
 		n := priorCallCount()
 		id := fmt.Sprintf("bd-created-%d", n)
 		writeIssueResult(id)
+	case "show":
+		// GO_HELPER_SHOW_METADATA is the JSON metadata object `issue show`
+		// reports (closed-anchor audit, pg2-a6aw6).
+		md := os.Getenv("GO_HELPER_SHOW_METADATA")
+		if md == "" {
+			md = "{}"
+		}
+		os.Stdout.WriteString(fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md))
+		os.Exit(0)
 	case "update", "transition":
 		id := ""
 		if len(args) > 2 {
@@ -957,5 +966,55 @@ func TestSync_Reconcile_ExistingAnchorDraftDriftCorrected(t *testing.T) {
 	}
 	if !sawDraft {
 		t.Fatalf("existing anchor's draft metadata not refreshed; records: %+v", readCallRecords(t, recordFile))
+	}
+}
+
+// TestSync_AnchorStale_And_StampClosedAnchor covers bead pg2-a6aw6's sync
+// half: a ledger-closed anchor whose bead metadata says state=open with no
+// closed_at is reported stale and repaired with truthful terminal metadata;
+// an already-truthful one is not stale.
+func TestSync_AnchorStale_And_StampClosedAnchor(t *testing.T) {
+	cases := []struct {
+		name      string
+		metadata  string
+		wantStale bool
+	}{
+		{"open-no-closed-at", `{"state":"open"}`, true},
+		{"merged-without-closed-at", `{"state":"merged"}`, true},
+		{"truthful", `{"state":"merged","closed_at":"2026-09-01T00:00:00Z"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := withFactory(t)
+			t.Setenv("GO_HELPER_SHOW_METADATA", tc.metadata)
+			s := newTestSyncer(t, ModeApply)
+			if err := s.store.UpsertLedger(store.LedgerEntry{
+				Repo: fixtureRepo, EntityType: "pr", EntityID: fixtureEntity, Kind: KindAnchor,
+				BeadID: "bd-anchor", LastSyncedContentHash: closedSentinel,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			stale, err := s.AnchorStale(context.Background(), fixtureRepo, fixtureEntity)
+			if err != nil || stale != tc.wantStale {
+				t.Fatalf("AnchorStale = %v, %v; want %v", stale, err, tc.wantStale)
+			}
+			if !stale {
+				return
+			}
+			if err := s.StampClosedAnchor(context.Background(), fixtureRepo, fixtureEntity, "merged"); err != nil {
+				t.Fatal(err)
+			}
+			calls := readCallRecords(t, rec)
+			last := calls[len(calls)-1]
+			if last.verb() != "issue update" || last.Args[2] != "bd-anchor" {
+				t.Fatalf("last call = %v, want issue update bd-anchor", last.Args)
+			}
+			joined := strings.Join(last.Args, " ")
+			for _, want := range []string{"state=merged", "draft=false", "closed_at=2026-09-17T00:00:00Z"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("update args %q missing %q", joined, want)
+				}
+			}
+		})
 	}
 }

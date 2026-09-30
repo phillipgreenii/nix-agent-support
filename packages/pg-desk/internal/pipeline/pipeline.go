@@ -84,6 +84,10 @@ type gatherer interface {
 // *sync.Syncer satisfies this interface by construction.
 type syncer interface {
 	Sync(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error
+	// AnchorStale/StampClosedAnchor back Reconcile's closed-anchor audit
+	// (bead pg2-a6aw6).
+	AnchorStale(ctx context.Context, repo, entityID string) (bool, error)
+	StampClosedAnchor(ctx context.Context, repo, entityID, reason string) error
 }
 
 // Pipeline wires gather -> interpret -> store -> sync for one entity per
@@ -409,8 +413,13 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 //   - a recorded sync_error (re-driven regardless of PR state; a successful
 //     run clears it).
 //
-// It is idempotent: once an anchor is closed and sync_error is empty the
-// entity is no longer a candidate. Every candidate is attempted even after
+// It also audits every ledger-closed anchor once (bead pg2-a6aw6): an
+// anchor closed by an earlier review can keep stale bead metadata
+// (state=open, no closed_at); a stale one is stamped with the truthful
+// terminal state from a fresh PR re-read, with no operator action.
+//
+// It is idempotent: once an anchor is closed, audited and sync_error is
+// empty the entity is no longer a candidate. Every candidate is attempted even after
 // one fails; failures are joined into the returned error (exit 1) so the
 // caller's scheduler retries the pass. Unlike Sweep it does not touch
 // meta.last_sweep.
@@ -439,21 +448,42 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 
 	// needsPeek[id]=true: anchor-open candidate that must be confirmed
 	// merged/closed first; false: sync_error candidate, always re-driven.
+	// An id absent from needsPeek is not re-driven (audit-only).
 	needsPeek := map[string]bool{}
+	audit := map[string]bool{}
 	var order []string
+	inOrder := map[string]bool{}
+	touch := func(id string) {
+		if !inOrder[id] {
+			inOrder[id] = true
+			order = append(order, id)
+		}
+	}
 	add := func(id string, peek bool) {
 		prev, seen := needsPeek[id]
+		touch(id)
 		if !seen {
-			order = append(order, id)
 			needsPeek[id] = peek
 			return
 		}
 		needsPeek[id] = prev && peek
 	}
 	for _, l := range ledger {
-		if l.Repo == repo && l.EntityType == entityTypePR && l.Kind == sync.KindAnchor &&
-			l.BeadID != "" && l.LastSyncedContentHash != sync.ClosedSentinel {
+		if l.Repo != repo || l.EntityType != entityTypePR || l.Kind != sync.KindAnchor || l.BeadID == "" {
+			continue
+		}
+		if l.LastSyncedContentHash != sync.ClosedSentinel {
 			add(l.EntityID, true)
+			continue
+		}
+		// Closed anchor: audit its bead's metadata once (pg2-a6aw6).
+		_, audited, mErr := p.store.GetMeta(reconcileAuditedKeyPrefix + l.EntityID)
+		if mErr != nil {
+			return fmt.Errorf("pipeline: reconcile: %w", mErr)
+		}
+		if !audited {
+			audit[l.EntityID] = true
+			touch(l.EntityID)
 		}
 	}
 	for _, i := range interps {
@@ -485,18 +515,16 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			break
 		}
 		p.markReconcileChecked(id)
-		if needsPeek[id] {
-			facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
-			if gErr != nil {
-				errs = append(errs, fmt.Errorf("reconcile %s: %w", id, gErr))
+		if peek, redrive := needsPeek[id]; redrive {
+			if err := p.reconcileRedrive(ctx, id, peek); err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			if facts.RemovedState == "open" {
-				continue // still open: nothing to close
-			}
 		}
-		if runErr := p.Run(ctx, entityTypePR, id, gather.ChangeRemoved); runErr != nil {
-			errs = append(errs, fmt.Errorf("reconcile %s: %w", id, runErr))
+		if audit[id] {
+			if err := p.reconcileAuditClosedAnchor(ctx, repo, id); err != nil {
+				errs = append(errs, fmt.Errorf("reconcile %s: %w", id, err))
+			}
 		}
 	}
 	if len(errs) > 0 {
@@ -504,6 +532,62 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 	}
 	return nil
 }
+
+// reconcileRedrive re-drives closure for one candidate: peek=true confirms
+// the PR left the open set first (a still-open PR is left alone).
+func (p *Pipeline) reconcileRedrive(ctx context.Context, id string, peek bool) error {
+	if peek {
+		facts, err := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
+		if err != nil {
+			return fmt.Errorf("reconcile %s: %w", id, err)
+		}
+		if facts.RemovedState == "open" {
+			return nil // still open: nothing to close
+		}
+	}
+	if err := p.Run(ctx, entityTypePR, id, gather.ChangeRemoved); err != nil {
+		return fmt.Errorf("reconcile %s: %w", id, err)
+	}
+	return nil
+}
+
+// reconcileAuditClosedAnchor repairs a closed anchor whose bead metadata
+// was left stale (state=open, no closed_at) by an earlier review that
+// closed it before handleClosure stamped the terminal state (bead
+// pg2-a6aw6). Policy: the truthful state comes from a fresh PR re-read
+// (merged, else closed), closed_at is the repair time, and each anchor is
+// audited exactly once (reconcile.anchor-audited.<id>) so the per-anchor
+// `issue show` cost is not repaid on every pass. A PR that has since
+// reopened is left unmarked and unrepaired.
+func (p *Pipeline) reconcileAuditClosedAnchor(ctx context.Context, repo, id string) error {
+	stale, err := p.syncer.AnchorStale(ctx, repo, id)
+	if err != nil {
+		return err
+	}
+	if stale {
+		facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
+		if gErr != nil {
+			return gErr
+		}
+		if facts.RemovedState == "open" || facts.RemovedState == "" {
+			return nil
+		}
+		reason := "closed"
+		if facts.RemovedState == "merged" {
+			reason = "merged"
+		}
+		if err := p.syncer.StampClosedAnchor(ctx, repo, id, reason); err != nil {
+			return err
+		}
+	}
+	// Best-effort mark: a failed stamp only costs one repeated audit.
+	_ = p.store.SetMeta(reconcileAuditedKeyPrefix+id, p.clock.Now().UTC().Format(time.RFC3339Nano))
+	return nil
+}
+
+// reconcileAuditedKeyPrefix prefixes the per-entity meta key recording that
+// a closed anchor's bead metadata has been audited (and repaired if stale).
+const reconcileAuditedKeyPrefix = "reconcile.anchor-audited."
 
 // reconcileCheckedKeyPrefix prefixes the per-entity meta key recording when
 // Reconcile last attempted that entity (RFC3339Nano UTC).

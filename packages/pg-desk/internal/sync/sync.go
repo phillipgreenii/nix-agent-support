@@ -276,3 +276,56 @@ func prNumberFromEntityID(entityID, repo string) (int, bool) {
 	}
 	return n, true
 }
+
+// AnchorStale reports whether the closed anchor bead for entityID still
+// carries stale metadata (bead pg2-a6aw6): the ledger says the anchor was
+// closed, but the bead's own metadata state is not merged/closed or it has
+// no closed_at (anchors closed by an earlier review, before handleClosure
+// stamped the terminal state, were left state=open). It performs one
+// `issue show` read; a ledger row that is not a closed anchor, or any mode
+// other than apply (nothing would be written), reports false.
+func (s *Syncer) AnchorStale(ctx context.Context, repo, entityID string) (bool, error) {
+	if s.mode() != ModeApply {
+		return false, nil
+	}
+	l, found, err := s.store.GetLedger(repo, "pr", entityID, KindAnchor)
+	if err != nil {
+		return false, fmt.Errorf("sync: read anchor ledger row: %w", err)
+	}
+	if !found || l.BeadID == "" || l.LastSyncedContentHash != closedSentinel {
+		return false, nil
+	}
+	res, err := s.client.Show(ctx, l.BeadID)
+	if err != nil {
+		return false, fmt.Errorf("sync: read closed anchor %s: %w", l.BeadID, err)
+	}
+	state := res.Metadata["state"]
+	return (state != "merged" && state != "closed") || res.Metadata["closed_at"] == "", nil
+}
+
+// StampClosedAnchor writes the truthful terminal metadata (state=reason,
+// draft=false, closed_at, last_checked_at) onto entityID's already-closed
+// anchor bead — the same fields handleClosure stamps before closing.
+// reason is "merged" or "closed", taken from a fresh PR re-read.
+func (s *Syncer) StampClosedAnchor(ctx context.Context, repo, entityID, reason string) error {
+	if s.mode() != ModeApply {
+		return nil
+	}
+	l, found, err := s.store.GetLedger(repo, "pr", entityID, KindAnchor)
+	if err != nil {
+		return fmt.Errorf("sync: read anchor ledger row: %w", err)
+	}
+	if !found || l.BeadID == "" || l.LastSyncedContentHash != closedSentinel {
+		return nil
+	}
+	if reason != "merged" {
+		reason = "closed"
+	}
+	now := s.clock.Now().UTC().Format(rfc3339)
+	if err := s.client.Update(ctx, l.BeadID, updateInput{Metadata: map[string]string{
+		"state": reason, "draft": "false", "closed_at": now, "last_checked_at": now,
+	}}); err != nil {
+		return fmt.Errorf("sync: repair closed anchor %s: %w", l.BeadID, err)
+	}
+	return nil
+}
