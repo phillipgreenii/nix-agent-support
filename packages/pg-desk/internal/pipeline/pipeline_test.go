@@ -860,3 +860,110 @@ func TestPipelineReconcile_ContinuesPastFailureAndReturnsError(t *testing.T) {
 		t.Fatalf("sync ran %d times, want 1 (entity 5)", synced)
 	}
 }
+
+// --- Reconcile budget: pg2-a5z69 — bounded, convergent runs -----------------
+
+// steppingClock is a mutable interpret.Clock: the fake gatherer advances it
+// to simulate a slow (~seconds) pg-connector read.
+type steppingClock struct{ now time.Time }
+
+func (c *steppingClock) Now() time.Time { return c.now }
+
+// budgetLogLines returns the decoded reconcile_budget log events in out.
+func budgetLogLines(t *testing.T, out *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for _, l := range strings.Split(out.String(), "\n") {
+		if !strings.Contains(l, "reconcile_budget") {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("bad log line %q: %v", l, err)
+		}
+		lines = append(lines, m)
+	}
+	return lines
+}
+
+// TestPipelineReconcile_BudgetStopsCleanlyAndRunsConverge: each PR read
+// costs 6s against a 5s budget, so one candidate fits per run. Each run
+// exits nil (a budget stop is NOT a failure) with a logged remaining count,
+// and successive runs visit the oldest-checked candidate first, so three
+// runs cover all three candidates even though every PR is still open.
+func TestPipelineReconcile_BudgetStopsCleanlyAndRunsConverge(t *testing.T) {
+	clk := &steppingClock{now: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)}
+	var gathered []string
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		gathered = append(gathered, entityID)
+		clk.now = clk.now.Add(6 * time.Second)
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "open", "repo": "acme/widgets"})
+		facts.RemovedState = "open"
+		return facts, nil
+	}), &out, WithReconcileBudget(5*time.Second))
+	p.clock = clk
+	for _, id := range []string{"1", "2", "3"} {
+		seedReconcileEntity(t, p, id, "abc")
+	}
+
+	for run := 0; run < 3; run++ {
+		clk.now = clk.now.Add(time.Hour) // runs are far apart
+		if err := p.Reconcile(context.Background()); err != nil {
+			t.Fatalf("run %d: budget stop must not be an error: %v", run, err)
+		}
+	}
+	if got := strings.Join(gathered, ","); got != "1,2,3" {
+		t.Fatalf("gathered %q, want 1,2,3 (one per run, oldest-checked first)", got)
+	}
+	lines := budgetLogLines(t, &out)
+	if len(lines) != 3 { // every run leaves 2 candidates unvisited
+		t.Fatalf("got %d budget log lines, want 3: %v", len(lines), lines)
+	}
+	for _, l := range lines {
+		if l["processed"] != float64(1) || l["remaining"] != float64(2) {
+			t.Fatalf("processed/remaining wrong: %v", lines)
+		}
+	}
+}
+
+// TestPipelineReconcile_BudgetStopStillReportsFailures: a candidate that
+// failed before the budget ran out still yields the non-nil (exit 1) error.
+func TestPipelineReconcile_BudgetStopStillReportsFailures(t *testing.T) {
+	clk := &steppingClock{now: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)}
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		clk.now = clk.now.Add(6 * time.Second)
+		return gather.Facts{}, errors.New("boom")
+	}), nil, WithReconcileBudget(5*time.Second))
+	p.clock = clk
+	seedReconcileEntity(t, p, "1", "abc")
+	seedReconcileEntity(t, p, "2", "abc")
+	if err := p.Reconcile(context.Background()); err == nil {
+		t.Fatal("expected the failed candidate to surface as an error")
+	}
+}
+
+// TestPipelineReconcile_NoBudgetProcessesEverything: the zero value keeps
+// the original unbounded behavior.
+func TestPipelineReconcile_NoBudgetProcessesEverything(t *testing.T) {
+	clk := &steppingClock{now: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)}
+	n := 0
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		n++
+		clk.now = clk.now.Add(time.Hour)
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "open", "repo": "acme/widgets"})
+		facts.RemovedState = "open"
+		return facts, nil
+	}), &out)
+	p.clock = clk
+	for _, id := range []string{"1", "2", "3"} {
+		seedReconcileEntity(t, p, id, "abc")
+	}
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 || len(budgetLogLines(t, &out)) != 0 {
+		t.Fatalf("gathered %d, want 3 with no budget log", n)
+	}
+}

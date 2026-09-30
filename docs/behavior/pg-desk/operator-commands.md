@@ -75,8 +75,18 @@ one error. It takes no arguments and does not stamp `meta.last_sweep`. `pg-desk`
 scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST invoke
 `pg-desk reconcile` periodically.
 
-Exit codes: `0` when every candidate succeeds (including none); `1` when config or store cannot
-be opened, or when any candidate's re-drive failed (naming which).
+`reconcile` is bounded per run so a large backlog converges across successive scheduled runs
+instead of being killed mid-pass. `--budget <duration>` (default `4m`; `0` = unbounded) stops
+`reconcile` from starting new candidates once that much wall-clock time has elapsed (the candidate
+in flight finishes). Candidates are visited oldest-checked first, using a per-entity
+`meta.reconcile.checked.<id>` stamp written after every attempt, so each bounded run resumes where
+the previous one stopped. Re-reads are serial (the gatherer is not safe for concurrent calls).
+
+Exit codes: `0` when every candidate succeeds (including none) and also when the budget ran out
+with candidates remaining — that case is distinguishable only by the stderr JSON line
+`{"event":"reconcile_budget_exhausted","processed":N,"remaining":M}`; `1` when config or store
+cannot be opened, or when any candidate's re-drive failed (naming which), even if the budget also
+ran out.
 
 ## doctor
 

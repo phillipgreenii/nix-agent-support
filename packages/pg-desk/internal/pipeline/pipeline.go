@@ -57,6 +57,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -97,6 +98,8 @@ type Pipeline struct {
 	clock    interpret.Clock
 	verbose  bool
 	out      io.Writer
+
+	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
 }
 
 // Option configures a Pipeline constructed by New.
@@ -114,6 +117,13 @@ func WithClock(c interpret.Clock) Option {
 // [design 7.9: "--verbose on run prints the three-stage timeline"].
 func WithVerbose(v bool) Option {
 	return func(p *Pipeline) { p.verbose = v }
+}
+
+// WithReconcileBudget bounds one Reconcile pass to roughly d of wall-clock
+// time (bead pg2-a5z69). The budget is checked between candidates, so the
+// candidate in flight always finishes; d <= 0 means unbounded.
+func WithReconcileBudget(d time.Duration) Option {
+	return func(p *Pipeline) { p.reconcileBudget = d }
 }
 
 // WithLogWriter overrides where structured JSON logs are written.
@@ -404,6 +414,18 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 // one fails; failures are joined into the returned error (exit 1) so the
 // caller's scheduler retries the pass. Unlike Sweep it does not touch
 // meta.last_sweep.
+//
+// # Budget and convergence (bead pg2-a5z69)
+//
+// Each candidate costs a pg-connector re-read (~4s), so a large backlog can
+// outlive the caller's timeout. With WithReconcileBudget set, Reconcile
+// stops starting new candidates once the budget elapsed and returns nil
+// (NOT an error: a budget stop is progress, not a failed re-drive) after
+// logging a {"event":"reconcile_budget_exhausted","processed":N,
+// "remaining":M} line. Candidates are visited oldest-checked first, using a
+// per-entity meta stamp (reconcile.checked.<id>) written after every attempt
+// (success, still-open, or failure), so successive bounded runs cover the
+// whole backlog rather than re-reading the same head of the list.
 func (p *Pipeline) Reconcile(ctx context.Context) error {
 	repo := p.repo()
 	ledger, err := p.store.ListLedger()
@@ -440,8 +462,29 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	var errs []error
+	// Oldest-checked (or never-checked) first; stable so ties keep the
+	// deterministic ledger/interpretation order.
+	checkedAt := map[string]string{}
 	for _, id := range order {
+		v, _, mErr := p.store.GetMeta(reconcileCheckedKeyPrefix + id)
+		if mErr != nil {
+			return fmt.Errorf("pipeline: reconcile: %w", mErr)
+		}
+		checkedAt[id] = v
+	}
+	sort.SliceStable(order, func(a, b int) bool { return checkedAt[order[a]] < checkedAt[order[b]] })
+
+	start := p.clock.Now()
+	var errs []error
+	for idx, id := range order {
+		if p.reconcileBudget > 0 && idx > 0 && p.clock.Now().Sub(start) >= p.reconcileBudget {
+			line, _ := json.Marshal(map[string]any{
+				"event": "reconcile_budget_exhausted", "processed": idx, "remaining": len(order) - idx,
+			})
+			_, _ = fmt.Fprintln(p.out, string(line))
+			break
+		}
+		p.markReconcileChecked(id)
 		if needsPeek[id] {
 			facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
 			if gErr != nil {
@@ -460,6 +503,16 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("pipeline: reconcile: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// reconcileCheckedKeyPrefix prefixes the per-entity meta key recording when
+// Reconcile last attempted that entity (RFC3339Nano UTC).
+const reconcileCheckedKeyPrefix = "reconcile.checked."
+
+// markReconcileChecked stamps id as attempted now. Best-effort: a failed
+// stamp only costs ordering fidelity on the next run, never correctness.
+func (p *Pipeline) markReconcileChecked(id string) {
+	_ = p.store.SetMeta(reconcileCheckedKeyPrefix+id, p.clock.Now().UTC().Format(time.RFC3339Nano))
 }
 
 // entityTypePR is the one entity type the sync stage runs for — mirrors
