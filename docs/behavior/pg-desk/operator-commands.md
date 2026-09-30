@@ -18,9 +18,10 @@ omitting the planned-sync-writes section rather than failing `show` outright.
 ## status
 
 `pg-desk status` prints the store path and schema version, entity and interpretation counts, the
-last heartbeat/run/sweep times, degraded rows, sync errors, and — when `sync.mode` is `plan` —
-planned sync rows by kind (anchor / feedback-cycle / review-request; see [`sync.md`](sync.md)). It
-also prints `pg-connector ledger show` for the configured consumer.
+last heartbeat/run/sweep times, degraded rows, sync errors (with how many are retrying, exhausted,
+and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), and — when `sync.mode` is
+`plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
+[`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
 
 Exit codes: `0` on success; `1` when the store cannot be opened. A config-load failure (needed
 only to check `sync.mode`) degrades to omitting the planned-sync-rows section rather than failing
@@ -66,14 +67,22 @@ removed` path (so closure stays ledger-guarded and re-entrant), every PR entity 
 - a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR a
   `--change removed` re-read reports as merged, closed, or not found; a PR still `open` is left
   alone; or
-- a recorded `interpretation.sync_error`, re-driven regardless of PR state (a successful run
-  clears it).
+- a recorded `interpretation.sync_error` whose automatic retry is due (see [`sync.md`](sync.md)'s
+  "Automatic retry"), re-driven regardless of PR state (a successful run clears it). A row with
+  no recorded retry state yet is due.
+
+A `sync_error` row whose retry is not due — still backing off, exhausted, or non-transient — is
+held: `reconcile` MUST NOT re-drive it through either bullet above (its open anchor is not re-read
+either, since that re-drive would be one more retry of the same failing sync). This is how a
+transient failure heals on a later scheduled pass with no operator action, while a persistent one
+stops after the retry bound. `--retry-all` lifts the hold for one run: every recorded `sync_error`
+is re-driven now, whatever its retry state — the operator's manual repair once the cause is fixed.
 
 `reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
 no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
-one error. It takes no arguments and does not stamp `meta.last_sweep`. `pg-desk` ships no
-scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST invoke
-`pg-desk reconcile` periodically.
+one error. It takes no positional arguments and does not stamp `meta.last_sweep`. `pg-desk`
+ships no scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST
+invoke `pg-desk reconcile` periodically — without `--retry-all`, so the retry policy holds.
 
 `reconcile` is bounded per run so a large backlog converges across successive scheduled runs
 instead of being killed mid-pass. `--budget <duration>` (default `4m`; `0` = unbounded) stops
@@ -91,11 +100,15 @@ ran out.
 ## doctor
 
 `pg-desk doctor` checks: the config resolves; `pg-connector` is on `PATH` and its `config
-validate` passes; `serve` is reachable; and the stranded-cycle report formerly produced by
-`pr-pool reconcile`. `pg-connector config validate`'s own query-name-coverage check (a
-config-authoring signal comparing a backend's declared query names against its peers of the
-same type, bead `pg2-2j5ac.28.1`) is informational-only as of `pg2-rnnfz` — it does not affect
-that check's pass/fail verdict, so a query-coverage gap alone never fails `doctor`.
+validate` passes; `serve` is reachable; that no row carries a recorded `sync_error` (a gate: any
+such row fails `doctor`, and each is listed with its error and its retry indicator — still
+retrying, with retries used out of the bound and the next retry time; exhausted; or
+non-transient — see [`sync.md`](sync.md)'s "Automatic retry"); and the stranded-cycle report
+formerly produced by `pr-pool reconcile`. `pg-connector config validate`'s own
+query-name-coverage check (a config-authoring signal comparing a backend's declared query names
+against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only as of
+`pg2-rnnfz` — it does not affect that check's pass/fail verdict, so a query-coverage gap alone
+never fails `doctor`.
 
 "The config resolves" includes every configured `repos[].beads_dir`: config load MUST fail —
 so every command, `serve` startup, and `doctor` exit non-zero — when a `beads_dir` does not

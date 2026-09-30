@@ -155,6 +155,19 @@ func helperMain() {
 
 	switch args[1] {
 	case "create":
+		// GO_HELPER_REQUIRE_DIR impersonates the beads backend pinned to a
+		// workspace that is not there (an unmounted volume): create fails the
+		// way the real backend does, with wire code "unavailable" and bd's
+		// chdir error, until that directory exists (bead pg2-xb6fs).
+		if dir := os.Getenv("GO_HELPER_REQUIRE_DIR"); dir != "" {
+			if _, err := os.Stat(dir); err != nil {
+				writeWireError("unavailable", "pg-connector-issue-beads: chdir "+dir+": no such file or directory")
+			}
+		}
+		// GO_HELPER_FAIL_CODE makes create fail with that wire error code.
+		if code := os.Getenv("GO_HELPER_FAIL_CODE"); code != "" {
+			writeWireError(code, "injected "+code+" failure")
+		}
 		n := priorCallCount()
 		id := fmt.Sprintf("bd-created-%d", n)
 		writeIssueResult(id)
@@ -196,6 +209,13 @@ func priorCallCount() int {
 	}
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	return len(lines)
+}
+
+// writeWireError answers with pg-connector's targeted-op failure shape: an
+// error envelope on stdout and exit 1.
+func writeWireError(code, message string) {
+	os.Stdout.WriteString(fmt.Sprintf(`{"protocolVersion":1,"error":{"code":%q,"message":%q}}`, code, message))
+	os.Exit(1)
 }
 
 func writeIssueResult(id string) {

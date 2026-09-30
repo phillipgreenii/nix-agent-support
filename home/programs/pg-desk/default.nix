@@ -35,6 +35,13 @@ let
   renderedOpen = lib.filterAttrs (_: v: v != null) {
     chrome_bin = cfg.open.chromeBin;
   };
+  # sync.retry (bead pg2-xb6fs): each key only when set, so pg-desk's own
+  # defaults (10 retries, 1m initial backoff, 30m cap) apply otherwise.
+  renderedSyncRetry = lib.filterAttrs (_: v: v != null) {
+    max_retries = cfg.sync.retry.maxRetries;
+    initial_backoff = cfg.sync.retry.initialBackoff;
+    max_backoff = cfg.sync.retry.maxBackoff;
+  };
 
   # The complete rendered document: every section-7.8 config key, each
   # included only when this module was actually given something for it —
@@ -72,7 +79,10 @@ let
   }
   // lib.optionalAttrs (cfg.actor != null) { inherit (cfg) actor; }
   // {
-    sync = { inherit (cfg.sync) mode; };
+    sync = {
+      inherit (cfg.sync) mode;
+    }
+    // lib.optionalAttrs (renderedSyncRetry != { }) { retry = renderedSyncRetry; };
   }
   // lib.optionalAttrs (cfg.heartbeatPeriod != null) { heartbeat_period = cfg.heartbeatPeriod; }
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
@@ -285,6 +295,42 @@ in
           packages/pg-desk/internal/sync's own fallback to "off" when this
           key is absent from config.yaml.
         '';
+      };
+
+      # sync.retry (bead pg2-xb6fs): bounds the automatic retry of a
+      # recorded sync_error. Left null, pg-desk's own defaults apply (see
+      # packages/pg-desk/internal/config's DefaultSyncRetry* constants).
+      retry = {
+        maxRetries = lib.mkOption {
+          type = lib.types.nullOr lib.types.ints.unsigned;
+          default = null;
+          description = ''
+            config.yaml's sync.retry.max_retries: how many automatic retries
+            a transient sync failure gets after the original failure before
+            the row is left exhausted (a permanent sync_error until an
+            operator runs `pg-desk reconcile --retry-all`). 0 disables
+            automatic retry. Null uses pg-desk's default, 10.
+          '';
+        };
+        initialBackoff = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            config.yaml's sync.retry.initial_backoff (a Go
+            time.ParseDuration string): the wait before the first retry,
+            doubled for each later one. Null uses pg-desk's default, "1m".
+          '';
+        };
+        maxBackoff = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            config.yaml's sync.retry.max_backoff (a Go time.ParseDuration
+            string): the cap on the doubled wait. Null uses pg-desk's
+            default, "30m". Retries run only when `pg-desk reconcile` does,
+            so its schedule also bounds how often a row is retried.
+          '';
+        };
       };
     };
 

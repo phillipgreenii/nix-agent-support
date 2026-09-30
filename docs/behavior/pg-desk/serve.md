@@ -37,7 +37,13 @@ dashboard payload's own `age_seconds`/`stale` fields — `stale` is `0 = fresh`,
 opposite polarity from a presence-style gauge), `pg_desk_dropped` (promoted from
 `dropped_count`, a point-in-time gauge, matching this payload's own field), and
 `pg_desk_sync_errors_total` (a counter, by repo — registered and exposed but with no live call
-site wired here, since `serve` never itself runs sync). `serve`'s WARN/ERROR-level operational
+site wired here, since `serve` never itself runs sync). Four gauges are read from the shared
+store at scrape time, so they do reflect failures `run` recorded: `pg_desk_sync_error_rows` (rows
+with a recorded `sync_error`), `pg_desk_oldest_sync_error_age_seconds`, and — splitting those rows
+by their automatic-retry state (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s "Automatic retry")
+— `pg_desk_sync_error_retrying_rows` (still being retried, so they may heal on their own) and
+`pg_desk_sync_error_exhausted_rows` (no automatic retry left: the bound was reached, or the failure
+is non-transient; these need an operator). `serve`'s WARN/ERROR-level operational
 log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 (`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
 `serve` still logs to the path its launchd module configures, defaulting to

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // yamlTags returns the yaml tag name (before any comma option) for every
@@ -66,7 +67,10 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"AgentConfig", reflect.TypeOf(AgentConfig{}), []string{"login", "approval_regex", "policy"}},
 		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types"}},
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
-		{"SyncConfig", reflect.TypeOf(SyncConfig{}), []string{"mode"}},
+		// sync.retry (bead pg2-xb6fs) postdates the section-7.8 table: the
+		// automatic-retry bounds for a recorded sync_error.
+		{"SyncConfig", reflect.TypeOf(SyncConfig{}), []string{"mode", "retry"}},
+		{"SyncRetryConfig", reflect.TypeOf(SyncRetryConfig{}), []string{"max_retries", "initial_backoff", "max_backoff"}},
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 	}
@@ -202,6 +206,13 @@ func TestLoadFile_FullExample(t *testing.T) {
 	if cfg.Sync.Mode != "off" {
 		t.Errorf("sync.mode: got %q", cfg.Sync.Mode)
 	}
+	maxRetries, initialBackoff, maxBackoff, err := cfg.Sync.Retry.Resolve()
+	if err != nil {
+		t.Fatalf("sync.retry: Resolve: %v", err)
+	}
+	if maxRetries != 5 || initialBackoff != 2*time.Minute || maxBackoff != time.Hour {
+		t.Errorf("sync.retry: got (%d, %s, %s), want (5, 2m0s, 1h0m0s)", maxRetries, initialBackoff, maxBackoff)
+	}
 
 	if cfg.HeartbeatPeriod != "5m" {
 		t.Errorf("heartbeat_period: got %q", cfg.HeartbeatPeriod)
@@ -322,6 +333,47 @@ func writeYAML(t *testing.T, dir, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestSyncRetryResolve_Defaults: an absent sync.retry block resolves to the
+// documented defaults (10 retries, 1m initial backoff, 30m cap).
+func TestSyncRetryResolve_Defaults(t *testing.T) {
+	maxRetries, initialBackoff, maxBackoff, err := SyncRetryConfig{}.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if maxRetries != 10 || initialBackoff != time.Minute || maxBackoff != 30*time.Minute {
+		t.Fatalf("defaults = (%d, %s, %s), want (10, 1m0s, 30m0s)", maxRetries, initialBackoff, maxBackoff)
+	}
+}
+
+// TestSyncRetryResolve_ExplicitZeroDisablesRetry: max_retries: 0 is honored
+// (not replaced by the default).
+func TestSyncRetryResolve_ExplicitZeroDisablesRetry(t *testing.T) {
+	zero := 0
+	maxRetries, _, _, err := SyncRetryConfig{MaxRetries: &zero}.Resolve()
+	if err != nil || maxRetries != 0 {
+		t.Fatalf("Resolve(max_retries: 0) = (%d, %v), want (0, nil)", maxRetries, err)
+	}
+}
+
+func TestLoadFile_SyncRetryInvalidValuesFail(t *testing.T) {
+	for name, block := range map[string]string{
+		"negative max_retries":      "max_retries: -1",
+		"unparseable backoff":       "initial_backoff: soon",
+		"zero backoff":              "initial_backoff: 0s",
+		"negative max_backoff":      "max_backoff: -5m",
+		"max below initial backoff": "initial_backoff: 10m\n    max_backoff: 5m",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\nsync:\n  retry:\n    "+block+"\n")
+			_, err := LoadFile(p)
+			if err == nil || !strings.Contains(err.Error(), "sync.retry") {
+				t.Fatalf("LoadFile: err = %v, want a sync.retry validation error", err)
+			}
+		})
+	}
 }
 
 func TestLoadFile_Minimal(t *testing.T) {

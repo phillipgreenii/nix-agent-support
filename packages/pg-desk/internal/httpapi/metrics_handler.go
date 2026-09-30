@@ -59,12 +59,18 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 			return metrics.Snapshot{}, err
 		}
 		syncRows, oldestAge := syncErrorStats(interps, nowUTC())
+		retrying, exhausted, err := syncRetryStats(st, interps)
+		if err != nil {
+			return metrics.Snapshot{}, err
+		}
 		return metrics.Snapshot{
 			AgeSeconds:                payload.AgeSeconds,
 			Stale:                     payload.Stale,
 			DroppedCount:              payload.DroppedCount,
 			SyncErrorRows:             syncRows,
 			OldestSyncErrorAgeSeconds: oldestAge,
+			SyncErrorRetryingRows:     retrying,
+			SyncErrorExhaustedRows:    exhausted,
 		}, nil
 	}
 
@@ -91,4 +97,26 @@ func syncErrorStats(interps []store.Interpretation, now time.Time) (rows, oldest
 		}
 	}
 	return rows, oldestAgeSeconds
+}
+
+// syncRetryStats splits the sync_error rows by automatic-retry state (bead
+// pg2-xb6fs): retrying (including a row with no recorded state yet, which is
+// due for its first retry) versus exhausted (retry bound reached, or
+// non-transient — no automatic retry left).
+func syncRetryStats(st *store.Store, interps []store.Interpretation) (retrying, exhausted int, err error) {
+	for _, i := range interps {
+		if i.SyncError == "" {
+			continue
+		}
+		r, _, err := st.GetSyncRetry(i.EntityID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if r.EffectiveState() == store.SyncRetryRetrying {
+			retrying++
+		} else {
+			exhausted++
+		}
+	}
+	return retrying, exhausted, nil
 }

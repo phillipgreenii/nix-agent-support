@@ -68,6 +68,52 @@ func TestStatusReportsCountsAgainstFixtureStore(t *testing.T) {
 	}
 }
 
+// TestStatusCountsSyncErrorsByRetryState: status splits the sync_error rows
+// into retrying / exhausted / non-transient (bead pg2-xb6fs); a row with no
+// recorded retry state yet counts as retrying.
+func TestStatusCountsSyncErrorsByRetryState(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+
+	origLedger := statusRunPgConnectorLedgerShow
+	t.Cleanup(func() { statusRunPgConnectorLedgerShow = origLedger })
+	statusRunPgConnectorLedgerShow = func(ctx context.Context) (string, error) { return "(empty)\n", nil }
+
+	states := map[string]string{
+		"o/r#1": store.SyncRetryRetrying,
+		"o/r#2": "", // no recorded state
+		"o/r#3": store.SyncRetryExhausted,
+		"o/r#4": store.SyncRetryNonTransient,
+	}
+	for id, state := range states {
+		if err := st.UpsertInterpretation(store.Interpretation{
+			Repo: "o/r", EntityType: entityTypePR, EntityID: id, SyncError: "boom", AsOf: "2026-09-30T00:00:00Z",
+		}); err != nil {
+			t.Fatalf("seed interpretation %s: %v", id, err)
+		}
+		if state != "" {
+			if err := st.SetSyncRetry(id, store.SyncRetry{Attempts: 1, State: state}); err != nil {
+				t.Fatalf("seed retry state %s: %v", id, err)
+			}
+		}
+	}
+
+	stdout, err := runStatusCmd(t)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, want := range []string{
+		"sync_errors: 4\n",
+		"sync_errors_retrying: 2\n",
+		"sync_errors_exhausted: 1\n",
+		"sync_errors_non_transient: 1\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+}
+
 // TestStatusPrintsPlannedSyncRowsInPlanMode is docket pg2-2j5ac.34.1's own
 // acceptance criterion: `pg-desk status` prints planned sync rows by kind
 // when sync.mode is "plan" (design section 7.5, 7.7), and stays silent on

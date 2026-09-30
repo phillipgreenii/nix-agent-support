@@ -58,6 +58,10 @@ actor: pg-desk
 
 sync:
   mode: off
+  retry:
+    max_retries: 5
+    initial_backoff: 2m
+    max_backoff: 1h
 
 heartbeat_period: 5m
 stale_after: 30m

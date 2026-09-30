@@ -29,6 +29,15 @@ func (s *Store) SetMeta(key, value string) error {
 	return nil
 }
 
+// DeleteMeta removes the meta row for key. Deleting a key that was never
+// set is not an error.
+func (s *Store) DeleteMeta(key string) error {
+	if _, err := s.sql.Exec(`DELETE FROM meta WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("store: delete meta %q: %w", key, err)
+	}
+	return nil
+}
+
 // GetMeta returns the meta value for key, or found=false if no such key
 // has been set.
 func (s *Store) GetMeta(key string) (value string, found bool, err error) {

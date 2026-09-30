@@ -22,6 +22,23 @@ func TestReconcileCmdRequiresNoArgs(t *testing.T) {
 	}
 }
 
+// TestReconcileCmdHasRetryAllFlag: the operator's manual repair flag
+// (bead pg2-xb6fs) exists and defaults off, so scheduled runs honor the
+// automatic-retry policy.
+func TestReconcileCmdHasRetryAllFlag(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"reconcile"})
+	if err != nil {
+		t.Fatalf("rootCmd has no reconcile subcommand: %v", err)
+	}
+	f := cmd.Flags().Lookup("retry-all")
+	if f == nil {
+		t.Fatal("reconcile has no --retry-all flag")
+	}
+	if f.DefValue != "false" {
+		t.Fatalf("--retry-all default = %q, want false", f.DefValue)
+	}
+}
+
 // An empty store has nothing to reconcile and never gathers (no
 // pg-connector on this test's $PATH), so it exits cleanly.
 func TestReconcileCmdEmptyStoreSucceeds(t *testing.T) {

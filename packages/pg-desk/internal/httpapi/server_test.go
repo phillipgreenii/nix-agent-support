@@ -446,3 +446,34 @@ func TestSyncErrorStats(t *testing.T) {
 		t.Fatalf("empty = (%d, %d), want (0, 0)", rows, oldest)
 	}
 }
+
+// TestSyncRetryStats: the retrying/exhausted gauges (bead pg2-xb6fs) split
+// the sync_error rows by their recorded retry state; a row with no state yet
+// counts as retrying, and non-transient counts as exhausted.
+func TestSyncRetryStats(t *testing.T) {
+	st := store.OpenForTest(t)
+	for id, state := range map[string]string{
+		"a": store.SyncRetryRetrying,
+		"b": store.SyncRetryExhausted,
+		"c": store.SyncRetryNonTransient,
+		"e": store.SyncRetryExhausted, // no sync_error: ignored
+	} {
+		if err := st.SetSyncRetry(id, store.SyncRetry{Attempts: 1, State: state}); err != nil {
+			t.Fatalf("SetSyncRetry(%s): %v", id, err)
+		}
+	}
+	interps := []store.Interpretation{
+		{EntityID: "a", SyncError: "boom"},
+		{EntityID: "b", SyncError: "boom"},
+		{EntityID: "c", SyncError: "boom"},
+		{EntityID: "d", SyncError: "boom"}, // no recorded state: retrying
+		{EntityID: "e"},
+	}
+	retrying, exhausted, err := syncRetryStats(st, interps)
+	if err != nil {
+		t.Fatalf("syncRetryStats: %v", err)
+	}
+	if retrying != 2 || exhausted != 2 {
+		t.Fatalf("syncRetryStats = (%d, %d), want (2, 2)", retrying, exhausted)
+	}
+}

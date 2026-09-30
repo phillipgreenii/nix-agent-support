@@ -46,6 +46,18 @@
 // writer persist already uses, never a new store method. The sync failure
 // is then ALSO returned as a Run-level error (pg2-kftf9.1) so pg-router
 // retries it — see the sync stage's own doc comment below.
+//
+// # Automatic retry of a sync_error (bead pg2-xb6fs)
+//
+// Every failed PR run of an entity that has a recorded sync_error — whether
+// the sync stage itself failed, or an earlier stage failed on a later
+// attempt — counts one attempt in that entity's store.SyncRetry, classified
+// and scheduled by internal/sync's RetryPolicy (transient failures back off
+// exponentially up to a retry bound; non-transient ones are never retried
+// automatically). A successful PR run deletes the state along with clearing
+// sync_error. Reconcile re-drives only the sync_error rows whose retry is
+// due, so a transient failure heals on a later scheduled pass without an
+// operator, and a persistent one stops after the bound.
 package pipeline
 
 import (
@@ -104,6 +116,11 @@ type Pipeline struct {
 	out      io.Writer
 
 	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
+
+	// retryPolicy schedules and bounds automatic retries of a recorded
+	// sync_error; retryAll makes Reconcile ignore it (pg2-xb6fs).
+	retryPolicy sync.RetryPolicy
+	retryAll    bool
 }
 
 // Option configures a Pipeline constructed by New.
@@ -130,6 +147,15 @@ func WithReconcileBudget(d time.Duration) Option {
 	return func(p *Pipeline) { p.reconcileBudget = d }
 }
 
+// WithReconcileRetryAll makes Reconcile re-drive every recorded sync_error
+// now, ignoring the automatic-retry policy — backoff, the retry bound, and
+// the non-transient classification alike (bead pg2-xb6fs). It is the
+// operator's manual repair (`pg-desk reconcile --retry-all`) once the cause
+// of an exhausted or non-transient row is fixed; scheduled runs never set it.
+func WithReconcileRetryAll(v bool) Option {
+	return func(p *Pipeline) { p.retryAll = v }
+}
+
 // WithLogWriter overrides where structured JSON logs are written.
 // Production defaults to os.Stderr [design 7.9: "run logs structured
 // JSON to stderr"]; cmd/pg-desk/run.go passes cmd.ErrOrStderr() instead,
@@ -146,12 +172,13 @@ func WithLogWriter(w io.Writer) Option {
 // caller owns st's lifecycle (open and Close); Pipeline never closes it.
 func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 	p := &Pipeline{
-		cfg:      cfg,
-		store:    st,
-		gatherer: gather.NewGatherer(cfg, st),
-		syncer:   sync.New(cfg, st),
-		clock:    interpret.SystemClock{},
-		out:      os.Stderr,
+		cfg:         cfg,
+		store:       st,
+		gatherer:    gather.NewGatherer(cfg, st),
+		syncer:      sync.New(cfg, st),
+		clock:       interpret.SystemClock{},
+		out:         os.Stderr,
+		retryPolicy: sync.RetryPolicyFor(cfg),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -181,8 +208,59 @@ type runLogLine struct {
 }
 
 // Run executes the gather -> interpret -> store pipeline once for one
-// entity. See the package doc comment for the exit-code contract.
+// entity. See the package doc comment for the exit-code contract. For a PR
+// entity it then records the run's outcome in the entity's sync_error retry
+// state (see the package doc's "Automatic retry" section); a failure to
+// record it is a store error and fails Run too.
 func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
+	runErr := p.run(ctx, entityType, entityID, change)
+	if entityType != entityTypePR {
+		return runErr
+	}
+	if err := p.recordSyncRetry(entityID, runErr); err != nil {
+		if runErr == nil {
+			return fmt.Errorf("pipeline: %w", err)
+		}
+		return errors.Join(runErr, fmt.Errorf("pipeline: %w", err))
+	}
+	return runErr
+}
+
+// recordSyncRetry updates entityID's retry state after one PR run: a
+// success deletes it (the run also cleared sync_error); a failure of an
+// entity that has a recorded sync_error counts one more attempt, classified
+// from runErr. A failure of an entity with no recorded sync_error (an
+// ordinary gather or store failure) records nothing: there is no sync_error
+// to retry, and pg-router already retries the failed event itself.
+func (p *Pipeline) recordSyncRetry(entityID string, runErr error) error {
+	if runErr == nil {
+		if err := p.store.DeleteSyncRetry(entityID); err != nil {
+			return fmt.Errorf("clear sync retry state %s: %w", entityID, err)
+		}
+		return nil
+	}
+	interp, found, err := p.store.GetInterpretation(p.repo(), entityTypePR, entityID)
+	if err != nil {
+		return fmt.Errorf("read interpretation for sync retry state %s: %w", entityID, err)
+	}
+	if !found || interp.SyncError == "" {
+		return nil
+	}
+	prev, _, err := p.store.GetSyncRetry(entityID)
+	if err != nil {
+		// A corrupt state value restarts the count rather than wedging the
+		// row: the zero value is what a first failure would see.
+		prev = store.SyncRetry{}
+	}
+	next := p.retryPolicy.NextState(prev, runErr, p.clock.Now())
+	if err := p.store.SetSyncRetry(entityID, next); err != nil {
+		return fmt.Errorf("record sync retry state %s: %w", entityID, err)
+	}
+	return nil
+}
+
+// run is Run's pipeline body, without the retry-state bookkeeping.
+func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
 	runStart := p.clock.Now()
 	var timeline []stageEvent
 
@@ -410,8 +488,19 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 //   - a non-closed anchor ledger row whose PR is now merged/closed/gone
 //     (confirmed by a `--change removed` re-read; an anchor whose PR is
 //     still open is left alone), or
-//   - a recorded sync_error (re-driven regardless of PR state; a successful
-//     run clears it).
+//   - a recorded sync_error whose automatic retry is due (re-driven
+//     regardless of PR state; a successful run clears it).
+//
+// # Automatic retry (bead pg2-xb6fs)
+//
+// A sync_error row is re-driven only when sync.RetryDue says so: its
+// transient failure's backoff has elapsed and the retry bound is not
+// reached, or it has no recorded retry state yet. An exhausted or
+// non-transient row, or one still backing off, is HELD: it is not re-driven
+// by either path above (an open anchor on a held row is not re-read
+// either — re-driving it would be one more retry of the same failing sync),
+// though a closed-anchor audit still runs. WithReconcileRetryAll lifts the
+// hold for an operator's manual repair.
 //
 // It also audits every ledger-closed anchor once (bead pg2-a6aw6): an
 // anchor closed by an earlier review can keep stale bead metadata
@@ -446,6 +535,29 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("pipeline: reconcile: %w", err)
 	}
 
+	// Split the sync_error rows into due (re-driven below) and held (not
+	// re-driven by either path) per the automatic-retry policy (pg2-xb6fs).
+	now := p.clock.Now()
+	var syncErrDue []string
+	held := map[string]bool{}
+	for _, i := range interps {
+		if i.Repo != repo || i.EntityType != entityTypePR || i.SyncError == "" {
+			continue
+		}
+		due := p.retryAll
+		if !due {
+			r, found, rErr := p.store.GetSyncRetry(i.EntityID)
+			// Unreadable state is treated like none: due, so the re-drive
+			// records fresh state.
+			due = rErr != nil || sync.RetryDue(r, found, now)
+		}
+		if due {
+			syncErrDue = append(syncErrDue, i.EntityID)
+		} else {
+			held[i.EntityID] = true
+		}
+	}
+
 	// needsPeek[id]=true: anchor-open candidate that must be confirmed
 	// merged/closed first; false: sync_error candidate, always re-driven.
 	// An id absent from needsPeek is not re-driven (audit-only).
@@ -473,7 +585,9 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			continue
 		}
 		if l.LastSyncedContentHash != sync.ClosedSentinel {
-			add(l.EntityID, true)
+			if !held[l.EntityID] {
+				add(l.EntityID, true)
+			}
 			continue
 		}
 		// Closed anchor: audit its bead's metadata once (pg2-a6aw6).
@@ -486,10 +600,8 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			touch(l.EntityID)
 		}
 	}
-	for _, i := range interps {
-		if i.Repo == repo && i.EntityType == entityTypePR && i.SyncError != "" {
-			add(i.EntityID, false)
-		}
+	for _, id := range syncErrDue {
+		add(id, false)
 	}
 
 	// Oldest-checked (or never-checked) first; stable so ties keep the

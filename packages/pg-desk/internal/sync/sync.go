@@ -126,7 +126,7 @@ func (s *Syncer) Sync(ctx context.Context, repo, entityID string, change gather.
 		return nil
 	}
 	if mode != ModePlan && mode != ModeApply {
-		return fmt.Errorf("sync: unknown sync.mode %q (want off, plan, or apply)", mode)
+		return fmt.Errorf("%w %q (want off, plan, or apply)", errUnknownMode, mode)
 	}
 
 	pr, prErr := decodePRShow(facts.PRShow)

@@ -753,15 +753,18 @@ func seedReconcileEntity(t *testing.T, p *Pipeline, id string, anchorHash string
 
 // TestPipelineReconcile_ClosesAnchorWhoseClosureFailedOnce is the bead's
 // acceptance test: a merged PR's closure fails once (recorded as
-// sync_error, anchor left unclosed), and the next Reconcile — with no
-// event and no operator action — re-drives it to success.
+// sync_error, anchor left unclosed), and the next Reconcile once the retry
+// backoff has elapsed (pg2-xb6fs) — with no event and no operator action —
+// re-drives it to success.
 func TestPipelineReconcile_ClosesAnchorWhoseClosureFailedOnce(t *testing.T) {
 	var out bytes.Buffer
+	clk := &steppingClock{now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
 		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets", "number": 7})
 		facts.RemovedState = "merged"
 		return facts, nil
 	}), &out)
+	p.clock = clk
 	seedReconcileEntity(t, p, "7", "abc123") // anchor open in the ledger
 
 	closureFails := true
@@ -785,6 +788,7 @@ func TestPipelineReconcile_ClosesAnchorWhoseClosureFailedOnce(t *testing.T) {
 	}
 
 	closureFails = false
+	clk.now = clk.now.Add(time.Minute) // the first retry's backoff
 	if err := p.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}

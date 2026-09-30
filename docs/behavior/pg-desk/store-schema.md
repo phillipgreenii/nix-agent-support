@@ -43,7 +43,14 @@ below. "Schema version 2 tables" describes what the cutover changes.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
   migrations, `heartbeat`, and `sweep` (`last_sweep`, bead `pg2-gznpe`) — `last_run` is reserved in
   this same table but not yet written by any command (a separate, pre-existing gap; not this
-  bead's scope).
+  bead's scope). It also holds per-entity keys: `reconcile`'s own stamps (see
+  [`operator-commands.md`](operator-commands.md)), and `sync_retry.<entity id>`, the retry
+  indicator of a PR's recorded `sync_error` (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s
+  "Automatic retry"): attempts so far, the retry bound, the state (`retrying`, `exhausted` or
+  `non-transient`), the last failure time and, while retrying, the next retry time. It is written
+  on every failed run of a PR that has a recorded `sync_error` and deleted by that PR's next
+  successful run. Keeping it in `meta` needs no schema change; it has meaning only on version 1,
+  since the cutover drops `sync_error`.
 
 ## Schema versions and the cutover
 

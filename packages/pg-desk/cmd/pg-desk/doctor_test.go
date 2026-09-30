@@ -262,4 +262,43 @@ func TestDoctorFailsOnNonEmptySyncError(t *testing.T) {
 	if !strings.Contains(stdout, "o/r#9: close failed") {
 		t.Errorf("stdout does not list the row: %s", stdout)
 	}
+	// No recorded retry state yet: the row awaits its first retry.
+	if !strings.Contains(stdout, "[retrying: awaiting its first automatic retry]") {
+		t.Errorf("stdout lacks the retry indicator: %s", stdout)
+	}
+}
+
+// TestDoctorShowsSyncErrorRetryIndicator: doctor tells a row still being
+// retried from an exhausted or non-transient one (bead pg2-xb6fs).
+func TestDoctorShowsSyncErrorRetryIndicator(t *testing.T) {
+	seed, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	for id, r := range map[string]store.SyncRetry{
+		"o/r#1": {Attempts: 3, MaxRetries: 10, State: store.SyncRetryRetrying, NextRetryAt: "2026-09-30T12:04:00Z"},
+		"o/r#2": {Attempts: 11, MaxRetries: 10, State: store.SyncRetryExhausted},
+		"o/r#3": {Attempts: 1, MaxRetries: 10, State: store.SyncRetryNonTransient},
+	} {
+		if err := seed.UpsertInterpretation(store.Interpretation{
+			Repo: "o/r", EntityType: entityTypePR, EntityID: id, SyncError: "boom", AsOf: "2026-09-30T12:00:00Z",
+		}); err != nil {
+			t.Fatalf("seed interpretation %s: %v", id, err)
+		}
+		if err := seed.SetSyncRetry(id, r); err != nil {
+			t.Fatalf("seed retry state %s: %v", id, err)
+		}
+	}
+	stdout, err := runDoctorCmd(t)
+	if err == nil {
+		t.Fatal("doctor: want the sync_error gate to fail")
+	}
+	for _, want := range []string{
+		"o/r#1: boom [retrying: 2/10 retries used, next retry at 2026-09-30T12:04:00Z]",
+		"o/r#2: boom [exhausted: 10/10 retries failed, no further automatic retry; fix the cause, then pg-desk reconcile --retry-all]",
+		"o/r#3: boom [non-transient: not retried automatically; fix the cause, then pg-desk reconcile --retry-all]",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
 }

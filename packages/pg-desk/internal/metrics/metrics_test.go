@@ -157,10 +157,16 @@ func TestSnapshotFuncErrorPropagates(t *testing.T) {
 
 func TestSyncErrorGauges(t *testing.T) {
 	h := newHarness(t)
-	h.snap = Snapshot{SyncErrorRows: 3, OldestSyncErrorAgeSeconds: 7200}
+	h.snap = Snapshot{SyncErrorRows: 3, OldestSyncErrorAgeSeconds: 7200, SyncErrorRetryingRows: 2, SyncErrorExhaustedRows: 1}
 	rm := h.collect(t)
 	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorRows)); got != 3 {
 		t.Fatalf("MetricSyncErrorRows = %d, want 3", got)
+	}
+	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorRetryingRows)); got != 2 {
+		t.Fatalf("MetricSyncErrorRetryingRows = %d, want 2", got)
+	}
+	if got := gaugeValue(t, findMetric(t, rm, MetricSyncErrorExhaustedRows)); got != 1 {
+		t.Fatalf("MetricSyncErrorExhaustedRows = %d, want 1", got)
 	}
 	if got := gaugeValue(t, findMetric(t, rm, MetricOldestSyncErrorAge)); got != 7200 {
 		t.Fatalf("MetricOldestSyncErrorAge = %d, want 7200", got)

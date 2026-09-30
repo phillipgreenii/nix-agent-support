@@ -250,16 +250,45 @@ func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueRes
 		}
 		return res, nil
 	case 4:
-		return issueResult{}, fmt.Errorf("sync: pg-connector %v: not_found", args)
+		return issueResult{}, &ConnectorError{Args: args, ExitCode: exitCode, Code: "not_found"}
 	default:
-		return issueResult{}, fmt.Errorf("sync: pg-connector %v: exit %d: %s", args, exitCode, wireErrorMessage(stdout.Bytes()))
+		code, detail := wireErrorDetail(stdout.Bytes())
+		return issueResult{}, &ConnectorError{Args: args, ExitCode: exitCode, Code: code, Detail: detail}
 	}
 }
 
-func wireErrorMessage(stdout []byte) string {
+// ConnectorError is a failed targeted `pg-connector issue` call (bead
+// pg2-xb6fs): it keeps the wire-taxonomy error code pg-connector reported
+// (pkg/scriptout's closed set — not_found, unauthenticated, unavailable,
+// unknown_op, version_mismatch, invalid_argument, query_not_recognized) so
+// Classify can tell an environmental failure from one that needs a person
+// without matching message text. Error() renders exactly the text this
+// package produced before the type existed, so recorded sync_error strings
+// do not change shape.
+type ConnectorError struct {
+	Args     []string
+	ExitCode int
+	// Code is the wire error code, or "" when stdout carried no error
+	// envelope (then Detail is the raw, trimmed stdout).
+	Code string
+	// Detail is "<code>: <message>" from the envelope, or the raw stdout.
+	Detail string
+}
+
+func (e *ConnectorError) Error() string {
+	if e.ExitCode == 4 {
+		return fmt.Sprintf("sync: pg-connector %v: not_found", e.Args)
+	}
+	return fmt.Sprintf("sync: pg-connector %v: exit %d: %s", e.Args, e.ExitCode, e.Detail)
+}
+
+// wireErrorDetail returns the envelope's error code and its
+// "<code>: <message>" rendering, or ("", trimmed stdout) when stdout is not
+// an error envelope.
+func wireErrorDetail(stdout []byte) (code, detail string) {
 	var env wireEnvelope
 	if err := json.Unmarshal(stdout, &env); err == nil && env.Error != nil {
-		return env.Error.Code + ": " + env.Error.Message
+		return env.Error.Code, env.Error.Code + ": " + env.Error.Message
 	}
-	return strings.TrimSpace(string(stdout))
+	return "", strings.TrimSpace(string(stdout))
 }

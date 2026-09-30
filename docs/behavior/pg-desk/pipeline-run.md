@@ -37,7 +37,10 @@ degraded run (see [`gather.md`](gather.md)), and `1` when the triggering entity 
 be fetched, the store could not be written, or the sync stage failed (see [`sync.md`](sync.md)).
 A sync failure is recorded as `sync_error` (the diagnostic, kept for the dashboard) AND fails
 `run`, so pg-router retries the event with its backoff and counts it in its failure metrics; a
-later successful run clears `sync_error`. `run` MUST NEVER exit `9` or return a raw
+later successful run clears `sync_error` and its retry state. Every failed run of a PR that has a
+recorded `sync_error` counts one attempt toward its automatic-retry bound; which failures
+`reconcile` retries, how often, and how many times is [`sync.md`](sync.md)'s "Automatic retry".
+`run` MUST NEVER exit `9` or return a raw
 `pg-connector` exit code.
 
 ## Telemetry and logs

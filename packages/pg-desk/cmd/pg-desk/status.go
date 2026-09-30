@@ -68,6 +68,9 @@ func runStatus(cmd *cobra.Command) error {
 		schemaVersion, lastHeartbeat, lastRun, lastSweep string
 		entityCount, syncErrors, degraded                int
 		interps                                          []store.Interpretation
+		// syncRetryStates counts sync_error rows by retry state (bead
+		// pg2-xb6fs): retrying / exhausted / non-transient.
+		syncRetryStates = map[string]int{}
 	)
 	if initialized {
 		schemaVersion, _, err = st.GetMeta(store.MetaKeySchemaVersion)
@@ -88,6 +91,11 @@ func runStatus(cmd *cobra.Command) error {
 			}
 			if i.SyncError != "" {
 				syncErrors++
+				r, _, err := st.GetSyncRetry(i.EntityID)
+				if err != nil {
+					return fmt.Errorf("status: read sync retry state %s: %w", i.EntityID, err)
+				}
+				syncRetryStates[r.EffectiveState()]++
 			}
 		}
 		lastHeartbeat, _, err = st.GetMeta(store.MetaKeyLastHeartbeat)
@@ -110,6 +118,9 @@ func runStatus(cmd *cobra.Command) error {
 	fmt.Fprintf(w, "interpretations: %d\n", len(interps))
 	fmt.Fprintf(w, "degraded: %d\n", degraded)
 	fmt.Fprintf(w, "sync_errors: %d\n", syncErrors)
+	fmt.Fprintf(w, "sync_errors_retrying: %d\n", syncRetryStates[store.SyncRetryRetrying])
+	fmt.Fprintf(w, "sync_errors_exhausted: %d\n", syncRetryStates[store.SyncRetryExhausted])
+	fmt.Fprintf(w, "sync_errors_non_transient: %d\n", syncRetryStates[store.SyncRetryNonTransient])
 	fmt.Fprintf(w, "last_heartbeat: %s\n", orDash(lastHeartbeat))
 	fmt.Fprintf(w, "last_run: %s\n", orDash(lastRun))
 	fmt.Fprintf(w, "last_sweep: %s\n", orDash(lastSweep))

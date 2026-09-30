@@ -67,6 +67,16 @@ const (
 	// MetricOldestSyncErrorAge is the age in seconds of the oldest row with
 	// a non-empty sync_error (0 when none): the oldest unreconciled anchor.
 	MetricOldestSyncErrorAge = "pg_desk_oldest_sync_error_age_seconds"
+	// MetricSyncErrorRetryingRows is the point-in-time count of sync_error
+	// rows still being retried automatically (bead pg2-xb6fs): a transient
+	// failure within the retry bound, or a row not yet retried at all. These
+	// may heal on their own.
+	MetricSyncErrorRetryingRows = "pg_desk_sync_error_retrying_rows"
+	// MetricSyncErrorExhaustedRows is the point-in-time count of sync_error
+	// rows that will get no further automatic retry (bead pg2-xb6fs): the
+	// retry bound was reached, or the failure was classified non-transient
+	// and was never retried. These need an operator.
+	MetricSyncErrorExhaustedRows = "pg_desk_sync_error_exhausted_rows"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -82,6 +92,10 @@ type Snapshot struct {
 	// leaked-anchor signals.
 	SyncErrorRows             int
 	OldestSyncErrorAgeSeconds int
+	// SyncErrorRetryingRows and SyncErrorExhaustedRows split SyncErrorRows by
+	// automatic-retry state (bead pg2-xb6fs); they sum to SyncErrorRows.
+	SyncErrorRetryingRows  int
+	SyncErrorExhaustedRows int
 }
 
 // SnapshotFunc supplies the current dashboard snapshot at collect time.
@@ -165,6 +179,8 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 	}{
 		{MetricSyncErrorRows, "count of interpretation rows with a non-empty sync_error (leaked/unreconciled anchors)", func(s Snapshot) int { return s.SyncErrorRows }},
 		{MetricOldestSyncErrorAge, "age in seconds of the oldest row with a non-empty sync_error, 0 when none", func(s Snapshot) int { return s.OldestSyncErrorAgeSeconds }},
+		{MetricSyncErrorRetryingRows, "count of sync_error rows still being retried automatically (transient, within the retry bound)", func(s Snapshot) int { return s.SyncErrorRetryingRows }},
+		{MetricSyncErrorExhaustedRows, "count of sync_error rows with no automatic retry left (retry bound reached, or non-transient); these need an operator", func(s Snapshot) int { return s.SyncErrorExhaustedRows }},
 	} {
 		g := g
 		if _, err := m.Int64ObservableGauge(

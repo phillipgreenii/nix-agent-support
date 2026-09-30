@@ -93,6 +93,44 @@ Sync MUST be safe to retry. Closure is guarded by the ledger: an anchor or cycle
 as closed is not closed again, and a retry after a partial failure (for example the anchor closed
 but a child close failed) MUST finish the remaining closes without repeating the finished ones.
 
+### Automatic retry
+
+A recorded `sync_error` MUST be retried automatically when its failure is transient, and MUST NOT
+be retried automatically when the failure needs a person (operator ruling, 2026-09-30, bead
+`pg2-xb6fs`):
+
+- **Transient** — the environment, not the request, is at fault: a missing path or an unmounted
+  volume, a network blip, a tracker that cannot currently be reached. `pg-connector`'s
+  `unavailable` code, a targeted `not_found`, a failure to start `pg-connector` at all, a timeout,
+  and every failure not named in the next bullet count as transient.
+- **Needs a person (non-transient)** — authentication (`unauthenticated`), validation
+  (`invalid_argument`), and config or version problems (`unknown_op`, `query_not_recognized`,
+  `version_mismatch`, an unknown `sync.mode`).
+
+Every failed run of a PR that has a recorded `sync_error` counts one attempt, whichever stage
+failed, and the latest failure decides the class. A transient row is retried with exponential
+backoff — by default 1m, 2m, 4m, 8m, 16m, then 30m for every later retry — and MUST stop after a
+bounded number of automatic retries (default 10). After that the row is **exhausted**: it stays a
+`sync_error` and is not retried again automatically. A successful run clears both the
+`sync_error` and its retry state. Automatic retries are performed by `pg-desk reconcile` (see
+[`operator-commands.md`](operator-commands.md)), so the backoff is the earliest a retry may run;
+how often the scheduler runs `reconcile` also bounds it. The bound governs only these automatic
+retries: a new event for the PR still runs the whole pipeline, sync included, whatever the row's
+retry state, and its failure counts as one more attempt. `pg-desk reconcile --retry-all` is the
+operator's manual repair once the cause is fixed: it re-drives every recorded `sync_error` now,
+ignoring backoff, the bound and the class.
+
+The bounds are configuration: `sync.retry.max_retries` (default `10`; `0` disables automatic
+retry), `sync.retry.initial_backoff` (default `1m`, doubled for each later retry) and
+`sync.retry.max_backoff` (default `30m`, and not below `initial_backoff`). An invalid value fails
+config load.
+
+Every `sync_error` row carries a retry indicator — attempts so far, the retry bound, and either
+the next retry time or why there will be none (exhausted, or non-transient) — kept in the store
+(see [`store-schema.md`](store-schema.md)) and shown by `pg-desk status`, `pg-desk doctor` and
+`serve`'s `/metrics` (see [`serve.md`](serve.md)), so an operator can tell a row that is still
+being retried from one that no longer will be.
+
 ## Telemetry and logs (D24)
 
 Sync emits nothing over OpenTelemetry or Prometheus of its own in this phase — export is a later

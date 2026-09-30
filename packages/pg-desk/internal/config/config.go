@@ -20,7 +20,9 @@
 // typed here now, most consumed by this docket's later packets;
 // agent_tracker_backend starts Phase 10, sync.mode/jira.*/ticket_patterns
 // start Phase 10/13 respectively (present but unused by this phase's own
-// code).
+// code). sync.retry (max_retries, initial_backoff, max_backoff) postdates
+// that table: it bounds the automatic retry of a recorded sync_error (bead
+// pg2-xb6fs; see SyncRetryConfig).
 //
 // Several fields that lived nested under pg-pr's repos[] entries
 // (team_members, watch_labels, ticket_patterns, check_interpreters) are
@@ -38,6 +40,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -176,6 +179,79 @@ type UrgencyConfig struct {
 // code.
 type SyncConfig struct {
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Retry bounds the automatic retry of a recorded sync_error (bead
+	// pg2-xb6fs). Every key is optional; see SyncRetryConfig.Resolve for the
+	// defaults.
+	Retry SyncRetryConfig `yaml:"retry,omitempty" json:"retry,omitempty"`
+}
+
+// Defaults for sync.retry (bead pg2-xb6fs). A transient sync failure is
+// retried with exponential backoff — 1m, 2m, 4m, 8m, 16m, then 30m for
+// every later retry — for at most 10 automatic retries, after which the row
+// stays a sync_error (exhausted) until an operator acts. The backoff is the
+// EARLIEST a retry may run: reconcile, the scheduled pass that performs
+// retries, only runs as often as its external scheduler invokes it.
+const (
+	DefaultSyncRetryMaxRetries     = 10
+	DefaultSyncRetryInitialBackoff = time.Minute
+	DefaultSyncRetryMaxBackoff     = 30 * time.Minute
+)
+
+// SyncRetryConfig is config.yaml's sync.retry block.
+type SyncRetryConfig struct {
+	// MaxRetries bounds automatic retries after the original failure
+	// (default DefaultSyncRetryMaxRetries). 0 disables automatic retry;
+	// negative is rejected. A pointer so an explicit 0 is distinguishable
+	// from an absent key.
+	MaxRetries *int `yaml:"max_retries,omitempty" json:"max_retries,omitempty"`
+	// InitialBackoff is the wait before the first retry, doubled for each
+	// later one (a Go time.ParseDuration string; default "1m").
+	InitialBackoff string `yaml:"initial_backoff,omitempty" json:"initial_backoff,omitempty"`
+	// MaxBackoff caps the doubled wait (a Go time.ParseDuration string;
+	// default "30m"). MUST NOT be below InitialBackoff.
+	MaxBackoff string `yaml:"max_backoff,omitempty" json:"max_backoff,omitempty"`
+}
+
+// Resolve applies the defaults and parses the durations. It fails on a
+// negative max_retries, an unparseable or non-positive duration, or a
+// max_backoff below initial_backoff; finalize calls it so a bad value fails
+// config load (and therefore every command and doctor) loudly.
+func (r SyncRetryConfig) Resolve() (maxRetries int, initialBackoff, maxBackoff time.Duration, err error) {
+	maxRetries = DefaultSyncRetryMaxRetries
+	if r.MaxRetries != nil {
+		if *r.MaxRetries < 0 {
+			return 0, 0, 0, fmt.Errorf("max_retries %d must not be negative", *r.MaxRetries)
+		}
+		maxRetries = *r.MaxRetries
+	}
+	initialBackoff, err = parsePositiveDuration("initial_backoff", r.InitialBackoff, DefaultSyncRetryInitialBackoff)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	maxBackoff, err = parsePositiveDuration("max_backoff", r.MaxBackoff, DefaultSyncRetryMaxBackoff)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if maxBackoff < initialBackoff {
+		return 0, 0, 0, fmt.Errorf("max_backoff %s must not be below initial_backoff %s", maxBackoff, initialBackoff)
+	}
+	return maxRetries, initialBackoff, maxBackoff, nil
+}
+
+// parsePositiveDuration parses v (def when empty) and rejects a value that
+// is not a positive duration.
+func parsePositiveDuration(name, v string, def time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(v) == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", name, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s %q must be positive", name, v)
+	}
+	return d, nil
 }
 
 // ServeConfig configures `pg-desk serve`.
@@ -314,6 +390,9 @@ func finalize(cfg *Config) error {
 				return err
 			}
 		}
+	}
+	if _, _, _, err := cfg.Sync.Retry.Resolve(); err != nil {
+		return fmt.Errorf("sync.retry: %w", err)
 	}
 	if cfg.Serve.Log != "" {
 		expanded, err := expandHome(cfg.Serve.Log)

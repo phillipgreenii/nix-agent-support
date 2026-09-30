@@ -186,7 +186,8 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 }
 
 // doctorSyncErrors lists every interpretation row with a non-empty
-// sync_error as "entity: error" (pg2-kftf9.5).
+// sync_error as "entity: error [retry indicator]" (pg2-kftf9.5; the
+// indicator is bead pg2-xb6fs's, see describeSyncRetry).
 func doctorSyncErrors(st *store.Store) ([]string, error) {
 	interps, err := st.ListInterpretations()
 	if err != nil {
@@ -194,11 +195,37 @@ func doctorSyncErrors(st *store.Store) ([]string, error) {
 	}
 	var out []string
 	for _, i := range interps {
-		if i.SyncError != "" {
-			out = append(out, fmt.Sprintf("%s: %s", i.EntityID, i.SyncError))
+		if i.SyncError == "" {
+			continue
 		}
+		r, found, err := st.GetSyncRetry(i.EntityID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf("%s: %s [%s]", i.EntityID, i.SyncError, describeSyncRetry(r, found)))
 	}
 	return out, nil
+}
+
+// describeSyncRetry renders a sync_error row's retry indicator so an
+// operator can tell a row that is still being retried from one that no
+// longer will be (bead pg2-xb6fs).
+func describeSyncRetry(r store.SyncRetry, found bool) string {
+	if !found {
+		return "retrying: awaiting its first automatic retry"
+	}
+	switch r.EffectiveState() {
+	case store.SyncRetryExhausted:
+		return fmt.Sprintf("exhausted: %d/%d retries failed, no further automatic retry; fix the cause, then pg-desk reconcile --retry-all", r.Retries(), r.MaxRetries)
+	case store.SyncRetryNonTransient:
+		return "non-transient: not retried automatically; fix the cause, then pg-desk reconcile --retry-all"
+	default:
+		next := r.NextRetryAt
+		if next == "" {
+			next = "the next reconcile"
+		}
+		return fmt.Sprintf("retrying: %d/%d retries used, next retry at %s", r.Retries(), r.MaxRetries, next)
+	}
 }
 
 // doctorCmd implements `pg-desk doctor`
