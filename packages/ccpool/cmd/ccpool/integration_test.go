@@ -25,12 +25,7 @@ func buildCCPool(t *testing.T) string {
 func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
-	cmd.Env = append(
-		os.Environ(),
-		"XDG_DATA_HOME="+xdgData,
-		"XDG_STATE_HOME="+xdgState,
-		"XDG_CONFIG_HOME="+filepath.Join(xdgData, "..", "cfg"),
-	)
+	cmd.Env = runCCEnv(os.Environ(), xdgData, xdgState)
 	if externalID != "" {
 		cmd.Env = append(cmd.Env, "CCPOOL_EXTERNAL_ID="+externalID)
 	}
@@ -49,6 +44,32 @@ func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args 
 		}
 	}
 	return out.String(), code
+}
+
+// runCCEnv builds the subprocess environment for runCC. HOME is replaced with
+// the test's sandbox base (the parent of xdgData) so Claude trust writes land
+// in <base>/.claude.json rather than the operator's real ~/.claude.json
+// (pg2-b74hc). The subprocess is the ccpool binary, not `go build`, but the Go
+// cache locations are pinned to the real ones anyway so any go tooling it (or
+// a future helper) runs still reuses the real module/build caches.
+func runCCEnv(base []string, xdgData, xdgState string) []string {
+	sandbox := filepath.Join(xdgData, "..")
+	env := append([]string{}, base...)
+	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH"} {
+		if os.Getenv(k) != "" {
+			continue
+		}
+		if v, err := exec.Command("go", "env", k).Output(); err == nil {
+			env = append(env, k+"="+strings.TrimSpace(string(v)))
+		}
+	}
+	return append(
+		env,
+		"HOME="+sandbox,
+		"XDG_DATA_HOME="+xdgData,
+		"XDG_STATE_HOME="+xdgState,
+		"XDG_CONFIG_HOME="+filepath.Join(sandbox, "cfg"),
+	)
 }
 
 // envWithoutOTel returns os.Environ() minus every OTEL_* variable, so a
@@ -120,5 +141,28 @@ func TestEndToEnd_hookLifecycleReflectedInList(t *testing.T) {
 	}
 	if !strings.Contains(out, " no ") {
 		t.Errorf("expected alpha to read not-live (no), got:\n%s", out)
+	}
+}
+
+// TestRunCCEnv_sandboxesHome asserts runCC never hands the subprocess the
+// operator's real HOME (pg2-b74hc), while Go cache vars still resolve to the
+// real caches.
+func TestRunCCEnv_sandboxesHome(t *testing.T) {
+	base := t.TempDir()
+	realHome := os.Getenv("HOME")
+	env := runCCEnv(os.Environ(), filepath.Join(base, "data"), filepath.Join(base, "state"))
+	got := map[string]string{}
+	for _, kv := range env { // later entries win, as in exec
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			got[k] = v
+		}
+	}
+	if got["HOME"] == realHome || filepath.Clean(got["HOME"]) != filepath.Clean(base) {
+		t.Fatalf("HOME = %q, want sandbox %q (real %q)", got["HOME"], base, realHome)
+	}
+	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH"} {
+		if want, err := exec.Command("go", "env", k).Output(); err == nil && got[k] != strings.TrimSpace(string(want)) {
+			t.Errorf("%s = %q, want real %q", k, got[k], strings.TrimSpace(string(want)))
+		}
 	}
 }
