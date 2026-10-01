@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
@@ -44,6 +45,12 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 	}
 	if _, err := p.persistRaw(entityType, entityID, result.Payload, result.AsOf, interp); err != nil {
 		return fmt.Errorf("pipeline: persist %s %s: %w", entityType, entityID, err)
+	}
+	// Rebuild the entity's derived links (runs whether or not any decider
+	// subscribes). A removed or empty payload clears them.
+	removed := result.RemovedState != "" || len(result.Payload) == 0
+	if err := p.extractAndReplace(entityType, entityID, result.Payload, removed, p.clock.Now().UTC().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 	}
 	return nil
 }

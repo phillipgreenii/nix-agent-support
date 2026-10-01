@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,6 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/threadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
 
@@ -164,7 +164,7 @@ func runRepo(cfg *config.Config) string {
 // 13, [design: 7.2, 8]): fetch the triggering thread via a single
 // `pg-connector thread show` call (runThreadShow, this file's own
 // injectable seam — mirroring runResolveBeadPR's identical convention),
-// scan its text for PR permalinks (scanThreadPermalinks) and Jira ticket
+// scan its text for PR permalinks (threadref.ScanPermalinks) and Jira ticket
 // keys (ticketkey.Parse, reused verbatim from this docket's Jira-half
 // sibling packet — never a second, parallel extractor), write/confirm an
 // xref row for every match, then re-interpret every PR CURRENTLY xref'd to
@@ -208,7 +208,7 @@ func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st
 
 	now := fields.AsOf
 
-	for _, prEntityID := range scanThreadPermalinks(fields.Text, repo) {
+	for _, prEntityID := range threadref.ScanPermalinks(fields.Text, repo) {
 		if err := st.UpsertXref(store.Xref{
 			Repo: repo, FromType: entityTypePR, FromID: prEntityID,
 			ToType: "thread", ToID: threadID,
@@ -336,40 +336,6 @@ var runThreadShow = func(ctx context.Context, threadID string) (result threadSho
 		}
 		return threadShowResult{}, false, fmt.Errorf("pg-connector thread show %s: exit %d: %s", threadID, exitCode, msg)
 	}
-}
-
-// threadPermalinkRE finds a GitHub PR URL anywhere in free-form text — this
-// packet's own new permalink scanner [design 7.2, 8: "cross-references
-// threads to PRs and issues by permalinks and ticket keys"]. Unlike
-// desk.go's own prURLNumberRE (anchored to the END of a whole PR-reference
-// string, for parsing a `<pr>` command-line argument), a thread's text is
-// free-form prose that may embed a permalink anywhere, with trailing
-// punctuation or more sentence after it — so this pattern is deliberately
-// NOT end-anchored, and stops at the number rather than requiring a
-// trailing slash or end-of-string.
-var threadPermalinkRE = regexp.MustCompile(`/pull/(\d+)\b`)
-
-// scanThreadPermalinks returns the deduplicated set of PR entity ids
-// ("<repo>#<n>", the SAME entityID form used everywhere else in this
-// codebase — desk.go's resolvePRRef, internal/gather's matchWorkBeads,
-// internal/sync's prNumberFromEntityID) named by a GitHub PR URL anywhere
-// in text. Phase 9 supports exactly one configured repository
-// (docs/behavior/pg-desk/README.md's "Scope"), so — mirroring desk.go's own
-// parsePRNumber/resolvePRRef precedent — whatever owner/repo the URL itself
-// names is not otherwise consulted; every match resolves against repo
-// (the caller's own single configured repository). Returns nil (never an
-// error) when text contains no PR-URL-shaped substring.
-func scanThreadPermalinks(text, repo string) []string {
-	seen := make(map[string]bool)
-	var out []string
-	for _, m := range threadPermalinkRE.FindAllStringSubmatch(text, -1) {
-		id := repo + "#" + m[1]
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	return out
 }
 
 func init() {

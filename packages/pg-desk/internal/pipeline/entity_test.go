@@ -28,6 +28,9 @@ func (f fakeEntityGatherer) GatherEntity(context.Context, string, gather.ChangeK
 func newGenericPipeline(t *testing.T, out *bytes.Buffer, gs map[string]gather.EntityGatherer) *Pipeline {
 	t.Helper()
 	p := newTestPipeline(t, nil, out)
+	// Hydration rebuilds derived links, which needs a new-schema store.
+	p.store = store.OpenNewSchemaForTest(t)
+	p.extractors = NewExtractorRegistry(p.cfg, p.store, p.repo())
 	p.entityGatherers = gs
 	return p
 }

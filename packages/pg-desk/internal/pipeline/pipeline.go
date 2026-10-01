@@ -113,10 +113,12 @@ type Pipeline struct {
 	// entityGatherers is the generic per-entity-type gather registry used
 	// by RunGenericEntity; populated once in New() from the real Gatherer.
 	entityGatherers map[string]gather.EntityGatherer
-	syncer          syncer
-	clock           interpret.Clock
-	verbose         bool
-	out             io.Writer
+	// extractors is the per-type link-extractor registry run after persist.
+	extractors ExtractorRegistry
+	syncer     syncer
+	clock      interpret.Clock
+	verbose    bool
+	out        io.Writer
 
 	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
 
@@ -180,6 +182,7 @@ func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 		store:           st,
 		gatherer:        g,
 		entityGatherers: g.EntityGatherers(),
+		extractors:      NewExtractorRegistry(cfg, st, repoOf(cfg)),
 		syncer:          sync.New(cfg, st),
 		clock:           interpret.SystemClock{},
 		out:             os.Stderr,
@@ -884,4 +887,11 @@ func Run(ctx context.Context, entityType, entityID string, change gather.ChangeK
 	defer func() { _ = st.Close() }()
 
 	return New(cfg, st).Run(ctx, entityType, entityID, change)
+}
+
+func repoOf(cfg *config.Config) string {
+	if cfg == nil || len(cfg.Repos) == 0 {
+		return ""
+	}
+	return cfg.Repos[0].Remote
 }

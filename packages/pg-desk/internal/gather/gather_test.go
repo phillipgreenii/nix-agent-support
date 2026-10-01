@@ -888,3 +888,27 @@ func TestGather_LinkedThreads_ReadFailureDegrades(t *testing.T) {
 		t.Fatalf("Degraded = %q, want %q", facts.Degraded, "linked threads")
 	}
 }
+
+// TestPRHydrationKeepsXrefScan pins that the link-extractor seam did not
+// change gather's own Jira-key scan: it still writes its legacy xref rows
+// (one per key per field) through UpsertXref, unchanged.
+func TestPRHydrationKeepsXrefScan(t *testing.T) {
+	withFactory(t, "happy_with_jira")
+	xrefs := &fakeXrefUpserter{}
+	g := NewGatherer(testConfigWithTicketPatterns("/configured/beads", fixtureTicketPatterns), xrefs)
+	if _, err := g.Gather(context.Background(), "pr", "PR1", ChangeAdded); err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	got := map[string]bool{}
+	for _, x := range xrefs.upserts {
+		got[x.ToID+"/"+x.Evidence] = true
+	}
+	for _, want := range []string{fixtureTicketKey1 + "/branch", fixtureTicketKey1 + "/title", fixtureTicketKey2 + "/body"} {
+		if !got[want] {
+			t.Fatalf("missing legacy xref %q; got %+v", want, xrefs.upserts)
+		}
+	}
+	if len(xrefs.upserts) != 3 {
+		t.Fatalf("got %d upserts, want 3", len(xrefs.upserts))
+	}
+}
