@@ -74,11 +74,8 @@ const issueShowWire = `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd
 func TestEntityGatherers_RegistryKeys(t *testing.T) {
 	g := NewGatherer(testConfig(""), nil)
 	m := g.EntityGatherers()
-	if len(m) != 2 || m["pr"] == nil || m["issue"] == nil {
+	if len(m) != 3 || m["pr"] == nil || m["issue"] == nil || m["thread"] == nil {
 		t.Fatalf("registry keys: %v", m)
-	}
-	if _, ok := m["thread"]; ok {
-		t.Fatal("unexpected adapter")
 	}
 }
 
@@ -146,6 +143,61 @@ func TestIssueAdapter_DepsFailureIsError(t *testing.T) {
 	g.SetReadIssueDeps(true)
 	if _, err := g.EntityGatherers()["issue"].GatherEntity(context.Background(), "bd-1", ChangeChanged); err == nil {
 		t.Fatal("want error on failed deps read")
+	}
+}
+
+const threadShowWire = `{"protocolVersion":1,"schemaVersion":4,"result":{"text":"root text","reply_count":2,"as_of":"2026-09-16T00:00:00Z","messages":[{"text":"hello"}]}}`
+
+func TestThreadGatherAdapterHydratesMessages(t *testing.T) {
+	rec := entityFactory(t, `thread show=0:`+threadShowWire)
+	g := NewGatherer(testConfig(""), nil)
+	res, err := g.EntityGatherers()["thread"].GatherEntity(context.Background(), "t-1", ChangeChanged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.AsOf != "2026-09-16T00:00:00Z" {
+		t.Fatalf("asof %q", res.AsOf)
+	}
+	var f ThreadFacts
+	if err := json.Unmarshal(res.Payload, &f); err != nil || len(f.ThreadShow) == 0 {
+		t.Fatalf("facts %+v err %v", f, err)
+	}
+	var got struct {
+		Text     string            `json:"text"`
+		AsOf     string            `json:"as_of"`
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(f.ThreadShow, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "root text" || got.AsOf != "2026-09-16T00:00:00Z" || len(got.Messages) != 1 || string(got.Messages[0]) != `{"text":"hello"}` {
+		t.Fatalf("payload round-trip: %+v", got)
+	}
+	if calls := readCalls(t, rec); len(calls) != 1 || calls[0] != "thread show t-1" {
+		t.Fatalf("calls %v", calls)
+	}
+}
+
+func TestThreadAdapter_NotFoundIsRemoved(t *testing.T) {
+	entityFactory(t, `thread show=4:{"error":{"code":"not_found"}}`)
+	g := NewGatherer(testConfig(""), nil)
+	res, err := g.EntityGatherers()["thread"].GatherEntity(context.Background(), "t-1", ChangeChanged)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res.RemovedState != "not_found" || len(res.Payload) != 0 {
+		t.Fatalf("res: %+v", res)
+	}
+}
+
+func TestThreadAdapter_HardErrorAndEmptyID(t *testing.T) {
+	entityFactory(t, `thread show=1:boom`)
+	g := NewGatherer(testConfig(""), nil)
+	if _, err := g.EntityGatherers()["thread"].GatherEntity(context.Background(), "t-1", ChangeChanged); err == nil {
+		t.Fatal("want error")
+	}
+	if _, err := g.EntityGatherers()["thread"].GatherEntity(context.Background(), "", ChangeChanged); err == nil {
+		t.Fatal("want error on empty id")
 	}
 }
 

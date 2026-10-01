@@ -13,11 +13,12 @@ import (
 type EntityInterpreter func(result gather.GatherResult, clock Clock, cfg *config.Config) (Interpretation, error)
 
 var entityInterpreters = map[string]EntityInterpreter{
-	"pr":    InterpretPR,
-	"issue": InterpretIssue,
+	"pr":     InterpretPR,
+	"issue":  InterpretIssue,
+	"thread": InterpretThread,
 }
 
-// EntityInterpreters returns the registry: exactly "pr" and "issue".
+// EntityInterpreters returns the registry: exactly "pr", "issue" and "thread".
 func EntityInterpreters() map[string]EntityInterpreter { return entityInterpreters }
 
 // InterpretPR decodes gather.Facts from the payload and runs Interpret
@@ -72,4 +73,19 @@ func InterpretIssue(result gather.GatherResult, clock Clock, cfg *config.Config)
 		Degraded:  result.Degraded,
 		AsOf:      now,
 	}, nil
+}
+
+// InterpretThread maps a thread gather result to the conservative minimum
+// Interpretation: only Degraded and AsOf (clock time) are filled.
+func InterpretThread(result gather.GatherResult, clock Clock, _ *config.Config) (Interpretation, error) {
+	now := clock.Now().UTC().Format(time.RFC3339)
+	out := Interpretation{Degraded: result.Degraded, AsOf: now}
+	if len(result.Payload) == 0 {
+		return out, nil
+	}
+	var facts gather.ThreadFacts
+	if err := json.Unmarshal(result.Payload, &facts); err != nil {
+		return Interpretation{}, fmt.Errorf("interpret: decode thread facts: %w", err)
+	}
+	return out, nil
 }

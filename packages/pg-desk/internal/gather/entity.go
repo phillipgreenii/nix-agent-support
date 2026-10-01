@@ -32,6 +32,12 @@ type IssueFacts struct {
 	IssueDeps json.RawMessage `json:"issue_deps,omitempty"`
 }
 
+// ThreadFacts is the thread type's gather payload: the raw `thread show`
+// result, carried as returned (the connector exposes no messages field yet).
+type ThreadFacts struct {
+	ThreadShow json.RawMessage `json:"thread_show,omitempty"`
+}
+
 // readIssueDeps holds the per-Gatherer read-issue-deps switch. It lives here
 // rather than on the Gatherer struct because gather.go is unchanged by
 // design (the PR pipeline is not refactored by the generic seam).
@@ -46,11 +52,12 @@ func (g *Gatherer) readsIssueDeps() bool {
 	return ok && v.(bool)
 }
 
-// EntityGatherers returns the registry: exactly "pr" and "issue".
+// EntityGatherers returns the registry: exactly "pr", "issue" and "thread".
 func (g *Gatherer) EntityGatherers() map[string]EntityGatherer {
 	return map[string]EntityGatherer{
-		"pr":    &prGatherAdapter{g: g},
-		"issue": &issueGatherAdapter{g: g, readDeps: g.readsIssueDeps()},
+		"pr":     &prGatherAdapter{g: g},
+		"issue":  &issueGatherAdapter{g: g, readDeps: g.readsIssueDeps()},
+		"thread": &threadGatherAdapter{g: g},
 	}
 }
 
@@ -99,6 +106,30 @@ func (a *issueGatherAdapter) GatherEntity(ctx context.Context, entityID string, 
 	payload, err := json.Marshal(facts)
 	if err != nil {
 		return GatherResult{}, fmt.Errorf("gather: marshal issue facts: %w", err)
+	}
+	var meta struct {
+		AsOf string `json:"as_of"`
+	}
+	_ = json.Unmarshal(show, &meta) // best-effort
+	return GatherResult{Payload: payload, AsOf: meta.AsOf}, nil
+}
+
+type threadGatherAdapter struct{ g *Gatherer }
+
+func (a *threadGatherAdapter) GatherEntity(ctx context.Context, entityID string, _ ChangeKind) (GatherResult, error) {
+	if entityID == "" {
+		return GatherResult{}, fmt.Errorf("gather: entity id is required")
+	}
+	show, notFound, err := a.g.targetedCall(ctx, []string{"thread", "show", entityID}, nil)
+	if notFound {
+		return GatherResult{RemovedState: "not_found"}, nil
+	}
+	if err != nil {
+		return GatherResult{}, fmt.Errorf("gather: fetch thread %s: %w", entityID, err)
+	}
+	payload, err := json.Marshal(ThreadFacts{ThreadShow: show})
+	if err != nil {
+		return GatherResult{}, fmt.Errorf("gather: marshal thread facts: %w", err)
 	}
 	var meta struct {
 		AsOf string `json:"as_of"`

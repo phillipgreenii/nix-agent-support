@@ -23,11 +23,39 @@ func issueResult(t *testing.T, show string, degraded string) gather.GatherResult
 
 func TestEntityInterpreters_Registry(t *testing.T) {
 	m := EntityInterpreters()
-	if len(m) != 2 || m["pr"] == nil || m["issue"] == nil {
+	if len(m) != 3 || m["pr"] == nil || m["issue"] == nil || m["thread"] == nil {
 		t.Fatalf("registry: %v", m)
 	}
-	if _, ok := m["thread"]; ok {
-		t.Fatal("unexpected interpreter")
+}
+
+func TestInterpretThread_OnlyDegradedAndAsOf(t *testing.T) {
+	b, err := json.Marshal(gather.ThreadFacts{ThreadShow: json.RawMessage(`{"text":"x"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := InterpretThread(gather.GatherResult{Payload: b, Degraded: "d"}, entityClock, &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Interpretation{Degraded: "d", AsOf: "2026-09-16T01:02:03Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+}
+
+func TestInterpretThread_EarlyReturns(t *testing.T) {
+	want := Interpretation{Degraded: "d", AsOf: "2026-09-16T01:02:03Z"}
+	for _, r := range []gather.GatherResult{
+		{Degraded: "d", RemovedState: "not_found"},
+		{Payload: json.RawMessage(`{}`), Degraded: "d"},
+	} {
+		got, err := InterpretThread(r, entityClock, nil)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v err %v", got, err)
+		}
+	}
+	if _, err := InterpretThread(gather.GatherResult{Payload: json.RawMessage(`nope`)}, entityClock, nil); err == nil {
+		t.Fatal("want decode error")
 	}
 }
 
