@@ -452,3 +452,483 @@ func TestReconcileRecordedEpisodeDoesNotAlertOrPend(t *testing.T) {
 		t.Fatalf("fixture does not reproduce the recorded c2e2fb21 Alerting window around 22:13-22:28: %v", legacyAt)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// pg2-o6z19 / pg2-n1pm4 / pg2-p93c0: rule pg-router-queue-stalled
+//
+// The growth rule above measures depth TREND; this one measures dispatch
+// PROGRESS: a type held at depth >= stallFloor for a whole 30m window in which
+// pg_router_throughput_total did not advance, sustained for `for: 30m`, then
+// held by `keepFiringFor: 30m`. Fixtures are 30s scrapes; a sample is omitted
+// where the gauge has no series (depth 0).
+// ---------------------------------------------------------------------------
+
+const (
+	// wantStallExpr MUST equal the expr of rule pg-router-queue-stalled.
+	wantStallExpr = `min_over_time(pg_router_queue_depth[30m]) >= 10 and count_over_time(pg_router_queue_depth[30m]) >= 54 unless on(type) (sum by (type) (increase(pg_router_throughput_total[30m])) > 0)`
+
+	stallFloor = 10
+	stallFor   = 30 * time.Minute
+	stallKeep  = 30 * time.Minute
+)
+
+// stallInput is what Prometheus holds for one type: the depth gauge and the
+// instants at which the throughput counter advanced.
+type stallInput struct {
+	depth   []sample
+	accepts []time.Time
+}
+
+func (in stallInput) acceptedIn(from, to time.Time) bool {
+	for _, a := range in.accepts {
+		if a.After(from) && !a.After(to) {
+			return true
+		}
+	}
+	return false
+}
+
+// depthHeld models the left operand: >= minSamples present scrapes in the 30m
+// window and min_over_time >= stallFloor.
+func (in stallInput) depthHeld(t time.Time) bool {
+	w := inRange(in.depth, t.Add(-window), t)
+	if len(w) < minSamples {
+		return false
+	}
+	for _, s := range w {
+		if s.v < stallFloor {
+			return false
+		}
+	}
+	return true
+}
+
+// stalledNow models the whole expression at instant t. increase() reads
+// the counter between the window's FIRST scrape and its last, so an advance
+// is only visible if it lands after the first scrape (t-window+scrape, t].
+func (in stallInput) stalledNow(t time.Time) bool {
+	return in.depthHeld(t) && !in.acceptedIn(t.Add(-window+scrape), t)
+}
+
+type stallState struct{ cond, alerting, firing bool }
+
+// stallReplay evaluates the rule every minute in [from, to] and applies
+// `for: 30m` (Pending until the condition has held at every evaluation of the
+// trailing 30m) and `keepFiringFor: 30m` (an alert that is firing stays firing
+// until 30m after the condition was last true, and a condition that comes back
+// inside that period continues it without a new Pending phase).
+func stallReplay(in stallInput, from, to time.Time) map[time.Time]stallState {
+	var times []time.Time
+	for t := from; !t.After(to); t = t.Add(evalEvery) {
+		times = append(times, t)
+	}
+	out := make(map[time.Time]stallState, len(times))
+	forN, keepN := int(stallFor/evalEvery), int(stallKeep/evalEvery)
+	run, lastTrue, firing := 0, 0, false
+	for i, t := range times {
+		c := in.stalledNow(t)
+		run = map[bool]int{true: run + 1, false: 0}[c]
+		alerting := false
+		switch {
+		case c && (firing || run > forN):
+			firing, alerting, lastTrue = true, true, i
+		case firing && i-lastTrue > keepN:
+			firing = false
+		}
+		out[t] = stallState{c, alerting, firing}
+	}
+	return out
+}
+
+func anyState(m map[time.Time]stallState, from, to time.Time, pick func(stallState) bool) (time.Time, bool) {
+	var first time.Time
+	found := false
+	for t, s := range m {
+		if t.Before(from) || t.After(to) || !pick(s) {
+			continue
+		}
+		if !found || t.Before(first) {
+			first, found = t, true
+		}
+	}
+	return first, found
+}
+
+func isCond(s stallState) bool     { return s.cond }
+func isAlerting(s stallState) bool { return s.alerting }
+func isFiring(s stallState) bool   { return s.firing }
+
+// longestCondRun is the longest stretch of consecutive true evaluations, in
+// minutes, within [from, to].
+func longestCondRun(m map[time.Time]stallState, from, to time.Time) int {
+	best, run := 0, 0
+	for t := from; !t.After(to); t = t.Add(evalEvery) {
+		if m[t].cond {
+			run++
+			best = max(best, run)
+		} else {
+			run = 0
+		}
+	}
+	return best
+}
+
+func atDay(day, hms string) time.Time {
+	t, err := time.Parse(time.RFC3339, day+"T"+hms+"Z")
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+// loadStallCSV reads a testdata series (columns documented in the file header).
+// metricView selects the accept column the daemon's throughput counter would
+// have shown; otherwise the accepts the queue log records.
+func loadStallCSV(t *testing.T, path, day string, metricView bool) stallInput {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in stallInput
+	for _, line := range strings.Split(string(b), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Split(line, ",")
+		if len(f) != 4 {
+			t.Fatalf("%s: bad row %q", path, line)
+		}
+		at := atDay(day, f[0])
+		var depth, qacc, macc int
+		for i, dst := range []*int{&depth, &qacc, &macc} {
+			n := 0
+			for _, c := range f[i+1] {
+				n = n*10 + int(c-'0')
+			}
+			*dst = n
+		}
+		if depth > 0 {
+			in.depth = append(in.depth, sample{at, float64(depth)})
+		}
+		n := qacc
+		if metricView {
+			n = macc
+		}
+		for i := 0; i < n; i++ {
+			in.accepts = append(in.accepts, at)
+		}
+	}
+	return in
+}
+
+// acceptsFromDrops derives dispatches from a synthetic depth series: every
+// unit the depth falls by between scrapes is one accept (a series that goes
+// absent has drained to zero). Arrivals landing in the same scrape as a
+// dispatch hide it, so this under-counts accepts, which only makes the
+// no-alert assertions below harder to pass.
+func acceptsFromDrops(series []sample) []time.Time {
+	var out []time.Time
+	for i := 1; i < len(series); i++ {
+		prev, cur := series[i-1], series[i]
+		next := cur.v
+		if cur.at.Sub(prev.at) > scrape { // gap: the series was absent, i.e. drained to 0
+			for k := 0; k < int(prev.v); k++ {
+				out = append(out, prev.at.Add(scrape))
+			}
+			continue
+		}
+		for k := 0; k < int(prev.v-next); k++ {
+			out = append(out, cur.at)
+		}
+	}
+	return out
+}
+
+func stallBlock(t *testing.T, uid string) string {
+	t.Helper()
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "- uid: "+uid)
+	if i < 0 {
+		t.Fatalf("rule %s not found", uid)
+	}
+	rest := src[i+len("- uid:"):]
+	if j := strings.Index(rest, "- uid:"); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
+
+func TestStallRuleExprMatchesModel(t *testing.T) {
+	rest := stallBlock(t, "pg-router-queue-stalled")
+	m := regexp.MustCompile(`(?m)^\s*expr: (.+)$`).FindStringSubmatch(rest)
+	if m == nil {
+		t.Fatal("no expr in rule")
+	}
+	if m[1] != wantStallExpr {
+		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], wantStallExpr)
+	}
+	// keepFiringFor is camelCase: file provisioning ignores keep_firing_for.
+	for _, need := range []string{"for: 30m", "keepFiringFor: 30m", "noDataState: OK", "execErrState: Error", "severity: warning"} {
+		if !strings.Contains(rest, need) {
+			t.Errorf("rule lost %q", need)
+		}
+	}
+	if strings.Contains(rest, "keep_firing_for") {
+		t.Error("snake_case keep_firing_for is silently ignored by file provisioning; use keepFiringFor")
+	}
+}
+
+// pg2-p93c0: the aggregate rule was deleted (see the decision comment in
+// alerts.yaml and TestWholeSystemStallSurfacesViaHeartbeat), so nothing may
+// provision its uid again by accident, and the growth rule keeps its identity.
+func TestBacklogGrowingRuleIsGoneAndGrowthRuleKept(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "- uid: pg-router-backlog-growing") {
+		t.Error("pg-router-backlog-growing was deleted by pg2-p93c0 and must not be re-provisioned")
+	}
+	growth := stallBlock(t, "pg-router-queue-depth-growing")
+	for _, need := range []string{"title: pg-router queue depth is growing (by type)", "severity: warning", "for: 15m"} {
+		if !strings.Contains(growth, need) {
+			t.Errorf("growth rule fingerprint/identity lost %q", need)
+		}
+	}
+}
+
+// pg2-n1pm4: replay of the recorded 2026-09-30 pr.changed series (12:00Z-22:00Z,
+// testdata/pr_changed_2026-09-30.csv, metric view = what Prometheus held).
+func TestPrChangedSeries20260930(t *testing.T) {
+	const day = "2026-09-30"
+	in := loadStallCSV(t, "testdata/pr_changed_2026-09-30.csv", day, true)
+	m := stallReplay(in, atDay(day, "12:31:00"), atDay(day, "22:00:00"))
+
+	// The absorbed 12:49Z and 13:49Z bursts (cleared in 30-40m, dispatching
+	// throughout) neither page nor even evaluate true before the stall begins.
+	if tt, bad := anyState(m, atDay(day, "12:31:00"), atDay(day, "14:30:00"), isCond); bad {
+		t.Errorf("absorbed bursts evaluated true at %s", tt.Format("15:04"))
+	}
+	// The ~55-deep stall pages, inside the recorded 14:19Z-17:29Z window.
+	first, ok := anyState(m, atDay(day, "12:31:00"), atDay(day, "22:00:00"), isAlerting)
+	if !ok {
+		t.Fatal("the 14:19Z-17:29Z stall never reached Alerting")
+	}
+	if first.Before(atDay(day, "14:19:00")) || first.After(atDay(day, "17:29:00")) {
+		t.Errorf("first Alerting at %s, want inside 14:19-17:29", first.Format("15:04"))
+	}
+	if !m[atDay(day, "17:00:00")].firing {
+		t.Error("alert not firing at 17:00, mid-stall")
+	}
+	// Once dispatches resume (17:20Z) the alert resolves after keepFiringFor and the
+	// 20:43Z episode (depth ~16, nearly flat, a dispatch inside every 30m) stays quiet.
+	if tt, bad := anyState(m, atDay(day, "18:00:00"), atDay(day, "22:00:00"), isFiring); bad {
+		t.Errorf("still firing / re-fired at %s after the stall", tt.Format("15:04"))
+	}
+	// Non-vacuity: the 20:43Z episode is close (the floor holds and the counter is
+	// silent for a while) but never for the 30 minutes the rule needs.
+	run := longestCondRun(m, atDay(day, "20:00:00"), atDay(day, "22:00:00"))
+	if run == 0 || run >= int(window/evalEvery) {
+		t.Errorf("20:43Z episode longest true run = %dm, want 0 < run < 30", run)
+	}
+}
+
+// Known limitation, pinned so it cannot be forgotten: the same day's queue log
+// records pr.changed accepts continuing from 15:00Z. The throughput counter
+// misses them because events restored by a daemon restart never reach
+// Emitter.OnEnqueue, so the 15:00Z-17:20Z part of the "stall" only exists in the
+// metric view. With the accepts the queue actually recorded, only the
+// 14:10Z-14:55Z silence (45m, shorter than 30m + for 30m) remains and nothing pages.
+func TestPrChangedStallAlertDependsOnRestartBlindMetric(t *testing.T) {
+	const day = "2026-09-30"
+	queue := loadStallCSV(t, "testdata/pr_changed_2026-09-30.csv", day, false)
+	m := stallReplay(queue, atDay(day, "12:31:00"), atDay(day, "22:00:00"))
+	if tt, bad := anyState(m, atDay(day, "12:31:00"), atDay(day, "22:00:00"), isAlerting); bad {
+		t.Errorf("queue-log view reached Alerting at %s; the recorded stall is no longer an artifact of the metric", tt.Format("15:04"))
+	}
+	// ... but it is a genuine silence while it lasts.
+	if run := longestCondRun(m, atDay(day, "14:00:00"), atDay(day, "15:10:00")); run < 10 {
+		t.Errorf("genuine 14:10Z-14:55Z silence evaluated true for only %dm", run)
+	}
+}
+
+// pg2-ralaa/pg2-nw41e: the 2026-10-01 issue.changed surge (depth 0 -> 38) is
+// absorbed by a working consumer; it never reaches Alerting, in either view.
+func TestIssueChangedSurge20261001DoesNotAlert(t *testing.T) {
+	const day = "2026-10-01"
+	for _, metricView := range []bool{true, false} {
+		in := loadStallCSV(t, "testdata/issue_changed_2026-10-01.csv", day, metricView)
+		m := stallReplay(in, atDay(day, "20:31:00"), atDay(day, "23:30:00"))
+		if tt, bad := anyState(m, atDay(day, "20:31:00"), atDay(day, "23:30:00"), isAlerting); bad {
+			t.Errorf("metricView=%v: surge reached Alerting at %s", metricView, tt.Format("15:04"))
+		}
+	}
+}
+
+// pg2-o6z19: a standing flat backlog (pr.changed 43 -> 56 over 25m) that is not
+// being drained alerts; the same backlog with a dispatch every 20m does not.
+func TestStandingFlatBacklogAlertsOnlyWithoutDispatches(t *testing.T) {
+	var depth []sample
+	start := at("10:00:00")
+	for i := 0; i < 360; i++ { // 3h
+		v := 56.0
+		if i < 50 { // 25m ramp 43 -> 56
+			v = 43 + 13*float64(i)/50
+		}
+		depth = append(depth, sample{start.Add(time.Duration(i) * scrape), float64(int(v))})
+	}
+	end := start.Add(3 * time.Hour)
+	stalled := stallInput{depth: depth, accepts: []time.Time{start.Add(2 * time.Minute)}}
+	if _, ok := anyState(stallReplay(stalled, start.Add(30*time.Minute), end), start, end, isAlerting); !ok {
+		t.Fatal("standing undrained backlog never reached Alerting")
+	}
+	progressing := stallInput{depth: depth}
+	for a := start.Add(time.Minute); a.Before(end); a = a.Add(20 * time.Minute) {
+		progressing.accepts = append(progressing.accepts, a)
+	}
+	if tt, bad := anyState(stallReplay(progressing, start.Add(30*time.Minute), end), start, end, isCond); bad {
+		t.Errorf("a standing backlog with a dispatch every 20m evaluated true at %s", tt.Format("15:04"))
+	}
+}
+
+// pg2-o6z19: a periodic type whose troughs rise by 15 each 30m cycle. It alerts
+// once its consumer goes quiet for a whole window; while the consumer keeps
+// dispatching it does NOT (documented known gap: a pure stall signal cannot see
+// a backlog that grows under a working consumer; the growth rule's own
+// 5-variant analysis in pg2-nw41e found the same blind spot).
+func TestRisingTroughPeriodicType(t *testing.T) {
+	build := func(consumerQuitsAfter time.Duration) stallInput {
+		var depth []sample
+		var accepts []time.Time
+		start := at("00:00:00")
+		trough := 15.0
+		for c := 0; c < 12; c++ { // 6h of 30m cycles; troughs 15, 30, 45, ...
+			peak := trough + 40
+			for i := 0; i < 60; i++ {
+				at := start.Add(time.Duration(c*60+i) * scrape)
+				v := peak - (peak-(trough+15))*float64(i)/59 // drains to the NEXT trough
+				if at.Sub(start) > consumerQuitsAfter {
+					v = peak // consumer wedged: nothing drains
+				} else if i%4 == 0 {
+					accepts = append(accepts, at) // working consumer: a dispatch every 2m
+				}
+				depth = append(depth, sample{at, float64(int(v))})
+			}
+			trough += 15
+		}
+		return stallInput{depth, accepts}
+	}
+	start, end := at("00:00:00"), at("00:00:00").Add(6*time.Hour)
+	working := build(1000 * time.Hour)
+	if tt, bad := anyState(stallReplay(working, start.Add(time.Hour), end), start, end, isCond); bad {
+		t.Errorf("rising troughs under a working consumer evaluated true at %s: the known gap closed, update the rule comment", tt.Format("15:04"))
+	}
+	wedged := build(2 * time.Hour)
+	if _, ok := anyState(stallReplay(wedged, start.Add(time.Hour), end), start, end, isAlerting); !ok {
+		t.Fatal("rising troughs with a consumer that went quiet never reached Alerting")
+	}
+}
+
+// pg2-nw41e: the healthy pr.reconcile sawtooth never even evaluates true, and
+// the floor+presence half of the expression alone WOULD (slow 42/54-deep cycles
+// hold >= 10 for 30m), so the throughput clause is what keeps it quiet.
+func TestHealthyReconcileSawtoothNeverStalls(t *testing.T) {
+	series := sawtoothSeries(70, preSweep)
+	in := stallInput{depth: series, accepts: acceptsFromDrops(series)}
+	from, to := at("00:00:00").Add(time.Hour), series[len(series)-1].at
+	floorOnly := false
+	for tt := from; !tt.After(to); tt = tt.Add(evalEvery) {
+		floorOnly = floorOnly || in.depthHeld(tt)
+	}
+	if !floorOnly {
+		t.Fatal("fixture never holds the depth floor, so the test is vacuous")
+	}
+	if tt, bad := anyState(stallReplay(in, from, to), from, to, isCond); bad {
+		t.Errorf("sawtooth evaluated true at %s", tt.Format("15:04"))
+	}
+	rec := knotsTo30s(pr0594oKnots)
+	recIn := stallInput{depth: rec, accepts: acceptsFromDrops(rec)}
+	rf, rt := at("21:10:00"), at("23:30:00")
+	if tt, bad := anyState(stallReplay(recIn, rf, rt), rf, rt, isCond); bad {
+		t.Errorf("recorded pg2-0594o episode evaluated true at %s", tt.Format("15:04"))
+	}
+}
+
+// pg2-nw41e R5 / pg2-mr0sl: review.ready sits behind a max_sessions=1 pool, so
+// a review session keeps the head event waiting. Depth recorded since the
+// apply is 1-4 (below the floor); a deeper queue is fine while a review
+// completes inside every 30m; a deep queue with no completion for over an hour
+// (30m of silence, then `for: 30m`) is indistinguishable from a stall and pages
+// by design.
+func TestReviewReadyBackpressure(t *testing.T) {
+	mk := func(level float64, every time.Duration) stallInput {
+		var in stallInput
+		start := at("08:00:00")
+		for i := 0; i < 480; i++ { // 4h
+			in.depth = append(in.depth, sample{start.Add(time.Duration(i) * scrape), level})
+		}
+		for a := start.Add(every / 2); a.Before(start.Add(4 * time.Hour)); a = a.Add(every) {
+			in.accepts = append(in.accepts, a)
+		}
+		return in
+	}
+	from, to := at("08:31:00"), at("12:00:00")
+	if tt, bad := anyState(stallReplay(mk(4, 90*time.Minute), from, to), from, to, isCond); bad {
+		t.Errorf("review.ready at depth 4 evaluated true at %s", tt.Format("15:04"))
+	}
+	if tt, bad := anyState(stallReplay(mk(15, 25*time.Minute), from, to), from, to, isCond); bad {
+		t.Errorf("review.ready at depth 15 with a completion every 25m evaluated true at %s", tt.Format("15:04"))
+	}
+	if _, ok := anyState(stallReplay(mk(15, 90*time.Minute), from, to), from, to, isAlerting); !ok {
+		t.Error("review.ready at depth 15 with 90m between completions never reached Alerting")
+	}
+}
+
+// pg2-xepg6: a type that blips above the floor for one scrape and drains has
+// min_over_time >= 10 on its lone sample; the presence guard keeps it quiet.
+func TestStallIgnoresSparseBlips(t *testing.T) {
+	var in stallInput
+	start := at("10:00:00")
+	for i := 0; i < 360; i++ {
+		if i%20 == 0 { // one scrape of depth 12 every 10m, drained in between
+			in.depth = append(in.depth, sample{start.Add(time.Duration(i) * scrape), 12})
+		}
+	}
+	from, to := start.Add(31*time.Minute), start.Add(3*time.Hour)
+	for tt := from; !tt.After(to); tt = tt.Add(evalEvery) {
+		if in.stalledNow(tt) {
+			t.Fatalf("sparse blips evaluated true at %s", tt.Format("15:04"))
+		}
+	}
+}
+
+// pg2-p93c0: the aggregate backlog rule is deleted because a whole-system stall
+// reaches the per-type rule through desk.heartbeat (about one event a minute)
+// within the hour. The coverage given up is many types each below the floor.
+func TestWholeSystemStallSurfacesViaHeartbeat(t *testing.T) {
+	var hb stallInput
+	start := at("06:00:00")
+	for i := 0; i < 480; i++ { // 4h, nothing dispatched, one heartbeat enqueued a minute
+		hb.depth = append(hb.depth, sample{start.Add(time.Duration(i) * scrape), float64(1 + i/2)})
+	}
+	m := stallReplay(hb, start.Add(31*time.Minute), start.Add(4*time.Hour))
+	first, ok := anyState(m, start, start.Add(4*time.Hour), isAlerting)
+	if !ok || first.After(start.Add(75*time.Minute)) {
+		t.Fatalf("whole-system stall reached Alerting at %v (ok=%v), want within 75m", first, ok)
+	}
+	// Given-up coverage, pinned: five types stuck at 4-9 each (aggregate 35) stay quiet.
+	for _, level := range []float64{4, 6, 9} {
+		var quiet stallInput
+		for i := 0; i < 480; i++ {
+			quiet.depth = append(quiet.depth, sample{start.Add(time.Duration(i) * scrape), level})
+		}
+		if tt, bad := anyState(stallReplay(quiet, start.Add(31*time.Minute), start.Add(4*time.Hour)), start, start.Add(4*time.Hour), isCond); bad {
+			t.Errorf("depth %.0f (below the floor) evaluated true at %s", level, tt.Format("15:04"))
+		}
+	}
+}

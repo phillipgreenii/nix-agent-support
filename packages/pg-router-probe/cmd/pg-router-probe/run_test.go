@@ -352,3 +352,17 @@ func TestParseBacklog(t *testing.T) {
 		t.Fatalf("bad json must error")
 	}
 }
+
+// pg2-p93c0 / pg2-o6z19: the probe watches the rule that replaced the deleted
+// aggregate backlog rule, so a stalled queue still reaches the escalation flow.
+func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
+	want := []string{
+		"pg-router-liveness-down",
+		"pg-router-queue-stalled",
+		"pg-router-queue-depth-growing",
+		"pg-router-failure-rate",
+	}
+	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
+		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
+	}
+}

@@ -55,10 +55,12 @@ import (
 // registeredRuleUIDs are the 4 Grafana rule UIDs this probe is scoped to
 // [design: Contract's "Grafana's alerting API" bullet]. Overridable via
 // --rule-uid so tests/fixtures never depend on a real Grafana deployment
-// having rules by these exact names.
+// having rules by these exact names. pg2-p93c0 deleted pg-router-backlog-growing;
+// pg2-o6z19 added pg-router-queue-stalled in its place (grafana/alerting/alerts.yaml
+// in packages/pg-router).
 var registeredRuleUIDs = []string{
 	"pg-router-liveness-down",
-	"pg-router-backlog-growing",
+	"pg-router-queue-stalled",
 	"pg-router-queue-depth-growing",
 	"pg-router-failure-rate",
 }

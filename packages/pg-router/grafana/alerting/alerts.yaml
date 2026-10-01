@@ -88,62 +88,18 @@ groups:
                     type: lt
                     params: [1]
 
-      # Backlog (total, scalar): pg_router_backlog has no fixed capacity
-      # bound (per pg-router.json's own panel description: "no yellow/red
-      # threshold is set here -- a nonzero backlog is an expected steady
-      # state"), so this alerts on SUSTAINED GROWTH over a rolling window
-      # rather than an absolute value. delta(...) over a 30m window must
-      # stay positive continuously across the 15m `for` pending period --
-      # i.e. the backlog must be climbing across roughly the last 45
-      # minutes, not just a momentary blip. noDataState: OK -- total
-      # absence of the metric is already covered by the liveness rule
-      # above; this rule's own job is only to notice growth once the series
-      # exists.
-      - uid: pg-router-backlog-growing
-        title: pg-router backlog is growing
-        condition: C
-        for: 15m
-        noDataState: OK
-        execErrState: Error
-        labels:
-          severity: warning
-        annotations:
-          summary: "pg-router total backlog has been growing for a sustained period"
-          description: "delta(pg_router_backlog[30m]) has stayed positive for over 15 minutes -- events are being retained faster than they are dispatched. See also the per-type queue-depth rule below, which catches a single type growing even while the aggregate total looks flat."
-        data:
-          - refId: A
-            relativeTimeRange:
-              from: 1800
-              to: 0
-            datasourceUid: prometheus
-            model:
-              refId: A
-              editorMode: code
-              instant: true
-              expr: delta(pg_router_backlog[30m])
-          - refId: B
-            datasourceUid: __expr__
-            model:
-              refId: B
-              type: reduce
-              expression: A
-              reducer: last
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              refId: C
-              type: threshold
-              expression: B
-              conditions:
-                - evaluator:
-                    type: gt
-                    params: [0]
-
+      # Aggregate backlog rule REMOVED (pg2-p93c0, decision recorded below the
+      # stall rule): the old pg-router-backlog-growing paged on any 45m+ ramp of
+      # the TOTAL (delta(pg_router_backlog[30m]) > 0 for 15m) even though the
+      # queue fully drained afterward, and a stalled consumer is covered per
+      # type by pg-router-queue-stalled. pg_router_backlog stays a dashboard
+      # panel; it is no longer an alert input.
+      #
       # Queue depth (per type): pg_router_queue_depth carries a `type`
       # label (pg-router.json's "Queue depth (by type)" panel) -- this is
       # the metric pg2-5sirm's own evidence names directly ("growing
-      # unbounded for a specific type"). Same sustained-growth shape as the
-      # backlog rule above, but evaluated per series: Grafana's unified
+      # unbounded for a specific type"). Sustained-growth shape, evaluated
+      # per series: Grafana's unified
       # alerting treats each unique label combination the query returns as
       # an independent alert instance, so one type growing fires without
       # needing every type enumerated in Nix -- unlike launchd-health's
@@ -204,12 +160,12 @@ groups:
       # Regression coverage: TestReconcileSawtoothDoesNotAlertOrPend (17
       # measured pre-sweep depths) and TestReconcileRecordedEpisodeDoesNotAlertOrPend
       # (the pg2-0594o 4-minute samples, which alert under c2e2fb21) in
-      # internal/alertrules/queue_depth_growing_test.go. Known gap (R2 SHOULD,
-      # deliberately not addressed here): a periodic type whose troughs rise
-      # cycle over cycle does not alert either, for the same reason, and a
-      # standing flat backlog (pr.changed 43 -> 56 over 25m) rises < 25/h; a
-      # stalled bounded type needs a different signal (stall-based, e.g. a
-      # per-type delivered counter), not a looser slope guard.
+      # internal/alertrules/queue_depth_growing_test.go. Known gap (pg2-nw41e R2
+      # SHOULD), now addressed by the SEPARATE rule pg-router-queue-stalled
+      # below (pg2-o6z19) rather than by loosening this one: a standing flat
+      # backlog (pr.changed 43 -> 56 over 25m) rises < 25/h, and a stalled
+      # bounded type needs a different signal (dispatch progress), not a looser
+      # slope guard. This rule's expression is UNCHANGED by pg2-o6z19.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -232,6 +188,120 @@ groups:
               editorMode: code
               instant: true
               expr: delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Stalled consumer (per type), pg2-o6z19 / pg2-n1pm4 / pg2-p93c0: a type
+      # that sat at depth >= 10 for 30 minutes while pg_router_throughput_total
+      # (counter, `type` label; Emitter.OnAccept increments it once per accepted
+      # delivery, internal/metrics/metrics.go) did not advance for that type.
+      # This measures dispatch PROGRESS, not depth trend, so it separates the
+      # absorbed bursts (12:49Z and 13:49Z on 2026-09-30: cleared in 30-40m,
+      # dispatching throughout) from the 14:19Z-17:29Z pr.changed stall (depth
+      # ~55, no counted dispatches) and from the 20:43Z ~16-deep nearly-flat
+      # episode (a dispatch lands within every 30m). The healthy pr.reconcile
+      # sawtooth, the 2026-10-01 issue.changed surge and review.ready under the
+      # max_sessions=1 backpressure (pg2-mr0sl; depth 1-4, below the floor) never
+      # satisfy it. Replay of the recorded series: testdata/*.csv and
+      # internal/alertrules/queue_depth_growing_test.go.
+      #
+      # Decision (pg2-o6z19), NEW rule instead of retuning
+      # pg-router-queue-depth-growing: the growth rule still has a job (a
+      # consumer that IS dispatching but slower than arrivals: TestSustainedGrowth*),
+      # its fingerprint labels (rule uid, alertname, severity, type) stay
+      # untouched, and a retune would have forced a different expression under the
+      # same uid and discarded the growth coverage and its replay tests. The two
+      # rules' fingerprints differ by rule uid, so each pages and escalates
+      # separately. A stalled consumer with a growing queue MAY fire both.
+      #
+      # Differences from the expression pg2-n1pm4 suggested:
+      #   - count_over_time(...[30m]) >= 54 is KEPT (that bead proposed dropping
+      #     it). The gauge observes only types present in the queue (pg2-xepg6), so
+      #     a type that drained has NO series and min_over_time sees only the few
+      #     remaining samples: one stray sample of 12 would satisfy >= 10. The
+      #     presence guard is what makes "held >= 10 for 30m" true.
+      #   - `unless on(type) (... > 0)` matches on `type` only (the left side
+      #     keeps instance/job/otel_scope_name, so the alert's fingerprint labels
+      #     are the same shape as the growth rule's). A type with NO throughput
+      #     series at all (OTel counters are created lazily on first increment) has
+      #     nothing to match, so it is treated as stalled, which is right.
+      #
+      # Known limitation (do NOT widen this rule to hide it; fix the metric):
+      # pg_router_throughput_total only counts events whose OnEnqueue this daemon
+      # process saw. eventqueue.Queue.replay() restores the durable queue on start
+      # WITHOUT calling Observer.OnEnqueue, so the Emitter's pending map is empty
+      # for restored events and their accepts are silently skipped. After every
+      # daemon restart, a type with a backlog >= 10 therefore reads "zero
+      # throughput" until the restored events drain, even though the consumer is
+      # working. The recorded 2026-09-30 14:19Z-17:29Z "stall" is partly this
+      # artifact (restarts at 14:49:52Z and 16:17:51Z; the queue log shows
+      # pr.changed accepts continuing at a reduced rate from 15:00Z), so the rule
+      # alerts there for that reason, and the same artifact can page after a
+      # restart on a busy day (replay of 2026-10-01). Proposed fix: seed the
+      # Emitter's pending map during replay (separate bead, see pg2-o6z19).
+      #
+      # Known gap (pg2-o6z19 R1, partially met): a periodic type whose troughs
+      # rise cycle over cycle while the consumer keeps dispatching never goes a
+      # whole 30m without a dispatch, so this rule cannot see it; it alerts only
+      # when the rise coincides with 30m of dispatch silence. Closing that needs a
+      # separate "backlog not draining" signal (not built: a never-below-N-for-2h
+      # form fires on healthy slow pr.reconcile cycles).
+      #
+      # for/keepFiringFor 30m: the condition already needs 30m of silence, so `for`
+      # adds another 30m before paging (an episode alerts >= 60m after the last
+      # dispatch), and keepFiringFor holds the alert through a
+      # dribble of one dispatch every ~30m that would otherwise flap it.
+      # keepFiringFor is camelCase on purpose: file provisioning ignores the
+      # snake_case spelling (AlertRuleExport; see hostmetrics.nix in
+      # phillipgreenii-nix-support-apps).
+      #
+      # pg2-p93c0 decision: pg-router-backlog-growing is DELETED, not retuned to
+      # a total-queue stall form. A whole-system stall (nothing dispatching at
+      # all) surfaces here per type as soon as any type holds >= 10: desk.heartbeat
+      # alone is enqueued about once a minute and passes the floor in ~10m
+      # (TestWholeSystemStallSurfacesViaHeartbeat), and a dead daemon is the
+      # liveness rule's job. What an aggregate stall rule would add is only
+      # many types each below 10 whose sum passes 10, which is queue noise by the
+      # floor's own definition. The delta(backlog) form paged on every absorbed
+      # ramp (12h of data: swings from single digits to ~135, never unbounded).
+      - uid: pg-router-queue-stalled
+        title: pg-router queue is stalled (by type)
+        condition: C
+        for: 30m
+        keepFiringFor: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router queue for type {{ $labels.type }} is stalled: depth held at 10 or more with no dispatches"
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed at 10 or more (and the type never drained) across a 30 minute window in which pg_router_throughput_total for that type did not advance, and the condition held for another 30 minutes -- the consumer for this event type is not making counted progress. Check `pg-router status` and the role that binds this type. If the daemon restarted recently, events restored from the durable queue are not counted in the throughput metric, so the queue MAY be draining; compare the queue log before acting."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: min_over_time(pg_router_queue_depth[30m]) >= 10 and count_over_time(pg_router_queue_depth[30m]) >= 54 unless on(type) (sum by (type) (increase(pg_router_throughput_total[30m])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
