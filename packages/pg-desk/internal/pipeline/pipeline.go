@@ -110,10 +110,13 @@ type Pipeline struct {
 	cfg      *config.Config
 	store    *store.Store
 	gatherer gatherer
-	syncer   syncer
-	clock    interpret.Clock
-	verbose  bool
-	out      io.Writer
+	// entityGatherers is the generic per-entity-type gather registry used
+	// by RunGenericEntity; populated once in New() from the real Gatherer.
+	entityGatherers map[string]gather.EntityGatherer
+	syncer          syncer
+	clock           interpret.Clock
+	verbose         bool
+	out             io.Writer
 
 	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
 
@@ -171,14 +174,16 @@ func WithLogWriter(w io.Writer) Option {
 // one Gatherer per `pg-desk run` invocation") — plus cfg and st. The
 // caller owns st's lifecycle (open and Close); Pipeline never closes it.
 func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
+	g := gather.NewGatherer(cfg, st)
 	p := &Pipeline{
-		cfg:         cfg,
-		store:       st,
-		gatherer:    gather.NewGatherer(cfg, st),
-		syncer:      sync.New(cfg, st),
-		clock:       interpret.SystemClock{},
-		out:         os.Stderr,
-		retryPolicy: sync.RetryPolicyFor(cfg),
+		cfg:             cfg,
+		store:           st,
+		gatherer:        g,
+		entityGatherers: g.EntityGatherers(),
+		syncer:          sync.New(cfg, st),
+		clock:           interpret.SystemClock{},
+		out:             os.Stderr,
+		retryPolicy:     sync.RetryPolicyFor(cfg),
 	}
 	for _, opt := range opts {
 		opt(p)
