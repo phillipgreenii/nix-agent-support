@@ -1,0 +1,6 @@
+{"time":"2026-09-23T14:01:00.000000000Z","level":"error","kind":"dispatch_result","msg":"dispatch failed","role":"worker","pool":"default","bead":"zr-1","session":"s1","failure_signature":"git-auth","signature_evidence":"error: oauth command timed out"}
+{"time":"2026-09-23T15:30:00.000000000Z","level":"error","kind":"dispatch_result","msg":"dispatch failed","role":"review","pool":"default","bead":"zr-2","session":"s2","failure_signature":"git-auth","signature_evidence":"error: oauth command timed out"}
+{"time":"2026-09-24T09:00:00.000000000Z","level":"error","kind":"dispatch_result","msg":"dispatch failed","role":"worker","pool":"p2","bead":"zr-3","session":"s3","failure_signature":"unknown","signature_evidence":""}
+{"time":"2026-09-24T10:00:00.000000000Z","level":"error","kind":"hard_stop","msg":"budget hard stop reached","role":"worker","pool":"p2","bead":"zr-4","session":"s4","failure_signature":"budget"}
+{"time":"2026-09-24T10:00:01.000000000Z","level":"error","kind":"dispatch_result","msg":"dispatch failed","role":"worker","pool":"p2","bead":"zr-4","session":"s4","failure_signature":"budget","signature_evidence":"session budget exceeded: role=worker","limit":"tokens","used":12,"cap":10}
+{"time":"2026-09-24T11:00:00.000000000Z","level":"info","kind":"needs_input","msg":"session needs input; operator must attach","session":"s5","bead":"zr-5"}

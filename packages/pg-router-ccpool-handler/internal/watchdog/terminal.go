@@ -81,7 +81,8 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	w.emit("error", "hard_stop", "budget hard stop reached", map[string]any{
 		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,
 		"role": be.Role, "pool": be.Pool, "limit": string(be.Limit),
-		"used": be.Used, "cap": be.Cap, "elapsed": be.Elapsed.Seconds(),
+		"failure_signature": "budget",
+		"used":              be.Used, "cap": be.Cap, "elapsed": be.Elapsed.Seconds(),
 	})
 }
 

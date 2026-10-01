@@ -62,6 +62,18 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   fragment behind. The raw failure text MUST never be logged or returned. Naming a cause is a
   judgment about the work, not an observed session fact, so this classification lives on the
   handler side and never in ccpool (`phillipgreenii-nix-agent-support` ADR 0015's "Decision").
+  - **Dispatch result.** When a dispatched session fails, exits without completing its bead, or is
+    hard-stopped by the budget watchdog, the handler MUST record one `dispatch_result` event-log
+    entry (and a log line) carrying `failure_signature`, `signature_evidence` (redacted, at most
+    300 characters), `role`, `pool`, `bead`, and `session`. The signature MUST be classified from
+    the last 64 KB of the session transcript (its `tool_result` and text content, with a
+    truncated first line dropped) and MUST be captured BEFORE any step that closes or purges the
+    session, because teardown can make the transcript unreadable. An empty or unreadable
+    transcript path yields `unknown` with empty evidence. `budget` MUST be set only for a watchdog
+    hard stop and reuses its `limit`, `used`, and `cap` fields; there MUST be no second budget
+    counter. The raw transcript MUST never be logged. There is no new metric or store: "first
+    seen" and "how often" are answered from the event log's own timestamps (see
+    `docs/runbooks/dispatched-session-failure-signatures.md` in the repo root).
 - **`INV-CCH-10`** — before accepting a dispatch, the handler MUST decline it when the git
   origin the dispatch needs is unavailable, and MUST NOT decline a dispatch for any other
   reason of origin state. Availability is per origin, keyed by a normalized repo key

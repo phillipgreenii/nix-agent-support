@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -33,7 +35,14 @@ func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps
 
 // ccpoolRun carries Deps so the moved methods keep their original signatures
 // (only o.X → r.deps.X). It exists per-Dispatch; no cross-dispatch state.
-type ccpoolRun struct{ deps Deps }
+type ccpoolRun struct {
+	deps Deps
+
+	// sigMu guards the failure-signature state below (INV-CCH-9).
+	sigMu      sync.Mutex
+	transcript string          // last-seen TranscriptPath of the dispatched session
+	captured   *failsig.Result // signature captured before teardown; first capture wins
+}
 
 // ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
 // backpressure signal (the pool is simply full). No bead was mutated and no
@@ -294,6 +303,7 @@ func budgetUnlimited(b budget.Budget) bool {
 // cleanupWorktree call here covers all three, rather than three separate call
 // sites.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	r.recordDispatchFailure(d, name, werr)
 	r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
 	if werr == nil {
 		// A successful completion resets the eviction strike counter so
@@ -533,6 +543,7 @@ func crashOrphaned(s ccpool.Session) bool {
 // waitFailureResult) so the terminal verb reported here is identical to what
 // a first-time dispatch of the same work would have reported.
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
+	r.noteTranscript(existing)
 	cc := d.Role.CCPool
 	// pg2-oq6cy: a live session still in `ready` never took a turn — no prompt
 	// was ever delivered (a healthy dispatched session moves ready->working
@@ -760,6 +771,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				return lose()
 			}
 			if won() {
+				r.captureSignature() // before any teardown (INV-CCH-9)
 				// INV-CCH-7: distinguish an EXTERNAL close (ccpool itself ended the
 				// session — idle_ttl, cap_eviction, operator) from a genuine worker
 				// failure. On external close, release the bead regardless of the
@@ -795,6 +807,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				return lose()
 			}
 			if won() {
+				r.captureSignature() // INV-CCH-9
 				return r.fail(ctx, d, fmt.Sprintf("not complete within %s", r.deps.Cfg.MaxWait))
 			}
 			return lose()
@@ -910,6 +923,7 @@ func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
 	}
 	for _, s := range sessions {
 		if s.ExternalID == externalID {
+			r.noteTranscript(s)
 			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
 		}
 	}
@@ -928,6 +942,7 @@ func (r *ccpoolRun) sessionState(ctx context.Context, externalID string) (ccpool
 	}
 	for _, s := range sessions {
 		if s.ExternalID == externalID {
+			r.noteTranscript(s)
 			return s.State, true
 		}
 	}
