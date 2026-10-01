@@ -35,6 +35,15 @@ import (
 // the fake listener below must be wired in under the identical name.
 const osxBridgeAPISocketEnvVar = "PG_OSX_BRIDGE_API_SOCKET"
 
+// Deadlines are hang guards, not performance assertions: a cold `go build`
+// under heavy machine load (load average 130+ to 400 during nix flake check,
+// pg2-z4ppl / pg2-iezmg) takes far longer than an idle build, so they are
+// deliberately generous (still below go test's default 10m package timeout).
+const (
+	buildDeadline = 8 * time.Minute
+	runDeadline   = 2 * time.Minute
+)
+
 // buildCalendarOsxBridgeBinary compiles this package's own real binary via
 // `go build -o <dir>/pg-connector-calendar-osx-bridge .`, run with THIS
 // package's own directory as the build's working directory — mirrors
@@ -45,7 +54,7 @@ func buildCalendarOsxBridgeBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "pg-connector-calendar-osx-bridge")
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), buildDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
 	out, err := cmd.CombinedOutput()
@@ -149,7 +158,7 @@ func TestConformance_RealBinary_FakeOsxBridgeSocketOnEnvOverride(t *testing.T) {
 	// a real subprocess.
 	t.Setenv(osxBridgeAPISocketEnvVar, sock)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	results := conformance.Run(ctx, conformance.ExecBackend{Binary: bin})
 	if len(results) == 0 {
