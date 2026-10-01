@@ -184,3 +184,50 @@ func TestRemovedPayloadClearsDerivedKeepsExternal(t *testing.T) {
 		t.Fatalf("links = %+v", ls)
 	}
 }
+
+// TestThreadExtractorCountsLegacyPRToKeyRows pins that a Jira key in a
+// thread resolves through a legacy-origin PR-to-key row (written by
+// gather.go's scan) even when the derived Jira extractor never ran.
+func TestThreadExtractorCountsLegacyPRToKeyRows(t *testing.T) {
+	p := linkPipeline(t, nil)
+	if err := p.store.UpsertXref(store.Xref{
+		Repo: linkRepo, FromType: "pr", FromID: "acme/widgets#3", ToType: "issue", ToID: "PROJ-4",
+		Evidence: "branch", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hydrate(t, p, "thread", "t2", threadResult(t, "tracked in PROJ-4, also PROJ-8"))
+	ls := linksFrom(t, p, "thread", "t2")
+	if len(ls) != 1 || ls[0].ToType != "pr" || ls[0].ToID != "acme/widgets#3" || ls[0].Origin != "derived:thread-refs" {
+		t.Fatalf("links = %+v", ls)
+	}
+}
+
+// TestExtractionRunsWithoutDeciderAndWritesNoChangeLog pins that hydration
+// extracts links with no decider/consumer registered for the type, and that
+// extraction itself appends no change_log record.
+func TestExtractionRunsWithoutDeciderAndWritesNoChangeLog(t *testing.T) {
+	p := linkPipeline(t, nil)
+	before, err := p.store.ListChangesAfter("pr", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.extractAndReplace("pr", "acme/widgets#1",
+		prResult(t, "PROJ-1", "", "").Payload, false, "2026-09-16T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if ls := linksFrom(t, p, "pr", "acme/widgets#1"); len(ls) != 1 {
+		t.Fatalf("links = %+v", ls)
+	}
+	after, err := p.store.ListChangesAfter("pr", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("change_log grew: before=%d after=%d", len(before), len(after))
+	}
+	hist, err := p.store.ListEntityHistory(linkRepo, "pr", "acme/widgets#1", 0)
+	if err != nil || len(hist) != 0 {
+		t.Fatalf("history = %+v err=%v", hist, err)
+	}
+}
