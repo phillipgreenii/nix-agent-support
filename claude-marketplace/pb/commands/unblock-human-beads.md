@@ -1100,8 +1100,11 @@ step — and never reaches TRIAGE at all.
 ## Isolation: reuse vs create
 
 - **Reuse (existing parked isolation for the bead) — always, directly.** If drain parked a
-  worktree/set for the bead, `cd` into it and do the minimal work there; commit on the
-  parked branch. Do NOT invoke `fork-workforest`, and do NOT clean it up (drain will reuse
+  worktree/set for the bead, do the minimal work there; commit on the parked branch. You
+  MUST NOT persistent-`cd` into the worktree or set root (the harness rewrites the
+  environment block to pin the session there, `pg2-u4r7t`): use `git -C <abs-worktree>`,
+  absolute paths, or a `( cd <abs-worktree> && ... )` subshell, and your cwd stays where it
+  started. Do NOT invoke `fork-workforest`, and do NOT clean it up (drain will reuse
   it on re-claim).
 - **Create (no isolation exists) — single-repo only.** If committed code is genuinely
   required and no parked isolation exists, create it at drain's exact convention:
