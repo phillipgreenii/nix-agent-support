@@ -29,10 +29,14 @@ resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Autho
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
 
-**Go test gate**: a Go package with `subPackages` set means `nix build .#<pkg>` compiles only
-`cmd/` — packages outside `cmd/` are never compiled and their tests never run, so a green package
-build is NOT a whole-module test gate (proven 2026-08-12, bead `pg2-3nb2t`: `nix build .#pg-pr`
-exited 0 while `checks.pg-pr-go-tests` had been red for a week). The whole-module gate is
-`nix build .#checks.<system>.<pkg>-go-tests` (a full `nix flake check` would also build it — it
-builds `checks.*` but NOT `packages.*` — but is NOT a per-change or land-time gate; build the
-targeted check).
+**Go test gate**: package builds no longer run tests at all — `mkGoApp`/`mkGoBinary` default
+`doCheck = false` (operator ruling 2026-10-01, bead `pg2-pla9d.2`), so a green `nix build .#<pkg>`
+proves only that the binary compiles, never that any test passes. (Even before that, a package
+with `subPackages` set compiled and tested only `cmd/` — proven 2026-08-12, bead `pg2-3nb2t`:
+`nix build .#pg-pr` exited 0 while `checks.pg-pr-go-tests` had been red for a week.) The Go test
+gate is the module's `mkGoTest` check: `nix build .#checks.<system>.<pkg>-go-tests` (a full
+`nix flake check` would also build it — it builds `checks.*` but NOT `packages.*` — but is NOT a
+per-change or land-time gate; build the targeted check). Every Go module with tests MUST have a
+`*-go-tests` check in `flake.nix`; a new module without one has no nix-side test coverage. Opting a
+package back into `doCheck = true` MUST carry a comment stating why its `*-go-tests` check is not
+enough.

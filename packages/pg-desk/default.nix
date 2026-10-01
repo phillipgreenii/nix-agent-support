@@ -31,14 +31,16 @@ mkGoApp {
   # third-party deps; pg-connector is intentionally absent from it.
   gomod2nixToml = ./gomod2nix.toml;
 
-  # No `subPackages` set (mirrors packages/pg-router/default.nix): the
-  # gomod2nix checkPhase therefore runs the FULL `go test ./...` across
-  # every internal/* package this docket's earlier packets (2-9) already
-  # landed, not just cmd/pg-desk. This packet's own "nix build .#pg-desk"
-  # validation command is thereby the whole-module Go test gate (repo
-  # CLAUDE.md's package-versioning path-rule "Go test gate"; bead
-  # pg2-3nb2t) — no separate checks.<system>.pg-desk-go-tests attribute is
-  # needed for that.
+  # No `subPackages` set (mirrors packages/pg-router/default.nix). This
+  # package build is NOT the Go test gate: repo-base's mkGoApp defaults
+  # `doCheck = false` (bead pg2-pla9d.2, operator ruling 2026-10-01), so
+  # `nix build .#pg-desk` compiles the binary and runs no tests. The
+  # whole-module gate is `checks.<system>.pg-desk-go-tests` in flake.nix
+  # (base `mkGoTest`, same Pattern-B fileset + modRoot as `src` above), which
+  # runs `go test ./...` across every cmd/* and internal/* package (repo
+  # CLAUDE.md's package-versioning path-rule "Go test gate"). Until that
+  # change this comment named the package build's own gomod2nix checkPhase
+  # as the gate (bead pg2-3nb2t); the doCheck flip retired that.
 
   # This package exports its version as `main.Version` (capitalised) —
   # cmd/pg-desk/main.go's `var Version = "dev"` — matching mkGoApp's

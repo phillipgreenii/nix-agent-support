@@ -14,10 +14,14 @@ mkGoApp {
   #
   # Filtered src, mirroring pg-connector-issue-jira.nix's own fileset
   # scoping (bead pg2-p5at3's precedent) — with ONE deliberate divergence
-  # from every sibling backend: mkGoApp does NOT skip `go test` (doCheck is
-  # left at buildGoApplication's real default, which runs goCheckHook
-  # scoped to `subPackages`; see default.nix's own pg2-p5at3 comment for
-  # where this was first learned the hard way). Every sibling backend's
+  # from every sibling backend. This was written when mkGoApp did NOT skip
+  # `go test` (doCheck was left at buildGoApplication's real default, which
+  # runs goCheckHook scoped to `subPackages`; see default.nix's own
+  # pg2-p5at3 comment for where this was first learned the hard way).
+  # repo-base's mkGoApp now defaults `doCheck = false` (bead pg2-pla9d.2), so
+  # this build no longer runs the test files and the test gate is
+  # `checks.<system>.pg-connector-go-tests`; the reasoning below still holds
+  # for any build that re-enables doCheck. Every sibling backend's
   # `cmd/pg-connector-<name>/` test files happen not to import
   # pkg/scriptout/{schemas,conformance}, so trimming those two subpackages
   # out of `src` is invisible to them. This binary's own

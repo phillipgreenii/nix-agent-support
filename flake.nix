@@ -1674,10 +1674,16 @@
               # goCheckHook scopes `go test` to `$subPackages` when set — so the
               # shipped-binary build (and thus `nix flake check` via that build)
               # only tests `cmd/`, leaving every `internal/`+`pkg/` suite ungated
-              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). The
-              # shipped-binary builds keep `subPackages` (stay scoped); only these
-              # gates pay the test cost, and only under `nix flake check`, never a
-              # system build.
+              # (ceta's rule tests, pg-pr's sync/store/auth seams, …). Since bead
+              # pg2-pla9d.2 (operator ruling 2026-10-01) repo-base's mkGoApp and
+              # mkGoBinary default `doCheck = false`, so a package build runs NO
+              # tests at all — not even `cmd/` — whether or not `subPackages` is
+              # set. These `*-go-tests` checks are therefore the ONLY nix-side Go
+              # test gate for every module: they pay the whole test cost, only
+              # when built (targeted `nix build .#checks.<system>.<name>` or a
+              # full `nix flake check`), never in a package or system build.
+              # Every Go module with tests MUST have one; a module without one
+              # has no nix-side test coverage (commit-time `run-unit-tests` aside).
               #
               # Why they call base's `goBuilders.mkGoTest`: it is the fleet's ONE
               # builder for this job (`phillipg-nix-repo-base` ADR 0021). It never
@@ -1697,16 +1703,18 @@
               # dependency.
               #
               # ccpool — bead pg2-ei1xj, discovered while implementing
-              # pg2-aqpvr. default.nix sets no subPackages, so gomod2nix's
-              # default checkPhase coincidentally swept every *_test.go via
+              # pg2-aqpvr. default.nix sets no subPackages, so (before the
+              # pg2-pla9d.2 doCheck = false default) gomod2nix's default
+              # checkPhase coincidentally swept every *_test.go via
               # `find . -name` as a side effect of building the PACKAGE
               # derivation — but `nix flake check` only builds checks.*, never
               # packages.*, so ccpool got ZERO Go test coverage from
               # `nix flake check` until this gate. Pattern-B module (local
               # replace ../claude-transcript, same shape as pa-monitor above),
               # so root the fileset at packages/ and pass modRoot. git on PATH
-              # for internal/gitfacet's real-git fixture tests (matches
-              # default.nix's nativeCheckInputs = [ pkgs.git ]). cmd/ccpool's
+              # for internal/gitfacet's real-git fixture tests (default.nix's
+              # nativeCheckInputs = [ pkgs.git ] is inert under the doCheck =
+              # false default; this testDeps is the live one). cmd/ccpool's
               # `integration`/`contract`-tagged suites stay off by default
               # (bare `go test ./...`, no -tags), matching every other
               # tagged-suite split in this flake.
@@ -2264,7 +2272,10 @@
                 # filtered fileset src, pg2-p5at3): this is the whole-module `go test
                 # ./...` gate (package-versioning.md's "Go test gate"), so it needs
                 # every cmd/pg-connector-*/ tree and pkg/* present regardless of any
-                # one derivation's own build+test dependency scope.
+                # one derivation's own build dependency scope. Since bead
+                # pg2-pla9d.2 (mkGoApp's doCheck = false default) none of the
+                # pg-connector package derivations runs tests, so this check is
+                # the module's ONLY nix-side test gate.
                 src = ./packages/pg-connector;
                 gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
                 testDeps = [
@@ -2566,6 +2577,31 @@
                     touch $out
                   '';
 
+              # pg-desk — whole-module Go test gate (bead pg2-pla9d.2). Until
+              # then packages/pg-desk/default.nix set no subPackages and its
+              # gomod2nix checkPhase WAS this module's gate (pg2-3nb2t); repo-base's
+              # mkGoApp now defaults `doCheck = false`, so without this check the
+              # ~49 test files would run nowhere on the nix side. Pattern-B module
+              # (go.mod `replace => ../pg-connector`; internal/gather's tests reuse
+              # pkg/scriptout/conformance), so root the fileset at packages/ and
+              # pass modRoot, mirroring packages/pg-desk/default.nix's own `src`.
+              # No testDeps: every subprocess the suite spawns is the test binary
+              # itself re-exec'd as a wire double (beadref/gather/sync
+              # helperCmdFactory), and internal/browser's darwin tests stub Chrome
+              # with a t.TempDir() script.
+              pg-desk-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-desk-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-desk
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "pg-desk";
+                gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+              };
+
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
               # pg2-adhga / ADR 0021). Pattern-B module (local replace
               # ../claude-transcript), so root the fileset at packages/ and pass
@@ -2603,6 +2639,18 @@
                 modRoot = "pa-monitor";
                 gomod2nixToml = ./packages/pa-monitor/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
+              };
+
+              # pa-monitor-decorator-scope — its own Pattern-A go.mod (no local
+              # replace), one test file (main_test.go: longest-prefix rule
+              # matching). Added by bead pg2-pla9d.2: its package build's
+              # gomod2nix checkPhase was the only place these tests ran, and
+              # repo-base's mkGoApp now defaults `doCheck = false`. No testDeps:
+              # the suite shells out to nothing.
+              pa-monitor-decorator-scope-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pa-monitor-decorator-scope-go-tests";
+                src = lib.cleanSource ./packages/pa-monitor-decorator-scope; # matches default.nix
+                gomod2nixToml = ./packages/pa-monitor-decorator-scope/gomod2nix.toml;
               };
 
               # pg-router — full internal/* suite PLUS a per-package STATEMENT-

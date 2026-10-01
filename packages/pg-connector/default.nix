@@ -35,7 +35,13 @@ mkGoApp {
   # added test-pg-connector-version-stamped's dependency on `pkgs.pg-connector`,
   # which forces THIS derivation itself to build under `nix flake check` and
   # therefore actually run doCheck's `go test ./...` against this filtered
-  # src for the first time. This still means an edit to ANY backend's Go
+  # src for the first time. (Historical since bead pg2-pla9d.2: repo-base's
+  # mkGoApp now defaults `doCheck = false`, so this package build runs no
+  # tests at all and the whole-module suite runs only in
+  # `checks.<system>.pg-connector-go-tests`, whose own `src` is the raw,
+  # unfiltered package dir. The filtered `src` and its `*.nix` inclusion are
+  # kept as-is: they are harmless, and still correct should doCheck ever be
+  # re-enabled here.) This still means an edit to ANY backend's Go
   # source, or to any of the 5 `*.nix` files, legitimately re-digests this
   # ONE derivation — that is correct, not a bug: the guard must re-verify the
   # invariant over the new content. Each Tier-2 backend below stays isolated

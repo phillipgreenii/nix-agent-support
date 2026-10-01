@@ -30,14 +30,16 @@ mkGoApp {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # internal/gitfacet's tests (pg2-svfbb.8, migrated onto x/gitclient's
+  # Only matters when this package's check phase runs. repo-base's mkGoApp
+  # defaults `doCheck = false` (bead pg2-pla9d.2, operator ruling 2026-10-01),
+  # so the package build runs no tests and this attribute is inert; the Go
+  # test gate is `checks.<system>.ccpool-go-tests` in flake.nix, which carries
+  # its own `testDeps = [ pkgs.git ]`. It is kept so an older repo-base pin
+  # (whose mkGoApp still ran `go test ./...` here, unscoped by subPackages)
+  # keeps building: internal/gitfacet's tests (pg2-svfbb.8, on x/gitclient's
   # gittest/gitfixture) build real throwaway repos via the `git` binary rather
-  # than skipping when it is absent (the pre-migration tests used a
-  # gitAvailable(t) skip so the doCheck phase degraded gracefully in a
-  # git-less sandbox). gomod2nix's buildGoApplication runs doCheck (`go test
-  # ./...`) with no subPackages scoping here, so git must be on PATH during
-  # the build sandbox's check phase — mirrors pg-pr's own
-  # nativeCheckInputs = [ pkgs.git ] (packages/pg-pr/default.nix).
+  # than skipping when it is absent. MAY be dropped once every consumer's lock
+  # carries the doCheck = false default.
   nativeCheckInputs = [ pkgs.git ];
 
   # Render the hook plugin with an ABSOLUTE binary path (the repo's template uses
