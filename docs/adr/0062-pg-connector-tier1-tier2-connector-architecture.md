@@ -122,7 +122,7 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    unknown is distinguishable from none only via the `sources[]` row; (f) the capability is
    read-only (no acknowledge, silence, or hide). The two Tier-2 backends
    (`pg-connector-alert-grafana`, and a deferred `pg-connector-alert-pagerduty`) are separate
-   later work; this item records only the Tier-1 entity.
+   work; this item records the Tier-1 entity, and the Grafana backend implements it.
 
 ## Consequences
 
@@ -159,8 +159,10 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
   no longer part of the "not yet built" list in the bullet above.
 - As of bead `pg2-wms83` (the `alert` Tier-1 entity, from design bead `pg2-k3lxs`), the `alert`
   entity-type capability is likewise added to this ADR's Decision (item 9, above) and to the
-  behavior-docs set's extent. The Grafana and PagerDuty Tier-2 backends are NOT yet built and
-  remain outside the extent.
+  behavior-docs set's extent. The PagerDuty Tier-2 backend is NOT yet built and remains outside
+  the extent. The Grafana Tier-2 backend (`pg-connector-alert-grafana`, bead `pg2-rejc3`) has
+  since landed with `list`, `show` and `list_attention`; its `list_history` (bead `pg2-rwuhs`) is
+  still outstanding.
 - Behavior-docs-first ordering, having been skipped for the first ten packets, cannot be
   retroactively un-skipped; this ADR and its behavior-docs set are a backfill, not evidence the
   process was followed from day one.

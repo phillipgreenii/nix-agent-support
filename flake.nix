@@ -213,6 +213,18 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-alert-grafana: the alert capability's Grafana Tier-2
+          # backend (bead pg2-rejc3) — another mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as every
+          # sibling backend entry above, building the standalone scriptout-only
+          # binary from packages/pg-connector/pg-connector-alert-grafana.nix.
+          # It also answers the attention capability; its own .nix file's src
+          # fileset names both provider subpackages.
+          pg-connector-alert-grafana =
+            final.callPackage ./packages/pg-connector/pg-connector-alert-grafana.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           # pg-connector-agentsession-pa-monitor: the agentsession
           # capability's Tier-2 pa-monitor backend (docket pg2-eezd1) —
           # another mkGoApp call over the SAME packages/pg-connector module
@@ -7017,6 +7029,7 @@
               pg-connector-thread-slack
               pg-connector-calendar-osx-bridge
               pg-connector-agentsession-pa-monitor
+              pg-connector-alert-grafana
               pg-ccaudit
               pg-router-source-pg-connector
               pg-router-probe

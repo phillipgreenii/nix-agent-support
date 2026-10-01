@@ -473,6 +473,9 @@ in
     # joins in turn (docket pg2-eezd1): also always-installed, independent
     # of whether connector.agentsession is itself populated -- it answers
     # the attention and search capabilities too, not only agentsession.
+    # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
+    # always-installed, independent of whether connector.alert is itself
+    # populated -- it answers the attention capability too.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -483,6 +486,7 @@ in
       pkgs.pg-connector-thread-slack
       pkgs.pg-connector-calendar-osx-bridge
       pkgs.pg-connector-agentsession-pa-monitor
+      pkgs.pg-connector-alert-grafana
     ];
 
     # No programs.tldr.customPages entry: unlike pg-pr's own module,
