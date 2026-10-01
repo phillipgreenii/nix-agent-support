@@ -104,7 +104,14 @@ func TestCheck_classes(t *testing.T) {
 				}
 				return s.run(ctx, dir, a...)
 			}
-			p.cfg.Timeout = 20 * time.Millisecond
+			// Only the timeout case needs a short deadline. Every other case
+			// returns immediately, so a generous deadline keeps a loaded
+			// machine from expiring pctx before probe() classifies the result
+			// (which would turn "unknown" into "timeout"; pg2-ithab).
+			p.cfg.Timeout = time.Minute
+			if errors.Is(tc.err, context.DeadlineExceeded) {
+				p.cfg.Timeout = 20 * time.Millisecond
+			}
 			d := p.Check(context.Background(), w)
 			if d.State.Class != tc.want {
 				t.Fatalf("class = %q, want %q (tail %q)", d.State.Class, tc.want, d.State.LastError)
