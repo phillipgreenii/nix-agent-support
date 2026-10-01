@@ -535,9 +535,10 @@ sequenceDiagram
   `INTF-SOURCE`'s manager-initiated direction and is invoked through the callback the core hands out,
   not by the operator.
 - **What the operator can do.** The boundary offers exactly these affordances: run the core in its
-  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **pause and resume the pool** —
-  set or clear a global **gate** that suspends event production and new dispatch while accepted work
-  finishes and expiry continues (`INV-LIFE-2`); **smoke-test one handler**
+  **long-running** mode or its **drain-and-exit** mode (`INV-LIFE-1`); **set and clear gates** — pause
+  and resume the pool via the `SYSTEM_PAUSE` gate, or set and clear a gate of any other TYPE — a
+  global **gate** that halts the participants that block on it while accepted work finishes and
+  expiry continues (`INV-LIFE-2`); **smoke-test one handler**
   against one explicitly named event, and **smoke-test one pull source's query** once and
   **read-only**, both under a **test-mode signal** so the participant knows a test is in flight and
   neither running any discovery of its own; **inject** an operator-supplied event into the live core;
@@ -560,16 +561,16 @@ DEC-CLI-2`).
   event is durable via the queue and delivered at-least-once and deduped like any push event
   (`INV-EVT-*`); no new delivery semantics. It is **distinct from** `ingest-event` (a manager→core
   callback) and from the one-shot handler smoke test, which tears down.
-- **Operator pause/resume.** `pause [<gate>]` / `resume [<gate>]` set or clear a named **gate**
-  (`INV-LIFE-2`); omitting `<gate>` defaults to `operator-paused`, and clearing **every** outstanding gate
-  requires an explicit `resume --all` — a bare `resume` clears only the default gate, so an
-  automation-owned gate is never cleared by accident. Both act **directly on the gate's file-backed
-  state** and **MUST succeed even with no core running** (exit `0`, reporting that the change takes
-  effect at the next start) — unlike every other operator command, they **never Discover or Dial** a
-  core (contrast "Locating the core" below). A **socket** pause/resume verb also exists so a client
-  already holding a connection can act over it, but **file existence is the single source of truth**
-  for whether the pool is gated, so the socket verb and the file-direct subcommand can never disagree
-  about state that outlives the call. (Concrete spelling:
+- **Operator pause/resume and gates.** `pause` / `resume` set or clear the `SYSTEM_PAUSE` **gate**
+  (`INV-LIFE-2`), recording the operator as its owner; a bare `resume` clears only `SYSTEM_PAUSE`,
+  and clearing **every** active gate requires an explicit `resume --all`, so a gate another system
+  owns is never cleared by accident. `gate set` / `gate clear` / `gate list` do the same for a gate
+  of any TYPE, accepting an optional description, owner and TTL lease. A gate is a record in the
+  core's durable log, so these commands are ordinary socket clients: they **MUST fail with a "no
+  running core" error** (non-zero exit) when none is reachable, exactly like every other operator
+  command (contrast the file-direct behavior this replaced). An external system sets and clears
+  gates over the same socket (`gate-set` / `gate-clear`); there is no separate file-based path.
+  (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
 - **Test-mode signal.** The signal "What the operator can do" names above is **advisory only**: it
   tells a participant that _a test is in flight_, and the participant **MAY** use it to alter its
@@ -586,10 +587,9 @@ DEC-CLI-2`).
   running core" error** and a **non-zero exit code**; it **MUST NOT start one**. Locating means being
   able to **reach** a core, not merely finding a trace that one once existed — a trace left behind by a
   core that has died is the same outcome as no trace at all. This holds on every locate path: the
-  manager callbacks and the operator commands alike
-  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-2`). The one
-  exception is **pause/resume** ("Operator pause/resume" above): they act on gate-file state directly
-  and never attempt to locate a core at all, so this locate-or-fail rule does not apply to them.
+  manager callbacks and the operator commands alike, **including** pause/resume and the gate commands
+  ("Operator pause/resume and gates" above)
+  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-2`).
 - **Protocol-level failure.** A **socket verb** — any message that reaches the core over its held
   socket connection, an operator command or a manager callback alike — MAY fail at the **protocol**
   level before the verb's own reply schema could even be composed: an unsupported `schemaVersion`, a
@@ -672,17 +672,12 @@ Inspection's **MUST** set has widened to also offer:
   non-failing lifecycle state such as a drain-and-exit run winding toward exit — observable from
   outside the process, rather than indistinguishable from a poll failure (see the glossary's
   **quiescing** entry).
-- Each configured **gate**'s own name, whether it is **active**, **since** it last changed, and its
-  **gate owner** — the human operator for a gate it set itself, or an automation actor for one it
-  owns (`INV-LIFE-2`'s gate identity) — plus the instants the rest of this reading is current
-  **as of**. Naming the **gate owner** per gate is what finally lets inspection show which gate a
-  human can clear unilaterally and which an automation actor may re-assert on its own initiative,
-  the labelling `INV-LIFE-2` already requires and no inspection surface carried before now.
-  Together with the lifecycle facts above, the gate owner is also part of what lets inspection
-  **distinguish** _halted_
-  (some gate active) from _quiescent_ (nothing unsettled remains in flight) — the distinction
-  `INV-LIFE-2` already requires of inspection and, until this widening, no inspection surface
-  carried at all.
+- Every **active gate**: its TYPE, description, **gate owner** (debug only — the identity that set it),
+  when it was **set** and its **TTL remaining** (or that it has none), plus the instant the rest of
+  this reading is current **as of**. Only gates in force are listed — an empty list means nothing is
+  gated. Together with the lifecycle facts above, the active gates are what lets inspection
+  **distinguish** _gated_ (some gate active) from _quiescent_ (nothing unsettled remains in flight) —
+  the distinction `INV-LIFE-2` already requires of inspection.
 - Every configured **listener**'s own role, its binds, **enabled** and **excluded** as two
   **independent** booleans computed over the **full configured participant set** — before any
   **run-scoped selector** (`STORY-OP-3`) narrows it, never from the already-filtered active set,

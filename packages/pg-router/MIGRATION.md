@@ -222,80 +222,79 @@ internally needs to be on the real runtime PATH by construction (this flake's
 own wrapper bundles `bd`, `ccpool`, `pg-pr`, and `jq` for exactly this
 reason — see `default.nix`).
 
-## Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)
+## Gates: file-backed gates replaced by the Gate Registry (bead `pg2-h63eu`, `INV-LIFE-2`)
 
-Before Task 1.2b, `Config.OperatorPaused`/`Config.CICDDown` defaulted to `""` — no gate could ever
-be set unless an operator explicitly pointed `PG_ROUTER_OPERATOR_PAUSED`/`PG_ROUTER_CICD_DOWN` (or,
-now, `[pool].operator_paused_path`/`cicd_down_path`) at a real path themselves. As of this change,
-`Config.Load()` fills either still-empty field with `<LogDir>/gates/{operator-paused,cicd-down}`
-(after the repo-TOML layer, so an existing `[pool]`/env override still wins).
+This section **supersedes** three earlier ones that described the file-backed gates: "Hazard: gate
+file paths are now configured by default" (Task 1.2b), "Operator: disabling a gate's effect
+entirely, from outside pg-router" (beads `pg2-efbb0`, `pg2-hipf0`), and "`cicd-down` gate:
+superseded, kept for backward compatibility" (bead `pg2-h410q`). All three described machinery
+that no longer exists.
 
-**What this means for an existing deployment:** `<LogDir>` (the standard XDG state path, or
-`PG_ROUTER_LOG_DIR`) is now a live gate location even for a pool that never configured one. A
-**stray file** already sitting at `<LogDir>/gates/operator-paused` or `<LogDir>/gates/cicd-down` —
-left over from an unrelated process, a manual experiment, a copy/paste of another pool's state
-directory — now **gates a pool that previously could not be gated at all**. Check for one before
-upgrading if `<LogDir>` is shared or was ever used for something else:
+**What a gate is now.** A gate is what prevents pg-router from routing: a **TYPE** (an ALL-CAPS
+string such as `SYSTEM_PAUSE` or `LOW_DISK_USAGE` — arbitrary, nothing hard-coded), an optional
+description, an optional **owner** (the caller's identity — DEBUG ONLY, no behavioral effect,
+overwritten on re-set) and an optional **TTL lease**. There is one active gate per TYPE, the last
+writer wins, and **any caller may clear any gate**. Gates are records in the same write-ahead log
+events use (`<LogDir>/queue.jsonl`): `GateSet` (each lease renewal is another one), `GateCleared`
+and `GateExpired`. The active set is a projection of that log, so it survives a restart, and a gate
+never depends on a queue drop.
+
+**What a gate does.** It acts on **participants, never on events.** While any gate is active, each
+participant that blocks on it is halted: a blocked **emitter** is not polled; a blocked
+**listener** is not dispatched to and its pull is rejected naming the gate. Pushed events are still
+accepted, acks and confirmations still processed, queued events stay queued, and an **unblocked**
+listener still receives them. A participant blocks on every gate TYPE by default and declares at
+registration which TYPEs it does **not** block on (`non_blocking_gates = ["LOW_DISK_USAGE"]` on a
+`[[role]]`/`[[query]]`, or `nonBlockingGates` on the `register` verb). The new built-in
+`type = "timer"` query is the **timer emitter** and is never blocked by any gate ("you can't stop
+time moving forward"). Event TTL is unchanged: when an event is about to expire, each listener that
+has not received it gets one final attempt, and a listener still blocked then **loses the event** —
+so a long gate drops events (counted in `pg_router_gate_drops`), and the queue is bounded by event
+TTL. Gate records themselves are routable as `gate.set` / `gate.cleared` / `gate.expired` events
+(a role may bind them) and always bypass gating for delivery.
+
+**Operating it.**
 
 ```bash
-pg-router config --show   # prints each gate's path and whether it is set
+pg-router pause [--description TEXT]            # sets SYSTEM_PAUSE (owner: operator)
+pg-router resume [--all]                        # clears SYSTEM_PAUSE (or every gate)
+pg-router gate set LOW_DISK_USAGE --description "3GiB free" --owner disk-watchdog --ttl 6m
+pg-router gate clear LOW_DISK_USAGE             # or: gate clear --all
+pg-router gate list [--json]
 ```
 
-**Gate files are never swept.** `pause`/`resume` (and `Config.Load()`'s defaulting above) create
-directories and files under `<LogDir>/gates/`, but nothing in this codebase ever cleans
-`<LogDir>` — that has always been true (no process here purges old state there) and this change
-does not alter it. A gate file, once created, persists until an explicit `resume` removes it;
-there is no time-based or startup expiry. Keep it that way: `<LogDir>` is also where
-`events.jsonl` and the discovery record live, and neither of those is swept either — introducing
-sweeping for gate files alone would make `<LogDir>`'s cleanup story inconsistent across the
-three, for no invariant that requires it.
+External systems use the same socket verbs (`gate-set`, `gate-clear`; schemas `cli.gate-set`,
+`cli.gate-clear`) — a TTL gate is kept alive by setting it again before the lease lapses, and
+simply stops gating when its owner dies. `pg-router status`/`--json` and the TUI Gates modal (`g`)
+list the active gates (TYPE, description, owner, set-at, TTL remaining).
 
-## Operator: disabling a gate's effect entirely, from outside pg-router (beads `pg2-efbb0`, `pg2-hipf0`)
+**Breaking changes.**
 
-Every named gate (`INV-LIFE-2`) had exactly one lever before this change: `pg-router
-pause`/`pg-router resume` (or the TUI's `P`/`R` keys), which set or clear the gate's own
-file-backed **tripped state**. There was no way to disable the gate **mechanism** itself — to make
-`Orchestrator.Gated()` ignore `operator_paused` even while its file happens to be present —
-without editing pg-router's own source or config and redeploying it.
+- **`pause`/`resume`/`gate` are socket clients now.** The old `pause [<gate>]`/`resume [<gate>]`
+  wrote a file directly and succeeded with no core running. Gates live in the daemon's event log, so
+  these commands need a running core and fail with `no running core` (exit `1`) otherwise; a gate
+  cannot be set while the daemon is down. `pause <name>` / `resume <name>` (a positional gate name)
+  is now a usage error — use `gate set TYPE` / `gate clear TYPE`.
+- **Removed:** the `operator_paused`/`cicd_down`/`disk_space_low` gates and their `<LogDir>/gates/*`
+  files (leftover files are inert — delete them); `PG_ROUTER_OPERATOR_PAUSED`, `PG_ROUTER_CICD_DOWN`,
+  `PG_ROUTER_DISK_SPACE_LOW` and `[pool].operator_paused_path`/`cicd_down_path`/
+  `disk_space_low_path` (the TOML keys still parse but are ignored with a warning); the whole
+  per-gate **disable-override** mechanism (`PG_ROUTER_*_DISABLE`, `<LogDir>/gate-overrides/*`,
+  `Config.OperatorPausedDisable`/`DiskSpaceLowDisable`) — clearing the gate **is** the veto now;
+  `config --show`'s gate-file rows; and the nix `daemon.gates.{operatorPausedPath,cicdDownPath}`
+  options (nothing in this workspace set them).
+- `operator_paused` is now the `SYSTEM_PAUSE` gate. `cicd_down` is no special code any more — it is
+  an arbitrary TYPE nothing sets (dead since `pg2-h410q`); for CI health prefer the per-connector
+  `command` source worked example below. `disk_space_low` is replaced by `LOW_DISK_USAGE`, set by an
+  ordinary external watchdog listener (bead `pg2-zwdwf`), not by pg-router code.
+- Wire: `cli.pause`/`cli.resume` lost their `gate` enum (SYSTEM_PAUSE only; `resume` gained `all`);
+  `cli.status-reply` `gates[]` now lists **active** gates only as `{type, description?, owner?,
+setAt, expiresAt?, ttlRemainingMs?}` and `gatesObservedAt` is gone (the list is read live).
+- `run-until-idle` while **any** gate is active still boots and stays reachable for one drain tick
+  but produces and drains nothing (a drain could spin on events a blocked listener will not take).
 
-**`operator_paused` now carries a kill switch.** `Config.OperatorPausedDisable` names a path
-(`PG_ROUTER_OPERATOR_PAUSED_DISABLE`, defaulting to
-`<LogDir>/gate-overrides/operator-paused-disabled`) that, when it **exists**, makes
-`Orchestrator.Gated()` ignore `operator_paused`'s own file state entirely — as if that gate were
-never configured. Create it with a plain `touch`; remove it with `rm`. Nothing in this codebase
-ever writes or reads that file except this ignore-check and the reporting surfaces below — no
-`pg-router` subcommand manages it, deliberately: a CLI verb for it would put the kill switch back
-INSIDE pg-router's own surface, which defeats the point.
-
-**Why this mechanism, and not an env var or GrowthBook** (the two other options the filing bead
-named): an env var can only be read as of a process's own `exec`, so toggling one would require
-restarting the daemon — failing the "without … redeploying it" requirement outright. GrowthBook
-(already used elsewhere in this workspace for CETA gate-weakening rulings) was rejected for now: a
-repo-wide grep found no existing GrowthBook client in pg-router, and this task's own constraints
-rule out a live network round-trip, so wiring one here would mean building unused interface
-plumbing for no operator-visible gain over reusing the exact `fileExists()` check the gate files
-themselves already use. Reconsider only if a later need requires this SAME toggle centrally
-managed across many independent deployments at once.
-
-**`disk_space_low` now carries the IDENTICAL kill switch (bead `pg2-hipf0`).**
-`Config.DiskSpaceLowDisable` names a path (`PG_ROUTER_DISK_SPACE_LOW_DISABLE`, defaulting to
-`<LogDir>/gate-overrides/disk-space-low-disabled`) that, when it **exists**, makes
-`Orchestrator.Gated()` ignore `disk_space_low`'s own file state entirely — mechanically the same
-mechanism as `operator_paused`'s above (same `fileExists()` reuse, same deliberately-separate-file
-reasoning, same no-`pg-router`-subcommand-manages-it posture, same rejection of an env var/GrowthBook
-for the same reasons), just wired onto a second gate rather than re-decided from scratch.
-
-**Reporting.** `pg-router status` / `--json` and the TUI's Gates modal (`g`) show the gate's raw
-`set`/`mtime`/`owner` fields UNCHANGED, plus a new `disabled` field/marker that appears only while
-the kill-switch file is present — for **both** `operator-paused` and `disk-space-low` now.
-`pg-router pause`/`pg-router resume` for either of those two gate names append a NOTE to their own
-output when that gate's kill switch is active, so a `pause` that silently has no dispatch effect is
-never reported as if it worked normally.
-
-**What this means for cicd_down.** It does not carry a kill switch yet — bead `pg2-8c7az` tracks
-adding the IDENTICAL pattern (a `CICDDownDisable` field, a `PG_ROUTER_CICD_DOWN_DISABLE` env var,
-and a `<LogDir>/gate-overrides/cicd-down-disabled` default) for its own gate, rather than
-re-deciding the mechanism.
+**Not part of this change.** A maximum queue size / overflow behavior for held events is a separate
+decision (bead `pg2-5d3ui`).
 
 ## Behavior: a partial produce during `run-until-idle` is a generic failure (Task 1.1)
 
@@ -320,8 +319,7 @@ one source had an error," never "did not run."
 `pg-router run-until-idle` — no behavior change, just the unit's own `ExecStart` naming the current
 subcommand directly.
 
-A new `daemon` submodule (`enable`, `repoRoot`, `beadsPrefix`, `configText`,
-`gates.{operatorPausedPath,cicdDownPath}`) drives a second, long-running systemd unit
+A new `daemon` submodule (`enable`, `repoRoot`, `beadsPrefix`, `configText`) drives a second, long-running systemd unit
 (`pg-router-daemon`) running `pg-router run` — the daemon core, producing and dispatching on a fixed
 poll interval until SIGINT/SIGTERM, as opposed to `periodicDrain`'s timer-triggered one-shot pass.
 **`periodicDrain.enable` and `daemon.enable` are mutually exclusive** and asserted so: both are
@@ -335,12 +333,9 @@ On darwin, the HM module's `systemd.user.services` is a no-op (darwin has no sys
 darwin deployment that wants the timer-driven form still needs its own launchd timer wiring, or
 should use `daemon` instead.
 
-The `daemon` submodule's `gates.operatorPausedPath`/`gates.cicdDownPath` set
-`PG_ROUTER_OPERATOR_PAUSED`/`PG_ROUTER_CICD_DOWN` for that unit only; leaving them `null` (the default)
-falls back to `Config.Load()`'s own default gate paths under `<PG_ROUTER_LOG_DIR>/gates/` — see
-"Hazard: gate file paths are now configured by default (Task 1.2b, `INV-LIFE-2`)" above, which
-applies equally to a daemon deployment: a stray file already sitting at that default path now
-gates a daemon that previously could not be gated, and gate files are never swept.
+(The `daemon` submodule's `gates.{operatorPausedPath,cicdDownPath}` options this paragraph used to
+describe were removed with the file-backed gates — see "Gates: file-backed gates replaced by the Gate
+Registry" above.)
 
 ## Worked example: per-connector CI health (`pg-connector`) as a `command` source (bead `pg2-h410q`)
 
@@ -415,27 +410,6 @@ replace the fixed positional argument with a small loop over `pg-pr pr list --js
 folding every call's `runs`/`sources` together before the same staleness/degraded check above —
 left as a deployment-specific extension (like the Jira example above, this only matters once a
 deploying flake has real repos/PRs to name) rather than expanded inline here.
-
-## `cicd-down` gate: superseded, kept for backward compatibility (bead `pg2-h410q`)
-
-The `cicd-down` gate (`INV-LIFE-2`'s "Gate identity"; `cmd/pg-router/gates_cmd.go`) was added
-2026-08-31 (commit `325edc35`) as a stopgap for "an automation actor" to signal CI trouble, but no
-producer was ever built — nothing in this codebase, nor (as far as this repo can see) any
-deploying flake, has ever written or cleared that file. The worked example immediately above gives
-pg-router a real, per-connector, non-binary CI health signal sourced from `pg-connector`'s own
-AsOf/Stale contract, which is what `cicd-down` was always meant to eventually consume — so
-`cicd-down` is **superseded**: prefer the per-connector `command` source above for any new CI
-health integration.
-
-`cicd-down` is **not removed**. It stays wired exactly as it always was (`pause`/`resume
-cicd-down`, `PG_ROUTER_CICD_DOWN`, `[pool].cicd_down_path`, the daemon submodule's
-`gates.cicdDownPath`, the TUI's gate modal/banner, `INV-LIFE-2`'s two-gate identity) — an operator
-or automation actor that already scripted against it keeps working unchanged. Retiring the gate
-mechanism itself (its CLI verbs, config surface, wire fields, and `docs/behavior/invariants.md`'s
-formal "exactly two named gates" text) is a larger, separately-scoped change than this bead's
-acceptance criteria required, and was deliberately left undone here rather than half-removed
-across the ~15 Go files (and the `home/programs/pg-router`/`darwin/modules/pg-router` Nix options) that
-reference it.
 
 ## Deployment: participant extraction — `pg-router-ccpool-handler` is now required (Phase 5, `docs/adr/0065`)
 

@@ -27,8 +27,9 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 | `push-inject <json>`                    | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                                                                                                           |
 | `status`                                | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                                                                                          |
 | `tui [--socket <path>] [--token <tok>]` | continuous-interactive view: polls `status`'s activity ring and offers `pause`/`resume` from the same screen — never a third affordance. No `--json` (it is a terminal UI). **Never fails on "no running core"**: it renders a no-core screen and keeps polling instead (`ADR 0036`) |
-| `pause [<gate>]`                        | set gate `<gate>` (default `operator-paused`) directly on its file-backed state (`INV-LIFE-2`) — see [below](#pause--resume--operator-gate-control)                                                                                                                                  |
-| `resume [<gate>] \| --all`              | clear gate `<gate>` (default `operator-paused`), or every outstanding gate with `--all` — see [below](#pause--resume--operator-gate-control)                                                                                                                                         |
+| `pause [--description T]`               | set the `SYSTEM_PAUSE` gate on the **running** core (`INV-LIFE-2`) — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                        |
+| `resume [--all]`                        | clear `SYSTEM_PAUSE` (or, with `--all`, every active gate) — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                                |
+| `gate set\|clear\|list`                 | set, clear or list **generic gates** by TYPE on the running core — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                          |
 | `version`                               | print the version and exit                                                                                                                                                                                                                                                           |
 | `help`                                  | print help and exit                                                                                                                                                                                                                                                                  |
 
@@ -96,39 +97,42 @@ Exit codes match every other operator subcommand: `0` ok, `2` usage, `1`
 everything else (`9` is reserved for the pre-accept busy decline, which this
 read-only verb never returns).
 
-### `pause` / `resume` — operator gate control
+### `pause` / `resume` / `gate` — operator gate control
 
 ```
-pg-router pause [<gate>]
-pg-router resume [<gate> | --all]
+pg-router pause [--description TEXT] [--owner WHO]
+pg-router resume [--all] [--by WHO]
+pg-router gate set TYPE [--description TEXT] [--owner WHO] [--ttl DURATION]
+pg-router gate clear (TYPE | --all) [--by WHO]
+pg-router gate list [--json]
 ```
 
-`pause`/`resume` set or clear a global **gate** (`INV-LIFE-2`) directly on its **file-backed
-state**: while a gate is set, the core suspends event production and new dispatch (accepted
-work still runs to completion, and expiry still advances). There are exactly two named gates,
-`operator-paused` (the operator's own) and `cicd-down` (an automation actor's); omitting `<gate>`
-defaults to `operator-paused`, and clearing **every** outstanding gate requires an explicit
-`resume --all` — a bare `resume` clears only the default gate, so an automation-owned gate is
-never cleared by accident. `resume --all <gate>` (both at once) is a usage error (exit `2`).
+A **gate** (`INV-LIFE-2`, the Gate Registry) is what prevents pg-router from routing. It has a
+**TYPE** (an ALL-CAPS string such as `SYSTEM_PAUSE` or `LOW_DISK_USAGE` — arbitrary), an optional
+description, an optional **owner** (the setter's identity — debug only, no behavioral effect,
+overwritten on re-set) and an optional **TTL lease** that the owner renews by setting the gate again.
+There is one active gate per TYPE, the last writer wins, and **any caller may clear any gate**.
+`pause`/`resume` are sugar for `gate set`/`gate clear` of `SYSTEM_PAUSE` (owner: the operator);
+a bare `resume` clears **only** `SYSTEM_PAUSE`, so a gate another system owns is never cleared by
+accident (`resume --all` clears everything).
 
-`cicd-down` is **superseded** (bead `pg2-h410q`; no producer was ever built for it — see
-`MIGRATION.md`'s "`cicd-down` gate: superseded, kept for backward compatibility"). It still works
-exactly as documented here, but a new deployment wanting CI-health-driven behavior should prefer
-`MIGRATION.md`'s per-connector `command`-source worked example, which surfaces `pg-connector`'s
-own AsOf/Stale contract per connector instead of one blunt global gate with no writer.
+Gates are records in the event log (`<LogDir>/queue.jsonl`), so they survive a restart and honor
+their TTL across one. A gate acts on **participants, never on events**: while it is active, each
+emitter that blocks on it is not polled, each listener that blocks on it is not dispatched to (and
+its pull is rejected naming the gate), pushed events are still accepted, acks and confirmations still
+processed, and queued events stay queued — an unblocked listener still receives them. A participant
+blocks on every gate TYPE by default and declares `non_blocking_gates = [...]` (on a `[[role]]` or
+`[[query]]`, or `nonBlockingGates` at `register`) for the TYPEs it does not. The built-in
+`type = "timer"` query (the timer emitter) is never blocked by any gate. A listener that is still
+blocked when an event's final attempt falls due loses that event, so long gates drop events (counted
+in `pg_router_gate_drops`). External systems use the `gate-set`/`gate-clear` socket verbs.
 
-**FILE-DIRECT**: unlike every other operator subcommand, `pause`/`resume` **never Discover or
-Dial** a core — they act on the gate file's existence directly and **succeed even with no core
-running** (exit `0`), reporting that the change takes effect at the next start (a currently
-running `run` picks it up on its next tick). This deliberately breaks the
-verb-named-subcommand-is-a-socket-client symmetry that `push-inject`/`ingest-event`/
-`self-status` follow. A **socket**-level `pause`/`resume` verb also exists (Phase 3) for a
-client already holding a connection to a running core; both paths act on the same file-backed
-state, so they can never disagree about what outlives the call.
-
-Re-pausing an already-set gate is idempotent-visible (`already paused (operator-paused since
-14:03)`) and never resets the original mtime. `pg-router config --show` prints each gate's path,
-whether it is set, and its "paused since" mtime when it is.
+Unlike the file-backed gates they replaced, these commands are **socket clients**: they need a
+running core and fail with `no running core` (exit `1`) otherwise — they never start one
+([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)). See `MIGRATION.md`'s
+"Gates: file-backed gates replaced by the Gate Registry" for everything that was removed
+(`operator-paused`/`cicd-down`/`disk-space-low`, the `PG_ROUTER_*` gate paths, the disable-override
+files).
 
 ### Manager → core callback subcommands
 
@@ -224,19 +228,16 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
   `PG_ROUTER_HANDLER_COMMAND` set logs a boot-time WARN naming the ambiguity.
 - `PG_ROUTER_LOG_DIR` — override the event-log directory (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
-- `PG_ROUTER_LOG_DIR` — override the event-log/state directory: gates, `events.jsonl`, the discovery record (default: the standard path below)
+- `PG_ROUTER_LOG_DIR` — override the event-log/state directory: `queue.jsonl` (events and gates), `events.jsonl`, the discovery record (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_TUI_INTERVAL` — `tui`'s poll interval, floor-clamped to `250ms` (default `1s`). Precedence:
   a CLI flag (none exists yet) wins over this env var, which wins over the built-in default; a value
   that fails to parse as a duration is a usage error naming the bad value.
-- `PG_ROUTER_OPERATOR_PAUSED` — `operator-paused` gate file path override (default `<PG_ROUTER_LOG_DIR>/gates/operator-paused`)
-- `PG_ROUTER_CICD_DOWN` — `cicd-down` gate file path override (default `<PG_ROUTER_LOG_DIR>/gates/cicd-down`). Superseded (bead `pg2-h410q`) — see the `pause`/`resume` section above.
 - `PG_ROUTER_TEST_MODE` — set to `1` by `run-role`/`run-query` for the duration of that one smoke
   test, so a participant it dispatches (or a command-backed source it shells out to) knows a test
   is in flight; advisory only. Not meant to be set by an operator directly.
 
-Precedence for every scalar above that a `[pool]` key can also set (including the two gate
-paths): `[pool]` wins over `PG_ROUTER_*` env, which wins over the built-in default — matching
+Precedence for every scalar above that a `[pool]` key can also set: `[pool]` wins over `PG_ROUTER_*` env, which wins over the built-in default — matching
 `internal/config`'s package doc and `config --print-defaults`'s header. The XDG-global config
 (`$XDG_CONFIG_HOME/pg-router/config.toml`, else `~/.config/pg-router/config.toml`) contributes
 `[pool].budget` only, beneath the repo-local file and above env.
@@ -306,17 +307,15 @@ turnkey deployment modes on top of the `package`/`enable` options — enabling b
 assertion failure, since they are independent pg-router cores that would race on the same
 `PG_ROUTER_LOG_DIR` (`events.jsonl`, the discovery record, the push-ingest socket):
 
-| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                                                                                               |
-| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`                                |
-| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`, `gates.{operatorPausedPath,cicdDownPath}` |
+| Submodule       | systemd unit(s)                           | Runs                                                                        | Shape                                                                                                |
+| --------------- | ----------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `periodicDrain` | `pg-router-drain` service + timer         | `pg-router run-until-idle` on a fixed `interval` (default `5m`), then exits | `enable`, `interval`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir` |
+| `daemon`        | `pg-router-daemon` service (long-running) | `pg-router run`, until SIGINT/SIGTERM                                       | `enable`, `repoRoot`, `beadsPrefix`, `configText`, `handlerCommand`, `handlerCommandDir`             |
 
 Both submodules render `configText` into the Nix store and point `PG_ROUTER_CONFIG` at it — fully
-declarative, no machine-local `.pg-router/config.toml` bootstrap step. `daemon`'s
-`gates.operatorPausedPath`/`gates.cicdDownPath` set `PG_ROUTER_OPERATOR_PAUSED`/`PG_ROUTER_CICD_DOWN` for
-that unit only; left `null` (the default), the gate paths fall back to `Config.Load()`'s own
-default (`<PG_ROUTER_LOG_DIR>/gates/{operator-paused,cicd-down}`) — see `MIGRATION.md`'s gates-default-on
-hazard note.
+declarative, no machine-local `.pg-router/config.toml` bootstrap step. (The `daemon.gates.*` options
+that used to set the gate-file paths were removed with the file-backed gates — gates are runtime
+records now; see `MIGRATION.md`.)
 
 `handlerCommand`/`handlerCommandDir` (plain strings, both `null` by default) set
 `PG_ROUTER_HANDLER_COMMAND`/`PG_ROUTER_HANDLER_COMMAND_DIR` for that unit — see this file's own

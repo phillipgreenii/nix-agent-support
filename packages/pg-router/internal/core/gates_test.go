@@ -322,3 +322,103 @@ func TestGateVerbs_ConcurrentChurn(t *testing.T) {
 		t.Fatalf("final status reply failed its schema: %v", err)
 	}
 }
+
+// Every gate verb reports a malformed or schema-invalid request through the
+// protocol error envelope and changes nothing.
+func TestGateVerbs_RejectMalformedRequests(t *testing.T) {
+	svc := startedServiceForStatus(t, nil)
+	if _, err := svc.SetGate(eventqueue.GateRequest{Type: GateSystemPause}); err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []string{SubcommandPause, SubcommandResume, SubcommandGateSet, SubcommandGateClear} {
+		for name, req := range map[string]string{
+			"not json":        `{`,
+			"wrong version":   `{"schemaVersion":"9"}`,
+			"unknown field":   `{"schemaVersion":"1","bogus":true}`,
+			"empty body":      ``,
+			"non-caps type":   `{"schemaVersion":"1","type":"nope"}`,
+			"wrong type type": `{"schemaVersion":"1","type":5}`,
+		} {
+			reply, code := serveGateVerb(t, svc, sub, req)
+			if code != conformance.ExitError || reply["error"] == nil {
+				t.Errorf("%s/%s: exit=%d reply=%v, want the protocol error envelope", sub, name, code, reply)
+			}
+		}
+	}
+	if got := activeTypes(svc); len(got) != 1 || got[0] != GateSystemPause {
+		t.Fatalf("rejected requests must change nothing; active = %v", got)
+	}
+}
+
+// A durable-write failure surfaces as an error reply and leaves the projection
+// untouched (the record is persisted BEFORE the in-memory change).
+func TestGateVerbs_StoreFailureLeavesGatesUntouched(t *testing.T) {
+	svc := startedServiceForStatus(t, nil)
+	q, err := eventqueue.New(failingStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.q = q
+	for sub, req := range map[string]string{
+		SubcommandGateSet: `{"schemaVersion":"1","type":"ALPHA"}`,
+		SubcommandPause:   `{"schemaVersion":"1"}`,
+	} {
+		if reply, code := serveGateVerb(t, svc, sub, req); code != conformance.ExitError || reply["error"] == nil {
+			t.Errorf("%s with a down store: exit=%d reply=%v, want an error reply", sub, code, reply)
+		}
+	}
+	if got := activeTypes(svc); len(got) != 0 {
+		t.Fatalf("a failed write must not create a gate; active = %v", got)
+	}
+	if _, err := svc.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); !errors.Is(err, errStoreDown) {
+		t.Fatalf("SetGate = %v, want the store error", err)
+	}
+}
+
+// Clearing through a store that fails the write reports the error and keeps
+// the gate (nothing is half-cleared).
+func TestGateClear_StoreFailureKeepsTheGate(t *testing.T) {
+	toggle := &toggleStore{MemStore: eventqueue.NewMemStore()}
+	q, err := eventqueue.New(toggle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := startedServiceForStatus(t, nil)
+	svc.q = q
+	if _, err := svc.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); err != nil {
+		t.Fatal(err)
+	}
+	toggle.fail = true
+	for _, req := range []struct{ sub, body string }{
+		{SubcommandGateClear, `{"schemaVersion":"1","type":"ALPHA"}`},
+		{SubcommandGateClear, `{"schemaVersion":"1","all":true}`},
+		{SubcommandResume, `{"schemaVersion":"1","all":true}`},
+	} {
+		if _, code := serveGateVerb(t, svc, req.sub, req.body); code != conformance.ExitError {
+			t.Errorf("%s %s with a failing store: exit = %d, want an error", req.sub, req.body, code)
+		}
+	}
+	if got := activeTypes(svc); len(got) != 1 {
+		t.Fatalf("a failed clear must keep the gate; active = %v", got)
+	}
+}
+
+// toggleStore is a MemStore whose writes can be switched to fail.
+type toggleStore struct {
+	*eventqueue.MemStore
+	fail bool
+}
+
+func (s *toggleStore) Append(r eventqueue.Record) error {
+	if s.fail {
+		return errStoreDown
+	}
+	return s.MemStore.Append(r)
+}
+
+func (s *toggleStore) AppendBatch(rs []eventqueue.Record) error {
+	if s.fail {
+		return errStoreDown
+	}
+	return s.MemStore.AppendBatch(rs)
+}

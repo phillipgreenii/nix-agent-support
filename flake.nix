@@ -3021,16 +3021,6 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = "/tmp/fake-ccpool-pool";
                                       };
-                                      gates = {
-                                        operatorPausedPath = lib.mkOption {
-                                          type = lib.types.nullOr lib.types.str;
-                                          default = null;
-                                        };
-                                        cicdDownPath = lib.mkOption {
-                                          type = lib.types.nullOr lib.types.str;
-                                          default = null;
-                                        };
-                                      };
                                     };
                                   }
                                 );
@@ -3053,7 +3043,7 @@
 
                   baseConfigText = "[[role]]\nname = \"worker\"\n";
 
-                  # Baseline: periodicDrain only, no gate overrides.
+                  # Baseline: periodicDrain only.
                   drainOnly = evalHM {
                     enable = true;
                     periodicDrain = {
@@ -3068,8 +3058,8 @@
                   };
                   drainService = drainOnly.systemd.user.services.pg-router-drain.Service;
 
-                  # daemon only, gate paths overridden — proves the daemon
-                  # ExecStart, and that the gate env vars actually surface.
+                  # daemon only — proves the daemon ExecStart and its optional
+                  # environment variables.
                   daemonOnly = evalHM {
                     enable = true;
                     periodicDrain = {
@@ -3083,10 +3073,6 @@
                       handlerCommand = "pg-router-ccpool-handler";
                       handlerCommandDir = "/nix/store/fake-roles-dir";
                       handlerCcpoolPool = "/state/pg-router-ccpool";
-                      gates = {
-                        operatorPausedPath = "/state/gates/operator-paused";
-                        cicdDownPath = "/state/gates/cicd-down";
-                      };
                     };
                   };
                   daemonService = daemonOnly.systemd.user.services.pg-router-daemon.Service;
@@ -3116,9 +3102,12 @@
                 assert !lib.hasInfix "drain" drainService.ExecStart;
                 # Daemon unit: the bare "run" subcommand.
                 assert lib.hasSuffix " run" daemonService.ExecStart;
-                # Gate env vars present on the daemon unit when configured.
-                assert lib.elem "PG_ROUTER_OPERATOR_PAUSED=/state/gates/operator-paused" daemonService.Environment;
-                assert lib.elem "PG_ROUTER_CICD_DOWN=/state/gates/cicd-down" daemonService.Environment;
+                # The file-backed gate env vars are GONE (pg2-h63eu): gates are
+                # generic records in the event log, not paths.
+                assert
+                  !(lib.any (
+                    v: lib.hasPrefix "PG_ROUTER_OPERATOR_PAUSED" v || lib.hasPrefix "PG_ROUTER_CICD_DOWN" v
+                  ) daemonService.Environment);
                 # handlerCommand/handlerCommandDir (this bead, pg2-pteab):
                 # present on the daemon unit when configured, absent from
                 # the drain unit (drainOnly's own periodicDrain never sets

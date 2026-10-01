@@ -132,12 +132,6 @@ in
           ) "export PG_ROUTER_BEADS_PREFIX=${lib.escapeShellArg daemonCfg.beadsPrefix}"}
           export PG_ROUTER_CONFIG=${pkgs.writeText "pg-router-daemon-config.toml" daemonCfg.configText}
           ${lib.optionalString (
-            daemonCfg.gates.operatorPausedPath != null
-          ) "export PG_ROUTER_OPERATOR_PAUSED=${lib.escapeShellArg daemonCfg.gates.operatorPausedPath}"}
-          ${lib.optionalString (
-            daemonCfg.gates.cicdDownPath != null
-          ) "export PG_ROUTER_CICD_DOWN=${lib.escapeShellArg daemonCfg.gates.cicdDownPath}"}
-          ${lib.optionalString (
             daemonCfg.handlerCommand != null
           ) "export PG_ROUTER_HANDLER_COMMAND=${lib.escapeShellArg daemonCfg.handlerCommand}"}
           ${lib.optionalString (

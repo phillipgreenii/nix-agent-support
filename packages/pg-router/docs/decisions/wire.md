@@ -237,8 +237,8 @@ an illustrative, handler-session-shaped placeholder; the value that actually fil
 the dispatch tracking id's own `dsp-<…>` form, once dispatch itself carries one.
 
 **The reply widens under the same strategy.** `interfaces.md`'s "Inspecting a running core" now
-names a much larger **MUST** set — the core's own identity/lifecycle facts, per-gate state and
-owner, per-listener and per-source health facts, delivery-side counters, and the registry — on top
+names a much larger **MUST** set — the core's own identity/lifecycle facts, the active gates (TYPE,
+description, owner, lease), per-listener and per-source health facts, delivery-side counters, and the registry — on top
 of the four fields illustrated above. Every one of them lands the same way the legacy four already
 illustrate: a new top-level or nested property, `additionalProperties: false` preserved at every
 level, and **no** new `required` entry anywhere, top level or nested — so the legacy four-field
@@ -335,7 +335,7 @@ already defines: `<command> <subcommand>`, JSON on stdin, JSON on stdout, a coar
 only differences from `dispatch` are the subcommand name and the call site:
 
 - `postStartup` fires once, immediately after the core's own boot (`bootCore`) succeeds, for each
-  of `run`'s three entry points (`run`, `run-until-idle`, `run-until-idle`'s gated slice).
+  of `run`'s entry points (`run` and `run-until-idle`, including `run-until-idle`'s gated slice).
 - `preShutdown` fires once, at the same point the core used to call the now-deleted
   `Orchestrator.TeardownAll` — a **zero-behavior-change relocation** of that per-process ccpool
   session sweep into the handler's own process, not a redesign: `TeardownAll` already fired once

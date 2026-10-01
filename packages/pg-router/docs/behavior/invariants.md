@@ -361,43 +361,57 @@ sequenceDiagram
   `crashing`** signal on sudden shutdown; because `crashing` is best-effort (it MAY be lost), **no
   correctness rule may depend on it** — this signal stays best-effort even though event **data** is now
   durable (`INV-EVT-1`).
-- **`INV-LIFE-2`** <!-- uuid: 376c7af0-95a7-4b24-a0c2-466031352d65 --> — **A pause is a global operator
-  gate.** While a gate is set, the core **MUST suspend event production and new dispatch**: work
-  already **accepted** — per `(event, handler)`, `INV-EVT-1` — **runs to completion**, a gate never
-  cancels work already in flight. Inspection **MUST distinguish** _halted_ (a gate is set) from
-  _quiescent_ (nothing unsettled remains in flight): a gated core MAY still have unsettled work, and a
-  core MAY be quiescent without being gated, so neither reading substitutes for the other. **Expiry
-  MUST continue** while gated — `INV-EVT-4`'s retry-bound clock does not pause with production. The
-  core **remains reachable to its participants in both run modes**, exactly as `INV-LIFE-1` already
+- **`INV-LIFE-2`** <!-- uuid: 376c7af0-95a7-4b24-a0c2-466031352d65 --> — **A gate prevents the core
+  from routing — to the participants that block on it.** A **gate** is a **TYPE**-keyed record in the
+  core's durable event log (a TYPE is an arbitrary ALL-CAPS string; there is **one active gate per
+  TYPE**, the **last writer wins**, and **any caller may clear any gate**), with an optional
+  description, an optional **owner** (the setter's identity — **debug only**, with no behavioral
+  effect) and an optional **TTL lease** that the owner renews by setting the gate again; a lapsed
+  lease counts as cleared. The set of active gates **MUST persist across a restart** and **MUST NOT
+  depend on any queued event** (a queue drop never un-sets a gate). While any gate is active, for each
+  participant that **blocks** on it the core **MUST**: not poll a blocked **emitter**; not dispatch to
+  a blocked **listener**, and reject a blocked listener's pull naming the gate. The core **MUST
+  still** accept pushed events, process acks and confirmations, keep queued events queued, and keep
+  delivering them to any **unblocked** listener — a gate acts on **participants, never on events**,
+  and work already **accepted** — per `(event, handler)`, `INV-EVT-1` — **runs to completion**. Each
+  participant **MUST** be able to declare, at registration, which gate TYPEs it does **not** block on;
+  absent a declaration it blocks on every TYPE. The **timer emitter MUST NEVER be blocked** by any
+  gate.
+
+  **Gate records are routable and bypass gating.** Setting, renewing, clearing and expiring a gate
+  are each recorded in the log and **MAY** be routed as ordinary events (`gate.set`, `gate.cleared`,
+  `gate.expired`) to any listener that binds them; those events **MUST ALWAYS bypass gating for
+  delivery** — otherwise a participant that blocks on TYPE X could never learn that X was cleared.
+
+  **Event TTL still holds.** When an event is about to expire, each listener that has not received it
+  gets one final attempt (`INV-EVT-4`); a listener that is still **blocked** at that point **loses the
+  event** ("the event goes away for it"). Long gates therefore cause event drops and the queue is
+  bounded by event TTL; the core **MUST** count gate-caused drops. **Expiry MUST continue** while any
+  gate is active — `INV-EVT-4`'s retry-bound clock does not pause with production.
+
+  **Inspection.** Inspection **MUST** report every active gate with its TYPE, description, owner,
+  when it was set and its TTL remaining, and **MUST distinguish** _gated_ (a gate is active) from
+  _quiescent_ (nothing unsettled remains in flight): a gated core MAY still have unsettled work, and
+  a core MAY be quiescent without being gated, so neither reading substitutes for the other. The core
+  **remains reachable to its participants in both run modes**, exactly as `INV-LIFE-1` already
   requires (cited here, not restated). A **gated drain-and-exit run** boots, stays reachable, emits
   its final observability snapshot, and **exits promptly WITHOUT draining** — it **MUST NOT** report
   the queue as drained, because without this rule a gated drain-and-exit run would spin forever on an
-  idle predicate a suspended dispatch can never satisfy.
+  idle predicate a blocked listener can never satisfy.
 
-  **Gate identity.** There are exactly **three** named gates, **OR-effective** — the core is halted
-  while **any** is set: `operator-paused`, which is `ACTOR-OP`'s own to set and clear; `cicd-down`,
-  which belongs to an **automation actor** rather than the human operator; and `disk-space-low`
-  (added by bead `pg2-af5ur`), which today is **manually settable/clearable only** — no producer in
-  this codebase sets or clears it on its own — pending a deliberately deferred automatic trigger
-  (tracked separately). Every surface that reports gate state **MUST label an automation-owned gate
-  as such**, because an automation actor **MAY re-assert** a gate it owns on its own initiative (e.g.
-  on every failed health check) in a way a human operator's own gate never does, and a reader
-  conflating the two would not know which one clearing depends on a human action.
+  **Operator pause.** `pause` sets the `SYSTEM_PAUSE` gate and `resume` clears it (with the caller
+  recorded as owner); a bare `resume` clears **only** `SYSTEM_PAUSE`, so a gate another system owns
+  is never cleared by accident. No other gate TYPE is special to the core — `cicd-down` and
+  `disk-space-low` are retired, their roles taken by arbitrary TYPEs that external systems set.
 
   **A gate is not a run-scoped selector.** A run-scoped selector (`STORY-OP-3`) is scoped to a single
-  run and never outlives it; a gate is **global** and **persists across runs**, taking effect at the
-  next start if none is running when it is set. The two differ in **kind**, not degree, and neither
-  substitutes for the other.
+  run and never outlives it; a gate is **global** and **persists across runs**. The two differ in
+  **kind**, not degree, and neither substitutes for the other.
 
-  **A gate's tripped state is distinct from its mechanism being disabled.** `operator-paused` and
-  `disk-space-low` MAY additionally be switched off entirely from **outside** their own
-  pause/resume surface — a separate, external signal that makes the core ignore that gate's
-  file-backed tripped state regardless of whether it is set. Inspection **MUST** report the gate's
-  raw tripped state and whether it is externally disabled as **two independent facts**, never
-  collapsed into one, because a gate MAY be simultaneously set and disabled. This mechanism is
-  concrete realization detail (`phillipgreenii-nix-agent-support · packages/pg-router/MIGRATION.md`'s
-  "Operator: disabling a gate's effect entirely, from outside pg-router" section), not restated
-  here beyond the behavior it guarantees.
+  **Clearing is the veto.** There is no separate "disable" signal for a gate: to make a gate stop
+  mattering, clear it (or exempt the participant). Realization detail, including what was retired, is
+  in `phillipgreenii-nix-agent-support · packages/pg-router/MIGRATION.md`'s "Gates: file-backed gates
+  replaced by the Gate Registry" section, not restated here.
 
 - **`INV-LIFE-3`** <!-- uuid: 4c5534a8-3ef4-4e5f-954e-c099da336988 --> — **The drive loop's own
   liveness does not wait on any one offer settling.** The core's drive loop — re-querying pull

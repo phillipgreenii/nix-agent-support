@@ -9,22 +9,23 @@ their own terms in a downstream deployment set.
   drain-and-exit, and stays reachable to its participants while it runs (`INV-LIFE-1`).
 - **Registry** — the core's roster of participants that have registered with it. A participant
   registers to receive lifecycle signals and to make its callback reachable, and deregisters on exit.
-- **Gate** — a **global, out-of-band** operator control that **persists across runs**, set or cleared
-  by `pause`/`resume` (`INTF-CLI`): while a gate is set the core suspends event production and new
-  dispatch, though accepted work still runs to completion and expiry still advances (`INV-LIFE-2`).
-  Contrast a **run-scoped selector** (`STORY-OP-3`), which selects the **active** subset of
-  sources/handlers for a **single run** and never outlives it — a selector is scoped to one run and
-  changes no persisted state; a gate is scoped to nothing narrower than the whole deployment and
-  outlives every run until explicitly cleared. The three named gates, **OR-effective**, are
-  `operator-paused` (the operator's own), `cicd-down` (an automation actor's, and labeled as such on
-  every surface), and `disk-space-low` (bead `pg2-af5ur`; manually settable/clearable only today —
-  no automatic producer exists yet, see `INV-LIFE-2`'s "Gate identity").
-- **Gate owner** — the field that carries that labeling per gate: `"operator"` for `operator-paused` or
-  `"automation"` for `cicd-down`. Realizes `INV-LIFE-2`'s requirement that every surface reporting
-  gate state label an automation-owned gate as such, because it MAY re-assert itself on its own
-  initiative in a way the human-owned gate never does. `disk-space-low` carries no owner label yet
-  (like both other gates, no writer in this codebase sets `Owner` today) — it will get one once its
-  automatic trigger is defined.
+- **Gate** — what **prevents the core from routing**: a **TYPE** (an ALL-CAPS string such as
+  `SYSTEM_PAUSE` or `LOW_DISK_USAGE`, arbitrary), an optional description, an optional **gate owner**
+  and an optional **TTL lease**. A gate is **global and out-of-band** and **persists across runs**: it
+  is a record in the core's durable event log, set and cleared through the `INTF-CLI` (`gate set`/
+  `gate clear`, and `pause`/`resume` as sugar for the `SYSTEM_PAUSE` gate) or by any external system
+  over the socket (`INV-LIFE-2`). There is **one active gate per TYPE**, the **last writer wins**, and
+  **any caller may clear any gate**. A gate acts on **participants, never on events**: a participant
+  that **blocks** on an active gate is halted (an emitter is not polled, a listener is not dispatched
+  to), while pushed events are still accepted and queued events stay queued. Each participant
+  declares at registration which gate TYPEs it does **not** block on (default: it blocks on every
+  TYPE); the **timer emitter** is never blocked by any gate. Contrast a **run-scoped selector**
+  (`STORY-OP-3`), which selects the **active** subset of sources/handlers for a **single run** and
+  never outlives it — a selector changes no persisted state; a gate outlives every run until
+  explicitly cleared or its lease lapses.
+- **Gate owner** — the identity of whoever set a gate (e.g. `"operator"`, or a watchdog's own name).
+  **Debug-only**: it has no behavioral effect, is overwritten on re-set, and is shown on inspection
+  surfaces but is never a metric label (its cardinality is unbounded).
 - **Quiescing** — the reading a client gives an inspected core whose own lifecycle state (the
   `starting → started → stopping → stopped` diagram, `INV-LIFE-1`) has left `started` for `stopping`
   while it is not failing — the orderly-shutdown leg of that lifecycle, most visibly a

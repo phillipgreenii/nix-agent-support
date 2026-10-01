@@ -1000,71 +1000,77 @@ sequenceDiagram
     deactivate Core
 ```
 
-### `USECASE-GATE-POOL` — pause and resume the pool via a global gate <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
+### `USECASE-GATE-POOL` — pause and resume the pool, or gate part of it, via a generic gate <!-- uuid: a2668c8c-fd26-4849-a7f5-a5068355cb1a -->
 
-**Actor:** `ACTOR-OP` (a human operator for `operator-paused`; an automation actor for `cicd-down`).
+**Actor:** `ACTOR-OP` (the human operator, for `SYSTEM_PAUSE`), or an **external system** acting
+through the gate API (for any other gate TYPE, e.g. a disk-space watchdog setting `LOW_DISK_USAGE`).
 **Level:** user-goal.
-**Preconditions:** none — a gate is file-backed and MAY be set or cleared whether or not a core is
-currently running.
-**Intent:** suspend, then resume, event production and new dispatch across the whole pool without
-touching configuration, so an operator (or an automation signal) can halt the system reversibly
-(`INV-LIFE-2`).
+**Preconditions:** a core is running — a gate is a record in its durable event log, so setting or
+clearing one is an ordinary call to the running core.
+**Intent:** halt, then release, the participants that block on a named condition, reversibly and
+without touching configuration (`INV-LIFE-2`).
 _Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
-_Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is halted or quiescent).
+_Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is gated or quiescent).
 
-**Flow.** `pause [<gate>]` sets a named gate (default `operator-paused`); `resume [<gate>]` clears one
-gate, and `resume --all` clears every gate outstanding. Setting or clearing succeeds **whether or not
-a core is currently running** — the command acts on the gate's own persisted state, never on a live
-core — so a gate set before the next start is still honoured at that start. While **any** gate is set
-the core suspends event production and new dispatch; work already accepted keeps running to
-completion, and expiry keeps advancing (`INV-LIFE-2`). This differs from a **run-scoped selector**
-(`STORY-OP-3`) in **kind**, not degree: a selector is scoped to one run and never outlives it, while a
-gate is global and persists across runs until explicitly cleared.
+**Flow.** `pause` sets the `SYSTEM_PAUSE` gate and `resume` clears it; `gate set TYPE` / `gate clear
+TYPE` do the same for any other TYPE, with an optional description, owner (debug only) and TTL lease
+(an external owner keeps its lease alive by setting the gate again, and the gate simply lapses if the
+owner dies). `resume --all` / `gate clear --all` clears every active gate; **any caller may clear any
+gate**. While a gate is active, each participant that **blocks** on it is halted — an emitter is not
+polled, a listener is not dispatched to — while pushed events are still accepted, acks and
+confirmations still processed, queued events stay queued and **unblocked** participants carry on
+(`INV-LIFE-2`). A participant declares at registration which gate TYPEs it does not block on; the
+timer emitter is never blocked. This differs from a **run-scoped selector** (`STORY-OP-3`) in
+**kind**, not degree: a selector is scoped to one run and never outlives it, while a gate is global,
+durable, and persists across runs and restarts until cleared or its lease lapses.
 
-**Two gates, OR-effective.** `operator-paused` is the operator's own; `cicd-down` belongs to an
-automation actor, and every surface reporting gate state labels an automation-owned gate as such,
-because it MAY re-assert the gate on its own initiative.
+**Gates are independent, not a fixed set.** There is no list of named gates in the core; each TYPE is
+its own gate and any number may be active at once. A participant is halted if it blocks on **any**
+active gate TYPE.
 
-**A gated drain-and-exit run does not drain.** Because new dispatch is suspended, a drain-and-exit run
-(`USECASE-RUN-DRAIN`) started while gated would never see its own queue empty on its own idle
-predicate; `INV-LIFE-2` instead requires it to boot, stay reachable, emit its final snapshot, and exit
-promptly, without reporting the queue as drained.
+**A gated drain-and-exit run does not drain.** Because a blocked listener will not be dispatched to,
+a drain-and-exit run (`USECASE-RUN-DRAIN`) started while gated would never see its own queue empty on
+its own idle predicate; `INV-LIFE-2` instead requires it to boot, stay reachable, emit its final
+snapshot, and exit promptly, without reporting the queue as drained.
 
 ```mermaid
 stateDiagram-v2
     [*] --> ungated
-    ungated --> halted: pause a gate - a file write, no core required
-    halted --> halted: pause a second gate - OR-effective
-    halted --> ungated: resume --all - every gate cleared
-    halted --> halted: resume one named gate - others may remain set
-    note right of halted
-      new dispatch and event production suspended
-      accepted work runs to completion, expiry continues (INV-LIFE-2)
+    ungated --> gated: set a gate - a record in the event log
+    gated --> gated: set another TYPE, or renew a lease
+    gated --> ungated: last gate cleared, or its lease lapses
+    gated --> gated: clear one TYPE - others may remain active
+    note right of gated
+      blocked participants halted: emitters not polled, listeners not dispatched to
+      pushes accepted, acks processed, queued events stay queued, expiry continues (INV-LIFE-2)
+      an event whose final attempt falls due for a blocked listener is lost to it
     end note
 ```
 
-**Reading halted apart from quiescent.** `INV-LIFE-2` requires inspection to **distinguish** these —
+**Reading gated apart from quiescent.** `INV-LIFE-2` requires inspection to **distinguish** these —
 a gated core MAY still have unsettled work in flight, and a core MAY be quiescent (nothing unsettled
 remains) without any gate active at all, so neither reading substitutes for the other. That
 distinction is read the same way any other run state is read, through `USECASE-DEBUG-RUN`'s
 inspection: the core's own lifecycle state and run mode name whether it is winding toward exit on its
 own account (a drain-and-exit run with nothing left to offer, independent of any gate — see the
-glossary's **quiescing** entry), and each gate's active flag and gate owner name whether dispatch is
-halted and by whom. A client that watches continuously renders these as two visibly different states rather
-than one generic "not dispatching": a **halted** pool still shows every participant's own health,
-because the participants themselves are not the ones stopped; a **quiescent**, ungated run is
-winding down toward `USECASE-RUN-DRAIN`'s own exit and is not an error condition at all.
+glossary's **quiescing** entry), and each active gate's TYPE, description, owner, set-at and TTL
+remaining name what is halting dispatch and who set it. A client that watches continuously renders
+these as two visibly different states rather than one generic "not dispatching": a **gated** pool
+still shows every participant's own health, because the participants themselves are not the ones
+stopped; a **quiescent**, ungated run is winding down toward `USECASE-RUN-DRAIN`'s own exit and is not
+an error condition at all.
 
 Extensions:
 
-- A gate is set or cleared while no core is running: `pause`/`resume` still exit `0` and report that
-  the change takes effect at the next start, because the command is a file write, not a call over a
-  socket (contrast `INTF-CLI` "Locating the core").
+- A gate is set or cleared while no core is running: the command fails with "no running core" and a
+  non-zero exit, like every other operator command (`INTF-CLI` "Locating the core").
 - The core is asked to run drain-and-exit while gated: it boots, stays reachable, emits a final
   snapshot, and exits promptly without draining (`INV-LIFE-2`, `USECASE-RUN-DRAIN`).
+- A gate's lease lapses without anyone clearing it: it counts as cleared from that instant and the
+  core records its expiry; the blocked participants resume.
 - Inspecting a running core while it is gated and/or winding toward a drain-and-exit: lifecycle
-  state/mode and each gate's active/owner together let the reading distinguish halted from
-  quiescent, per `INV-LIFE-2` (`USECASE-DEBUG-RUN`).
+  state/mode and each active gate together let the reading distinguish gated from quiescent, per
+  `INV-LIFE-2` (`USECASE-DEBUG-RUN`).
 
 ### `USECASE-DEBUG-RUN` — read a run: metrics, injected test events, and run-scoped selectors <!-- uuid: 3c360b41-5a84-4607-88b6-425c02f80474 -->
 

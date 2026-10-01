@@ -49,7 +49,7 @@ const (
 )
 
 // GateSystemPause is the gate TYPE pause sets and resume clears (formerly the
-// operator_paused file-backed gate; MIGRATION.md).
+// file-backed operator gate; see MIGRATION.md).
 const GateSystemPause = eventqueue.GateSystemPause
 
 // SetGate sets (or renews, or overwrites) the gate of req.Type through the

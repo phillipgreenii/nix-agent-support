@@ -20,8 +20,6 @@ let
       beadsPrefix,
       configText,
       configFileName,
-      operatorPausedPath ? null,
-      cicdDownPath ? null,
       handlerCommand ? null,
       handlerCommandDir ? null,
       handlerConfig ? null,
@@ -35,13 +33,13 @@ let
     ++ [
       "PG_ROUTER_CONFIG=${pkgs.writeText configFileName configText}"
     ]
-    ++ lib.optional (operatorPausedPath != null) "PG_ROUTER_OPERATOR_PAUSED=${operatorPausedPath}"
-    ++ lib.optional (cicdDownPath != null) "PG_ROUTER_CICD_DOWN=${cicdDownPath}"
     # handlerCommand/handlerCommandDir (this bead, pg2-pteab): threads the
     # now-landed Go-level PG_ROUTER_HANDLER_COMMAND[_DIR] support
     # (internal/config/config.go, bead pg2-ymb3v) into this systemd unit's
-    # own Environment, following the same optional-var pattern as
-    # operatorPausedPath/cicdDownPath above.
+    # own Environment, following the same optional-var pattern as the other
+    # optional variables below. (The gate-file path variables that used to
+    # lead this list are gone: gates are generic records in the event log,
+    # set with `pg-router gate set|clear`, pg2-h63eu.)
     ++ lib.optional (handlerCommand != null) "PG_ROUTER_HANDLER_COMMAND=${handlerCommand}"
     ++ lib.optional (handlerCommandDir != null) "PG_ROUTER_HANDLER_COMMAND_DIR=${handlerCommandDir}"
     # handlerConfig: threads PG_ROUTER_CCPOOL_HANDLER_CONFIG, the handler
@@ -254,30 +252,6 @@ in
           pass has nothing to keep scraping.
         '';
       };
-      gates = {
-        operatorPausedPath = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            PG_ROUTER_OPERATOR_PAUSED override: the `operator-paused` gate file path
-            (`INV-LIFE-2`). `null` leaves `Config.Load()`'s own default
-            (`<PG_ROUTER_LOG_DIR>/gates/operator-paused`) in effect — note that
-            default is now live even when unset here (Task 1.2b): a stray
-            file already at that path gates a daemon that previously could
-            not be gated, and gate files are never swept.
-          '';
-        };
-        cicdDownPath = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = ''
-            PG_ROUTER_CICD_DOWN override: the `cicd-down` gate file path
-            (`INV-LIFE-2`). `null` leaves `Config.Load()`'s own default
-            (`<PG_ROUTER_LOG_DIR>/gates/cicd-down`) in effect — same
-            gates-default-on hazard as `operatorPausedPath` above.
-          '';
-        };
-      };
     };
   };
 
@@ -359,8 +333,6 @@ in
                 beadsPrefix = cfg.daemon.beadsPrefix;
                 configText = cfg.daemon.configText;
                 configFileName = "pg-router-daemon-config.toml";
-                operatorPausedPath = cfg.daemon.gates.operatorPausedPath;
-                cicdDownPath = cfg.daemon.gates.cicdDownPath;
                 handlerCommand = cfg.daemon.handlerCommand;
                 handlerCommandDir = cfg.daemon.handlerCommandDir;
                 handlerConfig = cfg.daemon.handlerConfig;
