@@ -30,6 +30,15 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
+// Deadlines are hang guards, not performance assertions: a cold `go build`
+// under heavy machine load (observed load average 130+ during nix flake
+// check, pg2-z4ppl) takes far longer than an idle build, so they are
+// deliberately generous (still below go test's default 10m package timeout).
+const (
+	buildDeadline = 8 * time.Minute
+	runDeadline   = 2 * time.Minute
+)
+
 // buildThreadSlackBinary compiles this package's own real binary via
 // `go build -o <dir>/pg-connector-thread-slack .`, run with THIS
 // package's own directory as the build's working directory — mirrors
@@ -41,7 +50,7 @@ func buildThreadSlackBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "pg-connector-thread-slack")
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), buildDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
 	out, err := cmd.CombinedOutput()
@@ -86,7 +95,7 @@ func TestConformance_RealBinary_FakeClaudeOnEnvOverride(t *testing.T) {
 	// EnvBinary resolution is exercised against a real subprocess.
 	t.Setenv(internal.EnvBinary, fakeClaude)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	results := conformance.Run(ctx, conformance.ExecBackend{Binary: bin})
 	if len(results) == 0 {
