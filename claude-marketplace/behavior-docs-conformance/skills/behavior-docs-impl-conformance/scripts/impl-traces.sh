@@ -198,7 +198,10 @@ known=$(printf '%s\n%s\n%s\n' "$defined" "$imported" "$decided" | { grep -v '^$'
 # known ID. `INV-EVT-*` tokenizes to the bare family name INV-EVT, which is
 # nobody's definition but is a legitimate way for code to cite a whole family.
 resolves() {
-  printf '%s\n' "$known" | grep -qE -- "^$1(-|\$)"
+  # NOT `grep -q`: under `set -o pipefail`, -q exits at the first match and the
+  # still-writing printf can take SIGPIPE (141), so a PRESENT id reads as absent.
+  # Timing-dependent (load), hence flaky: pg2-g9vji. Read all input instead.
+  printf '%s\n' "$known" | grep -E -- "^$1(-|\$)" >/dev/null
 }
 
 fail=0
@@ -216,9 +219,10 @@ else
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     n=$(printf '%s\n' "$citations" | awk -F'\t' -v i="$id" '$1 == i' | grep -c . || true)
-    if printf '%s\n' "$defined" | grep -qE -- "^$id(-|$)"; then
+    # grep -q avoided under pipefail (SIGPIPE false negative, pg2-g9vji)
+    if printf '%s\n' "$defined" | grep -E -- "^$id(-|$)" >/dev/null; then
       printf '  ok         %-18s (%s citation(s))\n' "$id" "$n"
-    elif printf '%s\n' "$decided" | grep -qE -- "^$id(-|$)"; then
+    elif printf '%s\n' "$decided" | grep -E -- "^$id(-|$)" >/dev/null; then
       # Its OWN class, not `external`: the sibling decision area is an INPUT, so this
       # citation is conformant with NO imports row (`GOAL-5`). Reporting it as `external`
       # would say "declared in the imports table" of a row that does not and MUST NOT

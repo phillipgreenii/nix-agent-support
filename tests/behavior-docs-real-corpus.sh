@@ -125,7 +125,8 @@ strip_heuristic_sections() {
 require_clean() {
   local set="$1" name="$2" marker="$3" out="$4" body
   body=$(section "$name" "$out")
-  if printf '%s\n' "$body" | grep -qF -- "$marker"; then return 0; fi
+  # no grep -q: pipefail + early exit = SIGPIPE false negative (pg2-g9vji)
+  if printf '%s\n' "$body" | grep -F -- "$marker" >/dev/null; then return 0; fi
   echo "REAL-CORPUS FAIL [$set] self-checks section '$name' is not clean (expected to contain '$marker'):" >&2
   printf '%s\n' "$body" >&2
   hard_fail=1
@@ -159,7 +160,7 @@ for set in "$METHOD_SET" "$PGROUTER_SET" "$PAMONITOR_SET" "$CCPOOL_SET" "$PGPR_S
   # hand", and real element names can contain the word (`INV-FAIL-1`, or an
   # obsolete/renamed journey or use-case name), so the naive form fails every
   # run on both real sets and the gate is useless.
-  if strip_heuristic_sections "$out" | grep -qE '^[[:space:]]*FAIL[[:space:]]'; then
+  if strip_heuristic_sections "$out" | grep -E '^[[:space:]]*FAIL[[:space:]]' >/dev/null; then
     echo "REAL-CORPUS FAIL [$set] self-checks.sh reported a FAIL in a deterministic section:" >&2
     strip_heuristic_sections "$out" | grep -E '^[[:space:]]*FAIL[[:space:]]' >&2
     hard_fail=1

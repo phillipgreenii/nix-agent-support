@@ -312,7 +312,10 @@ known=$(printf '%s\n%s\n%s\n' "$defined" "$imported" "$decided" | { grep -v '^$'
 # token is a proper prefix of some known ID (`INV-EVT-*` tokenizes to INV-EVT).
 # An ID contains only letters, digits and hyphens, so it is regex-safe.
 resolves() {
-  printf '%s\n' "$known" | grep -qE -- "^$1(-|\$)"
+  # NOT `grep -q`: under `set -o pipefail`, -q exits at the first match and the
+  # still-writing printf can take SIGPIPE (141), so a PRESENT id reads as absent.
+  # Timing-dependent (load), hence flaky: pg2-g9vji. Read all input instead.
+  printf '%s\n' "$known" | grep -E -- "^$1(-|\$)" >/dev/null
 }
 
 fail=0
