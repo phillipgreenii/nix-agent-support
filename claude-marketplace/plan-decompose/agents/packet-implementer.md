@@ -22,8 +22,10 @@ otherwise.
    `pd_stale` unset. A completed reconcile restamps EVERY packet it verified — re-curated or
    found unaffected — so a mismatch means a reconcile is unfinished or owed, never "this
    packet was merely untouched by the amendment": do not second-guess it by reading the
-   design. On ANY mismatch or a malformed stamp: do NOT work it — release by re-deferring
-   (`bd defer <packet>`), set `pd_stale=<docket-rev-you-found>` via `--set-metadata` ONLY if
+   design. On ANY mismatch or a malformed stamp: do NOT work it — release by re-deferring AND clearing
+   your assignee in the SAME call (`bd update <packet> --status deferred --assignee "" --actor
+"<your-session-id>"`; a bare `bd defer` leaves the assignee set and strands the packet),
+   adding `--set-metadata pd_stale=<docket-rev-you-found>` to that SAME call ONLY if
    `pd_stale` is unset (never overwrite an existing value — `reconcile-pending` or reconcile's
    HOLD marker is what reconcile reads to know the packet still needs re-curation),
    comment one line on the docket that a reconcile is owed (when the docket's last reconcile

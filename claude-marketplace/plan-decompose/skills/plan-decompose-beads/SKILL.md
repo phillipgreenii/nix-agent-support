@@ -204,9 +204,11 @@ Read, for mode `report` (scoped to one docket, paginated over its children — p
   `--proxied-server` fails with `Error: unknown flag: --proxied-server`. So server-side
   offset pagination does not exist here — pagination is done CLIENT-SIDE, over the cheap
   part, never the expensive part:
-  1. **Children list, once** — `bd list --parent <docket> --status all -n 0 --json`. This
-     returns id/status/`metadata`/`comment_count` per child, never description or comment
-     bodies, so one unbounded call here is cheap regardless of docket size (confirmed
+  1. **Children list, once** — `bd list --parent <docket> --status all -n 0 --json`. Each
+     row carries id/status/`metadata`/`comment_count` and (bd 1.2.2, probed 2026-10-01) also
+     `description` and `acceptance_criteria`, but never comment bodies, so one unbounded call
+     here is cheap enough regardless of docket size; this procedure reads only the id/status/
+     `metadata`/`comment_count` fields and ignores the rest (confirmed
      `metadata` DOES appear as a JSON key on `bd show`/`bd list --json` once any key is set
      on that issue — probed via a scratch bead — but is OMITTED entirely, not `null`, when
      empty; check for key presence, not truthiness).
