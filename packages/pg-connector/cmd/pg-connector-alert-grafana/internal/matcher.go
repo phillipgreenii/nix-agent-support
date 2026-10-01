@@ -7,6 +7,7 @@ package internal
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -19,6 +20,25 @@ import (
 // escaped, regardless of whether the operator wrote them quoted, so
 // Alertmanager's own matcher parser sees one canonical form.
 func translateMatcherSet(element string) ([]string, error) {
+	parts, err := matcherParts(element)
+	if err != nil {
+		return nil, err
+	}
+	var filters []string
+	for _, p := range parts {
+		f, err := translateMatcher(p)
+		if err != nil {
+			return nil, fmt.Errorf("matcher set %q: %w", element, err)
+		}
+		filters = append(filters, f)
+	}
+	return filters, nil
+}
+
+// matcherParts strips the optional surrounding braces from one query element
+// and returns its comma-separated matcher strings (trimmed, empties dropped).
+// An empty element or `{}` yields none.
+func matcherParts(element string) ([]string, error) {
 	s := strings.TrimSpace(element)
 	if s == "" {
 		return nil, nil
@@ -33,24 +53,17 @@ func translateMatcherSet(element string) ([]string, error) {
 	if s == "" {
 		return nil, nil
 	}
-
-	parts, err := splitMatchers(s)
+	raw, err := splitMatchers(s)
 	if err != nil {
 		return nil, fmt.Errorf("matcher set %q: %w", element, err)
 	}
-	filters := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+	var parts []string
+	for _, p := range raw {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
 		}
-		f, err := translateMatcher(p)
-		if err != nil {
-			return nil, fmt.Errorf("matcher set %q: %w", element, err)
-		}
-		filters = append(filters, f)
 	}
-	return filters, nil
+	return parts, nil
 }
 
 // splitMatchers splits s on commas that are outside double quotes (a quoted
@@ -87,19 +100,28 @@ func splitMatchers(s string) ([]string, error) {
 	return parts, nil
 }
 
-// translateMatcher parses one `name op value` matcher.
+// translateMatcher parses one `name op value` matcher and renders it as a
+// canonical filter= value.
 func translateMatcher(m string) (string, error) {
+	name, op, value, err := parseMatcher(m)
+	if err != nil {
+		return "", err
+	}
+	return name + op + quoteMatcherValue(value), nil
+}
+
+// parseMatcher splits one `name op value` matcher into its parts.
+func parseMatcher(m string) (name, op, value string, err error) {
 	nameEnd := strings.IndexAny(m, "=!~")
 	if nameEnd <= 0 {
-		return "", fmt.Errorf("matcher %q has no label name or operator", m)
+		return "", "", "", fmt.Errorf("matcher %q has no label name or operator", m)
 	}
-	name := strings.TrimSpace(m[:nameEnd])
+	name = strings.TrimSpace(m[:nameEnd])
 	if name == "" || strings.ContainsAny(name, " \t\"") {
-		return "", fmt.Errorf("matcher %q has an invalid label name", m)
+		return "", "", "", fmt.Errorf("matcher %q has an invalid label name", m)
 	}
 	rest := m[nameEnd:]
 
-	var op string
 	for _, cand := range []string{"=~", "!~", "!=", "="} {
 		if strings.HasPrefix(rest, cand) {
 			op = cand
@@ -107,14 +129,14 @@ func translateMatcher(m string) (string, error) {
 		}
 	}
 	if op == "" {
-		return "", fmt.Errorf("matcher %q has an unrecognized operator (want =, !=, =~ or !~)", m)
+		return "", "", "", fmt.Errorf("matcher %q has an unrecognized operator (want =, !=, =~ or !~)", m)
 	}
 
-	value, err := parseMatcherValue(strings.TrimSpace(rest[len(op):]))
+	value, err = parseMatcherValue(strings.TrimSpace(rest[len(op):]))
 	if err != nil {
-		return "", fmt.Errorf("matcher %q: %w", m, err)
+		return "", "", "", fmt.Errorf("matcher %q: %w", m, err)
 	}
-	return name + op + quoteMatcherValue(value), nil
+	return name, op, value, nil
 }
 
 // parseMatcherValue unquotes a double-quoted value (honouring \" and \\
@@ -157,4 +179,67 @@ func quoteMatcherValue(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `"`, `\"`)
 	return `"` + value + `"`
+}
+
+// labelMatcher is one parsed matcher, evaluated client-side against a label
+// set (used by list_history, whose episodes come from per-rule history text
+// rather than the Alertmanager alerts API, so Grafana cannot filter them).
+type labelMatcher struct {
+	name  string
+	op    string
+	value string
+	re    *regexp.Regexp // set for =~ and !~; anchored like Alertmanager
+}
+
+// parseMatcherSet parses one query element into its ANDed matchers. It
+// accepts exactly what translateMatcherSet accepts (an empty element or `{}`
+// yields no matchers, i.e. matches everything).
+func parseMatcherSet(element string) ([]labelMatcher, error) {
+	parts, err := matcherParts(element)
+	if err != nil {
+		return nil, err
+	}
+	var out []labelMatcher
+	for _, p := range parts {
+		name, op, value, err := parseMatcher(p)
+		if err != nil {
+			return nil, fmt.Errorf("matcher set %q: %w", element, err)
+		}
+		m := labelMatcher{name: name, op: op, value: value}
+		if op == "=~" || op == "!~" {
+			re, err := regexp.Compile("^(?:" + value + ")$")
+			if err != nil {
+				return nil, fmt.Errorf("matcher set %q: bad regex %q: %w", element, value, err)
+			}
+			m.re = re
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// matches reports whether labels satisfy the matcher; a missing label reads
+// as the empty string (Alertmanager semantics).
+func (m labelMatcher) matches(labels map[string]string) bool {
+	v := labels[m.name]
+	switch m.op {
+	case "=":
+		return v == m.value
+	case "!=":
+		return v != m.value
+	case "=~":
+		return m.re.MatchString(v)
+	default: // "!~"
+		return !m.re.MatchString(v)
+	}
+}
+
+// matchesAll reports whether labels satisfy every matcher in the set.
+func matchesAll(set []labelMatcher, labels map[string]string) bool {
+	for _, m := range set {
+		if !m.matches(labels) {
+			return false
+		}
+	}
+	return true
 }

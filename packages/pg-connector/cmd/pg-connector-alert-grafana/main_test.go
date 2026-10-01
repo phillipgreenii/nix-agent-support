@@ -29,11 +29,11 @@ func capabilities(t *testing.T) scriptout.CapabilitiesResponse {
 	return resp
 }
 
-func TestNewDispatchTable_OpsAreAlertPlusAttentionWithoutHistoryOrAuth(t *testing.T) {
+func TestNewDispatchTable_OpsAreAlertPlusAttentionWithHistoryWithoutAuth(t *testing.T) {
 	resp := capabilities(t)
-	want := []string{"capabilities", "list", "list_attention", "show"}
+	want := []string{"capabilities", "list", "list_attention", "list_history", "show"}
 	if !reflect.DeepEqual(resp.Ops, want) {
-		t.Fatalf("Ops = %v, want %v (list_history out of scope pg2-rwuhs; no AuthChecker)", resp.Ops, want)
+		t.Fatalf("Ops = %v, want %v (list_history implemented by pg2-rwuhs; no AuthChecker)", resp.Ops, want)
 	}
 	if slices.Contains(resp.Ops, scriptout.OpAuthStatus) {
 		t.Fatal("must not advertise auth_status")

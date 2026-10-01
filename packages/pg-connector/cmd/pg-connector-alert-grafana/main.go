@@ -10,9 +10,10 @@
 // table carries no auth_status entry and `auth status` reports "disabled: not
 // applicable" through the wire-level unknown_op sentinel.
 //
-// list_history is out of scope until bead pg2-rwuhs: the alert capability's
-// table registers it, and newDispatchTable removes it again so
-// capabilities.ops never advertises an op this binary cannot answer.
+// list_history (bead pg2-rwuhs, internal/history.go) enumerates Grafana's
+// rules and reads each rule's state history; the parsing of its text field
+// lives in the backend. The merged table therefore advertises list, show,
+// list_history and list_attention (and no auth_status).
 package main
 
 import (
@@ -36,12 +37,11 @@ func run() int {
 	return scriptout.ServeLoop(newDispatchTable(internal.New(internal.NewHTTPClient())))
 }
 
-// newDispatchTable builds the alert capability's table, drops list_history
-// (out of scope, pg2-rwuhs), merges in the attention capability's table, then
-// adds the capabilities entry computed from the final table's own op names.
+// newDispatchTable builds the alert capability's table, merges in the
+// attention capability's table, then adds the capabilities entry computed from
+// the final table's own op names.
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := alert.NewDispatchTable(backend)
-	delete(table, "list_history")
 	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}

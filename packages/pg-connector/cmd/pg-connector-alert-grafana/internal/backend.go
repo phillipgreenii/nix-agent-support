@@ -21,9 +21,9 @@
 //   - Failure semantics (8.1): unreachable / HTTP error / malformed response
 //     answer unavailable; reachable-and-empty is a successful empty result.
 //     There is no cache fallback (8.2); Stale is always false.
-//   - ListHistory is out of scope (bead pg2-rwuhs): it answers unknown_op and
-//     main.go removes the op from the dispatch table so capabilities.ops does
-//     not advertise it.
+//   - ListHistory (bead pg2-rwuhs, history.go) enumerates rules and reads each
+//     rule's state history; it is the ONLY caller of the history transport
+//     methods, so attention and list stay stateless and history-free.
 //   - No AuthChecker: Grafana needs no auth, so `auth status` reports
 //     "disabled: not applicable" via the wire-level unknown_op sentinel.
 package internal
@@ -197,12 +197,6 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Alert, error) {
 		}
 	}
 	return nil, notFound
-}
-
-// ListHistory implements alert.Provider.ListHistory. It is out of scope for
-// this backend until bead pg2-rwuhs; it answers unknown_op.
-func (b *Backend) ListHistory(context.Context, time.Time, time.Time, schema.QueryExpr) (*schema.AlertHistoryResult, error) {
-	return nil, scriptout.WrapError(scriptout.ErrUnknownOp, "alert-grafana: list_history is not implemented")
 }
 
 // ListAttention implements attention.Provider: every alert in the

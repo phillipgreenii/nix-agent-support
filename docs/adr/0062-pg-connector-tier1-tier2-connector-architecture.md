@@ -161,8 +161,8 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
   entity-type capability is likewise added to this ADR's Decision (item 9, above) and to the
   behavior-docs set's extent. The PagerDuty Tier-2 backend is NOT yet built and remains outside
   the extent. The Grafana Tier-2 backend (`pg-connector-alert-grafana`, bead `pg2-rejc3`) has
-  since landed with `list`, `show` and `list_attention`; its `list_history` (bead `pg2-rwuhs`) is
-  still outstanding.
+  since landed with `list`, `show` and `list_attention`, and its `list_history` (bead `pg2-rwuhs`)
+  has since landed too (per-rule enumeration and state-history parsing live in the backend).
 - Behavior-docs-first ordering, having been skipped for the first ten packets, cannot be
   retroactively un-skipped; this ADR and its behavior-docs set are a backfill, not evidence the
   process was followed from day one.

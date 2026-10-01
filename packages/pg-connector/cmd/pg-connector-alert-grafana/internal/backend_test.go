@@ -21,6 +21,42 @@ type stubTransport struct {
 	err   error
 	calls [][]string
 	urls  []string
+
+	// History seam (history_test.go). rules answers Rules; frames answers
+	// RuleHistory by ruleUID (a missing uid is an empty-values frame);
+	// histErr/rulesErr fail the respective call. rulesCalls/historyCalls
+	// record the history path so tests can prove attention never reaches it.
+	rules        []apiRule
+	frames       map[string]apiHistory
+	rulesErr     error
+	histErr      map[string]error
+	rulesCalls   int
+	historyCalls []historyCall
+}
+
+type historyCall struct {
+	uid      string
+	from, to time.Time
+	limit    int
+}
+
+func (s *stubTransport) Rules(context.Context, string) ([]apiRule, error) {
+	s.rulesCalls++
+	if s.rulesErr != nil {
+		return nil, s.rulesErr
+	}
+	return s.rules, nil
+}
+
+func (s *stubTransport) RuleHistory(_ context.Context, _ string, uid string, from, to time.Time, limit int) (apiHistory, error) {
+	s.historyCalls = append(s.historyCalls, historyCall{uid, from, to, limit})
+	if err := s.histErr[uid]; err != nil {
+		return apiHistory{}, err
+	}
+	if f, ok := s.frames[uid]; ok {
+		return f, nil
+	}
+	return mkFrame(), nil
 }
 
 func (s *stubTransport) Alerts(_ context.Context, baseURL string, filters []string) ([]apiAlert, error) {
@@ -405,10 +441,3 @@ func TestToAttentionItem_AcknowledgedLowering(t *testing.T) {
 		})
 	}
 }
-
-func TestListHistory_IsUnknownOp(t *testing.T) {
-	_, err := New(&stubTransport{}).ListHistory(context.Background(), timeZero, timeZero, nil)
-	wantErrIs(t, err, scriptout.ErrUnknownOp)
-}
-
-var timeZero time.Time
