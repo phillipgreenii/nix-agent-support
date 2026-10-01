@@ -52,7 +52,8 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 - **Firing** — the only alert state the capability reports. A query narrows within the firing
   set and MUST NOT widen it (`INV-ALERT-1`).
 - **Acknowledged indicator** — the OPTIONAL `acknowledged` field on an alert. Absent means "this
-  source cannot express it", never "unacknowledged" (`INV-ALERT-2`).
+  source cannot express it", never "unacknowledged" (`INV-ALERT-2`). An acknowledged alert stays in
+  attention at a one-level-lower severity (`INV-ALERT-8`).
 - **Episode** — one firing interval of an alert (`rule_id`, optional `alert_id`, `started_at`,
   optional `ended_at`; omitted `ended_at` means still firing), returned by `alert history`.
 

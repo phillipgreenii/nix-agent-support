@@ -279,10 +279,39 @@ fails or returns none. Urgency alone is a routing field, not a severity.
 | `severity`            | `Alert.severity` (omitted if absent)                              |
 
 - Only firing alerts qualify (inherited from the list contract).
-- Whether an acknowledged alert (PagerDuty) still earns attention is decided by the query plus
-  this default: `list_attention` SHOULD exclude `acknowledged == true` alerts, since the
-  acknowledgement means a person is already on it. This is a contract default the PagerDuty
-  design review MAY revisit; it has no effect on Grafana. Flagged for ratification, see 12.
+- Acknowledged alerts STAY in attention (RATIFIED-AS-AMENDED, see 12). The operator ruling,
+  verbatim (Phillip, 2026-10-01): "acknolwedged is just a property on an active alert. they will
+  continue to show up in attention, but perhaps the interpration of the level might go down. ie,
+  unacknoledged should be consider before acknolwedged ones." This supersedes this design's
+  earlier default that `list_attention` SHOULD exclude `acknowledged == true` alerts. An
+  acknowledged alert is still an active alert; `list_attention` MUST NOT drop it because it is
+  acknowledged. It has no effect on Grafana, which never sets `acknowledged`.
+- Acknowledgement lowering rule (settled here, within the ruling). Chosen rule: **drop one
+  level, applied by the backend**.
+  - A backend MUST emit `severity` one rank lower, floored at `low` (`critical` to `high`, `high`
+    to `medium`, `medium` to `low`, `low` stays `low`), when and only when `acknowledged` is
+    present and true. The lowering applies after the backend's own severity mapping (6), so it
+    covers the PagerDuty urgency fallback too.
+  - `acknowledged` absent (nil) MUST NOT lower anything (`INV-ALERT-2`: absence is not false and
+    not true). An absent `severity` stays omitted: the backend MUST NOT synthesize one to lower
+    it (`INV-ALERT-4`).
+  - The ` (acknowledged)` summary marker (table above) is retained, so the lowered level is
+    explained to the reader.
+  - The umbrella is unchanged: `mergeAttentionItems` already sorts by severity rank, so
+    unacknowledged alerts sort before acknowledged ones of the same source severity with no new
+    code, and the umbrella still interprets no alert field (2.1).
+  - Guarantee and its limit. For the same source severity, an unacknowledged alert ranks
+    strictly before an acknowledged one, except at the `low` floor and where severity is absent
+    (both tie, then fall to the existing tiebreaks). Across levels, an acknowledged `critical`
+    ties an unacknowledged `high`; the ruling says the level "might go down", not that every
+    unacknowledged alert outranks every acknowledged one.
+  - Rejected alternative, rank-only tiebreak (keep the severity, sort unacknowledged first at the
+    same rank). It needs `acknowledged` (or a sort key) on the per-source `AttentionItem`, which
+    MUST NOT gain fields (`schema/attention.go`), or else the umbrella parsing the summary
+    marker or reading alert fields, which breaks the direct-attention decision (2.1). The
+    one-level drop uses only the existing `severity` field, so the wire contract, the aggregator
+    and the PagerDuty backend (C) need no schema change. A rank-only tiebreak MAY be revisited
+    as an additive optional field if the weaker cross-level guarantee proves insufficient.
 - Stateless: no ack, hide or unhide (`schema/attention.go`). Hide/ignore is deferred to pg-desk and
   will key on `(EntityType="alert", EntityID=Alert.id)`, which is why `id` stability is a hard
   contract (3.1).
@@ -375,6 +404,8 @@ in the same change (bead A).
     `sources[]`.
   - `INV-ALERT-6` no mutation: no acknowledge, silence or hide in this capability.
   - `INV-ALERT-7` backends answer attention directly and do not derive it by calling the umbrella.
+  - `INV-ALERT-8` acknowledged alerts stay in attention; the backend lowers their `severity` one
+    level (floored at `low`) and MUST NOT drop them or lower on an absent `acknowledged` (7).
   - Also amend `INV-EXIT-1` / `INV-ATTN-1` examples only where they enumerate fan-out verbs
     (`alert list`, `alert history`).
 - `interfaces.md`: `INTF-WIRE` alert ops and the query convention (5.3); `INTF-CLI`
@@ -414,8 +445,18 @@ Notes:
 
 These are design choices made within the rulings, not re-openings of them:
 
+Points 1, 3, 4 and 5 were ratified as written (Phillip, 2026-10-01); point 2 was ratified as
+amended.
+
 1. `--query` omitted means the unfiltered firing set (5.2).
-2. `list_attention` excludes acknowledged alerts by default (7). Only matters once PagerDuty lands.
+2. RATIFIED-AS-AMENDED (Phillip, 2026-10-01). The proposed default was that `list_attention`
+   excludes acknowledged alerts (7). The operator amended it, verbatim: "acknolwedged is just a
+   property on an active alert. they will continue to show up in attention, but perhaps the
+   interpration of the level might go down. ie, unacknoledged should be consider before
+   acknolwedged ones." Resulting contract (7): acknowledged alerts stay in attention, and the
+   backend emits their `severity` one level lower (floored at `low`) so unacknowledged alerts are
+   considered first. Only matters once PagerDuty lands; Grafana never sets `acknowledged`. The
+   lowering rule choice (drop one level, not a rank-only tiebreak) is recorded in 7.
 3. Silenced or inhibited Grafana alerts are treated as not actively firing and excluded (5.3, 6);
    surfacing them later as `acknowledged: true` is additive.
 4. No umbrella cache fallback for `alert` (8.2).

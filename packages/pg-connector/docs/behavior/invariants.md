@@ -351,6 +351,14 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   directly, from its own data, and MUST NOT derive it by calling the umbrella or a sibling backend
   (`INV-COMP-1`). The umbrella MUST NOT derive attention items from `alert list`; the two
   registrations (`connector.alert`, `attention.sources`) are independent.
+- **`INV-ALERT-8`** <!-- uuid: 711a14a6-cad8-4c1b-9256-689261e1270f --> — An acknowledged alert is still an active alert and MUST
+  stay in a backend's `list_attention` result: acknowledgement MUST NOT remove it. The backend MUST
+  emit its `severity` one level lower than the same alert unacknowledged (`critical` to `high`,
+  `high` to `medium`, `medium` to `low`, `low` stays `low`), so unacknowledged alerts of the same
+  source severity are considered first. Lowering applies only when `acknowledged` is present and
+  true (`INV-ALERT-2`) and only to a present `severity` (`INV-ALERT-4`: never synthesized). The
+  umbrella applies no alert-specific logic (`INV-ALERT-7`); its existing severity-rank sort
+  provides the ordering.
 
 ## Calendar identity matching
 
