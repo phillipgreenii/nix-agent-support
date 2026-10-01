@@ -16,6 +16,13 @@ const (
 	opEnqueue opKind = "enqueue"
 	opAccept  opKind = "accept"
 	opEvict   opKind = "evict"
+	// The Gate Registry's three record kinds (bead pg2-h63eu, gate.go): they ride
+	// the SAME log, through the SAME Append/AppendBatch interface, as the event
+	// records above. A replay folds them into the active-gate projection
+	// (Queue.gates) rather than the event queue.
+	opGateSet     opKind = "gate_set"
+	opGateCleared opKind = "gate_cleared"
+	opGateExpired opKind = "gate_expired"
 )
 
 // Record is one durable write-ahead-log entry. The log is append-only; queue
@@ -25,9 +32,10 @@ const (
 // and this write re-offers the event on restart (at-most-one redelivery,
 // absorbed by idempotent handlers, INV-EVT-2).
 //
-// There are exactly THREE record kinds and none of them is an attempt log: the
-// core keeps no attempt history (INV-EVT-4, DEC-EVENT-1), so a pre-accept decline
-// — even the final one past `expiresAt` — writes nothing. An event LEAVING the
+// There are exactly THREE EVENT record kinds (plus the Gate Registry's three
+// gate_* kinds, gate.go) and none of them is an attempt log: the core keeps no
+// attempt history (INV-EVT-4, DEC-EVENT-1), so a pre-accept decline — even the
+// final one past `expiresAt` — writes nothing. An event LEAVING the
 // queue is recorded (opEvict) rather than re-derived on replay, because a
 // past-expiry event is not necessarily finished: it is retained until every
 // matching handler has had the one attempt INV-EVT-1 owes it, and only the
@@ -47,6 +55,13 @@ type Record struct {
 	Payload       map[string]any `json:"payload,omitempty"`
 	// Accept fields.
 	ListenerID string `json:"listenerId,omitempty"`
+	// Gate fields (gate_set / gate_cleared / gate_expired; gate.go). At is the
+	// instant the record was written (a gate_set's SetAt) and ExpiresAt a
+	// gate_set's lease end (zero: no lease). Owner is the setter's identity on a
+	// gate_set and the clearing caller's on a gate_cleared — debug only.
+	GateType    string `json:"gateType,omitempty"`
+	Description string `json:"description,omitempty"`
+	Owner       string `json:"owner,omitempty"`
 }
 
 // Store is the durable persistence seam. The queue writes enqueue/accept/evict

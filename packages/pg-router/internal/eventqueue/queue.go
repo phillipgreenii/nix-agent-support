@@ -196,6 +196,10 @@ func newEntry(evt Event) *entry {
 
 type listenerState struct {
 	l Listener
+	// exempt is the set of gate TYPEs this listener declared, at registration,
+	// that it does NOT block on (gate.go's GateExempter). nil: blocks on every
+	// TYPE (the default). Set once at Register and never mutated.
+	exempt map[string]bool
 
 	// Handler retry cadence bookkeeping (INV-FAIL-2). declineEventID/declineStreak
 	// track CONSECUTIVE pre-accept declines against the CURRENT head, so a streak
@@ -299,6 +303,14 @@ type Queue struct {
 	after func(time.Duration) <-chan time.Time
 	store Store
 	obs   Observer
+	// gateObs receives the Gate Registry's metric signals (gate.go); a no-op
+	// unless WithGateObserver installs one.
+	gateObs GateObserver
+	// gates is the active-gate PROJECTION of the log's gate_* records (gate.go):
+	// the latest record per TYPE, rebuilt by replay. A lease that has lapsed is
+	// still present here until the next Expire sweep writes its gate_expired
+	// record, but Gate.ActiveAt already reports it inactive. Guarded by mu.
+	gates map[string]Gate
 
 	// retryBackoff is the DEFAULT handler retry cadence (INV-FAIL-2) — how long
 	// the core waits before re-offering a listener its head after a pre-accept
@@ -490,6 +502,8 @@ func New(store Store, opts ...Option) (*Queue, error) {
 		after:        time.After,
 		store:        store,
 		obs:          noopObserver{},
+		gateObs:      noopGateObserver{},
+		gates:        map[string]Gate{},
 		retryBackoff: backoff.Default(),
 		entries:      map[string]*entry{},
 		custody:      map[string]custody{},
@@ -545,6 +559,10 @@ func (q *Queue) replay() error {
 			}
 			delete(q.entries, r.EventID)
 			q.dropFromOrder(r.EventID) // no tombstone: a re-emit must re-append fresh
+		case opGateSet:
+			q.gates[r.GateType] = gateFromRecord(r)
+		case opGateCleared, opGateExpired:
+			delete(q.gates, r.GateType)
 		}
 	}
 	return nil
@@ -556,7 +574,11 @@ func (q *Queue) replay() error {
 func (q *Queue) Register(l Listener) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.listeners = append(q.listeners, &listenerState{l: l})
+	ls := &listenerState{l: l}
+	if ge, ok := l.(GateExempter); ok {
+		ls.exempt = ExemptSet(ge.NonBlockingGates())
+	}
+	q.listeners = append(q.listeners, ls)
 	q.listenerCount.Store(int64(len(q.listeners)))
 }
 
@@ -948,9 +970,22 @@ func (q *Queue) snapshotPending() (pending []pendingOffer, now time.Time) {
 		return id
 	}
 
+	var gsig gateSignals
+	pending, now = q.snapshotLocked(takeID, &gsig)
+	// The Gate Registry's observer hooks fire strictly AFTER q.mu is released
+	// (q.mu's lock-order invariant), like every other Observer notification.
+	q.fireGateSignals(gsig)
+	return pending, now
+}
+
+// snapshotLocked is snapshotPending's locked body: it takes q.mu itself, and
+// leaves any Gate Registry observer notifications in *gsig for the caller to
+// fire once the lock is released.
+func (q *Queue) snapshotLocked(takeID func() string, gsig *gateSignals) (pending []pendingOffer, now time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now = q.now()
+	active := q.activeGatesLocked(now)
 	pending = make([]pendingOffer, 0, len(q.listeners))
 	for _, ls := range q.listeners {
 		lid := ls.l.ID()
@@ -968,7 +1003,19 @@ func (q *Queue) snapshotPending() (pending []pendingOffer, now time.Time) {
 			// both identically, with no need to tell them apart.
 			continue
 		}
-		e := q.headFor(ls.l)
+		var e *entry
+		if gateType, blocked := BlockingGate(active, ls.exempt); blocked {
+			// A gate acts on this LISTENER, never on events (gate.go): it is not
+			// dispatched to, queued events stay queued, and an event whose final
+			// attempt falls due while it is blocked goes away for it. Gate records
+			// alone bypass gating and may still be offered.
+			if q.dropGateBlockedLocked(ls, gateType, now, gsig) {
+				gsig.blocks = append(gsig.blocks, gateBlock{listener: lid, gate: gateType})
+			}
+			e = q.headForGateEvents(ls.l)
+		} else {
+			e = q.headFor(ls.l)
+		}
 		if e == nil {
 			continue
 		}
@@ -1452,6 +1499,10 @@ func (q *Queue) Expire() (dropped int) {
 	unlock := q.unlockOnce()
 	defer unlock()
 	now := q.now()
+	// Gate Registry sweep (gate.go): retire every lapsed TTL lease — one
+	// gate_expired record each — before the event sweep below, so a gate event the
+	// sweep just routed is itself subject to this same pass's retention rule.
+	expiredGates, expiredEvents := q.expireGatesLocked(now)
 	kept := q.order[:0:0]
 	var evicts []Record
 	var misses []string // evt types of unconsumed-expired misses this sweep found
@@ -1466,7 +1517,9 @@ func (q *Queue) Expire() (dropped int) {
 		}
 		rec, unconsumedExpired := q.retireLocked(e)
 		evicts = append(evicts, rec)
-		if unconsumedExpired {
+		// A Gate Registry record routed to no taker is not a MISS: gate events
+		// are control-plane notifications, not work (gate.go).
+		if unconsumedExpired && !IsGateEvent(e.evt.Type) {
 			misses = append(misses, e.evt.Type)
 		}
 		dropped++
@@ -1479,6 +1532,12 @@ func (q *Queue) Expire() (dropped int) {
 		}
 	}
 	unlock()
+	for _, g := range expiredGates {
+		q.gateObs.OnGateExpired(g.Type, g.ExpiresAt.Sub(g.SetAt))
+	}
+	for _, evt := range expiredEvents {
+		q.obs.OnEnqueue(evt)
+	}
 	for _, t := range misses {
 		q.obs.OnUnconsumedExpired(t)
 	}
