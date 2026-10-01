@@ -13,7 +13,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable"}[10m]))`
 )
 
 func ruleBlock(t *testing.T, uid string) string {
@@ -61,10 +61,11 @@ func TestResidualFailureRateRule(t *testing.T) {
 	if got != wantResidualExpr {
 		t.Errorf("residual expr:\n got %q\nwant %q", got, wantResidualExpr)
 	}
-	// The residual excludes exactly the causes handled elsewhere: at-capacity
+	// The residual excludes exactly the causes handled elsewhere: origin-unavailable
+	// (own rule, pg2-o03wl so an outage pages once), at-capacity
 	// (intentionally silent) and budget-exceeded (its own rule). Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded"`) {
-		t.Errorf("residual must exclude exactly at-capacity and budget-exceeded: %q", got)
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded and origin-unavailable: %q", got)
 	}
 	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "{{ $labels.role }}", "{{ $labels.class }}"} {
 		if !strings.Contains(r, need) {
