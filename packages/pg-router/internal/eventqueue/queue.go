@@ -1661,6 +1661,12 @@ func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
 		q.Dispatch()
 		q.Expire()
 		if q.Idle() {
+			// Idle reads the clock afresh, so an event can cross its expiry
+			// BETWEEN the Expire sweep above and Idle's own check (pg2-0u18y):
+			// Idle then reports "past expiry, nothing owed" while the sweep
+			// had still retained it. One final sweep retires such events so
+			// "idle" always means drained, not merely drainable.
+			q.Expire()
 			return nil
 		}
 		select {

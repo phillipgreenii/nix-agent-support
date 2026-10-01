@@ -1104,6 +1104,39 @@ func TestRunUntilIdleExitsOnExpiry(t *testing.T) {
 	}
 }
 
+// pg2-0u18y: an event may cross its expiry BETWEEN RunUntilIdle's Expire sweep
+// and Idle's own clock read; RunUntilIdle must still return with it retired.
+// The clock advances 1ms on every read, so sweeping the expiry offset
+// deterministically lands one on that window without any real-time dependence.
+func TestRunUntilIdleRetiresEventExpiringBetweenSweepAndIdleCheck(t *testing.T) {
+	base := newClock().now()
+	for off := 5; off <= 80; off++ {
+		cur := base
+		q, err := New(NewMemStore(), WithClock(func() time.Time {
+			cur = cur.Add(time.Millisecond)
+			return cur
+		}), WithSleeper(func(d time.Duration) <-chan time.Time {
+			ch := make(chan time.Time, 1)
+			ch <- cur
+			return ch
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.Register(newListener("h", "other"))
+		mustEnqueue(t, q, evtUntil("e1", "orphan", base.Add(time.Duration(off)*time.Millisecond)))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := q.RunUntilIdle(ctx, time.Millisecond); err != nil {
+			cancel()
+			t.Fatalf("off=%dms: RunUntilIdle: %v", off, err)
+		}
+		cancel()
+		if len(q.DepthByType()) != 0 {
+			t.Fatalf("off=%dms: event not drained by expiry: %v", off, q.DepthByType())
+		}
+	}
+}
+
 // run-until-idle honors context cancellation while work is still pending: a busy
 // handler on an UNEXPIRED event keeps its head re-offered forever, so the queue
 // never becomes idle.
