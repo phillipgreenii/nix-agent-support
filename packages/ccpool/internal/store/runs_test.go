@@ -161,3 +161,84 @@ func TestCloseReasons_includesExited(t *testing.T) {
 		t.Fatal(`CloseReasons must include "exited"`)
 	}
 }
+
+func TestMigration010_endedRunsDefaultEmittedLaterRunsStartAtZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	clk := &clock.Fake{T: time.Unix(1000, 0).UTC()}
+	st, err := Open(path, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	insertSess(t, st, "a")
+	endedID, _ := st.OpenRun(ctx, "a")
+	if _, err := st.FinalizeRun(ctx, endedID, "exited", RunEndHook, 1100); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = st.OpenRun(ctx, "a") // still open when 010 applies
+	// Roll the DB back to its pre-010 shape (drop the column, forget the version).
+	if _, err := st.db.Exec(`ALTER TABLE session_runs DROP COLUMN metrics_emitted; DELETE FROM schema_migrations WHERE version = 10`); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	st, err = Open(path, clk)
+	if err != nil {
+		t.Fatalf("reopen (migrate 010): %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	runs, err := st.RunsFor(ctx, "a")
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs = %+v err=%v", runs, err)
+	}
+	if !runs[0].MetricsEmitted {
+		t.Errorf("run already ended at migration time must default to emitted: %+v", runs[0])
+	}
+	if runs[1].MetricsEmitted {
+		t.Errorf("open run must start unemitted: %+v", runs[1])
+	}
+	// A run ended after the migration is pending emission.
+	if _, err := st.FinalizeRun(ctx, runs[1].ID, "exited", RunEndHook, 1200); err != nil {
+		t.Fatal(err)
+	}
+	pend, err := st.RunsPendingEmission(ctx)
+	if err != nil || len(pend) != 1 || pend[0].Run.ID != runs[1].ID || pend[0].ExternalID != "a" {
+		t.Fatalf("pending = %+v err=%v, want only the post-migration run", pend, err)
+	}
+}
+
+func TestClaimRunEmission_onlyEndedRunsAndExactlyOneWinner(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "s.db"), &clock.Fake{T: time.Unix(1000, 0).UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	insertSess(t, st, "a")
+	id, _ := st.OpenRun(ctx, "a")
+	if won, err := st.ClaimRunEmission(ctx, id); err != nil || won {
+		t.Fatalf("open run claimed: won=%v err=%v", won, err)
+	}
+	_, _ = st.FinalizeRun(ctx, id, "exited", RunEndHook, 1100)
+	var wins int32
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			won, err := st.ClaimRunEmission(ctx, id)
+			if err != nil {
+				t.Errorf("claim: %v", err)
+			}
+			if won {
+				atomic.AddInt32(&wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("overlapping emitters: %d winners, want exactly 1", wins)
+	}
+	if pend, _ := st.RunsPendingEmission(ctx); len(pend) != 0 {
+		t.Fatalf("claimed run still pending: %+v", pend)
+	}
+}

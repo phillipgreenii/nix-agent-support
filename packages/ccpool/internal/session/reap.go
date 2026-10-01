@@ -77,6 +77,10 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	}
 	now := s.now()
 
+	// Emit runs the lock-free SessionEnd hook (or a kept-row Pass 0) ended since
+	// the last sweep, BEFORE Pass 0 can delete a session row and lose them.
+	s.emitPendingRuns(ctx)
+
 	// Pass 0: prune phantom rows. A row that is NOT live AND whose Claude session
 	// is gone from disk is a phantom (ADR 0015) — remove it so it never resurrects
 	// a finished/missing conversation. Guarded against the fresh-session race
@@ -250,7 +254,7 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKi
 			// resolved afterwards would always be unlabelled.
 			attrs := s.metricAttrs(externalID)
 			logArgs := sessionLogArgs(externalID)
-			if err := s.d.Store.Delete(ctx, externalID); err != nil {
+			if err := s.deleteSessionLocked(ctx, externalID); err != nil {
 				return err
 			}
 			recordReapPhantomPruned(attrs)

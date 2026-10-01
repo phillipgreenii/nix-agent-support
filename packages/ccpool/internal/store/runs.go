@@ -22,18 +22,23 @@ type Run struct {
 	EndedAt   int64 // 0 = open
 	EndReason string
 	EndSource string
+	// MetricsEmitted is true once the run's lifecycle metrics were claimed for
+	// emission (ClaimRunEmission); runs ended before migration 010 read true.
+	MetricsEmitted bool
 }
 
 // Open reports whether the run has not ended.
 func (r Run) Open() bool { return r.EndedAt == 0 }
 
-const runCols = `id, session_id, started_at, ended_at, end_reason, end_source`
+const runCols = `id, session_id, started_at, ended_at, end_reason, end_source, metrics_emitted`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	var ended sql.NullInt64
-	err := sc.Scan(&r.ID, &r.SessionID, &r.StartedAt, &ended, &r.EndReason, &r.EndSource)
+	var emitted int64
+	err := sc.Scan(&r.ID, &r.SessionID, &r.StartedAt, &ended, &r.EndReason, &r.EndSource, &emitted)
 	r.EndedAt = ended.Int64
+	r.MetricsEmitted = emitted != 0
 	return r, err
 }
 
@@ -124,6 +129,58 @@ func (s *Store) RunsFor(ctx context.Context, externalID string) ([]Run, error) {
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ClaimRunEmission atomically marks an ENDED run's metrics as emitted and
+// reports whether this caller won the claim. It is a single conditional UPDATE
+// (never check-then-act), so two overlapping emitters cannot both win: only the
+// winner records the run's metrics. An open run cannot be claimed.
+func (s *Store) ClaimRunEmission(ctx context.Context, runID int64) (won bool, err error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE session_runs SET metrics_emitted = 1
+		 WHERE id = ? AND metrics_emitted = 0 AND ended_at IS NOT NULL`, runID)
+	if err != nil {
+		return false, fmt.Errorf("claim run %d emission: %w", runID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim run %d emission: %w", runID, err)
+	}
+	return n > 0, nil
+}
+
+// PendingEmission is an ended run whose metrics have not been emitted, with the
+// external_id of the session it belongs to.
+type PendingEmission struct {
+	ExternalID string
+	Run        Run
+}
+
+// RunsPendingEmission returns every ended run with metrics_emitted = 0 across
+// the store, oldest first. The reaper sweep emits these at its start.
+func (s *Store) RunsPendingEmission(ctx context.Context) ([]PendingEmission, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT s.external_id, r.id, r.session_id, r.started_at, r.ended_at, r.end_reason, r.end_source, r.metrics_emitted
+		 FROM session_runs r JOIN sessions s ON s.id = r.session_id
+		 WHERE r.ended_at IS NOT NULL AND r.metrics_emitted = 0 ORDER BY r.id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("runs pending emission: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PendingEmission
+	for rows.Next() {
+		var p PendingEmission
+		var ended sql.NullInt64
+		var emitted int64
+		if err := rows.Scan(&p.ExternalID, &p.Run.ID, &p.Run.SessionID, &p.Run.StartedAt, &ended,
+			&p.Run.EndReason, &p.Run.EndSource, &emitted); err != nil {
+			return nil, err
+		}
+		p.Run.EndedAt = ended.Int64
+		p.Run.MetricsEmitted = emitted != 0
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

@@ -52,6 +52,8 @@ type metricsInstruments struct {
 	launchOutcomeTotal        metric.Int64Counter
 	sessionStates             metric.Int64Gauge
 	sessionInfo               metric.Int64Gauge
+	sessionDuration           metric.Float64Histogram
+	sessionsClosedTotal       metric.Int64Counter
 }
 
 // newMetricsInstruments builds the seven instruments against meter, under
@@ -117,9 +119,32 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_session_info: %w", err)
 	}
+	if m.sessionDuration, err = meter.Float64Histogram(
+		"ccpool_session_duration_seconds",
+		metric.WithUnit("s"),
+		metric.WithDescription("Duration of one session RUN (a launch or resume), ended_at - started_at from session_runs, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited). A resumed session's closed gap is not counted."),
+		metric.WithExplicitBucketBoundaries(SessionDurationBuckets...),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_duration_seconds: %w", err)
+	}
+	if m.sessionsClosedTotal, err = meter.Int64Counter(
+		"ccpool_sessions_closed_total",
+		metric.WithDescription("Session runs that ended, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited)."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_sessions_closed_total: %w", err)
+	}
 
 	return m, nil
 }
+
+// SessionDurationBuckets are the explicit histogram boundaries (seconds) for
+// ccpool_session_duration_seconds, spanning 30 s to 4 h; the SDK default
+// boundaries are tuned for milliseconds and are wrong for run durations.
+var SessionDurationBuckets = []float64{30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400}
+
+// ResultAttrKey is the attribute carrying a run's close reason on the run
+// lifecycle instruments.
+const ResultAttrKey = "result"
 
 // instrumentsOnce/liveInstruments back the lazy singleton ensureInstruments
 // registers exactly once, on first use, against MeterProvider().Meter(...) —
@@ -286,6 +311,16 @@ func (m metricsInstruments) info(ctx context.Context, claudeSessionID string, at
 	m.sessionInfo.Record(ctx, 1, withAttrs(attrs, attribute.String(ClaudeSessionIDAttrKey, claudeSessionID)))
 }
 
+func (m metricsInstruments) sessionClosed(ctx context.Context, durationSeconds float64, result string, attrs []attribute.KeyValue) {
+	opt := withAttrs(attrs, attribute.String(ResultAttrKey, result))
+	if m.sessionDuration != nil {
+		m.sessionDuration.Record(ctx, durationSeconds, opt)
+	}
+	if m.sessionsClosedTotal != nil {
+		m.sessionsClosedTotal.Add(ctx, 1, opt)
+	}
+}
+
 // ClaudeSessionIDAttrKey is the attribute key carrying a Claude session id on
 // ccpool_session_info, and on that gauge ONLY.
 //
@@ -403,4 +438,15 @@ func RecordSessionStates(counts []SessionStateCount, attrs []attribute.KeyValue)
 // point per live session per reap; no tracking state.
 func RecordSessionInfo(claudeSessionID string, attrs []attribute.KeyValue) {
 	ensureInstruments().info(context.Background(), claudeSessionID, attrs)
+}
+
+// RecordSessionClosed records one ended session RUN: one observation on
+// ccpool_session_duration_seconds (durationSeconds = ended_at - started_at of
+// the run) and one increment of ccpool_sessions_closed_total, both labeled by
+// result (the close reason: idle_ttl|cap_eviction|operator|handler|exited) plus
+// attrs (pool and the allowlisted labels, resolved BEFORE any delete). The
+// caller MUST invoke it at most once per run (the session_runs metrics_emitted
+// claim guarantees that).
+func RecordSessionClosed(durationSeconds float64, result string, attrs []attribute.KeyValue) {
+	ensureInstruments().sessionClosed(context.Background(), durationSeconds, result, attrs)
 }

@@ -191,14 +191,17 @@ func (s *Service) closeWithReason(ctx context.Context, externalID, reason string
 			// removes the session's metadata, so labels resolved afterwards would
 			// always be empty.
 			args := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
-			if err := s.d.Store.Delete(ctx, externalID); err != nil {
+			if err := s.deleteSessionLocked(ctx, externalID); err != nil {
 				return err
 			}
 			slog.Info("ccpool: purged session", args...)
 			return nil
 		}
-		// Non-purge close: do nothing else. No fabricated state.
-		return nil
+		// Non-purge close: emit the run(s) that ended (by this close or by the
+		// hook) once teardown succeeded, still inside the lock. The flag makes a
+		// retry after a deliverCommand error, or the next sweep, a no-op.
+		// No fabricated state.
+		return s.emitEndedRuns(ctx, externalID, s.metricAttrs(externalID))
 	})
 }
 

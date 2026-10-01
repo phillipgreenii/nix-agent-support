@@ -451,3 +451,71 @@ func TestSessionInfo_gaugeValueOneWithClaudeSessionID(t *testing.T) {
 		t.Errorf("attrs = %v, want exactly 3", dp.Attributes)
 	}
 }
+
+// TestSessionClosed_histogramAndCounter: one RecordSessionClosed yields one
+// histogram observation (unit s, explicit 30s..4h buckets) and one counter
+// increment, both carrying pool, pgrouter.role and result.
+func TestSessionClosed_histogramAndCounter(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	attrs := []attribute.KeyValue{attribute.String("pgrouter.role", "review"), attribute.String("pool", "p1")}
+	inst.sessionClosed(context.Background(), 125, "idle_ttl", attrs)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var hist *metricdata.HistogramDataPoint[float64]
+	var sum *metricdata.DataPoint[int64]
+	var unit string
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch m.Name {
+			case "ccpool_session_duration_seconds":
+				unit = m.Unit
+				h, ok := m.Data.(metricdata.Histogram[float64])
+				if !ok || len(h.DataPoints) != 1 {
+					t.Fatalf("histogram data = %#v", m.Data)
+				}
+				hist = &h.DataPoints[0]
+			case "ccpool_sessions_closed_total":
+				s, ok := m.Data.(metricdata.Sum[int64])
+				if !ok || len(s.DataPoints) != 1 {
+					t.Fatalf("counter data = %#v", m.Data)
+				}
+				sum = &s.DataPoints[0]
+			}
+		}
+	}
+	if hist == nil || sum == nil {
+		t.Fatalf("hist=%v sum=%v, both must be collected", hist, sum)
+	}
+	if unit != "s" {
+		t.Errorf("unit = %q, want s", unit)
+	}
+	if hist.Count != 1 || hist.Sum != 125 {
+		t.Errorf("histogram count=%d sum=%v, want 1 / 125", hist.Count, hist.Sum)
+	}
+	if len(hist.Bounds) != len(SessionDurationBuckets) || hist.Bounds[0] != 30 || hist.Bounds[len(hist.Bounds)-1] != 14400 {
+		t.Errorf("bounds = %v, want 30s..4h", hist.Bounds)
+	}
+	if sum.Value != 1 {
+		t.Errorf("counter = %d, want 1", sum.Value)
+	}
+	for _, set := range []attribute.Set{hist.Attributes, sum.Attributes} {
+		for k, want := range map[string]string{"pool": "p1", "pgrouter.role": "review", "result": "idle_ttl"} {
+			v, ok := set.Value(attribute.Key(k))
+			if !ok || v.AsString() != want {
+				t.Errorf("attr %s = %q (present=%v), want %q", k, v.AsString(), ok, want)
+			}
+		}
+		if set.Len() != 3 {
+			t.Errorf("attrs = %v, want exactly 3", set)
+		}
+	}
+}

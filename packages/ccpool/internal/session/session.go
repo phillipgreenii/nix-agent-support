@@ -41,6 +41,7 @@ var (
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
 	recordSessionStates             = telemetry.RecordSessionStates
 	recordSessionInfo               = telemetry.RecordSessionInfo
+	recordSessionClosed             = telemetry.RecordSessionClosed
 )
 
 // metricAttrs returns the attribute set for a per-session metric record: the
@@ -108,6 +109,9 @@ type (
 		Insert(ctx context.Context, s store.Session) error
 		Transition(ctx context.Context, externalID string, to store.State, claudeSessionID, transcriptPath string) (store.State, error)
 		Delete(ctx context.Context, externalID string) error
+		RunsFor(ctx context.Context, externalID string) ([]store.Run, error)
+		ClaimRunEmission(ctx context.Context, runID int64) (bool, error)
+		RunsPendingEmission(ctx context.Context) ([]store.PendingEmission, error)
 		List(ctx context.Context) ([]store.Session, error)
 		// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
 		SetMeta(ctx context.Context, externalID, key, value string) error
@@ -423,7 +427,7 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 		// 4. Claude session is GONE. Prune the phantom row UNLESS it is a fresh
 		// `starting` row that hasn't had a chance to write a transcript yet.
 		if !s.isFreshStarting(row) {
-			if err := s.d.Store.Delete(ctx, externalID); err != nil {
+			if err := s.deleteSessionLocked(ctx, externalID); err != nil {
 				return Handle{}, fmt.Errorf("prune phantom row %q: %w", externalID, err)
 			}
 			exists = false
