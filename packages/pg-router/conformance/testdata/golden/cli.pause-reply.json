@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1",
-  "gate": "operator_paused",
+  "gate": "SYSTEM_PAUSE",
   "set": true,
-  "mtime": "2026-09-01T00:00:00Z"
+  "setAt": "2026-09-01T00:00:00Z"
 }

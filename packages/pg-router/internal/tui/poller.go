@@ -229,18 +229,24 @@ func (p *SocketPoller) dialLocked() (*core.Client, error) {
 // calls — and never advances or resets Snapshot's backoff ladder, on
 // success or failure alike [design: Task 4.4 Interfaces (ToggleGate)].
 //
-// verb selects the socket subcommand: core.SubcommandPause ("pause") or
-// core.SubcommandResume ("resume"). effective reports the ACTUAL resulting
+// verb selects the socket subcommand: core.SubcommandPause ("pause"),
+// core.SubcommandResume ("resume", clearing SYSTEM_PAUSE only) or
+// ToggleVerbResumeAll (the `resume` verb with `all`, clearing every gate).
+// effective reports the ACTUAL resulting
 // gate state the core replied with (never an optimistic echo of verb), so
 // the caller (the sibling packet covering Task 4.8) never has to guess or
 // locally flip a toggle ahead of the core's own answer.
 func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective string, err error) {
 	var replySchema string
+	wireVerb := verb
+	all := false
 	switch verb {
 	case core.SubcommandPause:
 		replySchema = core.PauseReplySchema
 	case core.SubcommandResume:
 		replySchema = core.ResumeReplySchema
+	case ToggleVerbResumeAll:
+		replySchema, wireVerb, all = core.ResumeReplySchema, core.SubcommandResume, true
 	default:
 		return "", fmt.Errorf("tui: toggle gate: unknown verb %q", verb)
 	}
@@ -256,14 +262,24 @@ func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective s
 	callCtx, cancel := context.WithTimeout(ctx, pollerRPCDeadline)
 	defer cancel()
 
-	payload, err := json.Marshal(struct {
-		SchemaVersion string `json:"schemaVersion"`
-	}{SchemaVersion: schemas.SchemaVersion})
+	// The caller identity is DEBUG ONLY (the Gate Registry never acts on it):
+	// pause records the operator at this terminal as the gate's owner, resume
+	// as the clearer. Each verb's schema accepts only its own field.
+	req := map[string]any{"schemaVersion": schemas.SchemaVersion}
+	if verb == core.SubcommandPause {
+		req["owner"] = "operator"
+	} else {
+		req["by"] = "operator"
+		if all {
+			req["all"] = true
+		}
+	}
+	payload, err := json.Marshal(req)
 	if err != nil { // unreachable: one JSON-safe scalar always marshals
 		return "", fmt.Errorf("tui: toggle gate: build request: %w", err)
 	}
 
-	reply, _, callErr := client.Call(callCtx, verb, payload, core.CallOptions{CallTimeout: pollerRPCDeadline})
+	reply, _, callErr := client.Call(callCtx, wireVerb, payload, core.CallOptions{CallTimeout: pollerRPCDeadline})
 	if callErr != nil {
 		return "", fmt.Errorf("tui: toggle gate: %w", callErr)
 	}
@@ -274,7 +290,8 @@ func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective s
 	if err := core.DiscriminateReply(reply, replySchema, &out); err != nil {
 		return "", fmt.Errorf("tui: toggle gate: %w", err)
 	}
-	if out.Set {
+	// Only a pause reply carries `set`; a resume reply lists what it cleared.
+	if verb == core.SubcommandPause && out.Set {
 		return "paused", nil
 	}
 	return "resumed", nil

@@ -1,17 +1,20 @@
 // Package tui implements pg-router's operator-facing terminal UI. This file
-// (Task 4.8) carries the command-pattern P gate toggle, its R = resume-all
-// sub-binding, and the gates modal (g) that lists all of INV-LIFE-2's
-// named gates.
+// (Task 4.8, reworked by bead pg2-h63eu for the Gate Registry) carries the
+// command-pattern P gate toggle, its R = resume-all sub-binding, and the gates
+// modal (g) that lists every gate currently in force.
 package tui
 
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
@@ -23,19 +26,25 @@ import (
 // [design: Task 4.8 Step 3].
 const gateToggleTimeout = 10 * time.Second
 
+// ToggleVerbResumeAll is the Poller.ToggleGate verb behind the Gates modal's
+// R binding: the socket `resume` verb with `all` set, clearing EVERY active
+// gate, not just SYSTEM_PAUSE.
+const ToggleVerbResumeAll = "resume-all"
+
 // gateToggleResultMsg carries ToggleGate's outcome back to Update
 // [design: Task 4.8 Interfaces].
 type gateToggleResultMsg struct {
+	verb      string
 	effective string
 	err       error
 }
 
 // handleToggleOperatorGate implements the P key [design: Task 4.8 Files]: a
-// command-pattern toggle of the operator_paused gate ONLY -- never
-// cicd_down, which is automation-owned (see handleResumeAllGates's own
-// doc for why the socket verb cannot reach it anyway). It calls
-// m.poller.ToggleGate(ctx, verb), never a raw *core.Client, via
-// startGateToggle.
+// command-pattern toggle of the SYSTEM_PAUSE gate ONLY -- never another
+// system's gate, which a bare pause/resume deliberately cannot reach (resume
+// clears only SYSTEM_PAUSE unless `all` is given, so a gate another system
+// owns is never cleared by accident). It calls m.poller.ToggleGate(ctx,
+// verb), never a raw *core.Client, via startGateToggle.
 //
 // No optimistic flip, ever [design: Task 4.8 Step 1]: this method only
 // resolves which verb to send and stamps the pending indicator: it never
@@ -43,7 +52,7 @@ type gateToggleResultMsg struct {
 // applyGateToggleResult, and only once the RPC has actually replied.
 func (m *Model) handleToggleOperatorGate() tea.Cmd {
 	verb := core.SubcommandPause
-	if m.gateSet(core.GateOperatorPaused) {
+	if m.gateSet(core.GateSystemPause) {
 		verb = core.SubcommandResume
 	}
 	return m.startGateToggle(verb)
@@ -51,18 +60,13 @@ func (m *Model) handleToggleOperatorGate() tea.Cmd {
 
 // handleResumeAllGates implements the "R = resume-all inside the Gates
 // modal" sub-binding [design: Task 4.8 Files]: a no-op everywhere except
-// while the Gates modal is open. "All" is bounded by what Poller.ToggleGate can actually
-// reach (Task 4.4 Interfaces, internal/core/core.go's handleGateToggle):
-// the socket resume verb's request carries no "gate" field at all, so it
-// always targets the DEFAULT gate (operator_paused) -- cicd_down is
-// automation-owned and has no operator-facing socket verb to clear it
-// through in the first place. Resuming "all" the operator can affect and
-// resuming the operator gate are therefore the same RPC today.
+// while the Gates modal is open. It clears EVERY active gate (any caller may
+// clear any gate), via the socket `resume` verb's `all` flag.
 func handleResumeAllGates(m *Model) tea.Cmd {
 	if m.activeModal != ModalGates {
 		return nil
 	}
-	return m.startGateToggle(core.SubcommandResume)
+	return m.startGateToggle(ToggleVerbResumeAll)
 }
 
 // startGateToggle stamps the pending indicator and the asOf race-guard
@@ -81,7 +85,7 @@ func (m *Model) startGateToggle(verb string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), gateToggleTimeout)
 		defer cancel()
 		effective, err := poller.ToggleGate(ctx, verb)
-		return gateToggleResultMsg{effective: effective, err: err}
+		return gateToggleResultMsg{verb: verb, effective: effective, err: err}
 	}
 }
 
@@ -93,12 +97,12 @@ func (m *Model) startGateToggle(verb string) tea.Cmd {
 // was, a warn flash names the failure, and the failure is logged.
 //
 // On success: this is the ONE place allowed to change the rendered gate
-// state (the no-optimistic-flip contract's other half) -- it applies
-// `effective` to the operator_paused gate locally so the operator sees the
-// new state immediately rather than waiting for the next poll tick, and
-// flashes the resulting EFFECTIVE aggregate, not just the toggled gate:
-// clearing operator_paused while cicd_down remains set must not imply the
-// pool resumed [design: Task 4.8 (worked flash example)].
+// state (the no-optimistic-flip contract's other half) -- it applies the
+// toggle locally so the operator sees the new state immediately rather than
+// waiting for the next poll tick, and flashes the resulting EFFECTIVE state,
+// not just the toggled gate: clearing SYSTEM_PAUSE while another gate remains
+// active must not imply the pool resumed [design: Task 4.8 (worked flash
+// example)].
 func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 	m.gateTogglePending = false
 	if msg.err != nil {
@@ -106,142 +110,132 @@ func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 		m.setFlash("operator gate toggle failed: "+msg.err.Error(), FlashWarn)
 		return m.flashClearCmd()
 	}
-	m.setGate(core.GateOperatorPaused, msg.effective == "paused")
+	switch {
+	case msg.effective == "paused":
+		m.setGate(core.GateSystemPause, true)
+	case msg.verb == ToggleVerbResumeAll:
+		m.reply.Gates = nil
+	default:
+		m.setGate(core.GateSystemPause, false)
+	}
 	m.setFlash(m.operatorGateFlashText(msg.effective), FlashInfo)
 	return m.flashClearCmd()
 }
 
-// operatorGateFlashText names the resulting EFFECTIVE aggregate, not just the
-// toggled gate [design: Task 4.8 (worked flash example)]: clearing
-// operator_paused while cicd_down remains set still leaves the pool paused
-// overall (INV-LIFE-2's OR-effective semantics), and the flash says so
-// rather than implying the pool resumed.
-//
-// A trailing note is appended (bead pg2-efbb0) whenever operator_paused's
-// own external kill switch is currently active — read from m.reply.Gates,
-// which applyGateToggleResult's own setGate call (its caller) never
-// disturbs for this field, only for Set — so an operator toggling `P` while
-// disabled is told the toggle has NO dispatch effect, rather than being left
-// to believe "pool now PAUSED"/"pool now RESUMED" actually changed
-// anything.
+// operatorGateFlashText names the resulting EFFECTIVE state, not just the
+// toggled gate [design: Task 4.8 (worked flash example)]: clearing SYSTEM_PAUSE
+// while another gate remains active still leaves routing blocked for the
+// participants that block on it, and the flash says so rather than implying
+// the pool resumed.
 func (m *Model) operatorGateFlashText(effective string) string {
-	disabledNote := ""
-	if g, ok := m.gate(core.GateOperatorPaused); ok && g.Disabled {
-		disabledNote = " (externally disabled — has no dispatch effect)"
-	}
 	if effective == "paused" {
-		return "operator gate paused — pool now PAUSED" + disabledNote
+		return core.GateSystemPause + " set — pool now PAUSED"
 	}
-	if m.gateSet(core.GateCICDDown) {
-		return "operator gate cleared — still PAUSED by cicd-down"
+	if others := m.otherGateTypes(core.GateSystemPause); len(others) > 0 {
+		return core.GateSystemPause + " cleared — still gated by " + strings.Join(others, ", ")
 	}
-	return "operator gate cleared — pool now RESUMED" + disabledNote
+	return core.GateSystemPause + " cleared — pool now RESUMED"
 }
 
-// gate looks up the named gate (core.GateOperatorPaused / core.GateCICDDown)
-// in the last-polled reply, reporting whether it has ever actually been
-// observed. A gate absent from m.reply.Gates (never yet observed by the
-// core) reports the zero value, ok=false.
-func (m *Model) gate(name string) (Gate, bool) {
+// otherGateTypes lists the TYPEs of every active gate except except, sorted.
+func (m *Model) otherGateTypes(except string) []string {
+	var out []string
 	for _, g := range m.reply.Gates {
-		if g.Name == name {
+		if g.Type != except {
+			out = append(out, textsafe.Sanitize(g.Type))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// gate looks up the named gate TYPE in the last-polled reply, reporting
+// whether it is active. The wire lists ACTIVE gates only, so ok means "in
+// force".
+func (m *Model) gate(gateType string) (Gate, bool) {
+	for _, g := range m.reply.Gates {
+		if g.Type == gateType {
 			return g, true
 		}
 	}
 	return Gate{}, false
 }
 
-// gateSet reports whether the named gate is currently SET in the
+// gateSet reports whether the named gate TYPE is currently active in the
 // last-polled reply.
-func (m *Model) gateSet(name string) bool {
-	g, _ := m.gate(name)
-	return g.Set
+func (m *Model) gateSet(gateType string) bool {
+	_, ok := m.gate(gateType)
+	return ok
 }
 
 // setGate is applyGateToggleResult's own no-optimistic-flip exception: it
-// locally overwrites the named gate's Set field, run only once the RPC
-// has actually replied. A gate not yet present in m.reply.Gates (the core
-// has never reported it) is appended so the modal has something to show
-// even before the core's first tick observes it.
-func (m *Model) setGate(name string, set bool) {
+// locally adds or removes the named gate in the rendered list, run only once
+// the RPC has actually replied.
+func (m *Model) setGate(gateType string, set bool) {
 	for i, g := range m.reply.Gates {
-		if g.Name == name {
-			m.reply.Gates[i].Set = set
-			return
+		if g.Type != gateType {
+			continue
 		}
+		if !set {
+			m.reply.Gates = append(m.reply.Gates[:i:i], m.reply.Gates[i+1:]...)
+		}
+		return
 	}
-	m.reply.Gates = append(m.reply.Gates, Gate{Name: name, Set: set})
+	if set {
+		m.reply.Gates = append(m.reply.Gates, Gate{Type: gateType, SetAt: time.Now()})
+	}
 }
 
-// renderGatesModal lists ALL THREE of INV-LIFE-2's OR-effective named gates
-// (operator-paused, cicd-down, disk-space-low -- ADR 0026's hyphenated
-// display form; disk-space-low added by bead pg2-af5ur) with
-// state/since/owner, regardless of whether the core has ever reported any
-// of them [design: Task 4.8 Files]. R = resume-all is named in the modal's
-// own footer.
+// renderGatesModal lists every gate currently in force -- TYPE, description,
+// owner, set-at and TTL remaining -- or an unambiguous "none active" row.
+// R = resume-all is named in the modal's own footer.
 //
 // The Left column's guaranteed gap from the status text in Right is
-// render.Modal's own job now [pg2-y6sy5]: it used to pad Left to a fixed
-// 12 columns, which happened to equal len("quota-paused") -- this gate's
-// old name -- exactly, so that name received ZERO padding and ran straight
-// into the status text with no gap at all ("quota-pausedclear since -
-// (owner: -)"). render.Modal now sizes that column from the actual Left
-// values in play (mirroring
-// legendRows' dynamic-width pattern, pg2-58ecs's fix for the same
-// fixed-width-column collision shape), so callers here need not pad
-// displayName themselves.
+// render.Modal's own job [pg2-y6sy5]: it sizes that column from the actual
+// Left values in play, so gate TYPEs of any length need no padding here.
 func (m *Model) renderGatesModal() string {
-	rows := []render.ModalRow{
-		m.gateModalRow("operator-paused", core.GateOperatorPaused),
-		m.gateModalRow("cicd-down", core.GateCICDDown),
-		m.gateModalRow("disk-space-low", core.GateDiskSpaceLow),
-	}
-	return render.Modal("Gates", rows, "[R] resume all", m.width, m.height, m.modalScrollOffset)
+	return render.Modal("Gates", m.gateModalRows(), "[R] resume all", m.width, m.height, m.modalScrollOffset)
 }
 
-// gateModalRow renders one gate's name/state/since/owner line. displayName
-// is the ADR-0026-safe, hyphenated form the operator-facing docs use;
-// wireName is the underscored wire name reply.go's Gate.Name actually
-// carries (core.GateOperatorPaused / core.GateCICDDown / core.GateDiskSpaceLow).
-//
-// A gate that has never been observed by the core, or has been observed
-// and is currently clear, is rendered as the unambiguous "not set" --
-// never "clear since - (owner: -)": composeStatusReply's statusGates only
-// ever populates mtime/owner while a gate is actually SET (an unset gate
-// has no mtime, and no writer sets Owner at all today), so the dashes in
-// that placeholder text carried no information distinguishing "never
-// observed" from "observed and cleared" -- both looked like malformed data
-// rather than a plain "not set" fact [pg2-y6sy5].
-//
-// A "[DISABLED]" marker (bead pg2-efbb0) is PREPENDED whenever g.Disabled is
-// true — REGARDLESS of g.Set, since the two facts are independent: this
-// bead's acceptance criteria requires the raw file-based set/clear state to
-// keep showing unchanged, with the external-disable state indicated
-// ADDITIONALLY, never in its place. It is prepended, not appended: Modal's
-// own fixed contentWidth hard-clips a long Right value with no ellipsis
-// (render.Modal's own doc), so putting the marker FIRST guarantees it
-// survives that clip even in a narrow terminal — only the pre-existing
-// since/owner detail's tail is ever at risk of clipping, never this bead's
-// own new signal.
-func (m *Model) gateModalRow(displayName, wireName string) render.ModalRow {
-	g, _ := m.gate(wireName)
-	right := "not set"
-	if g.Set {
-		since := "-"
-		if !g.Mtime.IsZero() {
-			since = g.Mtime.Format(time.RFC3339)
-		}
-		owner := g.Owner
-		if owner == "" {
-			owner = "-"
-		}
-		right = fmt.Sprintf("SET since %s (owner: %s)", since, owner)
+// gateModalRows renders one row per active gate (sorted by TYPE), shared by the
+// Gates modal and the Problems modal so the two never drift into different
+// renderings of the same state. A clear registry renders the explicit "none
+// active" -- never a blank section -- mirroring unmatchedBindingRows' "(none)"
+// precedent (pg2-y6sy5): an empty section must read as a confirmed fact.
+func (m *Model) gateModalRows() []render.ModalRow {
+	if len(m.reply.Gates) == 0 {
+		return []render.ModalRow{{Left: "gates", Right: "none active"}}
 	}
-	if g.Disabled {
-		right = "[DISABLED] " + right
+	gates := append([]Gate(nil), m.reply.Gates...)
+	sort.Slice(gates, func(i, j int) bool { return gates[i].Type < gates[j].Type })
+	rows := make([]render.ModalRow, 0, len(gates))
+	for _, g := range gates {
+		rows = append(rows, render.ModalRow{Left: textsafe.Sanitize(g.Type), Right: gateDetail(g)})
 	}
-	return render.ModalRow{
-		Left:  displayName,
-		Right: right,
+	return rows
+}
+
+// gateDetail renders one gate's TTL / set-at / owner / description line. The
+// fixed-width facts (TTL left, set-at, owner) lead and the free-text
+// description trails, because render.Modal hard-clips a long Right value with
+// no ellipsis: a narrow terminal then loses the tail of the description, never
+// the TTL an operator needs to see.
+func gateDetail(g Gate) string {
+	ttl := "no TTL"
+	if !g.ExpiresAt.IsZero() {
+		ttl = "TTL " + formatCoarse(time.Duration(g.TTLRemainingMs)*time.Millisecond) + " left"
 	}
+	since := "-"
+	if !g.SetAt.IsZero() {
+		since = g.SetAt.Format("2006-01-02 15:04")
+	}
+	owner := textsafe.Sanitize(g.Owner)
+	if owner == "" {
+		owner = "-"
+	}
+	desc := textsafe.Sanitize(g.Description)
+	if desc == "" {
+		desc = "(no description)"
+	}
+	return fmt.Sprintf("%s · set %s · owner: %s · %s", ttl, since, owner, desc)
 }

@@ -5,7 +5,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -207,36 +206,6 @@ func TestRenderStatusText_ActivityDroppedNote(t *testing.T) {
 			renderStatusText(&out, "/s", st)
 			if !strings.Contains(out.String(), tc.want) {
 				t.Fatalf("stdout = %q, want it to contain %q", out.String(), tc.want)
-			}
-		})
-	}
-}
-
-// gatesAreStale: the marker fires only when a tick interval is known AND
-// gatesObservedAt genuinely predates lastTickAt by more than it.
-func TestGatesAreStale(t *testing.T) {
-	now := time.Date(2026, 9, 1, 0, 10, 0, 0, time.UTC)
-	cases := []struct {
-		name string
-		st   statusReply
-		want bool
-	}{
-		{"no tick interval", statusReply{GatesObservedAt: now.Format(time.RFC3339Nano), LastTickAt: now.Format(time.RFC3339Nano)}, false},
-		{"fresh", statusReply{
-			GatesObservedAt: now.Format(time.RFC3339Nano),
-			LastTickAt:      now.Format(time.RFC3339Nano),
-			TickIntervalMs:  1000,
-		}, false},
-		{"stale", statusReply{
-			GatesObservedAt: now.Add(-5 * time.Second).Format(time.RFC3339Nano),
-			LastTickAt:      now.Format(time.RFC3339Nano),
-			TickIntervalMs:  1000,
-		}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := gatesAreStale(tc.st); got != tc.want {
-				t.Fatalf("gatesAreStale = %v, want %v", got, tc.want)
 			}
 		})
 	}

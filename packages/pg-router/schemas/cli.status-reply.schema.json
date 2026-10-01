@@ -88,17 +88,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "set"],
+        "required": ["type", "setAt"],
         "properties": {
-          "name": { "type": "string" },
-          "set": { "type": "boolean" },
-          "mtime": { "type": "string" },
+          "type": { "type": "string" },
+          "description": { "type": "string" },
           "owner": { "type": "string" },
-          "disabled": { "type": "boolean" }
+          "setAt": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "ttlRemainingMs": { "type": "integer", "minimum": 0 }
         }
       }
     },
-    "gatesObservedAt": { "type": "string" },
     "listeners": {
       "type": "array",
       "items": {

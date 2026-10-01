@@ -1,0 +1,15 @@
+{
+  "$id": "cli.gate-set-reply",
+  "title": "INTF-CLI socket gate-set verb reply: the gate as recorded. `renewal` is true when it replaced an already-active gate of the same TYPE.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "type", "set", "setAt"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "type": { "type": "string" },
+    "set": { "type": "boolean" },
+    "setAt": { "type": "string" },
+    "expiresAt": { "type": "string" },
+    "renewal": { "type": "boolean" }
+  }
+}

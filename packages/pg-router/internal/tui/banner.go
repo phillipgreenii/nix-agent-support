@@ -8,6 +8,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,8 +35,7 @@ type topZoneData struct {
 // gate is set, or the header otherwise [design: Task 4.6 Files (banner.go);
 // Task 4.6 Step 3].
 func renderTopZone(d topZoneData) string {
-	gated := anyGateSet(d.reply.Gates)
-	if text := bannerText(gated, d.quiescing, inFlightCount(d.reply), d.reply.Dispatch); text != "" {
+	if text := bannerText(gateTypes(d.reply.Gates), d.quiescing, inFlightCount(d.reply), d.reply.Dispatch); text != "" {
 		return renderPausedBanner(text, d.width, d.theme)
 	}
 	return renderHeader(d)
@@ -51,10 +51,21 @@ func renderTopZone(d topZoneData) string {
 // dispatchSummary below) -- additive, and distinct from -- never a
 // replacement for -- inFlight's own pinned "N in flight" wording, which is
 // UNCHANGED by this addition [design: Binding decision 5].
-func bannerText(gated, quiescing bool, inFlight int, dispatch Dispatch) string {
+func bannerText(gates []string, quiescing bool, inFlight int, dispatch Dispatch) string {
 	switch {
-	case gated:
-		return fmt.Sprintf("PAUSED — dispatch halted · %d in flight · %s", inFlight, dispatchSummary(dispatch))
+	case len(gates) > 0:
+		// SYSTEM_PAUSE keeps the operator-facing "PAUSED" wording; any other gate
+		// reads "GATED" -- a gate acts on the participants that block on it, so
+		// the banner names which gates are in force rather than claiming the
+		// whole pool is halted.
+		lead := "GATED"
+		for _, g := range gates {
+			if g == core.GateSystemPause {
+				lead = "PAUSED"
+			}
+		}
+		return fmt.Sprintf("%s — routing halted for blocked participants (%s) · %d in flight · %s",
+			lead, strings.Join(gates, ", "), inFlight, dispatchSummary(dispatch))
 	case quiescing:
 		return fmt.Sprintf("quiescing — core is draining toward exit (no gate set) · %s", dispatchSummary(dispatch))
 	default:
@@ -193,34 +204,34 @@ func coreStateLabel(state string) string {
 	return textsafe.Sanitize(state)
 }
 
-// gatesSummary renders both of INV-LIFE-2's named gates as a compact
-// checkbox pair -- "oper[.] cicd[.]" when clear, "oper[X]" when set --
-// matching the design's own Wide/Narrow/Tiny mockups (§4.3) exactly.
+// gatesSummary renders the active gates as a compact list for the header's
+// gates line: "none" when nothing is gated, else the sorted TYPEs (at most
+// gatesSummaryMax, then "+N more") -- the full detail is the Gates modal's job.
 func gatesSummary(gates []Gate) string {
-	return fmt.Sprintf(
-		"oper[%s] cicd[%s]",
-		gateCheckbox(gates, core.GateOperatorPaused),
-		gateCheckbox(gates, core.GateCICDDown),
-	)
+	types := gateTypes(gates)
+	if len(types) == 0 {
+		return "none"
+	}
+	if len(types) > gatesSummaryMax {
+		more := len(types) - gatesSummaryMax
+		types = append(types[:gatesSummaryMax:gatesSummaryMax], fmt.Sprintf("+%d more", more))
+	}
+	return strings.Join(types, ", ")
 }
 
-func gateCheckbox(gates []Gate, name string) string {
+// gatesSummaryMax bounds how many gate TYPEs the header line spells out.
+const gatesSummaryMax = 3
+
+// gateTypes returns the sanitized TYPEs of the active gates, sorted.
+func gateTypes(gates []Gate) []string {
+	out := make([]string, 0, len(gates))
 	for _, g := range gates {
-		if g.Name == name && g.Set {
-			return "X"
-		}
+		out = append(out, textsafe.Sanitize(g.Type))
 	}
-	return "."
+	sort.Strings(out)
+	return out
 }
 
-// anyGateSet reports the EFFECTIVE (OR'd) aggregate gate state (ux-7): true
-// when either of INV-LIFE-2's two named gates is currently set, regardless
-// of which one.
-func anyGateSet(gates []Gate) bool {
-	for _, g := range gates {
-		if g.Set {
-			return true
-		}
-	}
-	return false
-}
+// anyGateSet reports whether any gate is in force (the wire lists active gates
+// only), the aggregate the pane dimming and the PAUSED/GATED banner key on.
+func anyGateSet(gates []Gate) bool { return len(gates) > 0 }

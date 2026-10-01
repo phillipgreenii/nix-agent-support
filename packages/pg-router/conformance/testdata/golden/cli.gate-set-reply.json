@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1",
+  "type": "LOW_DISK_USAGE",
+  "set": true,
+  "setAt": "2026-10-01T00:00:00Z",
+  "expiresAt": "2026-10-01T00:05:30Z",
+  "renewal": false
+}

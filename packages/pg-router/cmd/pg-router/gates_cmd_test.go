@@ -1,465 +1,242 @@
 package main
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/config"
+	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
-// pgRouterModuleRoot walks up from the test's cwd to this module's go.mod, the
-// same technique packages/ccpool/cmd/ccpool/spec_citations_test.go uses to
-// find its own module root. It exists so TestPrecedenceCopiesAgree can read
-// internal/config/config.go's package doc COMMENT as text — a doc comment is
-// not reachable at runtime any other way (it is not a value), unlike
-// exampleHeader (a same-module constant) and helpText (this package's own
-// constant).
-func pgRouterModuleRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
+// The gate CLI is a socket client of the running core's Gate Registry (bead
+// pg2-h63eu). Every test below drives the real command bodies against a REAL
+// core (startCore), asserting on what the CORE holds.
+
+func activeGateTypes(svc *core.Service) []string {
+	var out []string
+	for _, g := range svc.ActiveGates() {
+		out = append(out, g.Type)
 	}
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatalf("no go.mod found at or above %q", dir)
-		}
-		dir = parent
-	}
+	return out
 }
 
-// isolateGateEnv points every gate-path input this process's environment
-// could otherwise supply at deterministic, isolated values (unit tests MUST
-// be isolated) — a fresh LogDir under t.TempDir(), and no repo-local/XDG
-// config file — so config.GatePaths() resolves to <tmp>/gates/{operator-paused,
-// cicd-down,disk-space-low} regardless of the host machine's real XDG state.
-func isolateGateEnv(t *testing.T) string {
-	t.Helper()
-	logDir := t.TempDir()
-	t.Setenv("PG_ROUTER_LOG_DIR", logDir)
-	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "")
-	t.Setenv("PG_ROUTER_CICD_DOWN", "")
-	t.Setenv("PG_ROUTER_DISK_SPACE_LOW", "")
-	// beads pg2-efbb0/pg2-hipf0's external kill switches: cleared too, so a
-	// stray ambient PG_ROUTER_OPERATOR_PAUSED_DISABLE/
-	// PG_ROUTER_DISK_SPACE_LOW_DISABLE on the host can never make
-	// disabledNoteFor's output non-deterministic in a test that does not
-	// exercise it explicitly.
-	t.Setenv("PG_ROUTER_OPERATOR_PAUSED_DISABLE", "")
-	t.Setenv("PG_ROUTER_DISK_SPACE_LOW_DISABLE", "")
-	t.Setenv("PG_ROUTER_CONFIG", filepath.Join(t.TempDir(), "absent.toml"))
-	return logDir
-}
-
-func TestPauseGate_createsFileExitsZero(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+func TestPauseCore_SetsSystemPauseRecordingTheOperator(t *testing.T) {
+	svc := startCore(t, shortDir(t))
+	var stdout, stderr strings.Builder
+	if code := pauseCore(&stdout, &stderr, svc.Ref(), "operator", "maintenance window"); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, stderr.String())
 	}
-	path := filepath.Join(logDir, "gates", "operator-paused")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("gate file %q must exist after pause: %v", path, err)
+	if !strings.Contains(stdout.String(), "paused (SYSTEM_PAUSE since ") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), gateOperatorPaused) || !strings.Contains(stdout.String(), "since") {
-		t.Errorf("pause output must name the gate and report a set time; got %q", stdout.String())
-	}
-}
-
-// TestPauseGate_reportsExternalDisable locks bead pg2-efbb0: pause/resume
-// output for operator-paused MUST note when the external kill switch
-// (config.OperatorPausedDisablePath()) is currently active, so an operator
-// is never left believing the toggle changed dispatch behavior when
-// Orchestrator.Gated() will actually ignore it. cicd-down MUST show no such
-// note, since it carries no kill switch yet (bead pg2-8c7az).
-func TestPauseGate_reportsExternalDisable(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	disablePath := filepath.Join(logDir, "gate-overrides", "operator-paused-disabled")
-	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "externally DISABLED") {
-		t.Errorf("pause output for operator-paused while the kill switch is active must note it; got %q", stdout.String())
-	}
-
-	var stdout2, stderr2 bytes.Buffer
-	if code := resumeGate(&stdout2, &stderr2, gateOperatorPaused, false); code != exitOK {
-		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr2.String())
-	}
-	if !strings.Contains(stdout2.String(), "externally DISABLED") {
-		t.Errorf("resume output for operator-paused while the kill switch is active must note it; got %q", stdout2.String())
-	}
-
-	// cicd-down carries no kill switch — its own pause output must be
-	// unaffected by operator-paused's disable file.
-	var stdout3, stderr3 bytes.Buffer
-	if code := pauseGate(&stdout3, &stderr3, gateCICDDown); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr3.String())
-	}
-	if strings.Contains(stdout3.String(), "externally DISABLED") {
-		t.Errorf("pause output for cicd-down must not mention operator-paused's own kill switch; got %q", stdout3.String())
-	}
-}
-
-// TestPauseGate_noDisableNoteWhenNotDisabled is the negative control for
-// TestPauseGate_reportsExternalDisable: with no kill-switch file present,
-// pause output must carry no disable note at all.
-func TestPauseGate_noDisableNoteWhenNotDisabled(t *testing.T) {
-	isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if strings.Contains(stdout.String(), "externally DISABLED") {
-		t.Errorf("pause output must not mention external disable when the kill switch is absent; got %q", stdout.String())
-	}
-}
-
-// TestPauseGate_reportsExternalDisable_diskSpaceLow mirrors
-// TestPauseGate_reportsExternalDisable for disk-space-low's own kill switch
-// (bead pg2-hipf0): pause/resume output for disk-space-low MUST note when
-// its external kill switch (config.DiskSpaceLowDisablePath()) is currently
-// active, and operator-paused's own pause output MUST be unaffected by
-// disk-space-low's disable file.
-func TestPauseGate_reportsExternalDisable_diskSpaceLow(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	disablePath := filepath.Join(logDir, "gate-overrides", "disk-space-low-disabled")
-	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "externally DISABLED") {
-		t.Errorf("pause output for disk-space-low while the kill switch is active must note it; got %q", stdout.String())
-	}
-
-	var stdout2, stderr2 bytes.Buffer
-	if code := resumeGate(&stdout2, &stderr2, gateDiskSpaceLow, false); code != exitOK {
-		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr2.String())
-	}
-	if !strings.Contains(stdout2.String(), "externally DISABLED") {
-		t.Errorf("resume output for disk-space-low while the kill switch is active must note it; got %q", stdout2.String())
-	}
-
-	// operator-paused carries its OWN, separate kill switch — its own pause
-	// output must be unaffected by disk-space-low's disable file.
-	var stdout3, stderr3 bytes.Buffer
-	if code := pauseGate(&stdout3, &stderr3, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr3.String())
-	}
-	if strings.Contains(stdout3.String(), "externally DISABLED") {
-		t.Errorf("pause output for operator-paused must not mention disk-space-low's own kill switch; got %q", stdout3.String())
-	}
-}
-
-// TestPauseGate_noDisableNoteWhenNotDisabled_diskSpaceLow is the negative
-// control for TestPauseGate_reportsExternalDisable_diskSpaceLow: with no
-// kill-switch file present, disk-space-low's pause output must carry no
-// disable note at all.
-func TestPauseGate_noDisableNoteWhenNotDisabled_diskSpaceLow(t *testing.T) {
-	isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if strings.Contains(stdout.String(), "externally DISABLED") {
-		t.Errorf("pause output must not mention external disable when the kill switch is absent; got %q", stdout.String())
-	}
-}
-
-// MkdirAll on the gates dir: pausing the FIRST time, with no gates/
-// subdirectory yet under LogDir, must still succeed.
-func TestPauseGate_mkdirAllGatesDir(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	if _, err := os.Stat(filepath.Join(logDir, "gates")); !os.IsNotExist(err) {
-		t.Fatalf("premise: gates dir must not exist yet, got err=%v", err)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateCICDDown); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if fi, err := os.Stat(filepath.Join(logDir, "gates")); err != nil || !fi.IsDir() {
-		t.Fatalf("gates dir must exist after pause: err=%v", err)
-	}
-}
-
-// Re-pause is idempotent-visible (reports "already paused") but MUST NOT
-// touch the ORIGINAL mtime.
-func TestPauseGate_rePausePreservesMtime(t *testing.T) {
-	isolateGateEnv(t)
-	var out1, out2, stderr bytes.Buffer
-	if code := pauseGate(&out1, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("first pause exit = %d", code)
-	}
-	operatorPaused, _, _ := config.GatePaths()
-	fi1, err := os.Stat(operatorPaused)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mtime1 := fi1.ModTime()
-
-	if code := pauseGate(&out2, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("second pause exit = %d", code)
-	}
-	fi2, err := os.Stat(operatorPaused)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !fi2.ModTime().Equal(mtime1) {
-		t.Errorf("re-pause changed mtime: first %v, second %v", mtime1, fi2.ModTime())
-	}
-	if !strings.Contains(out2.String(), "already paused") {
-		t.Errorf("re-pause output must be idempotent-visible (\"already paused\"); got %q", out2.String())
-	}
-}
-
-// pauseGate/resumeGate never call config.Load() (they use config.GatePaths()
-// instead), so pause/resume MUST succeed even against a config that could
-// never itself Load() — here, malformed TOML, a guaranteed Load() hard error.
-func TestPauseGate_succeedsWhenConfigFailsLoad(t *testing.T) {
-	isolateGateEnv(t)
-	bad := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(bad, []byte("this is not = valid = toml ["), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PG_ROUTER_CONFIG", bad)
-	if _, err := config.Load(); err == nil {
-		t.Fatal("premise: malformed config must fail Load()")
-	}
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0 even though Load() fails; stderr:\n%s", code, stderr.String())
-	}
-}
-
-func TestResumeGate_clearsGate(t *testing.T) {
-	isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pause exit = %d", code)
-	}
-	operatorPaused, _, _ := config.GatePaths()
-	stdout.Reset()
-	if code := resumeGate(&stdout, &stderr, gateOperatorPaused, false); code != exitOK {
-		t.Fatalf("resume exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
-		t.Errorf("gate file must be gone after resume, got err=%v", err)
-	}
-	if !strings.Contains(stdout.String(), gateOperatorPaused) {
-		t.Errorf("resume output must name the gate; got %q", stdout.String())
-	}
-}
-
-// A bare resume clears ONLY the default gate (operator-paused); cicd-down
-// and disk-space-low (neither the default gate) are untouched.
-func TestResumeGate_bareResumeClearsOnlyDefaultGate(t *testing.T) {
-	isolateGateEnv(t)
-	var buf, stderr bytes.Buffer
-	if code := pauseGate(&buf, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pause operator-paused exit = %d", code)
-	}
-	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
-		t.Fatalf("pause cicd-down exit = %d", code)
-	}
-	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pause disk-space-low exit = %d", code)
-	}
-	if code := resumeGate(&buf, &stderr, gateOperatorPaused, false); code != exitOK {
-		t.Fatalf("resume exit = %d", code)
-	}
-	operatorPaused, cicdDown, diskSpaceLow := config.GatePaths()
-	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
-		t.Errorf("operator-paused must be cleared, got err=%v", err)
-	}
-	if _, err := os.Stat(cicdDown); err != nil {
-		t.Errorf("cicd-down must survive a bare resume (not the default gate), got err=%v", err)
-	}
-	if _, err := os.Stat(diskSpaceLow); err != nil {
-		t.Errorf("disk-space-low must survive a bare resume (not the default gate), got err=%v", err)
-	}
-}
-
-func TestResumeGate_allClearsEveryGate(t *testing.T) {
-	isolateGateEnv(t)
-	var buf, stderr bytes.Buffer
-	if code := pauseGate(&buf, &stderr, gateOperatorPaused); code != exitOK {
-		t.Fatalf("pause operator-paused exit = %d", code)
-	}
-	if code := pauseGate(&buf, &stderr, gateCICDDown); code != exitOK {
-		t.Fatalf("pause cicd-down exit = %d", code)
-	}
-	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pause disk-space-low exit = %d", code)
-	}
-	buf.Reset()
-	if code := resumeGate(&buf, &stderr, "", true); code != exitOK {
-		t.Fatalf("resume --all exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	operatorPaused, cicdDown, diskSpaceLow := config.GatePaths()
-	if _, err := os.Stat(operatorPaused); !os.IsNotExist(err) {
-		t.Errorf("operator-paused must be cleared by --all, got err=%v", err)
-	}
-	if _, err := os.Stat(cicdDown); !os.IsNotExist(err) {
-		t.Errorf("cicd-down must be cleared by --all, got err=%v", err)
-	}
-	if _, err := os.Stat(diskSpaceLow); !os.IsNotExist(err) {
-		t.Errorf("disk-space-low must be cleared by --all, got err=%v", err)
-	}
-	if got := buf.String(); !strings.Contains(got, gateDiskSpaceLow) {
-		t.Errorf("resume --all output must name disk-space-low among the cleared gates; got %q", got)
-	}
-}
-
-// TestResumeGate_allReportsExternalDisableForDiskSpaceLow locks the "--all"
-// summary line's own disabledNoteFor fold (gates_cmd.go's resumeGate): with
-// disk-space-low's kill switch active, `resume --all`'s summary MUST note
-// it — not just operator-paused's, the only gate the pre-pg2-hipf0 summary
-// checked.
-func TestResumeGate_allReportsExternalDisableForDiskSpaceLow(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	disablePath := filepath.Join(logDir, "gate-overrides", "disk-space-low-disabled")
-	if err := os.MkdirAll(filepath.Dir(disablePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(disablePath, []byte("disabled\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var buf, stderr bytes.Buffer
-	if code := pauseGate(&buf, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pause disk-space-low exit = %d", code)
-	}
-	buf.Reset()
-	if code := resumeGate(&buf, &stderr, "", true); code != exitOK {
-		t.Fatalf("resume --all exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if got := buf.String(); !strings.Contains(got, "externally DISABLED") {
-		t.Errorf("resume --all summary must note disk-space-low's active kill switch; got %q", got)
-	}
-}
-
-// TestPauseResumeGate_diskSpaceLow is disk-space-low's own dedicated
-// pause/resume round trip (bead pg2-af5ur), mirroring
-// TestPauseGate_createsFileExitsZero/TestResumeGate_clearsGate for the two
-// pre-existing gates: it must be settable/clearable manually via the SAME
-// generic verbs, with no automatic trigger involved.
-func TestPauseResumeGate_diskSpaceLow(t *testing.T) {
-	logDir := isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := pauseGate(&stdout, &stderr, gateDiskSpaceLow); code != exitOK {
-		t.Fatalf("pauseGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	path := filepath.Join(logDir, "gates", "disk-space-low")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("gate file %q must exist after pause: %v", path, err)
-	}
-	if !strings.Contains(stdout.String(), gateDiskSpaceLow) || !strings.Contains(stdout.String(), "since") {
-		t.Errorf("pause output must name the gate and report a set time; got %q", stdout.String())
+	gates := svc.ActiveGates()
+	if len(gates) != 1 || gates[0].Type != "SYSTEM_PAUSE" || gates[0].Owner != "operator" || gates[0].Description != "maintenance window" {
+		t.Fatalf("gates = %+v, want SYSTEM_PAUSE owned by operator with the description", gates)
 	}
 
 	stdout.Reset()
-	if code := resumeGate(&stdout, &stderr, gateDiskSpaceLow, false); code != exitOK {
-		t.Fatalf("resumeGate exit = %d, want 0; stderr:\n%s", code, stderr.String())
+	if code := pauseCore(&stdout, &stderr, svc.Ref(), "operator", ""); code != exitOK {
+		t.Fatalf("re-pause exit = %d", code)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("gate file must be gone after resume, got err=%v", err)
-	}
-	if !strings.Contains(stdout.String(), gateDiskSpaceLow) {
-		t.Errorf("resume output must name the gate; got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "pause re-asserted") {
+		t.Fatalf("a re-pause is another set (last writer wins) and is reported as such; stdout = %q", stdout.String())
 	}
 }
 
-func TestResumeGate_alreadyResumedIsExitZero(t *testing.T) {
-	isolateGateEnv(t)
-	var stdout, stderr bytes.Buffer
-	if code := resumeGate(&stdout, &stderr, gateOperatorPaused, false); code != exitOK {
-		t.Fatalf("resume of an unset gate exit = %d, want 0", code)
-	}
-	if !strings.Contains(stdout.String(), "already resumed") {
-		t.Errorf("output must report already-resumed; got %q", stdout.String())
-	}
-}
-
-// Route-level wiring: `pause`/`resume` are their own routes, and are
-// advertised in both usageLine and helpText — the same "helpText-mentions"
-// pattern push_inject_test.go's TestRoute_pushInject follows.
-func TestRoute_pauseResume(t *testing.T) {
-	if r := route([]string{"pg-router", "pause"}); r.kind != routePause {
-		t.Fatalf("route(pause).kind = %v, want routePause", r.kind)
-	}
-	if r := route([]string{"pg-router", "resume", "--all"}); r.kind != routeResume || !r.allGates {
-		t.Fatalf("route(resume --all) = %+v, want routeResume allGates=true", r)
-	}
-	for _, want := range []string{"pause", "resume"} {
-		if !strings.Contains(usageLine, want) {
-			t.Errorf("usageLine does not mention %q", want)
-		}
-		if !strings.Contains(helpText, want) {
-			t.Errorf("helpText does not mention %q", want)
+func TestResumeCore_ClearsSystemPauseOnlyUnlessAll(t *testing.T) {
+	svc := startCore(t, shortDir(t))
+	var stdout, stderr strings.Builder
+	for _, g := range []string{"SYSTEM_PAUSE", "LOW_DISK_USAGE"} {
+		if code := gateSetCore(&stdout, &stderr, svc.Ref(), g, "", "tester", 0); code != exitOK {
+			t.Fatalf("set %s exit = %d; stderr=%s", g, code, stderr.String())
 		}
 	}
+	stdout.Reset()
+	if code := resumeCore(&stdout, &stderr, svc.Ref(), false, "operator"); code != exitOK {
+		t.Fatalf("resume exit = %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "resumed (cleared SYSTEM_PAUSE)") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if got := activeGateTypes(svc); len(got) != 1 || got[0] != "LOW_DISK_USAGE" {
+		t.Fatalf("after a bare resume active = %v: another system's gate must survive", got)
+	}
+
+	stdout.Reset()
+	if code := resumeCore(&stdout, &stderr, svc.Ref(), false, "operator"); code != exitOK {
+		t.Fatalf("idempotent resume exit = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "already resumed (SYSTEM_PAUSE was not set)") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := resumeCore(&stdout, &stderr, svc.Ref(), true, "operator"); code != exitOK {
+		t.Fatalf("resume --all exit = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "cleared LOW_DISK_USAGE") || len(activeGateTypes(svc)) != 0 {
+		t.Fatalf("resume --all stdout = %q active = %v", stdout.String(), activeGateTypes(svc))
+	}
+	stdout.Reset()
+	_ = resumeCore(&stdout, &stderr, svc.Ref(), true, "operator")
+	if !strings.Contains(stdout.String(), "already resumed (no gate was set)") {
+		t.Fatalf("resume --all with nothing set: stdout = %q", stdout.String())
+	}
 }
 
-// helpText must name both gate env vars, PG_ROUTER_LOG_DIR (absent before this
-// packet), and the explicit FILE-DIRECT note that pause/resume deliberately
-// break the verb-named-subcommand-is-a-socket-client symmetry.
-func TestHelpText_gateEnvVarsAndFileDirectNote(t *testing.T) {
-	for _, want := range []string{
-		"PG_ROUTER_OPERATOR_PAUSED",
-		"PG_ROUTER_CICD_DOWN",
-		"PG_ROUTER_DISK_SPACE_LOW",
-		"PG_ROUTER_LOG_DIR",
-		"FILE-DIRECT",
-		"NEVER Discover or Dial",
+func TestGateSetCore_DescriptionOwnerTTLAndRenewal(t *testing.T) {
+	svc := startCore(t, shortDir(t))
+	var stdout, stderr strings.Builder
+	if code := gateSetCore(&stdout, &stderr, svc.Ref(), "LOW_DISK_USAGE", "3GiB free", "disk-watchdog", 6*time.Minute); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "gate LOW_DISK_USAGE set") || !strings.Contains(stdout.String(), "lease until") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	g := svc.ActiveGates()[0]
+	if g.Description != "3GiB free" || g.Owner != "disk-watchdog" || g.ExpiresAt.IsZero() {
+		t.Fatalf("gate = %+v", g)
+	}
+	ttl := g.ExpiresAt.Sub(g.SetAt)
+	if ttl != 6*time.Minute {
+		t.Fatalf("lease = %v, want 6m", ttl)
+	}
+
+	stdout.Reset()
+	if code := gateSetCore(&stdout, &stderr, svc.Ref(), "LOW_DISK_USAGE", "", "", 0); code != exitOK {
+		t.Fatalf("renew exit = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "renewed") {
+		t.Fatalf("stdout = %q, want a renewal", stdout.String())
+	}
+	g = svc.ActiveGates()[0]
+	if g.Description != "" || !g.ExpiresAt.IsZero() {
+		t.Fatalf("last writer wins: the overwrite carried no description or lease; gate = %+v", g)
+	}
+}
+
+func TestGateClearCore_OneAllAndIdempotent(t *testing.T) {
+	svc := startCore(t, shortDir(t))
+	var stdout, stderr strings.Builder
+	for _, ty := range []string{"A", "B", "C"} {
+		_ = gateSetCore(&stdout, &stderr, svc.Ref(), ty, "", "x", 0)
+	}
+	stdout.Reset()
+	if code := gateClearCore(&stdout, &stderr, svc.Ref(), "B", false, "anyone"); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "gate cleared (B)") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	stdout.Reset()
+	_ = gateClearCore(&stdout, &stderr, svc.Ref(), "B", false, "anyone")
+	if !strings.Contains(stdout.String(), "gate B was not set") {
+		t.Fatalf("clearing an unset gate is a no-op success; stdout = %q", stdout.String())
+	}
+	stdout.Reset()
+	_ = gateClearCore(&stdout, &stderr, svc.Ref(), "", true, "anyone")
+	if !strings.Contains(stdout.String(), "gate cleared (A, C)") || len(activeGateTypes(svc)) != 0 {
+		t.Fatalf("clear --all: stdout = %q active = %v", stdout.String(), activeGateTypes(svc))
+	}
+}
+
+func TestGateListCore_TextAndJSON(t *testing.T) {
+	svc := startCore(t, shortDir(t))
+	var stdout, stderr strings.Builder
+	if code := gateListCore(&stdout, &stderr, svc.Ref(), false); code != exitOK || !strings.Contains(stdout.String(), "(none)") {
+		t.Fatalf("empty list: exit=%d stdout=%q", code, stdout.String())
+	}
+	stdout.Reset()
+	if code := gateListCore(&stdout, &stderr, svc.Ref(), true); code != exitOK || strings.TrimSpace(stdout.String()) != "[]" {
+		t.Fatalf("empty --json list: exit=%d stdout=%q, want []", code, stdout.String())
+	}
+
+	_ = gateSetCore(&stdout, &stderr, svc.Ref(), "LOW_DISK_USAGE", "3GiB free", "disk-watchdog", time.Minute)
+	_ = gateSetCore(&stdout, &stderr, svc.Ref(), "SYSTEM_PAUSE", "", "operator", 0)
+	stdout.Reset()
+	if code := gateListCore(&stdout, &stderr, svc.Ref(), false); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"LOW_DISK_USAGE:", "owner=disk-watchdog", "ttlRemaining=", `description="3GiB free"`, "SYSTEM_PAUSE:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gate list missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "LOW_DISK_USAGE") > strings.Index(out, "SYSTEM_PAUSE") {
+		t.Errorf("gates must be sorted by TYPE:\n%s", out)
+	}
+	stdout.Reset()
+	_ = gateListCore(&stdout, &stderr, svc.Ref(), true)
+	var gates []statusGate
+	if err := json.Unmarshal([]byte(stdout.String()), &gates); err != nil || len(gates) != 2 || gates[0].Type != "LOW_DISK_USAGE" {
+		t.Fatalf("--json list = %q (%v), want 2 gates sorted by TYPE", stdout.String(), err)
+	}
+}
+
+// Gates live in the running core's log, so every gate command is a socket
+// client: with no core running it fails with the "no running core" diagnostic
+// and never starts one (ADR 0036).
+func TestGateCommands_NoRunningCoreIsExit1(t *testing.T) {
+	gone := core.Ref{Socket: shortDir(t) + "/gone.sock"}
+	for name, run := range map[string]func(out, errw *strings.Builder) int{
+		"pause":  func(o, e *strings.Builder) int { return pauseCore(o, e, gone, "op", "") },
+		"resume": func(o, e *strings.Builder) int { return resumeCore(o, e, gone, false, "op") },
+		"set":    func(o, e *strings.Builder) int { return gateSetCore(o, e, gone, "X", "", "", 0) },
+		"clear":  func(o, e *strings.Builder) int { return gateClearCore(o, e, gone, "X", false, "") },
+		"list":   func(o, e *strings.Builder) int { return gateListCore(o, e, gone, false) },
 	} {
-		if !strings.Contains(helpText, want) {
-			t.Errorf("helpText missing %q", want)
+		var stdout, stderr strings.Builder
+		if code := run(&stdout, &stderr); code != conformance.ExitError {
+			t.Errorf("%s: exit = %d, want 1", name, code)
+		}
+		if !strings.Contains(stderr.String(), "no running core") {
+			t.Errorf("%s: stderr = %q, want the no-running-core diagnostic", name, stderr.String())
 		}
 	}
 }
 
-// TestPrecedenceCopiesAgree is Task 1.2b's Step 1(e): the precedence sentence
-// has THREE copies — internal/config/config.go's package doc, example.go's
-// header (reached here through config.ExampleTOML()), and this package's own
-// helpText — and they must never drift apart. All three are required to
-// embed the SAME literal phrase.
-func TestPrecedenceCopiesAgree(t *testing.T) {
-	const phrase = "[pool] wins over PG_ROUTER_* env, which wins over the built-in default"
+func TestRunGate_UsageErrors(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no subcommand":         {},
+		"unknown subcommand":    {"frobnicate"},
+		"set without TYPE":      {"set"},
+		"set two TYPEs":         {"set", "A", "B"},
+		"set lower-case TYPE":   {"set", "low_disk"},
+		"set negative ttl":      {"set", "A", "--ttl", "-5m"},
+		"set bad ttl":           {"set", "A", "--ttl", "soon"},
+		"clear without target":  {"clear"},
+		"clear TYPE and --all":  {"clear", "A", "--all"},
+		"clear lower-case TYPE": {"clear", "a"},
+		"list stray argument":   {"list", "extra"},
+	} {
+		if code := runGate(args); code != conformance.ExitUsage {
+			t.Errorf("%s: exit = %d, want %d (usage)", name, code, conformance.ExitUsage)
+		}
+	}
+}
 
-	root := pgRouterModuleRoot(t)
-	configSrc, err := os.ReadFile(filepath.Join(root, "internal", "config", "config.go"))
-	if err != nil {
-		t.Fatalf("read config.go: %v", err)
+// pause/resume no longer take a gate name: the old positional form is a usage
+// error pointing at `gate set|clear`, never silently reinterpreted.
+func TestRunPauseResume_PositionalGateNameIsUsageError(t *testing.T) {
+	if code := runPause([]string{"operator-paused"}); code != conformance.ExitUsage {
+		t.Errorf("pause <gate> exit = %d, want usage", code)
 	}
-	if !strings.Contains(string(configSrc), phrase) {
-		t.Errorf("internal/config/config.go's package doc is missing the precedence phrase %q", phrase)
+	if code := runResume([]string{"cicd-down"}); code != conformance.ExitUsage {
+		t.Errorf("resume <gate> exit = %d, want usage", code)
 	}
-	if !strings.Contains(config.ExampleTOML(), phrase) {
-		t.Errorf("example.go's header (config.ExampleTOML()) is missing the precedence phrase %q", phrase)
+}
+
+func TestShortTime(t *testing.T) {
+	if got := shortTime(""); got != "-" {
+		t.Errorf("shortTime(\"\") = %q", got)
 	}
-	if !strings.Contains(helpText, phrase) {
-		t.Errorf("cmd/pg-router's helpText is missing the precedence phrase %q", phrase)
+	if got := shortTime("not-a-time"); got != "not-a-time" {
+		t.Errorf("shortTime(garbage) = %q, want the raw text", got)
+	}
+	if got := shortTime("2026-10-01T12:34:56Z"); len(got) != len("15:04:05") {
+		t.Errorf("shortTime(valid) = %q, want HH:MM:SS", got)
 	}
 }

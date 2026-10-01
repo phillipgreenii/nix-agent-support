@@ -51,94 +51,6 @@ func TestListenerCounts_DeclinedByReasonSnapshotIsIndependentCopy(t *testing.T) 
 	}
 }
 
-// TestGateStateNewerObservationWins is the red-first test for Task 3.5 Step 1's
-// compare rule: a concurrent tick-stat write with an OLDER observation MUST
-// NOT overwrite a socket verb's newer one.
-func TestGateStateNewerObservationWins(t *testing.T) {
-	var svc Service
-	newer := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	older := newer.Add(-time.Minute)
-
-	svc.ObserveGateFromSocketVerb(newer, "operator_paused", GateInfo{Set: true, Owner: "operator"})
-	svc.ObserveGateFromTick(older, map[string]GateInfo{"operator_paused": {Set: false}})
-
-	gates, observedAt := svc.GateSnapshot()
-	if !observedAt.Equal(newer) {
-		t.Fatalf("gatesObservedAt = %v, want unchanged at the socket verb's %v", observedAt, newer)
-	}
-	if got := gates["operator_paused"]; !got.Set {
-		t.Fatalf("operator_paused = %+v, want the socket verb's Set=true to survive the older drive-loop write", got)
-	}
-}
-
-// TestSocketPauseReflectsImmediately: a socket pause/resume verb write is
-// visible to an immediate status read with a fresh gatesObservedAt, and a
-// LATER drive-loop tick (still older than the socket write, or simply
-// observing a different gate) never reverts it.
-func TestSocketPauseReflectsImmediately(t *testing.T) {
-	var svc Service
-	pauseAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-
-	svc.ObserveGateFromSocketVerb(pauseAt, "cicd_down", GateInfo{Set: true, Mtime: pauseAt, Owner: "operator"})
-
-	gates, observedAt := svc.GateSnapshot()
-	if got := gates["cicd_down"]; !got.Set || !got.Mtime.Equal(pauseAt) {
-		t.Fatalf("cicd_down = %+v, want an immediate Set=true with Mtime %v", got, pauseAt)
-	}
-	if !observedAt.Equal(pauseAt) {
-		t.Fatalf("gatesObservedAt = %v, want the fresh %v the socket verb just recorded", observedAt, pauseAt)
-	}
-
-	// The next drive-loop tick observes an OLDER snapshot of gate-file state
-	// (e.g. it started its pass just before the socket write landed) — it
-	// must not revert what the socket verb just recorded.
-	tickAt := pauseAt.Add(-time.Second)
-	svc.ObserveGateFromTick(tickAt, map[string]GateInfo{"cicd_down": {Set: false}})
-
-	gates, observedAt = svc.GateSnapshot()
-	if got := gates["cicd_down"]; !got.Set {
-		t.Fatalf("cicd_down = %+v, want the socket pause unreverted by the older tick", got)
-	}
-	if !observedAt.Equal(pauseAt) {
-		t.Fatalf("gatesObservedAt = %v, want still %v (the older tick write must drop)", observedAt, pauseAt)
-	}
-}
-
-// TestFileDirectPauseLagsUntilNextTick: a file-direct pause (Task 1.2b, ADR
-// 0036) never calls into Service at all — it can only become visible once the
-// drive loop's own next periodic gate-file read calls ObserveGateFromTick. An
-// immediate status read in between reports the PRIOR observation with a
-// stale gatesObservedAt, flipping only at that next tick.
-func TestFileDirectPauseLagsUntilNextTick(t *testing.T) {
-	var svc Service
-	priorTick := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	svc.ObserveGateFromTick(priorTick, map[string]GateInfo{"operator_paused": {Set: false}})
-
-	// A file-direct pause happens here, out-of-band — nothing calls into svc.
-
-	// An immediate status read still sees the PRIOR (unset) state, stamped
-	// with the stale priorTick observation time.
-	gates, observedAt := svc.GateSnapshot()
-	if got := gates["operator_paused"]; got.Set {
-		t.Fatalf("operator_paused = %+v, want the prior unset state until the next tick observes the file", got)
-	}
-	if !observedAt.Equal(priorTick) {
-		t.Fatalf("gatesObservedAt = %v, want the stale %v (unrefreshed until the next tick)", observedAt, priorTick)
-	}
-
-	// The next drive-loop tick reads the gate file and observes it set.
-	nextTick := priorTick.Add(10 * time.Second)
-	svc.ObserveGateFromTick(nextTick, map[string]GateInfo{"operator_paused": {Set: true, Mtime: nextTick.Add(-5 * time.Second)}})
-
-	gates, observedAt = svc.GateSnapshot()
-	if got := gates["operator_paused"]; !got.Set {
-		t.Fatalf("operator_paused = %+v, want it to flip to set at the next tick", got)
-	}
-	if !observedAt.Equal(nextTick) {
-		t.Fatalf("gatesObservedAt = %v, want the fresh %v", observedAt, nextTick)
-	}
-}
-
 // TestCurrentTick_nilBeforeFirstPublish is the boot-window test: a freshly
 // constructed Service must not panic when status-composing logic touches its
 // tick cell before any PublishTick call [design: Task 3.5 Step 4].
@@ -192,23 +104,6 @@ func TestPublishTick_currentTickRoundTrips(t *testing.T) {
 	got = svc.CurrentTick()
 	if got == nil || got.RunMode != RunModeDrainAndExit || !got.LastTickAt.Equal(t1) {
 		t.Fatalf("CurrentTick() = %+v, want the second publish to fully replace the first", got)
-	}
-}
-
-// TestGateSnapshot_returnsIndependentCopy proves the map GateSnapshot hands
-// back is a copy: a caller mutating it must not corrupt the Service's own
-// cache.
-func TestGateSnapshot_returnsIndependentCopy(t *testing.T) {
-	var svc Service
-	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	svc.ObserveGateFromSocketVerb(now, "operator_paused", GateInfo{Set: true})
-
-	gates, _ := svc.GateSnapshot()
-	gates["operator_paused"] = GateInfo{Set: false}
-
-	gates2, _ := svc.GateSnapshot()
-	if got := gates2["operator_paused"]; !got.Set {
-		t.Fatalf("operator_paused = %+v, want the caller's mutation of the returned map to not affect the cache", got)
 	}
 }
 
@@ -746,36 +641,5 @@ func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
 	reply := svc.composeStatusReply(0)
 	if _, present := reply["counters"]; present {
 		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
-	}
-}
-
-// TestStatusGates_DisabledOmittedWhenFalse locks bead pg2-efbb0's wire
-// convention for GateInfo.Disabled: omitted entirely (never `"disabled":
-// false`) for a gate that does not carry the external kill switch, so an
-// existing reply consumer sees byte-identical output — the SAME
-// omit-when-absent convention mtime/owner already use.
-func TestStatusGates_DisabledOmittedWhenFalse(t *testing.T) {
-	out := statusGates(map[string]GateInfo{"operator_paused": {Set: true}})
-	if len(out) != 1 {
-		t.Fatalf("statusGates returned %d entries, want 1", len(out))
-	}
-	if _, present := out[0]["disabled"]; present {
-		t.Errorf("entry = %+v, want no \"disabled\" key when Disabled is false", out[0])
-	}
-}
-
-// TestStatusGates_DisabledPresentWhenTrue is the positive counterpart: a
-// gate with Disabled: true must carry `"disabled": true` on the wire,
-// independent of Set.
-func TestStatusGates_DisabledPresentWhenTrue(t *testing.T) {
-	out := statusGates(map[string]GateInfo{"operator_paused": {Set: true, Disabled: true}})
-	if len(out) != 1 {
-		t.Fatalf("statusGates returned %d entries, want 1", len(out))
-	}
-	if got, ok := out[0]["disabled"].(bool); !ok || !got {
-		t.Errorf("entry = %+v, want \"disabled\": true", out[0])
-	}
-	if got, ok := out[0]["set"].(bool); !ok || !got {
-		t.Errorf("entry = %+v, want \"set\": true unaffected by Disabled", out[0])
 	}
 }

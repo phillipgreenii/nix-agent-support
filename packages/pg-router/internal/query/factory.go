@@ -20,6 +20,12 @@ type Factories struct{ m map[string]Factory }
 func NewQueryFactories() *Factories {
 	f := &Factories{m: map[string]Factory{}}
 	f.m["command"] = decodeInto(func() Query { return &CommandQuery{} })
+	// timer has no sub-table to decode: the [[query]]-level emits/trigger are all
+	// it needs (see TimerQuery).
+	f.m["timer"] = func(meta Meta, _ toml.MetaData, _ toml.Primitive) (Query, error) {
+		q := TimerQuery{Meta: meta}
+		return q, q.Validate()
+	}
 	// beads-ready / beads-list / github-issues / jira-issues were removed here
 	// (pg2-n75tk): each typed "how another tool is configured" into Core, and
 	// jira-issues was structurally unsatisfiable (its backing command exists

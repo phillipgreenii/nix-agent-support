@@ -29,7 +29,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 		if !strings.Contains(got, "pg-router") {
 			t.Errorf("expected the header (contains %q); got:\n%s", "pg-router", got)
 		}
-		if strings.Contains(got, "dispatch halted") {
+		if strings.Contains(got, "routing halted") {
 			t.Errorf("header must not carry the PAUSED wording; got:\n%s", got)
 		}
 	})
@@ -39,12 +39,12 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 			clientVersion: "1.2.3",
 			reply: StatusReply{
 				Core:  CoreInfo{State: "started", Version: "1.2.3"},
-				Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
+				Gates: []Gate{{Type: core.GateSystemPause}},
 			},
 			width: 120,
 			theme: theme,
 		})
-		if !strings.Contains(got, "dispatch halted · 0 in flight") {
+		if !strings.Contains(got, "routing halted for blocked participants (SYSTEM_PAUSE) · 0 in flight") {
 			t.Errorf("PAUSED banner wording wrong; got:\n%s", got)
 		}
 		if strings.Contains(got, "config:") {
@@ -55,13 +55,13 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	t.Run("gated AND quiescing still shows only the halted wording", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply: StatusReply{
-				Gates: []Gate{{Name: core.GateCICDDown, Set: true}},
+				Gates: []Gate{{Type: "LOW_DISK_USAGE"}},
 			},
 			quiescing: true,
 			width:     120,
 			theme:     theme,
 		})
-		if !strings.Contains(got, "dispatch halted") {
+		if !strings.Contains(got, "routing halted") {
 			t.Errorf("expected the halted wording to win; got:\n%s", got)
 		}
 		if strings.Contains(got, "quiescing —") {
@@ -79,7 +79,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 		if !strings.Contains(got, "quiescing") {
 			t.Errorf("expected the quiescing wording; got:\n%s", got)
 		}
-		if strings.Contains(got, "dispatch halted") {
+		if strings.Contains(got, "routing halted") {
 			t.Errorf("quiescing (ungated) must not show the halted wording; got:\n%s", got)
 		}
 		if strings.Contains(got, "config:") {
@@ -90,7 +90,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	t.Run("N in flight reflects the reply's deliveries count", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply: StatusReply{
-				Gates:      []Gate{{Name: core.GateOperatorPaused, Set: true}},
+				Gates:      []Gate{{Type: core.GateSystemPause}},
 				Deliveries: []Delivery{{ID: "d1"}},
 			},
 			width: 120,
@@ -102,34 +102,34 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	})
 }
 
-// TestGatesSummary_ChecksboxReflectsSetState pins the compact "oper[.]
-// cicd[.]" grammar the header/mockups use, and its "X" transition when a
-// gate is set.
-func TestGatesSummary_ChecksboxReflectsSetState(t *testing.T) {
-	if got, want := gatesSummary(nil), "oper[.] cicd[.]"; got != want {
+// TestGatesSummary_ListsActiveGateTypes pins the header's compact gates
+// line: "none" when clear, else the sorted TYPEs, capped with "+N more".
+func TestGatesSummary_ListsActiveGateTypes(t *testing.T) {
+	if got, want := gatesSummary(nil), "none"; got != want {
 		t.Errorf("gatesSummary(nil) = %q, want %q", got, want)
 	}
-	got := gatesSummary([]Gate{{Name: core.GateOperatorPaused, Set: true}, {Name: core.GateCICDDown, Set: false}})
-	if want := "oper[X] cicd[.]"; got != want {
-		t.Errorf("gatesSummary = %q, want %q", got, want)
+	got := gatesSummary([]Gate{{Type: "ZED"}, {Type: core.GateSystemPause}})
+	if want := "SYSTEM_PAUSE, ZED"; got != want {
+		t.Errorf("gatesSummary = %q, want %q (sorted)", got, want)
+	}
+	many := []Gate{{Type: "A"}, {Type: "B"}, {Type: "C"}, {Type: "D"}, {Type: "E"}}
+	if got, want := gatesSummary(many), "A, B, C, +2 more"; got != want {
+		t.Errorf("gatesSummary(5 gates) = %q, want %q", got, want)
 	}
 }
 
-// TestAnyGateSet_ORsAllNamedGates checks the effective-aggregate semantics
-// (ux-7): any gate being set is enough — anyGateSet iterates the reply's
-// []Gate slice generically, so a THIRD named gate (disk-space-low, bead
-// pg2-af5ur) is OR'd in automatically with no code change of its own.
-func TestAnyGateSet_ORsAllNamedGates(t *testing.T) {
+// TestAnyGateSet_AnyActiveGate checks the aggregate: the wire lists ACTIVE gates
+// only, so any entry at all means something is gated, whatever its TYPE.
+func TestAnyGateSet_AnyActiveGate(t *testing.T) {
 	cases := []struct {
 		name  string
 		gates []Gate
 		want  bool
 	}{
 		{"none", nil, false},
-		{"operator only", []Gate{{Name: core.GateOperatorPaused, Set: true}}, true},
-		{"cicd only", []Gate{{Name: core.GateCICDDown, Set: true}}, true},
-		{"disk-space-low only", []Gate{{Name: core.GateDiskSpaceLow, Set: true}}, true},
-		{"all clear", []Gate{{Name: core.GateOperatorPaused}, {Name: core.GateCICDDown}, {Name: core.GateDiskSpaceLow}}, false},
+		{"system pause", []Gate{{Type: core.GateSystemPause}}, true},
+		{"an arbitrary TYPE", []Gate{{Type: "LOW_DISK_USAGE"}}, true},
+		{"several", []Gate{{Type: core.GateSystemPause}, {Type: "LOW_DISK_USAGE"}}, true},
 	}
 	for _, c := range cases {
 		if got := anyGateSet(c.gates); got != c.want {
@@ -138,85 +138,19 @@ func TestAnyGateSet_ORsAllNamedGates(t *testing.T) {
 	}
 }
 
-// TestRenderHeader_TinyTierDropsVersionAndConfig matches the design's own
-// Tiny mockup: the version pair and config path are dropped at the Tiny
-// tier (<80 cols).
-func TestRenderHeader_TinyTierDropsVersionAndConfig(t *testing.T) {
-	theme := render.NewTheme(false)
-	d := topZoneData{
-		clientVersion: "9.9.9",
-		reply: StatusReply{
-			Core: CoreInfo{State: "started", Version: "9.9.9", ConfigPath: "/etc/pg-router/config.toml"},
-		},
-		width: 60,
-		theme: theme,
+// TestBannerText_NamesGatesAndKeepsPausedForSystemPause: SYSTEM_PAUSE keeps the
+// operator-facing "PAUSED" lead, any other gate reads "GATED", and the banner
+// names every gate in force.
+func TestBannerText_NamesGatesAndKeepsPausedForSystemPause(t *testing.T) {
+	got := bannerText([]string{"LOW_DISK_USAGE"}, false, 2, Dispatch{})
+	if !strings.HasPrefix(got, "GATED") || !strings.Contains(got, "LOW_DISK_USAGE") {
+		t.Errorf("non-pause gate banner = %q, want a GATED lead naming the TYPE", got)
 	}
-	got := renderHeader(d)
-	if strings.Contains(got, "config:") {
-		t.Errorf("Tiny header should drop the config path; got:\n%s", got)
+	got = bannerText([]string{core.GateSystemPause, "LOW_DISK_USAGE"}, false, 0, Dispatch{})
+	if !strings.HasPrefix(got, "PAUSED") || !strings.Contains(got, "LOW_DISK_USAGE") {
+		t.Errorf("SYSTEM_PAUSE banner = %q, want a PAUSED lead naming every gate", got)
 	}
-	if strings.Contains(got, "client v9.9.9") {
-		t.Errorf("Tiny header should drop the version pair; got:\n%s", got)
-	}
-	if !strings.Contains(got, "pg-router") || !strings.Contains(got, "gates:") {
-		t.Errorf("Tiny header dropped too much; got:\n%s", got)
-	}
-}
-
-// TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields pins pg2-xp415's
-// layout fix: at Narrow/Wide, the header spreads the SAME fields (health,
-// identity/state/uptime, the client/core version pair, gates, config path)
-// across three lines instead of one dense line -- health leads on line 1
-// (the "is the core healthy" signal an operator needs at a glance), the
-// version pair is its own secondary line, and gates/config trail on a
-// tertiary line. This is a layout-only change: no field present before is
-// missing now, and vice versa.
-func TestRenderHeader_DefaultTierLeadsWithHealthAndGroupsFields(t *testing.T) {
-	theme := render.NewTheme(false)
-	d := topZoneData{
-		clientVersion: "dev",
-		reply: StatusReply{
-			Core: CoreInfo{
-				State:      "started",
-				Version:    "0.0.0-8a00aeb8",
-				ConfigPath: "/Volumes/gitrepos/ziprecruiter/pristine/.pg-router/config.toml",
-				StartedAt:  time.Now().Add(-4 * time.Minute),
-			},
-		},
-		width: 120,
-		theme: theme,
-	}
-	got := renderHeader(d)
-	lines := strings.Split(got, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected a 3-line header at the default tier; got %d lines:\n%s", len(lines), got)
-	}
-
-	// Line 1: health leads, then identity/state/uptime -- no version pair,
-	// no gates, no config path competing for attention here.
-	if !strings.HasPrefix(strings.TrimLeft(lines[0], " "), "[ok] pg-router") {
-		t.Errorf("line 1 must lead with the health signal; got %q", lines[0])
-	}
-	if !strings.Contains(lines[0], "core: started") || !strings.Contains(lines[0], "up 0h04m") {
-		t.Errorf("line 1 must still carry core state and uptime; got %q", lines[0])
-	}
-	if strings.Contains(lines[0], "config:") || strings.Contains(lines[0], "gates:") {
-		t.Errorf("line 1 must not also carry gates/config; got %q", lines[0])
-	}
-
-	// Line 2: the version pair, moved off line 1 and unambiguously labeled
-	// (previously "core: started vdev · core v..." conflated the client
-	// version with the core's own state/version).
-	if !strings.Contains(lines[1], "client vdev") || !strings.Contains(lines[1], "core v0.0.0-8a00aeb8") {
-		t.Errorf("line 2 must carry the client/core version pair; got %q", lines[1])
-	}
-
-	// Line 3: gates + config path, both still present (same data, just
-	// relocated/de-emphasized -- not dropped).
-	if !strings.Contains(lines[2], "gates: oper[.] cicd[.]") {
-		t.Errorf("line 3 must carry the gates summary; got %q", lines[2])
-	}
-	if !strings.Contains(lines[2], "config: ") || !strings.Contains(lines[2], "/Volumes/gitrepos/ziprecruiter/pristine/.pg-router/config.toml") {
-		t.Errorf("line 3 must still carry the full config path; got %q", lines[2])
+	if got := bannerText(nil, false, 0, Dispatch{}); got != "" {
+		t.Errorf("no gates, not quiescing: banner = %q, want empty (header renders)", got)
 	}
 }

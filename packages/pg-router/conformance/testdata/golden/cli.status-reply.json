@@ -50,17 +50,20 @@
   },
   "gates": [
     {
-      "name": "operator_paused",
-      "set": false
+      "type": "SYSTEM_PAUSE",
+      "description": "paused by the operator",
+      "owner": "operator",
+      "setAt": "2026-09-01T00:00:00Z"
     },
     {
-      "name": "cicd_down",
-      "set": true,
-      "mtime": "2026-09-01T00:05:00Z",
-      "owner": "ops"
+      "type": "LOW_DISK_USAGE",
+      "description": "free space below 10GiB",
+      "owner": "disk-watchdog",
+      "setAt": "2026-09-01T00:05:00Z",
+      "expiresAt": "2026-09-01T00:10:30Z",
+      "ttlRemainingMs": 120000
     }
   ],
-  "gatesObservedAt": "2026-09-01T00:05:30Z",
   "listeners": [
     {
       "role": "review",

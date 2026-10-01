@@ -260,7 +260,8 @@ var negativeMatrix = map[string][]negativeCase{
 		{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 		{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
 		{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
-		{"gate missing set", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"name":"operator_paused"}]}`},
+		{"gate missing setAt", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"type":"SYSTEM_PAUSE"}]}`},
+		{"gate carries the removed set/mtime/disabled fields", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"type":"SYSTEM_PAUSE","setAt":"2026-09-01T00:00:00Z","set":true}]}`},
 		{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
 		{"activityDropped wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activityDropped":"yes"}`},
 		// Task 4.1 (operator-widened scope): the new listeners[].backoff shape
@@ -300,6 +301,8 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing kind", `{"schemaVersion":"1","id":"role-triage"}`},
 		{"kind out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"orchestrator"}`},
 		{"self out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"handler","self":"mostly-fine"}`},
+		{"nonBlockingGates entry not ALL CAPS", `{"schemaVersion":"1","id":"role-triage","kind":"handler","nonBlockingGates":["low_disk"]}`},
+		{"nonBlockingGates not an array", `{"schemaVersion":"1","id":"role-triage","kind":"handler","nonBlockingGates":"LOW_DISK"}`},
 	},
 	"cli.register-reply": {
 		{"missing accepted", `{"schemaVersion":"1","callback":"","selfStatusCallback":"c"}`},
@@ -308,23 +311,43 @@ var negativeMatrix = map[string][]negativeCase{
 	},
 	"cli.pause": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
-		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate"}`},
-		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
+		{"owner wrong type", `{"schemaVersion":"1","owner":5}`},
+		{"carries the removed gate field", `{"schemaVersion":"1","gate":"operator_paused"}`},
 	},
 	"cli.pause-reply": {
-		{"missing set", `{"schemaVersion":"1","gate":"operator_paused"}`},
-		{"set wrong type", `{"schemaVersion":"1","gate":"operator_paused","set":"yes"}`},
-		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":true}`},
+		{"missing set", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","setAt":"2026-09-01T00:00:00Z"}`},
+		{"set wrong type", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":"yes","setAt":"2026-09-01T00:00:00Z"}`},
+		{"missing setAt", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":true}`},
 	},
 	"cli.resume": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
-		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate"}`},
-		{"gate wrong type", `{"schemaVersion":"1","gate":5}`},
+		{"all wrong type", `{"schemaVersion":"1","all":"yes"}`},
+		{"carries the removed gate field", `{"schemaVersion":"1","gate":"operator_paused"}`},
 	},
 	"cli.resume-reply": {
-		{"missing set", `{"schemaVersion":"1","gate":"operator_paused"}`},
-		{"set wrong type", `{"schemaVersion":"1","gate":"operator_paused","set":"no"}`},
-		{"gate out of enum", `{"schemaVersion":"1","gate":"bogus-gate","set":false}`},
+		{"missing cleared", `{"schemaVersion":"1"}`},
+		{"cleared wrong item type", `{"schemaVersion":"1","cleared":[5]}`},
+	},
+	"cli.gate-set": {
+		{"missing type", `{"schemaVersion":"1"}`},
+		{"type not ALL CAPS", `{"schemaVersion":"1","type":"low_disk"}`},
+		{"type empty", `{"schemaVersion":"1","type":""}`},
+		{"ttlMs zero (below minimum)", `{"schemaVersion":"1","type":"X","ttlMs":0}`},
+		{"ttlMs wrong type", `{"schemaVersion":"1","type":"X","ttlMs":"5m"}`},
+		{"unknown field", `{"schemaVersion":"1","type":"X","severity":"high"}`},
+	},
+	"cli.gate-set-reply": {
+		{"missing setAt", `{"schemaVersion":"1","type":"X","set":true}`},
+		{"set wrong type", `{"schemaVersion":"1","type":"X","set":"yes","setAt":"2026-09-01T00:00:00Z"}`},
+	},
+	"cli.gate-clear": {
+		{"type not ALL CAPS", `{"schemaVersion":"1","type":"x"}`},
+		{"all wrong type", `{"schemaVersion":"1","all":"yes"}`},
+		{"by wrong type", `{"schemaVersion":"1","type":"X","by":5}`},
+	},
+	"cli.gate-clear-reply": {
+		{"missing cleared", `{"schemaVersion":"1"}`},
+		{"cleared not an array", `{"schemaVersion":"1","cleared":"X"}`},
 	},
 }
 

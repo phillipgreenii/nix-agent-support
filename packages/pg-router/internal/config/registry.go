@@ -3,12 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
+	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -54,12 +56,10 @@ type poolTOML struct {
 	// one event of a marked type at a time, across every bound handler, until
 	// it is released. Absent/empty: marks nothing (unchanged from today).
 	SerializeTypes []string `toml:"serialize_types"`
-	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath override the three
-	// INV-LIFE-2 gate file paths `pause`/`resume` act on. Absent:
-	// PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN / PG_ROUTER_DISK_SPACE_LOW
-	// env, then <LogDir>/gates/{operator-paused,cicd-down,disk-space-low}
-	// (config.Load()'s post-repo-TOML fill; config.GatePaths() resolves the
-	// identical precedence without Load()).
+	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath are RETIRED (bead
+	// pg2-h63eu): they named the file-backed gates the Gate Registry replaced.
+	// They are still decoded so a config that carries them keeps loading;
+	// decodeRoleSet logs a deprecation warning and otherwise ignores them.
 	OperatorPausedPath string `toml:"operator_paused_path"`
 	CICDDownPath       string `toml:"cicd_down_path"`
 	DiskSpaceLowPath   string `toml:"disk_space_low_path"`
@@ -105,6 +105,10 @@ type roleTOML struct {
 	// (pg2-ec754), threaded verbatim onto roles.Role.Description and
 	// surfaced in the TUI drill-down details. Absent: empty default.
 	Description string `toml:"description"`
+	// NonBlockingGates is the list of gate TYPEs (Gate Registry, bead
+	// pg2-h63eu) this role's listener does NOT block on, declared at
+	// registration. Absent: the listener blocks on every gate TYPE.
+	NonBlockingGates []string `toml:"non_blocking_gates"`
 }
 
 // queryTOML is one top-level [[query]]: a named producer. It carries its config
@@ -148,6 +152,11 @@ type queryTOML struct {
 	// (pg2-ec754), threaded verbatim onto query.Source.Description and
 	// surfaced in the TUI drill-down details. Absent: empty default.
 	Description string `toml:"description"`
+	// NonBlockingGates is the list of gate TYPEs (Gate Registry, bead
+	// pg2-h63eu) this emitter does NOT block on, declared at registration.
+	// Absent: the emitter blocks on every gate TYPE. The built-in `timer`
+	// emitter ignores gates altogether and needs no list.
+	NonBlockingGates []string `toml:"non_blocking_gates"`
 }
 
 // triggerTOML is a query's firing strategy (Q1). kind selects the concrete
@@ -204,20 +213,14 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	if shape.Pool.WorktreeDir != "" {
 		c.WorktreeDir = shape.Pool.WorktreeDir
 	}
-	// [pool].operator_paused_path / cicd_down_path / disk_space_low_path overlay
-	// after the env overlay in Load() the same way worktree_dir does — config
-	// (repo) wins over PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN /
-	// PG_ROUTER_DISK_SPACE_LOW (env), which already won over Default()'s "". An
-	// absent key leaves the env/default value intact; Load() fills any still-
-	// empty field from <LogDir>/gates/... AFTER this returns.
-	if shape.Pool.OperatorPausedPath != "" {
-		c.OperatorPaused = shape.Pool.OperatorPausedPath
-	}
-	if shape.Pool.CICDDownPath != "" {
-		c.CICDDown = shape.Pool.CICDDownPath
-	}
-	if shape.Pool.DiskSpaceLowPath != "" {
-		c.DiskSpaceLow = shape.Pool.DiskSpaceLowPath
+	for key, val := range map[string]string{
+		"operator_paused_path": shape.Pool.OperatorPausedPath,
+		"cicd_down_path":       shape.Pool.CICDDownPath,
+		"disk_space_low_path":  shape.Pool.DiskSpaceLowPath,
+	} {
+		if val != "" {
+			slog.Warn("config: [pool]."+key+" is retired and ignored; gates are now TYPE-keyed records in the event log (see MIGRATION.md, \"Gates: file-backed gates replaced by the Gate Registry\")", "path", path)
+		}
 	}
 	overlayConfigBudget(c, shape.Pool.Budget)
 	// serialize_types (INV-CONC-1, pg2-cl9jz): a present, non-empty list REPLACES
@@ -309,7 +312,11 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, c Config) (qu
 			errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
 			continue
 		}
-		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description})
+		if err := validateGateTypes(qt.NonBlockingGates); err != nil {
+			errs = append(errs, fmt.Errorf("query[%d] %q: non_blocking_gates: %w", i, qt.Name, err))
+			continue
+		}
+		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description, NonBlockingGates: qt.NonBlockingGates})
 		if qt.ExpectedInterval != nil {
 			overrides[qt.Name] = qt.ExpectedInterval.D.Milliseconds()
 		}
@@ -402,7 +409,10 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("retry: %w", err)
 	}
-	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, Description: rt.Description}, nil
+	if err := validateGateTypes(rt.NonBlockingGates); err != nil {
+		return roles.Role{}, fmt.Errorf("non_blocking_gates: %w", err)
+	}
+	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}, nil
 }
 
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its
@@ -413,6 +423,8 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	}
 	prims := map[string]toml.Primitive{
 		"command": qt.Command,
+		// timer has no sub-table: a zero Primitive is never decoded.
+		"timer": {},
 	}
 	prim, ok := prims[qt.Type]
 	if !ok {
@@ -525,4 +537,16 @@ func overlayConfigBudget(c *Config, t *budgetTOML) {
 	if t.Time != nil {
 		c.BudgetTime = t.Time.D
 	}
+}
+
+// validateGateTypes checks every entry of a non_blocking_gates list is an
+// acceptable gate TYPE (ALL CAPS) — a mistyped exemption would otherwise
+// silently exempt nothing.
+func validateGateTypes(types []string) error {
+	for _, t := range types {
+		if err := eventqueue.ValidateGateType(t); err != nil {
+			return err
+		}
+	}
+	return nil
 }

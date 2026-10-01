@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -146,17 +145,7 @@ type statusReply struct {
 		ActiveRoles    int    `json:"activeRoles"`
 		ActiveQueries  int    `json:"activeQueries"`
 	} `json:"resolvedConfig"`
-	Gates []struct {
-		Name  string `json:"name"`
-		Set   bool   `json:"set"`
-		Mtime string `json:"mtime"`
-		Owner string `json:"owner"`
-		// Disabled (bead pg2-efbb0) reports whether this gate's own
-		// MECHANISM has been switched off from outside pg-router,
-		// independent of Set — see core.GateInfo.Disabled's doc comment.
-		Disabled bool `json:"disabled"`
-	} `json:"gates"`
-	GatesObservedAt string `json:"gatesObservedAt"`
+	Gates []statusGate `json:"gates"`
 	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
 	// operator-widened scope) — a dedicated decode target. Task 4.1 also
 	// removed the prior {id,kind,state,self} decode this array shared with
@@ -274,30 +263,8 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		fmt.Fprintln(w, "config: -")
 	}
 
-	staleSuffix := ""
-	if gatesAreStale(st) {
-		staleSuffix = " (stale — pending next tick)"
-	}
-	fmt.Fprintf(w, "GATES (observedAt=%s%s):\n", dash(st.GatesObservedAt), staleSuffix)
-	if len(st.Gates) == 0 {
-		fmt.Fprintln(w, "  (none)")
-	}
-	for _, g := range st.Gates {
-		line := fmt.Sprintf("  %s: set=%t", dash(g.Name), g.Set)
-		if g.Mtime != "" {
-			line += " mtime=" + dash(g.Mtime)
-		}
-		if g.Owner != "" {
-			line += " owner=" + dash(g.Owner)
-		}
-		// disabled (bead pg2-efbb0) is printed only when true, mirroring the
-		// mtime/owner omit-when-absent convention above — the gate's raw
-		// set/clear state (already printed) is left unchanged either way.
-		if g.Disabled {
-			line += " disabled=true (externally disabled — mechanism ignored)"
-		}
-		fmt.Fprintln(w, line)
-	}
+	fmt.Fprintln(w, "GATES:")
+	renderGates(w, st.Gates)
 
 	fmt.Fprintln(w, "QUEUES:")
 	if len(st.Queues) == 0 {
@@ -367,22 +334,4 @@ func renderSection(w io.Writer, name string, n int, body func()) {
 		return
 	}
 	body()
-}
-
-// gatesAreStale reports whether the reply's ONE gatesObservedAt timestamp
-// predates lastTickAt by more than one tick interval (Task 3.8 Binding
-// decisions, Step 9) — the signal that the drive loop has ticked at least
-// once since the gate cell was last refreshed, so the rendered gate state
-// may be behind. A run-until-idle pass or the boot window (no tickIntervalMs
-// at all) never reports stale: there is no periodic tick to be behind.
-func gatesAreStale(st statusReply) bool {
-	if st.GatesObservedAt == "" || st.LastTickAt == "" || st.TickIntervalMs <= 0 {
-		return false
-	}
-	observedAt, err1 := time.Parse(time.RFC3339Nano, st.GatesObservedAt)
-	lastTick, err2 := time.Parse(time.RFC3339Nano, st.LastTickAt)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return lastTick.Sub(observedAt) > time.Duration(st.TickIntervalMs)*time.Millisecond
 }

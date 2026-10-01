@@ -311,6 +311,10 @@ type Queue struct {
 	// still present here until the next Expire sweep writes its gate_expired
 	// record, but Gate.ActiveAt already reports it inactive. Guarded by mu.
 	gates map[string]Gate
+	// gateSnap is the lock-free, copy-on-write snapshot of gates (every entry,
+	// sorted by TYPE) republished under mu after each mutation — see
+	// publishGatesLocked. Readers filter lapsed leases with Gate.ActiveAt.
+	gateSnap atomic.Pointer[[]Gate]
 
 	// retryBackoff is the DEFAULT handler retry cadence (INV-FAIL-2) — how long
 	// the core waits before re-offering a listener its head after a pre-accept
@@ -516,6 +520,9 @@ func New(store Store, opts ...Option) (*Queue, error) {
 	if err := q.replay(); err != nil {
 		return nil, err
 	}
+	q.mu.Lock()
+	q.publishGatesLocked()
+	q.mu.Unlock()
 	return q, nil
 }
 

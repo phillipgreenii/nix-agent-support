@@ -30,6 +30,10 @@ type registerRequest struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
 	Self string `json:"self"`
+	// NonBlockingGates is the OPTIONAL list of gate TYPEs this participant does
+	// NOT block on (Gate Registry, bead pg2-h63eu), declared at registration.
+	// Absent: the participant blocks on every TYPE.
+	NonBlockingGates []string `json:"nonBlockingGates"`
 }
 
 // registerReply is the cli.register-reply shape: registration mints TWO
@@ -73,6 +77,12 @@ func (s *Service) handleRegister(stdin io.Reader, stdout io.Writer) int {
 	if err != nil {
 		writeBody(stdout, errorReply("register: "+err.Error()))
 		return conformance.ExitError
+	}
+	if len(req.NonBlockingGates) > 0 {
+		if err := s.reg.SetNonBlockingGates(req.ID, req.NonBlockingGates); err != nil {
+			writeBody(stdout, errorReply("register: "+err.Error()))
+			return conformance.ExitError
+		}
 	}
 	if req.Self != "" {
 		if err := s.reg.SetSelfStatus(req.ID, SelfStatus(req.Self)); err != nil {

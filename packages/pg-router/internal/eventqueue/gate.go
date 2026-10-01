@@ -273,23 +273,55 @@ func (q *Queue) activeGatesLocked(now time.Time) []Gate {
 	return out
 }
 
-// ActiveGates returns the gates in force right now (a lapsed lease is
-// inactive), sorted by TYPE. Caller must NOT hold q.mu.
-func (q *Queue) ActiveGates() []Gate {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.activeGatesLocked(q.now())
+// publishGatesLocked republishes the lock-free gate snapshot (copy-on-write,
+// like depthCell) after every mutation of q.gates — SetGate, ClearGate, the
+// expiry sweep and replay. The status verb and the per-tick emitter check read
+// it without taking q.mu (status must never contend on the queue lock, Task 3.8),
+// so a lapsed-but-unswept lease is filtered out at READ time by ActiveAt, not by
+// the publisher. Caller holds q.mu.
+func (q *Queue) publishGatesLocked() {
+	all := make([]Gate, 0, len(q.gates))
+	for _, g := range q.gates {
+		all = append(all, g)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Type < all[j].Type })
+	q.gateSnap.Store(&all)
 }
 
-// Gate returns the active gate of the given TYPE, if there is one.
-func (q *Queue) Gate(gateType string) (Gate, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	g, ok := q.gates[gateType]
-	if !ok || !g.ActiveAt(q.now()) {
-		return Gate{}, false
+// activeFromSnapshot returns the gates in force at now from the lock-free
+// snapshot, sorted by TYPE.
+func (q *Queue) activeFromSnapshot(now time.Time) []Gate {
+	snap := q.gateSnap.Load()
+	if snap == nil {
+		return nil
 	}
-	return g, true
+	var out []Gate
+	for _, g := range *snap {
+		if g.ActiveAt(now) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// ActiveGates returns the gates in force right now (a lapsed lease is
+// inactive), sorted by TYPE. Lock-free: it reads the published snapshot, so it
+// is safe to call from the status path and never contends on q.mu.
+func (q *Queue) ActiveGates() []Gate { return q.activeFromSnapshot(q.now()) }
+
+// Now returns the queue's own clock reading — the instant gate leases are
+// judged against — so a caller computing a lease's remaining time (the status
+// verb) agrees with the queue under an injected test clock.
+func (q *Queue) Now() time.Time { return q.now() }
+
+// Gate returns the active gate of the given TYPE, if there is one. Lock-free.
+func (q *Queue) Gate(gateType string) (Gate, bool) {
+	for _, g := range q.activeFromSnapshot(q.now()) {
+		if g.Type == gateType {
+			return g, true
+		}
+	}
+	return Gate{}, false
 }
 
 // anyListenerMatchesLocked reports whether some registered listener binds evt —
@@ -358,6 +390,7 @@ func (q *Queue) SetGate(req GateRequest) (Gate, error) {
 		return Gate{}, err
 	}
 	q.gates[g.Type] = g
+	q.publishGatesLocked()
 	if routed {
 		q.addEventLocked(evt)
 	}
@@ -394,6 +427,7 @@ func (q *Queue) ClearGate(gateType, by string) (Gate, bool, error) {
 		return Gate{}, false, err
 	}
 	delete(q.gates, gateType)
+	q.publishGatesLocked()
 	if routed {
 		q.addEventLocked(evt)
 	}
@@ -439,6 +473,7 @@ func (q *Queue) expireGatesLocked(now time.Time) (expired []Gate, events []Event
 	for _, g := range lapsed {
 		delete(q.gates, g.Type)
 	}
+	q.publishGatesLocked()
 	for _, evt := range evts {
 		q.addEventLocked(evt)
 	}
@@ -458,10 +493,7 @@ func (q *Queue) CheckPull(listenerID string, exempt map[string]bool) error {
 // caller is responsible for never asking about the timer emitter, which no gate
 // blocks.
 func (q *Queue) EmitterBlockedBy(emitterID string, exempt map[string]bool) (string, bool) {
-	q.mu.Lock()
-	active := q.activeGatesLocked(q.now())
-	q.mu.Unlock()
-	t, blocked := BlockingGate(active, exempt)
+	t, blocked := BlockingGate(q.ActiveGates(), exempt)
 	if blocked {
 		q.gateObs.OnGateBlocked(emitterID, "poll", t)
 	}
@@ -469,10 +501,7 @@ func (q *Queue) EmitterBlockedBy(emitterID string, exempt map[string]bool) (stri
 }
 
 func (q *Queue) checkBlocked(participant, kind string, exempt map[string]bool) error {
-	q.mu.Lock()
-	active := q.activeGatesLocked(q.now())
-	q.mu.Unlock()
-	t, blocked := BlockingGate(active, exempt)
+	t, blocked := BlockingGate(q.ActiveGates(), exempt)
 	if !blocked {
 		return nil
 	}

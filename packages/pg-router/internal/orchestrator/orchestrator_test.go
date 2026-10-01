@@ -222,17 +222,6 @@ func fastCfg() config.Config {
 	return c
 }
 
-// writeTemp creates a sentinel file and returns its path (+ a no-op cleanup;
-// t.TempDir() handles removal). Used by the gated-pass test.
-func writeTemp(t *testing.T) (string, func()) {
-	t.Helper()
-	p := t.TempDir() + "/sentinel"
-	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p, func() {}
-}
-
 // newTestQueue builds a bare eventqueue.Queue over an in-memory store, for
 // tests exercising the queue->handler Listener bridge (orchestrator.NewListener,
 // bead pg2-f3mcb.2) directly.
@@ -612,120 +601,6 @@ func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 	q.Dispatch()
 	if handler.callCount() != 2 {
 		t.Fatalf("after a SECOND Dispatch call, the next head (zr-w2) should be worked; calls=%d", handler.callCount())
-	}
-}
-
-// TestGated_operatorPausedAndCICDDownAndDiskSpaceLow locks the Gated()
-// predicate `run` / `run-until-idle` consult before registering any
-// Listener or running a producer tick (the exported form of the retired
-// DrainOnce's own gate check). DiskSpaceLow (bead pg2-af5ur) is checked the
-// same way as the pre-existing two gates.
-func TestGated_operatorPausedAndCICDDownAndDiskSpaceLow(t *testing.T) {
-	o := newOrch(fastCfg(), testQuerySet(nil, nil))
-	if o.Gated() {
-		t.Fatal("an ungated config must report Gated() == false")
-	}
-	f, _ := writeTemp(t)
-	o.Cfg.OperatorPaused = f
-	if !o.Gated() {
-		t.Fatal("OperatorPaused sentinel present must report Gated() == true")
-	}
-	o.Cfg.OperatorPaused = ""
-	o.Cfg.CICDDown = f
-	if !o.Gated() {
-		t.Fatal("CICDDown sentinel present must report Gated() == true")
-	}
-	o.Cfg.CICDDown = ""
-	o.Cfg.DiskSpaceLow = f
-	if !o.Gated() {
-		t.Fatal("DiskSpaceLow sentinel present must report Gated() == true")
-	}
-}
-
-// TestGated_operatorPausedDisableIgnoresOperatorPaused locks the bead
-// pg2-efbb0 external kill switch: when Cfg.OperatorPausedDisable names a
-// path that EXISTS, Gated() must ignore OperatorPaused's own file state
-// entirely — even while that file is present — but CICDDown/DiskSpaceLow
-// (which carry no kill switch yet) must still gate normally, and clearing
-// the disable file must restore OperatorPaused's own effect.
-func TestGated_operatorPausedDisableIgnoresOperatorPaused(t *testing.T) {
-	o := newOrch(fastCfg(), testQuerySet(nil, nil))
-	pausedFile, _ := writeTemp(t)
-	disableFile, _ := writeTemp(t)
-
-	o.Cfg.OperatorPaused = pausedFile
-	if !o.Gated() {
-		t.Fatal("OperatorPaused sentinel present (no disable configured) must report Gated() == true")
-	}
-
-	o.Cfg.OperatorPausedDisable = disableFile
-	if o.Gated() {
-		t.Fatal("OperatorPausedDisable present must make Gated() ignore OperatorPaused's own file state")
-	}
-
-	// CICDDown must still gate normally while operator_paused's own kill
-	// switch is active — the disable is scoped to operator_paused only.
-	o.Cfg.CICDDown = pausedFile
-	if !o.Gated() {
-		t.Fatal("CICDDown must still gate even while OperatorPausedDisable suppresses operator_paused")
-	}
-	o.Cfg.CICDDown = ""
-
-	// DiskSpaceLow likewise.
-	o.Cfg.DiskSpaceLow = pausedFile
-	if !o.Gated() {
-		t.Fatal("DiskSpaceLow must still gate even while OperatorPausedDisable suppresses operator_paused")
-	}
-	o.Cfg.DiskSpaceLow = ""
-
-	// Removing the disable file restores operator_paused's own effect.
-	o.Cfg.OperatorPausedDisable = ""
-	if !o.Gated() {
-		t.Fatal("clearing OperatorPausedDisable must restore OperatorPaused's own gating effect")
-	}
-}
-
-// TestGated_diskSpaceLowDisableIgnoresDiskSpaceLow mirrors
-// TestGated_operatorPausedDisableIgnoresOperatorPaused for disk_space_low's
-// own kill switch (bead pg2-hipf0): when Cfg.DiskSpaceLowDisable names a
-// path that EXISTS, Gated() must ignore DiskSpaceLow's own file state
-// entirely — even while that file is present — but OperatorPaused/CICDDown
-// must still gate normally, and clearing the disable file must restore
-// DiskSpaceLow's own effect.
-func TestGated_diskSpaceLowDisableIgnoresDiskSpaceLow(t *testing.T) {
-	o := newOrch(fastCfg(), testQuerySet(nil, nil))
-	diskSpaceLowFile, _ := writeTemp(t)
-	disableFile, _ := writeTemp(t)
-
-	o.Cfg.DiskSpaceLow = diskSpaceLowFile
-	if !o.Gated() {
-		t.Fatal("DiskSpaceLow sentinel present (no disable configured) must report Gated() == true")
-	}
-
-	o.Cfg.DiskSpaceLowDisable = disableFile
-	if o.Gated() {
-		t.Fatal("DiskSpaceLowDisable present must make Gated() ignore DiskSpaceLow's own file state")
-	}
-
-	// OperatorPaused must still gate normally while disk_space_low's own
-	// kill switch is active — the disable is scoped to disk_space_low only.
-	o.Cfg.OperatorPaused = diskSpaceLowFile
-	if !o.Gated() {
-		t.Fatal("OperatorPaused must still gate even while DiskSpaceLowDisable suppresses disk_space_low")
-	}
-	o.Cfg.OperatorPaused = ""
-
-	// CICDDown likewise.
-	o.Cfg.CICDDown = diskSpaceLowFile
-	if !o.Gated() {
-		t.Fatal("CICDDown must still gate even while DiskSpaceLowDisable suppresses disk_space_low")
-	}
-	o.Cfg.CICDDown = ""
-
-	// Removing the disable file restores disk_space_low's own effect.
-	o.Cfg.DiskSpaceLowDisable = ""
-	if !o.Gated() {
-		t.Fatal("clearing DiskSpaceLowDisable must restore DiskSpaceLow's own gating effect")
 	}
 }
 

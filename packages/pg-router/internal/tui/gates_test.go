@@ -23,7 +23,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 			return "paused", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
+	m.reply = StatusReply{}
 
 	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
@@ -32,14 +32,8 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	if !m.gateTogglePending {
 		t.Error("gateTogglePending = false right after P, want true (pending indicator)")
 	}
-	if m.gateSet(core.GateOperatorPaused) {
-		t.Fatal("operator_paused flipped to true before any gateToggleResultMsg arrived -- optimistic flip")
-	}
-
-	// The RPC "never arrives" in this branch of the test: cmd() is simply
-	// never invoked. Nothing changes the pre-toggle state on its own.
-	if m.gateSet(core.GateOperatorPaused) {
-		t.Fatal("operator_paused state changed with no gateToggleResultMsg delivered")
+	if m.gateSet(core.GateSystemPause) {
+		t.Fatal("SYSTEM_PAUSE flipped to set before any gateToggleResultMsg arrived -- optimistic flip")
 	}
 
 	// Now the reply DOES arrive -- Update's gateToggleResultMsg case is the
@@ -51,8 +45,8 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	}
 	updated, _ := m.Update(res)
 	mm := updated.(*Model)
-	if !mm.gateSet(core.GateOperatorPaused) {
-		t.Error("operator_paused still clear after a successful \"paused\" result")
+	if !mm.gateSet(core.GateSystemPause) {
+		t.Error("SYSTEM_PAUSE still clear after a successful \"paused\" result")
 	}
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after the result arrived")
@@ -60,7 +54,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 }
 
 // TestToggleOperatorGate_UsesResumeWhenAlreadyPaused: P is a TOGGLE, not
-// always-pause -- when operator_paused is already set, pressing it must send
+// always-pause -- when SYSTEM_PAUSE is already active, pressing it must send
 // core.SubcommandResume, not another pause.
 func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	var gotVerb string
@@ -70,7 +64,7 @@ func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 			return "resumed", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}}}
+	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}}}
 
 	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
@@ -82,13 +76,28 @@ func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	}
 }
 
+// TestToggleOperatorGate_IgnoresOtherGates: P toggles SYSTEM_PAUSE only. A
+// different gate being active must not make P send "resume" (which would
+// merely be a no-op for it): the operator still wants to PAUSE.
+func TestToggleOperatorGate_IgnoresOtherGates(t *testing.T) {
+	var gotVerb string
+	m := newTestModel(&stubPoller{
+		toggle: func(_ context.Context, verb string) (string, error) {
+			gotVerb = verb
+			return "paused", nil
+		},
+	})
+	m.reply = StatusReply{Gates: []Gate{{Type: "LOW_DISK_USAGE"}}}
+	_ = m.handleToggleOperatorGate()()
+	if gotVerb != core.SubcommandPause {
+		t.Errorf("verb = %q, want pause: another system's gate does not make P a resume", gotVerb)
+	}
+}
+
 // TestToggleOperatorGate_HandleNeverReachesRawClient documents Acceptance
 // Criterion 2 structurally: handleToggleOperatorGate is defined entirely in
 // terms of m.poller.ToggleGate (via startGateToggle) -- there is no
-// *core.Client field on Model at all for it to reach for instead. This
-// test exercises that path end to end so a future change reintroducing a
-// raw client call would have to touch (and be caught changing) exactly
-// this flow.
+// *core.Client field on Model at all for it to reach for instead.
 func TestToggleOperatorGate_HandleNeverReachesRawClient(t *testing.T) {
 	called := false
 	m := newTestModel(&stubPoller{
@@ -113,7 +122,7 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 			return "", errors.New("dial: no running core")
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
+	m.reply = StatusReply{}
 
 	cmd := m.handleToggleOperatorGate()
 	msg := cmd()
@@ -125,8 +134,8 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after a failed toggle")
 	}
-	if mm.gateSet(core.GateOperatorPaused) {
-		t.Error("operator_paused changed after a FAILED toggle -- state must stay put")
+	if mm.gateSet(core.GateSystemPause) {
+		t.Error("SYSTEM_PAUSE changed after a FAILED toggle -- state must stay put")
 	}
 	if mm.flash == "" || mm.flashLevel != FlashWarn {
 		t.Errorf("flash = %q level=%v, want a non-empty FlashWarn flash naming the failure", mm.flash, mm.flashLevel)
@@ -140,8 +149,8 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 }
 
 // TestGateToggle_SuccessFlashNamesEffectiveAggregate is the design's own
-// worked example: clearing operator_paused while cicd_down remains set must
-// flash that the pool is STILL paused, not imply it resumed.
+// worked example: clearing SYSTEM_PAUSE while another gate remains active
+// must flash that the pool is STILL gated, not imply it resumed.
 func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 	m := newTestModel(&stubPoller{
 		toggle: func(context.Context, string) (string, error) {
@@ -149,8 +158,8 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 		},
 	})
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: true},
-		{Name: core.GateCICDDown, Set: true},
+		{Type: core.GateSystemPause},
+		{Type: "LOW_DISK_USAGE"},
 	}}
 
 	cmd := m.handleToggleOperatorGate()
@@ -158,14 +167,27 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 	updated, _ := m.Update(msg)
 	mm := updated.(*Model)
 
-	if mm.gateSet(core.GateOperatorPaused) {
-		t.Error("operator_paused should be clear after a \"resumed\" result")
+	if mm.gateSet(core.GateSystemPause) {
+		t.Error("SYSTEM_PAUSE should be clear after a \"resumed\" result")
 	}
-	if !strings.Contains(mm.flash, "cicd-down") {
-		t.Errorf("flash %q should name cicd-down as the reason the pool is STILL paused", mm.flash)
+	if !mm.gateSet("LOW_DISK_USAGE") {
+		t.Error("the other system's gate must survive a SYSTEM_PAUSE resume")
+	}
+	if !strings.Contains(mm.flash, "LOW_DISK_USAGE") {
+		t.Errorf("flash %q should name LOW_DISK_USAGE as the reason the pool is STILL gated", mm.flash)
 	}
 	if mm.flashLevel != FlashInfo {
 		t.Errorf("a successful toggle's flash level = %v, want FlashInfo", mm.flashLevel)
+	}
+}
+
+// TestGateToggle_ResumedFlashWhenNothingElseIsActive: the plain case.
+func TestGateToggle_ResumedFlashWhenNothingElseIsActive(t *testing.T) {
+	m := newTestModel(nil)
+	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}}}
+	m.applyGateToggleResult(gateToggleResultMsg{verb: core.SubcommandResume, effective: "resumed"})
+	if !strings.Contains(m.flash, "RESUMED") {
+		t.Errorf("flash %q, want the pool-resumed wording when no other gate is active", m.flash)
 	}
 }
 
@@ -193,9 +215,10 @@ func TestResumeAllGates_NoopOutsideGatesModal(t *testing.T) {
 	}
 }
 
-// TestResumeAllGates_ResumesInsideGatesModal is the positive half of the
-// above: with the Gates modal open, R fires the resume RPC.
-func TestResumeAllGates_ResumesInsideGatesModal(t *testing.T) {
+// TestResumeAllGates_ClearsEveryGateInsideGatesModal is the positive half of
+// the above: with the Gates modal open, R fires the resume-all RPC and, on
+// success, empties the rendered gate list (any caller may clear any gate).
+func TestResumeAllGates_ClearsEveryGateInsideGatesModal(t *testing.T) {
 	var gotVerb string
 	m := newTestModel(&stubPoller{
 		toggle: func(_ context.Context, verb string) (string, error) {
@@ -204,195 +227,76 @@ func TestResumeAllGates_ResumesInsideGatesModal(t *testing.T) {
 		},
 	})
 	m.activeModal = ModalGates
+	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}, {Type: "LOW_DISK_USAGE"}}}
 
 	cmd := handleResumeAllGates(m)
 	if cmd == nil {
 		t.Fatal("handleResumeAllGates returned a nil cmd with the Gates modal open")
 	}
-	_ = cmd()
-	if gotVerb != core.SubcommandResume {
-		t.Errorf("ToggleGate verb = %q, want %q", gotVerb, core.SubcommandResume)
+	res := cmd().(gateToggleResultMsg)
+	if gotVerb != ToggleVerbResumeAll {
+		t.Errorf("ToggleGate verb = %q, want %q", gotVerb, ToggleVerbResumeAll)
+	}
+	m.Update(res)
+	if len(m.reply.Gates) != 0 {
+		t.Errorf("gates after resume-all = %+v, want none", m.reply.Gates)
 	}
 }
 
-// TestRenderGatesModal_ListsAllGatesByName: the gates modal must name
-// ALL THREE of INV-LIFE-2's OR-effective gates (disk-space-low added by
-// bead pg2-af5ur), by their ADR-0026-safe hyphenated display names, with
-// state/since/owner -- even ones never observed by the core. A
-// never-observed gate (cicd-down / disk-space-low here) renders as "not
-// set" [pg2-y6sy5], not the ambiguous "clear since - (owner: -)" this test
-// used to assert.
-func TestRenderGatesModal_ListsAllGatesByName(t *testing.T) {
+// TestRenderGatesModal_ListsEveryActiveGate: the modal shows TYPE,
+// description, owner, set-at and TTL remaining for each gate in force,
+// whatever the (arbitrary) TYPE is.
+func TestRenderGatesModal_ListsEveryActiveGate(t *testing.T) {
 	m := newTestModel(nil)
-	m.width, m.height = 80, 24
+	m.width, m.height = 120, 30
+	setAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
-		// cicd_down / disk_space_low deliberately absent -- never observed yet.
+		{Type: "LOW_DISK_USAGE", Description: "free space 3GiB", Owner: "disk-watchdog", SetAt: setAt, ExpiresAt: setAt.Add(5 * time.Minute), TTLRemainingMs: 270000},
+		{Type: core.GateSystemPause, Description: "paused by the operator", Owner: "operator", SetAt: setAt},
 	}}
-	m.activeModal = ModalGates
-
 	got := m.renderGatesModal()
-	for _, want := range []string{"operator-paused", "cicd-down", "disk-space-low", "SET", "not set", "operator", "resume all"} {
+	for _, want := range []string{
+		"SYSTEM_PAUSE", "LOW_DISK_USAGE",
+		"disk-watchdog", "operator", "2026-09-01 12:00", "no TTL", "TTL 4m",
+	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("gates modal missing %q; got:\n%s", want, got)
+			t.Errorf("Gates modal missing %q; got:\n%s", want, got)
 		}
 	}
+	if strings.Index(got, "LOW_DISK_USAGE") > strings.Index(got, "SYSTEM_PAUSE") {
+		t.Errorf("gates are not sorted by TYPE; got:\n%s", got)
+	}
+	if !strings.Contains(got, "[R] resume all") {
+		t.Errorf("Gates modal footer must name R = resume all; got:\n%s", got)
+	}
 }
 
-// TestRenderGatesModal_LongNameGetsGuaranteedGap is pg2-y6sy5's regression
-// test for the fixed-width column collision this modal shared with the
-// legend column pg2-58ecs already fixed: this gate's old name "quota-paused"
-// was exactly as wide as render.Modal's fixed 12-column Left field, so it
-// used to receive ZERO padding there and run straight into the status text
-// with no space at all ("quota-pausedSET since ..."). Assert a real gap
-// survives after the longest gate name (now "operator-paused", wider still)
-// regardless of render.Modal's own fixed-width column.
-func TestRenderGatesModal_LongNameGetsGuaranteedGap(t *testing.T) {
+// TestRenderGatesModal_NoneActiveIsUnambiguous (pg2-y6sy5's spirit): with
+// nothing gated the modal says so outright rather than rendering nothing.
+func TestRenderGatesModal_NoneActiveIsUnambiguous(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
-		{Name: core.GateCICDDown, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "automation"},
-	}}
-	m.activeModal = ModalGates
-
+	m.reply = StatusReply{}
 	got := m.renderGatesModal()
-	idx := strings.Index(got, "operator-paused")
-	if idx == -1 {
-		t.Fatalf("gates modal missing the long gate name %q; got:\n%s", "operator-paused", got)
-	}
-	next := idx + len("operator-paused")
-	if next >= len(got) || got[next] != ' ' {
-		t.Errorf("no guaranteed gap directly after the long gate name %q (next byte = %q); got:\n%s",
-			"operator-paused", string(got[next]), got)
+	if !strings.Contains(got, "none active") {
+		t.Errorf("empty Gates modal must read \"none active\"; got:\n%s", got)
 	}
 }
 
-// TestRenderGatesModal_NotSetIsUnambiguous is pg2-y6sy5's regression test
-// for the not-set-case wording: a gate the core has never observed must
-// render as the plain, unambiguous "not set" -- never the placeholder-dash
-// text "clear since - (owner: -)" that reads as malformed data.
-func TestRenderGatesModal_NotSetIsUnambiguous(t *testing.T) {
+// TestRenderGatesModal_LongTypeGetsGuaranteedGap is pg2-y6sy5's regression
+// test, carried forward: a long gate TYPE must never run straight into the
+// detail text with no gap.
+func TestRenderGatesModal_LongTypeGetsGuaranteedGap(t *testing.T) {
 	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: false},
-		// cicd_down deliberately absent -- never observed at all.
-	}}
-	m.activeModal = ModalGates
-
+	m.width, m.height = 120, 24
+	long := "A_VERY_LONG_ARBITRARY_GATE_TYPE_NAME"
+	m.reply = StatusReply{Gates: []Gate{{Type: long, Description: "d", Owner: "o"}}}
 	got := m.renderGatesModal()
-	if !strings.Contains(got, "not set") {
-		t.Errorf("an unset/never-observed gate should render unambiguous \"not set\" text; got:\n%s", got)
+	if strings.Contains(got, long+"d") {
+		t.Errorf("gate TYPE runs into its detail with no gap; got:\n%s", got)
 	}
-	if strings.Contains(got, "clear since") || strings.Contains(got, "owner: -") {
-		t.Errorf("gates modal still renders the ambiguous placeholder-dash text; got:\n%s", got)
-	}
-}
-
-// TestRenderGatesModal_ExternallyDisabledMarker locks bead pg2-efbb0's
-// acceptance criteria for the TUI: the gates modal must show the raw
-// set/clear state UNCHANGED and additionally mark the gate as externally
-// disabled, regardless of whether the gate's own file happens to be set or
-// clear at the same time.
-func TestRenderGatesModal_ExternallyDisabledMarker(t *testing.T) {
-	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator", Disabled: true},
-		{Name: core.GateCICDDown, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "automation"},
-	}}
-	m.activeModal = ModalGates
-
-	got := m.renderGatesModal()
-	if !strings.Contains(got, "SET") || !strings.Contains(got, "[DISABLED]") {
-		t.Errorf("disabled operator-paused must still show its raw SET state AND a [DISABLED] marker; got:\n%s", got)
-	}
-	// cicd-down carries no kill switch — its own row must show no marker.
-	cicdLine := got[strings.Index(got, "cicd-down"):]
-	if idx := strings.Index(cicdLine, "\n"); idx != -1 {
-		cicdLine = cicdLine[:idx]
-	}
-	if strings.Contains(cicdLine, "[DISABLED]") {
-		t.Errorf("cicd-down row must not carry the disabled marker; got:\n%s", cicdLine)
-	}
-}
-
-// TestRenderGatesModal_ExternallyDisabledMarkerWhenNotSet proves the marker
-// is independent of Set: a CLEARED gate that is also externally disabled
-// must still show BOTH "not set" and the disabled marker.
-func TestRenderGatesModal_ExternallyDisabledMarkerWhenNotSet(t *testing.T) {
-	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: false, Disabled: true},
-	}}
-	m.activeModal = ModalGates
-
-	got := m.renderGatesModal()
-	if !strings.Contains(got, "not set") || !strings.Contains(got, "[DISABLED]") {
-		t.Errorf("a clear-but-disabled gate must show BOTH \"not set\" and the disabled marker; got:\n%s", got)
-	}
-}
-
-// TestRenderGatesModal_ExternallyDisabledMarker_diskSpaceLow mirrors
-// TestRenderGatesModal_ExternallyDisabledMarker for disk-space-low's own
-// kill switch (bead pg2-hipf0), through the SAME production entry point
-// (m.renderGatesModal(), which wires the fixed "disk-space-low"/
-// core.GateDiskSpaceLow row) rather than calling gateModalRow directly —
-// this is what actually proves the wire-name wiring, not just the generic
-// gateModalRow mechanism gateModalRow's own doc comment already covers.
-func TestRenderGatesModal_ExternallyDisabledMarker_diskSpaceLow(t *testing.T) {
-	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateDiskSpaceLow, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Disabled: true},
-		{Name: core.GateOperatorPaused, Set: true, Mtime: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC), Owner: "operator"},
-	}}
-	m.activeModal = ModalGates
-
-	got := m.renderGatesModal()
-	diskLine := got[strings.Index(got, "disk-space-low"):]
-	if idx := strings.Index(diskLine, "\n"); idx != -1 {
-		diskLine = diskLine[:idx]
-	}
-	if !strings.Contains(diskLine, "SET") || !strings.Contains(diskLine, "[DISABLED]") {
-		t.Errorf("disabled disk-space-low must still show its raw SET state AND a [DISABLED] marker; got:\n%s", diskLine)
-	}
-	// operator-paused carries its OWN, separate kill switch — its own row
-	// must show no marker while only disk-space-low is disabled.
-	operatorLine := got[strings.Index(got, "operator-paused"):]
-	if idx := strings.Index(operatorLine, "\n"); idx != -1 {
-		operatorLine = operatorLine[:idx]
-	}
-	if strings.Contains(operatorLine, "[DISABLED]") {
-		t.Errorf("operator-paused row must not carry the disabled marker while only disk-space-low is disabled; got:\n%s", operatorLine)
-	}
-}
-
-// TestOperatorGateFlashText_NotesExternalDisable locks the flash-text
-// enhancement (bead pg2-efbb0): toggling operator_paused while its kill
-// switch is active must append a note so the operator is not misled into
-// thinking the toggle changed dispatch behavior.
-func TestOperatorGateFlashText_NotesExternalDisable(t *testing.T) {
-	m := newTestModel(nil)
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true, Disabled: true}}}
-
-	got := m.operatorGateFlashText("paused")
-	if !strings.Contains(got, "pool now PAUSED") || !strings.Contains(got, "no dispatch effect") {
-		t.Errorf("flash text = %q, want the usual PAUSED text plus a no-dispatch-effect note", got)
-	}
-}
-
-// TestOperatorGateFlashText_NoNoteWhenNotDisabled is the negative control:
-// with no kill switch active, the flash text must be byte-identical to its
-// pre-pg2-efbb0 form.
-func TestOperatorGateFlashText_NoNoteWhenNotDisabled(t *testing.T) {
-	m := newTestModel(nil)
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}}}
-
-	if got := m.operatorGateFlashText("paused"); got != "operator gate paused — pool now PAUSED" {
-		t.Errorf("flash text = %q, want unchanged \"operator gate paused — pool now PAUSED\"", got)
+	if !strings.Contains(got, long) {
+		t.Errorf("gate TYPE missing; got:\n%s", got)
 	}
 }
 
@@ -404,7 +308,7 @@ func TestOperatorGateFlashText_NoNoteWhenNotDisabled(t *testing.T) {
 func TestAsOfRaceGuard(t *testing.T) {
 	m := newTestModel(nil)
 	m.screen = screenMain
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: false}}}
+	m.reply = StatusReply{}
 
 	toggleStart := time.Now()
 	m.gateToggleStartedAt = toggleStart
@@ -415,11 +319,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	stale := StatusReply{
 		AsOf:  toggleStart.Add(-time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
+		Gates: []Gate{{Type: core.GateSystemPause}},
 	}
 	updated, _ := m.Update(pollResultMsg{reply: stale})
 	mm := updated.(*Model)
-	if mm.gateSet(core.GateOperatorPaused) {
+	if mm.gateSet(core.GateSystemPause) {
 		t.Fatal("a stale (pre-toggle) poll result overwrote the pending gate state")
 	}
 	if mm.screen != screenMain {
@@ -427,9 +331,9 @@ func TestAsOfRaceGuard(t *testing.T) {
 	}
 
 	// The toggle itself settles.
-	updated, _ = mm.Update(gateToggleResultMsg{effective: "resumed"})
+	updated, _ = mm.Update(gateToggleResultMsg{verb: core.SubcommandResume, effective: "resumed"})
 	mm = updated.(*Model)
-	if mm.gateSet(core.GateOperatorPaused) {
+	if mm.gateSet(core.GateSystemPause) {
 		t.Fatal("gate still set after a successful resume result")
 	}
 
@@ -438,11 +342,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	fresh := StatusReply{
 		AsOf:  toggleStart.Add(time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Name: core.GateOperatorPaused, Set: true}},
+		Gates: []Gate{{Type: core.GateSystemPause}},
 	}
 	updated, _ = mm.Update(pollResultMsg{reply: fresh})
 	mm = updated.(*Model)
-	if !mm.gateSet(core.GateOperatorPaused) {
+	if !mm.gateSet(core.GateSystemPause) {
 		t.Fatal("a fresh (post-toggle) poll result was not applied")
 	}
 	if mm.screen != screenMain {
@@ -464,5 +368,24 @@ func TestApplyPollResult_PreservesOpenModalScreen(t *testing.T) {
 	}
 	if mm.activeModal != ModalGates {
 		t.Fatalf("activeModal = %v, want ModalGates preserved across the poll", mm.activeModal)
+	}
+}
+
+// TestGateDetail_CarriesEveryField: the detail line carries TTL left, set-at,
+// owner and description (the modal may clip the tail, so the unclipped text is
+// checked here directly), with explicit placeholders for what a gate omits.
+func TestGateDetail_CarriesEveryField(t *testing.T) {
+	setAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	full := gateDetail(Gate{Type: "X", Description: "free space 3GiB", Owner: "disk-watchdog", SetAt: setAt, ExpiresAt: setAt.Add(5 * time.Minute), TTLRemainingMs: 270000})
+	for _, want := range []string{"TTL 4m", "2026-09-01 12:00", "disk-watchdog", "free space 3GiB"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("gateDetail missing %q: %q", want, full)
+		}
+	}
+	bare := gateDetail(Gate{Type: "X"})
+	for _, want := range []string{"no TTL", "owner: -", "(no description)"} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("gateDetail of a bare gate missing %q: %q", want, bare)
+		}
 	}
 }

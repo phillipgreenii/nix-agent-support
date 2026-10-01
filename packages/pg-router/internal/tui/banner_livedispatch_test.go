@@ -82,7 +82,7 @@ func TestBanner_GatedWithLiveSessionInFlightReadsHaltedNotQuiescent(t *testing.T
 
 	reply := StatusReply{
 		Core:       CoreInfo{State: "started"},
-		Gates:      []Gate{{Name: core.GateOperatorPaused, Set: true}},
+		Gates:      []Gate{{Type: core.GateSystemPause}},
 		Deliveries: make([]Delivery, inFlight),
 	}
 	got := renderTopZone(topZoneData{
@@ -91,7 +91,7 @@ func TestBanner_GatedWithLiveSessionInFlightReadsHaltedNotQuiescent(t *testing.T
 		width:     120,
 		theme:     render.NewTheme(false),
 	})
-	if !strings.Contains(got, "dispatch halted") {
+	if !strings.Contains(got, "routing halted") {
 		t.Errorf("expected the halted banner with a real session in flight; got:\n%s", got)
 	}
 	if strings.Contains(got, "quiescing —") {

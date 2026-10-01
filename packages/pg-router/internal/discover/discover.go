@@ -202,6 +202,10 @@ func WithSourceActivityObserver(obs SourceActivityObserver) ProduceOption {
 //     their type is UNDECLARED — no configured role binds to it (INV-DISP-3's
 //     configuration-wide view, now held on the pull path too, not just push)
 //     — never enqueued.
+//   - Blocked records, per source name, the gate TYPE (Gate Registry, bead
+//     pg2-h63eu) that stopped this pass from polling it: a blocked emitter is
+//     not polled (and its LastTick is left untouched, so it fires on the first
+//     pass after the gate clears). The timer emitter is never blocked.
 //   - Failure carries, per source name, THIS pass's pull-source
 //     failure-backoff state (INV-FAIL-3, Task 4.1) — present only for a
 //     source whose retry budget this pass exhausted (an entry in
@@ -216,6 +220,7 @@ type ProduceReport struct {
 	Emitted      map[string]int
 	Rejected     map[string]int
 	Failure      map[string]FailureInfo
+	Blocked      map[string]string
 }
 
 // FailureInfo is one source's pull-source failure-backoff state at the end
@@ -249,6 +254,7 @@ func newProduceReport() ProduceReport {
 		Emitted:      make(map[string]int),
 		Rejected:     make(map[string]int),
 		Failure:      make(map[string]FailureInfo),
+		Blocked:      make(map[string]string),
 	}
 }
 
@@ -366,6 +372,21 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	rpt := newProduceReport()
 	fired := make([]bool, len(sources))
 	nowT := now()
+	// gateBlocked is the Gate Registry's emitter check (internal/eventqueue/
+	// gate.go): a source an active gate blocks is NOT polled this pass. The timer
+	// emitter is exempt from every gate ("you can't stop time moving forward");
+	// any other source is exempt only from the TYPEs it declared at registration
+	// (query.Source.NonBlockingGates).
+	gateBlocked := func(s query.Source) bool {
+		if query.IsTimer(s.Query) {
+			return false
+		}
+		gt, blocked := q.EmitterBlockedBy(s.Name, eventqueue.ExemptSet(s.NonBlockingGates))
+		if blocked {
+			rpt.Blocked[s.Name] = gt
+		}
+		return blocked
+	}
 	// Period-driven (and any non-threshold, non-manual) queries fire every
 	// pass EXCEPT one cad reports not yet due (Task 1.3's per-source cadence).
 	for i, s := range sources {
@@ -377,6 +398,9 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			continue
 		}
 		if !cadenceDue(nowT, s.Name, t, cad) {
+			continue
+		}
+		if gateBlocked(s) {
 			continue
 		}
 		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
@@ -405,6 +429,9 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
+				if gateBlocked(s) {
+					continue
+				}
 				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
 					return rpt, err
 				}

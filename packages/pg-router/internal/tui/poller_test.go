@@ -357,9 +357,9 @@ func TestToggleGate_ReusesClientDialsIfNeeded(t *testing.T) {
 	startFakeCore(t, socketPath, func(subcommand string, _ json.RawMessage) ([]byte, int) {
 		switch subcommand {
 		case core.SubcommandPause:
-			return []byte(`{"schemaVersion":"1","gate":"operator_paused","set":true}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":true,"setAt":"2026-09-01T00:00:00Z"}`), conformance.ExitOK
 		case core.SubcommandResume:
-			return []byte(`{"schemaVersion":"1","gate":"operator_paused","set":false}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","cleared":["SYSTEM_PAUSE"]}`), conformance.ExitOK
 		default:
 			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), conformance.ExitError
 		}

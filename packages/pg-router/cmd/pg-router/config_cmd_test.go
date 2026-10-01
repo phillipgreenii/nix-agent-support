@@ -3,11 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 )
@@ -40,37 +37,6 @@ func TestRenderConfigShow_includesDispatchScalars(t *testing.T) {
 	// audit: 'git push' must be absent from the printed allowlist
 	if strings.Contains(out, "git push") {
 		t.Errorf("allowlist must not contain 'git push'; got:\n%s", out)
-	}
-}
-
-// config --show prints all three gate paths, and each one's "paused since"
-// mtime when set, or an explicit not-paused state when absent.
-func TestRenderConfigShow_gatesPathsStateMtime(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default()
-	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
-	cfg.CICDDown = filepath.Join(dir, "cicd-down")
-	cfg.DiskSpaceLow = filepath.Join(dir, "disk-space-low")
-	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var b bytes.Buffer
-	renderConfigShow(&b, cfg)
-	out := b.String()
-
-	for _, want := range []string{cfg.OperatorPaused, cfg.CICDDown, cfg.DiskSpaceLow, "paused since", "not paused"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
-	}
-	// The mtime string itself must be present (RFC3339), not just the label.
-	fi, err := os.Stat(cfg.OperatorPaused)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := fi.ModTime().Format(time.RFC3339); !strings.Contains(out, want) {
-		t.Errorf("missing mtime %q in:\n%s", want, out)
 	}
 }
 
@@ -115,45 +81,6 @@ func TestRenderConfigShowJSON_includesDispatchScalars(t *testing.T) {
 	}
 }
 
-// TestRenderConfigShowJSON_gatesPathsStateMtime is renderConfigShowJSON's
-// counterpart to TestRenderConfigShow_gatesPathsStateMtime: all three gate
-// paths, and each one's paused state + "since" mtime (or its absence when
-// unset), as typed JSON fields instead of a rendered string.
-func TestRenderConfigShowJSON_gatesPathsStateMtime(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default()
-	cfg.OperatorPaused = filepath.Join(dir, "operator-paused")
-	cfg.CICDDown = filepath.Join(dir, "cicd-down")
-	cfg.DiskSpaceLow = filepath.Join(dir, "disk-space-low")
-	if err := os.WriteFile(cfg.OperatorPaused, []byte("paused\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var b bytes.Buffer
-	renderConfigShowJSON(&b, cfg)
-
-	var got configShowReport
-	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
-		t.Fatalf("output is not one JSON object: %v\n%s", err, b.String())
-	}
-	if got.Gates.OperatorPaused.Path != cfg.OperatorPaused || !got.Gates.OperatorPaused.Paused {
-		t.Errorf("operatorPaused gate = %+v, want path=%q paused=true", got.Gates.OperatorPaused, cfg.OperatorPaused)
-	}
-	fi, err := os.Stat(cfg.OperatorPaused)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := fi.ModTime().Format(time.RFC3339); got.Gates.OperatorPaused.Since != want {
-		t.Errorf("operatorPaused since = %q, want %q", got.Gates.OperatorPaused.Since, want)
-	}
-	if got.Gates.CICDDown.Path != cfg.CICDDown || got.Gates.CICDDown.Paused || got.Gates.CICDDown.Since != "" {
-		t.Errorf("cicdDown gate = %+v, want path=%q paused=false since=\"\"", got.Gates.CICDDown, cfg.CICDDown)
-	}
-	if got.Gates.DiskSpaceLow.Path != cfg.DiskSpaceLow || got.Gates.DiskSpaceLow.Paused || got.Gates.DiskSpaceLow.Since != "" {
-		t.Errorf("diskSpaceLow gate = %+v, want path=%q paused=false since=\"\"", got.Gates.DiskSpaceLow, cfg.DiskSpaceLow)
-	}
-}
-
 // TestRoute_configShowJSON covers args.go's parseConfigArgs --json handling:
 // --json is accepted wherever it appears alongside --show, but is a usage
 // error with --print-defaults (no JSON encoding is defined for that mode).
@@ -177,5 +104,32 @@ func TestRoute_configShowJSON(t *testing.T) {
 	}
 	if !strings.Contains(helpText, "config --show [--json]") {
 		t.Error("helpText does not advertise config --show [--json]")
+	}
+}
+
+// config --show no longer reports gate files (bead pg2-h63eu): gates are live
+// state in the running core, not configuration. It says where to look instead,
+// and the --json report carries no gates object.
+func TestRenderConfigShow_pointsAtTheGateRegistryInsteadOfGateFiles(t *testing.T) {
+	cfg := config.Default()
+	var b bytes.Buffer
+	renderConfigShow(&b, cfg)
+	out := b.String()
+	if !strings.Contains(out, "pg-router gate list") {
+		t.Errorf("config --show should point at 'pg-router gate list'; got:\n%s", out)
+	}
+	for _, gone := range []string{"operator-paused", "cicd-down", "disk-space-low"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("config --show still mentions the retired %q gate file; got:\n%s", gone, out)
+		}
+	}
+	var j bytes.Buffer
+	renderConfigShowJSON(&j, cfg)
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(j.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got["gates"]; has {
+		t.Errorf("config --show --json still carries a gates object: %s", j.String())
 	}
 }

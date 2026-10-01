@@ -331,9 +331,9 @@ func TestServeStatus_NilTickBootWindow(t *testing.T) {
 
 // TestServeStatus_ComposesLiveState proves the reply actually reflects live
 // state from every seam Task 3.8's Contract names: queue depths (Task 3.2),
-// the activity ring (Task 3.4), the gate cell (Task 3.5, via the SAME
-// ObserveGateFromSocketVerb method Task 3.9's own verb will call), the
-// registry (existing Registry.List()), and a published tick.
+// the activity ring (Task 3.4), the Gate Registry (bead pg2-h63eu, via the
+// SAME Service.SetGate the gate socket verbs call), the registry (existing
+// Registry.List()), and a published tick.
 func TestServeStatus_ComposesLiveState(t *testing.T) {
 	ring := activity.New(4)
 	ring.Append(activity.Entry{Type: "review-requested", Outcome: "delivered"})
@@ -350,7 +350,9 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if _, err := svc.Register("review", KindHandler); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	svc.ObserveGateFromSocketVerb(time.Now(), "operator_paused", GateInfo{Set: true, Owner: "ops"})
+	if _, err := svc.SetGate(eventqueue.GateRequest{Type: GateSystemPause, Owner: "ops", Description: "for the test", TTL: time.Hour}); err != nil {
+		t.Fatalf("SetGate: %v", err)
+	}
 	now := time.Now()
 	svc.PublishTick(TickSnapshot{
 		RunMode:    RunModeLongRunning,
@@ -377,12 +379,13 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	foundGate := false
 	for _, g := range gates {
 		gm := g.(map[string]any)
-		if gm["name"] == "operator_paused" && gm["set"] == true && gm["owner"] == "ops" {
+		if gm["type"] == GateSystemPause && gm["owner"] == "ops" && gm["description"] == "for the test" &&
+			gm["expiresAt"] != nil && gm["ttlRemainingMs"] != nil {
 			foundGate = true
 		}
 	}
 	if !foundGate {
-		t.Fatalf("gates = %v, want operator_paused set by ObserveGateFromSocketVerb", gates)
+		t.Fatalf("gates = %v, want SYSTEM_PAUSE (owner, description, lease) set through Service.SetGate", gates)
 	}
 	listeners, _ := reply["listeners"].([]any)
 	if len(listeners) != 1 || listeners[0].(map[string]any)["role"] != "review" {
@@ -532,303 +535,7 @@ func TestServeStatus_InterleavedReadOnlyInvariance(t *testing.T) {
 	}
 }
 
-// TestServeStatus_ThreeWayConcurrency runs three independent actors
-// concurrently — status reads, live Enqueue/Dispatch/Expire churn, and the
-// gate-cell write a future socket pause/resume verb (Task 3.9, out of scope
-// here per this task's own Out-of-scope note) will call — and proves neither
-// a data race (run with -race) nor a deadlock results, and that a status
-// call made after every actor settles still composes a schema-valid reply.
-// --- Task 3.9: socket pause/resume verbs ------------------------------------
-
-// pauseRequest / resumeRequest are minimal, schema-valid requests: gate
-// omitted, so the handler resolves defaultGate (operator_paused).
-const (
-	pauseRequest  = `{"schemaVersion":"1"}`
-	resumeRequest = `{"schemaVersion":"1"}`
-)
-
-// servePause/serveResume run the `pause`/`resume` subcommand IN PROCESS
-// through the participant boundary, matching serveStatus's shape. Like
-// serveStatus, these may call t.Fatalf and so MUST only be called from the
-// test's own goroutine — see TestThreeWayGateRace for the plain svc.Serve
-// calls its worker goroutines use instead.
-func servePause(t *testing.T, svc *Service, request string) (map[string]any, int) {
-	t.Helper()
-	return serveGateVerb(t, svc, SubcommandPause, request)
-}
-
-func serveResume(t *testing.T, svc *Service, request string) (map[string]any, int) {
-	t.Helper()
-	return serveGateVerb(t, svc, SubcommandResume, request)
-}
-
-func serveGateVerb(t *testing.T, svc *Service, subcommand, request string) (map[string]any, int) {
-	t.Helper()
-	var out strings.Builder
-	code := svc.Serve(subcommand, strings.NewReader(request), &out)
-	var reply map[string]any
-	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
-		t.Fatalf("reply %q is not JSON: %v", out.String(), err)
-	}
-	return reply, code
-}
-
-// TestSocketPauseIdempotent proves the `pause` socket verb is idempotent:
-// pausing an already-paused gate is a no-op SUCCESS, not an error, and MUST
-// NOT rewrite the gate's recorded mtime — a re-pause must report the
-// ORIGINAL set time, never a rewritten one [design: Task 3.9 Step 1].
-func TestSocketPauseIdempotent(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-
-	reply, code := servePause(t, svc, pauseRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("first pause exit = %d, want 0; reply=%v", code, reply)
-	}
-	if err := conformance.Check(PauseReplySchema, reply); err != nil {
-		t.Fatalf("reply failed cli.pause-reply schema: %v", err)
-	}
-	if reply["gate"] != GateOperatorPaused {
-		t.Fatalf("gate = %v, want the default %q", reply["gate"], GateOperatorPaused)
-	}
-	if reply["set"] != true {
-		t.Fatalf("set = %v, want true", reply["set"])
-	}
-	firstMtime, ok := reply["mtime"].(string)
-	if !ok || firstMtime == "" {
-		t.Fatalf("mtime = %v, want the newly-set time", reply["mtime"])
-	}
-
-	time.Sleep(2 * time.Millisecond) // so a WRONGLY-rewritten mtime would visibly differ
-	reply2, code2 := servePause(t, svc, pauseRequest)
-	if code2 != conformance.ExitOK {
-		t.Fatalf("second pause exit = %d, want 0; reply=%v", code2, reply2)
-	}
-	if reply2["set"] != true {
-		t.Fatalf("set = %v, want true on re-pause", reply2["set"])
-	}
-	if reply2["mtime"] != firstMtime {
-		t.Fatalf("mtime on re-pause = %v, want unchanged %v", reply2["mtime"], firstMtime)
-	}
-}
-
-// TestSocketResumeIdempotent is pause's mirror: resuming an already-resumed
-// (never-paused) gate is a no-op SUCCESS, reporting set=false with no
-// mtime (nothing was ever set).
-func TestSocketResumeIdempotent(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-
-	reply, code := serveResume(t, svc, resumeRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
-	}
-	if err := conformance.Check(ResumeReplySchema, reply); err != nil {
-		t.Fatalf("reply failed cli.resume-reply schema: %v", err)
-	}
-	if reply["set"] != false {
-		t.Fatalf("set = %v, want false", reply["set"])
-	}
-	if _, present := reply["mtime"]; present {
-		t.Fatalf("mtime = %v, want omitted for a gate that was never set", reply["mtime"])
-	}
-
-	// Pause then resume: the gate must actually clear.
-	if _, code := servePause(t, svc, pauseRequest); code != conformance.ExitOK {
-		t.Fatalf("pause exit = %d, want 0", code)
-	}
-	reply2, code2 := serveResume(t, svc, resumeRequest)
-	if code2 != conformance.ExitOK {
-		t.Fatalf("resume exit = %d, want 0; reply=%v", code2, reply2)
-	}
-	if reply2["set"] != false {
-		t.Fatalf("set = %v, want false after resuming a paused gate", reply2["set"])
-	}
-	gates, _ := svc.GateSnapshot()
-	if got := gates[GateOperatorPaused]; got.Set {
-		t.Fatalf("operator_paused = %+v, want cleared after resume", got)
-	}
-}
-
-// TestSocketPauseResumeDiskSpaceLowGate proves the socket pause/resume verbs
-// accept "disk_space_low" as a named gate, not just the two originally wired
-// ("operator_paused"/"cicd_down") — pg2-6thut widened cli.pause/cli.resume/
-// cli.pause-reply/cli.resume-reply's `gate` enum to match the file-based CLI
-// path (cmd/pg-router/gates_cmd.go's isValidGateName), which already treated
-// all three uniformly. Before that widening, servePause/serveResume with
-// gate="disk_space_low" would fail conformance.CheckBytes against the
-// request schema (exit conformance.ExitError, an errorReply body) instead of
-// ever reaching handleGateToggle.
-func TestSocketPauseResumeDiskSpaceLowGate(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-	const diskSpaceLowRequest = `{"schemaVersion":"1","gate":"disk_space_low"}`
-
-	reply, code := servePause(t, svc, diskSpaceLowRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("pause exit = %d, want 0; reply=%v", code, reply)
-	}
-	if err := conformance.Check(PauseReplySchema, reply); err != nil {
-		t.Fatalf("reply failed cli.pause-reply schema: %v", err)
-	}
-	if reply["gate"] != GateDiskSpaceLow {
-		t.Fatalf("gate = %v, want %q", reply["gate"], GateDiskSpaceLow)
-	}
-	if reply["set"] != true {
-		t.Fatalf("set = %v, want true", reply["set"])
-	}
-
-	gates, _ := svc.GateSnapshot()
-	if got := gates[GateDiskSpaceLow]; !got.Set {
-		t.Fatalf("disk_space_low = %+v, want Set=true after the socket pause verb", got)
-	}
-	// The other two named gates must be untouched by targeting this one.
-	if got := gates[GateOperatorPaused]; got.Set {
-		t.Fatalf("operator_paused = %+v, want unaffected by pausing disk_space_low", got)
-	}
-
-	reply2, code2 := serveResume(t, svc, diskSpaceLowRequest)
-	if code2 != conformance.ExitOK {
-		t.Fatalf("resume exit = %d, want 0; reply=%v", code2, reply2)
-	}
-	if err := conformance.Check(ResumeReplySchema, reply2); err != nil {
-		t.Fatalf("reply failed cli.resume-reply schema: %v", err)
-	}
-	if reply2["gate"] != GateDiskSpaceLow {
-		t.Fatalf("gate = %v, want %q", reply2["gate"], GateDiskSpaceLow)
-	}
-	if reply2["set"] != false {
-		t.Fatalf("set = %v, want false after resume", reply2["set"])
-	}
-	gates, _ = svc.GateSnapshot()
-	if got := gates[GateDiskSpaceLow]; got.Set {
-		t.Fatalf("disk_space_low = %+v, want cleared after resume", got)
-	}
-}
-
-// TestPauseResumeRaceSameGate proves concurrent pause/resume socket calls on
-// the SAME gate never race (run with -race) and always leave the gate cell
-// in one coherent, schema-valid state — never a torn/partial GateInfo —
-// once every call settles [design: Task 3.9 Step 4].
-func TestPauseResumeRaceSameGate(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-
-	const n = 100
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			var out strings.Builder
-			if i%2 == 0 {
-				svc.Serve(SubcommandPause, strings.NewReader(pauseRequest), &out)
-			} else {
-				svc.Serve(SubcommandResume, strings.NewReader(resumeRequest), &out)
-			}
-		}(i)
-	}
-	wg.Wait()
-
-	// A final, deterministic pause proves the cell survived the race intact.
-	reply, code := servePause(t, svc, pauseRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
-	}
-	if err := conformance.Check(PauseReplySchema, reply); err != nil {
-		t.Fatalf("reply failed schema: %v", err)
-	}
-	if reply["set"] != true {
-		t.Fatalf("set = %v, want true after a final pause", reply["set"])
-	}
-}
-
-// TestGateDeletedExternallyDuringToggle proves the two-cell gate design
-// (Task 3.5) is load-bearing for the socket pause verb (Task 3.9): a
-// drive-loop tick that observed the gate file ABSENT, stamped strictly
-// BEFORE the socket pause runs, must never clobber the pause's own written
-// state — and neither may a LATE-ARRIVING tick observation that is merely
-// slow to reach the lock but still carries that SAME older timestamp (a
-// stale straggler standing in for "the file was deleted/recreated
-// externally between the observing poll and the toggle"). The socket
-// write's newer timestamp is what protects it, per ObserveGateFromTick's
-// own documented compare rule [design: Task 3.9 Step 4].
-func TestGateDeletedExternallyDuringToggle(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-
-	tickBefore := time.Now()
-	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateOperatorPaused: {Set: false}}) // drive loop's poll: gate file absent at this instant
-
-	reply, code := servePause(t, svc, pauseRequest) // the socket pause verb runs strictly after that poll
-	if code != conformance.ExitOK {
-		t.Fatalf("pause exit = %d, want 0; reply=%v", code, reply)
-	}
-	gates, _ := svc.GateSnapshot()
-	if got := gates[GateOperatorPaused]; !got.Set {
-		t.Fatalf("operator_paused = %+v, want Set=true after the socket pause verb", got)
-	}
-
-	// A stale straggler tick observation, stamped BEFORE the pause, must not
-	// clobber it even though ObserveGateFromTick overwrites perGate wholesale.
-	svc.ObserveGateFromTick(tickBefore, map[string]GateInfo{GateOperatorPaused: {Set: false}})
-	gates, _ = svc.GateSnapshot()
-	if got := gates[GateOperatorPaused]; !got.Set {
-		t.Fatalf("operator_paused = %+v, want the pause to survive a stale (older-timestamped) tick observation", got)
-	}
-}
-
-// TestThreeWayGateRace runs three actors concurrently under sustained load
-// — the drive loop's own periodic gate observation (ObserveGateFromTick,
-// standing in for an externally-mutating gate file re-observed each tick)
-// racing against the REAL socket `pause` verb and the REAL socket `resume`
-// verb, both firing on the same gate — and proves neither a data race (run
-// with -race) nor a deadlock results, with the gate cell left in one
-// coherent, schema-valid state once every actor settles [design: Task 3.9
-// Step 4].
-func TestThreeWayGateRace(t *testing.T) {
-	svc := startedServiceForStatus(t, nil)
-
-	const iterations = 500
-	var wg sync.WaitGroup
-
-	// Actor 1: the drive loop's periodic read of an externally-mutating gate
-	// file — ObserveGateFromTick is the only way that mutation ever reaches
-	// this Service, so toggling its input each iteration stands in for the
-	// file itself flipping between ticks.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iterations; i++ {
-			svc.ObserveGateFromTick(time.Now(), map[string]GateInfo{GateOperatorPaused: {Set: i%2 == 0}})
-		}
-	}()
-
-	// Actor 2: the real socket `pause` verb.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iterations; i++ {
-			var out strings.Builder
-			svc.Serve(SubcommandPause, strings.NewReader(pauseRequest), &out)
-		}
-	}()
-
-	// Actor 3: the real socket `resume` verb, same gate.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < iterations; i++ {
-			var out strings.Builder
-			svc.Serve(SubcommandResume, strings.NewReader(resumeRequest), &out)
-		}
-	}()
-
-	wg.Wait()
-
-	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("final status exit = %d, want 0; reply=%v", code, reply)
-	}
-	if err := conformance.Check(StatusReplySchema, reply); err != nil {
-		t.Fatalf("final status reply failed its own schema: %v", err)
-	}
-}
+// --- socket pause/resume + Gate Registry verbs: see gates_test.go -----------
 
 // TestStatusRacesDispatchAt10k strengthens TestServeStatus_ThreeWayConcurrency
 // (Task 3.9's own concurrency-test-matrix deliverable) to 10k iterations per
@@ -960,7 +667,11 @@ func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			svc.ObserveGateFromSocketVerb(time.Now(), "operator_paused", GateInfo{Set: i%2 == 0})
+			if i%2 == 0 {
+				_, _ = svc.SetGate(eventqueue.GateRequest{Type: GateSystemPause})
+			} else {
+				_, _ = svc.ClearGate(GateSystemPause, "test")
+			}
 		}
 	}()
 

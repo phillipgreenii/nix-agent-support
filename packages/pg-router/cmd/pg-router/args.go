@@ -3,13 +3,12 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"strings"
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [<gate>] | resume [<gate> | --all] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -86,19 +85,23 @@ Subcommands:
                           the log dir, on the interval PG_ROUTER_TUI_INTERVAL sets (below). Unlike
                           every other operator subcommand, it NEVER fails on "no running core": it
                           renders a no-core screen and keeps polling instead (ADR 0036).
-  pause [<gate>]          set gate <gate> (default operator-paused) directly on its file-backed state
-                          (INV-LIFE-2): exits 0 even with NO core running, reporting that the change
-                          takes effect at the next start (a currently running "run" picks it up on
-                          its next tick). FILE-DIRECT: unlike every operator subcommand above,
-                          pause/resume NEVER Discover or Dial a core — this deliberately breaks the
-                          verb-named-subcommand-is-a-socket-client symmetry that push-inject/
-                          ingest-event/self-status follow. A socket-level pause/resume verb also
-                          exists (Phase 3) for a client already holding a connection.
-  resume [<gate>] | --all clear gate <gate> (default operator-paused), or every outstanding gate at once
-                          with --all; a bare "resume" clears ONLY the default gate, so an
-                          automation-owned gate (cicd-down) is never cleared by accident.
-                          "resume --all <gate>" (both at once) is a usage error. Same FILE-DIRECT,
-                          no-core-required mechanics as pause.
+  pause                   set the SYSTEM_PAUSE gate (INV-LIFE-2): every participant that blocks on it
+                          stops (emitters are not polled, listeners are not dispatched to; pushed
+                          events are still accepted and queued events stay queued). --description and
+                          --owner (default "operator") are recorded for status/the TUI; the owner is
+                          DEBUG ONLY. Gates live in the running core's event log, so pause is a
+                          SOCKET CLIENT like status: with no core running it fails with "no running
+                          core" (exit 1) and never starts one.
+  resume [--all]          clear the SYSTEM_PAUSE gate, or — with --all — every active gate. A bare
+                          "resume" clears ONLY SYSTEM_PAUSE, so a gate another system owns is never
+                          cleared by accident. Same socket-client mechanics as pause.
+  gate set <TYPE>         set (or renew, or overwrite) the gate of one TYPE — an arbitrary ALL-CAPS
+                          name such as LOW_DISK_USAGE. Last writer wins per TYPE. --description, --owner
+                          (debug only) and --ttl <dur> (a lease the owner keeps alive by setting the
+                          gate again; a lapsed lease counts as cleared) are optional.
+  gate clear <TYPE>|--all clear one gate, or every active gate. ANY caller may clear any gate; clearing
+                          a gate that is not set is a no-op success.
+  gate list [--json]      list the active gates (TYPE, owner, set-at, TTL remaining, description).
   version                 print the version and exit
   help                    print this help and exit
 
@@ -148,13 +151,8 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
   PG_ROUTER_TUI_INTERVAL     tui's poll interval; floor-clamped to 250ms (default 1s). CLI flag >
                            PG_ROUTER_TUI_INTERVAL env > built-in default; a value that fails to
                            parse as a duration is a usage error naming the bad value.
-  PG_ROUTER_LOG_DIR          event-log/state directory: gates/, events.jsonl, the discovery record
+  PG_ROUTER_LOG_DIR          event-log/state directory: queue.jsonl (events AND gates), events.jsonl, the discovery record
                            (default: the XDG state dir, e.g. ~/.local/state/pg-router)
-  PG_ROUTER_OPERATOR_PAUSED  operator-paused gate file path override (default <PG_ROUTER_LOG_DIR>/gates/operator-paused)
-  PG_ROUTER_CICD_DOWN        cicd-down gate file path override (default <PG_ROUTER_LOG_DIR>/gates/cicd-down)
-  PG_ROUTER_DISK_SPACE_LOW   disk-space-low gate file path override (default <PG_ROUTER_LOG_DIR>/gates/disk-space-low);
-                           manually settable/clearable only today (pg-router run does not check
-                           disk space itself — see 'pause'/'resume' below)
   PG_ROUTER_ONLY             comma-separated run-scoped allow-list, each entry role:<name> or
                            query:<name> (DEC-CLI-1); unioned with any --only flags on
                            run/run-until-idle; run-role/run-query respect it too (no flags of
@@ -169,13 +167,15 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
                            the core neither requires nor inspects how, or whether, it responds.
                            Not meant to be set by an operator directly.
 
-Precedence for every scalar above that a [pool] key can also set (including the three gate
-paths): [pool] wins over PG_ROUTER_* env, which wins over the built-in default — matching
+Precedence for every scalar above that a [pool] key can also set: [pool] wins over PG_ROUTER_* env, which wins over the built-in default — matching
 internal/config's package doc and 'config --print-defaults's header. The XDG-global config
 ($XDG_CONFIG_HOME/pg-router/config.toml, else ~/.config/pg-router/config.toml) contributes
 [pool].budget only, beneath the repo-local file and above env; it sets nothing else.
 
-REMOVED: PG_ROUTER_MAX_WORKER, PG_ROUTER_MAX_FEEDBACK, PG_ROUTER_FEEDBACK_ENABLED,
+REMOVED: PG_ROUTER_OPERATOR_PAUSED, PG_ROUTER_CICD_DOWN, PG_ROUTER_DISK_SPACE_LOW and their
+*_DISABLE override files (the file-backed gates; gates are now generic records in the event
+log, set with 'gate set'/'pause' and cleared with 'gate clear'/'resume' — see MIGRATION.md),
+PG_ROUTER_MAX_WORKER, PG_ROUTER_MAX_FEEDBACK, PG_ROUTER_FEEDBACK_ENABLED,
 PG_ROUTER_WORKER_ENABLED, PG_ROUTER_SKILL_MD, PG_ROUTER_WORKER_SKILL_MD. Set
 role.enabled / the role's prompt in config.toml instead; the former per-role
 MAX_WORKER/MAX_FEEDBACK cap is not a config knob at all any more (INV-CONC-1)
@@ -202,8 +202,9 @@ const (
 	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
 	routeTUI                           // operator: continuous-interactive view over status/pause/resume (Task 4.2, .rest); never fails on "no running core" (ADR 0036)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
-	routePause                         // file-direct: set gate .gate directly on its file-backed state (INV-LIFE-2); never Discover/Dial
-	routeResume                        // file-direct: clear gate .gate, or every gate with .allGates; never Discover/Dial
+	routePause                         // operator: set the SYSTEM_PAUSE gate on the running core (INV-LIFE-2, .rest)
+	routeResume                        // operator: clear SYSTEM_PAUSE (or every gate with --all) on the running core (.rest)
+	routeGate                          // operator: gate set|clear|list against the running core's Gate Registry (.rest)
 )
 
 type routeResult struct {
@@ -221,12 +222,6 @@ type routeResult struct {
 	// of its own to resolve a bead id through.
 	eventJSON  string
 	configMode string // "print-defaults" | "show" (routeConfig only)
-	// gate / allGates are routePause/routeResume's TYPED fields (Task 1.2b): the
-	// gate name (already validated against the two known gates, defaulted to
-	// operator-paused when omitted) and, for routeResume only, whether --all was
-	// given. Parsed here in route()'s helpers, never re-parsed from .rest.
-	gate     string
-	allGates bool
 	// only / disable carry the raw --only/--disable flag OCCURRENCES for
 	// routeRun/routeRunUntilIdle (STORY-OP-3, DEC-CLI-1) — NOT yet combined
 	// with PG_ROUTER_ONLY/PG_ROUTER_DISABLE, since reading the environment is I/O
@@ -313,9 +308,14 @@ func route(argv []string) routeResult {
 		// own handler, with the same usage exit code (routeUsageErr would produce).
 		return routeResult{kind: routeSelfStatus, rest: args[1:]}
 	case "pause":
-		return parsePauseArgs(args[1:])
+		// Gate Registry (bead pg2-h63eu): pause/resume/gate are socket clients now,
+		// parsing their own --socket/--token/--owner/... flags in their own
+		// handlers, with the same usage exit code every operator subcommand uses.
+		return routeResult{kind: routePause, rest: args[1:]}
 	case "resume":
-		return parseResumeArgs(args[1:])
+		return routeResult{kind: routeResume, rest: args[1:]}
+	case "gate":
+		return routeResult{kind: routeGate, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}
@@ -435,66 +435,6 @@ func parseConfigArgs(args []string) routeResult {
 		return routeResult{kind: routeConfig, configMode: "show", json: asJSON}
 	}
 	return routeResult{kind: routeUsageErr, msg: "config: unknown flag " + pos[0] + " (want --print-defaults or --show)"}
-}
-
-// parsePauseArgs validates `pause [<gate>]` (Task 1.2b, INV-LIFE-2). Pure: no
-// I/O, no config load — the gate identity (operator-paused, cicd-down) is a fixed
-// CLI-level fact, not something config resolves, so validating it here costs
-// nothing config-dependent. An omitted gate defaults to operator-paused
-// (interfaces.md's "Operator pause/resume"); an unknown gate name or a
-// dash-prefixed token is a usage error, matching every other subcommand's
-// fail-fast-on-bad-input contract (pg2-52rn).
-func parsePauseArgs(args []string) routeResult {
-	var gate string
-	for _, a := range args {
-		switch {
-		case strings.HasPrefix(a, "-"):
-			return routeResult{kind: routeUsageErr, msg: "unknown flag: " + a}
-		case gate != "":
-			return routeResult{kind: routeUsageErr, msg: "pause: unexpected argument: " + a}
-		default:
-			gate = a
-		}
-	}
-	if gate == "" {
-		gate = gateOperatorPaused
-	} else if !validGate(gate) {
-		return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("pause: unknown gate %q (want %s, %s, or %s)", gate, gateOperatorPaused, gateCICDDown, gateDiskSpaceLow)}
-	}
-	return routeResult{kind: routePause, gate: gate}
-}
-
-// parseResumeArgs validates `resume [<gate>] | --all` (Task 1.2b, INV-LIFE-2).
-// Pure, same fail-fast contract as parsePauseArgs. "resume --all <gate>" (both
-// at once) is a usage error — interfaces.md draws no meaning for that
-// combination, and silently picking one would surprise an operator who typed
-// the other.
-func parseResumeArgs(args []string) routeResult {
-	var gate string
-	allGates := false
-	for _, a := range args {
-		switch {
-		case a == "--all":
-			allGates = true
-		case strings.HasPrefix(a, "-"):
-			return routeResult{kind: routeUsageErr, msg: "unknown flag: " + a}
-		case gate != "":
-			return routeResult{kind: routeUsageErr, msg: "resume: unexpected argument: " + a}
-		default:
-			gate = a
-		}
-	}
-	if allGates && gate != "" {
-		return routeResult{kind: routeUsageErr, msg: "resume: --all takes no gate argument"}
-	}
-	if !allGates {
-		if gate == "" {
-			gate = gateOperatorPaused
-		} else if !validGate(gate) {
-			return routeResult{kind: routeUsageErr, msg: fmt.Sprintf("resume: unknown gate %q (want %s, %s, or %s)", gate, gateOperatorPaused, gateCICDDown, gateDiskSpaceLow)}
-		}
-	}
-	return routeResult{kind: routeResume, gate: gate, allGates: allGates}
 }
 
 // extractJSONFlag pulls a --json flag out of args, wherever it occurs, returning

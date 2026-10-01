@@ -68,10 +68,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
 	}
-	_, _ = fmt.Fprintln(w, "gates (INV-LIFE-2):")
-	_, _ = fmt.Fprintf(w, "  operator-paused: %s\n", gateShowLine(cfg.OperatorPaused))
-	_, _ = fmt.Fprintf(w, "  cicd-down:       %s\n", gateShowLine(cfg.CICDDown))
-	_, _ = fmt.Fprintf(w, "  disk-space-low:  %s\n", gateShowLine(cfg.DiskSpaceLow))
+	_, _ = fmt.Fprintln(w, "gates: live state, not configuration — see 'pg-router gate list' (Gate Registry)")
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
 	_, _ = fmt.Fprintf(w, "  allowed-tools:   %s\n", cfg.AllowedTools)
@@ -81,37 +78,6 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "  model:           %s\n", orDefault(cfg.Model))
 	_, _ = fmt.Fprintf(w, "  budget:          tokens=%s cost=%s time=%s\n",
 		limitStr(cfg.BudgetTokens), centsStr(cfg.BudgetCost), durStr(cfg.BudgetTime))
-}
-
-// gateState reports whether path's gate is currently set (its file exists) and,
-// when set, the RFC3339 instant it was set at (the file's mtime) — read
-// straight off the file, never from a separately-tracked flag, since file
-// existence is the single source of truth (interfaces.md's "Operator
-// pause/resume"). Both gateShowLine's text rendering and
-// renderConfigShowJSON's JSON rendering consult this ONE helper, so the two
-// output forms can never disagree about gate state.
-func gateState(path string) (paused bool, since string) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return false, ""
-	}
-	return true, fi.ModTime().Format(time.RFC3339)
-}
-
-// gateShowLine renders one gate's `config --show` text row: its path, and
-// whether it is set and, if so, since when ("paused since").
-func gateShowLine(path string) string {
-	paused, since := gateState(path)
-	if !paused {
-		return fmt.Sprintf("%s (not paused)", path)
-	}
-	return fmt.Sprintf("%s (paused since %s)", path, since)
-}
-
-// gateShowJSON renders one gate's `config --show --json` row.
-func gateShowJSON(path string) configShowGate {
-	paused, since := gateState(path)
-	return configShowGate{Path: path, Paused: paused, Since: since}
 }
 
 // limitStr renders a token/count budget: <=0 means unlimited.
@@ -165,11 +131,6 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		ConfigPath: cfg.ConfigPath,
 		Roles:      make([]configShowRole, 0, len(cfg.Roles)),
 		Queries:    make([]configShowQuery, 0, len(cfg.Queries)),
-		Gates: configShowGates{
-			OperatorPaused: gateShowJSON(cfg.OperatorPaused),
-			CICDDown:       gateShowJSON(cfg.CICDDown),
-			DiskSpaceLow:   gateShowJSON(cfg.DiskSpaceLow),
-		},
 		Dispatch: configShowDispatch{
 			PermissionMode: cfg.PermissionMode,
 			AllowedTools:   cfg.AllowedTools,
@@ -189,7 +150,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		},
 	}
 	for _, r := range cfg.Roles {
-		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds})
+		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates})
 	}
 	for _, s := range cfg.Queries {
 		var emits []string
@@ -198,7 +159,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 			stub = query.IsStub(s.Query)
 		}
-		out.Queries = append(out.Queries, configShowQuery{Name: s.Name, Emits: emits, Stub: stub})
+		out.Queries = append(out.Queries, configShowQuery{Name: s.Name, Emits: emits, Stub: stub, NonBlockingGates: s.NonBlockingGates})
 	}
 	writeJSON(w, out)
 }
@@ -211,7 +172,6 @@ type configShowReport struct {
 	ConfigPath string             `json:"configPath"`
 	Roles      []configShowRole   `json:"roles"`
 	Queries    []configShowQuery  `json:"queries"`
-	Gates      configShowGates    `json:"gates"`
 	Dispatch   configShowDispatch `json:"dispatch"`
 }
 
@@ -219,6 +179,9 @@ type configShowRole struct {
 	Name    string   `json:"name"`
 	Enabled bool     `json:"enabled"`
 	Binds   []string `json:"binds"`
+	// NonBlockingGates are the gate TYPEs this listener declared it does not
+	// block on (Gate Registry); omitted when it blocks on every TYPE.
+	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
 }
 
 // configShowQuery echoes one configured producer's emits, flagging a stub query
@@ -229,20 +192,9 @@ type configShowQuery struct {
 	Name  string   `json:"name"`
 	Emits []string `json:"emits"`
 	Stub  bool     `json:"stub"`
-}
-
-type configShowGates struct {
-	OperatorPaused configShowGate `json:"operatorPaused"`
-	CICDDown       configShowGate `json:"cicdDown"`
-	DiskSpaceLow   configShowGate `json:"diskSpaceLow"`
-}
-
-// configShowGate is one gate's `--json` row (INV-LIFE-2): Since is the RFC3339
-// "paused since" instant, omitted when Paused is false.
-type configShowGate struct {
-	Path   string `json:"path"`
-	Paused bool   `json:"paused"`
-	Since  string `json:"since,omitempty"`
+	// NonBlockingGates are the gate TYPEs this emitter declared it does not
+	// block on (Gate Registry); omitted when it blocks on every TYPE.
+	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
 }
 
 // configShowDispatch mirrors renderConfigShow's "dispatch (workers):" block —

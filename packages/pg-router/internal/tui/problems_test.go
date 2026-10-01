@@ -97,24 +97,28 @@ func TestRenderProblemsModal_NoUnmatchedBindingsIsUnambiguous(t *testing.T) {
 	}
 }
 
-// TestRenderProblemsModal_ListsAllGatesByName is the bead's second
-// "at minimum" item: current gate state, reusing gateModalRow (gates.go) so
-// this view and the Gates modal never drift into two different renderings
-// of the same fact. All three named gates (disk-space-low added by bead
-// pg2-af5ur) must appear.
-func TestRenderProblemsModal_ListsAllGatesByName(t *testing.T) {
+// TestRenderProblemsModal_ListsActiveGates is the bead's second "at minimum"
+// item: current gate state, reusing gateModalRows (gates.go) so this view and
+// the Gates modal never drift into two different renderings of the same fact.
+// Every active gate must appear, whatever its (arbitrary) TYPE; with none the
+// section reads "none active", never blank.
+func TestRenderProblemsModal_ListsActiveGates(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Name: core.GateOperatorPaused, Set: true, Owner: "operator"},
-		// cicd_down / disk_space_low deliberately absent -- never observed yet.
+		{Type: core.GateSystemPause, Owner: "operator"},
+		{Type: "LOW_DISK_USAGE", Owner: "disk-watchdog"},
 	}}
 
 	got := m.renderProblemsModal()
-	for _, want := range []string{"operator-paused", "cicd-down", "disk-space-low", "SET", "not set", "operator"} {
+	for _, want := range []string{"SYSTEM_PAUSE", "LOW_DISK_USAGE", "operator", "disk-watchdog"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Problems modal missing %q; got:\n%s", want, got)
 		}
+	}
+	m.reply = StatusReply{}
+	if got := m.renderProblemsModal(); !strings.Contains(got, "none active") {
+		t.Errorf("Problems modal with no gates should show \"none active\"; got:\n%s", got)
 	}
 }
 
@@ -179,16 +183,16 @@ func TestProblemsModalFooter_EmptyCacheDirOmitsPathLine(t *testing.T) {
 func TestRenderProblemsModal_AdditiveNotReplacement(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{{Name: core.GateOperatorPaused, Set: true, Owner: "operator"}}}
+	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause, Owner: "operator"}}}
 
 	gates := m.renderGatesModal()
 	problems := m.renderProblemsModal()
 
-	if !strings.Contains(gates, "operator-paused") {
-		t.Fatalf("renderGatesModal() no longer lists operator-paused; got:\n%s", gates)
+	if !strings.Contains(gates, "SYSTEM_PAUSE") {
+		t.Fatalf("renderGatesModal() no longer lists SYSTEM_PAUSE; got:\n%s", gates)
 	}
-	if !strings.Contains(problems, "operator-paused") {
-		t.Fatalf("renderProblemsModal() does not list operator-paused; got:\n%s", problems)
+	if !strings.Contains(problems, "SYSTEM_PAUSE") {
+		t.Fatalf("renderProblemsModal() does not list SYSTEM_PAUSE; got:\n%s", problems)
 	}
 	if strings.Contains(gates, "Problems") {
 		t.Errorf("renderGatesModal() unexpectedly carries the Problems modal's own title; got:\n%s", gates)

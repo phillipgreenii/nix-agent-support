@@ -1,6 +1,6 @@
 {
-  "$id": "cli.resume-reply",
-  "title": "INTF-CLI socket resume verb reply: the TYPEs that were actually cleared — idempotent, so resuming an already-resumed pool is a no-op success with an empty list.",
+  "$id": "cli.gate-clear-reply",
+  "title": "INTF-CLI socket gate-clear verb reply: the TYPEs that were actually cleared (empty when nothing was active — idempotent).",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "cleared"],

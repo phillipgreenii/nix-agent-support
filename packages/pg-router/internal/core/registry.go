@@ -92,9 +92,13 @@ type Registration struct {
 	// participant may read via `mon.read` (Task 3.6-prereq), resolved from
 	// config at registration time by Service.Register and recorded here via
 	// SetSubset. Always empty for every OTHER kind.
-	Subset       []string
-	RegisteredAt time.Time
-	UpdatedAt    time.Time
+	Subset []string
+	// NonBlockingGates is the set of gate TYPEs (Gate Registry, bead
+	// pg2-h63eu) this participant declared, at registration, that it does NOT
+	// block on. Empty (the default): it blocks on every gate TYPE.
+	NonBlockingGates []string
+	RegisteredAt     time.Time
+	UpdatedAt        time.Time
 }
 
 // Registry is the core's participant registry (interfaces.md "Registry &
@@ -220,6 +224,21 @@ func (r *Registry) SetSubset(id string, subset []string) error {
 		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
 	}
 	reg.Subset = subset
+	reg.UpdatedAt = r.now()
+	return nil
+}
+
+// SetNonBlockingGates records the gate TYPEs a participant declared it does NOT
+// block on (Gate Registry, bead pg2-h63eu) — a plain field update, the same
+// shape as SetSubset, called by Service.Register's caller right after Register.
+func (r *Registry) SetNonBlockingGates(id string, gates []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reg, ok := r.byID[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownParticipant, id)
+	}
+	reg.NonBlockingGates = append([]string(nil), gates...)
 	reg.UpdatedAt = r.now()
 	return nil
 }

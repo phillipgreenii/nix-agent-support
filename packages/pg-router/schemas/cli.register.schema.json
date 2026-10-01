@@ -11,6 +11,13 @@
       "type": "string",
       "enum": ["source", "handler", "monitor", "storage"]
     },
-    "self": { "type": "string", "enum": ["healthy", "degraded", "unavailable"] }
+    "self": {
+      "type": "string",
+      "enum": ["healthy", "degraded", "unavailable"]
+    },
+    "nonBlockingGates": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" }
+    }
   }
 }

@@ -241,7 +241,7 @@ func fixtureSweepPaused() *Model {
 	m.screen = screenMain
 	m.reply = StatusReply{
 		Core:      CoreInfo{State: coreStateStarted},
-		Gates:     []Gate{{Name: core.GateOperatorPaused, Set: true}},
+		Gates:     []Gate{{Type: core.GateSystemPause}},
 		Listeners: []Listener{{Role: "reviewer", Enabled: true}},
 	}
 	return m

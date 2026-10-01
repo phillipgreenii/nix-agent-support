@@ -63,9 +63,11 @@ func run() int {
 	case routeSelfStatus:
 		return runSelfStatus(r.rest)
 	case routePause:
-		return runPause(r.gate)
+		return runPause(r.rest)
 	case routeResume:
-		return runResume(r.gate, r.allGates)
+		return runResume(r.rest)
+	case routeGate:
+		return runGate(r.rest)
 	}
 	return exitOK
 }

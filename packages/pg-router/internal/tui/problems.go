@@ -26,7 +26,6 @@
 package tui
 
 import (
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -46,12 +45,7 @@ const problemsErrorLogTailLines = 10
 func (m *Model) renderProblemsModal() string {
 	var rows []render.ModalRow
 	rows = append(rows, m.unmatchedBindingRows()...)
-	rows = append(
-		rows,
-		m.gateModalRow("operator-paused", core.GateOperatorPaused),
-		m.gateModalRow("cicd-down", core.GateCICDDown),
-		m.gateModalRow("disk-space-low", core.GateDiskSpaceLow),
-	)
+	rows = append(rows, m.gateModalRows()...)
 	rows = append(rows, m.recentErrorLogRows()...)
 	return render.Modal("Problems", rows, m.problemsModalFooter(), m.width, m.height, m.modalScrollOffset)
 }

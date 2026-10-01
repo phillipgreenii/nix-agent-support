@@ -187,8 +187,6 @@ func TestE2E_RunUntilIdlePushInject_RealBinary(t *testing.T) {
 	t.Setenv("PG_ROUTER_LOG_DIR", logDir)
 	// Hermetic: never let a real operator's XDG-global budget config leak in.
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(t.TempDir(), "no-such-global-config.toml"))
-	t.Setenv("PG_ROUTER_OPERATOR_PAUSED", "")
-	t.Setenv("PG_ROUTER_CICD_DOWN", "")
 	// Cleared so push-inject is forced through REAL cross-process discovery
 	// (core.Discover reading the record run-until-idle publishes under
 	// PG_ROUTER_LOG_DIR) instead of an injected --socket/--token pair.

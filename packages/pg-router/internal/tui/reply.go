@@ -21,14 +21,16 @@ import "time"
 // legacy `config` object (sources/handlers counts) — nothing in this phase's
 // TUI screens renders either.
 type StatusReply struct {
-	Core            CoreInfo  `json:"core"`
-	Mode            string    `json:"mode"`
-	Gates           []Gate    `json:"gates"`
-	GatesObservedAt time.Time `json:"gatesObservedAt"`
-	AsOf            time.Time `json:"asOf"`
-	LastTickAt      time.Time `json:"lastTickAt"`
-	SnapshotAt      time.Time `json:"snapshotAt"`
-	TickIntervalMs  int64     `json:"tickIntervalMs"`
+	Core  CoreInfo `json:"core"`
+	Mode  string   `json:"mode"`
+	Gates []Gate   `json:"gates"`
+	// AsOf is when the core composed this reply; the gate list is read live at
+	// that instant (the Gate Registry is a projection of the event log, not a
+	// polled cache), so it doubles as the gates' freshness stamp.
+	AsOf           time.Time `json:"asOf"`
+	LastTickAt     time.Time `json:"lastTickAt"`
+	SnapshotAt     time.Time `json:"snapshotAt"`
+	TickIntervalMs int64     `json:"tickIntervalMs"`
 
 	Queues     []Queue        `json:"queues"`
 	Deliveries []Delivery     `json:"deliveries"`
@@ -67,19 +69,19 @@ type CoreInfo struct {
 	ConfigPath string    `json:"configPath"`
 }
 
-// Gate mirrors one entry of the wire's `gates` array (INV-LIFE-2's three
-// named gates). Mtime/Owner/Disabled are omitted on the wire when the gate
-// carries none (composeStatusReply's statusGates), decoding to their zero
-// values here. Disabled (bead pg2-efbb0) reports whether the gate's own
-// MECHANISM has been switched off from outside pg-router — independent of
-// Set, which stays the gate's raw file-backed tripped state; see
-// core.GateInfo.Disabled's doc comment for the full design.
+// Gate mirrors one entry of the wire's `gates` array: a Gate Registry gate
+// in force (bead pg2-h63eu). The array lists ACTIVE gates only, so presence
+// means "set"; an empty array means nothing is gated. Type is the arbitrary
+// ALL-CAPS gate TYPE; Owner is DEBUG ONLY (shown, never acted on). Description,
+// Owner, ExpiresAt and TTLRemainingMs are omitted on the wire when the gate
+// carries none.
 type Gate struct {
-	Name     string    `json:"name"`
-	Set      bool      `json:"set"`
-	Mtime    time.Time `json:"mtime"`
-	Owner    string    `json:"owner"`
-	Disabled bool      `json:"disabled"`
+	Type           string    `json:"type"`
+	Description    string    `json:"description"`
+	Owner          string    `json:"owner"`
+	SetAt          time.Time `json:"setAt"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	TTLRemainingMs int64     `json:"ttlRemainingMs"`
 }
 
 // Queue mirrors one entry of the wire's `queues` array: a per-type depth.

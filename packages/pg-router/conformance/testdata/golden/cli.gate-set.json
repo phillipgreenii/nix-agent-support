@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "type": "LOW_DISK_USAGE",
+  "description": "free space below 10GiB",
+  "owner": "disk-watchdog",
+  "ttlMs": 330000
+}

@@ -88,6 +88,7 @@ func TestRoute(t *testing.T) {
 		{"reconcile-subcommand-is-deleted", []string{"pg-router", "reconcile"}, routeUsageErr},
 		{"pause-subcommand", []string{"pg-router", "pause"}, routePause},
 		{"resume-subcommand", []string{"pg-router", "resume"}, routeResume},
+		{"gate-subcommand", []string{"pg-router", "gate", "list"}, routeGate},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,76 +211,6 @@ func TestParseRunQueryArgs_bareRoleFormIsUsageError(t *testing.T) {
 	r := parseRunQueryArgs([]string{"feedback"})
 	if r.kind != routeUsageErr {
 		t.Errorf("parseRunQueryArgs(feedback) = %+v, want routeUsageErr", r)
-	}
-}
-
-// parsePauseArgs carries a TYPED gate field (Task 1.2b), never re-parsed from
-// .rest: an omitted gate defaults to operator-paused, an explicit known gate
-// name is carried verbatim, and an unknown gate name or a flag-like token is
-// a usage error (pg2-52rn's fail-fast-on-bad-input contract).
-func TestParsePauseArgs(t *testing.T) {
-	cases := []struct {
-		name     string
-		args     []string
-		wantKind routeKind
-		wantGate string
-	}{
-		{"no-args-defaults-operator-paused", nil, routePause, gateOperatorPaused},
-		{"explicit-operator-paused", []string{"operator-paused"}, routePause, gateOperatorPaused},
-		{"explicit-cicd-down", []string{"cicd-down"}, routePause, gateCICDDown},
-		{"explicit-disk-space-low", []string{"disk-space-low"}, routePause, gateDiskSpaceLow},
-		{"unknown-gate-is-usage-error", []string{"bogus"}, routeUsageErr, ""},
-		{"flag-like-token-is-usage-error", []string{"--bogus"}, routeUsageErr, ""},
-		{"extra-arg-is-usage-error", []string{"operator-paused", "extra"}, routeUsageErr, ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := parsePauseArgs(tc.args)
-			if r.kind != tc.wantKind {
-				t.Fatalf("parsePauseArgs(%v).kind = %v, want %v", tc.args, r.kind, tc.wantKind)
-			}
-			if tc.wantKind == routePause && r.gate != tc.wantGate {
-				t.Errorf("parsePauseArgs(%v).gate = %q, want %q", tc.args, r.gate, tc.wantGate)
-			}
-		})
-	}
-}
-
-// parseResumeArgs carries TYPED gate/allGates fields (Task 1.2b). "resume
-// --all <gate>" (both at once) is a usage error — interfaces.md draws no
-// meaning for the combination.
-func TestParseResumeArgs(t *testing.T) {
-	cases := []struct {
-		name         string
-		args         []string
-		wantKind     routeKind
-		wantGate     string
-		wantAllGates bool
-	}{
-		{"no-args-defaults-operator-paused", nil, routeResume, gateOperatorPaused, false},
-		{"explicit-cicd-down", []string{"cicd-down"}, routeResume, gateCICDDown, false},
-		{"explicit-disk-space-low", []string{"disk-space-low"}, routeResume, gateDiskSpaceLow, false},
-		{"all-flag", []string{"--all"}, routeResume, "", true},
-		{"all-and-gate-is-usage-error", []string{"--all", "operator-paused"}, routeUsageErr, "", false},
-		{"gate-and-all-is-usage-error", []string{"operator-paused", "--all"}, routeUsageErr, "", false},
-		{"unknown-gate-is-usage-error", []string{"bogus"}, routeUsageErr, "", false},
-		{"extra-arg-is-usage-error", []string{"operator-paused", "extra"}, routeUsageErr, "", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := parseResumeArgs(tc.args)
-			if r.kind != tc.wantKind {
-				t.Fatalf("parseResumeArgs(%v).kind = %v, want %v", tc.args, r.kind, tc.wantKind)
-			}
-			if tc.wantKind == routeResume {
-				if r.gate != tc.wantGate {
-					t.Errorf("parseResumeArgs(%v).gate = %q, want %q", tc.args, r.gate, tc.wantGate)
-				}
-				if r.allGates != tc.wantAllGates {
-					t.Errorf("parseResumeArgs(%v).allGates = %v, want %v", tc.args, r.allGates, tc.wantAllGates)
-				}
-			}
-		})
 	}
 }
 

@@ -320,11 +320,11 @@ type Service struct {
 	sourceDescriptions map[string]string
 	listenerCounts     map[string]*ListenerCounts
 
-	// tick and gates are the two published-state cells Serve's handlers (this
-	// package) read with no cross-package import (Task 3.5 Objective):
-	// tick is written by PublishTick (status.go) and gates is written by
-	// ObserveGateFromTick/ObserveGateFromSocketVerb (status.go, its own small
-	// mutex — never mu above).
+	// tick is the published-state cell Serve's handlers (this package) read with
+	// no cross-package import (Task 3.5 Objective): it is written by PublishTick
+	// (status.go). The gate state is NOT cached here any more (bead pg2-h63eu): it
+	// is the event queue's own projection of the Gate Registry's log records
+	// (internal/eventqueue/gate.go), read live by composeStatusReply.
 	//
 	// tick's single-writer discipline survives Task 6.2's concurrent
 	// phase-2 fan-out in internal/eventqueue unchanged (Task 6.4, bead
@@ -336,8 +336,7 @@ type Service struct {
 	// queued observer signals. None of that ever reaches this cell.
 	// cmd/pg-router/run.go's drive loop remains the ONLY caller of
 	// tick.Store (via PublishTick), exactly as before Task 6.2.
-	tick  atomic.Pointer[TickSnapshot]
-	gates gateState
+	tick atomic.Pointer[TickSnapshot]
 
 	// readSem is the verb-classed admission semaphore (Task 3.10 Step 4): a
 	// non-blocking counting semaphore over exactly the {status, mon.read, get}
@@ -911,6 +910,10 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handlePause(stdin, stdout)
 	case SubcommandResume:
 		return s.handleResume(stdin, stdout)
+	case SubcommandGateSet:
+		return s.handleGateSet(stdin, stdout)
+	case SubcommandGateClear:
+		return s.handleGateClear(stdin, stdout)
 	case SubcommandGet:
 		return s.handleGet(stdin, stdout)
 	case SubcommandPut:
@@ -961,159 +964,6 @@ const (
 // itself, which is what cmd/pg-router's discriminateReply does with this
 // constant).
 const ErrorReplySchema = "cli.error"
-
-// SubcommandPause / SubcommandResume are the INTF-CLI socket verbs (Task
-// 3.9) a caller that ALREADY holds a connection to a running core uses to
-// pause or resume one of the two INV-LIFE-2 named gates. They are the
-// socket-verb counterpart to cmd/pg-router's file-direct `pg-router pause` /
-// `pg-router resume` subcommands (Task 1.2b, ADR 0036): those write the gate
-// FILE directly and never touch a running core; these instead update the
-// SAME core's own published gate-observation cell (ObserveGateFromSocketVerb,
-// Task 3.5, status.go) — the cell the `status` verb (Task 3.8) already
-// reads live. Per ADR 0036, neither verb ever causes a core to start, and
-// neither writes the gate FILE itself: the drive loop's own periodic file
-// read (ObserveGateFromTick, cmd/pg-router's run.go) is what still governs
-// Orchestrator.Gated()'s actual dispatch-suspending effect — wiring a
-// socket-verb write through to that file, and any client-side admission
-// control over these verbs, is the client transport's concern (Task 3.10),
-// out of this task's Files.
-const (
-	SubcommandPause  = "pause"
-	SubcommandResume = "resume"
-)
-
-// The message types backing the pause/resume subcommands.
-const (
-	PauseRequestSchema  = "cli.pause"
-	PauseReplySchema    = "cli.pause-reply"
-	ResumeRequestSchema = "cli.resume"
-	ResumeReplySchema   = "cli.resume-reply"
-)
-
-// GateOperatorPaused / GateCICDDown / GateDiskSpaceLow are the three named
-// gates INV-LIFE-2 defines, spelled to match the wire-level vocabulary the
-// drive loop's own gate observation already uses (cmd/pg-router's
-// gateTickKeyOperatorPaused / gateTickKeyCICDDown / gateTickKeyDiskSpaceLow,
-// and this package's own status_test.go literal "operator_paused") — the
-// SAME three gates cmd/pg-router/gates_cmd.go's file-direct pause/resume
-// subcommands manage under their own, differently-spelled CLI vocabulary
-// (gateOperatorPaused = "operator-paused" / gateCICDDown = "cicd-down" /
-// gateDiskSpaceLow = "disk-space-low"). This package never imports that one
-// (no cross-package reach, Task 3.5 Contract), so the three vocabularies are
-// kept in sync by convention and tests, not a shared constant.
-//
-// GateCICDDown is SUPERSEDED (bead pg2-h410q) by pg-router's per-connector CI
-// health command-source recipe (MIGRATION.md), which consumes pg-connector's
-// ci capability's own AsOf/Stale contract (bead pg2-4aoeg) instead of one
-// global, never-produced gate; see cmd/pg-router/gates_cmd.go's gateCICDDown
-// doc comment for the full rationale. Kept, unremoved, for backward
-// compatibility.
-//
-// GateDiskSpaceLow (bead pg2-af5ur) is manually settable/clearable ONLY —
-// like GateOperatorPaused and GateCICDDown before any producer existed for
-// them, nothing in this codebase writes or clears this file on its own yet.
-// An automatic disk-space check that flips it is a deliberately deferred,
-// separate concern (tracked: bead pg2-zwdwf for the trigger/producer, bead
-// pg2-hipf0 for an external enable/disable path) — do not wire one here.
-const (
-	GateOperatorPaused = "operator_paused"
-	GateCICDDown       = "cicd_down"
-	GateDiskSpaceLow   = "disk_space_low"
-)
-
-// defaultGate is the gate a pause/resume request names when it omits
-// "gate" — the SAME default cmd/pg-router's file-direct `pause [<gate>]` /
-// `resume [<gate>]` subcommands use (gates_cmd.go: "Omitting a gate name...
-// defaults to operator-paused").
-const defaultGate = GateOperatorPaused
-
-// handlePause runs the `pause` socket verb (Task 3.9): idempotent — pausing
-// an already-paused gate is a no-op SUCCESS that MUST NOT rewrite the
-// gate's recorded mtime (Task 3.9 Binding decisions: mtime is the
-// operator-visible "since" a gate has been set, so a spurious rewrite on
-// re-pause is a real regression). It reuses Task 1.2b's pauseGate/
-// resumeGate BEHAVIOR — idempotent, mtime-preserving on re-toggle — over
-// the SAME published gate cell Task 3.5 built (ObserveGateFromSocketVerb),
-// rather than calling those functions directly: they are unexported in
-// cmd/pg-router (package main), which depends on this package, never the
-// reverse.
-func (s *Service) handlePause(stdin io.Reader, stdout io.Writer) int {
-	return s.handleGateToggle(stdin, stdout, true, PauseRequestSchema, "pause")
-}
-
-// handleResume runs the `resume` socket verb (Task 3.9): pause's
-// counterpart — clearing gate is idempotent the same way.
-func (s *Service) handleResume(stdin io.Reader, stdout io.Writer) int {
-	return s.handleGateToggle(stdin, stdout, false, ResumeRequestSchema, "resume")
-}
-
-// handleGateToggle is pause/resume's shared body: decode+validate the
-// request, resolve which named gate it targets (defaultGate when omitted —
-// the request schema's own enum already rejects anything else), and record
-// the idempotent target state via ObserveGateFromSocketVerb — which per its
-// own doc always wins for the ONE gate it names over an older-timestamped
-// concurrent drive-loop tick observation
-// (TestGateDeletedExternallyDuringToggle, TestThreeWayGateRace): the
-// two-cell design (Task 3.5) this concurrency test matrix proves
-// load-bearing. The composed reply's own shape is enforced by
-// PauseReplySchema/ResumeReplySchema at the CALLER (test) side, the same
-// way handleStatus's composeStatusReply is never self-checked against
-// StatusReplySchema in production either.
-func (s *Service) handleGateToggle(stdin io.Reader, stdout io.Writer, pause bool, requestSchema, verb string) int {
-	data, err := io.ReadAll(stdin)
-	if err != nil {
-		writeBody(stdout, errorReply(verb+": read request: "+err.Error()))
-		return conformance.ExitError
-	}
-	if err := conformance.CheckBytes(requestSchema, data); err != nil {
-		writeBody(stdout, errorReply(verb+": "+err.Error()))
-		return conformance.ExitError
-	}
-	var req struct {
-		Gate string `json:"gate"`
-	}
-	if err := json.Unmarshal(data, &req); err != nil {
-		// Unreachable once CheckBytes has passed — see handleStatus's identical note.
-		writeBody(stdout, errorReply(verb+": malformed request: "+err.Error()))
-		return conformance.ExitError
-	}
-	gate := req.Gate
-	if gate == "" {
-		gate = defaultGate
-	}
-
-	now := time.Now()
-	gates, _ := s.GateSnapshot()
-	existing := gates[gate]
-	var info GateInfo
-	switch {
-	case pause && existing.Set:
-		info = existing // already paused: no-op, preserve the original mtime/owner
-	case pause:
-		info = GateInfo{Set: true, Mtime: now}
-	case !existing.Set:
-		info = existing // already resumed: no-op
-	default:
-		info = GateInfo{} // resumed: cleared
-	}
-	s.ObserveGateFromSocketVerb(now, gate, info)
-
-	reply := map[string]any{
-		"schemaVersion": schemas.SchemaVersion,
-		"gate":          gate,
-		"set":           info.Set,
-	}
-	if !info.Mtime.IsZero() {
-		reply["mtime"] = info.Mtime.UTC().Format(time.RFC3339Nano)
-	}
-	body, err := json.Marshal(reply)
-	if err != nil { // unreachable: reply holds only JSON-safe scalars
-		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
-		return conformance.ExitError
-	}
-	writeBody(stdout, body)
-	return conformance.ExitOK
-}
 
 // SubcommandGet / SubcommandPut / SubcommandDelete are INTF-STORE's core-
 // initiated wire subcommands (Task 6.7): three socket verbs, each carrying
@@ -1337,7 +1187,6 @@ func (s *Service) handleStatus(stdin io.Reader, stdout io.Writer) int {
 func (s *Service) composeStatusReply(since uint64) map[string]any {
 	regs := s.reg.List()
 	tick := s.CurrentTick()
-	gates, gatesObservedAt := s.GateSnapshot()
 
 	legacySources, legacyHandlers := 0, 0
 	if tick != nil {
@@ -1385,7 +1234,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		},
 		"registry":  statusRegistrations(regs),
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners()),
-		"gates":     statusGates(gates),
+		"gates":     statusGates(s.q.ActiveGates(), s.q.Now()),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
 		"activity":  []any{},
@@ -1398,9 +1247,6 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		reply["unmatchedBindings"] = unmatched
 	} else {
 		reply["unmatchedBindings"] = []any{}
-	}
-	if !gatesObservedAt.IsZero() {
-		reply["gatesObservedAt"] = gatesObservedAt.UTC().Format(time.RFC3339Nano)
 	}
 	if s.activityRing != nil {
 		buf := make([]activity.Entry, activityReadWindow)
@@ -1453,31 +1299,25 @@ func statusQueues(depth map[string]int) []map[string]any {
 	return out
 }
 
-// statusGates renders GateSnapshot's map as the `gates` array, sorted by
-// name; `mtime`/`owner` are omitted per-entry when the gate carries none
-// (an unset gate has no mtime, and no writer here ever sets Owner today).
-// `disabled` follows the same omit-when-absent convention (bead pg2-efbb0):
-// it is added only when GateInfo.Disabled is true, so an existing reply
-// consumer that has never heard of the external kill switch sees byte-
-// identical output for every gate that has none wired.
-func statusGates(gates map[string]GateInfo) []map[string]any {
-	names := make([]string, 0, len(gates))
-	for n := range gates {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	out := make([]map[string]any, 0, len(names))
-	for _, n := range names {
-		g := gates[n]
-		entry := map[string]any{"name": n, "set": g.Set}
-		if !g.Mtime.IsZero() {
-			entry["mtime"] = g.Mtime.UTC().Format(time.RFC3339Nano)
+// statusGates renders the Gate Registry's active gates (Queue.ActiveGates,
+// already sorted by TYPE) as the `gates` array: only gates in force appear, so
+// an empty array means nothing is gated. description/owner/expiresAt/
+// ttlRemainingMs are omitted when the gate carries none (owner is DEBUG ONLY
+// and shown for operators; it is never a metric label).
+func statusGates(gates []eventqueue.Gate, now time.Time) []map[string]any {
+	out := make([]map[string]any, 0, len(gates))
+	for _, g := range gates {
+		entry := map[string]any{"type": g.Type, "setAt": g.SetAt.UTC().Format(time.RFC3339Nano)}
+		if g.Description != "" {
+			entry["description"] = g.Description
 		}
 		if g.Owner != "" {
 			entry["owner"] = g.Owner
 		}
-		if g.Disabled {
-			entry["disabled"] = true
+		if !g.ExpiresAt.IsZero() {
+			entry["expiresAt"] = g.ExpiresAt.UTC().Format(time.RFC3339Nano)
+			rem, _ := g.TTLRemaining(now)
+			entry["ttlRemainingMs"] = rem.Milliseconds()
 		}
 		out = append(out, entry)
 	}

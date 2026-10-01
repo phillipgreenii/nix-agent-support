@@ -1,0 +1,14 @@
+{
+  "$id": "cli.gate-set",
+  "title": "INTF-CLI socket gate-set verb (Gate Registry, bead pg2-h63eu): an external system (or an operator) sets — or renews, or overwrites — the gate of one TYPE. Last writer wins per TYPE; `owner` is the caller's identity, DEBUG ONLY (no behavioral effect, overwritten on re-set); `ttlMs` is an optional lease, renewed by setting the gate again. TYPE is arbitrary but ALL CAPS.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "type"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "type": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+    "description": { "type": "string" },
+    "owner": { "type": "string" },
+    "ttlMs": { "type": "integer", "minimum": 1 }
+  }
+}

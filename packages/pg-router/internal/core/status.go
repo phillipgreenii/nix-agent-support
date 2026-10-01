@@ -1,7 +1,6 @@
 package core
 
 import (
-	"sync"
 	"time"
 )
 
@@ -121,34 +120,6 @@ type ResolvedConfig struct {
 	ActiveQueries int
 }
 
-// GateInfo is one named gate's last-observed state.
-type GateInfo struct {
-	Set   bool
-	Mtime time.Time
-	Owner string
-	// Disabled reports whether this gate's MECHANISM has been switched off
-	// from outside pg-router (bead pg2-efbb0) — independent of Set, which
-	// stays the gate's own raw file-backed tripped state; a gate can be
-	// simultaneously Set (its file exists) and Disabled (its effect is
-	// ignored), and the two facts are reported separately rather than
-	// collapsed into one. operator_paused and disk_space_low carry a live
-	// kill switch today (cmd/pg-router's
-	// currentGateFiles/gateFileInfoWithDisable, beads pg2-efbb0/pg2-hipf0);
-	// cicd_down reports this as always false until its own sibling bead
-	// (pg2-8c7az) wires the identical pattern.
-	Disabled bool
-}
-
-// gateState is the daemon's per-gate observation cache — its OWN small
-// mutex, never the Service's own mu (Task 3.5 Contract): gate state has
-// nothing to do with queue dispatch or socket accept, so serializing it
-// against those would be pure contention with no correctness benefit.
-type gateState struct {
-	mu              sync.Mutex
-	perGate         map[string]GateInfo
-	gatesObservedAt time.Time
-}
-
 // PublishTick publishes next as the Service's current tick snapshot. Sole
 // callers: cmd/pg-router's runRun (long-running `run`'s per-tick body, after its
 // Dispatch()/Expire() pair) and runRunUntilIdle (`run-until-idle`'s per-pass
@@ -163,51 +134,4 @@ func (s *Service) PublishTick(next TickSnapshot) {
 // [design: Task 3.5 Step 4].
 func (s *Service) CurrentTick() *TickSnapshot {
 	return s.tick.Load()
-}
-
-// ObserveGateFromTick records the drive loop's own periodic gate-file read
-// (Orchestrator.Gated()'s underlying per-gate file state) at now. This is a
-// DRIVE-LOOP write: if a socket pause/resume verb
-// (ObserveGateFromSocketVerb) already recorded a STRICTLY NEWER
-// gatesObservedAt, this call drops instead of overwriting it — a concurrent
-// tick-stat write with an older observation MUST NOT overwrite a socket
-// verb's newer one [design: Task 3.5 Step 1].
-func (s *Service) ObserveGateFromTick(now time.Time, gates map[string]GateInfo) {
-	s.gates.mu.Lock()
-	defer s.gates.mu.Unlock()
-	if now.Before(s.gates.gatesObservedAt) {
-		return
-	}
-	s.gates.perGate = gates
-	s.gates.gatesObservedAt = now
-}
-
-// ObserveGateFromSocketVerb records a socket pause/resume verb's write
-// (Task 3.9, same package) for the ONE gate it names — it always wins for
-// that gate, regardless of gatesObservedAt ordering, and advances
-// gatesObservedAt to now if now is newer, so a later drive-loop tick stamped
-// with an OLDER now cannot immediately clobber it via
-// ObserveGateFromTick's compare rule above.
-func (s *Service) ObserveGateFromSocketVerb(now time.Time, gate string, info GateInfo) {
-	s.gates.mu.Lock()
-	defer s.gates.mu.Unlock()
-	if s.gates.perGate == nil {
-		s.gates.perGate = make(map[string]GateInfo)
-	}
-	s.gates.perGate[gate] = info
-	if now.After(s.gates.gatesObservedAt) {
-		s.gates.gatesObservedAt = now
-	}
-}
-
-// GateSnapshot returns a live, independent copy of the daemon's per-gate
-// observation cache plus the time it was last updated by either writer.
-func (s *Service) GateSnapshot() (map[string]GateInfo, time.Time) {
-	s.gates.mu.Lock()
-	defer s.gates.mu.Unlock()
-	out := make(map[string]GateInfo, len(s.gates.perGate))
-	for k, v := range s.gates.perGate {
-		out[k] = v
-	}
-	return out, s.gates.gatesObservedAt
 }

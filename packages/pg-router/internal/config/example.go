@@ -39,22 +39,22 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 #               participant's own private config, reached over the wire, never
 #               authored here (ADR 0065's "Open question resolved" section).
 #
-# Pool-wide scalars (budgets, gates, model, worktree_dir, ...) come from PG_ROUTER_*
+# Pool-wide scalars (budgets, model, worktree_dir, ...) come from PG_ROUTER_*
 # env vars and an optional [pool] section; this file defines roles + queries. Where
 # both a PG_ROUTER_* env var and a [pool] key set the same scalar, [pool] (this file)
 # wins — e.g. [pool].worktree_dir overrides PG_ROUTER_WORKTREE_DIR. In general,
 # [pool] wins over PG_ROUTER_* env, which wins over the built-in default.
 #
-# Gate file paths (INV-LIFE-2; "pg-router pause"/"pg-router resume" act on these
-# directly, file-direct, without a running core) default to
-# <LogDir>/gates/{operator-paused,cicd-down,disk-space-low} — run 'pg-router
-# config --show' to see the actual resolved paths for THIS environment (LogDir
-# varies with XDG_STATE_HOME / PG_ROUTER_LOG_DIR). Override with
-# [pool].operator_paused_path / cicd_down_path / disk_space_low_path
-# (uncomment and set an absolute path), e.g.:
-# operator_paused_path = "/home/example/.local/state/pg-router/gates/operator-paused"
-# cicd_down_path = "/home/example/.local/state/pg-router/gates/cicd-down"
-# disk_space_low_path = "/home/example/.local/state/pg-router/gates/disk-space-low"
+# Gates (INV-LIFE-2, Gate Registry) are NOT configured here: they are generic,
+# TYPE-keyed records in the running core's event log, set and cleared at runtime
+# ('pg-router pause'/'resume', 'pg-router gate set|clear|list', or an external
+# system through the socket API). A [[role]] or [[query]] declares at
+# registration which gate TYPEs it does NOT block on (default: it blocks on
+# every TYPE), and the built-in type = "timer" query is never blocked by any
+# gate:
+# non_blocking_gates = ["LOW_DISK_USAGE"]
+# The retired [pool].operator_paused_path / cicd_down_path / disk_space_low_path
+# keys are ignored (with a warning); see MIGRATION.md.
 #
 # Monitoring sinks (INTF-MON, optional; no built-in default): a [[monitor]]
 # entry resolves the "id" a kind=monitor sink registers with over the common

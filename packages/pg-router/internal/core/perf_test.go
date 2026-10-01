@@ -129,8 +129,7 @@ func TestStatusVerbAllocBudget(t *testing.T) {
 		t.Fatalf("Store calls during Serve(status) = %d, want 0 (status must be read-only, no durable-store I/O)", got)
 	}
 
-	gatesBefore, _ := svc.GateSnapshot()
-	if len(gatesBefore) != 0 {
-		t.Fatalf("gates = %v, want empty — nothing in this test ever wrote a gate, so GateSnapshot's own in-memory cache (never file I/O; see status.go's package doc) has nothing to report either", gatesBefore)
+	if gatesBefore := svc.ActiveGates(); len(gatesBefore) != 0 {
+		t.Fatalf("gates = %v, want empty — nothing in this test ever set a gate", gatesBefore)
 	}
 }

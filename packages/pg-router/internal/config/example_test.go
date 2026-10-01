@@ -33,21 +33,25 @@ func TestExampleTOML_roundTrips(t *testing.T) {
 	}
 }
 
-// TestExampleTOML_gateKeysDocumented is Task 1.2b's Step 1(b): the gate keys
-// must be present as a commented-out, absolute-path example (not a bracketed
-// placeholder — those default paths vary per environment/XDG_STATE_HOME, so a
-// literal <LogDir> value would be actively wrong if pasted in live), with
-// prose pointing at `config --show` for the real resolved paths.
-func TestExampleTOML_gateKeysDocumented(t *testing.T) {
+// TestExampleTOML_gateRegistryDocumented: the example explains that gates are
+// runtime records (not config keys), documents per-participant non_blocking_gates
+// and the timer emitter, and no longer advertises the retired gate-file keys
+// as live examples.
+func TestExampleTOML_gateRegistryDocumented(t *testing.T) {
 	out := ExampleTOML()
 	for _, want := range []string{
-		"config --show",
-		"# operator_paused_path =",
-		"# cicd_down_path =",
-		"# disk_space_low_path =",
+		"Gate Registry",
+		"pg-router gate set",
+		"# non_blocking_gates = [",
+		`type = "timer"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ExampleTOML() missing %q in:\n%s", want, out)
+		}
+	}
+	for _, gone := range []string{"# operator_paused_path =", "# cicd_down_path =", "# disk_space_low_path =", "gates/operator-paused"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("ExampleTOML() still advertises the retired %q", gone)
 		}
 	}
 }

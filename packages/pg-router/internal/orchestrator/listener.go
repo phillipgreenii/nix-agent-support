@@ -91,7 +91,10 @@ type HandlerFailureObserver interface {
 // a compile-time check that a future signature drift on either interface
 // fails the build here rather than silently degrading a role back to the
 // queue's own WithRetryBackoff default.
-var _ eventqueue.BackoffListener = (*roleListener)(nil)
+var (
+	_ eventqueue.BackoffListener = (*roleListener)(nil)
+	_ eventqueue.GateExempter    = (*roleListener)(nil)
+)
 
 // roleListener bridges the durable event queue to wireclient.Dispatch, which
 // sends handler.dispatch to whichever handler participant is registered for
@@ -181,6 +184,11 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
+
+// NonBlockingGates implements eventqueue.GateExempter (Gate Registry, bead
+// pg2-h63eu): the gate TYPEs this role declared, at registration, that its
+// listener does NOT block on. An empty list (the default) blocks on every TYPE.
+func (l *roleListener) NonBlockingGates() []string { return l.role.NonBlockingGates }
 
 // RetryBackoff implements eventqueue.BackoffListener (INV-FAIL-2, Task 1.3):
 // a role carrying its OWN non-zero backoff.Policy (a [role.retry] override,

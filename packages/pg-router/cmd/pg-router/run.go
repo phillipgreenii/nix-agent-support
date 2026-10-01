@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -211,8 +212,8 @@ func warnHandlerCommandAmbiguity(cfg config.Config) {
 // invokes an ObservableGauge's callback while collecting a live scrape of a
 // running process, so the callback firing at all already proves both facts
 // this metric is defined to report — there is no further condition to
-// check. runMode == core.RunModeDrainAndExit (runUntilIdleGated,
-// runRunUntilIdle) MUST NOT pass WithLiveness at all, per Task 3.3's binding
+// check. runMode == core.RunModeDrainAndExit
+// (runRunUntilIdle) MUST NOT pass WithLiveness at all, per Task 3.3's binding
 // decision that drain-and-exit never registers the observable, not merely
 // never observes it true.
 func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions, runMode string) (svc *core.Service, q *eventqueue.Queue, mp metric.MeterProvider, storeClose func() error, err error) {
@@ -240,6 +241,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			metricsOpts = append(metricsOpts, metrics.WithWorktreePool(cfg.WorktreeDir, 0))
 		}
 	}
+	// Gate Registry gauge (bead pg2-h63eu): one series per gate TYPE in force,
+	// read live off the queue on each collect (q is assigned below, before the
+	// first collect can run).
+	metricsOpts = append(metricsOpts, metrics.WithActiveGates(func() []eventqueue.Gate { return q.ActiveGates() }))
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
@@ -295,7 +300,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// delivered/declined into, so composeStatusReply's listeners[] can render
 	// a per-role FAIL count alongside DLVD/DECL.
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...))
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
@@ -406,7 +411,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 
 // postStartupAll dispatches handler.postStartup once to every ENABLED
 // role's registered handler participant (pg2-oju6w.15), immediately after
-// bootCore succeeds in each of runRun/runRunUntilIdle/runUntilIdleGated. It
+// bootCore succeeds in each of runRun/runRunUntilIdle. It
 // mirrors bootCore's own registration loop (`for _, r := range cfg.Roles {
 // if !r.Enabled { continue } ...}`), never declaredRoles (the full
 // pre-selector superset used only for status reporting). Built for symmetry
@@ -993,70 +998,6 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	return preparedRun{cfg: cfg, o: o, cleanup: cleanup, declaredRoles: declaredRoles, excluded: excluded}, exitOK
 }
 
-// gateTickKeyOperatorPaused / gateTickKeyCICDDown / gateTickKeyDiskSpaceLow
-// are the three file-direct gate names (Task 1.2b, ADR 0036; disk-space-low
-// added by bead pg2-af5ur) this run's config declares — the map keys
-// currentGateFiles/svc.ObserveGateFromTick use, one per
-// config.Config.OperatorPaused/CICDDown/DiskSpaceLow gate-file path.
-// gateTickKeyOperatorPaused's and gateTickKeyDiskSpaceLow's own GateInfo
-// additionally carry the bead pg2-efbb0/pg2-hipf0 external-disable read
-// (currentGateFiles' gateFileInfoWithDisable) — a fourth fact folded into
-// the SAME map entry, not a fourth key.
-const (
-	gateTickKeyOperatorPaused = "operator_paused"
-	gateTickKeyCICDDown       = "cicd_down"
-	gateTickKeyDiskSpaceLow   = "disk_space_low"
-)
-
-// gateFileInfo stats path and reports whether the gate is currently set
-// (the file exists) and, if so, its mtime. An empty path — the gate
-// unconfigured for this deployment — reads as unset, matching
-// orchestrator.gated()'s own "" ⇒ never gated short-circuit.
-func gateFileInfo(path string) core.GateInfo {
-	if path == "" {
-		return core.GateInfo{}
-	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return core.GateInfo{}
-	}
-	return core.GateInfo{Set: true, Mtime: fi.ModTime()}
-}
-
-// gateFileInfoWithDisable is gateFileInfo's counterpart for a gate that
-// carries an external kill switch (bead pg2-efbb0 — see
-// config.Config.OperatorPausedDisable's doc comment for the full design).
-// Set/Mtime come from path exactly as gateFileInfo reports them — the
-// gate's own raw tripped state, UNCHANGED by the kill switch — and Disabled
-// reports whether disablePath itself currently exists, reusing
-// gateFileInfo's own "file exists ⇒ Set" reading rather than a second
-// os.Stat call. The two facts are independent, so TUI/CLI can show both
-// (this bead's acceptance criteria). An empty disablePath (the mechanism
-// not configured, or not yet wired for this gate) always reports
-// Disabled: false, matching gateFileInfo's own empty-path posture.
-func gateFileInfoWithDisable(path, disablePath string) core.GateInfo {
-	info := gateFileInfo(path)
-	info.Disabled = gateFileInfo(disablePath).Set
-	return info
-}
-
-// currentGateFiles reads every file-direct gate cfg declares — the drive
-// loop's periodic input to svc.ObserveGateFromTick (Task 3.5 Files: gates_cmd.go
-// itself needs no code change, since file-direct pause/resume never touches a
-// running core; this is the OTHER half — the drive loop's own read of that
-// same gate-file state). operator_paused and disk_space_low each also fold
-// in their own external kill-switch read (beads pg2-efbb0/pg2-hipf0,
-// gateFileInfoWithDisable); cicd_down still uses the plain gateFileInfo
-// until its own sibling bead (pg2-8c7az) wires the identical pattern for
-// its gate.
-func currentGateFiles(cfg config.Config) map[string]core.GateInfo {
-	return map[string]core.GateInfo{
-		gateTickKeyOperatorPaused: gateFileInfoWithDisable(cfg.OperatorPaused, cfg.OperatorPausedDisable),
-		gateTickKeyCICDDown:       gateFileInfo(cfg.CICDDown),
-		gateTickKeyDiskSpaceLow:   gateFileInfoWithDisable(cfg.DiskSpaceLow, cfg.DiskSpaceLowDisable),
-	}
-}
-
 // countEnabledRoles counts roles active this run (Role.Enabled — selectors.go
 // flips this rather than removing entries, so a disabled role's Binds still
 // count toward declaredBindTypes, but not toward this active count).
@@ -1126,89 +1067,78 @@ func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
 	return rc
 }
 
-// gateNotice returns the operator-facing stderr notice for the currently
-// active gate (INV-LIFE-2's "Gate identity"): which of the two named gates is
-// set (operator-paused, OP's own; cicd-down, an automation actor's — labeled as
-// such because that actor MAY re-assert it on its own initiative, e.g. every
-// failed health check, unlike a human operator's own gate), that gate file's
-// mtime (when it was set), and the remedy to clear it. Returns "" when
-// neither gate file is present — mirrors Orchestrator.gated()'s OR-effective
-// check and its OperatorPaused-then-CICDDown precedence when, unusually, both
-// are set at once (an ordering choice this packet is free to make: the design
-// only requires the report name ONE active gate, not enumerate every set
-// one).
-//
-// The operator-paused candidate is skipped entirely when its external kill
-// switch (bead pg2-efbb0, cfg.OperatorPausedDisable) is present: reporting
-// "gated by operator-paused" here would misname the real cause whenever
-// some OTHER gate is what is actually halting dispatch, since
-// Orchestrator.gated() itself already ignores operator-paused's file state
-// in that case — this function's notice MUST agree with gated()'s own
-// reading of which gate is truly active.
-func gateNotice(cfg config.Config) string {
-	type gate struct {
-		name, path, owner, remedy string
+// gateNotice returns the operator-facing stderr notice for the gates currently
+// in force (INV-LIFE-2, Gate Registry bead pg2-h63eu): one entry per gate with
+// its TYPE, owner (DEBUG ONLY) and when it was set, plus the remedy. Returns ""
+// when no gate is active. A gate acts on the participants that block on it, not
+// on the whole pool, so the notice says "participants that block on them" rather
+// than claiming everything is halted.
+func gateNotice(gates []eventqueue.Gate) string {
+	if len(gates) == 0 {
+		return ""
 	}
-	candidates := []gate{
-		{"operator-paused", cfg.OperatorPaused, "operator", "remove the PG_ROUTER_OPERATOR_PAUSED file to resume"},
-		{"cicd-down", cfg.CICDDown, "automation", "the automation actor clears the PG_ROUTER_CICD_DOWN file once CI/CD is healthy again; it may re-assert it on the next failed health check"},
+	parts := make([]string, 0, len(gates))
+	for _, g := range gates {
+		p := g.Type
+		if g.Owner != "" {
+			p += " (owner " + g.Owner + ", "
+		} else {
+			p += " ("
+		}
+		p += "set " + g.SetAt.Format(time.RFC3339)
+		if !g.ExpiresAt.IsZero() {
+			p += ", lease until " + g.ExpiresAt.Format(time.RFC3339)
+		}
+		parts = append(parts, p+")")
 	}
-	for _, g := range candidates {
-		if g.path == "" {
-			continue
-		}
-		if g.name == "operator-paused" && gateFileInfo(cfg.OperatorPausedDisable).Set {
-			continue
-		}
-		fi, err := os.Stat(g.path)
-		if err != nil {
-			continue
-		}
-		return fmt.Sprintf("pg-router: gated by %s (%s-owned; set %s at %s) — %s",
-			g.name, g.owner, fi.ModTime().Format(time.RFC3339), g.path, g.remedy)
+	return "pg-router: gated by " + strings.Join(parts, "; ") +
+		" — participants that block on them are halted (emitters not polled, listeners not dispatched to); " +
+		"clear with `pg-router gate clear <TYPE>` (or `pg-router resume --all`)"
+}
+
+// gateSignature identifies the SET of active gate TYPEs, so runOneTick can
+// print the operator notice exactly when that set changes — a lease renewal (a
+// re-set of an already-active TYPE) changes nothing an operator must be told.
+func gateSignature(gates []eventqueue.Gate) string {
+	types := make([]string, len(gates))
+	for i, g := range gates {
+		types[i] = g.Type
 	}
-	return ""
+	return strings.Join(types, ",")
 }
 
 // runOneTick executes one iteration of `run`'s drive loop body (INV-LIFE-2):
-// gated ⇒ suspend production and new dispatch but still let expiry advance
-// (INV-EVT-4's retry-bound clock does not pause with production) — printing
-// the operator notice to stderr exactly on the gate-state TRANSITION (wasGated
-// false → true), which includes "once at startup while gated" since the
-// caller's very first call passes wasGated=false regardless of history;
-// ungated ⇒ ProduceTick + Kick + Expire. The per-tick
-// slog.Info the gated branch used to emit every tick is demoted to Debug here
-// (the stderr notice is the transition-worthy signal now). Returns the
-// gated-ness of THIS tick, for the caller to pass back in as wasGated on the
-// next call.
+// it ALWAYS runs ProduceTick + Kick + Expire and publishes the tick — whether
+// a gate is active is no longer a pool-wide on/off decided here. Under the Gate
+// Registry (bead pg2-h63eu, internal/eventqueue/gate.go) a gate acts on
+// PARTICIPANTS: ProduceTick skips each emitter that blocks on an active gate
+// (the timer emitter is never skipped), Kick skips each listener that does
+// (gate records themselves are still delivered), and Expire sweeps lapsed gate
+// leases and retires events — so an exempt participant keeps running while a
+// gate is up, and expiry (INV-EVT-4's retry-bound clock) never pauses.
 //
-// svc.ObserveGateFromTick runs every pass, gated or not (Task 3.5 Files: the
-// drive loop's own periodic read of gate-file state, so a status read always
-// has a fresh-as-of-this-tick gate view even while dispatch itself is
-// paused), and svc.PublishTick fires only on the successful non-gated produce
-// path, unchanged from before this function existed.
+// It prints the operator notice to stderr exactly when the set of active gate
+// TYPEs CHANGES (prevGates is the previous call's return value; the caller's
+// very first call passes "" and so reports a gate already active at startup).
+// The returned string is gateSignature of THIS tick, for the caller to pass back.
 //
 // q.Dispatch() → q.Kick() (this package's design doc, "decouple
 // pg-router-core's tick loop from per-dispatch-pass completion"; INV-LIFE-3,
-// docs/behavior/invariants.md): this tick's own ProduceTick/Expire/
-// gate-observation/PublishTick sequence no longer waits on any launched
-// offer settling before proceeding to the NEXT tick, so one role stuck for
-// its own handler's full MaxWait can no longer stall source re-polling or
-// dispatch to every OTHER role. INV-CONC-1's one-outstanding-offer-per-
-// handler ceiling is unaffected — that lives entirely in Kick's (and
-// Dispatch's) shared phase-1 snapshot, not in how long this loop itself
-// waits on a pass.
-func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, svc *core.Service, q *eventqueue.Queue, wasGated bool, stderr io.Writer) bool {
-	svc.ObserveGateFromTick(time.Now(), currentGateFiles(cfg))
-	if o.Gated() {
-		if !wasGated {
-			if notice := gateNotice(cfg); notice != "" {
-				fmt.Fprintln(stderr, notice)
-			}
+// docs/behavior/invariants.md): this tick's own ProduceTick/Expire/PublishTick
+// sequence no longer waits on any launched offer settling before proceeding to
+// the NEXT tick, so one role stuck for its own handler's full MaxWait can no
+// longer stall source re-polling or dispatch to every OTHER role.
+// INV-CONC-1's one-outstanding-offer-per-handler ceiling is unaffected — that
+// lives entirely in Kick's (and Dispatch's) shared phase-1 snapshot.
+func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, svc *core.Service, q *eventqueue.Queue, prevGates string, stderr io.Writer) string {
+	gates := q.ActiveGates()
+	sig := gateSignature(gates)
+	if sig != prevGates {
+		if notice := gateNotice(gates); notice != "" {
+			fmt.Fprintln(stderr, notice)
+		} else {
+			fmt.Fprintln(stderr, "pg-router: no gate active — all participants route normally")
 		}
-		slog.Debug("gated; pausing without dispatch")
-		q.Expire()
-		return true
 	}
 	if rpt, err := o.ProduceTick(ctx, q); err != nil {
 		slog.Error("producer tick failed", "err", err)
@@ -1219,6 +1149,9 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 		// and every pushed event's already-queued work.
 		for name, serr := range rpt.SourceErrors {
 			slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
+		}
+		for name, gate := range rpt.Blocked {
+			slog.Debug("producer tick: source blocked by a gate; not polled", "source", name, "gate", gate)
 		}
 		q.Kick()
 		q.Expire()
@@ -1232,57 +1165,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 			SnapshotAt: now,
 		})
 	}
-	return false
-}
-
-// runUntilIdleGated realizes `run-until-idle`'s gated drain-and-exit slice of
-// INV-LIFE-2: the core still boots and stays reachable to push participants
-// (INV-LIFE-1 — "in both run modes"), so a concurrent `ingest-event` push
-// during this window still succeeds and is durably enqueued, but it never
-// calls ProduceTick or Dispatch (a gate suspends production and new
-// dispatch) — the reachability window is bounded to ONE idleDrainTick pass
-// rather than looping (the ungated path's RunUntilIdle would otherwise spin
-// forever: a suspended dispatch can never satisfy Idle()). Expiry still runs
-// once (INV-EVT-4's clock does not pause with production) and the final
-// metrics snapshot is still flushed by the caller on every exit path. It MUST
-// NOT report the queue as drained — it never drained anything.
-func runUntilIdleGated(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, declaredRoles roles.RoleSet, excluded runExclusions) int {
-	if notice := gateNotice(cfg); notice != "" {
-		fmt.Fprintln(os.Stderr, notice)
-	}
-	svc, q, mp, storeClose, err := bootCore(ctx, cfg, o, declaredRoles, excluded, core.RunModeDrainAndExit)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
-		return exitGeneric
-	}
-	postStartupAll(ctx, o, cfg)
-	defer func() { _ = storeClose() }()
-	accepted := make(chan error, 1)
-	go func() { accepted <- svc.Accept(ctx) }()
-
-	defer preShutdownAll(context.Background(), o, cfg)
-	defer func() {
-		_ = svc.Close()
-		if err := <-accepted; err != nil {
-			slog.Warn("core accept loop exited with an error", "err", err)
-		}
-	}()
-	// metrics.Flush on every exit path (Objective: "the daemon deliberately
-	// has no Flush" — this is drain-and-exit only), matching the ungated
-	// path's own deferred flush below.
-	defer func() {
-		if err := metrics.Flush(context.Background(), mp); err != nil {
-			slog.Warn("run-until-idle: metrics flush failed", "err", err)
-		}
-	}()
-
-	q.Expire()
-	select {
-	case <-ctx.Done():
-	case <-time.After(idleDrainTick):
-	}
-	slog.Info("run-until-idle: gated; skipped drain (no dispatch), expiry advanced")
-	return exitOK
+	return sig
 }
 
 // runRunUntilIdle implements `pg-router run-until-idle` (and the deprecated
@@ -1305,14 +1188,13 @@ func runRunUntilIdle(only, disable []string) int {
 		return code
 	}
 	defer pr.cleanup()
+	return runUntilIdleBody(ctx, pr)
+}
 
-	if pr.o.Gated() {
-		// INV-LIFE-2's gated drain-and-exit slice: still boots the core (stays
-		// reachable, answers ingest-event) but never drains — see
-		// runUntilIdleGated's doc comment.
-		return runUntilIdleGated(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded)
-	}
-
+// runUntilIdleBody is runRunUntilIdle's boot-to-exit body over an already
+// prepared run, split out so a test can drive it with a hand-built
+// preparedRun (no env/config resolution, no signal handling).
+func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeDrainAndExit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-until-idle:", err)
@@ -1362,6 +1244,28 @@ func runRunUntilIdle(only, disable []string) int {
 			slog.Warn("run-until-idle: metrics flush failed", "err", err)
 		}
 	}()
+
+	// INV-LIFE-2's gated drain-and-exit slice (Gate Registry, bead pg2-h63eu):
+	// gates live in the event log, so they are only knowable once the core is
+	// booted. With ANY gate active this run still boots (above) and stays
+	// reachable — a concurrent `ingest-event` push still succeeds and is
+	// durably enqueued — but it never produces or drains: a gate suspends the
+	// participants that block on it, so a drain-to-idle could spin on events a
+	// blocked listener will not take until the gate clears. The reachability
+	// window is bounded to ONE idleDrainTick pass; expiry still runs once
+	// (INV-EVT-4's clock does not pause), and the final metrics snapshot is
+	// still flushed by the defers above. It MUST NOT report the queue as
+	// drained — it never drained anything.
+	if gates := q.ActiveGates(); len(gates) > 0 {
+		fmt.Fprintln(os.Stderr, gateNotice(gates))
+		q.Expire()
+		select {
+		case <-ctx.Done():
+		case <-time.After(idleDrainTick):
+		}
+		slog.Info("run-until-idle: gated; skipped drain (no dispatch), expiry advanced")
+		return exitOK
+	}
 
 	rpt, err := pr.o.ProduceTick(ctx, q)
 	if err != nil {
@@ -1535,9 +1439,9 @@ func runRun(only, disable []string, metricsAddr string) int {
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
-	wasGated := false
+	prevGates := ""
 	for {
-		wasGated = runOneTick(ctx, pr.cfg, pr.o, svc, q, wasGated, os.Stderr)
+		prevGates = runOneTick(ctx, pr.cfg, pr.o, svc, q, prevGates, os.Stderr)
 		select {
 		case <-ctx.Done():
 			slog.Info("run: shutdown requested")
