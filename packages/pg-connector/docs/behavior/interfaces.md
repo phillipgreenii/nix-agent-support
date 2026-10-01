@@ -348,7 +348,7 @@ not authorize (`INV-COMP-1`).
   verifies by conformance suite, and every obligation below is the umbrella's own.
   **Initiator:** operator.
 - **What the operator can do.** Invoke a **targeted** op against the one backend registered for a
-  capability (`pr show`, `pr files`, `pr commits`, `issue show/create/comment/
+  capability (`pr show`, `pr files`, `pr commits`, `pr review submit`, `issue show/create/comment/
 transition/update/close/deps`, `ci logs`, `ci rerun-failed`, `scm worktree add/remove/list`, `scm branch
 detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
   `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`, `calendar list`,

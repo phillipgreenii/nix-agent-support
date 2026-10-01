@@ -178,7 +178,7 @@ distinction come from the behavior-docs method
   before any wire call is attempted.
 
   A capability's registry entry naming more than one backend resolves differently depending on
-  whether the op is **id-keyed** (`show`, `files`, `commits`, `comment`, `transition`, `update`,
+  whether the op is **id-keyed** (`show`, `files`, `commits`, `review submit`, `comment`, `transition`, `update`,
   `close`, `deps`, `get_logs`, `rerun_failed`, every `scm` targeted verb) or an **id-less write**
   (`issue create` today, the only member) — a split fixed
   by bead pg2-2j5ac.17.2's own operator ruling, deliberately narrow (see this rule's final
@@ -232,6 +232,7 @@ status`/`config validate`.
     at least one did not); `3` total failure (every backend failed, including the case of zero
     backends registered — a misconfigured host has nothing to report as success).
   - **Targeted** (resolves to exactly one backend — `show`, `files`, `commits`,
+    `review submit`,
     `create`, `comment`, `transition`, `get_logs`, `rerun-failed`, `worktree add`/`remove`/`list`,
     `branch detect`): `0` the operation completed and produced a well-formed response (including
     a successful write); `4` `not_found` — a well-formed negative answer, MUST NOT share a code

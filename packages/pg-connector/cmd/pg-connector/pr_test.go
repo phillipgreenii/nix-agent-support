@@ -566,3 +566,101 @@ func TestPrListCacheFallback_DegradedSourceServesStaleEntities(t *testing.T) {
 		t.Fatalf("fallback backend's own source row = %+v, want a degraded row with a reason noting the fallback", fallbackRow)
 	}
 }
+
+// reviewSubmitResp is a well-formed review_submit wire response.
+const reviewSubmitOKResp = `{"protocolVersion":1,"schemaVersion":4,"result":{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"2026-01-01T00:00:00Z"}}`
+
+func executePrWithStdin(t *testing.T, stdin string, args []string) (string, string, int) {
+	t.Helper()
+	root := newRootCmd()
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetArgs(args)
+	err := root.Execute()
+	if err == nil {
+		return outBuf.String(), errBuf.String(), 0
+	}
+	var ee *exitError
+	if errors.As(err, &ee) {
+		return outBuf.String(), errBuf.String(), ee.code
+	}
+	return outBuf.String(), errBuf.String(), 1
+}
+
+func TestReviewSubmitNotFoundExits4(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rs-nf", map[string]string{
+		"review_submit": `{"protocolVersion":1,"schemaVersion":4,"error":{"code":"not_found","message":"no such pr"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rs-nf")
+	stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b"}`, []string{"pr", "review", "submit", "pr-1"})
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4; stdout=%s", code, stdout)
+	}
+}
+
+func TestReviewSubmitStdinParsedIntoWireArgs(t *testing.T) {
+	args, err := readReviewSubmitArgs(strings.NewReader(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}],"supersede_pending":true}`), "pr-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["id"] != "pr-9" || args["head_sha"] != "abc" || args["supersede_pending"] != true {
+		t.Fatalf("args = %+v", args)
+	}
+	if cs, ok := args["comments"].([]any); !ok || len(cs) != 1 {
+		t.Fatalf("comments = %+v", args["comments"])
+	}
+	if _, err := readReviewSubmitArgs(strings.NewReader(`not json`), "pr-9"); err == nil {
+		t.Fatal("want error for non-JSON stdin")
+	}
+}
+
+func TestReviewSubmitBadStdinExits1(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rs-bad", map[string]string{"review_submit": reviewSubmitOKResp}, `{}`)
+	writeConfigFor(t, "backend-rs-bad")
+	_, _, code := executePrWithStdin(t, `nope`, []string{"pr", "review", "submit", "pr-1"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
+
+func TestReviewSubmitFailedSupersedeStillExits0(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rs-sup", map[string]string{
+		"review_submit": `{"protocolVersion":1,"schemaVersion":4,"result":{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","supersede":{"attempted":true,"deleted":false,"error":"boom"}}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rs-sup")
+	stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b","supersede_pending":true}`, []string{"pr", "review", "submit", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Supersede struct {
+			Attempted bool   `json:"attempted"`
+			Deleted   bool   `json:"deleted"`
+			Error     string `json:"error"`
+		} `json:"supersede"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.State != "pending" || !res.Supersede.Attempted || res.Supersede.Deleted || res.Supersede.Error != "boom" {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestReviewSubmitInvalidArgumentExits1(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rs-ia", map[string]string{
+		"review_submit": `{"protocolVersion":1,"schemaVersion":4,"error":{"code":"invalid_argument","message":"head moved"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rs-ia")
+	_, _, code := executePrWithStdin(t, `{"head_sha":"old","body":"b"}`, []string{"pr", "review", "submit", "pr-1"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+}
