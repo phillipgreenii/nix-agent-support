@@ -2,6 +2,7 @@ package interpret
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/verdict"
@@ -42,10 +43,16 @@ const (
 //     than (or in addition to) a matching review State — observed for
 //     zr-review-bot, which posts a COMMENTED review (not CHANGES_REQUESTED)
 //     alongside a separate marker-carrying issue comment when it finds
-//     problems, and only uses a formal APPROVED review when clean. Authority
-//     Approved reads BotVerdictApproved; Authority Withheld (findings
-//     Problems, or a Clean-but-not-approved reading) reads
-//     BotVerdictDisapproved; Pending/Absent contribute nothing.
+//     problems, and only uses a formal APPROVED review when clean. A comment
+//     is a bot DISAPPROVAL only when its Findings are Problems (a real review
+//     finding). Findings Clean + Authority Approved reads BotVerdictApproved.
+//     Findings Clean + Authority Withheld ("no issues found, but
+//     auto-approval blocked" — an app not opted in to auto-approval, a
+//     not_approvable classification) is a POLICY limit on the bot's ability
+//     to approve, not a finding against the PR, so it contributes nothing
+//     (no-decision): it neither disapproves nor counts as approved.
+//     Pending/Absent contribute nothing. See classifyCommentVerdict for the
+//     last-definite-comment-wins ordering.
 //
 // Two independent signals, since neither one alone is a complete account of
 // every bot's real behavior: a bot that only ever emits Review objects needs
@@ -55,8 +62,9 @@ const (
 // over approved (never silently overridden by an approval elsewhere), exactly
 // mirroring the single-signal precedence the Review-state-only read already
 // had. HumanApprovers/HumanApproved count every DISTINCT login with a
-// currently APPROVED review — every reviewer counts as human, since this
-// packet has no agent registry input (see interpret.go's package doc).
+// currently APPROVED review that is NOT a bot: approverAllowlist logins and
+// logins isBotLogin recognizes are excluded (they feed BotVerdict, not the
+// human count). SelfApproved is unaffected by the bot exclusion.
 // WaitingOnMe is populated by interpret.go's caller (computeWaitingOnMe), not
 // here.
 //
@@ -81,7 +89,9 @@ const (
 // collapse for no benefit. HumanChangesRequested excludes approverAllowlist
 // logins deliberately: a bot's disapproval is already BotVerdict's concern,
 // and double-carrying it here would let one bot rejection present as two
-// independent signals to classifyPanel.
+// independent signals to classifyPanel. It also excludes isBotLogin accounts
+// (non-allowlisted bots such as github-actions), which are not humans and
+// have no BotVerdict channel either; their CHANGES_REQUESTED is ignored.
 func computeApprovals(pr prShow, self string, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
 	allow := toSet(approverAllowlist)
 
@@ -110,9 +120,12 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 	approvedByAllowlisted := false
 	for author, state := range latestDecision {
 		_, isBot := allow[author]
+		isNonHuman := isBot || isBotLogin(author)
 		switch state {
 		case "APPROVED":
-			approvers[author] = struct{}{}
+			if !isNonHuman {
+				approvers[author] = struct{}{}
+			}
 			if self != "" && author == self {
 				selfApproved = true
 			}
@@ -122,17 +135,20 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 		case "CHANGES_REQUESTED":
 			if isBot {
 				disapproved = true
-			} else {
+			} else if !isNonHuman {
 				humanChangesRequested = true
 			}
 		}
 	}
 
-	if commentAuthority := classifyCommentVerdict(pr, verdictClassifier); commentAuthority == verdict.Withheld {
+	switch r := classifyCommentVerdict(pr, verdictClassifier); {
+	case r.Findings == verdict.Problems:
 		disapproved = true
-	} else if commentAuthority == verdict.Approved {
+	case r.Findings == verdict.Clean && r.Authority == verdict.Approved:
 		approvedByAllowlisted = true
 	}
+	// Clean + Withheld (policy-blocked auto-approval) and everything else
+	// deliberately fall through: no-decision.
 
 	botVerdict := BotVerdictNoDecision
 	switch {
@@ -151,24 +167,47 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 	}
 }
 
-// classifyCommentVerdict returns the comment-verdict-grammar's Authority
-// reading across every comment on pr (top-level and review-thread), or
-// verdict.Absent when verdictClassifier is nil (no generations configured —
-// the comment-grammar signal is opt-in via config.VerdictGenerations) or no
-// comment carries a configured BodyMarker at all.
+// knownBotLogins are bot accounts whose login pg-connector reports WITHOUT
+// the "[bot]" suffix on REVIEW authors (observed 2026-10-01 on
+// ZR-Private/ziprecruiter#110113: review author "github-actions" while the
+// same bot's issue-comment author is "github-actions[bot]"; the payload
+// carries no author-type field). The "[bot]" suffix rule alone misses them.
+var knownBotLogins = map[string]struct{}{
+	"github-actions":                {},
+	"dependabot":                    {},
+	"copilot-pull-request-reviewer": {},
+}
+
+// isBotLogin reports whether login is a bot account: a GitHub "[bot]" suffix
+// or a member of knownBotLogins (suffix-stripped review authors).
+func isBotLogin(login string) bool {
+	if strings.HasSuffix(login, "[bot]") {
+		return true
+	}
+	_, ok := knownBotLogins[login]
+	return ok
+}
+
+// classifyCommentVerdict returns the verdict Result of the most recent
+// DEFINITE verdict comment across pr (top-level and review-thread), or the
+// zero Result (which matches none of computeApprovals' cases) when
+// verdictClassifier is nil (no generations configured — the comment-grammar
+// signal is opt-in via config.VerdictGenerations) or no comment carries a
+// definite reading.
 //
 // When more than one comment carries a matching marker (a bot re-posting its
-// overview comment across pushes), the LAST one wins — pr.allComments()
-// preserves the host's chronological order, so this reads as "the bot's most
-// recent verdict comment," mirroring Classify's own "highest declared
-// generation wins" precedent applied across comments instead of generations.
-// Only a DEFINITE reading (Findings Clean or Problems) can win; a comment
-// that only reaches Pending/Absent never overrides an earlier definite one.
-func classifyCommentVerdict(pr prShow, verdictClassifier *verdict.Classifier) verdict.Authority {
+// overview comment across pushes), the LAST definite one wins —
+// pr.allComments() preserves the host's chronological order. "Definite"
+// means Findings is Clean or Problems; a comment that only reaches
+// Pending/Absent never overrides an earlier definite one. A later
+// Clean + Withheld comment IS definite, so it supersedes an earlier Problems
+// comment and the net verdict resets to no-decision (the bot re-reviewed and
+// found nothing wrong, even though it cannot auto-approve).
+func classifyCommentVerdict(pr prShow, verdictClassifier *verdict.Classifier) verdict.Result {
+	var best verdict.Result
 	if verdictClassifier == nil {
-		return verdict.Absent
+		return best
 	}
-	best := verdict.Absent
 	for _, c := range pr.allComments() {
 		if c.Body == "" {
 			continue
@@ -177,7 +216,7 @@ func classifyCommentVerdict(pr prShow, verdictClassifier *verdict.Classifier) ve
 		if result.Findings == verdict.FindingsUnknown {
 			continue
 		}
-		best = result.Authority
+		best = result
 	}
 	return best
 }

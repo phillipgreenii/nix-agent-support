@@ -268,7 +268,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	}
 	ownership := classifyOwnership(selfLogin, pr.Author, commitAuthors)
 
-	ci := computeCIRollup(facts.CI, checkInterpreters)
+	ci := computeCIRollup(facts.CI, checkInterpreters, pr.HeadSHA)
 
 	enrichment := computeEnrichment(pr, files, commits)
 	// scoreUrgencyWithHealth fully replaces the base-only computeUrgency
@@ -335,6 +335,7 @@ type prShow struct {
 	State            string      `json:"state"`
 	Branch           string      `json:"branch"`
 	Base             string      `json:"base"`
+	HeadSHA          string      `json:"head_sha,omitempty"`
 	Author           string      `json:"author"`
 	URL              string      `json:"url"`
 	Draft            bool        `json:"draft"`

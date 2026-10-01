@@ -42,6 +42,19 @@ and MUST NOT use an LLM for any step below.
   `success` passes), the bot verdict is disapproved, a non-bot reviewer currently carries a
   `CHANGES_REQUESTED` review, or there is a merge conflict. Blocked always wins over every
   assignment/approval check below.
+  - **CI green** is judged only from the PR's current head commit. Workflow runs from earlier
+    pushed commits are ignored — GitHub cancels a superseded commit's in-flight runs, and those
+    cancellations are not failures of the current state. Within the head commit only the newest
+    run of each workflow (highest attempt, then highest run id) counts. A run with no commit SHA,
+    or a PR whose head commit is unknown, is counted as before.
+  - **Bot disapproval** from a comment verdict requires Findings `Problems`. Clean + Approved is a
+    bot approval; Clean + Withheld (e.g. "No issues found" with auto-approval blocked because an
+    app is not opted in) is a policy limit, not a review finding, and contributes no verdict. The
+    most recent definite verdict comment wins.
+  - **Human approval** (`human_approvers` / `human_approved`) and the non-bot
+    `CHANGES_REQUESTED` check exclude bots: `approver_allowlist` logins, any login ending in
+    `[bot]`, and a small set of known bots GitHub reports without that suffix on reviews
+    (`github-actions`, `dependabot`, `copilot-pull-request-reviewer`).
   - **Team**, once not blocked: if the operator is a requested reviewer and has not yet approved
     → `team_awaiting_me`; if the operator has already approved → `team_awaiting_owner` (the ball
     is back with the PR's owner or other reviewers). If the operator is not a requested reviewer:
