@@ -64,6 +64,11 @@ type ghProvider interface {
 	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
 	ViewerLogin(ctx context.Context) (string, error)
 	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// FindPendingReview/DeleteReview/PostPendingReview back review_submit
+	// (SubmitReview, review_submit.go).
+	FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error)
+	DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error
+	PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.

@@ -55,6 +55,15 @@ type fakeGH struct {
 	viewerLogin         string
 	viewerLoginErr      error
 	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
+
+	// review_submit seam (see review_submit_test.go).
+	pendingID    int64
+	pendingFound bool
+	findErr      error
+	deleteErr    error
+	postErr      error
+	deleted      []int64
+	posts        []postedReview
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {

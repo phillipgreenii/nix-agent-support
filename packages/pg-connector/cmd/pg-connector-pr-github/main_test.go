@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -57,6 +58,18 @@ func (fakeGH) ViewerLogin(ctx context.Context) (string, error) {
 
 func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
 	return nil, nil
+}
+
+func (fakeGH) FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
+	return nil
+}
+
+func (fakeGH) PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error) {
+	return &api.Review{ID: "RV", State: "pending"}, nil
 }
 
 func newTestBackend(t *testing.T) *internal.Backend {
@@ -179,5 +192,15 @@ func TestServeLoop_ShowRoundTripsThroughStdinStdout(t *testing.T) {
 	}
 	if pr.ID != "owner/repo#1" || pr.Title != "hello" {
 		t.Fatalf("result = %+v", pr)
+	}
+}
+
+// TestNewDispatchTable_ListsReviewSubmit: the GitHub backend implements the
+// optional ReviewSubmitter capability, so review_submit is registered and
+// therefore listed in capabilities.ops.
+func TestNewDispatchTable_ListsReviewSubmit(t *testing.T) {
+	table := newDispatchTable(newTestBackend(t))
+	if _, ok := table["review_submit"]; !ok {
+		t.Fatalf("review_submit missing from dispatch table; ops = %v", table.Ops())
 	}
 }

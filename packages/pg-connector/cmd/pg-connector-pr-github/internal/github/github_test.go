@@ -2365,3 +2365,80 @@ func TestSearchPRsEnriched_NeverFillsBaseSHA(t *testing.T) {
 		t.Errorf("BaseSHA = %q, want empty on the list path", prs[0].BaseSHA)
 	}
 }
+
+func TestPostPendingReview_PayloadAnchorsStampsAndCarriesSide(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
+	p := NewWithRunner(gh)
+
+	rev, err := p.PostPendingReview(context.Background(), "foo/bar", 42, "deadbeef", "top",
+		[]ReviewSubmitComment{
+			{Path: "a.go", Line: 3, Side: "LEFT", Body: "old line"},
+			{Path: "b.go", Line: 9, Body: "new line"},
+		})
+	if err != nil {
+		t.Fatalf("PostPendingReview: %v", err)
+	}
+	if rev.ID != "RV_kw" || rev.State != "pending" {
+		t.Fatalf("unexpected review: %+v", rev)
+	}
+	payload := decodeLastReviewPayload(t, gh)
+	if payload["commit_id"] != "deadbeef" {
+		t.Errorf("commit_id = %v", payload["commit_id"])
+	}
+	if _, has := payload["event"]; has {
+		t.Errorf("payload must carry no event (stays PENDING): %v", payload)
+	}
+	if body, _ := payload["body"].(string); !strings.Contains(body, BotMarker) || !strings.HasPrefix(body, "top") {
+		t.Errorf("body not stamped: %q", body)
+	}
+	cs, _ := payload["comments"].([]any)
+	if len(cs) != 2 {
+		t.Fatalf("comments = %v", payload["comments"])
+	}
+	c0, c1 := cs[0].(map[string]any), cs[1].(map[string]any)
+	if c0["side"] != "LEFT" || c1["side"] != "RIGHT" {
+		t.Errorf("sides = %v / %v, want LEFT / RIGHT", c0["side"], c1["side"])
+	}
+	for i, c := range []map[string]any{c0, c1} {
+		if b, _ := c["body"].(string); !strings.Contains(b, BotMarker) {
+			t.Errorf("comment %d not stamped: %q", i, b)
+		}
+	}
+}
+
+func TestFindPendingReview_PicksPendingAcrossPages(t *testing.T) {
+	gh := newFakeGH()
+	var page1 []string
+	for i := 1; i <= pendingReviewPageSize; i++ {
+		page1 = append(page1, `{"id":`+strings.Repeat("1", 1)+`,"state":"COMMENTED"}`)
+	}
+	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=1"] = []byte("[" + strings.Join(page1, ",") + "]")
+	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=2"] = []byte(`[{"id":99,"state":"APPROVED"},{"id":123,"state":"PENDING"}]`)
+	p := NewWithRunner(gh)
+
+	id, found, err := p.FindPendingReview(context.Background(), "foo/bar", 42)
+	if err != nil || !found || id != 123 {
+		t.Fatalf("FindPendingReview = (%d, %v, %v), want (123, true, nil)", id, found, err)
+	}
+}
+
+func TestFindPendingReview_NoneFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=1"] = []byte(`[{"id":1,"state":"APPROVED"}]`)
+	_, found, err := NewWithRunner(gh).FindPendingReview(context.Background(), "foo/bar", 42)
+	if err != nil || found {
+		t.Fatalf("FindPendingReview = (%v, %v), want (false, nil)", found, err)
+	}
+}
+
+func TestDeleteReview_Argv(t *testing.T) {
+	gh := newFakeGH()
+	if err := NewWithRunner(gh).DeleteReview(context.Background(), "foo/bar", 42, 123); err != nil {
+		t.Fatalf("DeleteReview: %v", err)
+	}
+	got := strings.Join(gh.calls[len(gh.calls)-1], " ")
+	if got != "api repos/foo/bar/pulls/42/reviews/123 --method DELETE" {
+		t.Errorf("argv = %q", got)
+	}
+}
