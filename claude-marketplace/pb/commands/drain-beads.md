@@ -675,30 +675,51 @@ build` for nix repos, and the repo's tests, including a slow full suite
 
    **Worktree-pinning check — run BEFORE dispatching the lander.** Your OWN
    session, not the bead's isolation worktree, can be environment-pinned: the
-   harness enforces a hard refusal on any git operation — direct, or via a
-   dispatched subagent — that targets a path outside that pin, including the
-   repo's own canonical clone. This is intentional, correct harness behavior
-   (see the closed, mischaracterized `pg2-79gml`; provenance for this check:
-   `pg2-weug3`, incident on epic `pg2-99f1r`). It is observable two ways:
-   your OWN environment block states it explicitly (something like "This is a
-   git worktree… Run all commands from this directory. Do NOT `cd` to the
-   original repository root"); or mechanically — `pwd` resolves under this
-   repo's `.worktrees/<id>` isolation directory (see ISOLATE above) while a
-   canonical-clone git query run from here (e.g. the `<primary>`-resolution
-   query LAND's own verification step uses below) either still names the
-   CANONICAL repo rather than this worktree, or is refused outright. Either
-   reading means the same thing: this session cannot reach the canonical
-   clone.
+   harness can refuse a git operation — direct, or via a dispatched subagent —
+   that targets a path outside that pin, including the repo's own canonical
+   clone. This is intentional, correct harness behavior (see the closed,
+   mischaracterized `pg2-79gml`; provenance for this check: `pg2-weug3`,
+   incident on epic `pg2-99f1r`; the false-abort correction below:
+   `pg2-u4r7t`). The pin is **proven ONLY by an OBSERVED refusal**: either a
+   harness pre-execution refusal message of the shape "This session is
+   isolated in the worktree `<path>`, but this command redirects git to the
+   shared checkout via -C. Refusing to run it" (observed in a session LAUNCHED
+   pinned to a `.claude/worktrees/<name>` worktree — the shape `pg2-79gml`
+   recorded), or a FAILED PROBE of the operation a land actually needs (e.g.
+   a read-only `git -C <abs-canonical> rev-parse --abbrev-ref HEAD` that is
+   refused or errors). Environment-block text alone — "This is a git
+   worktree… Do NOT `cd` to the original repository root" — and a `pwd` that
+   resolves under `.worktrees/<id>` or `.claude/worktrees/<name>` are
+   ADVISORY: they MUST NOT, alone, be treated as a pin, and an abort MUST NOT
+   rest on them. The harness rewrites that block whenever the persistent Bash
+   cwd lands in a worktree, including when YOU put it there (`pg2-u4r7t`,
+   2026-09-30: an orchestrator that had `cd`'d into `.worktrees/<id>` read the
+   rewritten block as a pin and falsely aborted a land, although a read-only
+   `git -C <canonical>` probe from that same cwd succeeded). So: PROBE
+   empirically before concluding anything, and if still unsure, dispatch the
+   lander and let it report `stopped:` — a wasted dispatch costs less than a
+   false abort.
+
+   **Self-pinned recovery.** If the block says worktree-pinned but YOU
+   persistent-`cd`'d there (the cwd is under `.worktrees/` or
+   `.claude/worktrees/` and you did not launch pinned), you pinned yourself
+   (see the Rules: the orchestrator MUST NOT persistent-`cd` into a worktree
+   or set root). Recover by running a plain `cd <abs-canonical-clone-root>` as
+   its OWN Bash call — NO `git` in the same command — then re-run the probe
+   above. Probe passes → NOT pinned; proceed to land. Do NOT abort the land on
+   a self-pin. Only a probe that STILL fails after the recovery `cd` counts as
+   an observed refusal.
 
    That matters only when landing actually NEEDS canonical-clone access.
    Check the resolved strategy the same cheap way the lander itself would —
    `git config --get pgii-integrate-branch.strategy`, or run the bare
    `integrate-branch-support` advisory command yourself and read its
    `strategy` field — before deciding:
-   - NOT pinned, OR the resolved strategy is (or will resolve to)
+   - NOT pinned (no observed refusal, probes pass), OR the resolved strategy is (or will resolve to)
      `pull-request` (pushing `drain/<id>` needs no canonical-clone access) →
      this check does not apply; proceed to dispatch the lander as below.
-   - PINNED AND the resolved strategy is (or will resolve to)
+   - PINNED (per an observed refusal or failed probe, as above) AND the
+     resolved strategy is (or will resolve to)
      `ff-merge-to-main` → do NOT dispatch a lander subagent for this repo. It
      would fail by construction — the harness's refusal applies to a
      dispatched subagent exactly as it does to your own direct calls, so the
@@ -719,18 +740,23 @@ build` for nix repos, and the repo's tests, including a slow full suite
      as committed — nothing here is discarded. Then return to CLAIM.
 
    The lander brief MUST contain: the bead id; the absolute canonical repo
-   root; the worktree path and branch `drain/<id>`; the working directory to
-   `cd` into first (worktree path, or for a set the set root
-   `<workspace_root>/.workforests/<set-branch>`); and these instructions:
-   - for the SINGLE-REPO path: `cd` into the worktree and confirm
-     `git rev-parse --abbrev-ref HEAD` prints `drain/<id>` BEFORE invoking any
-     skill, else report `stopped:wrong-branch` and land NOTHING; then invoke
+   root; the worktree path and branch `drain/<id>` (for a set, the set root
+   `<workspace_root>/.workforests/<set-branch>`); and these instructions. The
+   lander MUST NOT persistent-`cd` into the worktree or set root (that can
+   self-pin it exactly as it can the orchestrator, `pg2-u4r7t`): it MUST use
+   `git -C "$WT"` (with `WT` set to the absolute worktree path), absolute
+   paths, or a `( cd "$WT" && ... )` subshell, and its cwd stays where it
+   started:
+   - for the SINGLE-REPO path: BEFORE invoking any skill, confirm
+     `git -C "$WT" rev-parse --abbrev-ref HEAD` prints `drain/<id>`, else
+     report `stopped:wrong-branch` and land NOTHING; then invoke
      `integrate-branch:integrate-branch` and let IT resolve the strategy —
      NEVER name a handler (breaks `pull-request` repos);
-   - for the WORKFOREST-SET path: `cd` into the set root and invoke
-     `pn-workspace-rules:land-workforest` instead — the set root is NOT
-     itself a git repository, so the `git rev-parse` branch-precheck above
-     MUST NOT be run there (it would exit 128, a false
+   - for the WORKFOREST-SET path: invoke
+     `pn-workspace-rules:land-workforest` against the set root (by absolute
+     path, no persistent `cd`) instead — the set root is NOT
+     itself a git repository, so the `git -C <wt> rev-parse` branch-precheck
+     above MUST NOT be run there (it would exit 128, a false
      `stopped:wrong-branch` on a path that never should have run it);
      `land-workforest` is responsible for verifying each member repo's own
      branch itself;
@@ -1080,12 +1106,20 @@ arguments, behavior is otherwise unchanged.
   (not discarded), and report to the operator that the session should be
   restarted fresh — this is a session-level anomaly, not a `human`-labeled
   bead park.
+- The orchestrator MUST NOT persistent-`cd` into a bead worktree
+  (`.worktrees/<id>`, `.claude/worktrees/<name>`) or a workforest set root: the
+  harness rewrites the environment block to pin the session there
+  (`pg2-u4r7t`). Use `git -C <abs>`, absolute paths, or a `( cd ... )`
+  subshell; the orchestrator's own cwd stays the canonical root. Brief
+  subagents the same way.
 - Before dispatching a LAND-step (step 6) lander, check whether YOUR OWN
-  session is environment-pinned to a worktree in a way that blocks
-  canonical-clone access (the environment block says so, or a canonical-clone
-  git query from here still resolves to — or is refused for — the canonical
-  repo rather than this worktree). Where the resolved strategy needs
-  canonical-clone access (`ff-merge-to-main`), a pinned session MUST NOT
+  session is pinned in a way that blocks canonical-clone access. A pin is
+  proven ONLY by an OBSERVED harness refusal or a failed probe of the needed
+  operation — environment-block text or a worktree `pwd` alone MUST NOT cause
+  an abort. If you self-pinned, recover per step 6's "Self-pinned recovery"
+  (plain `cd <abs-canonical>`, re-probe) and proceed. Where the resolved
+  strategy needs canonical-clone access (`ff-merge-to-main`) and the pin IS
+  proven, a pinned session MUST NOT
   dispatch a lander for that repo — it fails by construction — and MUST
   instead report to the operator and release the claim (open, unassigned,
   no `human` label — a session-shaped blocker, not a person-shaped one),
