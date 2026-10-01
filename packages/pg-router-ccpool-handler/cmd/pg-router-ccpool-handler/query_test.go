@@ -80,7 +80,7 @@ func TestFingerprintID(t *testing.T) {
 
 func TestQueryBeadsReady_mapsIssuesToWireEvents(t *testing.T) {
 	br := fakeBR{out: map[string]string{
-		"ready --label worker-ready --exclude-label human --json --limit 0": `{"data":[` +
+		"ready --label worker-ready --exclude-label human --exclude-label needs-split-review --json --limit 0": `{"data":[` +
 			`{"id":"zr-1","issue_type":"task","title":"process-feedback: x","metadata":{"repo":"o/r"}},` +
 			`{"id":"zr-2","issue_type":"task","title":"other"}` +
 			`]}`,
@@ -100,6 +100,25 @@ func TestQueryBeadsReady_mapsIssuesToWireEvents(t *testing.T) {
 	payload, ok := evt["payload"].(map[string]any)
 	if !ok || payload["id"] != "zr-1" || payload["title"] != "process-feedback: x" {
 		t.Fatalf("event payload wrong: %+v", evt)
+	}
+}
+
+// A bead labelled needs-split-review is never discovered (bead pg2-mab1w): the
+// query always passes --exclude-label for it, and drops it client-side even if
+// bd returned it.
+func TestQueryBeadsReady_needsSplitReviewNotDiscovered(t *testing.T) {
+	br := fakeBR{out: map[string]string{
+		"ready --exclude-label needs-split-review --json --limit 0": `{"data":[` +
+			`{"id":"zr-1","issue_type":"task","title":"a","labels":["needs-split-review"]},` +
+			`{"id":"zr-2","issue_type":"task","title":"b","labels":["x"]}` +
+			`]}`,
+	}}
+	events, err := queryBeadsReady(context.Background(), br, queryFile{EmitType: "work.ready"})
+	if err != nil {
+		t.Fatalf("queryBeadsReady error: %v", err)
+	}
+	if len(events) != 1 || events[0]["id"] != "work.ready:zr-2" {
+		t.Fatalf("events = %+v, want only zr-2", events)
 	}
 }
 

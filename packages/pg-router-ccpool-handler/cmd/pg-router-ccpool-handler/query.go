@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
@@ -154,10 +155,19 @@ func runQuery(args []string) int {
 // (dispatch.go) reads back, so an event this source emits round-trips
 // through the core unchanged.
 func queryBeadsReady(ctx context.Context, br beads.Runner, qf queryFile) ([]map[string]any, error) {
-	issues, err := beads.Ready(ctx, br, labelArgs(qf.Labels, qf.ExcludeLabels)...)
+	// needs-split-review (bead pg2-mab1w) is excluded from EVERY beads-ready
+	// discovery, whatever the config says: a budget-exhausted bead parked for
+	// split review MUST NOT be re-dispatched to a worker/review role. Applied
+	// both server-side (--exclude-label) and as a client-side backstop.
+	exclude := append([]string(nil), qf.ExcludeLabels...)
+	if !slices.Contains(exclude, beads.LabelNeedsSplitReview) {
+		exclude = append(exclude, beads.LabelNeedsSplitReview)
+	}
+	issues, err := beads.Ready(ctx, br, labelArgs(qf.Labels, exclude)...)
 	if err != nil {
 		return nil, fmt.Errorf("beads-ready query: %w", err)
 	}
+	issues = slices.DeleteFunc(issues, func(i beads.Issue) bool { return i.HasLabel(beads.LabelNeedsSplitReview) })
 	issues = postFilterIssues(issues, qf.TitlePrefix, qf.ItemType)
 	events := make([]map[string]any, 0, len(issues))
 	for _, iss := range issues {

@@ -122,5 +122,26 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   `budget stop <n> of <threshold> (session <id>)` and the `hard_stop` event-log record gains
   `budget_stops=<n>`. The record is cleared only when the bead is CLOSED; a reopened bead keeps
   its history. The threshold is the role setting `budget_stop_escalate_after` (default 3, `0`
-  disables all of the above). This invariant only counts; acting on the count is separate work.
+  disables all of the above). This invariant only counts; acting on the count is `INV-CCH-12`.
   The handler has no metrics emitter, so it emits no metric for this.
+- **`INV-CCH-12`** — when a hard stop brings a bead's recorded stop count (`INV-CCH-11`) to the
+  threshold or above, the handler MUST, BEFORE the unclaim, escalate: (a) a bead dispatched to the
+  `review` role, to a triage role (role name containing `triage`), or already carrying `was-split`
+  or any `split-from:*` label MUST go straight to a human — add `human` and comment
+  `budget stops reached threshold <t>; escalated to human (<reason>; not split). stop sessions:
+<ids>. last stop: session=<id> limit=<kind> used=<n> cap=<n>` (no second split round, and the
+  triage role never re-enters the split path); (b) any other bead MUST get the label
+  `needs-split-review` and the comment `budget stops reached threshold <t>; queued for split
+review`. The claim is still released (status open, assignee cleared) — the label, not the claim,
+  keeps the bead out of the pool: every beads-ready discovery the handler runs MUST exclude
+  `needs-split-review` (it is added to the query's exclude labels and re-checked client-side,
+  whatever the query config says; the ZR discovery queries also name it). The hard-stop event-log
+  record gains `escalation=<split-review|human>` and a `budget_escalation` record carries role,
+  pool, outcome, reason, `budget_stops`, `threshold`. The count is never reset, so an operator
+  removing `human` or `needs-split-review` makes the NEXT stop re-evaluate and re-escalate; a
+  reopened bead likewise keeps its history. A bead found closed at escalation time gets no
+  escalation write and is NOT unclaimed (that would reopen it). A failed escalation write is
+  logged and falls back to the plain unclaim. Threshold `0` disables escalation (and counting).
+  Budgets are never changed. The handler has no metrics emitter, so
+  `pg_router_budget_escalations_total` is NOT emitted; the event log and bead comments are the
+  record until a metric transport exists.

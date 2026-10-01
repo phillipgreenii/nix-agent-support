@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,8 +79,14 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	_ = w.CC.Close(ctx, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")
-	stops, counted := w.recordBudgetStop(ctx, sessionName, beadID)
-	_ = beads.Unclaim(ctx, w.BD, beadID)
+	iss, stops, counted := w.recordBudgetStop(ctx, sessionName, beadID)
+	outcome, closed := "", false
+	if counted {
+		outcome, closed = w.escalate(ctx, sessionName, beadID, be, iss, stops)
+	}
+	if !closed { // never unclaim (= reopen) a bead closed mid-flight
+		_ = beads.Unclaim(ctx, w.BD, beadID)
+	}
 	fields := map[string]any{
 		"session": sessionName, "bead": beadID, "worktree_reset": didReset, "worktree": wt,
 		"role": be.Role, "pool": be.Pool, "limit": string(be.Limit),
@@ -88,6 +95,9 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	}
 	if counted {
 		fields["budget_stops"] = stops
+		if outcome != "" {
+			fields["escalation"] = outcome
+		}
 	}
 	w.emit("error", "hard_stop", "budget hard stop reached", fields)
 }
@@ -100,26 +110,102 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 // <= 0) it does nothing. On any bd failure it logs and reports counted=false,
 // so the caller falls back to today's plain unclaim (the safe direction); the
 // Budget is never touched.
-func (w *Watchdog) recordBudgetStop(ctx context.Context, sessionName, beadID string) (stops int, counted bool) {
+func (w *Watchdog) recordBudgetStop(ctx context.Context, sessionName, beadID string) (iss beads.Issue, stops int, counted bool) {
 	if w.BudgetStopEscalateAfter <= 0 {
-		return 0, false
+		return beads.Issue{}, 0, false
 	}
 	if err := beads.RecordBudgetStop(ctx, w.BD, beadID, sessionName); err != nil {
 		w.emit("warn", "budget_stop_record_failed", "budget-stop record failed; plain unclaim", map[string]any{
 			"session": sessionName, "bead": beadID, "err": err.Error(),
 		})
-		return 0, false
+		return beads.Issue{}, 0, false
 	}
-	n, err := beads.BudgetStops(ctx, w.BD, beadID)
+	iss, err := beads.ShowObj(ctx, w.BD, beadID)
+	n := beads.BudgetStopCount(iss)
 	if err != nil {
 		w.emit("warn", "budget_stop_record_failed", "budget-stop count failed; plain unclaim", map[string]any{
 			"session": sessionName, "bead": beadID, "err": err.Error(),
 		})
-		return 0, false
+		return beads.Issue{}, 0, false
 	}
 	_ = beads.Comment(ctx, w.BD, beadID,
 		fmt.Sprintf("budget stop %d of %d (session %s)", n, w.BudgetStopEscalateAfter, sessionName))
-	return n, true
+	return iss, n, true
+}
+
+// Escalation outcomes (bead pg2-mab1w) and the labels they act through.
+const (
+	OutcomeSplitReview = "split-review"
+	OutcomeHuman       = "human"
+
+	LabelNeedsSplitReview = beads.LabelNeedsSplitReview
+	LabelWasSplit         = "was-split"
+	LabelSplitFromPrefix  = "split-from:"
+	labelHuman            = "human"
+)
+
+// humanOnlyReason reports why a bead at the escalation threshold skips the
+// split path and goes straight to a human ("" = splitting is allowed). Review
+// beads are PR reviews (splitting makes no sense); an already-split bead or a
+// split child gets no second round; the triage role itself must never re-enter
+// the split path. A role is "triage" when its name contains "triage" (covers
+// pg2-/zr-escalation-triager and the split-triage role).
+func humanOnlyReason(role string, iss beads.Issue) string {
+	switch {
+	case role == "review":
+		return "review role"
+	case strings.Contains(role, "triage"):
+		return "triage role"
+	case iss.HasLabel(LabelWasSplit):
+		return "already split"
+	}
+	for _, l := range iss.Labels {
+		if strings.HasPrefix(l, LabelSplitFromPrefix) {
+			return "split child"
+		}
+	}
+	return ""
+}
+
+// escalate acts on the stop count once it reaches the threshold (bead
+// pg2-mab1w): human (reviews, triage role, was-split/split-from:*) or
+// needs-split-review. It runs BEFORE the unclaim so the exclusion label is in
+// place when the bead returns to the pool. The count is never reset, so a
+// manually removed human/needs-split-review label re-escalates on the next stop.
+// closed=true means the bead was closed mid-flight: nothing is written (and the
+// caller must not unclaim, which would reopen it). On a bd write failure it
+// logs and returns outcome "" so the caller does today's plain unclaim.
+func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be *BudgetError, iss beads.Issue, stops int) (outcome string, closed bool) {
+	if stops < w.BudgetStopEscalateAfter {
+		return "", false
+	}
+	if iss.Status == "closed" {
+		w.emit("info", "budget_escalation_skipped", "bead closed mid-flight; no escalation", map[string]any{
+			"session": sessionName, "bead": beadID, "role": be.Role,
+		})
+		return "", true
+	}
+	reason := humanOnlyReason(be.Role, iss)
+	label, comment := LabelNeedsSplitReview, fmt.Sprintf("budget stops reached threshold %d; queued for split review", w.BudgetStopEscalateAfter)
+	outcome = OutcomeSplitReview
+	if reason != "" {
+		label, outcome = labelHuman, OutcomeHuman
+		comment = fmt.Sprintf("budget stops reached threshold %d; escalated to human (%s; not split). stop sessions: %s. last stop: session=%s limit=%s used=%s cap=%s",
+			w.BudgetStopEscalateAfter, reason, strings.Join(beads.BudgetStopSessions(iss), ", "), sessionName, be.Limit,
+			strconv.FormatFloat(be.Used, 'f', -1, 64), strconv.FormatFloat(be.Cap, 'f', -1, 64))
+	}
+	fields := map[string]any{
+		"session": sessionName, "bead": beadID, "role": be.Role, "pool": be.Pool,
+		"outcome": outcome, "reason": reason, "budget_stops": stops, "threshold": w.BudgetStopEscalateAfter,
+	}
+	if err := beads.AddLabel(ctx, w.BD, beadID, label); err != nil {
+		fields["err"] = err.Error()
+		w.emit("warn", "budget_escalation_failed", "budget escalation failed; plain unclaim", fields)
+		return "", false
+	}
+	_ = beads.Comment(ctx, w.BD, beadID, comment)
+	w.emit("warn", "budget_escalation", "budget stops reached threshold; escalated to "+outcome, fields)
+	return outcome, false
 }
 
 func (w *Watchdog) sessionCWD(ctx context.Context, externalID string) string {

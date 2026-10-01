@@ -3,6 +3,7 @@ package beads
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -10,6 +11,10 @@ import (
 // watchdog budget hard stop on a bead (bead pg2-6akgz). The full label is
 // BudgetStopLabelPrefix + <session id>.
 const BudgetStopLabelPrefix = "budget-stop:"
+
+// LabelNeedsSplitReview parks a budget-exhausted bead for the split-triage role
+// (bead pg2-mab1w). Every worker/review/feedback discovery query excludes it.
+const LabelNeedsSplitReview = "needs-split-review"
 
 // RecordBudgetStop records one budget hard stop for session on bead id as the
 // label `budget-stop:<session>`. The count is derived from the SET of such
@@ -47,6 +52,20 @@ func budgetStopLabels(iss Issue) []string {
 }
 
 func countBudgetStops(iss Issue) int { return len(budgetStopLabels(iss)) }
+
+// BudgetStopCount is the number of distinct budget-stop labels already read
+// into iss (the same count BudgetStops returns, without a second bd call).
+func BudgetStopCount(iss Issue) int { return countBudgetStops(iss) }
+
+// BudgetStopSessions lists the session ids of iss's budget-stop labels, sorted, without the label prefix.
+func BudgetStopSessions(iss Issue) []string {
+	var out []string
+	for _, l := range budgetStopLabels(iss) {
+		out = append(out, strings.TrimPrefix(l, BudgetStopLabelPrefix))
+	}
+	sort.Strings(out)
+	return out
+}
 
 // ClearBudgetStops removes every budget-stop label from bead id iff the bead is
 // closed; a non-closed bead (including a reopened one) keeps its history.
