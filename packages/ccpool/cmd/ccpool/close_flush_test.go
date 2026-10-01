@@ -19,6 +19,18 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/store"
 )
 
+// flushChildEnv makes this test binary act as the ccpool binary: when set, the
+// package init runs the real run() (exactly what main() does) and exits, so the
+// test can drive a genuine `ccpool close` process without `go build` (which is
+// unavailable in the hermetic nix check sandbox).
+const flushChildEnv = "CCPOOL_FLUSH_TEST_CHILD"
+
+func init() {
+	if os.Getenv(flushChildEnv) == "1" {
+		os.Exit(run())
+	}
+}
+
 // fakeCollector is a local OTLP/gRPC metrics sink recording the metric names it
 // receives.
 type fakeCollector struct {
@@ -48,15 +60,12 @@ func (c *fakeCollector) saw(name string) bool {
 
 // TestClose_flushesRunLifecycleMetricsThroughRun proves the close path exits
 // through run() (whose deferred telemetry shutdown flushes the periodic metric
-// reader): the built binary closes a seeded session with an OTLP endpoint set,
+// reader): a child process running run() closes a seeded session with an OTLP endpoint set,
 // and the collector receives the run-lifecycle instruments. os.Exit appears
 // only in main(), after run() has returned, so no bypass exists on this path.
 // It also shows a ccpool close subprocess exports to the OTLP endpoint in its
 // environment (the environment is inherited like any exec'd child's).
 func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds the ccpool binary")
-	}
 	col := &fakeCollector{names: map[string]bool{}}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -72,11 +81,6 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
-	bin := filepath.Join(base, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-
 	env := append(
 		os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
@@ -86,6 +90,7 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 		"CCPOOL_POOL=",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=http://"+lis.Addr().String(),
 		"OTEL_EXPORTER_OTLP_PROTOCOL=grpc",
+		flushChildEnv+"=1",
 	)
 	// Resolve the DB path the binary will use, under the same environment.
 	for _, kv := range env[len(os.Environ()):] {
@@ -111,7 +116,11 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 	}
 	_ = st.Close()
 
-	cmd := exec.Command(bin, "close", "flush")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "close", "flush")
 	cmd.Env = env
 	cmd.Dir = base
 	if out, err := cmd.CombinedOutput(); err != nil {
