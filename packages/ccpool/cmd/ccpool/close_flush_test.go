@@ -118,7 +118,7 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 		t.Fatalf("close: %v\n%s", err, out)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !(col.saw("ccpool_sessions_closed_total") && col.saw("ccpool_session_duration_seconds")) {
+	for time.Now().Before(deadline) && (!col.saw("ccpool_sessions_closed_total") || !col.saw("ccpool_session_duration_seconds")) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	for _, name := range []string{"ccpool_sessions_closed_total", "ccpool_session_duration_seconds"} {
