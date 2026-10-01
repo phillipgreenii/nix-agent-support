@@ -73,6 +73,15 @@ in
     (lib.mkIf (obs.enable or false) {
       phillipgreenii.observability.logSources.ccpool.path =
         "\${env:XDG_STATE_HOME}/ccpool/diagnostics.jsonl";
+
+      # Per-pool dashboard (pg2-om899.8). Same "Claude Agents" folder title as
+      # pa-monitor's provider and alert groups, so all converge on one Grafana
+      # folder BY TITLE (no folderUid; see pa-monitor's registration). Only
+      # rendered when observability.ui.enable is also set.
+      phillipgreenii.observability.dashboardProviders.ccpool = {
+        folder = "Claude Agents";
+        dashboards = [ ../../../packages/ccpool/grafana/ccpool-pools.json ];
+      };
     })
 
     (lib.mkIf reapEnabledByAnyUser {

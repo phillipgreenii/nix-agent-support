@@ -1,0 +1,411 @@
+{
+  "uid": "ccpool-pools",
+  "title": "ccpool pools",
+  "tags": ["ccpool"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "description": "ccpool sessions grouped by pool (the basename of the pool directory). The pool variable falls back to All (regex .*), so panels render even before the first reaper sweep populates ccpool_session_info. A series with no pgrouter_role label is shown as unlabelled.",
+  "templating": {
+    "list": [
+      {
+        "name": "pool",
+        "label": "pool",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(ccpool_session_info, pool)",
+        "definition": "label_values(ccpool_session_info, pool)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "value": "$__all",
+          "text": "All"
+        }
+      },
+      {
+        "name": "role",
+        "label": "role",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(ccpool_session_info, pgrouter_role)",
+        "definition": "label_values(ccpool_session_info, pgrouter_role)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "value": "$__all",
+          "text": "All"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Runs",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Run duration (p50 / p95)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Duration of one session run (launch or resume), by pool. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, pool) (rate(ccpool_session_duration_seconds_bucket{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{pool}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, pool) (rate(ccpool_session_duration_seconds_bucket{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{pool}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "How runs ended",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Runs ended over the selected time range, by pool and result (idle_ttl, cap_eviction, operator, handler, exited). Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool, result) (increase(ccpool_sessions_closed_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__range]))",
+          "legendFormat": "{{pool}} / {{result}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Retries and failures",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 5,
+      "title": "Retries",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Retry attempts by pool and class, and genuine retry-policy exhaustion by pool. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool, class) (increase(ccpool_retries_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "retries {{pool}} / {{class}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool) (increase(ccpool_retry_exhausted_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "exhausted {{pool}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Failures and launch outcomes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Launch outcomes by pool, outcome and route; cancel outcomes by pool; and, for context, pg-router failures by class and reason (not pool-scoped; the handler-error series has no reason, shown as none). Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool, outcome, route) (increase(ccpool_launch_outcome_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "launch {{pool}} / {{outcome}} / {{route}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (pool) (increase(ccpool_cancel_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval]))",
+          "legendFormat": "cancel {{pool}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (class, reason) (label_replace(increase(pg_router_failures_total[$__rate_interval]), \"reason\", \"none\", \"reason\", \"^$\"))",
+          "legendFormat": "pg-router {{class}} / {{reason}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Tokens and capacity",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "title": "Tokens in live sessions",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Output tokens used so far by each LIVE Claude session, grouped by pool. Source: pa-monitor session_tokens, which is CUMULATIVE over the session (the sum of output_tokens across all assistant events in the session transcript; it is not the current context size, which pa-monitor reports separately as context_tokens). Only live sessions appear: a session's series vanishes when it ends, so this is not a per-pool lifetime total. Sessions not managed by ccpool are excluded. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (pool, pgrouter_role) (pa_monitor_session_tokens\n  * on (session_id) group_left (pool, pgrouter_role)\n    label_replace(\n      max by (claude_session_id, pool, pgrouter_role) (ccpool_session_info),\n      \"session_id\", \"$1\", \"claude_session_id\", \"(.*)\"\n    )) and on (pool) ccpool_session_info{pool=~\"$pool\"}, \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "legendFormat": "{{pool}} / {{pgrouter_role}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Capacity",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Sessions in use (dim=live) against the pool maximum (dim=max_sessions), by pool. Pool values are directory basenames, the same as the pool variable. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pool) (ccpool_pool_capacity{dim=\"live\", pool=~\"$pool\"})",
+          "legendFormat": "in use {{pool}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (pool) (ccpool_pool_capacity{dim=\"max_sessions\", pool=~\"$pool\"})",
+          "legendFormat": "capacity {{pool}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ]
+}

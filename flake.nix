@@ -1304,6 +1304,32 @@
                 touch $out
               '';
 
+              # ccpool-pools Grafana dashboard guard (bead pg2-om899.8): the JSON
+              # parses, carries the fixed uid, and every panel query references only
+              # the metric names the plan enumerates (a typo'd or invented series
+              # would silently render "No data"). The capacity instrument is
+              # ccpool_pool_capacity (telemetry.PoolCapacityMetric).
+              test-ccpool-pools-dashboard =
+                pkgs.runCommand "test-ccpool-pools-dashboard" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    f=${./packages/ccpool/grafana/ccpool-pools.json}
+                    jq -e '.uid == "ccpool-pools"' "$f" >/dev/null || { echo "FAIL: uid is not ccpool-pools" >&2; exit 1; }
+                    allowed='^(ccpool_session_duration_seconds_(bucket|sum|count)|ccpool_sessions_closed_total|ccpool_retries_total|ccpool_retry_exhausted_total|ccpool_launch_outcome_total|ccpool_cancel_total|ccpool_session_info|ccpool_pool_capacity|pa_monitor_session_tokens|pa_monitor_session_info|pg_router_failures_total)$'
+                    exprs="$(jq -r '[.panels[].targets[]?.expr] | length' "$f")"
+                    [ "$exprs" -gt 0 ] || { echo "FAIL: no panel queries found" >&2; exit 1; }
+                    names="$(jq -r '.panels[].targets[]?.expr' "$f" | grep -oE '\b(ccpool|pa_monitor|pg_router)_[a-z_]+' | sort -u)"
+                    bad=0
+                    for n in $names; do
+                      if ! printf '%s\n' "$n" | grep -qE "$allowed"; then
+                        echo "FAIL: dashboard query references unlisted metric $n" >&2
+                        bad=1
+                      fi
+                    done
+                    [ "$bad" -eq 0 ] || exit 1
+                    echo "ok: uid ccpool-pools, $exprs queries, metric names within the allowed set"
+                    touch $out
+                  '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #
