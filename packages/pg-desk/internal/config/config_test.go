@@ -41,7 +41,7 @@ func yamlTags(typ reflect.Type) []string {
 func TestConfigCoversAllSection78Keys(t *testing.T) {
 	got := yamlTags(reflect.TypeOf(Config{}))
 	want := []string{
-		"self_login", "team_members", "watch_labels", "repos",
+		"self_login", "self_issue_owner", "team_members", "watch_labels", "repos",
 		"ticket_patterns", "agents", "approver_allowlist",
 		"verdict_generations", "check_interpreters",
 		"ci_only_attempts_threshold", "jira", "category_vocabulary",

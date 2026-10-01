@@ -55,9 +55,12 @@ type Config struct {
 	// Path is the absolute path the config was loaded from. Populated by Load.
 	Path string `yaml:"-" json:"path,omitempty"`
 
-	SelfLogin   string   `yaml:"self_login" json:"self_login"`
-	TeamMembers []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
-	WatchLabels []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
+	SelfLogin string `yaml:"self_login" json:"self_login"`
+	// SelfIssueOwner is the bd owner identity treated as "mine" for issue
+	// entities (the issue-type counterpart of SelfLogin).
+	SelfIssueOwner string   `yaml:"self_issue_owner,omitempty" json:"self_issue_owner,omitempty"`
+	TeamMembers    []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
+	WatchLabels    []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
 
 	// Repos is the configured repository list. Phase 9 supports exactly one
 	// entry (docs/behavior/pg-desk/README.md); a second entry is not
