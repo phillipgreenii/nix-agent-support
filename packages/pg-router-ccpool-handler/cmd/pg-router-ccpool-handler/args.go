@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity|origin> [flags]"
+const usageLine = "usage: pg-router-ccpool-handler <register|self-status|dispatch|postStartup|preShutdown|query|pool-capacity|origin|split> [flags]"
 
 const helpText = `pg-router-ccpool-handler — the ccpool/command participant for pg-router.
 
@@ -46,6 +46,11 @@ Subcommands:
                  per-origin availability probe (INV-CCH-10): origin status,
                  origin ignore <key>, origin unignore <key>. Configured by
                  the launch config's originProbe block (bead pg2-4gi2c)
+
+  split         NOT part of the wire contract — the split-triage role's write
+                 path (bead pg2-47rsh): split apply <bead-id> (JSON plan on
+                 stdin) / split unsplittable <bead-id> (reason on stdin).
+                 See: split --help
 
 Exit codes: 0 ok, 1 unexpected error, 2 usage, 9 busy (a pre-accept decline).
 `

@@ -14,15 +14,22 @@ const (
 	// de-escalation (the `escalated` label removed), or on a new comment
 	// since dispatch (a Triage outcome that leaves the bead escalated).
 	CloseOrTriage Completion = "close-or-triage"
+	// CloseOrSplitTriage is for the split-triage role (pg2-47rsh): it works a
+	// needs-split-review bead it does NOT claim. Done on close, or when the
+	// `needs-split-review` label is gone (split -> was-split, or not
+	// splittable -> human; both remove it). Unlike close-or-triage there is no
+	// comment-growth signal and no hand-back reading: the label is the only
+	// outcome marker.
+	CloseOrSplitTriage Completion = "close-or-split-triage"
 )
 
 func (c *Completion) UnmarshalText(b []byte) error {
 	switch Completion(b) {
-	case CloseOnly, CloseOrHandback, CloseOrTriage:
+	case CloseOnly, CloseOrHandback, CloseOrTriage, CloseOrSplitTriage:
 		*c = Completion(b)
 		return nil
 	}
-	return fmt.Errorf("invalid completion %q (valid: close-only, close-or-handback, close-or-triage)", b)
+	return fmt.Errorf("invalid completion %q (valid: close-only, close-or-handback, close-or-triage, close-or-split-triage)", b)
 }
 
 // FailureAction is what to do to the bead when a dispatch is flagged.

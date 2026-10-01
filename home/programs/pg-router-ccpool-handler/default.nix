@@ -481,6 +481,7 @@ let
                   "close-only"
                   "close-or-handback"
                   "close-or-triage"
+                  "close-or-split-triage"
                 ];
                 description = "Bead-done semantics (`roleFile.CCPool.Completion` / `roles.Completion`).";
               };

@@ -51,13 +51,19 @@ type Tracker struct {
 // close-or-triage (pg2-2grpj) the triager never claims its bead, so besides
 // closed / hand-back it is also done when the `escalated` label is gone
 // (Escalate: human added, escalated removed) or the comment count grew since the
-// first read (Triage: comment appended, bead left escalated).
+// first read (Triage: comment appended, bead left escalated). For
+// close-or-split-triage (pg2-47rsh) the bead is done on close or once
+// needs-split-review is gone (split or not-splittable both remove it); a
+// hand-back is not an outcome there.
 func (t *Tracker) Done(c roles.Completion, obs Observation, ok bool) bool {
 	if !ok {
 		return DoneSignal(c, "", t.SeenClaimed)
 	}
 	if DoneSignal(c, obs.Status, t.SeenClaimed) {
 		return true
+	}
+	if c == roles.CloseOrSplitTriage {
+		return !slices.Contains(obs.Labels, beads.LabelNeedsSplitReview)
 	}
 	if c != roles.CloseOrTriage {
 		return false

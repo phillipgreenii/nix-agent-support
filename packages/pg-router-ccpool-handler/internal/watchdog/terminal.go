@@ -204,6 +204,12 @@ func (w *Watchdog) escalate(ctx context.Context, sessionName, beadID string, be 
 		return "", false
 	}
 	_ = beads.Comment(ctx, w.BD, beadID, comment)
+	if reason == "triage role" {
+		// pg2-47rsh: the split-triage session hit its OWN budget. human is on;
+		// drop needs-split-review so the bead is not left half-parked and the
+		// split-triage completion sees a decided outcome. Never re-enters split.
+		_ = beads.RemoveLabel(ctx, w.BD, beadID, LabelNeedsSplitReview)
+	}
 	w.emit("warn", "budget_escalation", "budget stops reached threshold; escalated to "+outcome, fields)
 	return outcome, false
 }

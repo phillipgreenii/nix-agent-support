@@ -145,3 +145,24 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   Budgets are never changed. The handler has no metrics emitter, so
   `pg_router_budget_escalations_total` is NOT emitted; the event log and bead comments are the
   record until a metric transport exists.
+- **`INV-CCH-13`** — the split-triage role (bead pg2-47rsh) works a bead labelled
+  `needs-split-review` (`INV-CCH-12`) and MUST record exactly one outcome through the handler's own
+  `split` subcommand, never by hand-built `bd` calls. Its completion is `close-or-split-triage`: the
+  dispatch is done when the bead is closed or the `needs-split-review` label is gone (a hand-back
+  and a new comment are NOT outcomes). (a) `split apply <id>` (JSON plan on stdin; at least 2
+  children, each with title, description and acceptance criteria) creates each child labelled with
+  the parent's labels MINUS every `budget-stop:*`, `needs-split-review`, `was-split`, `human`,
+  `escalated` and `split-from:*` label PLUS `split-from:<id>` (so a child inherits no stop count),
+  wires the parent BLOCKED-BY each child (`bd dep add <parent> <child>`, blocked id first, default
+  `blocks` type) and verifies the edges with `bd dep list <parent>`, adds `was-split`, comments the
+  decomposition, releases a held claim (status open + assignee cleared in one update), and removes
+  `needs-split-review` LAST. It refuses a closed, `was-split` or `split-from:*` parent, writing
+  nothing. (b) `split unsplittable <id>` (reason on stdin) adds `human`, comments the reason plus
+  the stop history, releases a held claim, and removes `needs-split-review` last. If a split fails
+  after children exist, the parent fails safe to `human` (label removed, claim released) rather than
+  being retried. A triage session that hits its own budget is routed to `human` by `INV-CCH-12`
+  and, additionally, has `needs-split-review` removed; it never re-enters the split path. No part
+  of this role changes any budget. All bead text reaches `bd` as discrete argv elements from stdin
+  JSON, never via a shell. The reference prompt is `docs/roles/split-triager-prompt.txt`; the
+  role, its discovery query (`ready --label needs-split-review --exclude-label human`) and the
+  `allowedTools` grant for the `split` subcommand are wired in the deployment config.

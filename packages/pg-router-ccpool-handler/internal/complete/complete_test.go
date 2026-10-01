@@ -159,3 +159,34 @@ func TestTracker_observeLatchesClaim(t *testing.T) {
 		t.Error("close-only must never latch")
 	}
 }
+
+// TestTracker_closeOrSplitTriage covers the split-triage completion
+// (pg2-47rsh): done on close or when needs-split-review is gone; a hand-back
+// and comment growth are NOT outcomes.
+func TestTracker_closeOrSplitTriage(t *testing.T) {
+	c := roles.CloseOrSplitTriage
+	parked := []string{"needs-split-review", "agent-support"}
+	var tr Tracker
+	if tr.Done(c, Observation{Status: "open", Labels: parked, Comments: 1}, true) {
+		t.Error("still parked must not be done")
+	}
+	if tr.Done(c, Observation{Status: "open", Labels: parked, Comments: 9}, true) {
+		t.Error("comment growth must not complete split triage")
+	}
+	tr.Observe(c, "in_progress")
+	if tr.Done(c, Observation{Status: "open", Labels: parked}, true) {
+		t.Error("a hand-back (open after claim) with the label still on must not be done")
+	}
+	if tr.Done(c, Observation{}, false) {
+		t.Error("a failed read must not be done")
+	}
+	if !tr.Done(c, Observation{Status: "open", Labels: []string{"was-split"}}, true) {
+		t.Error("label removed (split) must be done")
+	}
+	if !tr.Done(c, Observation{Status: "open", Labels: []string{"human"}}, true) {
+		t.Error("label removed (human) must be done")
+	}
+	if !tr.Done(c, Observation{Status: "closed", Labels: parked}, true) {
+		t.Error("closed must be done")
+	}
+}

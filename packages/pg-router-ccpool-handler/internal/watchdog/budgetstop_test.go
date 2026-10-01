@@ -265,6 +265,12 @@ func TestEscalate_humanBranches(t *testing.T) {
 			if bd.has("update zr-1 --add-label needs-split-review") {
 				t.Errorf("human path must not queue split review; calls=%v", bd.calls)
 			}
+			// pg2-47rsh: a triage session that hit its own budget drops
+			// needs-split-review (human instead); other human routes leave it.
+			rm := bd.idx("update zr-1 --remove-label needs-split-review")
+			if (tc.reason == "triage role") != (rm >= 0) || (rm >= 0 && rm > un) {
+				t.Errorf("remove-label needs-split-review at %d (unclaim %d); calls=%v", rm, un, bd.calls)
+			}
 		})
 	}
 }

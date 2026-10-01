@@ -58,6 +58,8 @@ func run(args []string) int {
 		return runPoolCapacity(args[1:])
 	case "origin":
 		return runOrigin(args[1:])
+	case "split":
+		return runSplit(args[1:])
 	default:
 		printUsageErr(fmt.Sprintf("pg-router-ccpool-handler: unknown subcommand %q", args[0]))
 		return conformance.ExitUsage
