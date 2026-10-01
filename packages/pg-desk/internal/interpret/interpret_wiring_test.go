@@ -40,12 +40,12 @@ func wiringConfig() *config.Config {
 		SelfLogin:         "me",
 		TeamMembers:       []string{"teammate"},
 		WatchLabels:       []string{"watch-me"},
-		ApproverAllowlist: []string{"zr-review-bot"},
+		ApproverAllowlist: []string{"example-review-bot"},
 		VerdictGenerations: []config.VerdictGeneration{{
-			ID:                "zr-review-bot-v1",
-			BodyMarker:        "<!-- review-bot -->",
-			FindingsPatterns:  []string{`(?i)\*\*Decision:\*\*\s*No issues found`, `(?i)\*\*Decision:\*\*\s*Issues found`},
-			AuthorityPatterns: []string{`(?i)\*\*Auto-approval:\*\*\s*will be submitted`},
+			ID:                "example-review-bot-v1",
+			BodyMarker:        "<!-- example-review-bot -->",
+			FindingsPatterns:  []string{`(?i)Result:\s*no findings`, `(?i)Result:\s*findings`},
+			AuthorityPatterns: []string{`(?i)Auto-approve:\s*submitting`},
 		}},
 	}
 }
@@ -118,13 +118,13 @@ func TestInterpret_MalformedHeadSHAType_Errors(t *testing.T) {
 	}
 }
 
-// Live zr-review-bot shape: a "No issues found / Auto-approval: blocked"
-// comment plus an APPROVED review from the allowlisted bot is no human
-// approval and no bot disapproval.
+// A review bot's "no findings, but auto-approval blocked by policy" comment
+// plus an APPROVED review from the allowlisted bot is no human approval and
+// no bot disapproval.
 func TestInterpret_PolicyBlockedBotComment_AwaitsTeam(t *testing.T) {
-	const blockedBody = "<!-- review-bot -->\n## Review Bot\n\n:white_check_mark: **Decision:** No issues found\n:no_entry: **Auto-approval:** blocked — see below"
-	const problemsBody = "<!-- review-bot -->\n## Review Bot\n\n**Decision:** Issues found\n"
-	const approvedBody = "<!-- review-bot -->\n## Review Bot\n\n**Decision:** No issues found\n**Auto-approval:** will be submitted"
+	const blockedBody = "<!-- example-review-bot -->\nResult: no findings\nAuto-approve: blocked (app not opted in)"
+	const problemsBody = "<!-- example-review-bot -->\nResult: findings\n"
+	const approvedBody = "<!-- example-review-bot -->\nResult: no findings\nAuto-approve: submitting"
 	green := []map[string]any{ciRun("A", "success", "new", "1", 1)}
 	cases := []struct {
 		name       string
@@ -142,10 +142,10 @@ func TestInterpret_PolicyBlockedBotComment_AwaitsTeam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			extra := map[string]any{
 				"head_sha": "new",
-				"comments": []map[string]any{{"id": "c1", "author": "zr-review-bot", "body": tc.comment}},
+				"comments": []map[string]any{{"id": "c1", "author": "example-review-bot", "body": tc.comment}},
 			}
 			if tc.withReview {
-				extra["reviews"] = []map[string]any{{"id": "r1", "author": "zr-review-bot", "state": "APPROVED"}}
+				extra["reviews"] = []map[string]any{{"id": "r1", "author": "example-review-bot", "state": "APPROVED"}}
 			}
 			facts := teamPRFacts(t, extra, green)
 			interp, err := Interpret(facts, wiringClock, wiringConfig())

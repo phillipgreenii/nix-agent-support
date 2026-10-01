@@ -168,9 +168,9 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 }
 
 // knownBotLogins are bot accounts whose login pg-connector reports WITHOUT
-// the "[bot]" suffix on REVIEW authors (observed 2026-10-01 on
-// ZR-Private/ziprecruiter#110113: review author "github-actions" while the
-// same bot's issue-comment author is "github-actions[bot]"; the payload
+// the "[bot]" suffix on REVIEW authors (observed 2026-10-01 on a live PR:
+// review author "github-actions" while the same bot's issue-comment author
+// is "github-actions[bot]"; the payload
 // carries no author-type field). The "[bot]" suffix rule alone misses them.
 var knownBotLogins = map[string]struct{}{
 	"github-actions":                {},
