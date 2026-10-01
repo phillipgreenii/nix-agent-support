@@ -26,12 +26,12 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 
 - **Capability** — the general term: a single-purpose Go `Provider` interface plus its own
   wire-op catalog. An interface's name and method set MUST correspond to exactly one capability
-  and MUST name no backend/system (`INV-CAP-1`). Six exist in this set's extent: the four
-  **entity types** below, plus the two cross-cutting capabilities `attention`/`search` (see
+  and MUST name no backend/system (`INV-CAP-1`). The **entity types** below plus the two cross-cutting capabilities `attention`/`search` (see
   "Cross-cutting capabilities"), which are capabilities but NOT entity types — neither is tied to
   one kind of external record.
 - **Entity type** — a capability tied to one kind of external record: one of `pr`, `issue`, `ci`,
-  `scm` in this set's extent. Every entity type is also a capability; `attention`/`search` are the
+  `scm`, or `alert` in this set's extent (`thread`/`calendar`/`agentsession` are likewise entity
+  types). Every entity type is also a capability; `attention`/`search` are the
   two capabilities that are not entity types.
 - **`pr`** — a pull/merge request: identity and review/feedback state. Carries no
   category/disposition write fields of its own — bead pg2-2j5ac.28.7 retired the `categorize`/
@@ -43,6 +43,18 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   runs, get logs, rerun failed).
 - **`scm`** — local git state (worktrees, cwd→branch resolution); unlike the other three, it syncs
   no remote entity.
+- **`alert`** — a currently-firing signal from a monitoring system: read-only, firing-only
+  (`INV-ALERT-1`), with backends that implement `attention` directly (`INV-ALERT-7`).
+- **Alert** — the `alert` entity's shared wire shape: a provider-namespaced stable `id`
+  (`INV-ALERT-3`), `provider`, `title`, optional `description`/`severity`/`acknowledged`/`url`,
+  `since`, flat `attributes`, per-provider `extensions` (opaque to Tier 1), `as_of`, and an
+  always-false `stale`. It has no state field: an alert that resolves leaves the list.
+- **Firing** — the only alert state the capability reports. A query narrows within the firing
+  set and MUST NOT widen it (`INV-ALERT-1`).
+- **Acknowledged indicator** — the OPTIONAL `acknowledged` field on an alert. Absent means "this
+  source cannot express it", never "unacknowledged" (`INV-ALERT-2`).
+- **Episode** — one firing interval of an alert (`rule_id`, optional `alert_id`, `started_at`,
+  optional `ended_at`; omitted `ended_at` means still firing), returned by `alert history`.
 
 ## Cross-cutting capabilities
 
@@ -143,6 +155,10 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
 - **`list`** — the `pr`/`issue`-only op resolving a caller-facing query NAME against the backend's
   own `config` block, returning every matching entity (`entities`), the complete current id set
   (`present_ids`), an always-`null` `cursor`, and a `truncated` flag.
+- **Named query (alert sense)** — for `alert`, the query name is OPTIONAL: omitted means a
+  backend's entire firing set, unfiltered, which is a fixed connector semantic rather than a
+  built-in query name. A backend ships no built-in query names; an unknown non-empty name answers
+  `query_not_recognized`.
 - **Named query** — a `config.queries.<name>` entry: a caller-facing name mapped to one or more
   backend-native query expressions (GitHub search syntax, JQL, a bd argument vector, …), resolved
   centrally by the capability's own dispatch table before the backend's `List` is ever called.

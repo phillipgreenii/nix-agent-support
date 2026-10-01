@@ -66,8 +66,9 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   the `pg-connector attention list`/`pg-connector search` CLI verbs); the wire protocol (envelope,
   `protocolVersion`/`schemaVersion` negotiation, the closed seven-value error taxonomy, the
   `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule,
-  the optional `AuthChecker` sub-interface); the operator CLI surface for the four landed
-  entity-type capabilities (`pr`, `issue`, `ci`, `scm`) plus `auth status`, `config validate`, and
+  the optional `AuthChecker` sub-interface); the operator CLI surface for the landed
+  entity-type capabilities (`pr`, `issue`, `ci`, `scm`, and `alert` with its `list`/`show`/`history`
+  verbs, firing-only contract, and direct attention implementation) plus `auth status`, `config validate`, and
   `config show`; the `pr`/`issue` `list` op and its named-query resolution; the `--backend`
   targeted/fan-out pinning flag; the id-keyed-vs-id-less split in multi-instance targeted-op
   resolution (an id-keyed op tries each registered backend in order, an id-less write hard-fails
@@ -77,7 +78,7 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
 - **Extent (out)** — everything the design document
   (`docs/superpowers/specs/2026-09-03-unified-connector-architecture-design.md`, recorded
   durably by `ADR 0062`) describes but that has not yet landed in code as of this writing: the
-  Tier-1/Tier-2 dashboard and alert convention, and the deferred `Thread`/`Note` entity types. A
+  Tier-1/Tier-2 dashboard convention, and the concrete `alert` Tier-2 backends (Grafana, PagerDuty), and the deferred `Thread`/`Note` entity types. A
   packet that builds either of these MUST extend this set in the same change (`ADR 0062`'s own
   "Negative" consequence) rather than leaving intended behavior undocumented a second time.
   Concrete backend implementations (which system a backend talks to, and how) are also out — that

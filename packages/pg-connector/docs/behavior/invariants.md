@@ -326,6 +326,32 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   output-mode choice MUST NOT alter `INTF-WIRE`'s own wire protocol in any way — it is a
   CLI-presentation concern layered entirely on top of an already-decoded, already-typed result.
 
+## Alert capability
+
+- **`INV-ALERT-1`** <!-- uuid: 2f06ab7b-1c8f-49cd-8ce8-915fc04ca9e4 --> — `alert` list results (`list`, and attention derived
+  from them) MUST contain only actively-firing alerts. A named query narrows within the firing
+  set and MUST NOT be able to make resolved, silenced, or inhibited alerts appear.
+- **`INV-ALERT-2`** <!-- uuid: 0b779bda-7152-4c9d-86d2-39d3aa0f8849 --> — `Alert.acknowledged` is OPTIONAL and a pointer: absent
+  means "this source cannot express it", NOT "unacknowledged". A consumer MUST NOT read absence
+  as false.
+- **`INV-ALERT-3`** <!-- uuid: 27864503-e22a-4236-96c0-a98c334120e5 --> — `Alert.id` MUST be stable across polls for the same
+  firing instance (not derived from a start time or any value that changes while firing) and MUST
+  be namespaced by provider, so ids are unique across sources (`{type, id}` is the attention
+  merge key, `INV-ATTN-1`). Any future hide/ignore keys on `(alert, Alert.id)`.
+- **`INV-ALERT-4`** <!-- uuid: 3d05165a-5cd8-424a-a653-b7ba5f405b1f --> — A backend maps its own source severity onto the
+  attention `Severity` enum internally, in a closed table; the umbrella applies no mapping. An
+  absent or unrecognized source severity is omitted, and MUST NOT be defaulted anywhere.
+- **`INV-ALERT-5`** <!-- uuid: 23834005-df0f-4004-9660-2248f4120f0b --> — `alert` MUST NOT fall back to the umbrella entity cache
+  (a cached firing set would render a stale "all clear" as current), so `stale` is always false.
+  "Unknown" MUST be distinguishable from "none" via the `sources[]` row (`degraded` versus
+  `succeeded` with `count: 0`, or fan-out exit `3`), never from an empty `entities`/`items` array.
+- **`INV-ALERT-6`** <!-- uuid: 60fc604d-34bd-4739-9598-530d53a247a1 --> — The `alert` capability is read-only: no acknowledge,
+  silence, or hide operation exists on `alert.Provider` or in the `alert` wire catalog.
+- **`INV-ALERT-7`** <!-- uuid: 06f06803-001c-475c-aed8-7724c7a2ff58 --> — A backend registered for alerts answers `list_attention`
+  directly, from its own data, and MUST NOT derive it by calling the umbrella or a sibling backend
+  (`INV-COMP-1`). The umbrella MUST NOT derive attention items from `alert list`; the two
+  registrations (`connector.alert`, `attention.sources`) are independent.
+
 ## Calendar identity matching
 
 - **`INV-CAL-1`** <!-- uuid: cbbe6491-8676-42fb-a491-418f3f36f6a9 --> — A `calendar` backend

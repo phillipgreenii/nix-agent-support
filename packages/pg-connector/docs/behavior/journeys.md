@@ -48,6 +48,11 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   entity types they cover, without learning any source's own query language. _(→
   `USECASE-CROSSCUT-FANOUT-CALL`; `INV-REG-3`, `INV-ATTN-1`, `INV-SEARCH-1`.)_
 
+- **`STORY-OP-9`** <!-- uuid: 9aa838f2-a978-4842-a33d-3ec21dedc9e6 --> — read what is currently firing (and, for triage, what
+  fired within a window) from every registered alert backend through the same umbrella, and tell
+  "nothing is firing" apart from "I could not find out" without inspecting an empty list. _(→
+  `USECASE-ALERT-READ`; `INV-ALERT-1`, `INV-ALERT-5`, `INV-ALERT-7`, `INV-OUT-1`.)_
+
 ## Journey
 
 ### `JOURNEY-FLOW` — the end-to-end arc, and one call's life along it <!-- uuid: 49d62f4d-4f8c-4335-8b24-266d0e6ca63a -->
@@ -344,6 +349,36 @@ Extensions:
   `total_before_cap` only when the cap actually cuts items — the fan-out exit code is unaffected.
 - `search --fields ...` requests specific result attributes; an unrecognized one produces a
   `warnings[]` entry, never an error and never a `sources[]`-level failure.
+
+### `USECASE-ALERT-READ` — read currently-firing alerts, their history, and the unknown-versus-none distinction <!-- uuid: 32809625-aff9-4052-9f86-523438b9e392 -->
+
+**Actor:** `ACTOR-OP` (directly, or via a Tier-3 consumer such as a menu bar indicator or a
+triage tool).
+**Level:** user-goal.
+**Preconditions:** zero or more backends registered under `connector.alert` and/or
+`attention.sources`.
+**Intent:** (1) an indicator reads `attention list` and renders "no alerts", the surviving items
+plus an "incomplete" marker, or "unknown"; (2) a triage tool reads `alert list` and
+`alert history` and applies its own grouping policy; (3) either can tell none from unknown.
+_Requires:_ `INV-ALERT-1`, `INV-ALERT-2`, `INV-ALERT-3`, `INV-ALERT-5`, `INV-ALERT-7`,
+`INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`.
+_Includes:_ `USECASE-FANOUT-CALL`, `USECASE-CROSSCUT-FANOUT-CALL`.
+
+**Flow.** `alert list [--query NAME]` and `alert history --since T --until T [--query NAME]` fan out
+across `connector.alert` and concatenate (no cross-source dedup); `alert show ID` is targeted.
+`attention list` reads `attention.sources`, where an alert backend answers `list_attention`
+itself (`INV-ALERT-7`). Reachable with nothing firing is `succeeded`, `count: 0`, exit `0`; an
+unreachable backend is `degraded` (exit `2` with surviving sources, `3` when none survive) and a
+consumer MUST read that as UNKNOWN, never as an empty list (`INV-ALERT-5`).
+
+```mermaid
+flowchart TD
+    call["alert list / history / attention list"] --> fan["fan out to registered backends"]
+    fan --> row{"backend outcome"}
+    row -->|"reachable, nothing firing"| none["succeeded, count 0: render none"]
+    row -->|"reachable, firing"| some["succeeded: render items"]
+    row -->|"unavailable or malformed"| unk["degraded: render unknown or incomplete"]
+```
 
 ### `USECASE-CHOOSE-OUTPUT` — choose the CLI's presentation mode <!-- uuid: 632b7e23-25c8-43e2-9572-65f3547023bd -->
 

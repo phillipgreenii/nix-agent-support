@@ -103,6 +103,26 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    problem with no credential/token shape at all — distinct from resolving a backend's OWN
    external-system credentials (a GitHub token, a Jira session, …), which is the concern
    principle 6 actually rejects sharing.
+9. **A new entity-type capability (`alert`) was added under this same model, without changing
+   the model itself.** `alert` is a first-class Tier-1 entity (peer of `pr`/`issue`/`ci`/`scm`/
+   `thread`/`calendar`): one capability-scoped `alert.Provider` Go interface
+   (`packages/pg-connector/pkg/provider/alert`), its own independently-versioned
+   `schema.AlertSchemaVersion`, a list-valued `connector.alert` registry entry, and the CLI verbs
+   `alert list|show|history`. It follows every rule above identically, with these `alert`-specific
+   decisions: (a) **attention is implemented DIRECTLY** — a backend registered for alerts also
+   implements `attention.Provider` (merging both dispatch tables in one binary, as
+   `pg-connector-calendar-osx-bridge` does) and is registered under the top-level
+   `attention.sources` independently of `connector.alert`; the umbrella never derives attention
+   items from `alert list`, because that would make it interpret alert fields and add a new
+   coupling direction (principle 1); (b) the list is **firing-only** and a named query can only
+   narrow it, never widen it; (c) `acknowledged` is an **optional** indicator, absence meaning
+   "this source cannot express it", not "unacknowledged"; (d) severity mapping is each backend's
+   own internal, closed table and is never defaulted; (e) there is **no umbrella entity-cache
+   fallback** for alerts, since a cached firing set would render a stale "all clear" as current —
+   unknown is distinguishable from none only via the `sources[]` row; (f) the capability is
+   read-only (no acknowledge, silence, or hide). The two Tier-2 backends
+   (`pg-connector-alert-grafana`, and a deferred `pg-connector-alert-pagerduty`) are separate
+   later work; this item records only the Tier-1 entity.
 
 ## Consequences
 
@@ -137,6 +157,10 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
   decomposing bead `pg2-si5jo`'s design), the `calendar` entity-type capability is likewise added
   to this ADR's Decision (item 8, above) and to the accompanying behavior-docs set's extent — it is
   no longer part of the "not yet built" list in the bullet above.
+- As of bead `pg2-wms83` (the `alert` Tier-1 entity, from design bead `pg2-k3lxs`), the `alert`
+  entity-type capability is likewise added to this ADR's Decision (item 9, above) and to the
+  behavior-docs set's extent. The Grafana and PagerDuty Tier-2 backends are NOT yet built and
+  remain outside the extent.
 - Behavior-docs-first ordering, having been skipped for the first ten packets, cannot be
   retroactively un-skipped; this ADR and its behavior-docs set are a backfill, not evidence the
   process was followed from day one.
