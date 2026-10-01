@@ -441,8 +441,7 @@ func TestGate_PushStillAcceptedAndAckStillProcessed(t *testing.T) {
 	c := newClock()
 	st := NewMemStore()
 	q, _ := newGateQueue(t, st, c)
-	var l *midOfferListener
-	l = &midOfferListener{fakeListener: newListener("L", "work"), onOffer: func() {
+	l := &midOfferListener{fakeListener: newListener("L", "work"), onOffer: func() {
 		// The gate is set WHILE the offer is outstanding: the in-flight offer's
 		// acceptance (the ack) must still be processed and recorded.
 		mustSet(t, q, GateRequest{Type: "ALPHA"})
