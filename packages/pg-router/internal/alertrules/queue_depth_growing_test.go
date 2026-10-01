@@ -15,12 +15,14 @@ import (
 
 const (
 	// wantExpr MUST equal the expr of rule pg-router-queue-depth-growing.
-	wantExpr = `delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54`
+	wantExpr = `delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54`
 
 	window      = 30 * time.Minute
 	minSamples  = 54   // 90% of the 60 samples a 30s scrape yields over 30m
 	minDelta    = 10   // absolute rise over the window
 	minRatio    = 0.25 // rise as a fraction of the window average
+	minDelta1h  = 25   // pg2-mpgfa: absolute rise over the trailing hour
+	minHalf     = 5    // pg2-mpgfa: rise required in EACH 15m half of the 30m window
 	forDuration = 15 * time.Minute
 	evalEvery   = time.Minute
 	scrape      = 30 * time.Second
@@ -31,25 +33,45 @@ type sample struct {
 	v  float64
 }
 
-// firingNow models the rule expression at instant t: the series must have
-// >= minSamples samples in (t-window, t] and last-first >= minDelta and > minRatio*avg (delta, without
-// range extrapolation, which cannot change the sign).
-func firingNow(series []sample, t time.Time) bool {
+// inRange returns the samples in (from, to].
+func inRange(series []sample, from, to time.Time) []sample {
 	var in []sample
 	for _, s := range series {
-		if s.at.After(t.Add(-window)) && !s.at.After(t) {
+		if s.at.After(from) && !s.at.After(to) {
 			in = append(in, s)
 		}
 	}
+	return in
+}
+
+// rise is last-first over the samples (Prometheus delta() without range
+// extrapolation, which cannot change the sign); fewer than 2 samples is 0.
+func rise(in []sample) float64 {
+	if len(in) < 2 {
+		return 0
+	}
+	return in[len(in)-1].v - in[0].v
+}
+
+// firingNow models the rule expression at instant t: the 30m window must hold
+// >= minSamples samples, rise >= minDelta and > minRatio*avg; the trailing 1h
+// must rise >= minDelta1h; and EACH 15m half of the 30m window must rise
+// >= minHalf (pg2-mpgfa).
+func firingNow(series []sample, t time.Time) bool {
+	in := inRange(series, t.Add(-window), t)
 	if len(in) < minSamples {
 		return false
 	}
-	d := in[len(in)-1].v - in[0].v
+	d := rise(in)
 	var sum float64
 	for _, s := range in {
 		sum += s.v
 	}
-	return d >= minDelta && d > minRatio*sum/float64(len(in))
+	h1 := rise(inRange(series, t.Add(-window), t.Add(-window/2)))
+	h2 := rise(inRange(series, t.Add(-window/2), t))
+	return rise(inRange(series, t.Add(-time.Hour), t)) >= minDelta1h &&
+		d >= minDelta && d > minRatio*sum/float64(len(in)) &&
+		h1 >= minHalf && h2 >= minHalf
 }
 
 // alerting models `for: 15m`: the expression must hold at every evaluation in
@@ -150,10 +172,10 @@ func TestSparseSelfClearingBlipsDoNotAlert(t *testing.T) {
 func TestSustainedGrowthAlerts(t *testing.T) {
 	var series []sample
 	start := at("10:00:00")
-	for i := 0; i < 120; i++ { // 60 minutes of 30s scrapes, +1 every 2 minutes
+	for i := 0; i < 180; i++ { // 90 minutes of 30s scrapes, +1 every 2 minutes
 		series = append(series, sample{start.Add(time.Duration(i) * scrape), float64(1 + i/4)})
 	}
-	if !everAlerting(series, start, start.Add(60*time.Minute)) {
+	if !everAlerting(series, start, start.Add(90*time.Minute)) {
 		t.Fatal("sustained growth never reached Alerting")
 	}
 }
@@ -196,5 +218,47 @@ func TestSustainedGrowthFromBaselineAlerts(t *testing.T) {
 	}
 	if !everAlerting(series, start, start.Add(120*time.Minute)) {
 		t.Fatal("growth from baseline never reached Alerting")
+	}
+}
+
+// pg2-mpgfa: a periodic sawtooth whose per-tooth rise over 30m is ~12 (the
+// pr.reconcile Pending episodes recorded at A=11.19 / 13.22) must not even
+// reach a single true evaluation, because the trailing 1h never rises 25.
+func TestSawtoothDoesNotAlertOrPend(t *testing.T) {
+	var series []sample
+	start := at("10:00:00")
+	for i := 0; i < 480; i++ { // 4h; 40m teeth: 19 -> 31 over 30m, then drops back
+		m := (i * 30 / 60) % 40 // minute within the tooth
+		v := 19.0
+		if m < 30 {
+			v += float64(m) * 12 / 30
+		} else {
+			v += 12 - float64(m-30)*1.2
+		}
+		series = append(series, sample{start.Add(time.Duration(i) * scrape), v})
+	}
+	for tt := start; !tt.After(start.Add(4 * time.Hour)); tt = tt.Add(evalEvery) {
+		if firingNow(series, tt) {
+			t.Fatalf("sawtooth evaluated true at %s", tt)
+		}
+	}
+}
+
+// pg2-mpgfa: a small burst onto a quiet type (the pr.changed 1 -> 12 episode
+// recorded at A=11.28) must not Pend either.
+func TestSmallBurstDoesNotPend(t *testing.T) {
+	var series []sample
+	start := at("10:00:00")
+	for i := 0; i < 240; i++ {
+		v := 1.0
+		if i > 120 { // step up by 11 and hold
+			v = 12
+		}
+		series = append(series, sample{start.Add(time.Duration(i) * scrape), v})
+	}
+	for tt := start; !tt.After(start.Add(2 * time.Hour)); tt = tt.Add(evalEvery) {
+		if firingNow(series, tt) {
+			t.Fatalf("small burst evaluated true at %s", tt)
+		}
 	}
 }

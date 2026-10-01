@@ -178,6 +178,16 @@ groups:
       # a rise of > 25% of the window's average depth (plateau noise is ~5%
       # of the average). Constants are mirrored in
       # internal/alertrules/queue_depth_growing_test.go; change together.
+      #
+      # pg2-mpgfa (trend guard): the pg2-7xvn8 floor (delta(30m) >= 10) still
+      # let the periodic pr.reconcile sawtooth (A=11.19, 13.22) and a
+      # pr.changed 1 -> 12 step (A=11.28) go Pending. Those rises are small
+      # and one-sided; a genuine backlog keeps climbing. Growth now ALSO needs
+      # delta(1h) >= 25 (a rise no ~12-per-tooth sawtooth or small burst can
+      # accumulate) and a rise >= 5 in EACH 15m half of the 30m window (a
+      # sustained slope, not a single jump or a sawtooth that has already
+      # turned). Slowest growth caught: ~25/h. Replay of 3 days of recorded
+      # history: see the commit message.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -199,7 +209,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54
+              expr: delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54
           - refId: B
             datasourceUid: __expr__
             model:
