@@ -188,6 +188,28 @@ groups:
       # sustained slope, not a single jump or a sawtooth that has already
       # turned). Slowest growth caught: ~25/h. Replay of 3 days of recorded
       # history: see the commit message.
+      #
+      # pg2-nw41e (periodic batch sawtooth, NO expression change): the
+      # type=pr.reconcile sweep refills the queue to ~70 every 30m and the
+      # single consumer drains it in 28-30m, so under the c2e2fb21 text
+      # (delta > 0 and count >= 54) the sign of delta(30m) was set by cycle
+      # phase and paged 5 times in 9h (replay of the 2026-09-29 17:55Z-02:55Z
+      # queue.jsonl reconstruction, windows 18:10, 19:12, 22:13, 23:14, 02:09).
+      # The current text evaluates false for that whole window and never
+      # reaches Alerting for pr.reconcile anywhere in the 2026-09-17 to
+      # 2026-10-01 reconstruction (only five true stretches of <= 7m, one of
+      # them the 10-01 22:14Z Pending at depth peak ~78; `for: 15m` never
+      # held): a sawtooth that drains inside one window has a falling half in
+      # every 30m window, so the "rise >= 5 in EACH 15m half" guard cannot hold.
+      # Regression coverage: TestReconcileSawtoothDoesNotAlertOrPend (17
+      # measured pre-sweep depths) and TestReconcileRecordedEpisodeDoesNotAlertOrPend
+      # (the pg2-0594o 4-minute samples, which alert under c2e2fb21) in
+      # internal/alertrules/queue_depth_growing_test.go. Known gap (R2 SHOULD,
+      # deliberately not addressed here): a periodic type whose troughs rise
+      # cycle over cycle does not alert either, for the same reason, and a
+      # standing flat backlog (pr.changed 43 -> 56 over 25m) rises < 25/h; a
+      # stalled bounded type needs a different signal (stall-based, e.g. a
+      # per-type delivered counter), not a looser slope guard.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C

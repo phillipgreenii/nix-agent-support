@@ -262,3 +262,193 @@ func TestSmallBurstDoesNotPend(t *testing.T) {
 		}
 	}
 }
+
+// legacyRule models the c2e2fb21 expression (`delta(30m) > 0` plus the
+// count_over_time >= 54 presence guard) that the pr.reconcile sawtooth paged
+// under. It exists only so the sawtooth fixtures below can prove they
+// reproduce that false positive; the live rule is firingNow/alerting.
+func legacyRule(series []sample, t time.Time) bool {
+	in := inRange(series, t.Add(-window), t)
+	return len(in) >= minSamples && rise(in) > 0
+}
+
+func legacyAlerting(series []sample, t time.Time) bool {
+	for e := t.Add(-forDuration); !e.After(t); e = e.Add(evalEvery) {
+		if !legacyRule(series, e) {
+			return false
+		}
+	}
+	return true
+}
+
+// pg2-nw41e: a batch type refilled by a 30m sweep (type=pr.reconcile). Each
+// sweep re-enqueues every open PR (~70) and the queue drops ids already
+// queued, so depth jumps to ~70 and the single consumer drains it back down
+// before the next sweep. preSweep is the depth in the last bucket before each
+// of 17 consecutive sweeps measured on 2026-09-29 17:55Z-02:55Z (queue.jsonl
+// reconstruction): healthy cycles end near 0-29, slow ones (42, 54) are the
+// post-restart head-of-line plateau. 0 means the type drained completely and
+// its series is ABSENT (the gauge observes only types present in the queue).
+var preSweep = []float64{4, 42, 32, 8, 3, 0, 15, 54, 18, 11, 0, 0, 2, 29, 8, 17, 5}
+
+// sawtoothSeries builds 30s samples: at every 30m boundary depth is the peak,
+// then drains linearly to the cycle's preSweep depth (a cycle ending at 0
+// finishes draining at 26m and stays absent for the last 4m).
+func sawtoothSeries(peak float64, ends []float64) []sample {
+	var series []sample
+	start := at("00:00:00")
+	for c, end := range ends {
+		drain := 30.0
+		if end == 0 {
+			drain = 26
+		}
+		for i := 0; i < 60; i++ {
+			m := float64(i) / 2
+			v := peak
+			if m >= drain {
+				v = end
+			} else {
+				v = peak - (peak-end)*m/drain
+			}
+			if v = float64(int(v + 0.5)); v > 0 {
+				series = append(series, sample{start.Add(time.Duration(c*60+i) * scrape), v})
+			}
+		}
+	}
+	return series
+}
+
+// pg2-nw41e R1: the periodic pr.reconcile sawtooth must not reach Alerting,
+// and must not even evaluate true once (a true evaluation is a Pending
+// transition in Grafana). Evaluations start 1h in so every guard sees its
+// full lookback; a shorter lookback would under-state the rise and make this
+// pass vacuously.
+func TestReconcileSawtoothDoesNotAlertOrPend(t *testing.T) {
+	series := sawtoothSeries(70, preSweep)
+	from, to := at("00:00:00").Add(time.Hour), series[len(series)-1].at
+	legacy := false
+	for tt := from; !tt.After(to); tt = tt.Add(evalEvery) {
+		if firingNow(series, tt) {
+			t.Fatalf("sawtooth evaluated true (would go Pending) at %s", tt)
+		}
+		if alerting(series, tt) {
+			t.Fatalf("sawtooth reached Alerting at %s", tt)
+		}
+		legacy = legacy || legacyAlerting(series, tt)
+	}
+	if !legacy {
+		t.Fatal("fixture does not reproduce the c2e2fb21 false positive")
+	}
+}
+
+// knot is one 4-minute Prometheus sample of pg_router_queue_depth{type="pr.reconcile"}.
+type knot struct {
+	hhmm string
+	v    float64
+}
+
+// pr0594oKnots are the recorded 4-minute samples of 2026-09-29 (21:30-22:58
+// are the pg2-0594o samples verbatim; the hour before and the half hour after
+// are the same-day queue.jsonl reconstruction, which matches the recorded
+// samples within 1 at every shared point). It covers a slow cycle
+// (Pending 21:58), then a restart burst where depth sat flat at 54 while the
+// consumer worked a pr.changed run (Alerting 22:13 -> Normal 22:28 under
+// c2e2fb21). 0 means the series was absent.
+var pr0594oKnots = []knot{
+	{"20:10", 40},
+	{"20:14", 29},
+	{"20:18", 22},
+	{"20:22", 13},
+	{"20:26", 2},
+	{"20:30", 63},
+	{"20:34", 54},
+	{"20:38", 44},
+	{"20:42", 34},
+	{"20:46", 24},
+	{"20:50", 13},
+	{"20:54", 3},
+	{"20:58", 66},
+	{"21:02", 55},
+	{"21:06", 41},
+	{"21:10", 30},
+	{"21:14", 20},
+	{"21:18", 9},
+	{"21:22", 0},
+	{"21:26", 0},
+	{"21:30", 60},
+	{"21:34", 50},
+	{"21:38", 40},
+	{"21:42", 32},
+	{"21:46", 26},
+	{"21:50", 21},
+	{"21:54", 16},
+	{"21:58", 66},
+	{"22:02", 60},
+	{"22:06", 54},
+	{"22:10", 54},
+	{"22:14", 54},
+	{"22:18", 54},
+	{"22:22", 54},
+	{"22:26", 54},
+	{"22:30", 66},
+	{"22:34", 56},
+	{"22:38", 50},
+	{"22:42", 43},
+	{"22:46", 33},
+	{"22:50", 27},
+	{"22:54", 20},
+	{"22:58", 17},
+	{"23:02", 67},
+	{"23:06", 58},
+	{"23:10", 52},
+	{"23:14", 41},
+	{"23:18", 30},
+	{"23:22", 17},
+	{"23:26", 6},
+	{"23:30", 69},
+}
+
+// knotsTo30s expands the 4-minute knots to the 30s scrape grid. A rise between
+// two knots is a sweep refill, which lands as a step (hold, then jump 30s
+// before the next knot); a fall is a linear drain. Zero is dropped (absent).
+func knotsTo30s(knots []knot) []sample {
+	var out []sample
+	for i := 0; i+1 < len(knots); i++ {
+		a, b := knots[i], knots[i+1]
+		ta, tb := at(a.hhmm+":00"), at(b.hhmm+":00")
+		for t := ta; t.Before(tb); t = t.Add(scrape) {
+			v := a.v
+			switch {
+			case b.v > a.v && tb.Sub(t) <= scrape:
+				v = b.v
+			case b.v < a.v:
+				v = a.v + (b.v-a.v)*float64(t.Sub(ta))/float64(tb.Sub(ta))
+			}
+			if v = float64(int(v + 0.5)); v > 0 {
+				out = append(out, sample{t, v})
+			}
+		}
+	}
+	return out
+}
+
+// pg2-nw41e R1: replay the recorded pg2-0594o episode. Evaluations start 1h
+// after the first knot (full lookback). The fixture must reproduce the
+// 22:13-22:28 Alerting window of the c2e2fb21 expression, and the live rule
+// must not evaluate true anywhere.
+func TestReconcileRecordedEpisodeDoesNotAlertOrPend(t *testing.T) {
+	series := knotsTo30s(pr0594oKnots)
+	from, to := at("21:10:00"), at("23:30:00")
+	var legacyAt []time.Time
+	for tt := from; !tt.After(to); tt = tt.Add(evalEvery) {
+		if firingNow(series, tt) {
+			t.Fatalf("recorded episode evaluated true (would go Pending) at %s", tt)
+		}
+		if legacyAlerting(series, tt) {
+			legacyAt = append(legacyAt, tt)
+		}
+	}
+	if len(legacyAt) == 0 || legacyAt[0].After(at("22:20:00")) || legacyAt[len(legacyAt)-1].Before(at("22:20:00")) {
+		t.Fatalf("fixture does not reproduce the recorded c2e2fb21 Alerting window around 22:13-22:28: %v", legacyAt)
+	}
+}
