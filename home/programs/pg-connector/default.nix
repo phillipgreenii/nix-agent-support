@@ -37,6 +37,11 @@ let
     # validateBackendList rejects an explicit `connector.agentsession: []`
     # the same way.
     agentsession = if cfg.connector.agentsession == [ ] then null else cfg.connector.agentsession;
+    # alert (bead pg2-9tql6): mirrors thread/calendar/agentsession's
+    # identical empty-list-omission pattern above -- registry.go's
+    # validateBackendList rejects an explicit `connector.alert: []` the
+    # same way.
+    alert = if cfg.connector.alert == [ ] then null else cfg.connector.alert;
   };
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
@@ -67,7 +72,21 @@ let
     lib.filterAttrs (_: v: v != null) {
       attention_threshold = entry.threshold;
       attention_exclude = entry.exclude;
+      # attention_query (bead pg2-9tql6): names the alerts backend's own
+      # `queries` entry that `list_attention` runs.
+      attention_query = entry.attentionQuery;
     };
+
+  # alertBackendExtra (bead pg2-9tql6) renders one alertBackends.<name>
+  # entry: its freeform backend-native keys (e.g. a Grafana `base_url`)
+  # verbatim, plus `queries` (caller-facing name -> QueryExpr, i.e. a
+  # string or a list of strings) only when non-empty -- an empty `queries`
+  # is omitted rather than rendered as `{}`, mirroring the "omit rather
+  # than render empty" convention above. No query names are built in.
+  alertBackendExtra =
+    entry:
+    (removeAttrs entry [ "queries" ])
+    // lib.optionalAttrs (entry.queries != { }) { inherit (entry) queries; };
 
   # renderedBackends folds attention.perBackend's own per-backend entries
   # into cfg.backends' existing opaque per-backend blocks (bead pg2-7wqkr):
@@ -76,18 +95,35 @@ let
   # backends.<name> config) still gets one, and a name present in both
   # gets attention.perBackend's own keys merged alongside (never
   # clobbering) whatever cfg.backends already set for it directly.
+  #
+  # alertBackends (bead pg2-9tql6) folds in the same way, layered between
+  # the two: cfg.backends < alertBackends < attention.perBackend.
   renderedBackends = lib.listToAttrs (
-    map (name: {
-      inherit name;
-      value =
-        (cfg.backends.${name} or { })
-        // attentionBackendExtra (
-          cfg.attention.perBackend.${name} or {
-            threshold = null;
-            exclude = null;
-          }
-        );
-    }) (lib.unique (lib.attrNames cfg.backends ++ lib.attrNames cfg.attention.perBackend))
+    map
+      (name: {
+        inherit name;
+        value =
+          (cfg.backends.${name} or { })
+          // alertBackendExtra (
+            cfg.alertBackends.${name} or {
+              queries = { };
+            }
+          )
+          // attentionBackendExtra (
+            cfg.attention.perBackend.${name} or {
+              threshold = null;
+              exclude = null;
+              attentionQuery = null;
+            }
+          );
+      })
+      (
+        lib.unique (
+          lib.attrNames cfg.backends
+          ++ lib.attrNames cfg.alertBackends
+          ++ lib.attrNames cfg.attention.perBackend
+        )
+      )
   );
 
   # The complete rendered document: extraConfig's keys (pg-pr's own,
@@ -180,6 +216,19 @@ in
             default = [ ];
             description = "Registered `agentsession` capability backends (bare binary names, resolved on PATH), in fan-out order.";
           };
+          # alert (bead pg2-9tql6): a WHOLLY NEW capability, mirroring
+          # thread's exact shape (list-of-str, default [ ]). Without this
+          # field, a machine config setting
+          # `connector.alert = [ "pg-connector-alert-grafana" ]` is a hard
+          # Nix eval error ("option does not exist"). Default MUST stay
+          # [ ] here (this repo is a public flake) -- the real
+          # registration plus real base_url/queries values live in the
+          # consuming machine flake.
+          alert = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `alert` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+          };
         };
       };
       default = { };
@@ -252,6 +301,24 @@ in
                       grammar; see that backend's own doc comments.
                     '';
                   };
+                  # attentionQuery (bead pg2-9tql6): an alerts backend's
+                  # `list_attention` runs one named query from its own
+                  # `queries` (see `alertBackends`). Not deadline-based, so
+                  # `threshold`/`exclude` above are unused by alerts.
+                  attentionQuery = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = ''
+                      The name of the entry in this backend's
+                      `alertBackends.<name>.queries` that `list_attention`
+                      runs; rendered as `attention_query`. `null` (the
+                      default) omits the key, in which case the backend
+                      returns its unfiltered firing set. Only consulted by
+                      an alerts backend (e.g. `pg-connector-alert-grafana`);
+                      deadline-based backends ignore it, and alerts
+                      backends ignore `threshold`/`exclude`.
+                    '';
+                  };
                 };
               }
             );
@@ -292,6 +359,44 @@ in
         backend binaries `pg-connector search <query>` fans out to.
         Independent of `connector.<type>` -- a backend may be registered
         here as well as under `connector.<type>`.
+      '';
+    };
+
+    # alertBackends (bead pg2-9tql6): per-alert-backend config rendered under
+    # backends.<name> -- design section 5.1's registry entry. Only the
+    # backend-independent `queries` shape (name -> QueryExpr, i.e. a string or
+    # a list of strings; a list means run each and union) is typed here;
+    # every other key is backend-native and passes through verbatim
+    # (freeform), e.g. a Grafana `base_url`. This module MUST NOT bake in
+    # query names or machine values -- those belong in the consuming
+    # machine flake.
+    alertBackends = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          freeformType = lib.types.attrsOf lib.types.anything;
+          options.queries = lib.mkOption {
+            type = lib.types.attrsOf (lib.types.either lib.types.str (lib.types.listOf lib.types.str));
+            default = { };
+            description = ''
+              Named queries for this alerts backend: a caller-facing name
+              mapped to a query expression, either one string or a list of
+              strings (a list runs each and unions the results). What a
+              query string means is backend-native (e.g. an Alertmanager
+              matcher set for Grafana). The module ships NO built-in names.
+              Empty (the default) omits `queries` from the rendered block.
+            '';
+          };
+        }
+      );
+      default = { };
+      description = ''
+        Per-alerts-backend config blocks, keyed by backend binary name (e.g.
+        `pg-connector-alert-grafana`), rendered under `backends.<name>:` in
+        the shared config file. Declare `queries` here and any backend-native
+        keys (e.g. `base_url`) as plain attributes; name the query
+        `list_attention` runs via `attention.perBackend.<name>.attentionQuery`.
+        Layered over `backends.<name>` and under `attention.perBackend`
+        when the same name appears in more than one.
       '';
     };
 

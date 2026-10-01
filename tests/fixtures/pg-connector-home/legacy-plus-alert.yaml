@@ -1,0 +1,42 @@
+attention:
+  sources:
+    - pg-connector-issue-beads
+    - pg-connector-pr-github
+    - pg-connector-alert-grafana
+backends:
+  pg-connector-alert-grafana:
+    attention_query: attention
+    base_url: https://grafana.example.localhost
+    queries:
+      attention:
+        - '{severity=~"critical|warning"}'
+      everything: "{}"
+      quiet-hours: '{severity="critical"}'
+  pg-connector-issue-beads:
+    attention_exclude: no-attention
+    attention_threshold: 72h
+  pg-connector-pr-github:
+    example_key: example-value
+configSchemaVersion: 2
+connector:
+  agentsession:
+    - pg-connector-agentsession-pa-monitor
+  alert:
+    - pg-connector-alert-grafana
+  calendar:
+    - pg-connector-calendar-osx-bridge
+  ci:
+    - pg-connector-ci-github-actions
+  issue:
+    - pg-connector-issue-beads
+    - pg-connector-issue-jira
+  pr:
+    - pg-connector-pr-github
+  scm: pg-connector-scm-git
+  thread:
+    - pg-connector-thread-slack
+search:
+  sources:
+    - pg-connector-issue-beads
+state:
+  consumer_prune_after: 720h

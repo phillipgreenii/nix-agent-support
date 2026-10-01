@@ -6488,6 +6488,39 @@
                 assert hasConfig bothEnabled; # both gates ⇒ still rendered
                 pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
 
+              # Rendering guard for home/programs/pg-connector (bead pg2-9tql6):
+              # evaluates the module (tests/pg-connector-home-render.nix) and
+              # compares the generated shared config file against goldens in
+              # tests/fixtures/pg-connector-home/. `legacy.yaml` was generated
+              # from the module BEFORE the alert options existed, so it pins
+              # the pre-existing thread/calendar/agentsession/attention
+              # rendering; `alert-grafana.yaml` is the Grafana sample from the
+              # alert-entity design. The comparison is semantic (yq-normalised
+              # JSON, keys sorted) rather than textual because prettier
+              # reindents YAML fixtures. Pure module eval plus a trivial yaml
+              # generate -- no package build.
+              test-pg-connector-home-rendering =
+                let
+                  rendered = import ./tests/pg-connector-home-render.nix { inherit lib pkgs; };
+                  fixtures = ./tests/fixtures/pg-connector-home;
+                in
+                pkgs.runCommand "pg-connector-home-rendering" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+                  norm() { yq -o=json -I=0 'sort_keys(..)' "$1"; }
+                  same() {
+                    if [ "$(norm "$1")" != "$(norm "$2")" ]; then
+                      echo "rendered config differs from golden: $1 vs $2" >&2
+                      diff -u <(yq -P 'sort_keys(..)' "$1") <(yq -P 'sort_keys(..)' "$2") >&2 || true
+                      exit 1
+                    fi
+                  }
+                  same ${fixtures + "/legacy.yaml"} ${rendered.legacy}
+                  # explicit connector.alert = [ ] is omitted like thread/calendar
+                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyAlert}
+                  same ${fixtures + "/alert-grafana.yaml"} ${rendered.alertGrafana}
+                  same ${fixtures + "/legacy-plus-alert.yaml"} ${rendered.legacyPlusAlert}
+                  touch $out
+                '';
+
               # Regression guard that the pa-monitor binary's version string is
               # actually stamped by the build-time ldflag (versionPath =
               # "main.version" in packages/pa-monitor/default.nix). Before that

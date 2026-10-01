@@ -1,0 +1,15 @@
+attention:
+  sources:
+    - pg-connector-alert-grafana
+backends:
+  pg-connector-alert-grafana:
+    attention_query: attention
+    base_url: https://grafana.example.localhost
+    queries:
+      attention:
+        - '{severity=~"critical|warning"}'
+      everything: "{}"
+      quiet-hours: '{severity="critical"}'
+connector:
+  alert:
+    - pg-connector-alert-grafana
