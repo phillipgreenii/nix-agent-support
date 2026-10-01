@@ -78,3 +78,50 @@ type Provider interface {
 	// targeted op, same convention as Files above. bead pg2-2j5ac.28.2.
 	Commits(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }
+
+// ReviewComment is one inline comment of a ReviewSubmitRequest (contract
+// 9.1): anchored to Path/Line on Side ("LEFT" or "RIGHT").
+type ReviewComment struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Side string `json:"side"`
+	Body string `json:"body"`
+}
+
+// ReviewSubmitRequest is the review_submit op's input (contract 9.1). ID is
+// the PR id, in the same style as every other pr op's args.
+type ReviewSubmitRequest struct {
+	ID               string          `json:"id"`
+	HeadSHA          string          `json:"head_sha"`
+	Body             string          `json:"body"`
+	Comments         []ReviewComment `json:"comments"`
+	SupersedePending bool            `json:"supersede_pending"`
+}
+
+// SupersedeOutcome reports the result of deleting the actor's existing
+// pending review before posting. A failed delete is reported here, never as
+// an op error (contract 9.1).
+type SupersedeOutcome struct {
+	Attempted bool   `json:"attempted"`
+	Deleted   bool   `json:"deleted"`
+	Error     string `json:"error,omitempty"`
+}
+
+// ReviewSubmitResult is the review_submit op's output (contract 9.1).
+// Supersede is nil (omitted) when supersede_pending was not set.
+type ReviewSubmitResult struct {
+	ReviewID  string            `json:"review_id"`
+	State     string            `json:"state"`
+	HeadSHA   string            `json:"head_sha"`
+	AsOf      string            `json:"as_of"`
+	Supersede *SupersedeOutcome `json:"supersede,omitempty"`
+}
+
+// ReviewSubmitter is an OPTIONAL capability of a pr backend: it posts a
+// PENDING review anchored to req.HeadSHA. It is deliberately not part of
+// Provider; NewDispatchTable registers the review_submit op only when the
+// provider type-asserts to it, so other backends keep compiling. Errors
+// MUST be wrapped with scriptout.Err* from INV-ERR-1's taxonomy.
+type ReviewSubmitter interface {
+	SubmitReview(ctx context.Context, req ReviewSubmitRequest) (ReviewSubmitResult, error)
+}

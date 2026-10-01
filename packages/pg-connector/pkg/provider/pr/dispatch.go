@@ -129,5 +129,21 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 		}
 	}
 
+	// review_submit is an optional capability (same type-assert pattern):
+	// registered, and so listed in capabilities.ops, only for a provider
+	// implementing ReviewSubmitter.
+	if rs, ok := p.(ReviewSubmitter); ok {
+		table["review_submit"] = scriptout.OpHandler{
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a ReviewSubmitRequest
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode review_submit args: "+err.Error())
+				}
+				return rs.SubmitReview(ctx, a)
+			},
+		}
+	}
+
 	return table
 }
