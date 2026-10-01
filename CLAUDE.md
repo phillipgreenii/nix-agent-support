@@ -66,7 +66,7 @@ only while editing files under `home/programs/claude-status-line/`.
 ## Development Workflow
 
 - **Format**: Use `nix fmt` for formatting Nix files
-- **Test**: Use `nix flake check` to validate configuration
+- **Test**: Build the targeted checks relevant to your change (`nix build .#checks.<system>.<name>`, in the background); a full `nix flake check` is NOT a per-change or land-time gate
 - **Build**: Flake provides reusable modules, not direct machine configs
 
 ## Beads Labels
@@ -129,7 +129,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 1. Maintain standalone functionality - don't add dependencies on other custom flakes
 2. Keep modules focused - one program per directory
-3. Test with `nix flake check` before committing
+3. Test with the targeted `nix build .#checks.<system>.<name>` checks relevant to the change (see "Before claiming any change is complete" below)
 4. Follow the established option pattern (define in module that uses it)
 5. Respect shell enable flags in all shell integrations
 6. **MUST review and update relevant documentation after completing any task**:
@@ -139,7 +139,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 **Before claiming any change is complete:**
 
 - If `.pre-commit-config.yaml` exists: the pre-commit hooks MUST pass on the changed files. The `git commit` hook run (on staged files) is the gate; validate beforehand with `prek run --files <changed files>` (or `pre-commit run --files …`). Do NOT rely on `--all-files` as the per-change gate — it duplicates the commit run, forces the slow bats/nix hooks on unrelated diffs, and can false-block on a pre-existing violation elsewhere; reserve it for a deliberate full-repo sweep.
-- If `flake.nix` exists: `nix flake check` MUST pass once before landing — `ff-merge-to-main`'s FF-2a already runs it for this repo at land time (this repo has no external CI, so that land-time run is the whole-repo gate). Do NOT also run a full `nix flake check` after each individual change; validate incrementally with the pre-commit bullet above instead.
+- If `flake.nix` exists: a full `nix flake check` is NOT a per-change or land-time gate (operator ruling, Phillip, 2026-10-01; this overrides any older rule telling an agent to run a full flake check at land). This repo has no CI, so its only automatic test runners are the commit-time `run-unit-tests` hook (`pg-test-runner`, touched projects) plus `ff-merge-to-main`'s FF-1b `prek` run over the branch diff at land — an accepted interim risk; if it lets problems through, that is the signal to bring CI back. You MAY — and SHOULD when the change touched shared infrastructure (a builder, `flake.nix` wiring, a shared library) — build the targeted checks relevant to your change in the background, e.g. `nix build .#checks.aarch64-darwin.<name> -L`.
 
 ## File Locations
 

@@ -33,5 +33,6 @@ reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these package
 `cmd/` — packages outside `cmd/` are never compiled and their tests never run, so a green package
 build is NOT a whole-module test gate (proven 2026-08-12, bead `pg2-3nb2t`: `nix build .#pg-pr`
 exited 0 while `checks.pg-pr-go-tests` had been red for a week). The whole-module gate is
-`nix build .#checks.<system>.<pkg>-go-tests`, or the full `nix flake check` — which builds
-`checks.*` but NOT `packages.*`.
+`nix build .#checks.<system>.<pkg>-go-tests` (a full `nix flake check` would also build it — it
+builds `checks.*` but NOT `packages.*` — but is NOT a per-change or land-time gate; build the
+targeted check).

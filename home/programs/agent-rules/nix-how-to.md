@@ -8,8 +8,8 @@ paths: ["**/*.nix", "**/flake.nix"]
 
 Moved out of the always-on core rules (tc-ql0o Stage D, 2026-08-26): this detail only matters
 while actively working on `.nix`/`flake.nix` files, so it rides in a path-scoped rule instead of
-every session unconditionally. The two completion-gate OBLIGATIONS themselves (pre-commit hooks
-MUST pass on changed files; `nix flake check` MUST pass when `flake.nix` exists) stay in the core
+every session unconditionally. The two completion-gate rules themselves (pre-commit hooks MUST
+pass on changed files; what `flake.nix` does and does NOT require) stay in the core
 `pgii-agent-rules.md` — they trigger on a repo PROPERTY, not on reading a `.nix` file (a Go-only
 edit in a flake repo never reads one — the `pg2-3nb2t` class), so a file-glob trigger cannot carry
 them. This file is the HOW, not the WHETHER.
@@ -46,46 +46,52 @@ prek run --last-commit                        # shorthand for --from-ref HEAD~1 
 
 This still only touches files the range actually changed (same cost profile as `--files`, not
 `--all-files`) — it just computes the file list from git instead of you enumerating it. This is
-what `ff-merge-to-main`'s FF-1b step now runs automatically at land time, for every repo with a
-`.pre-commit-config.yaml`: `prek run --from-ref <primary> --to-ref <branch>`, verifying the
-branch's cumulative diff in one pass rather than trusting that each commit's own per-commit run
-summed to the same thing. Reach for the same form yourself whenever you need to validate more
-than one commit's combined changes ad hoc (e.g. after an interactive rebase, or before manually
-handing a multi-commit branch off).
+what `ff-merge-to-main`'s FF-1b step runs automatically at land time, for every repo it lands
+(`integrate-branch-support --prek-branch-diff`): `prek run --from-ref <primary> --to-ref <branch>`,
+verifying the branch's cumulative diff in one pass rather than trusting that each commit's own
+per-commit run summed to the same thing. Reach for the same form yourself whenever you need to
+validate more than one commit's combined changes ad hoc (e.g. after an interactive rebase, or
+before manually handing a multi-commit branch off).
 
-## `nix flake check` is a land-time gate, not a per-change gate
+## A full `nix flake check` is NOT a per-change or land-time gate
 
-Reserve a full `nix flake check` for once before the branch lands (or the repo's own
-CI/land-time mechanism), not after every individual edit or bead. Many `flake.nix` repos wire
-`pre-commit-hooks.nix`'s hook set into a `checks.pre-commit` derivation, so `nix flake check`
-re-runs the exact same hooks the commit's own `prek`/`pre-commit` run (see the `--all-files`
-prohibition above) already ran on the staged files — paying for the whole hook set twice per
-change, on top of whatever CI already re-checks on push. Running it once per branch, right
-before landing, still satisfies the core rule's `nix flake check` MUST-pass obligation without
-multiplying that cost by however many changes land on the branch.
+Operator ruling (Phillip, 2026-10-01): a full `nix flake check` is NOT a land-time gate in any
+repo, and not a per-change gate either. This overrides any older text — a cached copy of a skill,
+a memory file, a repo doc — that tells an agent to run a full flake check at land or before
+committing. The gates are:
 
-**Every repo gets a prek-level land-time check; only two get the full flake check.**
-`ff-merge-to-main`'s FF-1b step runs the commit-range `prek` check above for every repo it lands
-that has a `.pre-commit-config.yaml` — that part is universal, not repo-scoped. FF-2a's full
-`nix flake check`, by contrast, only runs for `phillipgreenii-nix-agent-support`/
-`phillipg-nix-ziprecruiter` (the two repos with no external CI) — it skips every other repo. The
-match is on the canonical clone's full directory `basename`, never a shorthand: this repo is
-casually called `nix-agent-support` in plenty of prose (dropping the `phillipgreenii-` prefix) —
-that shorthand is **not** the match value FF-2a's own `case` statement uses, and restating it here
-has previously caused a lander agent to believe the gate didn't apply when it did (bead
-`pg2-5hww2`). So do not assume a repo without that FF-2a scoping has NO land-time gate at all: it
-still gets FF-1b's prek check; it just does not get the heavier `checks.*` derivations FF-2a covers
-unless you run `nix flake check` yourself before landing.
+1. **The commit's own hook run** — `prek` on the staged files (see the `--all-files` prohibition
+   above), including the commit-time `run-unit-tests` hook (`pg-test-runner`, touched projects
+   only).
+2. **At land, `ff-merge-to-main`'s FF-1b** — `integrate-branch-support --prek-branch-diff`, the
+   commit-range `prek` check above over the whole branch diff, for every repo it lands. When the
+   worktree has no usable `.pre-commit-config.yaml` (missing, or a dangling symlink) it prints one
+   `FF-1b: no prek config in <wt>, prek not run` notice line and runs nothing; never link, copy,
+   or regenerate a config to make it run.
 
-## A repo's own `check.sh`/convenience wrapper is not equivalent to `nix flake check`
+Beyond those, an agent MAY — and SHOULD when it touched shared infrastructure (a builder, a flake
+module, a shared library) — build the targeted checks relevant to its change, in the background
+(`nix build .#checks.<system>.<name> -L`, with an explicit long timeout or `run_in_background`).
+Why not the whole thing: many `flake.nix` repos wire `pre-commit-hooks.nix`'s hook set into a
+`checks.pre-commit` derivation, so a full `nix flake check` re-runs the hooks the commit already
+ran, and several concurrent sessions each running one saturated the machine.
 
-If a repo ships its own `./check.sh` (or similar) convenience script, a clean run of it does
-NOT by itself satisfy the `nix flake check` MUST-pass obligation. A `check.sh` that passes
-`--no-build` skips derivation builds entirely, and — like the commit-time `prek`/`pre-commit`
-hook — it only lints the files it targets, not the whole repo. A gate can be fully green on
-`check.sh` and `pre-commit` while bare `nix flake check` still fails on a repo-wide lint or a
-consumer-input-alignment derivation the narrower script never runs. Always run bare
-`nix flake check` as the actual land-time acceptance gate — `check.sh` alone is not a
+Repos with cloud CI (`phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`) keep CI as
+the whole-repo gate. Accepted interim risk: `phillipgreenii-nix-agent-support` and
+`phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners are the commit-time
+`run-unit-tests` hook plus FF-1b's `prek` run on the branch diff — the whole-repo `checks.*`
+derivations (`checks.pre-commit`, every `*-go-tests`, golangci lint, spec-drift) run only when an
+agent builds them. If that lets problems through, that is the signal to bring CI back.
+
+## A repo's own `check.sh`/convenience wrapper is not equivalent to the `checks.*` derivations
+
+If a repo ships its own `./check.sh` (or similar) convenience script, a clean run of it does NOT
+prove the checks relevant to your change build. A `check.sh` that passes `--no-build` skips
+derivation builds entirely, and — like the commit-time `prek`/`pre-commit` hook — it only lints
+the files it targets, not the whole repo. A gate can be fully green on `check.sh` and `pre-commit`
+while a repo-wide lint or a consumer-input-alignment derivation the narrower script never runs
+still fails. When you need confidence beyond the commit hooks, build the actual
+`checks.<system>.<name>` derivations relevant to your change — `check.sh` alone is not a
 substitute, however convenient.
 
 ## `end-of-file-fixer` can still modify a file at commit time after a clean `pre-commit run`

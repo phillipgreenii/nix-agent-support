@@ -590,9 +590,12 @@ changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
    every hook over the whole repo and can false-block on a pre-existing
    violation the subagent never touched), IS the first gate and is folded into
    making the commit if `.pre-commit-config.yaml` exists — ONLY THEN run any
-   gate the commit did not already cover (`nix flake check` / `pn workspace
-build` for nix repos, and the repo's tests, including a slow full suite
-   backgrounded to outlive a bounded turn); and NOT do ANY of the following —
+   gate the commit did not already cover (the targeted
+   `nix build .#checks.<system>.<name>` checks relevant to its change and
+   `pn workspace build` for nix repos, and the repo's tests, including a slow
+   full suite backgrounded to outlive a bounded turn — a full
+   `nix flake check` is NOT a per-change or land-time gate); and NOT do ANY of
+   the following —
    these bd/pb verbs are orchestrator-only, exhaustively, no exceptions: NOT
    `bd claim` or `bd close` the bead itself, NOT `bd create` any new bead
    (ordinary issue, follow-up, or otherwise — filing ANY bead is out of
@@ -767,9 +770,9 @@ build` for nix repos, and the repo's tests, including a slow full suite
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - the lander is itself a dispatched (non-top-level) subagent, so if any step
-     it invokes backgrounds a command (e.g. `ff-merge-to-main`'s FF-2a
-     `nix flake check`), IT must block on that command itself in THIS SAME
-     turn via a `Monitor` until-loop call, exactly the pattern given in the
+     it invokes backgrounds a command (e.g. a long `prek` run in
+     `ff-merge-to-main`'s FF-1b), IT must block on that command itself in
+     THIS SAME turn via a `Monitor` until-loop call, exactly the pattern given in the
      DELEGATE step above — there is no external notification for its own
      backgrounded work either;
    - return a structured report: `outcome` (`landed` | `pr-opened` |
@@ -1033,9 +1036,9 @@ arguments, behavior is otherwise unchanged.
   on it — end the turn instead; the task notification resumes you
   automatically. `ScheduleWakeup` is `/loop`-only and needs a `prompt` this
   command never has. This is orthogonal to, and MUST NOT be confused with, a
-  DISPATCHED subagent's own backgrounded Bash/Monitor calls (e.g. a lander's
-  `nix flake check`) — the notification-resumes-you mechanism applies only to
-  YOU, the top-level orchestrator, waiting on your own Agent-tool dispatch;
+  DISPATCHED subagent's own backgrounded Bash/Monitor calls (e.g. an
+  implementer's backgrounded `nix build .#checks.<system>.<name>`) — the
+  notification-resumes-you mechanism applies only to YOU, the top-level orchestrator, waiting on your own Agent-tool dispatch;
   a subagent gets no such notification for its own child and MUST block on it
   itself via `Monitor` in the same turn (see step 4's worked example). It is
   also orthogonal to `--monitor-if-empty` (see that section above): arming

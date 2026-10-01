@@ -61,7 +61,8 @@ refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
   else `main`.
 - `DIRTY`, `AHEAD`, `BEHIND`, and `PRECOMMIT` are also available from this same
   call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
-  itself.
+  itself. `PRECOMMIT` (`real` / `symlink` / `dangling` / `missing`) is
+  informational only: FF-1b decides for itself whether a usable config exists.
 
 ## FF-0 — Precondition: canonical steady-state, and `<WT>` actually rebasable
 
@@ -308,136 +309,73 @@ Every commit on `<FB>` already had its own hooks run against its own staged
 diff at commit time — but that only ever validates one commit in isolation.
 Nothing before this step has checked the **union** of every file any commit on
 the branch touched, together, in one pass. This step closes that gap, and it
-applies to **every repo that has a `.pre-commit-config.yaml`** — not just the
-two repos FF-2a special-cases:
+applies to **every repo this handler lands**:
 
 ```bash
-if [ -f "$WT/.pre-commit-config.yaml" ]; then
-  (cd "$WT" && prek run --from-ref "$PRIMARY" --to-ref "$FB")
-fi
+(cd "$WT" && integrate-branch-support --prek-branch-diff)
 ```
 
-No `.pre-commit-config.yaml` → skip silently; nothing to run. `prek`'s
-`--from-ref`/`--to-ref` diff-expression form resolves exactly the file set
-`git diff --name-only "$PRIMARY"...` would, so this scopes to files the branch
-actually touched, not the whole repo (`--all-files` MUST NOT be used here for
-the same reason it MUST NOT be used as a per-commit gate — it forces every
-hook over the whole tree and can false-block on a pre-existing violation the
-branch never touched). `<FB>` already reflects FF-1's rebase, so this runs
-against the freshly-rebased tree, at the default `pre-commit` hook stage —
-the same stage every individual commit already ran, just scoped to the whole
-branch's diff instead of one commit's.
+When `<WT>` has a **usable** `.pre-commit-config.yaml` — a regular file, or a
+symlink whose target exists — this runs
+`prek run --from-ref "$PRIMARY" --to-ref "$FB"` from `<WT>`'s root and exits
+with `prek`'s own status. `prek`'s `--from-ref`/`--to-ref` diff-expression form
+resolves exactly the file set `git diff --name-only "$PRIMARY"...` would, so
+this scopes to files the branch actually touched, not the whole repo
+(`--all-files` MUST NOT be used here for the same reason it MUST NOT be used
+as a per-commit gate — it forces every hook over the whole tree and can
+false-block on a pre-existing violation the branch never touched). `<FB>`
+already reflects FF-1's rebase, so this runs against the freshly-rebased tree,
+at the default `pre-commit` hook stage — the same stage every individual
+commit already ran, just scoped to the whole branch's diff instead of one
+commit's.
 
-This is **distinct from, and runs before,** FF-2a below: FF-1b checks the
-`.pre-commit-config.yaml` hook set (fast, prek-cached, every repo); FF-2a
-checks the heavier `checks.*` derivations under `nix flake check` (slow,
-repo-scoped to the two repos with no external CI). Neither substitutes for
-the other — FF-1b passing does not mean FF-2a can be skipped, and FF-2a
-passing does not mean FF-1b can be skipped.
+**No usable config → skip with exactly one notice line, never silently.** When
+`<WT>/.pre-commit-config.yaml` is **missing**, or is a symlink whose target
+does **not** exist (a dangling link: `[ -e ]` and `[ -f ]` are both false for
+it, which is how an older inline `[ -f ]` guard skipped it without a word),
+the command runs nothing, creates nothing, prints exactly one line —
+
+```text
+FF-1b: no prek config in <WT>, prek not run
+```
+
+— and exits 0; the land continues to FF-2. Operator ruling (Phillip,
+2026-10-01, bead `pg2-pla9d.1`), verbatim: "if there is no config file, then
+the pre-hook should do nothing. trying to copy or symlink to other worktrees
+didn't seem to work". So the handler MUST NOT link, copy, or regenerate a
+config to make `prek` runnable, and MUST NOT treat the notice as a failure;
+it relays the notice line in its outcome report so the skip is visible.
 
 A non-zero exit here — **halt and report** `stopped:precommit-branch-diff-failed`
 with the repo name, the failing hook(s), and `prek`'s own output. Do not
 attempt to fix the violation yourself; that decision belongs to the operator.
 
-## FF-2 — Precondition: repo-scoped `nix flake check`, then fast-forward-only merge
+### What is NOT a land-time gate: a full `nix flake check`
 
-FF-2 splits into two parts, the same way FF-0 does: FF-2a is a **blocking
-precondition** that only two specific repos require, and FF-2b is the
-fast-forward merge itself, unchanged for every other repo this handler lands.
+FF-1b is the only check this handler runs before it merges. **A full
+`nix flake check` is NOT a land-time gate** — for any repo this handler lands —
+and the handler MUST NOT run one, or halt on one, as a step of its own.
+Operator ruling (Phillip, 2026-10-01): the repo-scoped full-flake-check land
+step was dropped; if that causes problems, that is the signal to bring CI
+back. **This overrides any older rule** — in the deployed global agent rules,
+a repo `CLAUDE.md`, a cached copy of this skill, or a memory file — that tells
+an agent to run a full flake check at land (the deployed copies of these
+rules keep saying so until the operator next runs `pn workspace apply`).
 
-### FF-2a — Repo-scoped `nix flake check` (blocking)
+Interim risk, accepted by the operator: `phillipgreenii-nix-agent-support` and
+`phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners
+are now the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
+projects only) plus this FF-1b `prek` run over the branch diff. Repos with
+cloud CI keep CI as their whole-repo gate. The change's author MAY — and
+SHOULD when the change touched shared infrastructure — build the targeted
+checks relevant to it (`nix build .#checks.<system>.<name>`, in the
+background) before invoking `integrate-branch`; that is the author's
+judgment, not a step of this handler.
 
-`phillipgreenii-nix-agent-support` and `phillipg-nix-ziprecruiter` have no
-external CI system — their pre-commit/pre-push hooks have historically been the
-only automated, whole-repo check they get, and a separate design is narrowing
-those hooks (moving heavyweight test hooks out of pre-commit). For **these two
-repos only**, this handler runs a full `nix flake check` against the just-rebased
-`<WT>` before it moves `<CC>`'s primary branch, so trimming those hooks does not
-leave a landing with no automated check at all.
+## FF-2 — Fast-forward-only merge
 
-**Run this exact block; do not eyeball the match or reconstruct the pattern from
-memory.** `basename "$CC"` is a real, cheap command — actually run it (this block
-is meant to be executed verbatim, not paraphrased) and let the shell's own `case`
-decide:
-
-```bash
-case "$(basename "$CC")" in
-phillipgreenii-nix-agent-support | nix-agent-support | phillipg-nix-ziprecruiter)
-  (cd "$WT" && nix flake check)
-  ;;
-esac
-```
-
-**Known trap — a shorter shorthand used to silently miss the match.** Plenty
-of prose elsewhere (ADR titles, plan docs, even this workspace's own
-agent-rules text, and the root `CLAUDE.md` itself) casually calls the first
-repo `nix-agent-support`, dropping the `phillipgreenii-` prefix — and on at
-least one real machine that shorthand IS the canonical clone's actual
-directory basename (no `phillipgreenii-` prefix in the checkout path at all).
-Bead `pg2-5hww2` recorded a lander agent recalling the pattern as
-`nix-agent-support` from memory, "concluding" the repo's real basename
-(`phillipgreenii-nix-agent-support`) didn't match, and silently skipping this
-MUST-run gate — even though the two quoted literals in the `case` at the time
-were correct for the machine that block was written on. Bead `tc-04y5` then
-found the deeper problem: on a machine whose canonical checkout is literally
-named `nix-agent-support` (no prefix), the literal match never fires for
-_any_ reasoning path, careful or not — the case pattern itself didn't cover
-that real basename. The `case` above now lists `nix-agent-support` as a third
-literal for exactly that reason: it is not a "shorthand exception", it is a
-real, observed directory basename this gate MUST also match on. If your own
-reasoning about whether this repo "matches" produces any string other than a
-verbatim copy of one of the three `case` literals above, that reasoning is
-wrong; re-read the block above rather than trust recollection, or just run it
-and observe which branch (if any) executes.
-
-Match on `basename "$CC"` — the canonical clone's directory name, the same
-identifier this workspace's own `pn-workspace.toml` and root `CLAUDE.md` repo-label
-table key on — not on the git remote: for at least one of these two repos
-(`phillipg-nix-ziprecruiter`, remote `phillipg_mbp.git`) the remote's repo name
-does not match the conventional workspace name. The root `CLAUDE.md` repo-label
-table's **short label column** (e.g. `agent-support`) is a different, shorter
-identifier still — it is the label used on beads, never the `case` match value
-either.
-
-Every other repo this handler lands (every other repo in this workspace's
-`pn-workspace.toml`, all of which also resolve to `ff-merge-to-main`) skips this
-step entirely — they either already have external CI or have not been evaluated
-for this gap, and this handler MUST NOT widen the check to them without a
-separate decision.
-
-`nix flake check` can run long. Give it an explicit generous timeout, or
-background it and wait for it to finish — but "wait" means STAY IN THIS SAME
-INVOCATION (keep calling tools) until it resolves, never send a final response
-expecting a later notification to resume you. This handler is usually
-executing inside a dispatched (non-top-level) subagent's own invocation — e.g.
-the lander subagent `/pb:drain-beads`' LAND step dispatches — and such an
-invocation is a bounded request/response: the moment it stops calling tools
-and returns final text, that invocation is OVER, permanently, unlike the
-top-level orchestrating session's turn, which genuinely can be resumed later
-by a task-notification. Ending the turn with something like "I'll wait for the
-Monitor notification to arrive" is a no-op that leaves the land unfinished
-(observed live: bead `tc-wklt`). Use this pattern verbatim:
-
-```
-Bash({ command: "nix flake check > /tmp/flake-check.log 2>&1; echo DONE >> /tmp/flake-check.log",
-       run_in_background: true })
-Monitor({ command: "until grep -q '^DONE' /tmp/flake-check.log; do sleep 2; done; tail -c 4000 /tmp/flake-check.log",
-          description: "wait for nix flake check", timeout_ms: 1200000 })
-# Monitor's tool result comes back immediately as "started" — that is NOT
-# completion. Do not send a final response yet. The completion event (with the
-# tailed log) arrives later as a notification INTO this same invocation, as
-# long as you keep it open — never end your turn here; continue FF-2a/FF-2b
-# once that event lands.
-```
-
-Do not skip or truncate the check for expediency.
-
-A non-zero exit here is a **new**, repo-scoped precondition failure — distinct
-from every rebase/merge reason below. **Halt and report** `stopped:flake-check-failed`
-with the repo name and the command's own failure output, and do **not** proceed
-to FF-2b. Do not attempt to fix the failure yourself; that decision (fix the
-flake, or investigate what the narrowed pre-commit hooks would have missed)
-belongs to the operator.
+FF-2's single part keeps its historical label, FF-2b, because other skills
+(e.g. `land-workforest`) cite this step by that name.
 
 ### FF-2b — Fast-forward-only merge in the canonical clone
 
@@ -458,9 +396,8 @@ possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 - `attempts = 0`.
 - If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
   (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-1b and
-  FF-2 — this re-runs FF-1b's consolidated `prek` check for every repo, and for
-  the two named repos also FF-2a's `nix flake check`, both against the freshly
-  rebased tree, before FF-2b's merge is retried).
+  FF-2 — this re-runs FF-1b's consolidated `prek` check against the freshly
+  rebased tree before FF-2b's merge is retried).
 - When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
   and ask** the user rather than retry indefinitely — a persistent ff-race
   warrants attention (R-7).
@@ -473,8 +410,8 @@ first appears on a retry is therefore reported the same way, by FF-1.
 
 ## FF-4 — Cleanup
 
-Only reached after FF-1b (when a `.pre-commit-config.yaml` exists) and FF-2
-succeed (FF-2a's check, when it applies, and FF-2b's merge). Delegate to
+Only reached after FF-1b (a passing `prek` run, or its one-line no-config
+notice) and FF-2b's merge succeed. Delegate to
 `wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
 fsmonitor-stop / worktree-remove / branch-delete / prune sequence: it folds in
 a liveness guard this handler did not previously have. **Relocate the shell
@@ -512,7 +449,7 @@ flowchart TD
     F0B -->|Yes| INIT["attempts = 0"]
     INIT --> B["FF-1: git -c rerere.enabled=false -C WT rebase primary"]
     B --> C{"exit 0?"}
-    C -->|Yes| F1B{"FF-1b: .pre-commit-config.yaml exists? run prek --from-ref PRIMARY --to-ref FB"}
+    C -->|Yes| F1B{"FF-1b: integrate-branch-support --prek-branch-diff (usable config? prek --from-ref PRIMARY --to-ref FB)"}
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
@@ -522,9 +459,7 @@ flowchart TD
     C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
     F1B -->|"fails"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
-    F1B -->|"passes, or no config"| F2A{"FF-2a: repo is agent-support or ziprecruiter? run nix flake check"}
-    F2A -->|"fails"| S11["STOP: stopped:flake-check-failed — operator fixes it"]
-    F2A -->|"passes, or repo not in scope"| G["FF-2b: git -C CC merge --ff-only FB"]
+    F1B -->|"passes, or one notice line: no usable config, prek not run"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
     H -->|Yes| I["FF-4: cd to CC, then wtdone FB --cc CC"]
     H -->|"No: attempts++"| J{"attempts < 2?"}
@@ -542,21 +477,23 @@ When FF-1's flake.lock-only mechanical resolution (above) fired during this
 run, a `landed` report MUST also include a line recording which side was
 picked and whether the relock produced a diff — e.g. `flake.lock conflict:
 took theirs, relocked yes` — so a reviewer or an aggregating drain session
-does not have to re-derive it from git history. Its `<reason>` values, and the
+does not have to re-derive it from git history. Likewise, when FF-1b skipped
+`prek` for lack of a usable config, a `landed` report MUST include its
+`FF-1b: no prek config in <WT>, prek not run` notice line verbatim. Its
+`<reason>` values, and the
 disposition each one asks of the operator:
 
-| `<reason>`                     | Raised by | What the operator does next                                                  |
-| ------------------------------ | --------- | ---------------------------------------------------------------------------- |
-| detached `HEAD`                | Step 0    | check out the feature branch                                                 |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                        |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                    |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                    |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                         |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                     |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                              |
-| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke     |
-| `flake-check-failed`           | FF-2a     | fix the flake (repo-scoped; only agent-support/ziprecruiter), then re-invoke |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                       |
+| `<reason>`                     | Raised by | What the operator does next                                              |
+| ------------------------------ | --------- | ------------------------------------------------------------------------ |
+| detached `HEAD`                | Step 0    | check out the feature branch                                             |
+| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                    |
+| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                |
+| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                |
+| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                     |
+| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                 |
+| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                          |
+| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke |
+| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                   |
 
 These reasons MUST NOT be collapsed into one another — above all,
 `rebase-conflict` MUST NOT absorb the four other rebase reasons
@@ -598,27 +535,23 @@ exist, and prescribes a `git rebase --continue` that exits 128.
   handler MUST NOT achieve this with a persistent `git config rerere.enabled
 false` write to `<CC>`'s `.git/config` — that would also disable rerere for
   the operator's own manual git usage in that clone, which is out of scope.
-- When `<WT>` has a `.pre-commit-config.yaml`, FF-1b MUST run
-  `prek run --from-ref <PRIMARY> --to-ref <FB>` against the rebased `<WT>`
-  before FF-2, and MUST halt and report `stopped:precommit-branch-diff-failed`
-  on any non-zero exit rather than proceed to FF-2 — this check is universal
-  (every repo with prek configured, not just agent-support/ziprecruiter): a
+- FF-1b MUST run `integrate-branch-support --prek-branch-diff` from the rebased
+  `<WT>` before FF-2, and MUST halt and report
+  `stopped:precommit-branch-diff-failed` on any non-zero exit rather than
+  proceed to FF-2 — this check is universal (every repo this handler lands): a
   per-commit hook run only ever validated ONE commit's own diff, never the
   union of every commit's changes across the whole branch. The handler MUST
-  NOT use `--all-files` here (same false-block risk as a per-commit
-  `--all-files` run), and MUST NOT skip it on the reasoning that FF-2a will
-  also run for the two named repos — FF-1b's hook set and FF-2a's `checks.*`
-  derivations check different things, and neither substitutes for the other.
-- When the repo being landed is `phillipgreenii-nix-agent-support` (or its
-  unprefixed local-checkout basename `nix-agent-support`) or
-  `phillipg-nix-ziprecruiter` (identified by `basename "$CC"`), FF-2a MUST run a
-  full `nix flake check` against the rebased `<WT>` and MUST halt and report
-  `stopped:flake-check-failed` on any non-zero exit, rather than proceed to
-  FF-2b's merge — these two repos have no external CI, so this handler's own gate
-  is the only whole-repo check they get at landing time. The handler MUST NOT
-  widen this requirement to any other repo it lands without a separate decision,
-  and MUST NOT identify the repo by git remote (it does not match the
-  conventional repo name for at least one of these two).
+  NOT substitute `prek run --all-files` (same false-block risk as a per-commit
+  `--all-files` run).
+- When `<WT>` has no usable `.pre-commit-config.yaml` (missing, or a symlink
+  whose target does not exist), FF-1b MUST NOT run `prek`, MUST NOT link, copy,
+  or regenerate a config, and MUST continue the land after the single
+  `FF-1b: no prek config in <WT>, prek not run` notice line, which the outcome
+  report relays (operator ruling, Phillip, 2026-10-01).
+- The handler MUST NOT run a full `nix flake check`, or halt on one, as a step
+  of its own, for any repo: a full `nix flake check` is NOT a land-time gate
+  (operator ruling, Phillip, 2026-10-01). This overrides any older rule telling
+  an agent to run a full flake check at land.
 - The handler MUST classify a non-zero `git rebase` exit by git's own
   rebase-in-progress state directory, probed with `git rev-parse --git-path` for
   **both** `rebase-merge` and `rebase-apply`, re-anchoring a relative answer on the

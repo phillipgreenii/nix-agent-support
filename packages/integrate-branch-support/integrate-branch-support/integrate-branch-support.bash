@@ -219,25 +219,42 @@ ahead_behind_primary() {
   printf '%s\n' "$(git rev-list --count HEAD.."$ref" 2>/dev/null || echo 0)"
 }
 
-# precommit_state <worktree root>: print "symlink", "real", or "missing" for
-# the on-disk state of <worktree root>/.pre-commit-config.yaml. This repo's
-# own CLAUDE.md ("prek / pre-commit in Fresh Worktrees") documents why this
-# matters: the canonical clone's copy is a gitignored, nix-generated symlink
-# into /nix/store, which a fresh `git worktree add` worktree does not get for
-# free -- commits there fail with "config file not found" until one is
-# created. `-L` is checked before `-e` so a broken symlink (nix store path
-# no longer present) is still reported as "symlink", not "missing" -- the two
-# have different fixes (re-link vs. rebuild) and collapsing them would send
-# an agent down the wrong one.
+# precommit_state <worktree root>: print "symlink", "dangling", "real", or
+# "missing" for the on-disk state of <worktree root>/.pre-commit-config.yaml.
+# This repo's own CLAUDE.md ("prek / pre-commit in Fresh Worktrees") documents
+# why this matters: the canonical clone's copy is a gitignored, nix-generated
+# symlink into /nix/store, which a fresh `git worktree add` worktree does not
+# get for free. "symlink" is a link whose target exists; "dangling" is a link
+# whose target does NOT exist (e.g. a garbage-collected nix store path) --
+# `-L` is checked before `-e` because `-e` (and `-f`) follow the link and are
+# false for a dangling one, which would otherwise be misreported as
+# "missing". Only "symlink" and "real" are a USABLE prek config (see
+# precommit_usable).
 precommit_state() {
   local path="$1/.pre-commit-config.yaml"
   if [ -L "$path" ]; then
-    printf 'symlink'
+    if [ -e "$path" ]; then
+      printf 'symlink'
+    else
+      printf 'dangling'
+    fi
   elif [ -e "$path" ]; then
     printf 'real'
   else
     printf 'missing'
   fi
+}
+
+# precommit_usable <worktree root>: succeed iff <worktree root> has a prek
+# config prek can actually read -- a regular file, or a symlink whose target
+# exists. A missing file and a dangling symlink both fail. Read-only: it never
+# links, copies, or regenerates a config (operator ruling 2026-10-01, bead
+# pg2-pla9d.1: with no config, the pre-land prek step does nothing).
+precommit_usable() {
+  case "$(precommit_state "$1")" in
+  real | symlink) return 0 ;;
+  *) return 1 ;;
+  esac
 }
 
 resolve_strategy() {

@@ -7,16 +7,49 @@ if ! declare -F resolve_primary_branch >/dev/null 2>&1; then
   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/integrate-branch-support.bash"
 fi
 
-# This tool takes no positional arguments; --facts is its only recognized
-# flag (besides the framework-injected --help/--version, handled above this
-# script). Anything else -- an unknown flag or a stray positional -- is a
-# generic usage error (exit 1, the conventional catch-all; this tool has no
-# branchable exit codes).
-facts_mode=0
+show_help() {
+  cat <<'HELP'
+integrate-branch-support: Advisory: report a repo's integration facts + recommended strategy
+
+Usage: integrate-branch-support [--facts | --prek-branch-diff]
+
+With no option, print one JSON object (strategy, reason, primary_branch,
+canonical, remote, open_pr, mr_bead) describing how the current branch
+should be integrated.
+
+Options:
+  --facts             Print orientation facts as a stable KEY=value block
+                      (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT)
+  --prek-branch-diff  Run prek over the whole branch diff
+                      (prek run --from-ref PRIMARY --to-ref FB, in WT) and
+                      exit with prek's status. When WT has no usable
+                      .pre-commit-config.yaml (missing, or a dangling
+                      symlink) print one notice line, run nothing, create
+                      nothing, and exit 0
+  -h, --help          Show this help message
+  -v, --version       Show version information
+HELP
+}
+
+# This tool takes no positional arguments; --facts and --prek-branch-diff are
+# its only recognized modes (mutually exclusive), besides --help and the
+# framework-injected --version (handled above this script). Anything else --
+# an unknown flag or a stray positional -- is a generic usage error (exit 1,
+# the conventional catch-all; this tool has no branchable exit codes of its
+# own -- --prek-branch-diff passes prek's exit status through).
+mode=report
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --facts)
-    facts_mode=1
+  -h | --help)
+    show_help
+    exit 0
+    ;;
+  --facts | --prek-branch-diff)
+    if [ "$mode" != report ]; then
+      echo "integrate-branch-support: --facts and --prek-branch-diff are mutually exclusive" >&2
+      exit 1
+    fi
+    mode="${1#--}"
     shift
     ;;
   *)
@@ -35,7 +68,29 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ "$facts_mode" -eq 1 ]; then
+if [ "$mode" = prek-branch-diff ]; then
+  # --prek-branch-diff: ff-merge-to-main's FF-1b step, made testable here
+  # rather than as inline skill prose. Operator ruling 2026-10-01 (bead
+  # pg2-pla9d.1): "if there is no config file, then the pre-hook should do
+  # nothing" -- so with no USABLE config (missing, or a dangling symlink that
+  # `[ -f ]` would also have silently skipped) print exactly ONE notice line
+  # and succeed, and NEVER link, copy, or regenerate a config.
+  wt_val="$(current_worktree_root)"
+  if ! precommit_usable "$wt_val"; then
+    printf 'FF-1b: no prek config in %s, prek not run\n' "$wt_val"
+    exit 0
+  fi
+  fb_val="$(current_branch)"
+  if [ "$fb_val" = "(detached)" ]; then
+    echo "integrate-branch-support: detached HEAD in $wt_val -- no branch diff to check" >&2
+    exit 1
+  fi
+  primary_val="$(resolve_primary_branch)"
+  cd "$wt_val" || exit 1
+  exec prek run --from-ref "$primary_val" --to-ref "$fb_val"
+fi
+
+if [ "$mode" = facts ]; then
   # --facts: a stable, parseable KEY=value block (one fact per line) for an
   # agent to eval/parse directly, replacing the hand-authored WT/FB/CC/PRIMARY
   # preamble + worktree-orientation one-liners the ff-merge-to-main and

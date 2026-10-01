@@ -439,11 +439,19 @@ EOF
   echo "$output" | grep -q "^PRECOMMIT=real$"
 }
 
-@test "facts: PRECOMMIT reports symlink, even a broken one" {
-  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
+@test "facts: PRECOMMIT reports symlink for a link whose target exists" {
+  echo "repos: []" >"$STUB_BIN/real-config.yaml"
+  ln -s "$STUB_BIN/real-config.yaml" .pre-commit-config.yaml
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^PRECOMMIT=symlink$"
+}
+
+@test "facts: PRECOMMIT reports dangling for a broken symlink (not symlink, not missing)" {
+  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRECOMMIT=dangling$"
 }
 
 @test "facts: PRIMARY resolution matches the JSON mode's (config -> origin/HEAD -> main)" {
@@ -451,6 +459,135 @@ EOF
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^PRIMARY=develop$"
+}
+
+# stub_prek [exit-code]: put a fake `prek` on PATH that records its cwd and
+# argv to $STUB_BIN/prek-calls (outside the fixture repo, so recording never
+# dirties the tree under test) and exits with [exit-code] (default 0). The
+# ABSENCE of $STUB_BIN/prek-calls is how a test proves prek was NOT called.
+stub_prek() {
+  local rc="${1:-0}"
+  cat >"$STUB_BIN/prek" <<STUB
+#!/usr/bin/env bash
+printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/prek-calls"
+printf 'args=%s\n' "\$*" >>"$STUB_BIN/prek-calls"
+exit $rc
+STUB
+  chmod +x "$STUB_BIN/prek"
+  PATH="$STUB_BIN:$PATH"
+}
+
+# assert_no_prek_config_created <worktree>: the skip path MUST NOT link, copy,
+# or regenerate a config -- nothing at all may exist at the config path, and
+# the worktree MUST be exactly as clean as before.
+assert_no_prek_config_created() {
+  [ ! -e "$1/.pre-commit-config.yaml" ]
+  [ ! -L "$1/.pre-commit-config.yaml" ]
+  [ -z "$(git -C "$1" status --porcelain)" ]
+}
+
+@test "prek-branch-diff: config present (real file) runs prek over the branch diff from WT" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  echo "repos: []" >.pre-commit-config.yaml
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ -f "$STUB_BIN/prek-calls" ]
+  grep -qxF "cwd=$(pwd -P)" "$STUB_BIN/prek-calls"
+  grep -qxF "args=run --from-ref main --to-ref feat" "$STUB_BIN/prek-calls"
+  [[ "$output" != *"FF-1b: no prek config"* ]]
+}
+
+@test "prek-branch-diff: config present (symlink with a live target) runs prek" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  echo "repos: []" >"$STUB_BIN/real-config.yaml"
+  ln -s "$STUB_BIN/real-config.yaml" .pre-commit-config.yaml
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  grep -qxF "args=run --from-ref main --to-ref feat" "$STUB_BIN/prek-calls"
+}
+
+@test "prek-branch-diff: a failing prek run passes its exit status through" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  echo "repos: []" >.pre-commit-config.yaml
+  stub_prek 3
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 3 ]
+  [ -f "$STUB_BIN/prek-calls" ]
+}
+
+@test "prek-branch-diff: config missing in a linked worktree prints one notice line, prek not called, nothing created" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt
+  wt="$(pwd -P)"
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "FF-1b: no prek config in $wt, prek not run" ]
+  [ ! -e "$STUB_BIN/prek-calls" ]
+  assert_no_prek_config_created "$wt"
+}
+
+@test "prek-branch-diff: dangling symlink prints the same one notice line, prek not called, link untouched" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt
+  wt="$(pwd -P)"
+  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "FF-1b: no prek config in $wt, prek not run" ]
+  [ ! -e "$STUB_BIN/prek-calls" ]
+  # Not repaired, replaced, or removed: still the same dangling link.
+  [ -L .pre-commit-config.yaml ]
+  [ ! -e .pre-commit-config.yaml ]
+  [ "$(readlink .pre-commit-config.yaml)" = "/nix/store/does-not-exist/.pre-commit-config.yaml" ]
+}
+
+@test "prek-branch-diff: WT == canonical clone with config missing prints the same one notice line, prek not called, nothing created" {
+  local cc
+  cc="$(cd "$TEST_DIR" && pwd -P)"
+  git checkout -q -b feat
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "FF-1b: no prek config in $cc, prek not run" ]
+  [ ! -e "$STUB_BIN/prek-calls" ]
+  assert_no_prek_config_created "$cc"
+}
+
+@test "prek-branch-diff: run from a subdirectory still checks the worktree ROOT's config" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt
+  wt="$(pwd -P)"
+  echo "repos: []" >.pre-commit-config.yaml
+  mkdir -p sub
+  cd sub || return 1
+  stub_prek
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  grep -qxF "cwd=$wt" "$STUB_BIN/prek-calls"
+}
+
+@test "prek-branch-diff: combined with --facts is a usage error" {
+  run bash "$BIN" --facts --prek-branch-diff
+  [ "$status" -ne 0 ]
+}
+
+@test "help: --help exits 0 and documents --prek-branch-diff" {
+  run bash "$BIN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--prek-branch-diff"* ]]
 }
 
 @test "fail-safe: --facts exits nonzero when run outside a git repository" {

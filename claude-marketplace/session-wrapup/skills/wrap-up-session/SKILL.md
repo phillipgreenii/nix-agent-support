@@ -215,7 +215,9 @@ the repo, in this rough order of authority:
   pre-commit hooks SCOPED to the session's changed files — `prek run --files <the files this
 session changed>` (or `pre-commit run --files …`), NOT `--all-files` (which re-runs every
   hook over the whole repo and can false-block on a pre-existing violation this session never
-  touched; the commit's own hook run is the real gate) — then `nix flake check`. Reserve
+  touched; the commit's own hook run is the real gate) — then the targeted
+  `nix build .#checks.<system>.<name>` checks relevant to the session's changes, in the
+  background. A full `nix flake check` is NOT a per-change or land-time gate. Reserve
   `--all-files` for a deliberate full-repo sweep, never as the per-change gate.)
 - Language defaults (`go test ./...`, `pytest`, `npm test`, `cargo test`).
 
@@ -664,7 +666,7 @@ If nothing was in scope, say so plainly rather than inventing work.
 | file discovered/unfinished                             | `bd create --title=... --description=... --type=... -p <0-4>`                                                                               |
 | dirty state                                            | `git status` ; ahead of main: `git log main..`                                                                                              |
 | unpushed blocks the work?                              | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                            |
-| run gates (nix-\* repos)                               | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; `nix flake check`                                    |
+| run gates (nix-\* repos)                               | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; targeted `nix build .#checks.<system>.<name>`        |
 | integrate a repo's work                                | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)                                       |
 | set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                 |
 | remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                          |

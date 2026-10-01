@@ -348,7 +348,7 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 7. Create `default.nix` calling `mkBashScript` with `name`, `src = ./.`, `description`, `runtimeDeps`.
 8. Wire into `scripts.nix` at module or package level — see [`references/wiring.md`](references/wiring.md).
 9. Verify locally: `cd path/to/command && bats tests/`.
-10. Verify nix: `nix build .#<package>` and `nix flake check`.
+10. Verify nix: `nix build .#<package>` and the script's own check, `nix build .#checks.<system>.<check-name>` (in the background; a full `nix flake check` is NOT a per-change or land-time gate).
 11. Commit with `feat:` or `refactor:` prefix.
 
 ## Workflow: Modifying an Existing Script
@@ -359,7 +359,7 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 4. Update completions if flags/options/subcommands changed.
 5. Update tldr page if common usage examples changed.
 6. Update `show_help()`.
-7. Run `bats tests/` then `nix flake check`.
+7. Run `bats tests/` then build the script's check, `nix build .#checks.<system>.<check-name>`.
 8. Commit.
 
 ## Workflow: Deleting a Script
@@ -371,7 +371,7 @@ Trips SC2207 and breaks on filenames with spaces. Use `mapfile -t COMPREPLY < <(
 5. Remove from `scripts.nix` (callPackage + allScripts list + checks).
 6. Remove wiring from `flake.nix`.
 7. Regenerate pre-commit if needed: `nix run .#install-pre-commit-hooks`.
-8. `nix flake check`.
+8. Build the checks of the modules you touched (`nix build .#checks.<system>.<check-name>`) to confirm nothing still references the deleted script.
 9. Commit.
 
 ## Implementation references

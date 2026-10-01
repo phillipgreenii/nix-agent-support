@@ -153,8 +153,8 @@ should only arm a leaf once it's genuinely unblocked.
 
    Each child's description must be **self-contained** ("no see-parent-for-context"),
    carry the injected facts, and — crucially — state its own **acceptance gate**:
-   what "done" looks like and how to verify it (e.g. "done when `nix flake check`
-   is green" / "the new table-driven test passes"). Lift the gate from the
+   what "done" looks like and how to verify it (e.g. "done when `nix build .#checks.<system>.<name>`
+   is green for the touched package" / "the new table-driven test passes"). Lift the gate from the
    producer's spec if there is one.
 
 5. **Arm the leaves with the consuming agent's label.** Only leaves (no open
@@ -204,13 +204,13 @@ BRANCH=$(bd show <PR-id> --json | jq -r '.metadata.branch')   # -> phillipg.bead
 
 # Create one leaf per module (helper keeps the bd flags right)
 scripts/create-child-bead.sh zr-abc "test: unit tests for processingcycle.go" \
-  "Add table-driven tests for FindOpenProcessingCycle + CreateProcessingCycle. Done when the new test passes under nix flake check." \
+  "Add table-driven tests for FindOpenProcessingCycle + CreateProcessingCycle. Done when the new test passes under nix build .#checks.<system>.pg-pr-go-tests." \
   "target file: packages/pg-pr/pkg/beads/processingcycle.go" \
   "test file: packages/pg-pr/pkg/beads/processingcycle_test.go (create if absent)" \
   "branch: $BRANCH"
 
 scripts/create-child-bead.sh zr-abc "test: unit tests for feedback.go" \
-  "Add table-driven tests for CreateFeedback. Done when the new test passes under nix flake check." \
+  "Add table-driven tests for CreateFeedback. Done when the new test passes under nix build .#checks.<system>.pg-pr-go-tests." \
   "target file: packages/pg-pr/pkg/beads/feedback.go" \
   "branch: $BRANCH"
 

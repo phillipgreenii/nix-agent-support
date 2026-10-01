@@ -599,11 +599,15 @@
       # nine `<module>-push-golangci` hooks (bead pg2-767br) and the two
       # `behavior-docs-*` hooks (beads pg2-wr6lm.4/.6.3, pg2-2oupw). Their
       # equivalents (`checks.<module>-golangci`, `checks.test-behavior-docs-*`
-      # below) are untouched and still run under `nix flake check` -- that
-      # thorough tier now runs at LANDING time (the integrate-branch landing
-      # handler's flake-check precondition for this repo) rather than at push
-      # time, so removing these push-time nix builds does not leave the repo
-      # ungated; the gate moved, it did not disappear.
+      # below) are untouched and still build under `nix flake check` or a
+      # targeted `nix build .#checks.<system>.<name>`. Operator ruling
+      # 2026-10-01 (bead pg2-pla9d.1): that thorough tier is NOT a land-time
+      # gate any more -- the integrate-branch landing handler no longer runs
+      # a full flake check -- so in this CI-less repo it runs only when an
+      # agent builds the checks relevant to its change. Accepted interim
+      # risk: the automatic gates are this commit-time hook plus the
+      # handler's prek run over the branch diff; if that lets problems
+      # through, that is the signal to bring CI back.
       #
       # In their place: ONE hook, `run-unit-tests`, that runs the unit tier of
       # every touched project's tests directly against the working tree --
@@ -1499,6 +1503,112 @@
                   fi
 
                   echo "ok: $scanned markdown file(s) scanned under claude-marketplace/; no stale always-on claims for moved rule packs"
+                  touch $out
+                '';
+
+              # Guard for the operator ruling of 2026-10-01 (bead pg2-pla9d.1):
+              # ff-merge-to-main's repo-scoped full-flake-check land step was
+              # dropped, and a full `nix flake check` is NOT a per-change or
+              # land-time gate in this repo's agent-facing text. Scans the
+              # MARKDOWN fileset only -- CLAUDE.md, the agent-rules sources,
+              # every claude-marketplace/ *.md and .claude/rules/*.md, minus
+              # docs/superpowers/** and docs/adr/** (point-in-time records) --
+              # NOT flake.nix, whose own patterns below would self-match.
+              # Forbidden: the removed step's label and stop reason, and
+              # phrases mandating a full flake check at land / before
+              # committing. Allowed phrasing (stripped before matching): "a
+              # full `nix flake check` is NOT a land-time gate" and "...telling
+              # an agent to run a full flake check at land" (the override
+              # notice). Each file is newline-joined first so a mandate split
+              # across wrapped lines is still caught. Also asserts the FF-1b
+              # skip-with-notice text exists in the skill and matches the
+              # notice integrate-branch-support actually prints (its
+              # behaviour is covered by checks.test-integrate-branch-support).
+              test-no-full-flake-check-land-mandate =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./CLAUDE.md
+                      (lib.fileset.fileFilter (file: file.hasExt "md") ./home/programs/agent-rules)
+                      (lib.fileset.fileFilter (file: file.hasExt "md") ./claude-marketplace)
+                      (lib.fileset.fileFilter (file: file.hasExt "md") ./.claude/rules)
+                    ];
+                  };
+                  shSrc = ./packages/integrate-branch-support/integrate-branch-support/integrate-branch-support.sh;
+                in
+                pkgs.runCommand "test-no-full-flake-check-land-mandate" { } ''
+                  export LC_ALL=C
+                  surface="${surface}"
+                  shsrc="${shSrc}"
+                  for rel in CLAUDE.md home/programs/agent-rules/pgii-agent-rules.md home/programs/agent-rules/nix-how-to.md .claude/rules/package-versioning.md claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md claude-marketplace/pb/commands/drain-beads.md; do
+                    if [ ! -f "$surface/$rel" ]; then
+                      echo "FAIL: guard never scanned $rel -- it moved; update the guard's fileset" >&2
+                      exit 1
+                    fi
+                  done
+
+                  forbidden='FF-2a|flake-check-failed|nix flake check`? MUST (pass|run)|full `?(nix )?flake check`? (MUST|SHOULD)|(run|runs|running) (a )?(full )?`?(nix )?flake check`? (once )?(before|at) (land|commit)|(test|validate|verify) with `?nix flake check`? before|nix flake check`? before (landing|committing)|flake check`? (as|is) (the|a) (actual )?land-time|then `?nix flake check'
+                  allowed='a full `?nix flake check`? is NOT a (per-change or )?land-time gate|(telling|tells) an agent to run a full flake check at land'
+
+                  scan_text() {
+                    local text
+                    text="$(tr '\n' ' ' | tr -s '[:space:]' ' ' | sed -E "s/$allowed//g")"
+                    if printf '%s\n' "$text" | grep -qiE "$forbidden"; then
+                      printf '%s\n' "$text" | grep -oiE ".{0,60}($forbidden).{0,40}"
+                    fi
+                  }
+
+                  for bad in 'run a full `nix flake check` before landing' '`nix flake check` MUST pass once before landing' "ff-merge-to-main's FF-2a" 'stopped:flake-check-failed' 'Test with `nix flake check` before committing' 'bare `nix flake check` as the actual land-time acceptance gate' 'Run `bats tests/` then `nix flake check`.'; do
+                    if [ -z "$(printf '%s\n' "$bad" | scan_text)" ]; then
+                      echo "FAIL: negative control did not trip the pattern: $bad" >&2
+                      exit 1
+                    fi
+                  done
+                  for good in 'a full `nix flake check` is NOT a land-time gate' 'a full `nix flake check` is NOT a per-change or land-time gate' 'this overrides any older rule telling an agent to run a full flake check at land'; do
+                    if [ -n "$(printf '%s\n' "$good" | scan_text)" ]; then
+                      echo "FAIL: allowed phrasing tripped the pattern: $good" >&2
+                      exit 1
+                    fi
+                  done
+
+                  scanned=0
+                  fail=0
+                  while IFS= read -r f; do
+                    scanned=$((scanned + 1))
+                    hits="$(scan_text <"$f")"
+                    if [ -n "$hits" ]; then
+                      echo "FAIL: ''${f#"$surface"/} mandates a full flake check at land / before committing, or names the removed land step:" >&2
+                      printf '  ...%s...\n' "$hits" >&2
+                      fail=1
+                    fi
+                  done < <(find "$surface" -type f -name '*.md' -not -path '*/docs/superpowers/*' -not -path '*/docs/adr/*' | sort)
+
+                  if [ "$scanned" -lt 20 ]; then
+                    echo "FAIL: guard scanned only $scanned markdown file(s); expected at least 20" >&2
+                    exit 1
+                  fi
+                  if [ "$fail" -ne 0 ]; then
+                    echo "Allowed phrasing: 'a full \`nix flake check\` is NOT a land-time gate'." >&2
+                    exit 1
+                  fi
+
+                  ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
+                  for want in 'integrate-branch-support --prek-branch-diff' 'FF-1b: no prek config in <WT>, prek not run' 'overrides any older rule'; do
+                    if ! grep -qF -- "$want" "$ff"; then
+                      echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b skip-with-notice text: $want" >&2
+                      exit 1
+                    fi
+                  done
+                  if ! grep -qF "printf 'FF-1b: no prek config in %s, prek not run" "$shsrc"; then
+                    echo "FAIL: integrate-branch-support.sh no longer prints the FF-1b notice line the skill documents" >&2
+                    exit 1
+                  fi
+                  if ! grep -qF 'is NOT a per-change or land-time gate' "$surface/home/programs/agent-rules/pgii-agent-rules.md"; then
+                    echo "FAIL: the core agent rules lost the 'full nix flake check is NOT a per-change or land-time gate' rule" >&2
+                    exit 1
+                  fi
+                  echo "ok: $scanned markdown file(s) scanned; no full-flake-check land mandates; FF-1b skip-with-notice documented"
                   touch $out
                 '';
 
