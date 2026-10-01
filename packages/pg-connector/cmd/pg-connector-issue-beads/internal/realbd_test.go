@@ -51,6 +51,11 @@ import (
 // Run explicitly via `go test -tags contract ./cmd/pg-connector-issue-beads/internal/...`
 // (mirroring packages/pb/packages/ccpool's own contract suites); it is
 // skipped when `bd` is absent from PATH.
+// runDeadline is a hang guard for real `bd` runs, not a performance
+// assertion: bd init and round trips are far slower under heavy host load
+// (pg2-6gjki, same convention as a1be9c6), so it is deliberately generous.
+const runDeadline = 2 * time.Minute
+
 func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	if _, err := exec.LookPath("bd"); err != nil {
 		t.Skip("bd not on PATH")
@@ -60,7 +65,7 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	env := cleanBDEnv()
 	prefix := "tp" + fmt.Sprintf("%x", time.Now().UnixNano())[:10]
 
-	initCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	initCtx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	initCmd := exec.CommandContext(initCtx, "bd", "init", "--prefix", prefix,
 		"--non-interactive", "-q", "--skip-agents", "--skip-hooks")
@@ -71,7 +76,7 @@ func TestBackend_RoundTrip_RealBD(t *testing.T) {
 	}
 
 	b := New(&CLIRunner{Dir: dir, Env: env})
-	ctx, cancelCtx := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancelCtx := context.WithTimeout(context.Background(), runDeadline)
 	defer cancelCtx()
 
 	created, err := b.Create(ctx, issue.IssueInput{

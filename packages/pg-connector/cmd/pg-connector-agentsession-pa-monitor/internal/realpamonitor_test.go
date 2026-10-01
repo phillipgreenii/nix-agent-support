@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+// runDeadline is a hang guard for the real pa-monitor binary, not a
+// performance assertion; generous so host load cannot cause a spurious
+// timeout-skip (pg2-6gjki, same convention as a1be9c6).
+const runDeadline = 2 * time.Minute
+
 // TestRealPaMonitor_StatusAndInfoRoundTrip exercises the real pa-monitor
 // binary (must be on PATH, daemon running) — skips (not fails) when
 // unreachable, matching every other daemon-dependent test's convention.
@@ -16,7 +21,7 @@ import (
 // wiring needed.
 func TestRealPaMonitor_StatusAndInfoRoundTrip(t *testing.T) {
 	r := NewCLIRunner()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 
 	raw, err := r.Status(ctx)

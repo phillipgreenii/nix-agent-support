@@ -60,6 +60,16 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
+// Deadlines are hang guards, not performance assertions: a cold `go build`
+// or real-binary run under heavy machine load (observed load average 130+
+// during nix flake check, pg2-z4ppl; 200-400 per pg2-6gjki) takes far
+// longer than an idle one, so they are deliberately generous (still below
+// go test's default 10m package timeout). Same convention as a1be9c6.
+const (
+	buildDeadline = 8 * time.Minute
+	runDeadline   = 2 * time.Minute
+)
+
 // contractBackendBinaries is every binary this suite builds and runs for
 // real: the Tier-1 umbrella plus all four Tier-2 backends this bead's scope
 // names (pr-github, ci-github-actions, issue-beads, scm-git).
@@ -111,7 +121,7 @@ func buildContractBinaries() (string, error) {
 		return "", fmt.Errorf("mkdir temp build dir: %w", err)
 	}
 	for _, name := range contractBackendBinaries {
-		ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), buildDeadline)
 		cmd := exec.CommandContext(ctx, "go", "build", "-o", filepath.Join(dir, name), "./cmd/"+name)
 		cmd.Dir = moduleRoot
 		out, buildErr := cmd.CombinedOutput()
@@ -214,7 +224,7 @@ type contractResult struct {
 // below asserts on explicitly, not a Go-level error.
 func runPGConnector(t *testing.T, cwd string, env []string, args ...string) contractResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, filepath.Join(contractBinDir, "pg-connector"), args...)
 	cmd.Dir = cwd
@@ -270,7 +280,7 @@ func newDisposableBDWorkspace(t *testing.T) string {
 	dir := t.TempDir()
 	prefix := "tc" + fmt.Sprintf("%x", time.Now().UnixNano())[:10]
 	env := contractEnv(nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bd", "init", "--prefix", prefix,
 		"--non-interactive", "-q", "--skip-agents", "--skip-hooks")
@@ -290,7 +300,7 @@ func newDisposableGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dir
@@ -779,7 +789,7 @@ func TestContract_CompletionScripts_NonEmpty(t *testing.T) {
 	bin := filepath.Join(contractBinDir, "pg-connector")
 	for _, shell := range []string{"bash", "zsh", "fish"} {
 		t.Run(shell, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, bin, "completion", shell)
 			var stdout, stderr bytes.Buffer
