@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,8 @@ func testCmd() (*cobra.Command, *bytes.Buffer) {
 // dependencies, so a test can assert on WHAT was attempted without a
 // live Grafana server, a real pg-connector binary, or real snapshot I/O.
 type spyDeps struct {
+	backlogResult int
+	backlogErr    error
 	fetchAlertsFn func(ctx context.Context, opts runOptions) ([]grafanaAlert, error)
 
 	listEscalatedResult []connectorIssue
@@ -84,6 +87,9 @@ func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 				metadata map[string]string
 			}{id, metadata})
 			return s.updateErr
+		},
+		fetchBacklog: func(ctx context.Context, opts runOptions) (int, error) {
+			return s.backlogResult, s.backlogErr
 		},
 		comment: func(ctx context.Context, id, body string, warn func(string)) error {
 			s.commented = append(s.commented, struct {
@@ -277,3 +283,72 @@ var errUnreachable = &testError{"grafana unreachable"}
 type testError struct{ msg string }
 
 func (e *testError) Error() string { return e.msg }
+
+func TestRunProbeBacklogAloneConfiguresDriftCheck(t *testing.T) {
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	opts.haveBacklog = true
+	opts.backlog = 60 // only --backlog; --queue-depth deliberately unset
+	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 1, QueueDepth: 5}); err != nil {
+		t.Fatal(err)
+	}
+	spy := &spyDeps{}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(spy.created) != 1 || !strings.Contains(spy.created[0].title, "backlog") {
+		t.Fatalf("expected exactly one backlog finding, got %+v", spy.created)
+	}
+	snap, _ := loadSnapshot(opts.snapshotPath)
+	if snap.QueueDepth != 5 || snap.Backlog != 60 {
+		t.Fatalf("queue-depth must be preserved and backlog updated, got %+v", snap)
+	}
+}
+
+func TestRunProbeBacklogFromStatus(t *testing.T) {
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	opts.backlogFromStatus = true
+	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 1}); err != nil {
+		t.Fatal(err)
+	}
+	spy := &spyDeps{backlogResult: 80}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(spy.created) != 1 {
+		t.Fatalf("expected one backlog finding, got %+v", spy.created)
+	}
+	snap, _ := loadSnapshot(opts.snapshotPath)
+	if snap.Backlog != 80 {
+		t.Fatalf("expected snapshot backlog 80, got %d", snap.Backlog)
+	}
+}
+
+func TestRunProbeBacklogFromStatusFailureIsDegraded(t *testing.T) {
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	opts.backlogFromStatus = true
+	opts.binaryPath = os.Args[0] // a readable file so one sub-check succeeds
+	spy := &spyDeps{backlogErr: errUnreachable}
+	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected exit 4 (partial), got %v", err)
+	}
+}
+
+func TestParseBacklog(t *testing.T) {
+	got, err := parseBacklog([]byte(`{"queues":[{"type":"a","depth":3},{"type":"b","depth":4}]}`))
+	if err != nil || got != 7 {
+		t.Fatalf("got %d, %v; want 7", got, err)
+	}
+	if got, err := parseBacklog([]byte(`{"queues":[]}`)); err != nil || got != 0 {
+		t.Fatalf("empty queues: got %d, %v", got, err)
+	}
+	if _, err := parseBacklog([]byte(`{}`)); err == nil {
+		t.Fatalf("missing queues must error")
+	}
+	if _, err := parseBacklog([]byte(`not json`)); err == nil {
+		t.Fatalf("bad json must error")
+	}
+}

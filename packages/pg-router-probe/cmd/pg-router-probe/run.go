@@ -24,7 +24,7 @@
 //	                 same paragraph].
 //
 // Which sub-checks are "configured" at all (Grafana URL set,
-// --queue-depth/--backlog both set, --binary-path set) is entirely a
+// --queue-depth and/or --backlog/--backlog-from-status set, --binary-path set) is entirely a
 // function of this run invocation's own flags — wiring REAL values into
 // those flags in production is the out-of-scope sibling scheduling
 // packet's job [Files: "Scheduling this probe through pg-router" Out of
@@ -85,6 +85,15 @@ type runOptions struct {
 	haveBacklog    bool
 	backlog        int
 
+	// backlogFromStatus makes the probe read the backlog itself from
+	// `<pgRouterPath> status --json` (sum of queues[].depth, pg-router's
+	// MetricBacklog definition) instead of taking a bare --backlog int.
+	// pg2-5g9e0: a scheduled role's argv is static, so a live reading
+	// cannot be passed as a flag value.
+	backlogFromStatus bool
+	pgRouterPath      string
+	statusTimeout     time.Duration
+
 	binaryPath       string
 	deployRecordPath string
 	snapshotPath     string
@@ -102,6 +111,7 @@ type runDeps struct {
 	createIssue    func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error)
 	updateMetadata func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error
 	comment        func(ctx context.Context, id, body string, warn func(string)) error
+	fetchBacklog   func(ctx context.Context, opts runOptions) (int, error)
 }
 
 func defaultRunDeps() runDeps {
@@ -117,6 +127,7 @@ func defaultRunDeps() runDeps {
 		createIssue:    createIssue,
 		updateMetadata: updateIssueMetadata,
 		comment:        commentIssue,
+		fetchBacklog:   fetchBacklogFromStatus,
 	}
 }
 
@@ -126,6 +137,8 @@ func newRunCmd() *cobra.Command {
 		pgConnectorTimeout: 30 * time.Second,
 		ruleUIDs:           append([]string{}, registeredRuleUIDs...),
 		snapshotPath:       defaultSnapshotPath(),
+		pgRouterPath:       "pg-router",
+		statusTimeout:      10 * time.Second,
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -137,8 +150,12 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the 4 registered rule UIDs")
-	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading; unset (with --backlog) skips the queue/backlog drift sub-check")
-	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading; unset (with --queue-depth) skips the queue/backlog drift sub-check")
+	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading; unset skips the queue-depth drift check (the backlog check is independent)")
+	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading; unset skips the backlog drift check (the queue-depth check is independent)")
+	cmd.Flags().BoolVar(&opts.backlogFromStatus, "backlog-from-status", false, "read the backlog from `pg-router status --json` (sum of queues[].depth) instead of --backlog")
+	cmd.Flags().StringVar(&opts.pgRouterPath, "pg-router-path", opts.pgRouterPath, "pg-router binary used by --backlog-from-status")
+	cmd.Flags().DurationVar(&opts.statusTimeout, "status-timeout", opts.statusTimeout, "explicit timeout for the `pg-router status --json` call")
+	cmd.MarkFlagsMutuallyExclusive("backlog", "backlog-from-status")
 	cmd.Flags().StringVar(&opts.binaryPath, "binary-path", "", "path to the daemon/handler binary to hash; unset skips the binary hash sanity sub-check")
 	cmd.Flags().StringVar(&opts.deployRecordPath, "deploy-record-file", "", "optional file of known-expected binary hashes, one per line")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
@@ -195,15 +212,35 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	}
 
 	// Sub-check 2: queue/backlog drift.
-	if !opts.haveQueueDepth || !opts.haveBacklog {
-		skipped = append(skipped, "queue-backlog-drift: not configured (--queue-depth/--backlog unset)")
+	// The two readings are independent: either flag alone configures its
+	// own check (pg2-5g9e0 -- only --backlog is wired in production; there
+	// is no defined single-queue reading for --queue-depth).
+	if opts.backlogFromStatus {
+		n, err := deps.fetchBacklog(ctx, opts)
+		if err != nil {
+			msg := fmt.Sprintf("backlog-drift: %v", err)
+			skipped = append(skipped, msg)
+			degraded = append(degraded, msg)
+		} else {
+			opts.haveBacklog = true
+			opts.backlog = n
+		}
+	}
+	if !opts.haveQueueDepth && !opts.haveBacklog {
+		if !opts.backlogFromStatus {
+			skipped = append(skipped, "queue-backlog-drift: not configured (--queue-depth/--backlog unset)")
+		}
 	} else {
 		ranAny = true
-		if f := checkQueueGrowth("queue-depth", hadPrev, prevSnap.QueueDepth, opts.queueDepth); f != nil {
-			findings = append(findings, *f)
+		if opts.haveQueueDepth {
+			if f := checkQueueGrowth("queue-depth", hadPrev, prevSnap.QueueDepth, opts.queueDepth); f != nil {
+				findings = append(findings, *f)
+			}
 		}
-		if f := checkQueueGrowth("backlog", hadPrev, prevSnap.Backlog, opts.backlog); f != nil {
-			findings = append(findings, *f)
+		if opts.haveBacklog {
+			if f := checkQueueGrowth("backlog", hadPrev, prevSnap.Backlog, opts.backlog); f != nil {
+				findings = append(findings, *f)
+			}
 		}
 	}
 
