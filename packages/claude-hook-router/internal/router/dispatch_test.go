@@ -163,6 +163,16 @@ func helperDelegate(t *testing.T, name, contract string, priority int, spec stri
 	}
 }
 
+// generousBudget is far above any plausible loaded-machine delegate latency;
+// merge-outcome tests use it so the production 6s TotalBudget (which each
+// helper-process re-exec can eat a large share of under load) cannot turn a
+// later delegate into a Skipped one and flip the merge result (pg2-s2n49).
+const generousBudget = 10 * time.Minute
+
+func dispatchGenerous(ctx context.Context, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
+	return dispatch(ctx, generousBudget, event, delegates, payload, projectDir, dataDir)
+}
+
 func rawPayload(fields map[string]string) map[string]json.RawMessage {
 	m := make(map[string]json.RawMessage, len(fields))
 	for k, v := range fields {
@@ -185,7 +195,7 @@ func TestDispatchSequentialOrderByPriority(t *testing.T) {
 		helperDelegate(t, "second", "annotate", 2, "annotate:second"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	want := "first\nsecond\nthird"
 	if got := result.Output.AdditionalContext; got != want {
@@ -214,7 +224,7 @@ func TestDispatchCumulativeRewritePassthroughUpdatedInput(t *testing.T) {
 	}
 	payload := rawPayload(map[string]string{"tool_input": `{"command":"echo original"}`})
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, payload, "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, payload, "", t.TempDir())
 
 	want := `{"marker":"hello"}`
 	if got := result.Output.AdditionalContext; got != want {
@@ -231,7 +241,7 @@ func TestDispatchCumulativeRewritePassthroughUpdatedToolOutput(t *testing.T) {
 	}
 	payload := rawPayload(map[string]string{"tool_response": `{"status":"ok"}`})
 
-	result := Dispatch(context.Background(), "PostToolUse", delegates, payload, "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PostToolUse", delegates, payload, "", t.TempDir())
 
 	want := `{"marker":"hello2"}`
 	if got := result.Output.AdditionalContext; got != want {
@@ -250,7 +260,7 @@ func TestDispatchCumulativeRewritePassthroughDecisionUpdatedInput(t *testing.T) 
 	}
 	payload := rawPayload(map[string]string{"tool_input": `{"command":"echo original"}`})
 
-	result := Dispatch(context.Background(), "PermissionRequest", delegates, payload, "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PermissionRequest", delegates, payload, "", t.TempDir())
 
 	want := `{"marker":"hello3"}`
 	if got := result.Output.AdditionalContext; got != want {
@@ -268,7 +278,7 @@ func TestDispatchAbstainDoesNotShortCircuit(t *testing.T) {
 		helperDelegate(t, "contributor", "annotate", 2, "annotate:contributed"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Output.PermissionDecision != "" {
 		t.Errorf("PermissionDecision = %q, want empty (the abstainer contributed nothing)", result.Output.PermissionDecision)
@@ -289,7 +299,7 @@ func TestDispatchMalformedOutputTreatedAsAbstainChainContinues(t *testing.T) {
 		helperDelegate(t, "contributor", "annotate", 3, "annotate:contributed"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Output.PermissionDecision != "" {
 		t.Errorf("PermissionDecision = %q, want empty (both decide delegates were malformed)", result.Output.PermissionDecision)
@@ -316,7 +326,7 @@ func TestDispatchMalformedOutputTreatedAsAbstainChainContinues(t *testing.T) {
 func TestDispatchExtraFieldsIgnoredGracefully(t *testing.T) {
 	delegates := []Delegate{helperDelegate(t, "forward-compat", "decide", 1, "extra-fields")}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Entries[0].Verdict != VerdictApplied {
 		t.Errorf("verdict = %q, want %q (an unknown extra field must not error the parse)", result.Entries[0].Verdict, VerdictApplied)
@@ -334,7 +344,7 @@ func TestDispatchCommandNotFoundIsAbstainNotFatal(t *testing.T) {
 		helperDelegate(t, "contributor", "annotate", 2, "annotate:contributed"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Entries[0].Verdict != VerdictError {
 		t.Errorf("verdict = %q, want %q", result.Entries[0].Verdict, VerdictError)
@@ -377,7 +387,7 @@ func TestDispatchPermissionMergeTableThroughRealDispatch(t *testing.T) {
 				helperDelegate(t, "d1", "decide", 1, specFor(first)),
 				helperDelegate(t, "d2", "decide", 2, specFor(second)),
 			}
-			result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+			result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 			want := expectedWinner([]string{first, second})
 			if got := result.Output.PermissionDecision; got != want {
@@ -407,7 +417,7 @@ func specFor(permissionValue string) string {
 func TestDispatchNestedHookSpecificOutputEnvelopeIsHonoredNotAbstained(t *testing.T) {
 	delegates := []Delegate{helperDelegate(t, "nested-delegate", "decide", 1, "decide-nested:allow")}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Entries[0].Verdict != VerdictApplied {
 		t.Errorf("verdict = %q, want %q (the nested envelope must be unwrapped, not treated as abstain)", result.Entries[0].Verdict, VerdictApplied)
@@ -527,7 +537,7 @@ func TestDispatchPartialChainFailurePreservesPriorContributions(t *testing.T) {
 		helperDelegate(t, "last", "annotate", 3, "annotate:tail"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Output.PermissionDecision != "ask" {
 		t.Errorf("PermissionDecision = %q, want %q (the first delegate's contribution must survive the mid-chain failure)", result.Output.PermissionDecision, "ask")
@@ -548,7 +558,7 @@ func TestDispatchObserveContractResponseIsAlwaysDiscarded(t *testing.T) {
 		helperDelegate(t, "decider", "decide", 2, "decide:allow"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if result.Entries[0].Verdict != VerdictApplied {
 		t.Errorf("observer verdict = %q, want %q (it did return valid output; it is DISCARDED, not erroring)", result.Entries[0].Verdict, VerdictApplied)
@@ -568,7 +578,7 @@ func TestDispatchAllObserveShortCircuitReturnsEmptyResult(t *testing.T) {
 		helperDelegate(t, "observer-two", "observe", 2, "annotate:should-not-appear"),
 	}
 
-	result := Dispatch(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
+	result := dispatchGenerous(context.Background(), "PreToolUse", delegates, rawPayload(nil), "", t.TempDir())
 
 	if !result.Output.IsZero() {
 		t.Errorf("Output = %#v, want the zero HookOutput", result.Output)

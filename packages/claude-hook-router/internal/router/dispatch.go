@@ -45,6 +45,15 @@ type Result struct {
 // this router's own CLAUDE_PLUGIN_DATA, under which each delegate gets its
 // own vendored/<name>/ subdirectory (ADR 0071 §2.7).
 func Dispatch(ctx context.Context, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
+	return dispatch(ctx, TotalBudget, event, delegates, payload, projectDir, dataDir)
+}
+
+// dispatch is Dispatch with the shared chain budget made explicit, so tests
+// that assert merge outcomes (not timing) can use a budget generous enough
+// that a loaded machine cannot exhaust it and turn a later delegate into a
+// Skipped one (ADR 0071 §4 B1: budget exhaustion is Abstain + partial merge
+// by design, which would otherwise make those tests load-sensitive).
+func dispatch(ctx context.Context, budget time.Duration, event string, delegates []Delegate, payload map[string]json.RawMessage, projectDir, dataDir string) Result {
 	sorted := make([]Delegate, len(delegates))
 	copy(sorted, delegates)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -62,7 +71,7 @@ func Dispatch(ctx context.Context, event string, delegates []Delegate, payload m
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, TotalBudget)
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	var result Result
