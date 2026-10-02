@@ -194,3 +194,13 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   (or its bead) must not delete the working directory out from under a peer. If the session list
   cannot be read the worktree is left in place. This extends the same sharing rule that
   `INV-CCH-14` and the dispatch-time reconcile apply to their own purges (bead `pg2-aqpqx`).
+- **`INV-CCH-16`** — when a ccpool-backed handler session runs under `permissionMode=dontAsk`, the
+  prompt the handler sends it MUST carry, ahead of the role's task text, a code-owned notice (not
+  editable through any role's prompt file) that writes to the agent runtime's protected paths --
+  the `.claude/` directory, except `.claude/worktrees` -- are denied automatically in that mode and
+  cannot be granted by any allow-list entry. The notice MUST instruct the session that, if the task
+  requires such a write, it MUST NOT attempt or retry the write, MUST stop at once, and MUST hand
+  the task back through the role's normal hand-back path stating the reason and carrying the exact
+  intended change (unified diff, or full content for a new file). The notice MUST NOT be sent when
+  the session runs under any other permission mode. This invariant does not choose the permission
+  mode; that remains a deployment decision.

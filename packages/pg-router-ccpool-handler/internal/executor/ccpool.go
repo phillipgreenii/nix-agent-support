@@ -612,8 +612,9 @@ func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, exis
 }
 
 // renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety
-// preamble when authorship_guard is set, then the role's rendered task prompt, then
-// the budget prompt-line (empty when the budget is unlimited).
+// preamble when authorship_guard is set, the (non-editable) protected-path notice
+// when the session runs under permissionMode=dontAsk, then the role's rendered task
+// prompt, then the budget prompt-line (empty when the budget is unlimited).
 func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, worktreeDir string) string {
 	pctx := prompt.Context{
 		Item:        d.Item,
@@ -632,6 +633,9 @@ func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, workt
 	var sb strings.Builder
 	if cc.AuthorshipGuard {
 		sb.WriteString(prompt.AuthorshipPreamble())
+	}
+	if r.deps.Cfg.PermissionMode == "dontAsk" {
+		sb.WriteString(prompt.ProtectedPathNotice())
 	}
 	sb.WriteString(body)
 	sb.WriteString(cc.Budget.PromptLine()) // "" when unlimited

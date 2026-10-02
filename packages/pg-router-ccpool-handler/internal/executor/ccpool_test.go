@@ -1855,3 +1855,33 @@ func TestDispatch_absorbDuplicate_readyNoPrompt_sendFails_closesAndUnclaims(t *t
 		t.Errorf("stranded session must be purge-closed; Closed=%v purge=%v", cc.Closed, cc.ClosedPurge)
 	}
 }
+
+// A dontAsk session is told up front that .claude/** writes are auto-denied and
+// must be handed back (bead pg2-a4kzx); the notice sits before the task prompt
+// and, when authorship_guard is on, after the authorship preamble.
+func TestRenderNudge_dontAsk_includesProtectedPathNotice(t *testing.T) {
+	cfg := fastCfg()
+	cfg.PermissionMode = "dontAsk"
+	r := newExec(&dtest.FakeCC{}, &dtest.ScriptBD{}, cfg)
+	role := workerRole(cfg)
+	got := r.renderNudge(role.CCPool, DispatchContext{Role: role, Item: item.Item{ID: "pg2-x"}}, "/wt")
+	notice := prompt.ProtectedPathNotice()
+	if !strings.Contains(got, notice) {
+		t.Fatalf("dontAsk nudge missing protected-path notice: %q", got)
+	}
+	ni, ai, bi := strings.Index(got, notice), strings.Index(got, prompt.AuthorshipPreamble()), strings.Index(got, "implement work bead pg2-x")
+	if ai < 0 || ai >= ni || ni >= bi {
+		t.Fatalf("order must be authorship preamble < notice < task body; got %d,%d,%d", ai, ni, bi)
+	}
+}
+
+func TestRenderNudge_notDontAsk_omitsProtectedPathNotice(t *testing.T) {
+	cfg := fastCfg()
+	cfg.PermissionMode = "bypassPermissions"
+	r := newExec(&dtest.FakeCC{}, &dtest.ScriptBD{}, cfg)
+	role := workerRole(cfg)
+	got := r.renderNudge(role.CCPool, DispatchContext{Role: role, Item: item.Item{ID: "pg2-x"}}, "/wt")
+	if strings.Contains(got, prompt.ProtectedPathNotice()) {
+		t.Fatalf("non-dontAsk nudge must not carry the notice: %q", got)
+	}
+}

@@ -45,3 +45,15 @@ func TestAuthorshipPreamble_present(t *testing.T) {
 		}
 	}
 }
+
+func TestProtectedPathNotice_present(t *testing.T) {
+	p := ProtectedPathNotice()
+	for _, want := range []string{"dontAsk", ".claude/", ".claude/worktrees", "denied", "stop", "hand", "diff"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("protected-path notice missing %q: %s", want, p)
+		}
+	}
+	if !strings.HasSuffix(p, "\n\n") {
+		t.Fatalf("notice must end with a blank line so the task prompt starts on its own paragraph: %q", p)
+	}
+}

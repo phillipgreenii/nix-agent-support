@@ -48,3 +48,24 @@ func AuthorshipPreamble() string {
 		"NO changes, comment why, and add the human label (bd update <bead> --add-label " +
 		"human). NEVER git push --force (use --force-with-lease only if instructed).\n\n"
 }
+
+// ProtectedPathNotice is the fixed, code-owned block prepended to a ccpool role's
+// task prompt when the session runs under permissionMode=dontAsk. Claude Code
+// auto-denies writes (Edit/Write) to its protected paths -- the .claude/
+// directory, except .claude/worktrees -- under dontAsk, and no allowed-tools
+// entry can grant them, so a worker that discovers this by trial burns turns on
+// the denial before handing back. Stating it up front lets the worker hand the
+// change back on its first attempt. Like AuthorshipPreamble it is NOT in any
+// prompt_file, so editing config cannot weaken it. (bead pg2-a4kzx)
+func ProtectedPathNotice() string {
+	return "Permission note: this session runs with permissionMode=dontAsk. Writes " +
+		"(Edit/Write) to Claude Code protected paths -- anything under .claude/ except " +
+		".claude/worktrees -- are denied automatically, and no allowed-tools grant can " +
+		"override that. If completing this task requires changing a file under .claude/, " +
+		"do NOT attempt the write and do NOT retry or work around the denial: stop " +
+		"immediately, make no partial changes to those paths, and hand the task back " +
+		"through this role's normal hand-back path, stating that the change needs a " +
+		".claude/ protected-path write and including the exact intended change (the " +
+		"full unified diff, or the complete new file content for a new file) in your " +
+		"hand-back so a person can apply it. Changes to all other paths proceed as normal.\n\n"
+}
