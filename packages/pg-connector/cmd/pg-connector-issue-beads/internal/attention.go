@@ -119,6 +119,8 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 			severity = schema.SeverityHigh
 			summary = fmt.Sprintf("%s: overdue (due %s)", iss.Title, iss.DueAt)
 		}
+		// URL is deliberately left unset (INV-ATTN-URL-1): bd has no hosted
+		// page for an issue, and an item with no page omits the field.
 		items = append(items, schema.AttentionItem{
 			Type:     "issue",
 			ID:       iss.ID,

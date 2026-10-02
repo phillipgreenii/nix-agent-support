@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -29,8 +30,51 @@ func TestAttentionItem_JSONShape_WithSeverity(t *testing.T) {
 	}
 }
 
+// TestAttentionItem_JSONShape_URL pins INV-ATTN-URL-1's wire half: url is
+// omitempty (an item with no page omits the key entirely, never "url":"")
+// and a set url is emitted verbatim as the last key.
+func TestAttentionItem_JSONShape_URL(t *testing.T) {
+	raw, err := json.Marshal(AttentionItem{Type: "pr", ID: "o/r#1", Summary: "needs review", Severity: SeverityHigh, URL: "https://example.invalid/o/r/pull/1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"type":"pr","id":"o/r#1","summary":"needs review","severity":"high","url":"https://example.invalid/o/r/pull/1"}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+
+	raw, err = json.Marshal(AttentionItem{Type: "pr", ID: "o/r#1", Summary: "needs review"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "url") {
+		t.Fatalf("empty URL must be omitted entirely, got %s", raw)
+	}
+}
+
+// TestAttentionItem_UnmarshalV1Item proves the additive bump: a version-1
+// item (no url key) still decodes, with URL left empty.
+func TestAttentionItem_UnmarshalV1Item(t *testing.T) {
+	var out AttentionItem
+	if err := json.Unmarshal([]byte(`{"type":"pr","id":"pr-1","summary":"needs review","severity":"low"}`), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.URL != "" {
+		t.Fatalf("URL = %q, want empty for a v1 item", out.URL)
+	}
+}
+
+func TestAttentionSchemaVersion_BumpedForURL(t *testing.T) {
+	if AttentionSchemaVersion != 2 {
+		t.Fatalf("AttentionSchemaVersion = %d, want 2 (the additive url field)", AttentionSchemaVersion)
+	}
+	if CurrentSchemaVersions["attention"] != AttentionSchemaVersion {
+		t.Fatalf("CurrentSchemaVersions[attention] = %d, want %d", CurrentSchemaVersions["attention"], AttentionSchemaVersion)
+	}
+}
+
 func TestAttentionItem_JSONRoundTrip(t *testing.T) {
-	in := AttentionItem{Type: "ci", ID: "run-1", Summary: "build failed", Severity: SeverityCritical}
+	in := AttentionItem{Type: "ci", ID: "run-1", Summary: "build failed", Severity: SeverityCritical, URL: "https://example.invalid/run/1"}
 	raw, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

@@ -17,6 +17,10 @@ func TestListAttention_BlockedHumanInput(t *testing.T) {
 	if len(items) != 1 || items[0].Severity != schema.SeverityHigh || items[0].ID != "s1" {
 		t.Errorf("got %+v", items)
 	}
+	// INV-ATTN-URL-1: an agent session has no page, so url is omitted.
+	if items[0].URL != "" {
+		t.Errorf("URL = %q, want empty", items[0].URL)
+	}
 }
 
 func TestListAttention_BlockedUsageLimitIsMedium(t *testing.T) {

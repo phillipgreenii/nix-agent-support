@@ -317,14 +317,15 @@ Extensions:
 **Intent:** call `attention list` or `search <query>` — the two capabilities with no targeted
 form at all — and get back every registered source's own contribution, aggregated per that
 capability's own rule, plus the ordinary fan-out exit code.
-_Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-SEARCH-1`.
+_Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-ATTN-URL-1`, `INV-SEARCH-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The umbrella resolves the backend set from the capability's own top-level key
 (`attention.sources` or `search.sources`, never `connector.<type>` — `INV-REG-3`) and dispatches
 one `INTF-WIRE` request per registered source, building one `sources[]` row each exactly as
 `USECASE-FANOUT-CALL` does. It then aggregates the per-source raw items by that capability's own
-rule — `attention list` dedups by `{type, id}` and ranks by severity (`INV-ATTN-1`); `search`
+rule — `attention list` dedups by `{type, id}` and ranks by severity (`INV-ATTN-1`), passing each
+item's optional own-page `url` through unread and never defaulting it (`INV-ATTN-URL-1`); `search`
 keeps every source's results in its own group, ordered by registration order, with no
 cross-source merge at all (`INV-SEARCH-1`) — and computes the SAME fan-out exit code
 `USECASE-FANOUT-CALL` does from the `sources[]` rows. Neither verb accepts `--backend` or

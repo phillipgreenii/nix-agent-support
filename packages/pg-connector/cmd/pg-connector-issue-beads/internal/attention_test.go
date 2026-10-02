@@ -84,6 +84,13 @@ func TestBackend_ListAttention_DueBeforeAndOverdueSplit(t *testing.T) {
 	if byID["tp-2"].Severity != schema.SeverityMedium {
 		t.Fatalf("tp-2 severity = %q, want medium (due soon, not yet overdue)", byID["tp-2"].Severity)
 	}
+	// INV-ATTN-URL-1: bd has no hosted page for an issue, so the item omits
+	// url rather than synthesizing one.
+	for id, it := range byID {
+		if it.URL != "" {
+			t.Fatalf("%s URL = %q, want empty (bd has no issue page)", id, it.URL)
+		}
+	}
 }
 
 // TestBackend_ListAttention_UsesConfiguredThreshold proves the configured

@@ -137,6 +137,9 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 			ID:       item.Key,
 			Summary:  summary,
 			Severity: severity,
+			// The issue's own page (INV-ATTN-URL-1); omitted when pjira
+			// returned none.
+			URL: item.URL,
 		})
 	}
 	return items, nil

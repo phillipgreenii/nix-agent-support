@@ -238,7 +238,7 @@ func toAttentionItem(a schema.Alert) schema.AttentionItem {
 		summary += " (acknowledged)"
 		severity = lowerOneLevel(severity)
 	}
-	return schema.AttentionItem{Type: alertType, ID: a.ID, Summary: summary, Severity: severity}
+	return schema.AttentionItem{Type: alertType, ID: a.ID, Summary: summary, Severity: severity, URL: a.URL}
 }
 
 // lowerOneLevel drops s one rank, floored at low; an absent severity stays

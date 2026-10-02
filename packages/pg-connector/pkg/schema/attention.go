@@ -23,16 +23,23 @@ package schema
 // cmd/pg-connector/config_validate.go's checkSchemaVersions (an
 // unknown-to-this-build capability key is otherwise treated as "no
 // opinion," never a mismatch).
-const AttentionSchemaVersion = 1
+//
+// Version history: 1 = {type, id, summary, severity?}; 2 = adds the optional
+// url (additive: a v1 consumer ignores it, a v2 consumer tolerates its
+// absence).
+const AttentionSchemaVersion = 2
 
 // AttentionItem is the attention capability's shared JSON wire shape: a
 // single source's own list_attention response item is exactly this shape —
-// {type, id, summary} plus optional severity — carried by
+// {type, id, summary} plus optional severity and url — carried by
 // pkg/provider/attention.Provider.ListAttention. Tier 1's aggregated
 // pg-connector attention list output (built by the sibling aggregation
 // packet) is a strict superset that adds via/truncated/total_before_cap at
 // the merge/envelope layer; it is never a violation of this per-source
-// shape, and this type MUST NOT itself gain those fields.
+// shape, and this type MUST NOT itself gain those fields. That
+// no-via/no-truncated/no-total_before_cap rule concerns AGGREGATION fields
+// only: it does not forbid per-item descriptive fields such as URL, which a
+// source fills and the umbrella passes through unread.
 type AttentionItem struct {
 	// Type identifies the kind of thing this item is about (e.g. a PR, a
 	// CI run, an issue) — a source-defined, generic string, not a closed
@@ -49,6 +56,15 @@ type AttentionItem struct {
 	// entirely (omitempty) — it MUST NOT be defaulted to any value by any
 	// caller of this package.
 	Severity Severity `json:"severity,omitempty"`
+
+	// URL is this item's own page (INV-ATTN-URL-1): the alert in its
+	// source system, the PR, the issue. A source with no page for the item
+	// omits the field entirely (omitempty). It names the item itself and
+	// nothing else — never a related entity (cross-entity links are not an
+	// attention concern) — and it MUST NOT be defaulted or synthesized by
+	// any caller of this package, including the umbrella's merge layer,
+	// which passes it through unread.
+	URL string `json:"url,omitempty"`
 }
 
 // Severity is the attention capability's closed string enum, with a

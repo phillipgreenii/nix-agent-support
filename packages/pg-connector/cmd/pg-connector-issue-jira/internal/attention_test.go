@@ -91,6 +91,11 @@ func TestBackend_ListAttention_DueSoonAndOverdueSplit(t *testing.T) {
 	if byID["TP-2"].Severity != schema.SeverityMedium {
 		t.Fatalf("TP-2 severity = %q, want medium (due soon, not yet overdue)", byID["TP-2"].Severity)
 	}
+	// INV-ATTN-URL-1: the item's url is the issue's own page, as pjira
+	// reported it.
+	if byID["TP-1"].URL != "https://example.invalid/TP-1" || byID["TP-2"].URL != "https://example.invalid/TP-2" {
+		t.Fatalf("urls = %q, %q; want the pjira issue urls", byID["TP-1"].URL, byID["TP-2"].URL)
+	}
 }
 
 func TestBackend_ListAttention_NoExcludeConfigured(t *testing.T) {

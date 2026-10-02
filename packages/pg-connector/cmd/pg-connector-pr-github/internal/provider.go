@@ -580,6 +580,9 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 			Type:    "pr",
 			ID:      formatPRID(full.Repo, full.Number),
 			Summary: fmt.Sprintf("%s: %s", reason, full.Title),
+			// The PR's own page (INV-ATTN-URL-1); omitted when GitHub
+			// returned none.
+			URL: full.URL,
 		}, nil
 	})
 	if err != nil {

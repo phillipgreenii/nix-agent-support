@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,6 +225,41 @@ func TestFanOutAttentionList_AttachesBackendConfig(t *testing.T) {
 	}
 }
 
+// TestMergeAttentionItems_URLPassesThroughUnread pins INV-ATTN-URL-1's
+// umbrella half: the merge layer never defaults or synthesizes url. An item
+// keeps its source's url (or none), and a dedup group carries the winning
+// contributor's own item, url included.
+func TestMergeAttentionItems_URLPassesThroughUnread(t *testing.T) {
+	perSource := map[string][]schema.AttentionItem{
+		"backend-a": {
+			{Type: "alert", ID: "x", Summary: "no page", Severity: schema.SeverityMedium},
+			{Type: "pr", ID: "o/r#1", Summary: "from a", Severity: schema.SeverityLow, URL: "https://example.invalid/a"},
+		},
+		"backend-b": {{Type: "pr", ID: "o/r#1", Summary: "from b", Severity: schema.SeverityHigh, URL: "https://example.invalid/b"}},
+	}
+	got := mergeAttentionItems(perSource, []string{"backend-a", "backend-b"})
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
+	}
+	byID := map[string]MergedAttentionItem{}
+	for _, it := range got {
+		byID[it.ID] = it
+	}
+	if byID["x"].URL != "" {
+		t.Fatalf("item with no source url gained %q; the umbrella MUST NOT default url", byID["x"].URL)
+	}
+	if byID["o/r#1"].URL != "https://example.invalid/b" {
+		t.Fatalf("deduped url = %q, want the winning (most severe) contributor's url", byID["o/r#1"].URL)
+	}
+	raw, err := json.Marshal(byID["x"])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"url"`) {
+		t.Fatalf("item with no url must omit the key, got %s", raw)
+	}
+}
+
 // --- CLI-level: "attention list" end-to-end, mirroring pr_test.go's
 // executePr helper. ---
 
@@ -241,6 +277,22 @@ func TestRun_AttentionList_MergesAndReportsSources(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"source":"backend-b"`) || !strings.Contains(stdout, `"status":"disabled"`) {
 		t.Fatalf("stdout missing disabled sources[] row for backend-b: %s", stdout)
+	}
+}
+
+func TestRun_AttentionList_PassesURLThrough(t *testing.T) {
+	writeFakeBackend(t, "backend-a", `{"protocolVersion":1,"schemaVersion":2,"result":[{"type":"pr","id":"1","summary":"a","severity":"high","url":"https://example.invalid/pull/1"},{"type":"alert","id":"2","summary":"b","severity":"low"}]}`)
+	writeAttentionConfigFor(t, "backend-a")
+
+	stdout, _, code := executePr(t, []string{"attention", "list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, `"url":"https://example.invalid/pull/1"`) {
+		t.Fatalf("stdout dropped the item's url: %s", stdout)
+	}
+	if strings.Count(stdout, `"url"`) != 1 {
+		t.Fatalf("exactly one item has a url, stdout=%s", stdout)
 	}
 }
 

@@ -110,7 +110,7 @@ obliges to exist and to name no backend/system; `INTF-WIRE` is the interface tha
 | `alert`     | `list`            | `{query?, ids_only}` → `{entities, present_ids, cursor: null, truncated}`; `query` optional, omitted means the whole firing set | fanned out by the umbrella across every registered `alert` backend unless `--backend` pins one                    |
 | `alert`     | `show`            | `{id}` → the currently-firing alert (`not_found` when it is not firing)                                                         | targeted                                                                                                          |
 | `alert`     | `list_history`    | `{since, until, query?}` → `{episodes, truncated}`                                                                              | fanned out by the umbrella across every registered `alert` backend unless `--backend` pins one                    |
-| `attention` | `list_attention`  | (no args) → `[]AttentionItem` (`{type, id, summary}` + optional `severity`)                                                     | fan-out only — every backend registered under the top-level `attention.sources` key; no targeted form at all      |
+| `attention` | `list_attention`  | (no args) → `[]AttentionItem` (`{type, id, summary}` + optional `severity`, `url`)                                              | fan-out only — every backend registered under the top-level `attention.sources` key; no targeted form at all      |
 | `search`    | `search`          | `{query, fields}` → `[]SearchResult` (`{type, id, title, url, source}` + optional `attributes`)                                 | fan-out only — every backend registered under the top-level `search.sources` key; no targeted form at all         |
 | _(any)_     | `capabilities`    | (no args) → the bespoke discovery shape                                                                                         | common; every backend MUST answer it                                                                              |
 | _(any)_     | `auth_status`     | (no args) → `{state, detail?}`                                                                                                  | common but **optional** — present only if the backend's concrete provider implements `AuthChecker` (`INV-AUTH-1`) |
@@ -335,7 +335,11 @@ realization-gap register).
 
 - **`list_attention`** — aggregated by `attention list` via dedup-and-rank, never plain
   concatenation like `ci list`'s own fan-out (`INV-ATTN-1`); an optional `--cap N` truncates the
-  already-merged list.
+  already-merged list. Each item MAY carry a `url` — its own page, filled by a source that has one
+  (an alert backend from the alert's URL, the PR backend from the PR URL, the Jira backend from the
+  issue URL) and omitted by one that does not (the beads and agent-session backends); the umbrella
+  passes it through unread and never defaults it (`INV-ATTN-URL-1`). The attention capability's
+  schema version is 2 (additive over 1).
 - **`search`** — aggregated by `search` via per-source grouping, never merged across sources
   (`INV-SEARCH-1`); an optional `--fields` list requests specific result attributes, and an
   unrecognized one produces a `warnings[]` entry, never an error.

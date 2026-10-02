@@ -285,6 +285,15 @@ status`/`config validate`.
   config order ascending (and, within that, by its own original item order). No cap applies by
   default; an explicit `--cap N` truncates the already-merged/sorted list and MUST set
   `truncated`/`total_before_cap` only when the cap actually cuts items.
+- **`INV-ATTN-URL-1`** <!-- uuid: 31ed884e-8c30-4792-9638-612b94096377 --> — An attention
+  item's optional `url` (attention schema version 2) MUST name the item's OWN page — the alert in
+  its source system, the PR, the issue — and nothing else: never a related entity's page
+  (cross-entity links are not an attention concern). A source with no page for an item MUST omit
+  `url` entirely (never an empty string). `url` MUST NOT be defaulted or synthesized by any
+  caller, including `attention list`'s merge layer, which passes it through unread; a dedup
+  group's `url` is the winning contributor's own (the same winner `INV-ATTN-1` selects for
+  `summary`/`severity`). The `via`/`truncated`/`total_before_cap` aggregation fields remain the
+  only fields the merge layer adds; `url` is a per-source descriptive field and not one of them.
 - **`INV-SEARCH-1`** <!-- uuid: a9fdaa89-5b51-4d5f-8a2b-3d72a36a0326 --> — `search`'s aggregation
   MUST NOT merge or dedup across sources at all — unlike `attention list`'s `INV-ATTN-1`, each
   queried source's own results stay grouped under that source, in that source's own returned

@@ -363,8 +363,8 @@ func TestListAttention_Mapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []schema.AttentionItem{
-		{Type: "alert", ID: "grafana:a", Summary: "Crit", Severity: schema.SeverityCritical},
-		{Type: "alert", ID: "grafana:b", Summary: "NoSev"},
+		{Type: "alert", ID: "grafana:a", Summary: "Crit", Severity: schema.SeverityCritical, URL: "https://grafana.example.localhost/alerting/grafana/uid-a/view"},
+		{Type: "alert", ID: "grafana:b", Summary: "NoSev", URL: "https://grafana.example.localhost/alerting/grafana/uid-b/view"},
 	}
 	if !reflect.DeepEqual(items, want) {
 		t.Fatalf("items = %+v, want %+v", items, want)

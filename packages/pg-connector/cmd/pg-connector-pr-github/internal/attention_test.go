@@ -186,6 +186,41 @@ func TestBackend_ListAttention_ScansConfiguredQueryAndFiltersByPredicate(t *test
 	}
 }
 
+// TestBackend_ListAttention_FillsURLFromFullPR pins INV-ATTN-URL-1 for the
+// PR backend: the item's url is the PR's own page as returned by GetPR, and
+// a PR GitHub returned no URL for yields an item with no url (never a
+// synthesized one).
+func TestBackend_ListAttention_FillsURLFromFullPR(t *testing.T) {
+	for _, tc := range []struct {
+		name, prURL, want string
+	}{
+		{"url present", "https://example.invalid/owner/repo/pull/1", "https://example.invalid/owner/repo/pull/1"},
+		{"url absent", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh := &fakeGH{
+				viewerLogin: attnSelf,
+				searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+					return []api.PR{{Repo: "owner/repo", Number: 1, Title: "needs review", Author: attnTeammate}}, nil
+				},
+				pr: &api.PR{Repo: "owner/repo", Number: 1, Title: "needs review", HeadSHA: "h1", URL: tc.prURL},
+			}
+			b := New(gh)
+			ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"attention_query":"is:open is:pr"}`))
+			got, err := b.ListAttention(ctx)
+			if err != nil {
+				t.Fatalf("ListAttention: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+			}
+			if got[0].URL != tc.want {
+				t.Fatalf("got[0].URL = %q, want %q", got[0].URL, tc.want)
+			}
+		})
+	}
+}
+
 func TestBackend_ListAttention_RateLimitBelowReserve(t *testing.T) {
 	gh := &fakeGH{rateLimit: 1}
 	b := New(gh)
