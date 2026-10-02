@@ -143,16 +143,18 @@ func typeProblem(field, want string, raw json.RawMessage) string {
 }
 
 // excerpt quotes the first startsLen runes of stdout (surrounding whitespace
-// skipped), ending the quoted text with an ellipsis when it was cut.
+// skipped), ending the quoted text with an ellipsis when it was cut. It walks
+// only as far as it needs, so a 1 MiB stdout is not converted wholesale.
 func excerpt(stdout []byte) string {
 	b := bytes.Trim(stdout, " \t\r\n")
-	if len(b) > startsLen*utf8.UTFMax {
-		b = b[:startsLen*utf8.UTFMax] // enough bytes for startsLen runes; avoids converting all of a 1 MiB stdout
+	end := 0
+	for n := 0; n < startsLen && end < len(b); n++ {
+		_, size := utf8.DecodeRune(b[end:])
+		end += size
 	}
-	runes := []rune(strings.ToValidUTF8(string(b), "\uFFFD"))
-	text := string(runes)
-	if len(runes) > startsLen {
-		text = string(runes[:startsLen]) + "…"
+	text := strings.ToValidUTF8(string(b[:end]), "\uFFFD")
+	if end < len(b) {
+		text += "…"
 	}
 	return strconv.Quote(text)
 }

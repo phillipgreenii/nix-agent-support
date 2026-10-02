@@ -426,3 +426,35 @@ func TestParseObjectErrorKinds(t *testing.T) {
 		t.Errorf("members must come back raw and verbatim, got %q %v", got, err)
 	}
 }
+
+func TestKindNamesEveryJSONType(t *testing.T) {
+	for in, want := range map[string]string{
+		`"s"`: "a string", `{}`: "an object", `[]`: "an array", `true`: "a boolean", `false`: "a boolean",
+		`null`: "null", `0`: "a number", `-1.5e3`: "a number", ` {"a":1}`: "an object", "": "empty", " \n": "empty",
+	} {
+		if got := kind([]byte(in)); got != want {
+			t.Errorf("kind(%q) = %q; want %q", in, got, want)
+		}
+	}
+	if kind(nil) != "empty" {
+		t.Error("kind(nil) must not panic and must say empty")
+	}
+}
+
+// Result.Render refuses what it cannot encode, and says why.
+func TestRenderReportsEncodingFailures(t *testing.T) {
+	out, err := Result{Outcome: Resolved, Meta: []byte(`{not json`)}.Render()
+	if err == nil || out != nil {
+		t.Errorf("Render with invalid meta = %q, %v; want an error and no output", out, err)
+	}
+}
+
+// Syntax errors inside the object, wherever the decoder trips, are "not JSON".
+func TestParseObjectMalformedInsideTheObject(t *testing.T) {
+	for _, in := range []string{`{"a":1 "b":2}`, `{1:2}`, `{"a":1,}`, `{"a":[1 2]}`, `{"a":{"b":1 "c":2}}`, `{"a":[}`, `{"a"}`} {
+		_, err := ParseObject([]byte(in))
+		if !errors.Is(err, ErrNotJSON) {
+			t.Errorf("ParseObject(%q) error = %v; want kind ErrNotJSON", in, err)
+		}
+	}
+}
