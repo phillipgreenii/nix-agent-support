@@ -58,6 +58,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-EVENT-3`](event.md) — the durable queue is size-bounded: a soft threshold halts polled
   emitters (an in-memory flag, not a gate); the maximum refuses admission with a classified
   `log_full` / `log_unwritable` reason.
+- [`DEC-EVENT-4`](event.md) — the queue log has one owner at a time (an exclusive lock, second opener
+  refused), and `log compact [--dry-run]` is the operator's way to reclaim dead history.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
 - [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the

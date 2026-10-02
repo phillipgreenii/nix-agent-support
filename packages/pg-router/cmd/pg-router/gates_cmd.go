@@ -393,6 +393,12 @@ func renderGates(w io.Writer, gates []statusGate) {
 // out. It returns exitOK, or the exit code to report (a diagnostic already
 // written to stderr).
 func callGateVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req map[string]any, out any) int {
+	return callVerb(stderr, ref, verb, replySchema, req, out, core.CallOptions{})
+}
+
+// callVerb is callGateVerb with the call options chosen by the caller: a verb that
+// does real file work (log-compact) needs a longer timeout than the 5 s default.
+func callVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req map[string]any, out any, opts core.CallOptions) int {
 	payload, err := json.Marshal(req)
 	if err != nil { // unreachable: the request holds only JSON-safe scalars
 		fmt.Fprintf(stderr, "%s: build request: %v\n", verb, err)
@@ -404,7 +410,7 @@ func callGateVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req 
 		return conformance.ExitError
 	}
 	defer func() { _ = client.Close() }()
-	reply, code, err := client.Call(context.Background(), verb, payload, core.CallOptions{})
+	reply, code, err := client.Call(context.Background(), verb, payload, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", verb, err)
 		return conformance.ExitError

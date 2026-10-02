@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1",
+  "dryRun": true,
+  "compacted": false,
+  "noProgress": false,
+  "via": "daemon",
+  "bytesBefore": 33282518,
+  "bytesAfter": 4096,
+  "recordsBefore": 182157,
+  "recordsAfter": 9,
+  "eventsKept": 2,
+  "eventsDropped": 14106,
+  "gatesKept": 1,
+  "limitBytes": 67108864,
+  "percentBefore": 49.6,
+  "percentAfter": 0
+}

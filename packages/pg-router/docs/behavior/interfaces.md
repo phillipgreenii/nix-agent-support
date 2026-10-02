@@ -575,6 +575,24 @@ DEC-CLI-2`).
   gates over the same socket (`gate-set` / `gate-clear`); there is no separate file-based path.
   (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
+- **Operator log compaction.** The durable queue log accumulates history a restart never needs
+  (every evicted event leaves its records behind). The core compacts it itself — at startup, and
+  when it outgrows a configured size — and the operator **MAY** also ask for it, or ask what it
+  would do: **`log compact`** compacts the log down to live state now, and **`log compact
+--dry-run`** reports what that would do (size and record counts before and after, events kept
+  versus dropped, gates kept, the share of the configured maximum afterwards, and whether a real
+  run would be refused) **without changing anything**. Compaction **MUST NOT** change what a
+  restart rebuilds: the retained events and their order, who accepted them, the active gates.
+  Against a running core the request goes to that core, which does the work; with none running the
+  command compacts the log itself. The log has **one owner at a time**: a second process **MUST NOT**
+  open it while another holds it — a second start, or an offline `log compact` beside a live core,
+  is refused with a clear message rather than allowed to rewrite the log under its owner (which
+  would silently lose every later record). A compaction that finds the log already holds live state
+  only changes nothing and says so. Inspection reports the most recent compaction (when, what
+  started it, what it reclaimed). Output is a human summary or, with `--json`, one object; the
+  exit code is `0` on success (including "nothing to do"), `1` on a refusal or failure, `2` on a
+  usage error. `log compact` reclaims dead history only — it never discards a queued event. (Concrete
+  spelling: `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-4`.)
 - **Test-mode signal.** The signal "What the operator can do" names above is **advisory only**: it
   tells a participant that _a test is in flight_, and the participant **MAY** use it to alter its
   own side-effectful behavior for the duration (e.g. skip a real write) — the core neither requires

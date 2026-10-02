@@ -127,6 +127,18 @@ func writeJSONReply(stdout io.Writer, verb string, reply map[string]any) int {
 	return conformance.ExitOK
 }
 
+// writeJSONValue marshals any JSON-safe value to stdout (writeJSONReply for a
+// typed reply rather than a map).
+func writeJSONValue(stdout io.Writer, verb string, v any) int {
+	body, err := json.Marshal(v)
+	if err != nil { // unreachable: v holds only JSON-safe scalars
+		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
+		return conformance.ExitError
+	}
+	writeBody(stdout, body)
+	return conformance.ExitOK
+}
+
 // doSetGate is gate-set's and pause's shared write: it reports whether the
 // call replaced an already-active gate (the renewal flag) alongside the gate as
 // recorded.

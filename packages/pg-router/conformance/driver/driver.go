@@ -349,6 +349,17 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing cleared", `{"schemaVersion":"1"}`},
 		{"cleared not an array", `{"schemaVersion":"1","cleared":"X"}`},
 	},
+	"cli.log-compact": {
+		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
+		{"dryRun wrong type", `{"schemaVersion":"1","dryRun":"yes"}`},
+		{"unknown field", `{"schemaVersion":"1","force":true}`},
+	},
+	"cli.log-compact-reply": {
+		{"missing via", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
+		{"via out of enum", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"remote","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
+		{"negative bytesAfter", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":-1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
+		{"missing gatesKept", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0}`},
+	},
 }
 
 // invokeMonRead runs the mon.read (INTF-MON pull direction, Task 3.6)

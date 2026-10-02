@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json]) | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -102,6 +102,19 @@ Subcommands:
   gate clear <TYPE>|--all clear one gate, or every active gate. ANY caller may clear any gate; clearing
                           a gate that is not set is a no-op success.
   gate list [--json]      list the active gates (TYPE, owner, set-at, TTL remaining, description).
+  log compact [--dry-run] [--json]
+                          compact <LogDir>/queue.jsonl (the write-ahead log of events AND gates) down to
+                          live state now, instead of waiting for the startup or threshold trigger. With a
+                          core running the request goes over its socket and runs inside the daemon (it
+                          owns the log's exclusive lock); with none running it compacts offline, taking
+                          the lock itself, and is refused (exit 1) if another process holds it. --socket/
+                          --token name a core explicitly (no offline fallback then). --dry-run changes
+                          NOTHING (no rename, no temp file, no lock kept) and reports what a real run
+                          would do: bytes and records before/after, events kept vs dropped, gates kept,
+                          the percent of max_log_bytes after, and whether a real run would be refused. A
+                          real run on a log that is already live state only rewrites nothing. Human
+                          summary by default, --json for the cli.log-compact-reply object. Exit 0 ok
+                          (including "nothing to do"), 1 failure or refusal, 2 usage.
   version                 print the version and exit
   help                    print this help and exit
 
@@ -213,6 +226,7 @@ const (
 	routePause                         // operator: set the SYSTEM_PAUSE gate on the running core (INV-LIFE-2, .rest)
 	routeResume                        // operator: clear SYSTEM_PAUSE (or every gate with --all) on the running core (.rest)
 	routeGate                          // operator: gate set|clear|list against the running core's Gate Registry (.rest)
+	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
 )
 
 type routeResult struct {
@@ -324,6 +338,10 @@ func route(argv []string) routeResult {
 		return routeResult{kind: routeResume, rest: args[1:]}
 	case "gate":
 		return routeResult{kind: routeGate, rest: args[1:]}
+	case "log":
+		// Bead pg2-maxn1: log compact parses its own flags in its own handler, with
+		// the same usage exit code every operator subcommand uses.
+		return routeResult{kind: routeLog, rest: args[1:]}
 	}
 	if strings.HasPrefix(args[0], "-") {
 		return routeResult{kind: routeUsageErr, msg: "unknown flag: " + args[0]}

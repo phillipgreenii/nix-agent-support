@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -197,6 +198,27 @@ type queueLogView struct {
 		LogUnwritable int64 `json:"logUnwritable"`
 	} `json:"rejected"`
 	Detail string `json:"detail"`
+	// LastCompaction is the most recent compaction this core process completed
+	// (bead pg2-maxn1); nil before the first, or from a core that predates it.
+	LastCompaction *lastCompactionView `json:"lastCompaction"`
+}
+
+// lastCompactionView is queueLog.lastCompaction.
+type lastCompactionView struct {
+	At            string `json:"at"`
+	Trigger       string `json:"trigger"`
+	BytesBefore   int64  `json:"bytesBefore"`
+	BytesAfter    int64  `json:"bytesAfter"`
+	RecordsBefore int    `json:"recordsBefore"`
+	RecordsAfter  int    `json:"recordsAfter"`
+	DurationMs    int64  `json:"durationMs"`
+}
+
+// String renders it as one operator line: when, what triggered it, and what it did.
+func (l lastCompactionView) String() string {
+	return fmt.Sprintf("%s (%s): %s -> %s, %d -> %d records, %s",
+		shortTime(l.At), textsafe.Sanitize(l.Trigger), humanBytes(l.BytesBefore), humanBytes(l.BytesAfter),
+		l.RecordsBefore, l.RecordsAfter, (time.Duration(l.DurationMs) * time.Millisecond).Round(time.Millisecond))
 }
 
 // limitView converts v for the shared operator-notice wording (core.LogLimitNotice).
@@ -298,6 +320,11 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 			fmt.Fprintf(w, " limit=%d (%s) used=%.1f%% state=%s", ql.LimitBytes, humanBytes(ql.LimitBytes), ql.Percent, dash(ql.State))
 		}
 		fmt.Fprintln(w)
+		if ql.LastCompaction != nil {
+			fmt.Fprintf(w, "  last compaction: %s\n", ql.LastCompaction)
+		} else {
+			fmt.Fprintln(w, "  last compaction: none since this core started")
+		}
 		// The soft step is not a gate, so nothing in GATES says it is in force:
 		// state what is halted, what still runs, why, and the remedies here.
 		for _, line := range core.LogLimitNotice(ql.limitView()) {

@@ -818,6 +818,18 @@ func (s *Service) isClosing() bool {
 // propagation.
 const serverCallDeadline = DefaultCallTimeout
 
+// serverDeadlineFor is the accept-to-response deadline for one authenticated
+// subcommand: serverCallDeadline for every verb except log-compact, which does
+// real file work (fold, write, fsync, rename of a log up to max_log_bytes) and so
+// gets LogCompactCallTimeout. It is applied only AFTER the token check, so an
+// unauthenticated peer can never hold a connection open that long.
+func serverDeadlineFor(subcommand string) time.Duration {
+	if subcommand == SubcommandLogCompact {
+		return LogCompactCallTimeout
+	}
+	return serverCallDeadline
+}
+
 // handleConn serves one transport frame: authenticate, admission-control the
 // two read verbs, run the subcommand through the participant boundary, return
 // the reply and coarse exit code.
@@ -867,6 +879,11 @@ func (s *Service) handleConn(conn net.Conn) {
 		}
 		defer s.releaseReadSlot()
 	}
+	if d := serverDeadlineFor(req.Subcommand); d != serverCallDeadline {
+		if err := conn.SetDeadline(time.Now().Add(d)); err != nil {
+			slog.Warn("core: extend connection deadline failed", "subcommand", req.Subcommand, "err", err)
+		}
+	}
 	var out bytes.Buffer
 	code := s.Serve(req.Subcommand, bytes.NewReader(req.Payload), &out)
 	s.respond(conn, code, out.Bytes())
@@ -915,6 +932,8 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleGateSet(stdin, stdout)
 	case SubcommandGateClear:
 		return s.handleGateClear(stdin, stdout)
+	case SubcommandLogCompact:
+		return s.handleLogCompact(stdin, stdout)
 	case SubcommandGet:
 		return s.handleGet(stdin, stdout)
 	case SubcommandPut:
@@ -1665,6 +1684,9 @@ func statusQueueLog(q *eventqueue.Queue) map[string]any {
 		out["limitBytes"] = ls.HardBytes
 		out["softBytes"] = ls.SoftBytes
 		out["percent"] = math.Round(ls.Percent()*10) / 10
+	}
+	if lc := lastCompactionStatus(q); lc != nil {
+		out["lastCompaction"] = lc
 	}
 	if ls.Detail != "" {
 		out["detail"] = ls.Detail

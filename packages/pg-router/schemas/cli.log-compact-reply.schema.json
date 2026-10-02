@@ -1,0 +1,74 @@
+{
+  "$id": "cli.log-compact-reply",
+  "title": "INTF-CLI socket log-compact verb reply: what the compaction (or its dry run) did or would do. Also the shape `pg-router log compact --json` prints, whether it ran against the daemon or offline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "dryRun",
+    "compacted",
+    "noProgress",
+    "via",
+    "bytesBefore",
+    "bytesAfter",
+    "recordsBefore",
+    "recordsAfter",
+    "eventsKept",
+    "eventsDropped",
+    "gatesKept"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "dryRun": {
+      "type": "boolean",
+      "description": "True when nothing was changed: the numbers are what a real run would do."
+    },
+    "compacted": {
+      "type": "boolean",
+      "description": "True when a real run rewrote the log. False for a dry run, and for a real run that found no progress possible (the log is already live state only) and so rewrote nothing."
+    },
+    "noProgress": {
+      "type": "boolean",
+      "description": "True when a compaction would not make the log smaller (bytesAfter >= bytesBefore)."
+    },
+    "via": {
+      "enum": ["daemon", "offline"],
+      "description": "Where it ran: inside the running daemon (over its socket), or offline against the log file with no daemon running."
+    },
+    "bytesBefore": { "type": "integer", "minimum": 0 },
+    "bytesAfter": { "type": "integer", "minimum": 0 },
+    "recordsBefore": { "type": "integer", "minimum": 0 },
+    "recordsAfter": { "type": "integer", "minimum": 0 },
+    "eventsKept": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Events still live (retained) that the compacted log keeps."
+    },
+    "eventsDropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Events whose final state is evicted: their records are discarded."
+    },
+    "gatesKept": { "type": "integer", "minimum": 0 },
+    "torn": {
+      "type": "boolean",
+      "description": "True when the log has an undecodable line; everything from it on is ignored by a replay and discarded by a compaction."
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How long a real run took."
+    },
+    "limitBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "max_log_bytes, the denominator of the two percentages."
+    },
+    "percentBefore": { "type": "number", "minimum": 0 },
+    "percentAfter": { "type": "number", "minimum": 0 },
+    "wouldRefuse": {
+      "type": "string",
+      "description": "Dry run only: why a real run right now would be refused (the log is locked by another process)."
+    }
+  }
+}

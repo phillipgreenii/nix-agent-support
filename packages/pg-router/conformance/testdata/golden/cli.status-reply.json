@@ -40,6 +40,15 @@
     "rejected": {
       "logFull": 0,
       "logUnwritable": 0
+    },
+    "lastCompaction": {
+      "at": "2026-09-01T00:00:00Z",
+      "trigger": "threshold",
+      "bytesBefore": 8650752,
+      "bytesAfter": 4096,
+      "recordsBefore": 40213,
+      "recordsAfter": 9,
+      "durationMs": 41
     }
   },
   "resolvedConfig": {

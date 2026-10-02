@@ -271,6 +271,26 @@ func TestRenderStatusText_QueueLogLine(t *testing.T) {
 	}
 }
 
+// The last compaction (bead pg2-maxn1) gets its own line under the queue log line:
+// when, the trigger, what it reclaimed and how long it took; before the first one
+// the line says so rather than vanishing.
+func TestRenderStatusText_LastCompaction(t *testing.T) {
+	var out strings.Builder
+	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 4096, Compactions: 1, LastCompaction: &lastCompactionView{
+		At: "2026-09-01T13:04:05Z", Trigger: "manual", BytesBefore: 33291620, BytesAfter: 3808, RecordsBefore: 182157, RecordsAfter: 9, DurationMs: 41,
+	}}})
+	for _, want := range []string{"(manual): 31.7 MiB -> 3.7 KiB, 182157 -> 9 records, 41ms", "  last compaction: "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status text lacks %q:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 4096}})
+	if want := "  last compaction: none since this core started\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("status text lacks %q:\n%s", want, out.String())
+	}
+}
+
 // With a limit configured the line carries it and the percent; a healthy log adds
 // no notice (bead pg2-5d3ui).
 func TestRenderStatusText_QueueLogLimitLineHealthy(t *testing.T) {
@@ -296,7 +316,7 @@ func TestRenderStatusText_QueueLogLimitNotices(t *testing.T) {
 	}{
 		{
 			"emitters halted", func(v *queueLogView) { v.State = "emitters_halted"; v.EmittersHalted = true },
-			[]string{"state=emitters_halted", "  ! LOG LIMIT:", "  ! HALTED: polled command-source emitters", "  ! STILL RUNNING: listener dispatch and drain, timer emitters, and pushed events", "restart pg-router", "PG_ROUTER_MAX_LOG_BYTES"},
+			[]string{"state=emitters_halted", "  ! LOG LIMIT:", "  ! HALTED: polled command-source emitters", "  ! STILL RUNNING: listener dispatch and drain, timer emitters, and pushed events", "pg-router log compact", "PG_ROUTER_MAX_LOG_BYTES"},
 		},
 		{
 			"log full", func(v *queueLogView) { v.State = "log_full"; v.EmittersHalted = true; v.Rejected.LogFull = 4 },
@@ -319,8 +339,9 @@ func TestRenderStatusText_QueueLogLimitNotices(t *testing.T) {
 					t.Errorf("status text lacks %q:\n%s", want, out.String())
 				}
 			}
-			if strings.Contains(out.String(), "pg-router log compact") {
-				t.Errorf("the notice names a command that does not exist:\n%s", out.String())
+			// Every non-ok state names the verb that reclaims dead history (bead pg2-maxn1).
+			if !strings.Contains(out.String(), "pg-router log compact") {
+				t.Errorf("the notice does not name `pg-router log compact`:\n%s", out.String())
 			}
 		})
 	}

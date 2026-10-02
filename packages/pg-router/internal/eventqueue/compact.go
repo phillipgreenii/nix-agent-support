@@ -513,6 +513,77 @@ func (q *Queue) PlanCompaction() (CompactPlan, error) {
 // call concurrently with every other Queue method.
 func (q *Queue) CompactNow() (CompactStats, error) { return q.compact("manual") }
 
+// CompactResult is the outcome of an operator's compaction request
+// (`pg-router log compact [--dry-run]`).
+type CompactResult struct {
+	// DryRun is true when nothing was (or could have been) changed.
+	DryRun bool
+	// Compacted is true when a real run rewrote the log. A real run that would
+	// make no progress (the log is already live state only) rewrites nothing and
+	// reports false: there is nothing to refuse and nothing to do.
+	Compacted bool
+	// Plan is the fold computed BEFORE the run: what the run was about to do (and,
+	// for a dry run, all there is to report).
+	Plan CompactPlan
+	// Stats is what the run actually did; zero unless Compacted.
+	Stats CompactStats
+}
+
+// CompactManual serves an operator's `log compact` (trigger "manual") or, with
+// dryRun, its dry run. A real run is skipped when the plan finds no progress
+// possible: rewriting a log to the same size would only cost an fsync and a
+// rename. Safe to call concurrently with every other Queue method.
+func (q *Queue) CompactManual(dryRun bool) (CompactResult, error) {
+	plan, err := q.PlanCompaction()
+	if err != nil {
+		return CompactResult{}, err
+	}
+	res := CompactResult{DryRun: dryRun, Plan: plan}
+	if dryRun || plan.NoProgress() {
+		return res, nil
+	}
+	st, err := q.CompactNow()
+	if err != nil {
+		return res, err
+	}
+	res.Compacted, res.Stats = true, st
+	return res, nil
+}
+
+// CompactFileOffline serves `log compact [--dry-run]` when no daemon is running:
+// a dry run only reads the file (PlanCompactionFile: no lock, no temp file, no
+// side effect). A real run takes the exclusive log lock itself and fails with
+// *ErrLogLocked if another process holds it, so it can never compact a log a
+// live daemon is appending to.
+func CompactFileOffline(path string, dryRun bool) (CompactResult, error) {
+	if dryRun {
+		plan, err := PlanCompactionFile(path)
+		return CompactResult{DryRun: true, Plan: plan}, err
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return CompactResult{}, nil // nothing to compact, and no reason to create the log
+	}
+	fs, err := NewFileStore(path)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	defer func() { _ = fs.Close() }()
+	plan, err := fs.PlanCompaction()
+	if err != nil {
+		return CompactResult{}, err
+	}
+	res := CompactResult{Plan: plan}
+	if plan.NoProgress() {
+		return res, nil
+	}
+	st, err := fs.Compact()
+	if err != nil {
+		return res, err
+	}
+	res.Compacted, res.Stats = true, st
+	return res, nil
+}
+
 func (q *Queue) compact(trigger string) (CompactStats, error) {
 	c, ok := q.store.(Compactor)
 	if !ok {

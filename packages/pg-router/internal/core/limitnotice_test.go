@@ -24,13 +24,13 @@ func TestLogLimitNotice(t *testing.T) {
 		{
 			"emitters halted",
 			withState(base, eventqueue.StateEmittersHalted),
-			[]string{"LOG LIMIT", "58.0 MiB of 64.0 MiB (91%)", "soft threshold", "HALTED: polled command-source emitters", "STILL RUNNING: listener dispatch and drain, timer emitters, and pushed events", "Only the hard limit stops those", "PG_ROUTER_MAX_LOG_BYTES", "restart pg-router", "move queue.jsonl aside"},
+			[]string{"LOG LIMIT", "58.0 MiB of 64.0 MiB (91%)", "soft threshold", "HALTED: polled command-source emitters", "STILL RUNNING: listener dispatch and drain, timer emitters, and pushed events", "Only the hard limit stops those", "PG_ROUTER_MAX_LOG_BYTES", "pg-router log compact", "pg-router log compact --dry-run", "restart pg-router", "move queue.jsonl aside"},
 			[]string{"log_full", "rejected"},
 		},
 		{
 			"log full",
 			func() LogLimitView { v := withState(base, eventqueue.StateLogFull); v.RejectedLogFull = 7; return v }(),
-			[]string{"LOG FULL", "hard limit", "HALTED: polled command-source emitters, AND all new events", "rejected with `log_full` (7 rejected so far)", "STILL RUNNING: listener dispatch and drain", "PG_ROUTER_MAX_LOG_BYTES"},
+			[]string{"LOG FULL", "hard limit", "HALTED: polled command-source emitters, AND all new events", "rejected with `log_full` (7 rejected so far)", "STILL RUNNING: listener dispatch and drain", "PG_ROUTER_MAX_LOG_BYTES", "pg-router log compact"},
 			nil,
 		},
 		{
@@ -41,7 +41,7 @@ func TestLogLimitNotice(t *testing.T) {
 				v.Detail = "no space left on device"
 				return v
 			}(),
-			[]string{"LOG UNWRITABLE", "no space left on device", "rejected with `log_unwritable` (3 rejected so far)", "STILL RUNNING: listener dispatch", "Recovery is automatic", "disk space"},
+			[]string{"LOG UNWRITABLE", "no space left on device", "rejected with `log_unwritable` (3 rejected so far)", "STILL RUNNING: listener dispatch", "Recovery is automatic", "disk space", "pg-router log compact"},
 			nil,
 		},
 	} {

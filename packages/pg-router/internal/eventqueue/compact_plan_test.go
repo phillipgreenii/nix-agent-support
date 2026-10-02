@@ -279,3 +279,107 @@ func TestQueueCompactionUnsupportedStore(t *testing.T) {
 		t.Fatalf("CompactNow err = %v, want ErrCompactionUnsupported", err)
 	}
 }
+
+// CompactManual: a dry run changes nothing; a real run compacts and is recorded as
+// "manual"; running again finds no progress possible, rewrites nothing and does
+// not count as a compaction.
+func TestQueueCompactManual(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "queue.jsonl")
+	clk := newClock()
+	seedLog(t, path, clk)
+	q, fs := newFileQueue(t, path, WithClock(clk.now)) // no startup compaction: the log stays bloated
+	defer func() { _ = fs.Close() }()
+	before := fileBytes(t, path)
+
+	dry, err := q.CompactManual(true)
+	if err != nil || !dry.DryRun || dry.Compacted || dry.Plan.NoProgress() {
+		t.Fatalf("dry run = %+v, %v", dry, err)
+	}
+	if !bytes.Equal(fileBytes(t, path), before) || q.Compactions() != 0 {
+		t.Fatal("a dry run changed the log or counted as a compaction")
+	}
+
+	real, err := q.CompactManual(false)
+	if err != nil || !real.Compacted || real.DryRun {
+		t.Fatalf("real run = %+v, %v", real, err)
+	}
+	planMatchesStats(t, "manual run", real.Plan, real.Stats)
+	if info, ok := q.LastCompaction(); !ok || info.Trigger != "manual" {
+		t.Fatalf("LastCompaction = %+v, %v", info, ok)
+	}
+
+	after := fileBytes(t, path)
+	again, err := q.CompactManual(false)
+	if err != nil || again.Compacted || !again.Plan.NoProgress() {
+		t.Fatalf("second run = %+v, %v; want a no-progress skip", again, err)
+	}
+	if !bytes.Equal(fileBytes(t, path), after) || q.Compactions() != 1 {
+		t.Fatal("a no-progress run rewrote the log or counted as a compaction")
+	}
+}
+
+// The offline path: a dry run reads only (no lock needed, none taken); a real run
+// takes the lock, compacts, and releases it; a held lock refuses a real run and
+// leaves the log byte-identical; a missing log is neither created nor an error.
+func TestCompactFileOffline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "queue.jsonl")
+
+	res, err := CompactFileOffline(path, false)
+	if err != nil || res.Compacted {
+		t.Fatalf("missing log: %+v, %v", res, err)
+	}
+	if got := dirEntries(t, dir); len(got) != 0 {
+		t.Fatalf("a missing log was created or locked: %v", got)
+	}
+
+	seedLog(t, path, newClock())
+	before := fileBytes(t, path)
+	wantState := replayStateOfCopy(t, path)
+
+	dry, err := CompactFileOffline(path, true)
+	if err != nil || !dry.DryRun || dry.Compacted || dry.Plan.NoProgress() {
+		t.Fatalf("offline dry run = %+v, %v", dry, err)
+	}
+	if !bytes.Equal(fileBytes(t, path), before) {
+		t.Fatal("the offline dry run changed the log")
+	}
+
+	holder, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompactFileOffline(path, false); !errors.As(err, new(*ErrLogLocked)) {
+		t.Fatalf("real run beside a lock holder: err = %v, want *ErrLogLocked", err)
+	}
+	if !bytes.Equal(fileBytes(t, path), before) {
+		t.Fatal("a refused offline run changed the log")
+	}
+	if held, err := LogLocked(path); err != nil || !held {
+		t.Fatalf("the refused run must not release the holder's lock: %v, %v", held, err)
+	}
+	_ = holder.Close()
+
+	real, err := CompactFileOffline(path, false)
+	if err != nil || !real.Compacted {
+		t.Fatalf("offline real run = %+v, %v", real, err)
+	}
+	planMatchesStats(t, "offline run", real.Plan, real.Stats)
+	if fileSize(t, path) != real.Stats.BytesAfter {
+		t.Fatalf("log is %d bytes, run said %d", fileSize(t, path), real.Stats.BytesAfter)
+	}
+	if held, _ := LogLocked(path); held {
+		t.Fatal("the offline run kept the lock")
+	}
+	if _, err := os.Stat(compactTempPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("temp file left behind: %v", err)
+	}
+	again, err := CompactFileOffline(path, false)
+	if err != nil || again.Compacted {
+		t.Fatalf("second offline run = %+v, %v; want a no-progress skip", again, err)
+	}
+	// And the compacted log is intact: a restart rebuilds the same state.
+	if got := replayStateOfCopy(t, path); got != wantState {
+		t.Fatalf("state changed across the offline compaction\n got: %s\nwant: %s", got, wantState)
+	}
+}

@@ -132,5 +132,43 @@ ruling rejected: nothing already queued is ever evicted to make room.
   still bounds how long any event waits). `events.jsonl` and `launchd-stderr.log` in the same state
   directory are separate and unbounded, though they share the disk and can cause `log_unwritable`.
 
+### `DEC-EVENT-4` — the queue log has one owner at a time, and `log compact [--dry-run]` is the operator's way to reclaim dead history <!-- uuid: 7339dfe9-1171-4e66-8856-dc382142ef8a -->
+
+**Decided** by the implementing agent (bead `pg2-maxn1`, finishing what `pg2-8e0m6` specified and
+never shipped) where `pg2-8e0m6` left a choice open; the operator MAY overrule any point. The
+operator's own request (Phillip, 2026-10-02) was that size and percentage be visible in status and
+the TUI and that there be a way to trigger a compaction and a dry-run compaction from the CLI.
+
+- **One owner: fail fast.** `NewFileStore` takes an exclusive, non-blocking `flock` on
+  `queue.jsonl.lock` before touching the log and holds it until `Close` (the kernel drops it on
+  death). A second opener gets `*ErrLogLocked` and the daemon refuses to start. `pg2-8e0m6` allowed
+  "fails fast or at least skips compaction"; skipping only compaction would still let two processes
+  append to one file, and the daemon's own `ErrAlreadyRunning` fires only after the queue has already
+  replayed and compacted the log. The lock is a **sibling file** because compaction renames a new
+  inode over the log, which would silently end a `flock` on the log itself. A stale compaction temp
+  file is removed only after the lock is held.
+- **Where `log compact` runs.** Against a running core it is a socket verb (`log-compact`,
+  `cli.log-compact` / `cli.log-compact-reply`) and the daemon does the work, so the process holding
+  the lock is the one touching the file. It uses the compaction the startup and threshold triggers
+  use (trigger `manual`): the landed scheme folds a prefix **without** holding the queue lock and
+  splices the tail under the store's own mutex, rather than `pg2-8e0m6`'s "holds `q.mu`", which is
+  the better property and is kept. With no core running it compacts **offline**, taking the lock
+  itself and refusing (exit `1`) when another process holds it; a core named explicitly by
+  `--socket` never falls back to offline. The socket verb alone gets a longer connection deadline
+  (2 minutes, set only after the token check) because it does real file work.
+- **Dry run.** Reads only: no rename, no temp file, no lock kept, no lock file created, no counter.
+  It reports bytes and records before and after, events kept and dropped, gates kept, the percent of
+  `max_log_bytes` afterwards, a torn tail, and whether a real run would be refused (the offline case:
+  the log is locked) or would do nothing.
+- **"Nothing to do" is success.** A real run whose plan finds no progress possible (the log is
+  already live state only) rewrites nothing, does not count as a compaction and exits `0`; it is not
+  a refusal. Exit codes: `0` ok (including nothing to do), `1` refusal or failure, `2` usage.
+- **Status.** `queueLog.lastCompaction` {`at`, `trigger` = `startup` | `threshold` | `limit` |
+  `manual`, bytes and records before and after, `durationMs`}, in `status`, `--json` and the TUI.
+- **Remedy.** The size-limit notices, the `log_full` reason text, the README and the Grafana rule
+  name `pg-router log compact` (and its `--dry-run`) as the remedy for a log that is large because of
+  dead history. It never discards a queued event, so it does not help when the backlog itself is the
+  problem.
+
 The behavior-doc side is `INV-EVT-1`'s "one sanctioned refusal at ingest" paragraph and the
 `ingest-event` / inspection sections of the interfaces doc.

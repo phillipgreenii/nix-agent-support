@@ -95,6 +95,35 @@
         "detail": {
           "type": "string",
           "description": "The underlying write error while state is log_unwritable."
+        },
+        "lastCompaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "trigger",
+            "bytesBefore",
+            "bytesAfter",
+            "recordsBefore",
+            "recordsAfter",
+            "durationMs"
+          ],
+          "description": "The most recent compaction this process completed; absent before the first one (startup compaction normally makes it present from the start).",
+          "properties": {
+            "at": {
+              "type": "string",
+              "description": "When it finished (RFC 3339)."
+            },
+            "trigger": {
+              "enum": ["startup", "threshold", "limit", "manual"],
+              "description": "What started it: startup, threshold (compact_threshold_bytes), limit (the soft log-size threshold) or manual (pg-router log compact)."
+            },
+            "bytesBefore": { "type": "integer", "minimum": 0 },
+            "bytesAfter": { "type": "integer", "minimum": 0 },
+            "recordsBefore": { "type": "integer", "minimum": 0 },
+            "recordsAfter": { "type": "integer", "minimum": 0 },
+            "durationMs": { "type": "integer", "minimum": 0 }
+          }
         }
       }
     },

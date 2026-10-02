@@ -68,6 +68,8 @@ func run() int {
 		return runResume(r.rest)
 	case routeGate:
 		return runGate(r.rest)
+	case routeLog:
+		return runLog(r.rest)
 	}
 	return exitOK
 }

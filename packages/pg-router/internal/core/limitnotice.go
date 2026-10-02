@@ -27,8 +27,11 @@ type LogLimitView struct {
 
 // LogLimitRemedies is the actionable remedy text shared by every non-ok state.
 // There is deliberately no "purge" command: the real remedies are these.
+// `pg-router log compact` only reclaims dead (evicted) history, never a queued
+// event, so it helps when the log is large because of churn and not when the
+// backlog itself is.
 const LogLimitRemedies = "wait for queued events to expire (the log is compacted automatically); " +
-	"restart pg-router to compact the log now; " +
+	"run `pg-router log compact` (or restart pg-router) to compact the log now - `pg-router log compact --dry-run` previews what it would reclaim; " +
 	"raise PG_ROUTER_MAX_LOG_BYTES (or [pool].max_log_bytes) and restart; " +
 	"or stop the daemon and move queue.jsonl aside (this LOSES the queued events)"
 

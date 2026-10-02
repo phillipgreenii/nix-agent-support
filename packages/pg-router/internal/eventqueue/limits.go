@@ -61,7 +61,7 @@ type ErrLogFull struct {
 
 func (e *ErrLogFull) Error() string {
 	return fmt.Sprintf("%s: pg-router event log is at %d of %d bytes; the event was NOT queued; safe to retry later. "+
-		"To free space: wait for queued events to expire, restart pg-router (the log is compacted at startup), "+
+		"To free space: wait for queued events to expire, run `pg-router log compact` (or restart pg-router; the log is compacted at startup), "+
 		"or raise PG_ROUTER_MAX_LOG_BYTES and restart",
 		ReasonLogFull, e.Bytes, e.Limit)
 }

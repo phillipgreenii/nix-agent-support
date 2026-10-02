@@ -47,13 +47,10 @@ func TestLogLimitRule(t *testing.T) {
 	for _, need := range []string{
 		"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "params: [0]",
 		// the remedies, in the annotation
-		"wait for queued events to expire", "restart pg-router to compact now", "PG_ROUTER_MAX_LOG_BYTES", "move queue.jsonl aside",
+		"wait for queued events to expire", "pg-router log compact", "restart pg-router) to compact now", "PG_ROUTER_MAX_LOG_BYTES", "move queue.jsonl aside",
 	} {
 		if !strings.Contains(r, need) {
 			t.Errorf("log-limit rule lost %q", need)
 		}
-	}
-	if strings.Contains(r, "pg-router log compact") {
-		t.Error("the annotation names a command that does not exist")
 	}
 }

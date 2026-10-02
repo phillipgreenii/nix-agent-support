@@ -1,0 +1,11 @@
+{
+  "$id": "cli.log-compact",
+  "title": "INTF-CLI socket log-compact verb (`pg-router log compact`): compact the running core's queue.jsonl write-ahead log down to live state, or - with dryRun - report what that would do and change nothing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "dryRun": { "type": "boolean" }
+  }
+}

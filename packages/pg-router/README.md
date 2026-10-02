@@ -303,10 +303,29 @@ INV-EVT-2) and gate persistence are unchanged.
 - **Crash safety.** Until the rename the log path holds the complete old log; from it on, the complete
   new one. A leftover temp file is removed on the next start. A torn trailing line is tolerated as before
   and startup compaction drops it.
+- **`pg-router log compact [--dry-run] [--json]`** (bead `pg2-maxn1`) compacts the log now instead of
+  waiting for the startup or threshold trigger, and `--dry-run` reports what it WOULD do.
+  - _Where it runs._ With a core running (found via `--socket`/`--token`, else `PG_ROUTER_SOCKET`/
+    `PG_ROUTER_TOKEN`, else discovery under the log dir) the request goes over its socket and the
+    compaction runs inside the daemon, which holds the log's lock; the reply says `"via": "daemon"`. With
+    none running it compacts the file itself (`"via": "offline"`), taking the lock, and is **refused with
+    exit 1** if another process holds it. A core named by `--socket` never falls back to offline.
+  - _`--dry-run` changes nothing_ — no rename, no temp file, no lock kept or created, no counter. It prints
+    bytes and records before/after, events kept vs dropped (evicted), gates kept, the percent of
+    `max_log_bytes` afterwards, a warning for a torn tail, and whether a real run would be refused (the
+    log is locked by another process) or would do nothing.
+  - _A real run on a log that already holds live state only_ rewrites nothing and says "nothing to do"
+    (exit 0); it does not count as a compaction.
+  - _Output and exit codes._ A human summary, or with `--json` one object (the `cli.log-compact-reply`
+    schema, identical online and offline apart from `via`). Exit `0` ok (including "nothing to do"), `1`
+    refusal or failure (log locked, core unreachable or refusing, compaction failed), `2` usage.
+  - It reclaims **dead history only** — a queued event is never discarded.
 - **Observability.** The `pg_router_queue_log_bytes` gauge, one `eventqueue: queue log compacted` log
   line per compaction (trigger, bytes and records before/after, duration), a `queue log:` line in
-  `pg-router status` (`queueLog` in `--json`) and `log: <size>` in the TUI header. The size
-  limit built on top of it is described in "Queue log size limit" below.
+  `pg-router status` followed by a `last compaction:` line (`queueLog` and `queueLog.lastCompaction` in
+  `--json`: `at`, `trigger` = `startup`/`threshold`/`limit`/`manual`, bytes and records before/after,
+  `durationMs`) and `log: <size>` in the TUI header. The size limit built on top of it is described in
+  "Queue log size limit" below.
 
 ### Queue log size limit
 
@@ -350,8 +369,10 @@ retry later ...` and `log_unwritable: ...`. Retrying is safe because delivery is
   per source in the produce report). The Grafana rule `pg-router-log-limit` fires after 10 minutes of
   either `emitters_halted` or a rejection.
 - **Remedies** (there is no CLI to purge queued events): wait for queued events to expire (the log is
-  compacted automatically); restart pg-router (the log is compacted at startup); raise
-  `PG_ROUTER_MAX_LOG_BYTES` (or `[pool].max_log_bytes`) and restart; or stop the daemon and move
+  compacted automatically); run `pg-router log compact` (or restart pg-router, which compacts at startup)
+  to reclaim dead history now — `pg-router log compact --dry-run` shows what it would reclaim first, and
+  it never discards a queued event, so it only helps when the log is large because of churn, not backlog;
+  raise `PG_ROUTER_MAX_LOG_BYTES` (or `[pool].max_log_bytes`) and restart; or stop the daemon and move
   `queue.jsonl` aside (this LOSES the queued events). `log_unwritable`: free disk space or fix
   permissions on the log directory. `events.jsonl` and `launchd-stderr.log` in the same state
   directory are unbounded and out of scope, but share the disk and can cause `log_unwritable`.
