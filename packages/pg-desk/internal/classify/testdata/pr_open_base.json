@@ -1,0 +1,73 @@
+{
+  "pr_show": {
+    "id": "example/repo#7",
+    "repo": "example/repo",
+    "number": 7,
+    "title": "Add widget",
+    "state": "open",
+    "branch": "feature-x",
+    "base": "main",
+    "author": "teammate",
+    "url": "https://example.invalid/example/repo/pull/7",
+    "draft": false,
+    "merged": false,
+    "as_of": "2026-01-01T00:00:00Z",
+    "stale": false,
+    "comments": [
+      {
+        "id": "c1",
+        "author": "teammate",
+        "body": "please look",
+        "resolved": false
+      }
+    ],
+    "reviews": [
+      {
+        "id": "r1",
+        "author": "review-bot",
+        "state": "COMMENTED",
+        "comments": [
+          {
+            "id": "t1",
+            "author": "review-bot",
+            "body": "nit",
+            "path": "a.go",
+            "line": 3,
+            "thread_id": "th1",
+            "resolved": false
+          }
+        ]
+      }
+    ],
+    "head_sha": "aaaa111",
+    "mergeable": "MERGEABLE",
+    "merge_state_status": "CLEAN",
+    "checks_rollup": "success",
+    "review_decision": "REVIEW_REQUIRED",
+    "comment_count": 1,
+    "review_count": 1,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "base_sha": "bbbb222"
+  },
+  "ci": {
+    "runs": [
+      {
+        "id": "100",
+        "name": "build",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://example.invalid/runs/100",
+        "provider": "ci-example",
+        "head_sha": "aaaa111",
+        "repo": "example/repo",
+        "pr_id": "example/repo#7",
+        "attempt": 1,
+        "as_of": "2026-01-01T00:00:00Z",
+        "stale": false
+      }
+    ],
+    "sources": [{ "source": "ci-example", "status": "succeeded", "count": 1 }]
+  },
+  "head_sha": "aaaa111",
+  "as_of": "2026-01-01T00:00:00Z"
+}
