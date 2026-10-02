@@ -41,17 +41,29 @@ func NewExtractorRegistry(cfg *config.Config, st *store.Store, repo string) Extr
 // an empty set, which drops the entity's derived links. Types without
 // extractors are skipped. External and legacy rows are never touched.
 func (p *Pipeline) extractAndReplace(entityType, entityID string, payload json.RawMessage, removed bool, now string) error {
+	links, ok, err := p.deriveLinks(entityType, entityID, payload, removed, now)
+	if err != nil || !ok {
+		return err
+	}
+	return p.store.ReplaceDerivedXrefs(p.repo(), entityType, entityID, links)
+}
+
+// deriveLinks runs the extractors of entityType in memory and returns the
+// entity's complete derived link set WITHOUT touching the store. ok is false
+// when the type has no extractors (nothing to replace). A removed or empty
+// payload yields an empty set.
+func (p *Pipeline) deriveLinks(entityType, entityID string, payload json.RawMessage, removed bool, now string) (links []store.XrefLink, ok bool, err error) {
 	exts := p.extractors[entityType]
 	if len(exts) == 0 {
-		return nil
+		return nil, false, nil
 	}
 	repo := p.repo()
-	links := []store.XrefLink{}
+	links = []store.XrefLink{}
 	if !removed && len(payload) > 0 {
 		for _, e := range exts {
 			ls, err := e.Extract(entityType, entityID, payload)
 			if err != nil {
-				return fmt.Errorf("extractor %s: %w", e.Name(), err)
+				return nil, false, fmt.Errorf("extractor %s: %w", e.Name(), err)
 			}
 			for _, l := range ls {
 				l.Repo, l.FromType, l.FromID = repo, entityType, entityID
@@ -61,7 +73,7 @@ func (p *Pipeline) extractAndReplace(entityType, entityID string, payload json.R
 			}
 		}
 	}
-	return p.store.ReplaceDerivedXrefs(repo, entityType, entityID, links)
+	return links, true, nil
 }
 
 // workItemExtractor links a work item (type "issue") from its own 9.8

@@ -67,33 +67,52 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 // "head_sha" key and stores it, for any entity type (types without the key
 // get ""). This keeps a pr row written here identical to the PR path's.
 func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessage, asOf string, interp interpret.Interpretation) (store.Interpretation, error) {
-	repo := p.repo()
+	factsJSON, headSHA := factsAndHead(payload)
 
-	factsJSON := []byte(payload)
+	if asOf == "" {
+		asOf = interp.AsOf
+	}
+	if err := p.store.UpsertEntity(store.Entity{
+		Repo:        p.repo(),
+		EntityType:  entityType,
+		EntityID:    entityID,
+		Facts:       string(factsJSON),
+		AsOf:        asOf,
+		ContentHash: contentHash(factsJSON),
+		HeadSHA:     headSHA,
+	}); err != nil {
+		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
+	}
+
+	row, err := p.interpretationRow(entityType, entityID, interp)
+	if err != nil {
+		return store.Interpretation{}, err
+	}
+	if err := p.store.UpsertInterpretation(row); err != nil {
+		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
+	}
+	return row, nil
+}
+
+// factsAndHead normalizes a gather payload into the entity.facts JSON (an
+// empty payload is "{}") and decodes its top-level head_sha key (non-object
+// or malformed payloads carry none).
+func factsAndHead(payload json.RawMessage) (factsJSON []byte, headSHA string) {
+	factsJSON = []byte(payload)
 	if len(factsJSON) == 0 {
 		factsJSON = []byte("{}")
 	}
 	var head struct {
 		HeadSHA string `json:"head_sha"`
 	}
-	// Non-object or malformed payloads simply carry no head_sha.
 	_ = json.Unmarshal(factsJSON, &head)
+	return factsJSON, head.HeadSHA
+}
 
-	if asOf == "" {
-		asOf = interp.AsOf
-	}
-	if err := p.store.UpsertEntity(store.Entity{
-		Repo:        repo,
-		EntityType:  entityType,
-		EntityID:    entityID,
-		Facts:       string(factsJSON),
-		AsOf:        asOf,
-		ContentHash: contentHash(factsJSON),
-		HeadSHA:     head.HeadSHA,
-	}); err != nil {
-		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
-	}
-
+// interpretationRow builds the store row for one interpretation (the JSON
+// columns marshaled), without writing it.
+func (p *Pipeline) interpretationRow(entityType, entityID string, interp interpret.Interpretation) (store.Interpretation, error) {
+	repo := p.repo()
 	marshal := func(name string, v any) (string, error) {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -139,9 +158,6 @@ func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessa
 		Degraded:       interp.Degraded != "",
 		SyncError:      "",
 		AsOf:           interp.AsOf,
-	}
-	if err := p.store.UpsertInterpretation(row); err != nil {
-		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
 	}
 	return row, nil
 }
