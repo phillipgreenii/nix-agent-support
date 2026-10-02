@@ -26,6 +26,7 @@ mkGoApp {
   subPackages = [
     "cmd/pg-rescue"
     "cmd/pg-rescue-notify"
+    "cmd/pg-rescue-bead"
   ];
 
   meta = {

@@ -929,8 +929,9 @@ both when it creates an item and when it updates one.
 | ------------------------------------------------------------ | ----------------------------------------- | -------------------------------------------------------------------- |
 | `--priority N`                                               | `2`                                       | Priority                                                             |
 | `--issue-type T`                                             | `task`                                    | Passed as pg-connector `--issue-type`                                |
-| `--label L` (repeatable)                                     | none                                      | Added alongside `pg-rescue` and the derived repo label               |
-| `--repo-label L`                                             | derived                                   | Overrides the repo label                                             |
+| `--label L` (repeatable)                                     | none                                      | Added alongside `pg-rescue` and the repo label                       |
+| `--repo-label L`                                             | none                                      | Sets the repo label, overriding the `--repo-label-map` lookup        |
+| `--repo-label-map REPO=LABEL` (repeatable)                   | none                                      | Maps a git toplevel basename to its repo label; see "Repo label"     |
 | `--tracker-dir PATH`                                         | derived                                   | Overrides the tracker; see "Tracker" below                           |
 | `--title-template TEXT`, `--title-template-file F`           | `pg-rescue: {{.Cmd}} failed in {{.Repo}}` | Title                                                                |
 | `--body-template TEXT`, `--body-template-file F`             | built-in                                  | Replaces the body                                                    |
@@ -943,12 +944,28 @@ both when it creates an item and when it updates one.
 **Tracker**
 
 - The beads backend does not fall back to cwd. It requires `PG_CONNECTOR_ISSUE_BEADS_DIR`.
-- The handler sets that variable on its `pg-connector` child to `--tracker-dir`. If `--tracker-dir`
-  is not given, it uses the tracker root derived from the cwd's repo, through the workspace's
-  repo-to-tracker lookup.
-- If no tracker can be determined, or the tracker is unreachable, it exits `1`. It never falls back
-  to another tracker.
+- The handler sets that variable on its `pg-connector` child to the tracker it resolves, in this
+  order:
+  1. `--tracker-dir PATH`, if given. It MUST be an existing directory.
+  2. Otherwise, the git toplevel of the report's cwd (`.Cwd`), if that toplevel contains `.beads/`.
+- If neither yields a tracker, it exits `1` before any call to `pg-connector`: `--tracker-dir` is
+  required in that case. If the tracker is unreachable, it also exits `1`. It never falls back to
+  another tracker.
+- No workspace repo-to-tracker lookup exists in code. The workspace's repo-to-label table is
+  machine-local and names a private repo, so this public handler MUST NOT hardcode one. Everything
+  that is specific to a machine arrives through arguments.
 - It sets `PG_CONNECTOR_ISSUE_BEADS_ACTOR=pg-rescue/<run-id>`, for attribution.
+
+**Repo label**
+
+- `--repo-label L` sets the repo label directly.
+- Otherwise, the handler looks up the basename of the git toplevel containing `.Cwd` in the
+  `--repo-label-map REPO=LABEL` entries. A later entry for the same `REPO` wins. The machine config
+  fills the map in (pg2-owwhw).
+- With no `--repo-label`, and either no map entry or no git toplevel, the item gets no repo label.
+  The handler never guesses one.
+- An item carries these labels, in order and without repeats: `pg-rescue`, the repo label if any,
+  then each `--label`.
 
 **Body**
 
@@ -971,12 +988,23 @@ Instructions come only from `--append-instructions` and the body template. The t
   `metadata.pg_rescue_fingerprint == $PG_RESCUE_FINGERPRINT`. This follows the
   `pg-router-probe --dedup-query` precedent.
 - On a match, it comments the new report on that item and reports `Updated <id>`.
-- Otherwise it creates the item with the fingerprint in its metadata.
+- Otherwise it creates the item with the fingerprint in its metadata. A closed item never matches,
+  even if the query returns it.
+- `--annotate` and `--dedup-query` are mutually exclusive (a usage error): annotate names the item,
+  dedup searches for it.
+- A dedup query that fails is a failure (exit `1`); the handler does not go on to create an item it
+  could not check for duplicates.
 
 **Result**
 
 The handler's result carries `meta.item_id` and `meta.action` (`created`, `updated` or
 `annotated`).
+
+The handler exits `1` on any failure, including a usage error: exit `2` would be read as `declined`.
+The body is kept under 60,000 bytes, below bd's 64 KiB text-field cap, by shrinking the inlined
+output tail first. The default templates may use `.FiledAt`, the time the item is filed, in
+addition to the shared data model (section 8.1); the default body ends with `state was left as-is
+at <FiledAt>`.
 
 ### 8.4 `pg-rescue-notify`
 
