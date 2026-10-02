@@ -169,10 +169,17 @@ func runWrapper(rt *Runtime, args []string, stdout, stderr io.Writer) int {
 	}
 
 	stateRoot := rundir.StateRoot(rt.Getenv, rt.Home)
+	rundir.Prune(stateRoot, rt.Now())
 	id, dir, err := rundir.Create(stateRoot, rt.Now, rt.Rand)
 	if err != nil {
 		return failf(stderr, "%v", err)
 	}
+	lock, err := rundir.Acquire(dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return failf(stderr, "%v", err)
+	}
+	defer lock.Release()
 
 	return rt.Executor.Execute(&Plan{
 		Options:   opts,

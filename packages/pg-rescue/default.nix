@@ -32,6 +32,14 @@ mkGoApp {
     "cmd/pg-rescue-claude"
   ];
 
+  # The tldr page is a committed pg-rescue.md copied into place the way
+  # packages/pg-pr does it; a home-manager module (a later bead) wires it
+  # into programs.tldr.customPages from this path.
+  postInstall = ''
+    mkdir -p $out/share/tldr/pages.common
+    cp ${./pg-rescue.md} $out/share/tldr/pages.common/pg-rescue.md
+  '';
+
   meta = {
     description = "Script-first command runner: wraps a command and, on failure, tries an ordered chain of named failure handlers";
     mainProgram = "pg-rescue";

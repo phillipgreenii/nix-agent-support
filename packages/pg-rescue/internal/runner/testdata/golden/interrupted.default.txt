@@ -1,0 +1,13 @@
+CONFLICT (content): Merge conflict in README.md
+
+== pg-rescue: `git pull --rebase` exited 1 · chain sync ==
+
+== [1/5] flake-lock-conflict: declined (exit 2) ==
+Conflict spans source files, not just flake.lock
+
+== [2/5] fix-small: declined (exit 2) ==
+Conflict needs a design decision between two rewrites of the same function
+
+== [3/5] fix-large: failed (interrupted by SIGINT) ==
+
+== interrupted during fix-large · working copy may be mid-change · exit 130 · run <RUNID> ==

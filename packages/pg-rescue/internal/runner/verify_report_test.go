@@ -152,11 +152,13 @@ func TestStdoutAndStderrStaySeparateAndOutputLogKeepsArrivalOrder(t *testing.T) 
 	if code != 2 {
 		t.Fatalf("exit %d", code)
 	}
-	if stdout != "out1\nout2\nout3\n" || stderr != "err1\nerr2\nerr3\n" {
+	// The display goes to stderr, after the command's own stderr; stdout holds
+	// the command's stdout and nothing else.
+	if stdout != "out1\nout2\nout3\n" || !strings.HasPrefix(stderr, "err1\nerr2\nerr3\n") {
 		t.Errorf("stdout=%q stderr=%q", stdout, stderr)
 	}
-	if strings.Contains(stdout+stderr, "handler text") {
-		t.Error("handler text must never reach the caller's streams")
+	if strings.Contains(stdout, "handler text") || strings.Contains(stdout, "pg-rescue") {
+		t.Error("handler text must never reach the caller's stdout")
 	}
 	b, _ := os.ReadFile(e.onDisk().OutputFile)
 	if string(b) != "out1\nerr1\nout2\nerr2\nout3\nerr3\n" {

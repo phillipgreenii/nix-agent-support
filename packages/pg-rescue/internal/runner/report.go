@@ -33,6 +33,13 @@ type redactor struct{ res []*regexp.Regexp }
 
 func newRedactor(res []*regexp.Regexp) *redactor { return &redactor{res: res} }
 
+// RedactWith returns a function that replaces every match of the patterns with
+// "[REDACTED]". The display and the run log use it so they redact exactly as
+// the report does.
+func RedactWith(patterns []*regexp.Regexp) func(string) string {
+	return newRedactor(patterns).apply
+}
+
 func (d *redactor) apply(s string) string {
 	for _, re := range d.res {
 		s = re.ReplaceAllLiteralString(s, redacted)

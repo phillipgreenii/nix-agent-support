@@ -1,0 +1,26 @@
+CONFLICT (content): Merge conflict in README.md
+
+== pg-rescue: `git pull --rebase` exited 1 · chain sync ==
+
+== [1/5] flake-lock-conflict: declined (exit 2, <DUR>, timeout 2m) ==
+Conflict spans source files, not just flake.lock
+-- argv --
+pg-rescue-flake-lock-conflict
+
+== [2/5] fix-small: declined (exit 2, <DUR>, timeout 3m, haiku, 2m, no MCP) ==
+Conflict needs a design decision between two rewrites of the same function
+-- argv --
+pg-rescue-claude --model haiku --time-limit 2m --strict-mcp-config
+
+== [3/5] fix-large: failed (interrupted by SIGINT, <DUR>, timeout 10m, sonnet, 8m) ==
+-- argv --
+pg-rescue-claude --model sonnet --time-limit 8m
+-- stderr --
+fix-large: working
+
+== [4/5] p1-later: skipped (chain stopped) ==
+
+== [5/5] notify: skipped (chain stopped) ==
+
+== interrupted during fix-large · working copy may be mid-change · exit 130 · run <RUNID> ==
+== run dir: ~/.local/state/pg-rescue/runs/<RUNID> ==

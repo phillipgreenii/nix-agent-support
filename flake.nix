@@ -2444,6 +2444,9 @@
               # The runner's end-to-end tests (bead pg2-qt5ex) re-exec the test
               # binary itself as the fake command, handler and verify
               # (GO_WANT_HELPER_PROCESS), and use /bin/sh for --verify.
+              # The display's golden tests (bead pg2-ymqvd) put fake git and
+              # handler shell scripts first on PATH, and the README's jq recipes
+              # are run verbatim against a fixture run log (jq).
               pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-go-tests";
                 src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
@@ -2451,6 +2454,7 @@
                 testDeps = [
                   pkgs.bash
                   pkgs.git
+                  pkgs.jq
                 ];
               };
 

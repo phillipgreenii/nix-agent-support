@@ -138,6 +138,18 @@ type Result struct {
 	// Kept says the run directory was kept (a handler ran or the run was
 	// interrupted); otherwise Run removed it.
 	Kept bool
+	// Passthrough says the command's own output reached the wrapper's stdout
+	// or stderr, and MidLine that the last byte passed through was not a
+	// newline. The display uses them to start its first line on a line of its
+	// own.
+	Passthrough bool
+	MidLine     bool
+	// Depth, ParentRunID and Fingerprint are known for every run, including
+	// the ones that never built a report (success, wrapper error), so the run
+	// log can describe them.
+	Depth       int
+	ParentRunID *string
+	Fingerprint string
 }
 
 type run struct {
@@ -146,6 +158,7 @@ type run struct {
 	sig  os.Signal // the first wrapper signal received
 
 	outMu  sync.Mutex // serializes writes to the wrapper's own stdout/stderr
+	pass   passState  // what has been passed through; guarded by outMu
 	rep    *report.Report
 	res    *Result
 	redact *redactor
@@ -174,6 +187,15 @@ func Run(p Params) Result {
 		p.Foreground = foregroundOfTerminal
 	}
 	r := &run{p: p, res: &Result{CommandExit: -1}, redact: newRedactor(p.Config.Redact)}
+	r.res.Depth = r.depth()
+	if parent := p.Getenv("PG_RESCUE_RUN_ID"); parent != "" {
+		r.res.ParentRunID = &parent
+	}
+	mode := report.ModeArgv
+	if p.Options.Stdin {
+		mode = report.ModeStdin
+	}
+	r.res.Fingerprint = report.Fingerprint(mode, p.Options.Argv, p.Cwd, p.Options.Context)
 	r.sigs = p.Signals
 	if r.sigs == nil {
 		r.sigs = make(chan os.Signal, 8)
@@ -183,6 +205,9 @@ func Run(p Params) Result {
 	started := p.Now()
 	r.execute()
 	r.res.Duration = p.Now().Sub(started)
+	r.outMu.Lock()
+	r.res.Passthrough, r.res.MidLine = r.pass.wrote, r.pass.wrote && r.pass.last != '\n'
+	r.outMu.Unlock()
 	return *r.res
 }
 
@@ -289,8 +314,8 @@ func (r *run) runCommand(out *capture.File) (exit int, ok bool) {
 	res := r.runProc(procSpec{
 		path: path, argv: argv, dir: r.p.Cwd, env: r.p.Environ(),
 		stdin:   r.p.Stdin,
-		stdout:  &tee{c: out, out: r.p.Stdout, mu: &r.outMu},
-		stderr:  &tee{c: out, out: r.p.Stderr, mu: &r.outMu},
+		stdout:  &tee{c: out, out: r.p.Stdout, mu: &r.outMu, pass: &r.pass},
+		stderr:  &tee{c: out, out: r.p.Stderr, mu: &r.outMu, pass: &r.pass},
 		forward: true,
 	})
 	if res.startErr != nil {
@@ -338,14 +363,25 @@ type tee struct {
 	c      *capture.File
 	out    io.Writer
 	mu     *sync.Mutex
+	pass   *passState
 	failed bool
+}
+
+// passState remembers the last byte the command's output put on the wrapper's
+// own streams, so the display can tell whether the cursor is mid-line.
+type passState struct {
+	wrote bool
+	last  byte
 }
 
 func (t *tee) Write(p []byte) (int, error) {
 	_, _ = t.c.Write(p)
 	if t.out != nil && !t.failed {
 		t.mu.Lock()
-		_, err := t.out.Write(p)
+		n, err := t.out.Write(p)
+		if n > 0 {
+			t.pass.wrote, t.pass.last = true, p[n-1]
+		}
 		t.mu.Unlock()
 		if err != nil {
 			t.failed = true

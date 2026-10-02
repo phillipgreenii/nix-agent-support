@@ -1,0 +1,19 @@
+CONFLICT (content): Merge conflict in README.md
+
+== pg-rescue: `git pull --rebase` exited 1 · chain sync ==
+
+== [1/5] flake-lock-conflict: declined (exit 2) ==
+Conflict spans source files, not just flake.lock
+
+== [2/5] fix-small: declined (exit 2) ==
+Conflict needs a design decision between two rewrites of the same function
+
+== [3/5] fix-large: failed (timed out after 1s) ==
+
+== [4/5] p1-later: deferred ==
+Filed pg2-abc12 (P1): pg-rescue: git pull --rebase failed in demo-repo
+
+== [5/5] notify: skipped (chain stopped) ==
+
+== deferred by p1-later · exit 75 · working copy left as-is · run <RUNID> ==
+== run dir: ~/.local/state/pg-rescue/runs/<RUNID> ==
