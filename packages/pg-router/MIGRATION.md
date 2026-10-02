@@ -268,6 +268,34 @@ External systems use the same socket verbs (`gate-set`, `gate-clear`; schemas `c
 simply stops gating when its owner dies. `pg-router status`/`--json` and the TUI Gates modal (`g`)
 list the active gates (TYPE, description, owner, set-at, TTL remaining).
 
+**The disk-space watchdog (`LOW_DISK_USAGE`).** The replacement for `disk_space_low` is an ordinary
+external listener, `pg-router-disk-watchdog` (bead `pg2-zwdwf`, `packages/pg-router-disk-watchdog`),
+not pg-router code. Wire it as a timer-driven role that is registered **non-blocking on
+`LOW_DISK_USAGE`**, so the gate it sets can never stop it from running again to clear it:
+
+```toml
+[[query]]
+name = "disk-check-tick"
+type = "timer"
+emits = ["disk.check"]
+trigger = { kind = "period", every = "5m" }
+
+[[role]]
+name = "disk-watchdog"
+binds = ["disk.check"]
+non_blocking_gates = ["LOW_DISK_USAGE"]
+```
+
+The role's backing command is `pg-router-disk-watchdog [--path P]... [--min-free 20GiB]
+[--recover-free SIZE] [--ttl 7m] [--pg-router-path PATH]`. Each run measures the lowest free space
+over the given paths (default `/`), then: below `--min-free` it runs `pg-router gate set
+LOW_DISK_USAGE` (description with the free space, `--owner pg-router-disk-watchdog`, `--ttl` lease,
+re-set on every low pass); at or above `--recover-free` (default `--min-free` x 1.25, hysteresis so a
+borderline disk does not flap) it clears the gate; in between it renews a gate it already owns. It
+only ever clears a gate whose owner is itself, so a hand-set `pg-router gate set LOW_DISK_USAGE`
+is left alone. The default `--min-free` is `20GiB`; the default `--ttl` is `7m` (the 5 minute check
+cadence plus margin). A failed measurement or an unreachable core exits `1` and changes nothing.
+
 **Breaking changes.**
 
 - **`pause`/`resume`/`gate` are socket clients now.** The old `pause [<gate>]`/`resume [<gate>]`

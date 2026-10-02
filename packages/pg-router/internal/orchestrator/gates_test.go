@@ -160,3 +160,49 @@ func TestRoleListener_declaresRoleNonBlockingGates(t *testing.T) {
 		t.Fatalf("NonBlockingGates = %v", got)
 	}
 }
+
+// The disk-space watchdog deployment shape (bead pg2-zwdwf): a timer-driven
+// listener that declares LOW_DISK_USAGE non-blocking MUST keep being dispatched
+// while that very gate is active -- otherwise the gate it sets would stop it
+// from ever running again to clear it -- while an ordinary listener (blocking on
+// every TYPE) is held back for the whole time the gate is up.
+func TestDispatch_diskWatchdogStillRunsWhileLowDiskUsageIsActive(t *testing.T) {
+	const diskTick = "disk.check"
+	feedbackEvts := []event.Event{event.NewItemEvent("feedback.ready", "t", item.Item{ID: "zr-f"})}
+	sources := testQuerySet(feedbackEvts, nil)[:1]
+	sources = append(sources, query.Source{
+		Name:  "disk-check-tick",
+		Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{diskTick}}},
+	})
+	o := newOrch(fastCfg(), sources)
+	o.Reg = roles.RoleSet{
+		{Name: "feedback", Enabled: true, Binds: []string{"feedback.ready"}},
+		{Name: "disk-watchdog", Enabled: true, Binds: []string{diskTick}, NonBlockingGates: []string{"LOW_DISK_USAGE"}},
+	}
+	o.Bindings = core.NewBindings(o.Reg.DeclaredBindTypes()...)
+	handler := o.Handler.(*fakeHandler)
+	q := newTestQueue(t)
+	for _, r := range o.Reg {
+		q.Register(o.NewListener(context.Background(), r))
+	}
+
+	// The watchdog's own gate is up (as it would be after a low-space check).
+	if _, err := q.SetGate(eventqueue.GateRequest{Type: "LOW_DISK_USAGE", Owner: "pg-router-disk-watchdog", TTL: 7 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	rpt, err := o.ProduceTick(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, polled := rpt.LastTick["disk-check-tick"]; !polled {
+		t.Fatalf("the timer emitter must keep ticking under LOW_DISK_USAGE; LastTick=%v Blocked=%v", rpt.LastTick, rpt.Blocked)
+	}
+	if rpt.Blocked["feedback-source"] != "LOW_DISK_USAGE" {
+		t.Errorf("an ordinary emitter must be blocked by LOW_DISK_USAGE; Blocked=%v", rpt.Blocked)
+	}
+
+	q.Dispatch()
+	if got := dispatchedRoles(handler); !slices.Equal(got, []string{"disk-watchdog"}) {
+		t.Fatalf("dispatched to %v, want only the watchdog while LOW_DISK_USAGE is active", got)
+	}
+}

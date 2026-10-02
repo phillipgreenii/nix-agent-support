@@ -292,6 +292,12 @@
           pg-router-probe = final.callPackage ./packages/pg-router-probe {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-disk-watchdog: Pattern A (ADR 0008), a stdlib-only module that
+          # execs the `pg-router` CLI (gate set|clear|list) as a subprocess (bead
+          # pg2-zwdwf); no local `replace`/modRoot.
+          pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -1001,6 +1007,7 @@
                 "pg-connector"
                 "pg-router-source-pg-connector"
                 "pg-router-probe"
+                "pg-router-disk-watchdog"
                 "ccpool-probe"
               ];
 
@@ -2160,6 +2167,15 @@
                 pname = "pg-router-probe-go-tests";
                 src = lib.cleanSource ./packages/pg-router-probe; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-probe/gomod2nix.toml;
+              };
+
+              # pg-router-disk-watchdog (bead pg2-zwdwf) - table-driven unit suite over
+              # the set/hold/clear decision with a faked statfs and a faked `pg-router`
+              # CLI. No testDeps: nothing real is exec'd except `sh` in execRun's test.
+              pg-router-disk-watchdog-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-disk-watchdog-go-tests";
+                src = lib.cleanSource ./packages/pg-router-disk-watchdog; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
               };
 
               # ccpool-probe (docket pg2-93e5s, packet 2) — fixture-driven
@@ -7022,6 +7038,7 @@
               pg-ccaudit
               pg-router-source-pg-connector
               pg-router-probe
+              pg-router-disk-watchdog
               ccpool-probe
               integrate-branch-support
               pg-desk
