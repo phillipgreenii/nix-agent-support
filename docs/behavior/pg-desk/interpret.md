@@ -38,8 +38,9 @@ and MUST NOT use an LLM for any step below.
   (superseding the earlier act-now/blocked taxonomy): "Act Now" conflated "nothing is stopping you
   from looking at this" with "this needs YOUR action."
 
-  A PR is **blocked** when CI is not green (`failure`, `pending`, or `none` all count — only
-  `success` passes), the bot verdict is disapproved, a non-bot reviewer currently carries a
+  A PR is **blocked** when CI is failing or absent (`failure` or `none` — `success` and
+  `pending` do not block; a PR still waiting on CI falls through to the approval checks below,
+  operator ruling 2026-10-01), the bot verdict is disapproved, a non-bot reviewer currently carries a
   `CHANGES_REQUESTED` review, or there is a merge conflict. Blocked always wins over every
   assignment/approval check below.
   - **CI green** is judged only from the PR's current head commit. Workflow runs from earlier

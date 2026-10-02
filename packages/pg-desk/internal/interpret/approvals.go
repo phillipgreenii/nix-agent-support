@@ -361,7 +361,8 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 // approvals and a bot approval showed as Act Now solely because it matched
 // a watch label, with nothing left for the operator to actually do.
 //
-//   - blocked (ci not green, bot disapproved, a real human
+//   - blocked (ci failing or absent -- pending CI is NOT blocked, operator
+//     ruling 2026-10-01 -- bot disapproved, a real human
 //     CHANGES_REQUESTED, or a merge conflict) always resolves to
 //     team_awaiting_owner / mine_awaiting_me FIRST, before any
 //     assignment/approval check — see this file's TestClassifyPanel
@@ -385,7 +386,10 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 		return PanelNone
 	}
 
-	blocked := ci.State != "success" ||
+	// CI blocks on failure (and on "none" -- no countable run at all -- which
+	// the 2026-10-01 ruling left as it was). A "pending" rollup does NOT
+	// block: a PR still waiting on CI falls through to the approval checks.
+	blocked := ci.State != "success" && ci.State != "pending" ||
 		appr.BotVerdict == BotVerdictDisapproved ||
 		appr.HumanChangesRequested ||
 		pr.hasConflict()

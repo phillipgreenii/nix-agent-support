@@ -711,7 +711,9 @@ func TestClassifyPanel(t *testing.T) {
 		}{
 			{"conflict -> awaiting me", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingMe},
 			{"ci failure -> awaiting me", openPR, ciRollupResult{State: "failure"}, Approvals{}, PanelMineAwaitingMe},
-			{"ci pending -> awaiting me (pending counts as blocked)", openPR, ciRollupResult{State: "pending"}, Approvals{}, PanelMineAwaitingMe},
+			{"ci pending, not yet approved -> awaiting team (pending is not blocked)", openPR, ciRollupResult{State: "pending"}, Approvals{}, PanelMineAwaitingTeam},
+			{"ci pending + approved -> awaiting me (falls through to approval checks)", openPR, ciRollupResult{State: "pending"}, Approvals{HumanApproved: true}, PanelMineAwaitingMe},
+			{"ci pending + merge conflict still blocks -> awaiting me", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "pending"}, Approvals{}, PanelMineAwaitingMe},
 			{"ci none -> awaiting me (no countable run is not green)", openPR, ciRollupResult{State: "none"}, Approvals{}, PanelMineAwaitingMe},
 			{"bot disapproved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, PanelMineAwaitingMe},
 			{"human changes requested -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, PanelMineAwaitingMe},
@@ -761,7 +763,11 @@ func TestClassifyPanel(t *testing.T) {
 			want         string
 		}{
 			{"ci failing -> awaiting owner", openPR, ciRollupResult{State: "failure"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
-			{"ci pending -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"ci none -> awaiting owner (no countable run is not green)", openPR, ciRollupResult{State: "none"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"ci pending, no approval -> awaiting team (pending is not blocked)", openPR, ciRollupResult{State: "pending"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingTeam},
+			{"ci pending, human approved -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{HumanApproved: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
+			{"ci pending, review requested of me -> awaiting me", openPR, ciRollupResult{State: "pending"}, Approvals{}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingMe},
+			{"ci pending + bot disapproved still blocks -> awaiting owner", openPR, ciRollupResult{State: "pending"}, Approvals{BotVerdict: BotVerdictDisapproved}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingOwner},
 			{"conflict -> awaiting owner", prShow{State: "open", Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 			{"bot disapproved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictDisapproved}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 			{"human changes requested -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanChangesRequested: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
