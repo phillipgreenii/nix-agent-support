@@ -243,9 +243,11 @@ func TestSignalBeforeTheCommandStartsSpawnsNothing(t *testing.T) {
 	e := newE2E(t, "", []hd{result("h", "declined")}, chainOf("h"))
 	e.exec.Signals = make(chan os.Signal, 1)
 	e.exec.Signals <- syscall.SIGTERM
+	// If the command were spawned it would publish this and ignore TERM, so
+	// a race with the signal cannot hide it.
 	marker := filepath.Join(e.root, "ran")
-	code, _, _ := e.wrap("h", helperArgv("ran", "file="+marker))
-	if code != 143 || exists(marker) || e.result().Kind != runner.KindInterrupted {
-		t.Errorf("exit=%d ran=%v kind=%s", code, exists(marker), e.result().Kind)
+	code, _, _ := e.wrap("h", helperArgv("ignore-term", "secs=1", "started="+marker))
+	if in := e.result().Interrupted; code != 143 || exists(marker) || e.result().Kind != runner.KindInterrupted || in == nil || in.Phase != runner.PhaseBetween {
+		t.Errorf("exit=%d ran=%v kind=%s interruption=%+v", code, exists(marker), e.result().Kind, in)
 	}
 }

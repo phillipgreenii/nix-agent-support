@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -194,5 +195,129 @@ func TestCreateIsExclusiveAndPrivate(t *testing.T) {
 	}
 	if _, err := Create(p+".link", Limits{}); err == nil {
 		t.Error("Create must not follow a symlink")
+	}
+}
+
+func TestWithDefaultsOnlyReplacesNonPositiveFields(t *testing.T) {
+	for _, in := range []Limits{{}, {Head: -1, Tail: -5, Window: -9}} {
+		if got := in.withDefaults(); got.Head != DefaultHead || got.Tail != DefaultTail || got.Window != DefaultWindow {
+			t.Errorf("%+v -> %+v", in, got)
+		}
+	}
+	got := Limits{Head: 1, Tail: 2, Window: 3}.withDefaults()
+	if got.Head != 1 || got.Tail != 2 || got.Window != 3 {
+		t.Errorf("explicit limits changed: %+v", got)
+	}
+}
+
+func TestTruncatedAtTheExactCap(t *testing.T) {
+	for _, c := range []struct {
+		n    int
+		want bool
+	}{{9, false}, {10, false}, {11, true}} {
+		f := newFile(t, Limits{Head: 6, Tail: 4})
+		f.Write([]byte(strings.Repeat("z", c.n)))
+		if f.Truncated() != c.want {
+			t.Errorf("%d bytes over a 6+4 cap: Truncated = %v", c.n, f.Truncated())
+		}
+		got := finish(t, f)
+		if strings.Contains(got, "truncated") != c.want {
+			t.Errorf("%d bytes: file = %q", c.n, got)
+		}
+	}
+}
+
+func TestWritesAfterCloseChangeNothing(t *testing.T) {
+	c := newFile(t, Limits{Head: 4, Tail: 4})
+	c.Write([]byte("abcdefghijkl"))
+	before := finish(t, c)
+	c.Write([]byte("MORE"))
+	if c.Total() != 12 {
+		t.Errorf("total moved after Close: %d", c.Total())
+	}
+	if after, _ := os.ReadFile(c.Path()); string(after) != before {
+		t.Errorf("file changed after Close: %q -> %q", before, after)
+	}
+	if err := c.Close(); err != nil {
+		t.Errorf("second Close = %v", err)
+	}
+}
+
+func TestWindowAgreesWithAModelForRandomWrites(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for round := 0; round < 300; round++ {
+		win := 1 + rng.Intn(12)
+		c := newFile(t, Limits{Head: 1 << 20, Tail: 1 << 20, Window: win})
+		var all []byte
+		for i := 0; i < rng.Intn(10); i++ {
+			chunk := make([]byte, rng.Intn(30))
+			for j := range chunk {
+				chunk[j] = "ab\n"[rng.Intn(3)]
+			}
+			all = append(all, chunk...)
+			c.Write(chunk)
+		}
+		for n := 0; n <= win+3; n++ {
+			got, lineStart := c.Window(n)
+			k := min(n, win, len(all))
+			wantBytes := all[len(all)-k:]
+			wantStart := k == len(all) || all[len(all)-k-1] == '\n'
+			if !bytes.Equal(got, wantBytes) || lineStart != wantStart {
+				t.Fatalf("round %d win=%d n=%d all=%q: got %q/%v want %q/%v", round, win, n, all, got, lineStart, wantBytes, wantStart)
+			}
+		}
+		c.Close()
+	}
+}
+
+func TestFirstIOErrorWinsAndRingFailuresAreReported(t *testing.T) {
+	// A ring file that cannot be created is an error, and it does not replace
+	// an earlier one.
+	c := newFile(t, Limits{Head: 2, Tail: 2})
+	os.WriteFile(c.Path()+".tail", nil, 0o600) // makes the exclusive create fail
+	c.Write([]byte("abcdef"))
+	if c.Err() == nil {
+		t.Fatal("a ring that cannot be created must be reported")
+	}
+	if err := c.Close(); err == nil {
+		t.Error("Close must report it")
+	}
+
+	c2 := newFile(t, Limits{Head: 2, Tail: 2})
+	c2.f.Close()
+	c2.Write([]byte("ab")) // fails: the file is closed
+	first := c2.Err()
+	if first == nil {
+		t.Fatal("expected the head write to fail")
+	}
+	os.WriteFile(c2.Path()+".tail", nil, 0o600)
+	c2.Write([]byte("cdefgh"))
+	if c2.Err() != first {
+		t.Errorf("a later error replaced the first: %v -> %v", first, c2.Err())
+	}
+	c2.Close()
+
+	// A ring that breaks under us surfaces from Close.
+	c3 := newFile(t, Limits{Head: 2, Tail: 4})
+	c3.Write([]byte("abcdefgh"))
+	c3.ring.Close()
+	if err := c3.Close(); err == nil {
+		t.Error("a broken ring must make Close fail")
+	}
+
+	// A file that cannot be closed cleanly is reported once.
+	c4 := newFile(t, Limits{})
+	c4.f.Close()
+	if err := c4.Close(); err == nil {
+		t.Error("closing an already closed file must be reported")
+	}
+}
+
+func TestOversizedSingleWriteKeepsOnlyTheLastTail(t *testing.T) {
+	c := newFile(t, Limits{Head: 3, Tail: 5})
+	c.Write([]byte("abc"))
+	c.Write([]byte("0123456789")) // larger than the ring
+	if got, want := finish(t, c), model("abc0123456789", 3, 5); got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
 }

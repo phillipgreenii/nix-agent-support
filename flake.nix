@@ -2409,6 +2409,9 @@
               # fixtures; this bead's tests do not exec either yet.
               # pg-rescue-notify's tests (bead pg2-nwffx) put a fake osascript
               # (a /bin/sh script) first on PATH; they never post a real one.
+              # The runner's end-to-end tests (bead pg2-qt5ex) re-exec the test
+              # binary itself as the fake command, handler and verify
+              # (GO_WANT_HELPER_PROCESS), and use /bin/sh for --verify.
               pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-go-tests";
                 src = lib.cleanSource ./packages/pg-rescue; # matches default.nix

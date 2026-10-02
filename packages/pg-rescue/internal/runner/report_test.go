@@ -131,3 +131,22 @@ func TestFormatDurationAndSignalName(t *testing.T) {
 		}
 	}
 }
+
+func TestLimitTailDropsAnEmptyPartialFirstLine(t *testing.T) {
+	// The cut fell exactly on a newline: the "partial" line is empty and goes.
+	if got := LimitTail("\nb\nc\n", 10, 100, false); got != "b\nc\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := LimitTail("\nb\nc\n", 10, 100, true); got != "\nb\nc\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestFormatDurationPicksTheLargestExactUnit(t *testing.T) {
+	for in, want := range map[string]string{"2h": "2h", "2m": "2m", "3s": "3s", "1m1s": "61s", "1h1m": "61m", "1500ms": "1.5s"} {
+		d, _ := parseDur(in)
+		if got := formatDuration(d); got != want {
+			t.Errorf("formatDuration(%s) = %q; want %q", in, got, want)
+		}
+	}
+}

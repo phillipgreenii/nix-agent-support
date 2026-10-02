@@ -56,6 +56,13 @@ func splitKV(args []string) (kv map[string]string, rest []string) {
 	return kv, nil
 }
 
+func octal(s string, def uint64) uint64 {
+	if n, err := strconv.ParseUint(s, 8, 32); err == nil {
+		return n
+	}
+	return def
+}
+
 func atoi(s string, def int) int {
 	if n, err := strconv.Atoi(s); err == nil {
 		return n
@@ -74,7 +81,10 @@ func publish(path, content string) {
 }
 
 // expand substitutes {pos} (the handler's position) in a path.
-func expand(s string) string { return strings.ReplaceAll(s, "{pos}", os.Getenv("PG_RESCUE_POSITION")) }
+func expand(s string) string {
+	s = strings.ReplaceAll(s, "{pos}", os.Getenv("PG_RESCUE_POSITION"))
+	return strings.ReplaceAll(s, "{rundir}", os.Getenv("PG_RESCUE_RUN_DIR"))
+}
 
 var helperBehaviors = map[string]func(kv map[string]string, rest []string){}
 
@@ -174,8 +184,17 @@ func helperMain(args []string) {
 	case "grandchild":
 		// Leaves a sleeping child behind in the same process group, then
 		// exits. hold=1 lets the child keep our stdout and stderr open.
-		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", "sleep", "secs=60")
+		// child= picks the child's behavior (default sleep); setsid=1 moves it into
+		// its own session, out of reach of a process-group kill.
+		kind := kv["child"]
+		if kind == "" {
+			kind = "sleep"
+		}
+		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", kind, "secs="+kv["secs"], "ms="+kv["ms"], "text="+kv["text"], "started="+kv["ready"])
 		child.Env = os.Environ()
+		if kv["setsid"] == "1" {
+			child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		}
 		if kv["hold"] == "1" {
 			child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		}
@@ -184,6 +203,20 @@ func helperMain(args []string) {
 			os.Exit(96)
 		}
 		publish(expand(kv["pid"]), strconv.Itoa(child.Process.Pid))
+		// ready= names a file the child publishes once it is set up (for example
+		// once it ignores TERM); wait for it so the handler exits only then.
+		if ready := kv["ready"]; ready != "" {
+			for i := 0; i < 2000 && !fileExists(ready); i++ {
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		os.Exit(code)
+	case "late":
+		time.Sleep(time.Duration(atoi(kv["ms"], 0)) * time.Millisecond)
+		fmt.Fprint(os.Stdout, kv["text"])
+		os.Exit(code)
+	case "chmod-rundir":
+		_ = os.Chmod(os.Getenv("PG_RESCUE_RUN_DIR"), os.FileMode(octal(kv["mode"], 0o700)))
 		os.Exit(code)
 	case "record":
 		record(kv, rest)
@@ -308,3 +341,5 @@ func probePID(kv map[string]string, _ []string) {
 	publish(kv["dest"], state)
 	os.Exit(atoi(kv["code"], 0))
 }
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }

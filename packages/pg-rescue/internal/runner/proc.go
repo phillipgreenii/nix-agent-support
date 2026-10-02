@@ -19,8 +19,9 @@ type procSpec struct {
 	env  []string
 	// stdin is the child's stdin; nil means /dev/null.
 	stdin io.Reader
-	// stdout and stderr receive the child's streams; they never fail the
-	// child (a failing sink is simply drained). nil discards.
+	// stdout and stderr receive the child's streams; they must never
+	// return an error, or the copier would stop and the child could block on a
+	// full pipe.
 	stdout, stderr io.Writer
 	// ownGroup puts the child in its own process group and, after it exits,
 	// kills whatever is left of that group.
@@ -106,11 +107,7 @@ func (r *run) runProc(s procSpec) procResult {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			to := c.to
-			if to == nil {
-				to = io.Discard
-			}
-			_, _ = io.Copy(to, c.from)
+			_, _ = io.Copy(c.to, c.from)
 		}()
 	}
 	drained := make(chan struct{})

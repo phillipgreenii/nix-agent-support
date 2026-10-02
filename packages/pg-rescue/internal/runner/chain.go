@@ -132,11 +132,6 @@ func (r *run) attempt(pos int, name string) (stop bool) {
 		r.res.Kind, r.res.ExitCode, r.res.DeferredBy = KindDeferred, ExitDeferred, name
 		return true
 	}
-	if r.pollSignal() {
-		// Noticed only now: the handler had already finished.
-		r.finishInterrupted(PhaseBetween, "", 0)
-		return true
-	}
 	return false
 }
 
