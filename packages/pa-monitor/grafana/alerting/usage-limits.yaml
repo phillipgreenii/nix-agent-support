@@ -15,11 +15,44 @@ groups:
       # the account pct reads <=99, and a 1m eval can sample between emitter ticks),
       # so the condition is (pct > 99) OR (limit_hits_total increased in 5m). The
       # counter is `or vector(0)`-defaulted so its absence never yields NoData.
+      #
+      # pg2-hog2v (OPERATOR RULING, Phillip, 2026-09-30, verbatim): "i'm ok with a
+      # notification for pa-monitor 5h limit ... it is important that we know as
+      # soon as the limit is hit and notify and then clear as soon as it resets."
+      # This rule and its notification are WANTED: it MUST NOT be downgraded,
+      # silenced or deleted. It is tuned for promptness in BOTH directions:
+      #
+      #   FIRE promptly: `for: 0m`, and no keepFiringFor (keepFiringFor only
+      #   extends a firing alert, it never delays the first firing). Worst-case
+      #   detection delay from the cap being reached to the alert going Alerting
+      #   is the sum of the pipeline stages, each taken at its worst case:
+      #       daemon tick                      5s   (daemon.go --tick-seconds default)
+      #     + OTel SDK PeriodicReader export  60s   (SDK default; no
+      #                                             OTEL_METRIC_EXPORT_INTERVAL override)
+      #     + otelcol batch processor          5s   (batch.timeout; remote-write push,
+      #                                             so no Prometheus scrape interval)
+      #     + Grafana evaluation interval     60s   (group `interval: 1m` above)
+      #     = 130s worst case (about 2m10s); the average is about half of that.
+      #   The notification policy adds its own group_wait (10s, notifier.nix in
+      #   phillipgreenii-nix-support-apps), outside this file.
+      #
+      #   CLEAR promptly: keepFiringFor is DROPPED on this rule (decision
+      #   pg2-hog2v). It was 5m, which held the alert Alerting for up to 5m AFTER
+      #   the window reset, contradicting "clear as soon as it resets". With it
+      #   gone the alert resolves on the first evaluation after the percentage
+      #   gauge drops to <=99: worst case 5 + 60 + 5 + 60 = 130s after the reset
+      #   (same pipeline stages as above). The flap risk the old comment guarded
+      #   against is small: usage_percentage is monotonic within a window, and an
+      #   unknown/stale reading is not observed (noDataState OK) rather than 0.
+      #   Residual, accepted: the `$L > 0` counter term below looks back 5m, so a
+      #   limit-hit recorded within 5m of the reset can hold the alert for the
+      #   remainder of that 5m lookback; the usual case (hit well before reset)
+      #   is unaffected because pct > 99 already holds until the reset.
+      #   Guarded by internal/alertrules/usage_limits_test.go.
       - uid: pa-monitor-5h-usage-limit-hit
         title: pa-monitor 5h usage limit hit
         condition: C
         for: 0m
-        keepFiringFor: 5m # hold through a brief dip so it doesn't flap while capped
         noDataState: OK # metric absent (unknown window) => no alarm
         execErrState: OK
         labels:
@@ -99,6 +132,10 @@ groups:
       # Weekly (7d) usage limit hit. Same shape, keyed off the weekly window
       # metrics. When the weekly window metrics are absent (unknown), noDataState
       # OK keeps it silent until they appear.
+      #
+      # pg2-hog2v: deliberately left with keepFiringFor 5m. The operator's
+      # "clear as soon as it resets" ruling was about the 5h rule; against a 7d
+      # window a <=5m late clear is immaterial and the hold damps flapping.
       - uid: pa-monitor-weekly-usage-limit-hit
         title: pa-monitor weekly usage limit hit
         condition: C
