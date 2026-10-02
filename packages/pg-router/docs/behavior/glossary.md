@@ -85,7 +85,9 @@ their own terms in a downstream deployment set.
 ## Participants (the system actors)
 
 - **Event source** — emits typed events; **pull** (the core queries it on a query trigger) or **push**
-  (it calls the core's ingest callback). A push-only source still registers.
+  (it calls the core's ingest callback). No source, push or pull, registers into the self-report
+  registry — a source's liveness is reported entirely through its own `lastTick`/staleness fields
+  (`INTF-CLI`), never registry membership. Self-report is handler-only.
 - **Event handler** — responds to an event it is bound to: it **accepts** the event and owns the run
   from there, reporting its progress and outcome on its **own** surface rather than back to the core,
   and may be capacity-limited — a limit it enforces itself, which nothing declares to the core
