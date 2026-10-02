@@ -2407,6 +2407,8 @@
               # injected Executor standing in for "spawn the command". bash and
               # git are on PATH for the later beads' fake-handler and real-git
               # fixtures; this bead's tests do not exec either yet.
+              # pg-rescue-notify's tests (bead pg2-nwffx) put a fake osascript
+              # (a /bin/sh script) first on PATH; they never post a real one.
               pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-go-tests";
                 src = lib.cleanSource ./packages/pg-rescue; # matches default.nix

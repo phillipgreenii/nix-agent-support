@@ -20,7 +20,13 @@ mkGoApp {
 
   gomod2nixToml = ./gomod2nix.toml;
 
-  subPackages = [ "cmd/pg-rescue" ];
+  # Each reference handler is its own binary (design: one package, several
+  # cmd/). Handlers are found on PATH at run time, so they ship alongside the
+  # wrapper but never link against it.
+  subPackages = [
+    "cmd/pg-rescue"
+    "cmd/pg-rescue-notify"
+  ];
 
   meta = {
     description = "Script-first command runner: wraps a command and, on failure, tries an ordered chain of named failure handlers";
