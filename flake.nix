@@ -298,6 +298,15 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-rescue: Pattern A (ADR 0008), a Go module that wraps a command and,
+          # on failure, walks a named chain of failure handlers (bead pg2-wgpem
+          # is the first implementation bead: skeleton, CLI, config, check and
+          # result). Handlers are independent executables found on PATH at run
+          # time, so it has no compile-time dependency on another package and
+          # needs no local `replace`/modRoot.
+          pg-rescue = final.callPackage ./packages/pg-rescue {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -963,7 +972,10 @@
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
               # doubles, verified via
-              # `grep -rln '^//go:build' packages/ccpool-probe`) is a
+              # `grep -rln '^//go:build' packages/ccpool-probe`; `pg-rescue`
+              # added bead pg2-wgpem — verified via
+              # `grep -rln '^//go:build' packages/pg-rescue`, whose tests use
+              # the GO_WANT_HELPER_PROCESS re-exec pattern, not build tags) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -1023,6 +1035,7 @@
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
                 "ccpool-probe"
+                "pg-rescue"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -2387,6 +2400,21 @@
                 pname = "ccpool-probe-go-tests";
                 src = lib.cleanSource ./packages/ccpool-probe; # matches default.nix
                 gomod2nixToml = ./packages/ccpool-probe/gomod2nix.toml;
+              };
+
+              # pg-rescue (bead pg2-wgpem) — table-driven unit suite over the
+              # CLI parser, config validation, `check` and `result`, with an
+              # injected Executor standing in for "spawn the command". bash and
+              # git are on PATH for the later beads' fake-handler and real-git
+              # fixtures; this bead's tests do not exec either yet.
+              pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-rescue-go-tests";
+                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                ];
               };
 
               # T-14 enforcement, mechanical rather than aspirational: the
@@ -7246,6 +7274,7 @@
               pg-router-probe
               pg-router-disk-watchdog
               ccpool-probe
+              pg-rescue
               integrate-branch-support
               pg-desk
               claude-hook-router
