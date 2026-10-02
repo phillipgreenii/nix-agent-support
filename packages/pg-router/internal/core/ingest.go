@@ -87,6 +87,11 @@ type ingestRequest struct {
 //     malformed ones (reason `malformed: …`) and, rarely, a durable-write failure
 //     (reason `enqueue: …`) — plus the events the core REFUSED to queue because
 //     their type is unknown to the configuration (reason `unknown type: …`).
+//   - A well-formed, declared event is also refused — never silently — when the
+//     event log is at its hard size limit (reason `log_full: …`) or cannot be
+//     written (reason `log_unwritable: …`; bead pg2-5d3ui). The event was NOT
+//     queued and retrying later is safe (INV-EVT-2). The fixed PREFIX is the
+//     contract; the rest of the text names the numbers and the remedies.
 //   - The tracking id is echoed, never required to be one the core issued. A push
 //     source mints its own id, so requiring a known id would break push ingest
 //     outright. (The "unknown tracking id ⇒ acknowledged and ignored" rule in
@@ -144,6 +149,21 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 			continue
 		}
 		res, err := s.q.Enqueue(evt)
+		if reason, refused := eventqueue.RejectReason(err); refused {
+			// The ONE sanctioned ingest refusal of a well-formed, declared event
+			// (INV-EVT-1, bead pg2-5d3ui): the event log is at its hard size limit
+			// (log_full) or cannot be written (log_unwritable). It is never silent —
+			// the source is told here, the queue counted it and told its
+			// RejectObserver, and it is logged. The reason text begins with the fixed
+			// prefix (eventqueue.ReasonLogFull / ReasonLogUnwritable, no `enqueue:`
+			// wrapper): nothing machine-readable separates retry-later from permanent
+			// in the reply schema (only {id, reason}), so the PREFIX is the contract.
+			// Retrying is safe because delivery is idempotent (INV-EVT-2).
+			slog.Warn("core: ingest-event refused an event: the event log is at its limit or unwritable",
+				"trackingId", req.ID, "eventId", evt.ID, "type", evt.Type, "reason", reason)
+			reply.Rejected = append(reply.Rejected, rejection{ID: evt.ID, Reason: err.Error()})
+			continue
+		}
 		if err != nil {
 			// A core-side durable-write failure, not a malformed event — but the
 			// event did NOT enter the queue, and `rejected` is the only per-event

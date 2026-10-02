@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +71,15 @@ type Config struct {
 	// when that is larger, so a live set bigger than the threshold cannot make
 	// the queue compact on every sweep.
 	CompactThresholdBytes int64
+	// MaxLogBytes is the HARD size limit of the queue.jsonl write-ahead log
+	// (bead pg2-5d3ui): at or above it, new events are rejected at ingest with a
+	// classified log_full reason. A derived SOFT threshold (SoftLogBytes, 90% of
+	// it) halts the polled emitters first. From [pool].max_log_bytes or
+	// PG_ROUTER_MAX_LOG_BYTES (which accepts units: 64MiB, 100MB, 512KiB, ...);
+	// Default() is DefaultMaxLogBytes. Zero or negative is rejected by Validate
+	// (a limit is always in force), as is an order other than
+	// compact_threshold_bytes < soft < max_log_bytes.
+	MaxLogBytes int64
 	// The three file-backed INV-LIFE-2 gates (OperatorPaused / CICDDown /
 	// DiskSpaceLow), their external disable kill-switches and the
 	// PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN / PG_ROUTER_DISK_SPACE_LOW[_DISABLE]
@@ -330,6 +340,7 @@ func Default() Config {
 		PollInterval:          10 * time.Second,
 		RetryBackoff:          backoff.Default(),
 		CompactThresholdBytes: DefaultCompactThresholdBytes,
+		MaxLogBytes:           DefaultMaxLogBytes,
 		// PullFailureBackoff shares the same shape default; Retries stays 0
 		// (fail fast) so an unconfigured deployment is byte-for-byte unchanged
 		// from pg2-qq9v's original "a query failure must NOT masquerade as no
@@ -396,6 +407,11 @@ func Load() (Config, error) {
 	c.LogDir = envStr("PG_ROUTER_LOG_DIR", c.LogDir)
 	c.ActivityRingSize = envInt("PG_ROUTER_ACTIVITY_RING", c.ActivityRingSize)
 	c.CompactThresholdBytes = int64(envInt("PG_ROUTER_COMPACT_THRESHOLD_BYTES", int(c.CompactThresholdBytes)))
+	maxLog, err := envBytes("PG_ROUTER_MAX_LOG_BYTES", c.MaxLogBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	c.MaxLogBytes = maxLog
 	c.MetricsAddr = envStr("PG_ROUTER_METRICS_ADDR", c.MetricsAddr)
 
 	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
@@ -588,11 +604,29 @@ func (c Config) diagnose() (errs []error, warns []string) {
 			}
 		}
 	}
+	errs = append(errs, c.logLimitFindings()...)
 	errs = append(errs, c.absentBackingCommands()...)
 	cycleErrs, cycleWarns := c.reentryCycleFindings()
 	errs = append(errs, cycleErrs...)
 	warns = append(warns, cycleWarns...)
 	return errs, warns
+}
+
+// logLimitFindings checks the queue-log size settings (bead pg2-5d3ui): the hard
+// limit max_log_bytes must be positive, and the thresholds must be ordered
+// compact_threshold_bytes < soft < max_log_bytes — otherwise a compaction could
+// never run before the emitters halt, or the halt could never come before
+// rejection. A compact_threshold_bytes of 0 disables runtime compaction and so
+// takes no part in the ordering.
+func (c Config) logLimitFindings() []error {
+	if c.MaxLogBytes <= 0 {
+		return []error{fmt.Errorf("max_log_bytes must be > 0, got %d (set [pool].max_log_bytes or PG_ROUTER_MAX_LOG_BYTES to a positive size, e.g. 64MiB)", c.MaxLogBytes)}
+	}
+	if c.CompactThresholdBytes > 0 && c.CompactThresholdBytes >= c.SoftLogBytes() {
+		return []error{fmt.Errorf("log size thresholds must satisfy compact_threshold_bytes < soft < max_log_bytes, got compact_threshold_bytes=%d, soft=%d (%d%% of max_log_bytes=%d)",
+			c.CompactThresholdBytes, c.SoftLogBytes(), SoftLogPercent, c.MaxLogBytes)}
+	}
+	return nil
 }
 
 // handlerIsDisconnected is check 3 — "a handler no binding can reach". A binding
@@ -824,6 +858,87 @@ func envBool(key string, def bool) bool {
 // live state was a few KB, so this compacts roughly every few days at today's
 // rate and keeps replay and restart cost small.
 const DefaultCompactThresholdBytes int64 = 8 << 20
+
+// DefaultMaxLogBytes is Default().MaxLogBytes: 64 MiB, about twice the 33 MB the
+// live log reached in its first 15 days uncompacted (bead pg2-5d3ui) and roughly
+// 30 days of that growth if compaction were failing — far above the few KB a
+// compacted log holds.
+const DefaultMaxLogBytes int64 = 64 << 20
+
+// SoftLogPercent is the soft threshold as a percentage of MaxLogBytes (an
+// arbitrary starting value, one derived constant rather than a second setting):
+// above it the polled emitters are halted.
+const SoftLogPercent = 90
+
+// SoftLogBytes is the derived soft log-size threshold: SoftLogPercent of
+// MaxLogBytes. Above it (after a compaction attempt) the queue halts polled
+// emitters; at MaxLogBytes it rejects events outright.
+func (c Config) SoftLogBytes() int64 { return c.MaxLogBytes / 100 * SoftLogPercent }
+
+// ParseBytes parses a byte count: a plain non-negative integer ("67108864") or
+// an integer with a unit suffix, binary (KiB, MiB, GiB, TiB) or decimal (KB, MB,
+// GB, TB), case-insensitive, with optional space ("64 MiB"). Anything else —
+// empty, negative, fractional, an unknown unit, an overflow — is an error.
+func ParseBytes(s string) (int64, error) {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	i := 0
+	for i < len(t) && t[i] >= '0' && t[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, fmt.Errorf("%q is not a size: want an integer with an optional unit (e.g. 67108864 or 64MiB)", s)
+	}
+	n, err := strconv.ParseInt(t[:i], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%q: %w", s, err)
+	}
+	unit := strings.ToLower(strings.TrimSpace(t[i:]))
+	mult := int64(1)
+	switch unit {
+	case "", "b":
+	case "kib", "k":
+		mult = 1 << 10
+	case "mib", "m":
+		mult = 1 << 20
+	case "gib", "g":
+		mult = 1 << 30
+	case "tib", "t":
+		mult = 1 << 40
+	case "kb":
+		mult = 1000
+	case "mb":
+		mult = 1000 * 1000
+	case "gb":
+		mult = 1000 * 1000 * 1000
+	case "tb":
+		mult = 1000 * 1000 * 1000 * 1000
+	default:
+		return 0, fmt.Errorf("%q: unknown unit %q (use B, KiB, MiB, GiB, TiB or KB, MB, GB, TB)", s, t[i:])
+	}
+	if n > math.MaxInt64/mult {
+		return 0, fmt.Errorf("%q overflows", s)
+	}
+	return n * mult, nil
+}
+
+// envBytes overlays a byte count from env. Unlike envInt it does NOT silently
+// fall back on a value it cannot parse: a mistyped size limit (e.g. "64Mib " vs
+// "64 megabytes") would otherwise be ignored without a word. An unset or empty
+// variable keeps def.
+func envBytes(key string, def int64) (int64, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return def, nil
+	}
+	n, err := ParseBytes(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return n, nil
+}
 
 func envInt(key string, def int) int {
 	if v, ok := os.LookupEnv(key); ok {

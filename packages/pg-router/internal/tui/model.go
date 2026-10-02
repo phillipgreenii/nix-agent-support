@@ -555,6 +555,9 @@ func (m *Model) renderMain() string {
 	if p := pollErrorZone(m.pollErrFlagged, m.lastErr, m.theme); p != "" {
 		zones = append(zones, zoneSpec{name: "poll-error", content: p, dropOrder: 2})
 	}
+	if z := logLimitZone(m.reply.QueueLog, m.width, m.theme); z != "" {
+		zones = append(zones, zoneSpec{name: "log-limit", content: z, dropOrder: logLimitDropOrder})
+	}
 
 	// Static tier: Listeners, Sources -- fixed membership for the run, never
 	// reordered/resized by the dynamic tier below (this task).

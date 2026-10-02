@@ -3,6 +3,7 @@ package eventqueue
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -151,12 +152,20 @@ type FileStore struct {
 	f      *os.File
 	size   int64 // logical byte length of the log file; guarded by mu
 	closed bool
+	// poisoned is set when a failed write could not be rolled back (truncate-back
+	// failed too), leaving a partial line at the tail that the next append would
+	// fuse onto. Every append fails until a Compact rewrites the file. Guarded by mu.
+	poisoned bool
 
 	sizeGauge atomic.Int64 // lock-free mirror of size, for LogSize
 
 	// compactHook, when non-nil, is called at each durable step of Compact with
 	// the step's name — a test seam for crash injection (see compactStage*).
 	compactHook func(stage string)
+
+	// writeFn, when non-nil, replaces f.Write — a test seam for short-write and
+	// ENOSPC injection (the real file is still the one truncated back).
+	writeFn func(f *os.File, b []byte) (int, error)
 }
 
 // NewFileStore opens (creating parent dirs) the append-only WAL at path. A
@@ -186,25 +195,101 @@ func NewFileStore(path string) (*FileStore, error) {
 // LogSize reports the log file's current byte length. Lock-free.
 func (s *FileStore) LogSize() int64 { return s.sizeGauge.Load() }
 
+// EncodeError marks a record that could not be marshalled. It is a fault in the
+// record's content, NOT a failure of the log's storage, so the queue does not
+// treat it as an unwritable log.
+type EncodeError struct{ Err error }
+
+func (e *EncodeError) Error() string { return "eventqueue: encode record: " + e.Err.Error() }
+func (e *EncodeError) Unwrap() error { return e.Err }
+
 // writeLocked writes b to the log and fsyncs. Caller holds s.mu.
+//
+// On ANY write or sync error the file is truncated back to its pre-write length
+// and the logical size restored (bead pg2-5d3ui, hardening what pg2-8e0m6's
+// item 9 asked for): a short write (ENOSPC) would otherwise leave a partial line
+// that the next successful append fuses onto, silently losing that later record
+// — and recovery from an unwritable log (Queue.EnforceLogLimits) depends on a
+// retried append starting on a line boundary. If the truncate itself fails the
+// store is poisoned until a Compact rewrites the file.
 func (s *FileStore) writeLocked(b []byte) error {
 	if s.closed {
 		return os.ErrClosed
 	}
-	n, err := s.f.Write(b)
+	if s.poisoned {
+		return errPoisoned
+	}
+	prev := s.size
+	write := s.f.Write
+	if s.writeFn != nil {
+		write = func(b []byte) (int, error) { return s.writeFn(s.f, b) }
+	}
+	n, err := write(b)
+	if err == nil {
+		err = s.f.Sync()
+	}
+	if err != nil {
+		if terr := s.f.Truncate(prev); terr != nil {
+			s.poisoned = true
+			s.size += int64(n)
+			s.sizeGauge.Store(s.size)
+			return fmt.Errorf("%w (and rolling the partial write back failed: %v)", err, terr)
+		}
+		return err
+	}
 	s.size += int64(n)
 	s.sizeGauge.Store(s.size)
+	return nil
+}
+
+var errPoisoned = errors.New("eventqueue: log has an unrecoverable partial write; appends are refused until a compaction rewrites it")
+
+// Probe checks that the log's directory can still be written to without
+// touching the log itself: it writes and fsyncs a small file beside it and
+// removes it. It is Queue.EnforceLogLimits' recovery probe for an unwritable log
+// (there is no no-op log record, so appending one is not an option); a
+// compaction writes its temp file in the same directory and is the other,
+// heavier, probe. Returns nil when the write and fsync succeeded.
+func (s *FileStore) Probe() error {
+	p := s.path + probeSuffix
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	return s.f.Sync()
+	defer func() { _ = os.Remove(p) }()
+	if _, err := f.Write(make([]byte, probeBytes)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	poisoned := s.poisoned
+	s.mu.Unlock()
+	if poisoned {
+		// The tail holds a partial line a failed rollback left behind; a compaction
+		// rewrites the file from its decodable prefix and clears the condition.
+		_, err := s.Compact()
+		return err
+	}
+	return nil
 }
+
+const (
+	probeSuffix = ".probe"
+	probeBytes  = 4096
+)
 
 // Append marshals and writes one record as a line, then fsyncs.
 func (s *FileStore) Append(rec Record) error {
 	b, err := json.Marshal(rec)
 	if err != nil {
-		return err
+		return &EncodeError{Err: err}
 	}
 	b = append(b, '\n')
 	s.mu.Lock()
@@ -224,7 +309,7 @@ func (s *FileStore) AppendBatch(recs []Record) error {
 	for _, rec := range recs {
 		b, err := json.Marshal(rec)
 		if err != nil {
-			return err
+			return &EncodeError{Err: err}
 		}
 		buf = append(buf, b...)
 		buf = append(buf, '\n')
@@ -296,28 +381,82 @@ func (s *FileStore) Close() error {
 // constructing a fresh Queue over the SAME MemStore).
 type MemStore struct {
 	recs []Record
+	// size tracks the encoded byte length of recs (one JSON line per record, the
+	// shape FileStore writes), so a MemStore reports a LogSize like a FileStore
+	// does; sizeSet, when SetLogSize was called, overrides it. Guarded by mu — a
+	// status/metrics reader calls LogSize without the queue lock.
+	mu      sync.Mutex
+	size    int64
+	sizeSet *int64
 }
 
 // NewMemStore returns an empty in-memory store.
 func NewMemStore() *MemStore { return &MemStore{} }
 
+// encodedLen is the byte length rec occupies as a log line.
+func encodedLen(rec Record) int64 {
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return 0
+	}
+	return int64(len(b)) + 1
+}
+
 // Append records one operation in memory.
 func (m *MemStore) Append(rec Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.recs = append(m.recs, rec)
+	m.size += encodedLen(rec)
 	return nil
 }
 
 // AppendBatch records every rec in recs in memory, in order, as one operation.
 func (m *MemStore) AppendBatch(recs []Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.recs = append(m.recs, recs...)
+	for _, r := range recs {
+		m.size += encodedLen(r)
+	}
 	return nil
 }
 
 // Replay returns a copy of the recorded operations in append order.
 func (m *MemStore) Replay() ([]Record, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	out := make([]Record, len(m.recs))
 	copy(out, m.recs)
 	return out, nil
+}
+
+// LogSize reports the log's byte length: the encoded size of the records
+// appended so far, or the value SetLogSize pinned. It is the sizing seam that
+// lets a test drive the queue's size limits (Queue.EnforceLogLimits) without
+// writing megabytes.
+func (m *MemStore) LogSize() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sizeSet != nil {
+		return *m.sizeSet
+	}
+	return m.size
+}
+
+// SetLogSize pins the size LogSize reports, regardless of what is appended
+// afterwards (a test seam). Call UnsetLogSize to go back to tracking.
+func (m *MemStore) SetLogSize(n int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sizeSet = &n
+}
+
+// UnsetLogSize stops pinning LogSize.
+func (m *MemStore) UnsetLogSize() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sizeSet = nil
 }
 
 // Close is a no-op for the in-memory store.

@@ -29,6 +29,19 @@
     "busy": 1,
     "total": 3
   },
+  "queueLog": {
+    "bytes": 62914560,
+    "compactions": 2,
+    "limitBytes": 67108864,
+    "softBytes": 60397977,
+    "percent": 93.8,
+    "state": "emitters_halted",
+    "emittersHalted": true,
+    "rejected": {
+      "logFull": 0,
+      "logUnwritable": 0
+    }
+  },
   "resolvedConfig": {
     "repoRoot": "/repo",
     "beadsPrefix": "zr",

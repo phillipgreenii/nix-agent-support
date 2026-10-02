@@ -23,6 +23,10 @@
 //     and the Gates modal never drift into two different renderings of the
 //     same fact;
 //  3. the most recent tui-errors.log lines (errorlog.go's tailErrorLog).
+//
+// Between 2 and 3 it also shows the event-log size limit's state (bead
+// pg2-5d3ui, loglimit.go): the soft step is not a gate, so the Gates section
+// cannot carry it.
 package tui
 
 import (
@@ -46,6 +50,7 @@ func (m *Model) renderProblemsModal() string {
 	var rows []render.ModalRow
 	rows = append(rows, m.unmatchedBindingRows()...)
 	rows = append(rows, m.gateModalRows()...)
+	rows = append(rows, m.logLimitRows()...)
 	rows = append(rows, m.recentErrorLogRows()...)
 	return render.Modal("Problems", rows, m.problemsModalFooter(), m.width, m.height, m.modalScrollOffset)
 }

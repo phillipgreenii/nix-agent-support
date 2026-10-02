@@ -697,3 +697,50 @@ func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
 		t.Fatalf("final status reply failed its own schema: %v", err)
 	}
 }
+
+// The status reply's queueLog carries the log-limit state (bead pg2-5d3ui): limit,
+// soft threshold, percent, the single state, whether polled emitters are halted
+// and the refusal counts — and the reply still satisfies its own (closed) schema.
+func TestServeStatus_QueueLogReportsLimitState(t *testing.T) {
+	mem := eventqueue.NewMemStore()
+	q, err := eventqueue.New(mem, eventqueue.WithLogLimits(900, 1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router", startedAt: time.Now()}
+
+	for _, tc := range []struct {
+		name       string
+		size       int64
+		wantState  string
+		wantHalted bool
+		wantPct    float64
+	}{
+		{"ok", 100, "ok", false, 10},
+		{"halted", 950, "emitters_halted", true, 95},
+		{"full", 1200, "log_full", true, 120},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem.SetLogSize(tc.size)
+			q.EnforceLogLimits()
+			reply, code := serveStatus(t, svc, statusRequest)
+			if code != conformance.ExitOK {
+				t.Fatalf("exit = %d; reply=%v", code, reply)
+			}
+			if err := conformance.Check(StatusReplySchema, reply); err != nil {
+				t.Fatalf("reply failed its own schema: %v", err)
+			}
+			ql := reply["queueLog"].(map[string]any)
+			if ql["state"] != tc.wantState || ql["emittersHalted"] != tc.wantHalted {
+				t.Fatalf("queueLog = %v, want state=%s halted=%v", ql, tc.wantState, tc.wantHalted)
+			}
+			if ql["limitBytes"] != float64(1000) || ql["softBytes"] != float64(900) || ql["bytes"] != float64(tc.size) || ql["percent"] != tc.wantPct {
+				t.Fatalf("queueLog = %v, want bytes=%d limit=1000 soft=900 percent=%v", ql, tc.size, tc.wantPct)
+			}
+			rej := ql["rejected"].(map[string]any)
+			if rej["logFull"] != float64(0) || rej["logUnwritable"] != float64(0) {
+				t.Fatalf("rejected = %v", rej)
+			}
+		})
+	}
+}

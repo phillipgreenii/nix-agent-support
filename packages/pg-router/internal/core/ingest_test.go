@@ -445,9 +445,11 @@ func TestDecodeIngest_EnvelopeMatchesSchema(t *testing.T) {
 	}
 }
 
-// A durable-write failure is surfaced per event with an `enqueue:` reason — a
-// different cause from `malformed:`, and NOT silently counted as accepted.
-func TestIngestEvent_EnqueueFailureIsReported(t *testing.T) {
+// A durable-write failure is surfaced per event, NOT silently counted as
+// accepted. Since bead pg2-5d3ui a failed write is classified: the reason carries
+// the fixed `log_unwritable:` prefix (the event was not queued; retrying later is
+// safe), distinct from `malformed:`.
+func TestIngestEvent_DurableWriteFailureIsClassifiedLogUnwritable(t *testing.T) {
 	q, err := eventqueue.New(failingStore{})
 	if err != nil {
 		t.Fatalf("queue: %v", err)
@@ -472,8 +474,91 @@ func TestIngestEvent_EnqueueFailureIsReported(t *testing.T) {
 	if entry["id"] != "evt-abc123" {
 		t.Fatalf("rejection id = %v, want the event id", entry["id"])
 	}
-	if reason := entry["reason"].(string); !strings.HasPrefix(reason, "enqueue: ") {
-		t.Fatalf("reason = %q, want an enqueue: prefix (distinguishable from malformed:)", reason)
+	reason := entry["reason"].(string)
+	if !strings.HasPrefix(reason, eventqueue.ReasonLogUnwritable+": ") || strings.HasPrefix(reason, "enqueue: ") {
+		t.Fatalf("reason = %q, want the log_unwritable: prefix (and no enqueue: wrapper)", reason)
+	}
+	if !strings.Contains(reason, errStoreDown.Error()) || !strings.Contains(reason, "NOT queued") {
+		t.Fatalf("reason = %q should name the cause and say the event was not queued", reason)
+	}
+}
+
+// A write failure that is NOT the log's fault (an unencodable record) is not an
+// admission refusal and keeps the historical `enqueue:` prefix.
+func TestIngestEvent_UnclassifiedEnqueueFailureKeepsEnqueuePrefix(t *testing.T) {
+	q, err := eventqueue.New(encodeFailStore{})
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
+	reply, code := serveIngest(t, svc, oneEventRequest)
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	reason := reply["rejected"].([]any)[0].(map[string]any)["reason"].(string)
+	if !strings.HasPrefix(reason, "enqueue: ") {
+		t.Fatalf("reason = %q, want an enqueue: prefix", reason)
+	}
+}
+
+type encodeFailStore struct{ failingStore }
+
+func (encodeFailStore) Append(eventqueue.Record) error {
+	return &eventqueue.EncodeError{Err: errors.New("cannot encode")}
+}
+
+// At the hard log-size limit a well-formed, declared event is refused with the
+// fixed `log_full:` prefix, exit 1, a schema-valid reply, and the numbers and
+// remedies in the text; the refusal is counted; a Deduped re-emit of a retained
+// id is still accepted; and once there is room the same event is accepted.
+func TestIngestEvent_HardLimitRejectsWithLogFullPrefix(t *testing.T) {
+	mem := eventqueue.NewMemStore()
+	q, err := eventqueue.New(mem, eventqueue.WithLogLimits(900, 1000))
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
+
+	mem.SetLogSize(1000)
+	reply, code := serveIngest(t, svc, oneEventRequest)
+	if code != conformance.ExitError {
+		t.Fatalf("exit = %d, want 1 (the contract: the prefix, not a distinct code)", code)
+	}
+	if err := conformance.Check(IngestReplySchema, reply); err != nil {
+		t.Fatalf("reply failed its own schema: %v", err)
+	}
+	if reply["accepted"] != float64(0) {
+		t.Fatalf("accepted = %v, want 0", reply["accepted"])
+	}
+	entry := reply["rejected"].([]any)[0].(map[string]any)
+	if entry["id"] != "evt-abc123" {
+		t.Fatalf("rejection id = %v", entry["id"])
+	}
+	reason := entry["reason"].(string)
+	for _, want := range []string{
+		"log_full: pg-router event log is at 1000 of 1000 bytes; the event was NOT queued; safe to retry later",
+		"PG_ROUTER_MAX_LOG_BYTES",
+	} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q lacks %q", reason, want)
+		}
+	}
+	if !strings.HasPrefix(reason, eventqueue.ReasonLogFull+": ") {
+		t.Fatalf("reason %q lacks the log_full: prefix", reason)
+	}
+	if got := q.LimitStatus().RejectedLogFull; got != 1 {
+		t.Fatalf("RejectedLogFull = %d, want 1: the refusal must be counted, never silent", got)
+	}
+
+	// Room again: accepted; then, back at the limit, the SAME id is a retained
+	// duplicate and is still a success (Deduped writes nothing).
+	mem.SetLogSize(10)
+	if reply, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK || reply["accepted"] != float64(1) {
+		t.Fatalf("with room: code=%d reply=%v, want accepted", code, reply)
+	}
+	mem.SetLogSize(5000)
+	if reply, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK || reply["accepted"] != float64(1) {
+		t.Fatalf("Deduped re-emit at the hard limit: code=%d reply=%v, want accepted (no write needed)", code, reply)
 	}
 }
 

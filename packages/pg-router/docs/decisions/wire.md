@@ -190,6 +190,21 @@ rejects rather than enqueues, `INV-DISP-3`), each with a reason:
 }
 ```
 
+When the core's durable queue is full or cannot be written (`INV-EVT-1`'s one sanctioned ingest
+refusal), a well-formed, declared event is refused the same way — named in `rejected`, exit `1`, same
+reply shape — with a reason whose **fixed prefix** is the contract (the schema carries only `id` and
+`reason`, so nothing machine-readable separates retry-later from permanent):
+
+```json
+{
+  "id": "evt-abc123",
+  "reason": "log_full: pg-router event log is at 67108864 of 67108864 bytes; the event was NOT queued; safe to retry later. To free space: ..."
+}
+```
+
+`log_unwritable: pg-router cannot write its event log (...); the event was NOT queued; safe to retry later. ...`
+is the other prefix.
+
 The `self-status` callback request — any registered participant pushing a report about itself
 (`INTF-CLI`, the common manager contract's "Self-status", realized by bead `pg2-zaghi`):
 

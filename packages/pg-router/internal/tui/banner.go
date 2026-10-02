@@ -143,7 +143,7 @@ func renderHeader(d topZoneData) string {
 	// header already runs through below, never by hand-truncating the text
 	// itself [design: Task 6.5 Files; Binding decision 5].
 	busy := dispatchSummary(d.reply.Dispatch)
-	logSize := queueLogSummary(d.reply.QueueLog)
+	logSize := styledQueueLogSummary(d.reply.QueueLog, d.theme)
 
 	var lines []string
 	switch tier {
@@ -172,11 +172,67 @@ func renderHeader(d topZoneData) string {
 	return render.Block(out, render.EffectiveWidth(d.width))
 }
 
-// queueLogSummary renders the durable queue log's size for the header ("log:
-// 31.7 MiB"), the at-a-glance answer to "is the write-ahead log growing without
-// bound" (bead pg2-8e0m6).
+// Log-size bands (bead pg2-5d3ui): the header's log summary is plain below
+// logBandWarnPercent, yellow (theme.Cooling) from there up to the soft threshold,
+// and red (theme.Failing) at or above logBandCritPercent — which is the soft
+// threshold (90% of the limit) — or whenever the state is not "ok". Documented
+// here, in the TUI legend and in the README.
+const (
+	logBandWarnPercent = 70.0
+	logBandCritPercent = 90.0
+)
+
+// queueLogSummary renders the durable queue log's size for the header: "log:
+// 31.7 MiB / 64.0 MiB (49%)" against a core that reports a limit, "log: 31.7
+// MiB" against one that does not, followed by a plain-words tag when the log is
+// not healthy ("emitters halted", "FULL, rejecting events", "UNWRITABLE,
+// rejecting events") so the state survives with color off.
 func queueLogSummary(l QueueLog) string {
-	return "log: " + humanBytes(l.Bytes)
+	out := "log: " + humanBytes(l.Bytes)
+	if l.LimitBytes > 0 {
+		out += fmt.Sprintf(" / %s (%.0f%%)", humanBytes(l.LimitBytes), l.Percent)
+	}
+	switch l.State {
+	case "emitters_halted":
+		out += " · emitters halted"
+	case "log_full":
+		out += " · FULL, rejecting events"
+	case "log_unwritable":
+		out += " · UNWRITABLE, rejecting events"
+	}
+	return out
+}
+
+// Log-size band names (logBand).
+const (
+	bandOK   = "ok"
+	bandWarn = "warn"
+	bandCrit = "crit"
+)
+
+// logBand classifies l for coloring: crit when the state is not "ok" or the log
+// is at/over logBandCritPercent of its limit, warn from logBandWarnPercent, else
+// ok. A core that reports no limit is always ok (nothing to measure against).
+func logBand(l QueueLog) string {
+	switch {
+	case l.State != "" && l.State != "ok", l.LimitBytes > 0 && l.Percent >= logBandCritPercent:
+		return bandCrit
+	case l.LimitBytes > 0 && l.Percent >= logBandWarnPercent:
+		return bandWarn
+	}
+	return bandOK
+}
+
+// styledQueueLogSummary is queueLogSummary colored by logBand.
+func styledQueueLogSummary(l QueueLog, theme render.Theme) string {
+	text := queueLogSummary(l)
+	switch logBand(l) {
+	case bandCrit:
+		return theme.Failing.Render(text)
+	case bandWarn:
+		return theme.Cooling.Render(text)
+	}
+	return text
 }
 
 // humanBytes renders n as a short binary-unit size ("31.7 MiB").

@@ -208,6 +208,19 @@ func WithSourceActivityObserver(obs SourceActivityObserver) ProduceOption {
 //     pg2-h63eu) that stopped this pass from polling it: a blocked emitter is
 //     not polled (and its LastTick is left untouched, so it fires on the first
 //     pass after the gate clears). The timer emitter is never blocked.
+//   - Halted records, per source name, why the log-size limit stopped this pass
+//     from polling it (eventqueue.StateEmittersHalted or StateLogUnwritable;
+//     bead pg2-5d3ui): like Blocked, the source is not polled and its LastTick is
+//     left untouched, but this is NOT a gate — it is the queue's in-memory
+//     emittersHalted flag, re-derived each tick from the log size. The timer
+//     emitter is never halted, and neither is anything pushed.
+//   - LogRejected counts, per source name, the events this pass's Enqueue
+//     refused because the event log is at its hard limit or unwritable
+//     (eventqueue.ErrLogFull / ErrLogUnwritable): pull-side only — the queue's
+//     RejectObserver counts every refusal, push and pull together. Such a refusal
+//     is NON-FATAL: it is recorded here and in SourceErrors (once per source) and
+//     the pass continues with the other sources, so a never-halted timer source
+//     cannot wedge the loop at the hard limit.
 //   - Failure carries, per source name, THIS pass's pull-source
 //     failure-backoff state (INV-FAIL-3, Task 4.1) — present only for a
 //     source whose retry budget this pass exhausted (an entry in
@@ -223,6 +236,8 @@ type ProduceReport struct {
 	Rejected     map[string]int
 	Failure      map[string]FailureInfo
 	Blocked      map[string]string
+	Halted       map[string]string
+	LogRejected  map[string]int
 }
 
 // FailureInfo is one source's pull-source failure-backoff state at the end
@@ -257,6 +272,8 @@ func newProduceReport() ProduceReport {
 		Rejected:     make(map[string]int),
 		Failure:      make(map[string]FailureInfo),
 		Blocked:      make(map[string]string),
+		Halted:       make(map[string]string),
+		LogRejected:  make(map[string]int),
 	}
 }
 
@@ -389,6 +406,19 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		}
 		return blocked
 	}
+	// emittersHalted is the log-size limit's soft step (bead pg2-5d3ui): while the
+	// queue says its emitters are halted, a polled source is not polled — checked
+	// right next to the gate check, but it is a queue-level in-memory flag, not a
+	// gate (no Gate Registry, BlockingGate or NonBlockingGates involvement). The
+	// timer emitter is exempt, exactly as it is from every gate: only the hard
+	// limit (Enqueue admission) stops timer and pushed events.
+	emittersHalted := func(s query.Source) bool {
+		if query.IsTimer(s.Query) || !q.EmittersHalted() {
+			return false
+		}
+		rpt.Halted[s.Name] = q.LimitStatus().State
+		return true
+	}
 	// Period-driven (and any non-threshold, non-manual) queries fire every
 	// pass EXCEPT one cad reports not yet due (Task 1.3's per-source cadence).
 	for i, s := range sources {
@@ -402,7 +432,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if !cadenceDue(nowT, s.Name, t, cad) {
 			continue
 		}
-		if gateBlocked(s) {
+		if gateBlocked(s) || emittersHalted(s) {
 			continue
 		}
 		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
@@ -431,7 +461,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if gateBlocked(s) {
+				if gateBlocked(s) || emittersHalted(s) {
 					continue
 				}
 				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
@@ -480,7 +510,11 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // to the next source instead of aborting the whole pass. Only a REAL failure
 // still returns an error: ctx cancellation observed while waiting out the
 // backoff, or a durable-queue Enqueue failure (a store failure is not a source
-// failure).
+// failure). The one exception to that last item is a classified admission
+// refusal (eventqueue.ErrLogFull / ErrLogUnwritable, bead pg2-5d3ui): it is
+// recorded in rpt.LogRejected and rpt.SourceErrors and the source's remaining
+// events are still offered to Enqueue (each refused the same way, cheaply), so
+// the per-event reject counts stay true.
 //
 // Every emitted event is checked against declared (the CONFIGURED role-binding
 // set, core.Bindings — the same value core.Listen validates push events
@@ -555,6 +589,18 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			continue
 		}
 		if _, err := q.Enqueue(ToQueueEvent(e)); err != nil {
+			if _, refused := eventqueue.RejectReason(err); refused {
+				// The log is at its hard limit or unwritable (bead pg2-5d3ui): the
+				// event was NOT queued and the queue told its RejectObserver. This
+				// must not abort the pass — every other source still runs, and the
+				// tick still expires, dispatches and compacts, which is the only way
+				// the condition ever clears. Record it against this source, once.
+				rpt.LogRejected[s.Name]++
+				if _, seen := rpt.SourceErrors[s.Name]; !seen {
+					rpt.SourceErrors[s.Name] = fmt.Errorf("enqueue %s: %w", s.Name, err)
+				}
+				continue
+			}
 			return fmt.Errorf("enqueue %s: %w", s.Name, err)
 		}
 		rpt.Emitted[s.Name]++

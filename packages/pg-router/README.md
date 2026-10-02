@@ -234,6 +234,12 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
   to live state in the background; default `8388608` (8 MiB); `0` disables runtime compaction (the
   startup compaction still runs). `[pool].compact_threshold_bytes` in `config.toml` overrides it. See
   "Queue log compaction" below.
+- `PG_ROUTER_MAX_LOG_BYTES` — the HARD size limit of `queue.jsonl`: at or above it new events are
+  rejected with a `log_full` reason; default `67108864` (64 MiB). Accepts a plain byte count or a
+  unit (`64MiB`, `200MB`, `1 GiB`); an unparseable value, zero or a negative is an error (never
+  silently the default). `[pool].max_log_bytes` in `config.toml` overrides it. The derived soft
+  threshold is 90% of it, and `compact_threshold_bytes < soft < max_log_bytes` is enforced at load.
+  See "Queue log size limit" below.
 - `PG_ROUTER_TUI_INTERVAL` — `tui`'s poll interval, floor-clamped to `250ms` (default `1s`). Precedence:
   a CLI flag (none exists yet) wins over this env var, which wins over the built-in default; a value
   that fails to parse as a duration is a usage error naming the bad value.
@@ -292,7 +298,58 @@ INV-EVT-2) and gate persistence are unchanged.
   and startup compaction drops it.
 - **Observability.** The `pg_router_queue_log_bytes` gauge, one `eventqueue: queue log compacted` log
   line per compaction (trigger, bytes and records before/after, duration), a `queue log:` line in
-  `pg-router status` (`queueLog` in `--json`) and `log: <size>` in the TUI header.
+  `pg-router status` (`queueLog` in `--json`) and `log: <size>` in the TUI header. The size
+  limit built on top of it is described in "Queue log size limit" below.
+
+### Queue log size limit
+
+`queue.jsonl` is also bounded (bead `pg2-5d3ui`). Compaction keeps it to live state (a few KB on the
+real workload), so the limit is a backstop — against a backlog that is genuinely large, or a disk that
+cannot be written — not something a healthy daemon approaches. One user-visible knob,
+`max_log_bytes` (default 64 MiB, see `PG_ROUTER_MAX_LOG_BYTES` above), and two thresholds derived from
+it:
+
+| Log size                                    | State             | What happens                                                                                                                      |
+| ------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| up to 90% (the **soft** threshold)          | `ok`              | Nothing.                                                                                                                          |
+| above 90%, still after a compaction attempt | `emitters_halted` | **Polled command-source emitters are not polled.** Everything else keeps running (below).                                         |
+| at `max_log_bytes` (the **hard** limit)     | `log_full`        | The above, **and** every new event is rejected with a `log_full:` reason — timer emitters and pushed events included.             |
+| the log cannot be written (disk full, I/O)  | `log_unwritable`  | The same as `log_full`, with a `log_unwritable:` reason; the daemon re-probes every tick and resumes by itself once it can write. |
+
+- **The soft step is not a gate.** It is an in-memory `emittersHalted` flag on the queue, consulted
+  by the producer next to the gate check and re-derived every tick from the log size. It adds nothing
+  to the Gate Registry, does not appear in `pg-router gate list` / `pg_router_gates_active`, and is
+  **not** cleared by `gate clear` or `resume --all`. **It does NOT stop timer emitters or pushed
+  events** — only the hard limit does. Listener dispatch and the drain (including `run-until-idle`)
+  keep running while halted, so space can be reclaimed and no listener loses an event.
+- **The hard limit applies to enqueue admission only.** Accept, evict and gate records still append
+  above it. A still-retained duplicate id (a re-emit) is still accepted: it writes nothing.
+- **A refusal is non-fatal.** A pull or timer source whose event is refused is recorded as a source
+  error with a per-source reject count and the tick carries on (it still runs the limit controller,
+  `Kick`, `Expire` and publishes the tick); `run-until-idle` drains before exiting `1`. A push caller
+  sees the reason in `rejected[].reason` and exit `1`; `push-inject` prints it. The fixed prefix is
+  the contract: `log_full: pg-router event log is at N of M bytes; the event was NOT queued; safe to
+retry later ...` and `log_unwritable: ...`. Retrying is safe because delivery is idempotent.
+- **Order at startup:** compaction first, then the limits are evaluated.
+- **Seeing it.** `pg-router status` prints `queue log: bytes=... limit=... used=P% state=...` and,
+  when not `ok`, a notice stating what is HALTED, what STILL RUNS, why, and the remedies
+  (`queueLog` in `--json`: `limitBytes`, `softBytes`, `percent`, `state`, `emittersHalted`,
+  `rejected.{logFull,logUnwritable}`, `detail`). The `tui` header shows `log: 58.0 MiB / 64.0 MiB
+(91%)` colored by band — plain below 70%, yellow from 70%, red at 90% or whenever the state is not
+  `ok` — and, when not `ok`, a notice zone with the same wording (also in the Problems modal, `!`).
+  Metrics: `pg_router_queue_log_limit_bytes`, `pg_router_queue_log_percent` (0-100),
+  `pg_router_emitters_halted` (0/1), `pg_router_log_rejecting{reason}` (0/1) and the counter
+  `pg_router_enqueue_rejected{type,reason}` (push and pull together; the pull side is also broken out
+  per source in the produce report). The Grafana rule `pg-router-log-limit` fires after 10 minutes of
+  either `emitters_halted` or a rejection.
+- **Remedies** (there is no CLI to purge queued events): wait for queued events to expire (the log is
+  compacted automatically); restart pg-router (the log is compacted at startup); raise
+  `PG_ROUTER_MAX_LOG_BYTES` (or `[pool].max_log_bytes`) and restart; or stop the daemon and move
+  `queue.jsonl` aside (this LOSES the queued events). `log_unwritable`: free disk space or fix
+  permissions on the log directory. `events.jsonl` and `launchd-stderr.log` in the same state
+  directory are unbounded and out of scope, but share the disk and can cause `log_unwritable`.
+- **Not in scope:** per-type fairness — one noisy type can fill the file for all (accepted; event TTL
+  still bounds how long any event waits).
 
 ### Logs
 

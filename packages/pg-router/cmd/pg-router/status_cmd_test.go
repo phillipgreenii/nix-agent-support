@@ -260,10 +260,7 @@ func TestStatusCmd_RendersWidenedListenersSources(t *testing.T) {
 // predates the field.
 func TestRenderStatusText_QueueLogLine(t *testing.T) {
 	var out strings.Builder
-	renderStatusText(&out, "/s", statusReply{QueueLog: &struct {
-		Bytes       int64 `json:"bytes"`
-		Compactions int64 `json:"compactions"`
-	}{Bytes: 33291620, Compactions: 2}})
+	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 33291620, Compactions: 2}})
 	if want := "queue log: bytes=33291620 (31.7 MiB) compactions=2\n"; !strings.Contains(out.String(), want) {
 		t.Fatalf("stdout = %q, want %q", out.String(), want)
 	}
@@ -271,6 +268,61 @@ func TestRenderStatusText_QueueLogLine(t *testing.T) {
 	renderStatusText(&out, "/s", statusReply{})
 	if want := "queue log: -\n"; !strings.Contains(out.String(), want) {
 		t.Fatalf("stdout = %q, want %q", out.String(), want)
+	}
+}
+
+// With a limit configured the line carries it and the percent; a healthy log adds
+// no notice (bead pg2-5d3ui).
+func TestRenderStatusText_QueueLogLimitLineHealthy(t *testing.T) {
+	var out strings.Builder
+	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 33291620, Compactions: 2, LimitBytes: 64 << 20, SoftBytes: 60397977, Percent: 49.6, State: "ok"}})
+	if want := "queue log: bytes=33291620 (31.7 MiB) compactions=2 limit=67108864 (64.0 MiB) used=49.6% state=ok\n"; !strings.Contains(out.String(), want) {
+		t.Fatalf("stdout = %q, want %q", out.String(), want)
+	}
+	if strings.Contains(out.String(), "  ! ") {
+		t.Fatalf("a healthy log must render no notice: %q", out.String())
+	}
+}
+
+// The soft step is NOT a gate, so the status text itself must say plainly what is
+// HALTED, what still RUNS, why, and the remedies; log_full and log_unwritable are
+// shown the same way, with the reject counts by reason.
+func TestRenderStatusText_QueueLogLimitNotices(t *testing.T) {
+	base := queueLogView{Bytes: 62 << 20, Compactions: 1, LimitBytes: 64 << 20, SoftBytes: 60397977, Percent: 96.9}
+	for _, tc := range []struct {
+		name  string
+		mod   func(*queueLogView)
+		wants []string
+	}{
+		{
+			"emitters halted", func(v *queueLogView) { v.State = "emitters_halted"; v.EmittersHalted = true },
+			[]string{"state=emitters_halted", "  ! LOG LIMIT:", "  ! HALTED: polled command-source emitters", "  ! STILL RUNNING: listener dispatch and drain, timer emitters, and pushed events", "restart pg-router", "PG_ROUTER_MAX_LOG_BYTES"},
+		},
+		{
+			"log full", func(v *queueLogView) { v.State = "log_full"; v.EmittersHalted = true; v.Rejected.LogFull = 4 },
+			[]string{"state=log_full", "  ! LOG FULL:", "rejected with `log_full` (4 rejected so far)", "STILL RUNNING: listener dispatch and drain"},
+		},
+		{"log unwritable", func(v *queueLogView) {
+			v.State = "log_unwritable"
+			v.EmittersHalted = true
+			v.Rejected.LogUnwritable = 2
+			v.Detail = "no space left on device"
+		}, []string{"state=log_unwritable", "  ! LOG UNWRITABLE:", "no space left on device", "rejected with `log_unwritable` (2 rejected so far)", "Recovery is automatic"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := base
+			tc.mod(&v)
+			var out strings.Builder
+			renderStatusText(&out, "/s", statusReply{QueueLog: &v})
+			for _, want := range tc.wants {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("status text lacks %q:\n%s", want, out.String())
+				}
+			}
+			if strings.Contains(out.String(), "pg-router log compact") {
+				t.Errorf("the notice names a command that does not exist:\n%s", out.String())
+			}
+		})
 	}
 }
 

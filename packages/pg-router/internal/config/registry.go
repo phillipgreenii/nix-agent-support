@@ -61,6 +61,10 @@ type poolTOML struct {
 	// (disable runtime compaction) is distinguishable from absent (keep the
 	// default / env value).
 	CompactThresholdBytes *int64 `toml:"compact_threshold_bytes"`
+	// MaxLogBytes is the HARD size limit of the queue.jsonl write-ahead log (bead
+	// pg2-5d3ui). A pointer so an explicit 0 is distinguishable from absent (and
+	// rejected, rather than silently meaning "default").
+	MaxLogBytes *int64 `toml:"max_log_bytes"`
 	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath are RETIRED (bead
 	// pg2-h63eu): they named the file-backed gates the Gate Registry replaced.
 	// They are still decoded so a config that carries them keeps loading;
@@ -240,6 +244,12 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 			return nil, fmt.Errorf("pool.compact_threshold_bytes must be >= 0 (0 disables runtime compaction), got %d", *v)
 		}
 		c.CompactThresholdBytes = *v
+	}
+	if v := shape.Pool.MaxLogBytes; v != nil {
+		if *v <= 0 {
+			return nil, fmt.Errorf("pool.max_log_bytes must be > 0, got %d", *v)
+		}
+		c.MaxLogBytes = *v
 	}
 	// Pool-wide retry-cadence defaults (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz) MUST
 	// resolve before buildRole/buildQueries below, since both read c.RetryBackoff

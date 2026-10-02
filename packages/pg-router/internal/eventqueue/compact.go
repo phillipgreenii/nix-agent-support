@@ -331,6 +331,7 @@ func (s *FileStore) Compact() (stats CompactStats, err error) {
 	old := s.f
 	s.f = tmp
 	s.size = written
+	s.poisoned = false // the new file has no partial tail
 	s.sizeGauge.Store(written)
 	_ = old.Close()
 	stats.BytesAfter = written

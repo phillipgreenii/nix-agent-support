@@ -619,3 +619,50 @@ groups:
               type: threshold
               expression: B
               conditions: [{ evaluator: { type: gt, params: [0] } }]
+
+      # Event-log size limit (pg2-5d3ui). pg-router caps queue.jsonl (max_log_bytes,
+      # default 64MiB): past 90% of it the daemon halts its POLLED command-source
+      # emitters (an in-memory flag, NOT a gate -- pg_router_gates_active does not
+      # move; listeners, drain, timer emitters and pushed events keep running);
+      # at the limit, or when the log cannot be written, it also rejects every
+      # new event with a log_full / log_unwritable reason. Either is the daemon
+      # running with reduced capability, so this fires on EITHER:
+      #   - pg_router_emitters_halted == 1 (soft step, hard limit, or unwritable), or
+      #   - any pg_router_enqueue_rejected_total increase in the last 5m (an event
+      #     was actually refused, by a push source or a pull/timer source).
+      # `for: 10m` keeps a compaction blip (the controller compacts first and
+      # clears the halt on the next tick) and a lone refusal from paging; a limit
+      # that is genuinely stuck stays true for the whole window. noDataState: OK
+      # because the rejected counter is created lazily (an absent series is the
+      # healthy state, as for pg-router-source-failure-rate); a dead daemon or
+      # unreachable /metrics endpoint is pg-router-liveness-down's job.
+      - uid: pg-router-log-limit
+        title: pg-router event log is at its size limit (emitters halted or events rejected)
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router event log is near or at its size limit: polled emitters halted and/or events being rejected"
+          description: "pg_router_emitters_halted has been 1, or pg_router_enqueue_rejected_total has been increasing, for over 10 minutes: queue.jsonl is past 90% of max_log_bytes (polled emitters halted; listeners, timers and pushed events still run), at the limit (new events rejected with log_full), or unwritable (rejected with log_unwritable). `pg-router status` shows the state (queue log line) and the TUI shows it in the header and a notice. Remedy: wait for queued events to expire (the log compacts automatically); restart pg-router to compact now; raise PG_ROUTER_MAX_LOG_BYTES (or [pool].max_log_bytes) and restart; or stop the daemon and move queue.jsonl aside (this LOSES the queued events). log_unwritable: free disk space / fix permissions on the log directory (the daemon resumes by itself)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_router_emitters_halted) > 0 or sum(increase(pg_router_enqueue_rejected_total[5m])) > 0
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [0] } }]

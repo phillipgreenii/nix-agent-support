@@ -53,6 +53,13 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # every TYPE), and the built-in type = "timer" query is never blocked by any
 # gate:
 # non_blocking_gates = ["LOW_DISK_USAGE"]
+# The event log (queue.jsonl) is size-limited: [pool].max_log_bytes (default
+# 67108864 = 64 MiB; PG_ROUTER_MAX_LOG_BYTES takes units such as 64MiB). Past 90%
+# of it polled emitters are halted; at it new events are rejected with a log_full
+# reason. compact_threshold_bytes must stay below 90% of it (see README, "Queue
+# log size limit"):
+# [pool]
+# max_log_bytes = 67108864
 # The retired [pool].operator_paused_path / cicd_down_path / disk_space_low_path
 # keys are ignored (with a warning); see MIGRATION.md.
 #

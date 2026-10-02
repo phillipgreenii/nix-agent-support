@@ -91,6 +91,26 @@ flowchart TD
   owed its opportunity. Delivery therefore **survives a restart** — the storage mechanism
   (jsonl / DB / WAL) is a realization choice, not behavior. _(The `crashing` lifecycle signal in
   `INV-LIFE-1` stays best-effort — that is a separate concern from event-data durability.)_
+
+  **The one sanctioned refusal at ingest: the durable queue is bounded.** The core has a configured
+  **maximum size** for its durable queue. When the queue is **at** that maximum, or the core
+  **cannot write** it (disk full, I/O error), the core **MUST refuse** a new event at ingest — and
+  that admission refusal is the **only** one `INV-EVT-1` allows beyond a malformed event and an
+  event whose `type` is unknown to the configuration (`INV-DISP-3`). It is **never silent**: the
+  source is told (the event is named in the reply's `rejected` list, with a reason whose fixed
+  prefix classifies it — `log_full` or `log_unwritable` — and which says the event was **not**
+  queued and that retrying later is safe, because delivery is idempotent, `INV-EVT-2`), and the core
+  counts and logs every refusal. It is not a drop: nothing already accepted into the queue is lost,
+  every event already queued still gets its delivery opportunity, and a still-retained duplicate
+  `id` is still absorbed (`INV-EVT-3`). Refusing admission is the **only** thing the maximum stops:
+  delivery, acceptance, retirement and gate changes continue above it, so the queue can shrink
+  again. Before the maximum, once the queue passes a **soft threshold** below it (and compaction has
+  not brought it back under), the core **MUST** stop polling its pull sources (command-source
+  emitters) — a reduction in intake, not a drop, and **not** a gate (`INV-LIFE-2`): listeners, the
+  drain, the **timer emitter** and **pushed** events keep running until the maximum itself is
+  reached. Inspection **MUST** say plainly which of these limited-capability states is in force,
+  what is halted, what still runs, and what the operator can do about it.
+
 - **`INV-EVT-2`** <!-- uuid: 06649d39-2734-409a-8098-f3c2cef44cbe --> — A handler **MUST tolerate
   duplicate events** (be idempotent) — required, because at-least-once delivery (`INV-EVT-1`) and the
   narrow crash window MAY redeliver an accepted event. A source **MAY** emit the same event more than

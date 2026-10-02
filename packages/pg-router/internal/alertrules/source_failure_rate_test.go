@@ -30,3 +30,30 @@ func TestLivenessRuleCoversDeadDaemon(t *testing.T) {
 		t.Error("pg-router-liveness-down must keep noDataState: Alerting; it is the liveness backstop that lets pg-router-source-failure-rate keep noDataState: OK")
 	}
 }
+
+const wantLogLimitExpr = `max(pg_router_emitters_halted) > 0 or sum(increase(pg_router_enqueue_rejected_total[5m])) > 0`
+
+// pg-router-log-limit (pg2-5d3ui) fires when the emitters are halted by the
+// event-log size limit OR any event is rejected, only after 10 minutes so a
+// compaction blip does not page, and carries the remedy. noDataState: OK because
+// the rejected counter is lazy (an absent series is healthy); a dead daemon is
+// pg-router-liveness-down's job. This pins the decisions, the exported _total
+// series name, and the remedy text so a change has to be deliberate.
+func TestLogLimitRule(t *testing.T) {
+	r := ruleBlock(t, "pg-router-log-limit")
+	if got := ruleExpr(t, r); got != wantLogLimitExpr {
+		t.Errorf("log-limit expr:\n got %q\nwant %q", got, wantLogLimitExpr)
+	}
+	for _, need := range []string{
+		"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "params: [0]",
+		// the remedies, in the annotation
+		"wait for queued events to expire", "restart pg-router to compact now", "PG_ROUTER_MAX_LOG_BYTES", "move queue.jsonl aside",
+	} {
+		if !strings.Contains(r, need) {
+			t.Errorf("log-limit rule lost %q", need)
+		}
+	}
+	if strings.Contains(r, "pg-router log compact") {
+		t.Error("the annotation names a command that does not exist")
+	}
+}

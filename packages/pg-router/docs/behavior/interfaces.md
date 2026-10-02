@@ -642,6 +642,15 @@ visibility there comes from the drop being **counted in the metric catalog** `IN
 (`INV-OBS-1`). The `rejected` list therefore carries **malformed** events — bad schema, or a missing
 required field — and events whose `type` is **unknown to the configuration**, each with a reason.
 
+The `rejected` list also carries, never silently, the events the core **refused because its durable
+queue is full or cannot be written** (`INV-EVT-1`'s one sanctioned ingest refusal): the reason
+begins with the fixed prefix **`log_full:`** (the queue is at its configured maximum size) or
+**`log_unwritable:`** (the core could not write it), says the event was **not** queued, and says
+retrying later is safe — delivery is idempotent (`INV-EVT-2`). Nothing else in the reply separates a
+retry-later refusal from a permanent one, so **the prefix is the contract**: the exit code stays `1`
+and the reply shape is unchanged. A still-retained duplicate `id` is **not** refused at the limit —
+it writes nothing and is accepted as ever (`INV-EVT-3`).
+
 **`self-status`** — any registered participant, of any kind, pushes a report about **itself** —
 `healthy` / `degraded` / `unavailable` — under one tracking id, naming its own registered id. The
 reply reports whether the core **accepted** the push. Unlike `ingest-event`'s tracking id (which a
@@ -725,6 +734,19 @@ Inspection's **MUST** set has widened to also offer:
   an additive schema change discovered **after** the widening above, and carries the explicit
   operator note this section's own rule requires: **operator-approved** as part of
   `phillipgreenii-nix-agent-support` bead `pg2-3brwx.5` (2026-09-16).
+- The **event-log size-limit state** (`INV-EVT-1`): the durable queue's current size, its configured
+  maximum and the percentage used; the single most severe **state** — `ok`, `emitters_halted`
+  (past the soft threshold, polled emitters not being polled), `log_full` (at the maximum, new
+  events refused) or `log_unwritable` (the queue cannot be written, new events refused) — whether
+  polled emitters are halted; and how many events have been refused so far, by reason. Because the
+  soft step is **not** a gate, no gate and no gates line says it is in force: inspection (and the
+  `tui` subcommand) **MUST** say plainly what is **halted** (polled command-source emitters; and,
+  at `log_full` / `log_unwritable`, every new event), what **still runs** (listener dispatch and the
+  drain; the timer emitter and pushed events until the maximum), why, and the operator's remedies.
+  This reading adds a metric for the state but no member to `INTF-MON`'s ten-member catalog, and is
+  itself an additive schema change discovered **after** the widening above, carrying the explicit
+  operator note this section's own rule requires: **operator-approved** as part of
+  `phillipgreenii-nix-agent-support` bead `pg2-5d3ui` (2026-10-02).
 - **Per-participant recent history and in-flight status** (`INV-OBS-2`): drilling into ONE
   configured listener or source, rather than reading the pool-wide readings above, offers that
   participant's own bounded window of recent delivery/fetch attempts (a timestamp and an outcome

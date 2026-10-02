@@ -438,6 +438,9 @@ type Queue struct {
 	compacting       atomic.Bool
 	compactWG        sync.WaitGroup
 	compactions      atomic.Int64
+
+	// lim is the log-size limit enforcement state (limits.go, bead pg2-5d3ui).
+	lim limitState
 }
 
 // custody is one outstanding-offer record in Queue.custody. It carries no
@@ -663,6 +666,15 @@ func (q *Queue) Register(l Listener) {
 // retired nor the re-emit admitted — so, unlike an unbatched retire, that
 // failure return owes no hook at all; only the Deduped return and the two
 // success returns do.
+//
+// LOG-SIZE LIMIT (limits.go, bead pg2-5d3ui). A re-emit that would be WRITTEN is
+// first checked for admission: at or above the hard size limit it is refused with
+// *ErrLogFull, and while the log is marked unwritable with *ErrLogUnwritable (as
+// is an event whose own write fails) — the event is NOT queued, the caller is
+// told why, the refusal is counted and a RejectObserver is notified. A Deduped
+// re-emit writes nothing and is therefore never refused. This is the ONE
+// sanctioned ingest refusal of a well-formed, declared event (INV-EVT-1) and it
+// is never silent.
 func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	if err := evt.Validate(); err != nil {
 		return Enqueued, err
@@ -673,6 +685,14 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	now := q.now()
 	evt = evt.Resolve(now)
 	enqueueRecord := recordFromEvent(evt, now)
+	// reject refuses the admission with err: counted here, the observer told after
+	// q.mu is released (the lock-order rule on q.mu's doc).
+	reject := func(err error) (EnqueueResult, error) {
+		reason := q.countReject(err)
+		unlock()
+		q.notifyRejected(evt.Type, reason)
+		return Enqueued, err
+	}
 	if e, ok := q.entries[evt.ID]; ok {
 		if q.retainedLocked(e, now) {
 			unlock()
@@ -686,9 +706,12 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		// record), so which of the two removes it cannot change what is observed.
 		// The evict half is built (recordEvictLocked) but not yet applied to
 		// q.entries/q.order — both mutations wait until the batch below succeeds.
+		if err := q.admitLocked(); err != nil {
+			return reject(err)
+		}
 		evictRecord := q.recordEvictLocked(e.evt.ID)
-		if err := q.store.AppendBatch([]Record{evictRecord, enqueueRecord}); err != nil {
-			return Enqueued, err
+		if err := q.appendBatchLocked([]Record{evictRecord, enqueueRecord}); err != nil {
+			return reject(classifyWriteErr(err))
 		}
 		staleMiss := len(e.accepted) == 0
 		delete(q.entries, e.evt.ID)
@@ -703,8 +726,11 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		q.obs.OnEnqueue(evt)
 		return Enqueued, nil
 	}
-	if err := q.store.Append(enqueueRecord); err != nil {
-		return Enqueued, err
+	if err := q.admitLocked(); err != nil {
+		return reject(err)
+	}
+	if err := q.appendLocked(enqueueRecord); err != nil {
+		return reject(classifyWriteErr(err))
 	}
 	q.entries[evt.ID] = newEntry(evt)
 	q.order = append(q.order, evt.ID)
@@ -712,6 +738,17 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	unlock()
 	q.obs.OnEnqueue(evt)
 	return Enqueued, nil
+}
+
+// classifyWriteErr maps a failed enqueue write to ErrLogUnwritable — the event
+// was NOT queued, and the log could not be written — unless the failure was an
+// EncodeError (a fault in the event itself, which stays a plain error).
+func classifyWriteErr(err error) error {
+	var enc *EncodeError
+	if errors.As(err, &enc) {
+		return err
+	}
+	return &ErrLogUnwritable{Err: err}
 }
 
 // dropFromOrder removes every occurrence of id from the FIFO spine so the spine
@@ -1192,7 +1229,7 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	// redelivery (one extra re-offer per crash window).
 	e.accepted[lid] = true
 	e.settled[lid] = true
-	if err := q.store.Append(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
+	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
 		// The in-memory accept already happened and the listener has taken
 		// delivery responsibility (INV-EVT-1); we do NOT roll back or change
 		// delivery semantics. But a swallowed accept-write is a durability
@@ -1338,7 +1375,7 @@ func (q *Queue) Dispatch() (accepted int) {
 		}
 	}
 	if len(evicts) > 0 {
-		if err := q.store.AppendBatch(evicts); err != nil {
+		if err := q.appendBatchLocked(evicts); err != nil {
 			// Matching the accept-append precedent above: the in-memory eviction(s)
 			// already happened and delivery is unaffected, but a swallowed
 			// evict-append is a durability degradation — the evicted id(s) replay as
@@ -1412,7 +1449,7 @@ func (q *Queue) Kick() (launched int) {
 				// Kept under q.mu, exactly like Dispatch's batched evict-append
 				// (see this function's own doc: the Store is not internally
 				// synchronized).
-				if err := q.store.Append(rec); err != nil {
+				if err := q.appendLocked(rec); err != nil {
 					slog.Error("eventqueue: evict-append failed; the event will replay as retained and be re-offered after a restart",
 						"eventId", p.evt.ID, "err", err)
 				}
@@ -1587,7 +1624,7 @@ func (q *Queue) Expire() (dropped int) {
 	}
 	q.order = kept
 	if len(evicts) > 0 {
-		if err := q.store.AppendBatch(evicts); err != nil {
+		if err := q.appendBatchLocked(evicts); err != nil {
 			slog.Error("eventqueue: evict-append failed; the event(s) will replay as retained and be re-offered after a restart",
 				"count", len(evicts), "err", err)
 		}

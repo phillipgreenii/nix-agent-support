@@ -116,6 +116,25 @@ const (
 	// write and drops when the log is compacted, so a flat-lining saw-tooth is
 	// healthy and a line that only climbs means compaction is not keeping up.
 	MetricQueueLogBytes = "pg_router_queue_log_bytes"
+	// The log-size limit's metrics (bead pg2-5d3ui; internal/eventqueue/limits.go).
+	// Registered only when New is given WithLogLimitStatus.
+	//
+	// MetricQueueLogLimitBytes is the hard limit (max_log_bytes); MetricQueueLogPercent
+	// is MetricQueueLogBytes as a percentage (0-100, may exceed 100) of it.
+	MetricQueueLogLimitBytes = "pg_router_queue_log_limit_bytes"
+	MetricQueueLogPercent    = "pg_router_queue_log_percent"
+	// MetricEmittersHalted is 1 while polled command-source emitters are not being
+	// polled (past the soft threshold after a compaction attempt, or the log is
+	// unwritable), else 0. It is the soft step's whole metric surface: the soft
+	// step is not a gate, so MetricActiveGates / MetricGateBlocked do not move.
+	MetricEmittersHalted = "pg_router_emitters_halted"
+	// MetricLogRejecting is 1 per reason ("log_full", "log_unwritable") while the
+	// log is in that state and refusing new events, else 0.
+	MetricLogRejecting = "pg_router_log_rejecting"
+	// MetricEnqueueRejected counts event admissions refused at Enqueue, per event
+	// type and reason ("log_full" / "log_unwritable"); push and pull together
+	// (eventqueue.RejectObserver).
+	MetricEnqueueRejected = "pg_router_enqueue_rejected"
 	// MetricLiveness reports 1 while the daemon's last tick is within its
 	// liveness window, else 0. Registered ONLY when New is given WithLiveness
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
@@ -265,6 +284,7 @@ type Emitter struct {
 	throughput      metric.Int64Counter
 	sourceFailures  metric.Int64Counter
 	deduped         metric.Int64Counter
+	enqueueRejected metric.Int64Counter
 	dispatchLatency metric.Float64Histogram
 
 	// Gate Registry instruments (gate.go's GateObserver half; see the const
@@ -309,6 +329,7 @@ var (
 	_ eventqueue.Observer        = (*Emitter)(nil)
 	_ eventqueue.GateObserver    = (*Emitter)(nil)
 	_ eventqueue.RestoreObserver = (*Emitter)(nil)
+	_ eventqueue.RejectObserver  = (*Emitter)(nil)
 )
 
 // Option configures an optional catalog member at construction time
@@ -318,6 +339,7 @@ type Option func(*options)
 
 type options struct {
 	queueLogBytes func() int64
+	logLimits     func() eventqueue.LimitStatus
 	activeGates   func() []eventqueue.Gate
 	isLive        func() bool
 	now           func() time.Time
@@ -337,6 +359,15 @@ func WithClock(now func() time.Time) Option {
 // registered.
 func WithQueueLogSize(fn func() int64) Option {
 	return func(o *options) { o.queueLogBytes = fn }
+}
+
+// WithLogLimitStatus registers the log-size limit's gauges — MetricQueueLogLimitBytes,
+// MetricQueueLogPercent, MetricEmittersHalted and MetricLogRejecting — reading fn
+// (typically queue.LimitStatus) on each collect. Without it they are simply not
+// registered. MetricEnqueueRejected (a counter, fed by OnEnqueueRejected) is
+// always registered.
+func WithLogLimitStatus(fn func() eventqueue.LimitStatus) Option {
+	return func(o *options) { o.logLimits = fn }
 }
 
 // WithActiveGates registers MetricActiveGates, an ObservableGauge reporting 1
@@ -415,6 +446,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if err != nil {
 		return nil, err
 	}
+	enqueueRejected, err := m.Int64Counter(
+		MetricEnqueueRejected,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("event admissions refused because the event log is at its hard size limit (reason=log_full) or cannot be written (reason=log_unwritable), per event type; push and pull together"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	dispatchLatency, err := m.Float64Histogram(
 		MetricDispatchLatency,
 		metric.WithUnit("ms"),
@@ -463,6 +502,11 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 				return nil
 			}),
 		); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.logLimits != nil {
+		if err := registerLogLimitGauges(m, cfg.logLimits); err != nil {
 			return nil, err
 		}
 	}
@@ -542,6 +586,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.throughput = throughput
 	e.sourceFailures = sourceFailures
 	e.deduped = deduped
+	e.enqueueRejected = enqueueRejected
 	e.dispatchLatency = dispatchLatency
 	e.gateSets = gateSets
 	e.gateClears = gateClears
@@ -801,6 +846,15 @@ func (e *Emitter) OnDeduped(evtType string) {
 	e.deduped.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
 }
 
+// OnEnqueueRejected implements eventqueue.RejectObserver: it counts one event
+// admission the queue refused because the event log is at its hard limit
+// (reason "log_full") or unwritable ("log_unwritable"), per event type.
+func (e *Emitter) OnEnqueueRejected(evtType, reason string) {
+	e.enqueueRejected.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("type", evtType), attribute.String("reason", reason),
+	))
+}
+
 // OnUnknownTypeRejected increments the unknown-type counter for the rejected
 // event's type — the metric half of INV-DISP-3's "the condition is recorded to
 // logs and metrics", fired from the core's ingest path (it satisfies
@@ -949,6 +1003,67 @@ func Flush(ctx context.Context, mp metric.MeterProvider) error {
 		ForceFlush(context.Context) error
 	}); ok {
 		return f.ForceFlush(ctx)
+	}
+	return nil
+}
+
+// registerLogLimitGauges registers the log-size limit's observable gauges over
+// fn (see WithLogLimitStatus).
+func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus) error {
+	if _, err := m.Int64ObservableGauge(
+		MetricQueueLogLimitBytes,
+		metric.WithUnit("By"),
+		metric.WithDescription("the hard size limit of the event-queue write-ahead log (max_log_bytes); at or above it new events are rejected"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			o.Observe(fn().HardBytes)
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
+	if _, err := m.Float64ObservableGauge(
+		MetricQueueLogPercent,
+		metric.WithUnit("%"),
+		metric.WithDescription("size of the event-queue write-ahead log as a percentage (0-100, may exceed 100) of its hard limit"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			o.Observe(fn().Percent())
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
+	if _, err := m.Int64ObservableGauge(
+		MetricEmittersHalted,
+		metric.WithUnit("{state}"),
+		metric.WithDescription("1 while polled command-source emitters are not being polled because the event log is past its soft size threshold or unwritable, else 0; not a gate (timers, listeners and pushed events keep running)"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			v := int64(0)
+			if fn().EmittersHalted {
+				v = 1
+			}
+			o.Observe(v)
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
+	if _, err := m.Int64ObservableGauge(
+		MetricLogRejecting,
+		metric.WithUnit("{state}"),
+		metric.WithDescription("1 per reason (log_full, log_unwritable) while the event log is in that state and refusing new events, else 0"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			st := fn().State
+			for _, reason := range []string{eventqueue.ReasonLogFull, eventqueue.ReasonLogUnwritable} {
+				v := int64(0)
+				if st == reason {
+					v = 1
+				}
+				o.Observe(v, metric.WithAttributes(attribute.String("reason", reason)))
+			}
+			return nil
+		}),
+	); err != nil {
+		return err
 	}
 	return nil
 }

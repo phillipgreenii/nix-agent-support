@@ -58,7 +58,44 @@
       "required": ["bytes", "compactions"],
       "properties": {
         "bytes": { "type": "integer", "minimum": 0 },
-        "compactions": { "type": "integer", "minimum": 0 }
+        "compactions": { "type": "integer", "minimum": 0 },
+        "limitBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The hard size limit (max_log_bytes): at or above it new events are rejected with a log_full reason."
+        },
+        "softBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The derived soft threshold (90% of limitBytes): above it, after a compaction attempt, polled emitters are halted."
+        },
+        "percent": {
+          "type": "number",
+          "minimum": 0,
+          "description": "bytes as a percentage of limitBytes, rounded to one decimal; may exceed 100."
+        },
+        "state": {
+          "enum": ["ok", "emitters_halted", "log_full", "log_unwritable"],
+          "description": "The most severe log-limit state. emitters_halted is NOT a gate: it halts polled emitters only; listeners, drain, timer emitters and pushed events keep running. log_full and log_unwritable also reject new events with the matching reason prefix."
+        },
+        "emittersHalted": {
+          "type": "boolean",
+          "description": "True while polled command-source emitters are not being polled (past the soft threshold, or the log is unwritable)."
+        },
+        "rejected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["logFull", "logUnwritable"],
+          "description": "Event admissions refused since the core started, by reason (log_full / log_unwritable); push and pull together.",
+          "properties": {
+            "logFull": { "type": "integer", "minimum": 0 },
+            "logUnwritable": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "detail": {
+          "type": "string",
+          "description": "The underlying write error while state is log_unwritable."
+        }
       }
     },
     "dispatch": {

@@ -580,3 +580,140 @@ func TestLoad_compactThresholdNegativeRejected(t *testing.T) {
 		t.Fatalf("Load error = %v, want a compact_threshold_bytes rejection", err)
 	}
 }
+
+// --- max_log_bytes (pg2-5d3ui) ---
+
+func TestLoad_maxLogBytesDefaultEnvAndPool(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, compactCfgBody)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxLogBytes != DefaultMaxLogBytes || DefaultMaxLogBytes != 64<<20 {
+		t.Fatalf("default MaxLogBytes = %d, want 64 MiB", c.MaxLogBytes)
+	}
+	if got, want := c.SoftLogBytes(), int64(64<<20)/100*90; got != want {
+		t.Fatalf("SoftLogBytes() = %d, want 90%% of max = %d", got, want)
+	}
+
+	// env, with units
+	for env, want := range map[string]int64{"134217728": 128 << 20, "128MiB": 128 << 20, "1 GiB": 1 << 30, "200MB": 200_000_000} {
+		t.Setenv("PG_ROUTER_MAX_LOG_BYTES", env)
+		c, err = Load()
+		if err != nil {
+			t.Fatalf("PG_ROUTER_MAX_LOG_BYTES=%q: %v", env, err)
+		}
+		if c.MaxLogBytes != want {
+			t.Fatalf("PG_ROUTER_MAX_LOG_BYTES=%q gave %d, want %d", env, c.MaxLogBytes, want)
+		}
+	}
+
+	// [pool] (repo config) wins over env
+	writeCfg(t, "[pool]\nmax_log_bytes = 33554432\n"+compactCfgBody)
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxLogBytes != 32<<20 {
+		t.Fatalf("[pool] max_log_bytes gave %d, want 32 MiB", c.MaxLogBytes)
+	}
+}
+
+// A mistyped limit must be REJECTED, never silently replaced by the default (the
+// way envInt treats an unparseable value).
+func TestLoad_maxLogBytesBadValuesRejected(t *testing.T) {
+	absentGlobalConfig(t)
+	for _, tc := range []struct{ name, env, toml, wantErr string }{
+		{"env unparseable", "lots", "", "PG_ROUTER_MAX_LOG_BYTES"},
+		{"env unknown unit", "64megabytes", "", "unknown unit"},
+		{"env fractional", "1.5GiB", "", "PG_ROUTER_MAX_LOG_BYTES"},
+		{"env negative", "-5", "", "PG_ROUTER_MAX_LOG_BYTES"},
+		{"env zero", "0", "", "max_log_bytes must be > 0"},
+		{"toml zero", "", "[pool]\nmax_log_bytes = 0\n", "max_log_bytes"},
+		{"toml negative", "", "[pool]\nmax_log_bytes = -1\n", "max_log_bytes"},
+		{"env below the compaction threshold", "1MiB", "", "compact_threshold_bytes < soft < max_log_bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PG_ROUTER_MAX_LOG_BYTES", tc.env)
+			writeCfg(t, tc.toml+compactCfgBody)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load error = %v, want one containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseBytes(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"0", 0, false},
+		{"1", 1, false},
+		{"67108864", 64 << 20, false},
+		{"64MiB", 64 << 20, false},
+		{"64mib", 64 << 20, false},
+		{"64 MiB", 64 << 20, false},
+		{" 64MiB ", 64 << 20, false},
+		{"64M", 64 << 20, false},
+		{"2KiB", 2048, false},
+		{"2kb", 2000, false},
+		{"3GiB", 3 << 30, false},
+		{"3GB", 3_000_000_000, false},
+		{"1TiB", 1 << 40, false},
+		{"10B", 10, false},
+		{"", 0, true},
+		{"   ", 0, true},
+		{"MiB", 0, true},
+		{"-1", 0, true},
+		{"1.5MiB", 0, true},
+		{"64Mib!", 0, true},
+		{"64 megabytes", 0, true},
+		{"9223372036854775807KiB", 0, true}, // overflow
+		{"99999999999999999999", 0, true},
+	} {
+		got, err := ParseBytes(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("ParseBytes(%q) error = %v, wantErr %v", tc.in, err, tc.wantErr)
+			continue
+		}
+		if err == nil && got != tc.want {
+			t.Errorf("ParseBytes(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// The ordering compact < soft < max is enforced by Validate; compaction disabled
+// (0) takes no part in it.
+func TestValidate_logLimitOrdering(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		compact, max int64
+		wantErr      string
+	}{
+		{"defaults", DefaultCompactThresholdBytes, DefaultMaxLogBytes, ""},
+		{"compact just below soft", 899, 1000, ""},
+		{"compact equals soft", 900, 1000, "compact_threshold_bytes < soft < max_log_bytes"},
+		{"compact above soft but below max", 950, 1000, "compact_threshold_bytes < soft < max_log_bytes"},
+		{"compact above max", 5000, 1000, "compact_threshold_bytes < soft < max_log_bytes"},
+		{"runtime compaction disabled", 0, 1000, ""},
+		{"zero max", 0, 0, "max_log_bytes must be > 0"},
+		{"negative max", 0, -1, "max_log_bytes must be > 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			c.CompactThresholdBytes = tc.compact
+			c.MaxLogBytes = tc.max
+			errs := c.logLimitFindings()
+			switch {
+			case tc.wantErr == "" && len(errs) != 0:
+				t.Fatalf("unexpected findings: %v", errs)
+			case tc.wantErr != "" && !findingsContain(errs, tc.wantErr):
+				t.Fatalf("findings %v lack %q", errs, tc.wantErr)
+			}
+		})
+	}
+}

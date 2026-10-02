@@ -116,10 +116,22 @@ type Dispatch struct {
 	Total int `json:"total"`
 }
 
-// QueueLog mirrors the wire's `queueLog` object.
+// QueueLog mirrors the wire's `queueLog` object: the write-ahead log's size and
+// compaction count (bead pg2-8e0m6) plus the log-size limit state (bead
+// pg2-5d3ui). The limit fields are zero/empty against a core that predates them.
 type QueueLog struct {
-	Bytes       int64 `json:"bytes"`
-	Compactions int64 `json:"compactions"`
+	Bytes          int64   `json:"bytes"`
+	Compactions    int64   `json:"compactions"`
+	LimitBytes     int64   `json:"limitBytes"`
+	SoftBytes      int64   `json:"softBytes"`
+	Percent        float64 `json:"percent"`
+	State          string  `json:"state"`
+	EmittersHalted bool    `json:"emittersHalted"`
+	Rejected       struct {
+		LogFull       int64 `json:"logFull"`
+		LogUnwritable int64 `json:"logUnwritable"`
+	} `json:"rejected"`
+	Detail string `json:"detail"`
 }
 
 // Registration mirrors one entry of the wire's `registry` array: a

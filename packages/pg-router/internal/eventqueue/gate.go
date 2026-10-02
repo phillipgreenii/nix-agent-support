@@ -386,7 +386,7 @@ func (q *Queue) SetGate(req GateRequest) (Gate, error) {
 	if routed {
 		recs = append(recs, recordFromEvent(evt, now))
 	}
-	if err := q.store.AppendBatch(recs); err != nil {
+	if err := q.appendBatchLocked(recs); err != nil {
 		return Gate{}, err
 	}
 	q.gates[g.Type] = g
@@ -423,7 +423,7 @@ func (q *Queue) ClearGate(gateType, by string) (Gate, bool, error) {
 	if routed {
 		recs = append(recs, recordFromEvent(evt, now))
 	}
-	if err := q.store.AppendBatch(recs); err != nil {
+	if err := q.appendBatchLocked(recs); err != nil {
 		return Gate{}, false, err
 	}
 	delete(q.gates, gateType)
@@ -466,7 +466,7 @@ func (q *Queue) expireGatesLocked(now time.Time) (expired []Gate, events []Event
 			evts = append(evts, evt)
 		}
 	}
-	if err := q.store.AppendBatch(recs); err != nil {
+	if err := q.appendBatchLocked(recs); err != nil {
 		logGateAppendFailure(len(lapsed), err)
 		return nil, nil
 	}

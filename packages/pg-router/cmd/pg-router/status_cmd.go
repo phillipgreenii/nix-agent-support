@@ -148,10 +148,7 @@ type statusReply struct {
 	Gates []statusGate `json:"gates"`
 	// QueueLog is the durable write-ahead log's size and compaction count (bead
 	// pg2-8e0m6); nil when the core predates the field.
-	QueueLog *struct {
-		Bytes       int64 `json:"bytes"`
-		Compactions int64 `json:"compactions"`
-	} `json:"queueLog"`
+	QueueLog *queueLogView `json:"queueLog"`
 	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
 	// operator-widened scope) — a dedicated decode target. Task 4.1 also
 	// removed the prior {id,kind,state,self} decode this array shared with
@@ -182,6 +179,32 @@ type statusReply struct {
 	ActivityDropped bool   `json:"activityDropped"`
 	LastTickAt      string `json:"lastTickAt"`
 	TickIntervalMs  int    `json:"tickIntervalMs"`
+}
+
+// queueLogView is the status reply's `queueLog` object (beads pg2-8e0m6,
+// pg2-5d3ui): the write-ahead log's size and compaction count plus the log-size
+// limit state. Every limit field is absent (zero) from a core that predates it.
+type queueLogView struct {
+	Bytes          int64   `json:"bytes"`
+	Compactions    int64   `json:"compactions"`
+	LimitBytes     int64   `json:"limitBytes"`
+	SoftBytes      int64   `json:"softBytes"`
+	Percent        float64 `json:"percent"`
+	State          string  `json:"state"`
+	EmittersHalted bool    `json:"emittersHalted"`
+	Rejected       struct {
+		LogFull       int64 `json:"logFull"`
+		LogUnwritable int64 `json:"logUnwritable"`
+	} `json:"rejected"`
+	Detail string `json:"detail"`
+}
+
+// limitView converts v for the shared operator-notice wording (core.LogLimitNotice).
+func (v queueLogView) limitView() core.LogLimitView {
+	return core.LogLimitView{
+		Bytes: v.Bytes, LimitBytes: v.LimitBytes, SoftBytes: v.SoftBytes, State: v.State,
+		RejectedLogFull: v.Rejected.LogFull, RejectedLogUnwritable: v.Rejected.LogUnwritable, Detail: v.Detail,
+	}
 }
 
 // backoffView is listeners[].backoff's / sources[].failure's shared
@@ -270,7 +293,16 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 	}
 
 	if ql := st.QueueLog; ql != nil {
-		fmt.Fprintf(w, "queue log: bytes=%d (%s) compactions=%d\n", ql.Bytes, humanBytes(ql.Bytes), ql.Compactions)
+		fmt.Fprintf(w, "queue log: bytes=%d (%s) compactions=%d", ql.Bytes, humanBytes(ql.Bytes), ql.Compactions)
+		if ql.LimitBytes > 0 {
+			fmt.Fprintf(w, " limit=%d (%s) used=%.1f%% state=%s", ql.LimitBytes, humanBytes(ql.LimitBytes), ql.Percent, dash(ql.State))
+		}
+		fmt.Fprintln(w)
+		// The soft step is not a gate, so nothing in GATES says it is in force:
+		// state what is halted, what still runs, why, and the remedies here.
+		for _, line := range core.LogLimitNotice(ql.limitView()) {
+			fmt.Fprintf(w, "  ! %s\n", line)
+		}
 	} else {
 		fmt.Fprintln(w, "queue log: -")
 	}

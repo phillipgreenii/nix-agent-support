@@ -248,6 +248,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// Event-queue write-ahead-log size gauge (bead pg2-8e0m6), read live off the
 	// queue on each collect.
 	metricsOpts = append(metricsOpts, metrics.WithQueueLogSize(func() int64 { return q.LogSize() }))
+	// Log-size limit gauges (bead pg2-5d3ui): limit, percent, emitters halted, and
+	// which reason (if any) the log is rejecting events for.
+	metricsOpts = append(metricsOpts, metrics.WithLogLimitStatus(func() eventqueue.LimitStatus { return q.LimitStatus() }))
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
@@ -307,7 +310,12 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows
 		// cfg.CompactThresholdBytes (bead pg2-8e0m6).
-		eventqueue.WithCompaction(cfg.CompactThresholdBytes, true))
+		eventqueue.WithCompaction(cfg.CompactThresholdBytes, true),
+		// Enforce the log-size limit (bead pg2-5d3ui): the soft threshold (derived,
+		// 90% of max_log_bytes) halts polled emitters, the hard limit
+		// (max_log_bytes) rejects new events with a classified reason. Startup
+		// compaction (above) runs before either is evaluated.
+		eventqueue.WithLogLimits(cfg.SoftLogBytes(), cfg.MaxLogBytes))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
@@ -576,6 +584,18 @@ func (f fanOutObserver) OnRestore(evt eventqueue.Event) {
 	}
 	if ro, ok := f.b.(eventqueue.RestoreObserver); ok {
 		ro.OnRestore(evt)
+	}
+}
+
+// OnEnqueueRejected (bead pg2-5d3ui) forwards eventqueue.RejectObserver's hook to
+// whichever arms implement it — the metrics emitter counts it per type and
+// reason; the activity observer has no use for it.
+func (f fanOutObserver) OnEnqueueRejected(evtType, reason string) {
+	if ro, ok := f.a.(eventqueue.RejectObserver); ok {
+		ro.OnEnqueueRejected(evtType, reason)
+	}
+	if ro, ok := f.b.(eventqueue.RejectObserver); ok {
+		ro.OnEnqueueRejected(evtType, reason)
 	}
 }
 
@@ -1169,31 +1189,46 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 			fmt.Fprintln(stderr, "pg-router: no gate active — all participants route normally")
 		}
 	}
-	if rpt, err := o.ProduceTick(ctx, q); err != nil {
-		slog.Error("producer tick failed", "err", err)
-	} else {
-		// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
-		// more SourceErrors) suspends only THAT source's own production —
-		// Dispatch/Expire still run over the queue for every other source's
-		// and every pushed event's already-queued work.
-		for name, serr := range rpt.SourceErrors {
-			slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
-		}
-		for name, gate := range rpt.Blocked {
-			slog.Debug("producer tick: source blocked by a gate; not polled", "source", name, "gate", gate)
-		}
-		q.Kick()
-		q.Expire()
-		now := time.Now()
-		svc.PublishTick(core.TickSnapshot{
-			Sources:    sourceReportsFor(cfg.Queries, rpt, o.LastTick()),
-			Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
-			RunMode:    core.RunModeLongRunning,
-			Version:    version,
-			LastTickAt: now,
-			SnapshotAt: now,
-		})
+	// The log-size limit controller (bead pg2-5d3ui) runs FIRST, so the
+	// emitters-halted decision it derives from the current log size is the one this
+	// tick's producer sees, and it runs whether or not producing succeeds.
+	q.EnforceLogLimits()
+	// Producing, dispatching, expiring and publishing are independent of one
+	// another's failure: a ProduceTick error must NOT skip Kick, Expire or
+	// PublishTick, or one failing source would stop the very work that frees the
+	// log (at the hard limit the loop would wedge for good). rpt is whatever the
+	// pass managed to record before it stopped.
+	rpt, err := o.ProduceTick(ctx, q)
+	if err != nil {
+		slog.Error("producer tick failed; still dispatching, expiring and publishing this tick", "err", err)
 	}
+	// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
+	// more SourceErrors) suspends only THAT source's own production —
+	// Dispatch/Expire still run over the queue for every other source's
+	// and every pushed event's already-queued work.
+	for name, serr := range rpt.SourceErrors {
+		slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
+	}
+	for name, gate := range rpt.Blocked {
+		slog.Debug("producer tick: source blocked by a gate; not polled", "source", name, "gate", gate)
+	}
+	for name, why := range rpt.Halted {
+		slog.Debug("producer tick: source not polled; the event log is past its soft size limit or unwritable", "source", name, "state", why)
+	}
+	for name, n := range rpt.LogRejected {
+		slog.Warn("producer tick: events refused; the event log is at its hard size limit or unwritable", "source", name, "events", n)
+	}
+	q.Kick()
+	q.Expire()
+	now := time.Now()
+	svc.PublishTick(core.TickSnapshot{
+		Sources:    sourceReportsFor(cfg.Queries, rpt, o.LastTick()),
+		Config:     resolvedConfigFor(cfg, core.RunModeLongRunning),
+		RunMode:    core.RunModeLongRunning,
+		Version:    version,
+		LastTickAt: now,
+		SnapshotAt: now,
+	})
 	return sig
 }
 
@@ -1296,10 +1331,14 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		return exitOK
 	}
 
-	rpt, err := pr.o.ProduceTick(ctx, q)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "run-until-idle: discover:", err)
-		return exitGeneric
+	q.EnforceLogLimits()
+	rpt, produceErr := pr.o.ProduceTick(ctx, q)
+	if produceErr != nil {
+		// Do not exit before draining (bead pg2-5d3ui): the drain below is what frees
+		// the log, and a pass that failed part-way left already-queued work that is
+		// owed its delivery opportunity (INV-EVT-1). The run still exits generic-
+		// failure once it has drained.
+		fmt.Fprintln(os.Stderr, "run-until-idle: discover:", produceErr)
 	}
 	// Binding Decision 1: drive Kick/Expire/Idle directly rather than
 	// calling eventqueue.Queue.RunUntilIdle, so a tick snapshot can be
@@ -1319,6 +1358,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// deliverable one — Idle() sees it and correctly returns false — until
 	// that offer's own phase 3 actually settles it.
 	for {
+		q.EnforceLogLimits()
 		q.Kick()
 		q.Expire()
 		now := time.Now()
@@ -1348,7 +1388,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// exit generic-failure (1): deliberately not a branchable, specific code
 	// (repo's coarse exit-code convention, ADR 0042) — a caller MUST NOT infer
 	// more from it than "something did not fully succeed."
-	if len(rpt.SourceErrors) > 0 {
+	if len(rpt.SourceErrors) > 0 || produceErr != nil {
 		for name, serr := range rpt.SourceErrors {
 			slog.Error("run-until-idle: source failed; other sources still drained", "source", name, "err", serr)
 		}

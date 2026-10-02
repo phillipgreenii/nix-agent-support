@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -1226,13 +1227,10 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"busy":  s.q.SessionsInFlight(),
 			"total": s.q.ListenerCount(),
 		},
-		// queueLog (bead pg2-8e0m6): the durable write-ahead log's current size and
-		// how many times this process has compacted it. Additive to the status
-		// tree; bytes is 0 when the queue's store cannot report a size.
-		"queueLog": map[string]any{
-			"bytes":       s.q.LogSize(),
-			"compactions": s.q.Compactions(),
-		},
+		// queueLog (beads pg2-8e0m6, pg2-5d3ui): the durable write-ahead log's
+		// current size, how many times this process has compacted it, and the
+		// size-limit state (statusQueueLog). Additive to the status tree.
+		"queueLog": statusQueueLog(s.q),
 		"core": map[string]any{
 			"state":      s.State().String(),
 			"pid":        os.Getpid(),
@@ -1643,4 +1641,33 @@ func (s *Service) declaredTypesSorted() []string {
 // running the command through a shell.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// statusQueueLog composes the status reply's `queueLog` object: the log's size and
+// compaction count (bead pg2-8e0m6) plus the size-limit enforcement state (bead
+// pg2-5d3ui) — the single most severe state, whether polled emitters are
+// halted, and the admission refusals so far by reason always; the hard limit,
+// the soft threshold and the percent only when a hard limit is configured. bytes
+// is 0 when the queue's store cannot report a size.
+func statusQueueLog(q *eventqueue.Queue) map[string]any {
+	ls := q.LimitStatus()
+	out := map[string]any{
+		"bytes":          ls.Bytes,
+		"compactions":    q.Compactions(),
+		"state":          ls.State,
+		"emittersHalted": ls.EmittersHalted,
+		"rejected": map[string]any{
+			"logFull":       ls.RejectedLogFull,
+			"logUnwritable": ls.RejectedLogUnwritable,
+		},
+	}
+	if ls.HardBytes > 0 {
+		out["limitBytes"] = ls.HardBytes
+		out["softBytes"] = ls.SoftBytes
+		out["percent"] = math.Round(ls.Percent()*10) / 10
+	}
+	if ls.Detail != "" {
+		out["detail"] = ls.Detail
+	}
+	return out
 }

@@ -55,6 +55,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   clock origin to pick.
 - [`DEC-EVENT-2`](event.md) — the queue is durable, ordered, de-duped and retention-bounded, and
   delivers at-least-once with per-handler serial FIFO.
+- [`DEC-EVENT-3`](event.md) — the durable queue is size-bounded: a soft threshold halts polled
+  emitters (an in-memory flag, not a gate); the maximum refuses admission with a classified
+  `log_full` / `log_unwritable` reason.
 - [`DEC-OBS-1`](observability.md) — OTel is the default emission transport for metrics only, and
   logs stay JSONL.
 - [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the
