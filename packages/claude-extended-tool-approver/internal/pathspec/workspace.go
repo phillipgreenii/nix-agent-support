@@ -2,6 +2,8 @@ package pathspec
 
 import (
 	"bufio"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -674,6 +676,7 @@ func relTo(abs, root string) string {
 // candidates lists every (root, kind) abs lies under.
 func candidates(kinds []Kind, abs string) []candidate {
 	var out []candidate
+	var dirs []string // markerDirs(abs), computed once and only if a Markers kind needs it
 	home, _ := os.UserHomeDir()
 	home = patheval.ResolveRealPath(home)
 	for i, k := range kinds {
@@ -689,12 +692,12 @@ func candidates(kinds []Kind, abs string) []candidate {
 				out = append(out, candidate{home, k, i})
 			}
 		case len(k.Markers) > 0:
-			for dir := abs; ; dir = filepath.Dir(dir) {
+			if dirs == nil {
+				dirs = markerDirs(abs)
+			}
+			for _, dir := range dirs {
 				if hasMarker(dir, k.Markers) {
 					out = append(out, candidate{dir, k, i})
-				}
-				if filepath.Dir(dir) == dir {
-					break
 				}
 			}
 		}
@@ -740,20 +743,48 @@ func InsideMarkerWorkspace(kinds []Kind, names []string, abs string) bool {
 	for _, n := range names {
 		want[n] = true
 	}
+	var dirs []string // markerDirs(abs), computed once and only if a wanted Markers kind needs it
 	for _, k := range kinds {
 		if len(k.Markers) == 0 || !want[k.Name] {
 			continue
 		}
-		for dir := abs; ; dir = filepath.Dir(dir) {
+		if dirs == nil {
+			dirs = markerDirs(abs)
+		}
+		for _, dir := range dirs {
 			if hasMarker(dir, k.Markers) {
 				return true
-			}
-			if filepath.Dir(dir) == dir {
-				break
 			}
 		}
 	}
 	return false
+}
+
+// markerDirs lists abs and every ancestor of abs that could hold a marker
+// file, deepest first (the order the marker walks have always visited them),
+// omitting every directory at or below the first one that does not exist: a
+// nonexistent directory cannot contain a marker, and neither can anything
+// beneath it. The prune is by a single top-down os.Stat per ancestor
+// (stopping at the first fs.ErrNotExist), so a path that does not exist
+// costs one failed lookup rather than one per (ancestor, kind, marker). That
+// matters where a failed lookup is expensive — e.g. macOS's autofs-backed
+// /home, ~20-40ms per stat with no negative caching — and is invisible
+// elsewhere. Any OTHER stat error (permission, not-a-directory) does not
+// prune, so those cases behave exactly as the unpruned walk did.
+func markerDirs(abs string) []string {
+	var chain []string // abs ... root, deepest first
+	for dir := abs; ; dir = filepath.Dir(dir) {
+		chain = append(chain, dir)
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if _, err := os.Stat(chain[i]); errors.Is(err, fs.ErrNotExist) {
+			return chain[i+1:]
+		}
+	}
+	return chain
 }
 
 // hasMarker reports whether any marker exists directly under dir.

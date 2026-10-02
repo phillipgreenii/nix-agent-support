@@ -340,3 +340,58 @@ func TestAccessResultString(t *testing.T) {
 		}
 	}
 }
+
+// TestMarkerDirs pins markerDirs: it lists abs and its ancestors deepest
+// first, but drops every directory at or below the first one that does not
+// exist (a nonexistent directory cannot hold a marker, and a failed lookup
+// can be expensive -- macOS autofs /home).
+func TestMarkerDirs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("existing path lists itself then every ancestor, deepest first", func(t *testing.T) {
+		t.Parallel()
+		got := markerDirs(sub)
+		if len(got) < 3 || got[0] != sub || got[1] != filepath.Join(root, "a") || got[2] != root {
+			t.Fatalf("markerDirs(%q) = %v, want [%q %q %q ...]", sub, got, sub, filepath.Join(root, "a"), root)
+		}
+		if last := got[len(got)-1]; last != string(filepath.Separator) {
+			t.Errorf("markerDirs(%q) last = %q, want the filesystem root", sub, last)
+		}
+	})
+
+	t.Run("nonexistent tail is pruned, existing ancestors are kept", func(t *testing.T) {
+		t.Parallel()
+		missing := filepath.Join(sub, "no", "such", "dir")
+		got := markerDirs(missing)
+		if len(got) == 0 || got[0] != sub {
+			t.Fatalf("markerDirs(%q) = %v, want it to start at the deepest existing ancestor %q", missing, got, sub)
+		}
+		for _, d := range got {
+			if strings.HasPrefix(d, filepath.Join(sub, "no")) {
+				t.Errorf("markerDirs(%q) kept nonexistent dir %q", missing, d)
+			}
+		}
+	})
+
+	t.Run("a marker in an existing ancestor is still found through a nonexistent tail", func(t *testing.T) {
+		t.Parallel()
+		if err := os.Mkdir(filepath.Join(root, "a", ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		missing := filepath.Join(sub, "gone", "file.txt")
+		found := false
+		for _, c := range candidates(DefaultKinds(), missing) {
+			if c.root == filepath.Join(root, "a") && c.kind.Name == "git" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("candidates(%q) did not report the git workspace at %q", missing, filepath.Join(root, "a"))
+		}
+	})
+}

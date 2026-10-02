@@ -289,16 +289,17 @@ func DiscoveredVerbs(kinds []Kind, abs string) []VerbSet {
 		kind  Kind
 	}
 	var candidates []found
+	var dirs []string // markerDirs(abs), computed once and only if a Verbs kind needs it
 	for i, k := range kinds {
 		if k.Verbs == nil || len(k.Markers) == 0 {
 			continue
 		}
-		for dir := abs; ; dir = filepath.Dir(dir) {
+		if dirs == nil {
+			dirs = markerDirs(abs)
+		}
+		for _, dir := range dirs {
 			if hasMarker(dir, k.Markers) {
 				candidates = append(candidates, found{dir, i, k})
-			}
-			if filepath.Dir(dir) == dir {
-				break
 			}
 		}
 	}
