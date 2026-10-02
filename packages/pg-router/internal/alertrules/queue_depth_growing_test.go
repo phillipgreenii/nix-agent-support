@@ -738,12 +738,16 @@ func TestPrChangedSeries20260930(t *testing.T) {
 	}
 }
 
-// Known limitation, pinned so it cannot be forgotten: the same day's queue log
-// records pr.changed accepts continuing from 15:00Z. The throughput counter
-// misses them because events restored by a daemon restart never reach
-// Emitter.OnEnqueue, so the 15:00Z-17:20Z part of the "stall" only exists in the
-// metric view. With the accepts the queue actually recorded, only the
-// 14:10Z-14:55Z silence (45m, shorter than 30m + for 30m) remains and nothing pages.
+// MODEL test over RECORDED data (not live code): the 2026-09-30 queue log records
+// pr.changed accepts continuing from 15:00Z, but the throughput counter recorded
+// at the time missed them because events restored by a daemon restart never
+// reached Emitter.OnEnqueue, so the 15:00Z-17:20Z part of the "stall" only existed
+// in the metric view. That defect is FIXED in the emitter (bead pg2-0efop:
+// eventqueue.RestoreObserver / Emitter.OnRestore seed restored events, so
+// throughput counts them from the first post-restart accept). This test still pins
+// the recorded-data fact that, with the accepts the queue actually recorded, only
+// the 14:10Z-14:55Z silence (45m, shorter than 30m + for 30m) remains and nothing
+// pages; the test above keeps the metric-view fixture as the pre-fix replay.
 func TestPrChangedStallAlertDependsOnRestartBlindMetric(t *testing.T) {
 	const day = "2026-09-30"
 	queue := loadStallCSV(t, "testdata/pr_changed_2026-09-30.csv", day, false)

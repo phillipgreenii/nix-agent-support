@@ -652,6 +652,84 @@ func TestOnEnqueue_FIFOCapEviction_OldestDropped(t *testing.T) {
 	}
 }
 
+// Restart (bead pg2-0efop): an event restored from the durable queue by a
+// fresh process must still count toward throughput and dispatch latency when
+// it is accepted. Before the fix replay() restored the entry without telling
+// the Emitter, so OnAccept silently skipped it and pg_router_throughput_total
+// read zero for the whole restored backlog (the 2026-09-30 pr.changed stall
+// false-positive). Latency is measured from the ORIGINAL enqueue instant the
+// durable record carries, across the restart.
+func TestRestartRestoredEventsCountTowardThroughputAndLatency(t *testing.T) {
+	mem := eventqueue.NewMemStore()
+	t0 := time.Date(2026, 9, 30, 14, 0, 0, 0, time.UTC)
+	clk1 := &mockClock{t: t0}
+
+	// Process 1: enqueue two events, accept nothing, then "crash".
+	q1, err := eventqueue.New(mem, eventqueue.WithClock(clk1.now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"e1", "e2"} {
+		evt := eventqueue.Event{ID: id, Type: "pr.changed", ExpiresAt: t0.Add(time.Hour)}
+		if _, err := q1.Enqueue(evt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Process 2: brand-new Emitter (empty pending map) over the same store.
+	clk2 := &mockClock{t: t0.Add(90 * time.Second)}
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	var q2 *eventqueue.Queue
+	emitter, err := New(mp, func() map[string]int { return q2.DepthByType() }, WithClock(clk2.now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q2, err = eventqueue.New(mem, eventqueue.WithClock(clk2.now), eventqueue.WithObserver(emitter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q2.Register(acceptingListener{typ: "pr.changed"})
+	for q2.Dispatch() > 0 { // one head event per listener per pass
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	if got := sumFor(findMetric(t, rm, MetricThroughput), "type", "pr.changed"); got != 2 {
+		t.Fatalf("throughput[pr.changed] = %d, want 2 (both restored events accepted)", got)
+	}
+	hist, ok := findMetric(t, rm, MetricDispatchLatency).Data.(metricdata.Histogram[float64])
+	if !ok || len(hist.DataPoints) != 1 {
+		t.Fatalf("dispatch_latency = %+v, want one datapoint series", hist)
+	}
+	dp := hist.DataPoints[0]
+	if dp.Count != 2 || dp.Sum != 2*90_000 {
+		t.Fatalf("dispatch_latency count=%d sum=%vms, want 2 samples of 90000ms each (from the original enqueue instant)", dp.Count, dp.Sum)
+	}
+}
+
+// OnRestore only seeds the OnAccept correlation: it must not emit any metric
+// by itself (the restored event was already reported by the process that
+// enqueued it).
+func TestOnRestore_SeedsCorrelationWithoutEmitting(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnRestore(eventqueue.Event{ID: "r1", Type: "pr.changed", At: h.clk.now()})
+
+	for _, sm := range h.collect(t).ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricThroughput || m.Name == MetricDispatchLatency {
+				t.Fatalf("%s emitted by OnRestore alone, want nothing until an accept", m.Name)
+			}
+		}
+	}
+	h.emitter.OnAccept("r1", "l")
+	if got := sumFor(findMetric(t, h.collect(t), MetricThroughput), "type", "pr.changed"); got != 1 {
+		t.Fatalf("throughput[pr.changed] = %d, want 1 after the restored event's accept", got)
+	}
+}
+
 // OnDeclined — the queue's pre-accept-decline / dispatch-failure signal
 // (eventqueue.Observer, INV-FAIL-1) — feeds the SAME pg_router_failures
 // counter RecordFailure does, labeled with the one class knowable at that

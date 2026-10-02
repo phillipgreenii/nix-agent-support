@@ -559,6 +559,19 @@ func (f fanOutObserver) OnEnqueue(evt eventqueue.Event) {
 	f.b.OnEnqueue(evt)
 }
 
+// OnRestore (bead pg2-0efop) forwards eventqueue.RestoreObserver's hook to
+// whichever arms implement it, so replay's restored events seed the metrics
+// emitter's and the activity observer's OnAccept correlation without a fresh
+// OnEnqueue (which would re-emit activity rows / double-report the enqueue).
+func (f fanOutObserver) OnRestore(evt eventqueue.Event) {
+	if ro, ok := f.a.(eventqueue.RestoreObserver); ok {
+		ro.OnRestore(evt)
+	}
+	if ro, ok := f.b.(eventqueue.RestoreObserver); ok {
+		ro.OnRestore(evt)
+	}
+}
+
 func (f fanOutObserver) OnAccept(eventID, listenerID string) {
 	f.a.OnAccept(eventID, listenerID)
 	f.b.OnAccept(eventID, listenerID)
@@ -689,6 +702,15 @@ func (a *activityObserver) OnEnqueue(evt eventqueue.Event) {
 		a.order = append(a.order, evt.ID)
 	}
 	a.mu.Unlock()
+}
+
+// OnRestore implements eventqueue.RestoreObserver (bead pg2-0efop): it seeds
+// the eventID->Type correlation for an event restored from the durable queue
+// after a restart, so its later OnAccept renders the real type instead of an
+// empty one. Unlike OnEnqueue's counterpart nothing is appended to the ring —
+// the restored event already had its activity before the restart.
+func (a *activityObserver) OnRestore(evt eventqueue.Event) {
+	a.OnEnqueue(evt)
 }
 
 func (a *activityObserver) OnAccept(eventID, listenerID string) {

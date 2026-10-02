@@ -278,8 +278,9 @@ type pendingDispatch struct {
 
 // Ensure the queue can drive it.
 var (
-	_ eventqueue.Observer     = (*Emitter)(nil)
-	_ eventqueue.GateObserver = (*Emitter)(nil)
+	_ eventqueue.Observer        = (*Emitter)(nil)
+	_ eventqueue.GateObserver    = (*Emitter)(nil)
+	_ eventqueue.RestoreObserver = (*Emitter)(nil)
 )
 
 // Option configures an optional catalog member at construction time
@@ -589,6 +590,26 @@ func (e *Emitter) OnGateDrop(evtType, listenerID, gateType string) {
 // might later be evicted, never correctness (a miss is the tolerated
 // imperfection OnAccept's own doc describes).
 func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
+	e.seedPending(evt)
+}
+
+// OnRestore implements eventqueue.RestoreObserver (bead pg2-0efop): it seeds
+// the SAME eventID->{type, enqueue-time} correlation OnEnqueue does, for each
+// event Queue.New's replay restored from the durable queue after a restart, so
+// OnAccept counts RecordThroughput/RecordDispatchLatency for it instead of
+// silently skipping it (the restart-blind defect behind the 2026-09-30
+// pr.changed throughput-zero window). It records nothing else: no counter is
+// emitted, because the event was already reported by the process that enqueued
+// it. Dispatch latency for a restored event is measured from evt.At — the
+// ORIGINAL resolved enqueue instant the durable record carries — so it
+// includes the time spent queued across the restart, exactly what a live
+// event's latency means.
+func (e *Emitter) OnRestore(evt eventqueue.Event) {
+	e.seedPending(evt)
+}
+
+// seedPending is the shared body of OnEnqueue and OnRestore.
+func (e *Emitter) seedPending(evt eventqueue.Event) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, exists := e.pending[evt.ID]; exists {

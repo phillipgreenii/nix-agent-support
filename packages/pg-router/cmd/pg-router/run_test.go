@@ -1403,3 +1403,50 @@ func TestPreShutdownAll_nilHandlerDoesNotPanic(t *testing.T) {
 	cfg := config.Config{Roles: roles.RoleSet{{Name: "r1", Enabled: true}}}
 	preShutdownAll(context.Background(), o, cfg) // must not panic
 }
+
+// restartAcceptListener accepts every event of one type; minimal
+// eventqueue.Listener for the restart test below.
+type restartAcceptListener struct{ typ string }
+
+func (restartAcceptListener) ID() string { return "restart-accept" }
+func (l restartAcceptListener) Matches(e eventqueue.Event) bool {
+	return e.Type == l.typ
+}
+
+func (restartAcceptListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
+	return eventqueue.OfferResult{Accepted: true}
+}
+
+// TestActivityObserver_RestoredEventsSeededWithoutActivityRows (bead
+// pg2-0efop): replaying the durable queue after a restart, through the
+// production fanOutObserver, seeds activityObserver's eventID->Type
+// correlation (so a later accept renders the real type) but appends NO ring
+// rows for the restore itself and does not re-fire OnEnqueue.
+func TestActivityObserver_RestoredEventsSeededWithoutActivityRows(t *testing.T) {
+	mem := eventqueue.NewMemStore()
+	q1, err := eventqueue.New(mem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q1.Enqueue(eventqueue.Event{ID: "evt-r1", Type: "pr.changed", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	ring := activity.New(8)
+	activityObs := newActivityObserver(ring)
+	q2, err := eventqueue.New(mem, eventqueue.WithObserver(fanOutObserver{activityObs, &recordingDispatchFailureObserver{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]activity.Entry, 8)
+	if n, _ := ring.Read(0, buf); n != 0 {
+		t.Fatalf("ring rows after replay = %d (%+v), want 0 (restore must not emit activity)", n, buf[:n])
+	}
+
+	q2.Register(restartAcceptListener{typ: "pr.changed"})
+	q2.Dispatch()
+	n, _ := ring.Read(0, buf)
+	if n != 1 || buf[0].Type != "pr.changed" || buf[0].Outcome != "delivered" {
+		t.Fatalf("ring after accept = %+v, want exactly one {Type: pr.changed, Outcome: delivered}", buf[:n])
+	}
+}

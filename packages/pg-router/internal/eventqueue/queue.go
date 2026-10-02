@@ -151,6 +151,24 @@ type Observer interface {
 	OnDeduped(evtType string)
 }
 
+// RestoreObserver is an OPTIONAL extension of Observer (bead pg2-0efop): an
+// Observer that also implements it is told, once per event, about every event
+// New's replay() RESTORED from the durable queue and left retained. Without it
+// an Observer that correlates OnAccept(eventID, ...) with state recorded in
+// OnEnqueue (metrics.Emitter, the activity observer) is blind to every event
+// queued before a restart, because replay is not an enqueue: the event was
+// already counted/recorded by the process that originally enqueued it.
+//
+// It is a separate interface, not a sixth method on Observer, so every
+// existing Observer implementation and test fake keeps compiling unchanged,
+// and a restore stays distinguishable from a fresh enqueue: an implementer
+// MUST seed only its OnAccept correlation state and MUST NOT emit enqueue
+// counters or activity rows (the event was already reported once, pre-restart).
+// evt is the resolved durable event, so evt.At is the ORIGINAL enqueue instant.
+type RestoreObserver interface {
+	OnRestore(evt Event)
+}
+
 type noopObserver struct{}
 
 func (noopObserver) OnEnqueue(Event)                   {}
@@ -570,6 +588,18 @@ func (q *Queue) replay() error {
 			q.gates[r.GateType] = gateFromRecord(r)
 		case opGateCleared, opGateExpired:
 			delete(q.gates, r.GateType)
+		}
+	}
+	// Tell a RestoreObserver about each event that survived replay (pg2-0efop),
+	// in FIFO order and exactly once per retained id — AFTER the loop, so an
+	// event enqueued and then evicted within the log is never reported. Not
+	// OnEnqueue: see RestoreObserver. New runs this before the queue is shared,
+	// so no lock is needed (replay already mutates q.entries unlocked).
+	if ro, ok := q.obs.(RestoreObserver); ok {
+		for _, id := range q.order {
+			if e, ok := q.entries[id]; ok {
+				ro.OnRestore(e.evt)
+			}
 		}
 	}
 	return nil
