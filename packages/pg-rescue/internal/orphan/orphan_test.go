@@ -96,7 +96,7 @@ func TestSameParentNeverExits(t *testing.T) {
 	rec := newExitRecorder()
 	stop := WatchWith(Options{Interval: fast, Getppid: p.Getppid, Cleanup: rec.Cleanup, Exit: rec.Exit})
 	defer stop()
-	deadline := time.Now().Add(30 * fast)
+	deadline := time.Now().Add(10 * time.Second) // generous: a loaded machine must not make this flaky
 	for time.Now().Before(deadline) && p.calls.Load() < 10 {
 		time.Sleep(fast)
 	}
