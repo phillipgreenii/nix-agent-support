@@ -50,6 +50,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		// links (bead pg2-apuyx) postdates the section-7.8 table: the
 		// read-only `links` verb's URL knobs.
 		"links",
+		// Entity-change-flow keys (design 9.10).
+		"watch", "sweep", "hydration", "change_log_retention", "consumer_stale_after",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
@@ -77,6 +79,11 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
+		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
+		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
+		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
+		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll"}},
+		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll"}},
 	}
 	for _, c := range cases {
 		gotSub := yamlTags(c.typ)
@@ -237,6 +244,22 @@ func TestLoadFile_FullExample(t *testing.T) {
 
 	if cfg.Open.ChromeBin != "/usr/bin/example-browser" {
 		t.Errorf("open.chrome_bin: got %q", cfg.Open.ChromeBin)
+	}
+
+	// Entity-change-flow keys (design 9.10).
+	if got := cfg.WatchQueries("pr"); !reflect.DeepEqual(got, []string{"mine", "team"}) {
+		t.Errorf("watch.pr.queries: got %v", got)
+	}
+	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items"}) {
+		t.Errorf("watch.issue.queries: got %v", got)
+	}
+	if got := cfg.WatchQueries("thread"); !reflect.DeepEqual(got, []string{"mentions"}) {
+		t.Errorf("watch.thread.queries: got %v", got)
+	}
+	if cfg.ThreadActiveWindow() != 7*24*time.Hour || cfg.SweepMaxAge() != 6*time.Hour ||
+		cfg.SweepMaxPerPoll() != 20 || cfg.HydrationMaxPerPoll() != 50 ||
+		cfg.ChangeLogRetention() != 14*24*time.Hour || cfg.ConsumerStaleAfter() != 7*24*time.Hour {
+		t.Errorf("change-flow scalars not parsed: %+v", cfg)
 	}
 
 	if cfg.Path != examplePath {
@@ -537,5 +560,156 @@ func TestLoadFile_LinksIssueURLTemplateInvalidFails(t *testing.T) {
 				t.Fatalf("LoadFile: err = %v, want a links.issue_url_template validation error", err)
 			}
 		})
+	}
+}
+
+const changeFlowBase = "self_login: a\nrepos:\n  - remote: o/r\n"
+
+func TestChangeFlowKeys_Defaults(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	for _, typ := range []string{"pr", "issue", "thread", "bogus"} {
+		if q := cfg.WatchQueries(typ); q != nil {
+			t.Errorf("WatchQueries(%q) = %v, want nil", typ, q)
+		}
+	}
+	if got := cfg.ThreadActiveWindow(); got != 7*24*time.Hour {
+		t.Errorf("ThreadActiveWindow = %v, want 7d", got)
+	}
+	if got := cfg.SweepMaxAge(); got != 6*time.Hour {
+		t.Errorf("SweepMaxAge = %v, want 6h", got)
+	}
+	if got := cfg.SweepMaxPerPoll(); got != 20 {
+		t.Errorf("SweepMaxPerPoll = %d, want 20", got)
+	}
+	if got := cfg.HydrationMaxPerPoll(); got != 50 {
+		t.Errorf("HydrationMaxPerPoll = %d, want 50", got)
+	}
+	if got := cfg.ChangeLogRetention(); got != 0 {
+		t.Errorf("ChangeLogRetention = %v, want 0", got)
+	}
+	if got := cfg.ConsumerStaleAfter(); got != 0 {
+		t.Errorf("ConsumerStaleAfter = %v, want 0", got)
+	}
+}
+
+func TestChangeFlowKeys_Explicit(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
+watch:
+  pr:
+    queries: [mine, team]
+  issue:
+    queries: [assigned-to-me, work-items]
+  thread:
+    queries: [mentions]
+    active_window: 3d
+sweep:
+  max_age: 90m
+  max_per_poll: 5
+hydration:
+  max_per_poll: 9
+change_log_retention: 14d
+consumer_stale_after: 36h
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.WatchQueries("pr"); !reflect.DeepEqual(got, []string{"mine", "team"}) {
+		t.Errorf("pr queries = %v", got)
+	}
+	if got := cfg.WatchQueries("issue"); !reflect.DeepEqual(got, []string{"assigned-to-me", "work-items"}) {
+		t.Errorf("issue queries = %v", got)
+	}
+	if got := cfg.WatchQueries("thread"); !reflect.DeepEqual(got, []string{"mentions"}) {
+		t.Errorf("thread queries = %v", got)
+	}
+	if got := cfg.ThreadActiveWindow(); got != 3*24*time.Hour {
+		t.Errorf("ThreadActiveWindow = %v", got)
+	}
+	if got := cfg.SweepMaxAge(); got != 90*time.Minute {
+		t.Errorf("SweepMaxAge = %v", got)
+	}
+	if got := cfg.SweepMaxPerPoll(); got != 5 {
+		t.Errorf("SweepMaxPerPoll = %d", got)
+	}
+	if got := cfg.HydrationMaxPerPoll(); got != 9 {
+		t.Errorf("HydrationMaxPerPoll = %d", got)
+	}
+	if got := cfg.ChangeLogRetention(); got != 14*24*time.Hour {
+		t.Errorf("ChangeLogRetention = %v", got)
+	}
+	if got := cfg.ConsumerStaleAfter(); got != 36*time.Hour {
+		t.Errorf("ConsumerStaleAfter = %v", got)
+	}
+}
+
+func TestParseDayDuration(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"7d":     7 * 24 * time.Hour,
+		"14d":    14 * 24 * time.Hour,
+		"6h":     6 * time.Hour,
+		"1d12h":  36 * time.Hour,
+		"0.5d":   12 * time.Hour,
+		" 2d ":   48 * time.Hour,
+		"1500ms": 1500 * time.Millisecond,
+	} {
+		got, err := parseDayDuration(in)
+		if err != nil || got != want {
+			t.Errorf("parseDayDuration(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"d", "xd", "7", "-1d", "0d", "0h", "-5h", "1d-2h", "7dd", "abc"} {
+		if d, err := parseDayDuration(in); err == nil {
+			t.Errorf("parseDayDuration(%q) = %v, want error", in, d)
+		}
+	}
+}
+
+func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
+	for name, tc := range map[string]struct{ block, key string }{
+		"malformed active_window": {"watch:\n  thread:\n    active_window: soon", "watch.thread.active_window"},
+		"negative active_window":  {"watch:\n  thread:\n    active_window: -1d", "watch.thread.active_window"},
+		"malformed max_age":       {"sweep:\n  max_age: xyz", "sweep.max_age"},
+		"malformed retention":     {"change_log_retention: 14", "change_log_retention"},
+		"zero retention":          {"change_log_retention: 0d", "change_log_retention"},
+		"malformed stale after":   {"consumer_stale_after: forever", "consumer_stale_after"},
+		"zero sweep cap":          {"sweep:\n  max_per_poll: 0", "sweep.max_per_poll"},
+		"negative sweep cap":      {"sweep:\n  max_per_poll: -3", "sweep.max_per_poll"},
+		"zero hydration cap":      {"hydration:\n  max_per_poll: 0", "hydration.max_per_poll"},
+		"negative hydration cap":  {"hydration:\n  max_per_poll: -1", "hydration.max_per_poll"},
+		"empty pr query":          {"watch:\n  pr:\n    queries: [mine, \"\"]", "watch.pr.queries"},
+		"empty issue query":       {"watch:\n  issue:\n    queries: [\" \"]", "watch.issue.queries"},
+		"duplicate thread query":  {"watch:\n  thread:\n    queries: [mentions, mentions]", "watch.thread.queries"},
+		"duplicate pr query":      {"watch:\n  pr:\n    queries: [a, b, a]", "watch.pr.queries"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.block+"\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("LoadFile: err = %v, want an error naming %q", err, tc.key)
+			}
+		})
+	}
+}
+
+// TestLoadFile_LegacyKeysStillLoad pins that the keys slated for removal in
+// Phase 10 (sync, agent_tracker_backend, heartbeat_period) still load next to
+// the new change-flow keys, so the primary branch stays deployable.
+func TestLoadFile_LegacyKeysStillLoad(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`
+sync:
+  mode: off
+agent_tracker_backend: beads
+heartbeat_period: 5m
+watch:
+  pr:
+    queries: [mine]
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if cfg.Sync.Mode != "off" || cfg.AgentTrackerBackend != "beads" || cfg.HeartbeatPeriod != "5m" {
+		t.Fatalf("legacy keys not preserved: %+v", cfg)
 	}
 }

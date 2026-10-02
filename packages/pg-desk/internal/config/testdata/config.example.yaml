@@ -72,3 +72,22 @@ serve:
 
 open:
   chrome_bin: /usr/bin/example-browser
+
+watch:
+  pr:
+    queries: [mine, team]
+  issue:
+    queries: [assigned-to-me, work-items]
+  thread:
+    queries: [mentions]
+    active_window: 7d
+
+sweep:
+  max_age: 6h
+  max_per_poll: 20
+
+hydration:
+  max_per_poll: 50
+
+change_log_retention: 14d
+consumer_stale_after: 7d

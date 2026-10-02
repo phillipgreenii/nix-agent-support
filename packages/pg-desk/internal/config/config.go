@@ -39,6 +39,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,6 +122,221 @@ type Config struct {
 
 	// Links configures the read-only `pg-desk links` verb (bead pg2-apuyx).
 	Links LinksConfig `yaml:"links,omitempty" json:"links,omitempty"`
+
+	// Watch, Sweep, Hydration, ChangeLogRetentionRaw and
+	// ConsumerStaleAfterRaw are the entity-change-flow keys (design 9.10,
+	// docs/superpowers/specs/2026-09-29-entity-change-flow-design.md). Read
+	// them through the typed accessors (WatchQueries, ThreadActiveWindow,
+	// SweepMaxAge, SweepMaxPerPoll, HydrationMaxPerPoll, ChangeLogRetention,
+	// ConsumerStaleAfter), which own the documented defaults.
+	Watch     WatchConfig     `yaml:"watch,omitempty" json:"watch,omitempty"`
+	Sweep     SweepConfig     `yaml:"sweep,omitempty" json:"sweep,omitempty"`
+	Hydration HydrationConfig `yaml:"hydration,omitempty" json:"hydration,omitempty"`
+	// ChangeLogRetentionRaw is change_log_retention (a duration such as
+	// "14d"); empty means unset.
+	ChangeLogRetentionRaw string `yaml:"change_log_retention,omitempty" json:"change_log_retention,omitempty"`
+	// ConsumerStaleAfterRaw is consumer_stale_after (a duration such as
+	// "7d"); empty means unset.
+	ConsumerStaleAfterRaw string `yaml:"consumer_stale_after,omitempty" json:"consumer_stale_after,omitempty"`
+}
+
+// Defaults for the entity-change-flow keys (design 9.10, 8.4, 8.5).
+// change_log_retention and consumer_stale_after have no default here on
+// purpose: their accessors return zero when unset so the store's own
+// DefaultChangeLogRetention / DefaultConsumerStaleAfter stay the single home
+// of those numbers.
+const (
+	DefaultThreadActiveWindow  = 7 * 24 * time.Hour
+	DefaultSweepMaxAge         = 6 * time.Hour
+	DefaultSweepMaxPerPoll     = 20
+	DefaultHydrationMaxPerPoll = 50
+)
+
+// WatchConfig is config.yaml's watch block: per entity type, the named
+// pg-connector queries whose results form the watched set.
+type WatchConfig struct {
+	PR     WatchTypeConfig   `yaml:"pr,omitempty" json:"pr,omitempty"`
+	Issue  WatchTypeConfig   `yaml:"issue,omitempty" json:"issue,omitempty"`
+	Thread WatchThreadConfig `yaml:"thread,omitempty" json:"thread,omitempty"`
+}
+
+// WatchTypeConfig is the watch.pr / watch.issue block.
+type WatchTypeConfig struct {
+	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+}
+
+// WatchThreadConfig is the watch.thread block.
+type WatchThreadConfig struct {
+	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+	// ActiveWindow is how long a thread stays active after its last
+	// activity (a duration such as "7d"); empty means DefaultThreadActiveWindow.
+	ActiveWindow string `yaml:"active_window,omitempty" json:"active_window,omitempty"`
+}
+
+// SweepConfig is config.yaml's sweep block (the rolling re-hydration sweep).
+type SweepConfig struct {
+	// MaxAge is how stale a row may be before the sweep re-hydrates it
+	// (a duration such as "6h"); empty means DefaultSweepMaxAge.
+	MaxAge string `yaml:"max_age,omitempty" json:"max_age,omitempty"`
+	// MaxPerPoll caps sweep re-hydrations per poll; nil means
+	// DefaultSweepMaxPerPoll. A pointer so an explicit 0 is rejected rather
+	// than mistaken for unset.
+	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
+}
+
+// HydrationConfig is config.yaml's hydration block.
+type HydrationConfig struct {
+	// MaxPerPoll caps hydrations per poll; nil means
+	// DefaultHydrationMaxPerPoll.
+	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
+}
+
+// WatchQueries returns the configured pg-connector query names for an entity
+// type ("pr", "issue" or "thread"); nil for a type with none or an unknown
+// type.
+func (c *Config) WatchQueries(entityType string) []string {
+	switch entityType {
+	case "pr":
+		return c.Watch.PR.Queries
+	case "issue":
+		return c.Watch.Issue.Queries
+	case "thread":
+		return c.Watch.Thread.Queries
+	}
+	return nil
+}
+
+// ThreadActiveWindow returns watch.thread.active_window (default 7 days).
+func (c *Config) ThreadActiveWindow() time.Duration {
+	return durationOrDefault(c.Watch.Thread.ActiveWindow, DefaultThreadActiveWindow)
+}
+
+// SweepMaxAge returns sweep.max_age (default 6h).
+func (c *Config) SweepMaxAge() time.Duration {
+	return durationOrDefault(c.Sweep.MaxAge, DefaultSweepMaxAge)
+}
+
+// SweepMaxPerPoll returns sweep.max_per_poll (default 20).
+func (c *Config) SweepMaxPerPoll() int {
+	if c.Sweep.MaxPerPoll == nil {
+		return DefaultSweepMaxPerPoll
+	}
+	return *c.Sweep.MaxPerPoll
+}
+
+// HydrationMaxPerPoll returns hydration.max_per_poll (default 50).
+func (c *Config) HydrationMaxPerPoll() int {
+	if c.Hydration.MaxPerPoll == nil {
+		return DefaultHydrationMaxPerPoll
+	}
+	return *c.Hydration.MaxPerPoll
+}
+
+// ChangeLogRetention returns change_log_retention, or ZERO when unset so the
+// caller passes zero to (*Store).PruneChangeLog and the store's default
+// applies.
+func (c *Config) ChangeLogRetention() time.Duration {
+	return durationOrDefault(c.ChangeLogRetentionRaw, 0)
+}
+
+// ConsumerStaleAfter returns consumer_stale_after, or ZERO when unset (see
+// ChangeLogRetention).
+func (c *Config) ConsumerStaleAfter() time.Duration {
+	return durationOrDefault(c.ConsumerStaleAfterRaw, 0)
+}
+
+// durationOrDefault parses a value already validated by finalize; an empty
+// or (impossible after validation) unparseable value yields def.
+func durationOrDefault(v string, def time.Duration) time.Duration {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	d, err := parseDayDuration(v)
+	if err != nil {
+		return def
+	}
+	return d
+}
+
+// parseDayDuration is time.ParseDuration plus a leading whole-or-fractional
+// day component: "7d", "14d", "1d12h". The result MUST be positive.
+func parseDayDuration(v string) (time.Duration, error) {
+	v = strings.TrimSpace(v)
+	var days time.Duration
+	rest := v
+	if i := strings.Index(v, "d"); i >= 0 {
+		n, err := strconv.ParseFloat(v[:i], 64)
+		if err != nil || n < 0 || v[:i] == "" {
+			return 0, fmt.Errorf("invalid duration %q", v)
+		}
+		days = time.Duration(n * float64(24*time.Hour))
+		rest = v[i+1:]
+	}
+	var d time.Duration
+	if rest != "" {
+		var err error
+		d, err = time.ParseDuration(rest)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q: %w", v, err)
+		}
+		if d < 0 {
+			return 0, fmt.Errorf("invalid duration %q", v)
+		}
+	}
+	d += days
+	if d <= 0 {
+		return 0, fmt.Errorf("duration %q must be positive", v)
+	}
+	return d, nil
+}
+
+// validateChangeFlow validates the entity-change-flow keys; every error
+// names the offending key.
+func validateChangeFlow(cfg *Config) error {
+	for _, t := range []struct {
+		key     string
+		queries []string
+	}{
+		{"watch.pr.queries", cfg.Watch.PR.Queries},
+		{"watch.issue.queries", cfg.Watch.Issue.Queries},
+		{"watch.thread.queries", cfg.Watch.Thread.Queries},
+	} {
+		seen := map[string]bool{}
+		for i, q := range t.queries {
+			if strings.TrimSpace(q) == "" {
+				return fmt.Errorf("%s[%d]: query name must not be empty", t.key, i)
+			}
+			if seen[q] {
+				return fmt.Errorf("%s: duplicate query name %q", t.key, q)
+			}
+			seen[q] = true
+		}
+	}
+	for _, d := range []struct{ key, val string }{
+		{"watch.thread.active_window", cfg.Watch.Thread.ActiveWindow},
+		{"sweep.max_age", cfg.Sweep.MaxAge},
+		{"change_log_retention", cfg.ChangeLogRetentionRaw},
+		{"consumer_stale_after", cfg.ConsumerStaleAfterRaw},
+	} {
+		if strings.TrimSpace(d.val) == "" {
+			continue
+		}
+		if _, err := parseDayDuration(d.val); err != nil {
+			return fmt.Errorf("%s: %w", d.key, err)
+		}
+	}
+	for _, n := range []struct {
+		key string
+		val *int
+	}{
+		{"sweep.max_per_poll", cfg.Sweep.MaxPerPoll},
+		{"hydration.max_per_poll", cfg.Hydration.MaxPerPoll},
+	} {
+		if n.val != nil && *n.val <= 0 {
+			return fmt.Errorf("%s %d must be positive", n.key, *n.val)
+		}
+	}
+	return nil
 }
 
 // LinksConfig is config.yaml's links block.
@@ -429,6 +645,9 @@ func finalize(cfg *Config) error {
 	}
 	if _, _, _, err := cfg.Sync.Retry.Resolve(); err != nil {
 		return fmt.Errorf("sync.retry: %w", err)
+	}
+	if err := validateChangeFlow(cfg); err != nil {
+		return err
 	}
 	if err := validateIssueURLTemplate(cfg.Links.IssueURLTemplate); err != nil {
 		return fmt.Errorf("links.issue_url_template: %w", err)
