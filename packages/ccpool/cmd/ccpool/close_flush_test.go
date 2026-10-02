@@ -90,6 +90,13 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 		"CCPOOL_POOL=",
 		"OTEL_EXPORTER_OTLP_ENDPOINT=http://"+lis.Addr().String(),
 		"OTEL_EXPORTER_OTLP_PROTOCOL=grpc",
+		// Load-proofing (pg2-pv7ai): the child's export/shutdown deadline defaults to
+		// 10s, which a starved host (a shared builder running many nix builds at
+		// once) can blow, dropping the flush and failing this test for reasons
+		// unrelated to the close path. Raise it so only a genuine failure to
+		// flush through run() can fail the test; a healthy run still returns at
+		// once, since the export completes as soon as the collector answers.
+		"OTEL_EXPORTER_OTLP_TIMEOUT=60000",
 		flushChildEnv+"=1",
 	)
 	// Resolve the DB path the binary will use, under the same environment.
@@ -120,13 +127,20 @@ func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "close", "flush")
+	// Bound the child (a wedged one would otherwise hang until go test's 10m
+	// package deadline), but far above any plausible loaded-host runtime.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "close", "flush")
 	cmd.Env = env
 	cmd.Dir = base
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("close: %v\n%s", err, out)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	// The child has already exited, so its export completed (or failed) before
+	// this point; this wait only absorbs the collector goroutine recording the
+	// last request. Generous so load cannot turn it into a flake.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) && (!col.saw("ccpool_sessions_closed_total") || !col.saw("ccpool_session_duration_seconds")) {
 		time.Sleep(50 * time.Millisecond)
 	}
