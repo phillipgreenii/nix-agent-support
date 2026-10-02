@@ -1,0 +1,13 @@
+#compdef handoff-create
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(--unattended)--attended[A human is in the session: label the handoff human]' \
+  '(--attended)--unattended[No human present: no human label, a drain agent may pick it up]' \
+  '--session-id[Source session id]:session id:' \
+  '--title[Subject of the handoff]:title:' \
+  '--body-file[File holding the carry-over body]:file:_files' \
+  '*--label[Extra label]:label:' \
+  '--actor[Actor for the audit trail (default: the session id)]:actor:' \
+  '--bd-dir[Tracker root to run bd against]:directory:_files -/'

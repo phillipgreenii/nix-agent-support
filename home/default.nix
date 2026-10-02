@@ -31,6 +31,7 @@
     ./programs/git-tools
     ./programs/bg-tools
     ./programs/session-mode
+    ./programs/handoff-create
     ./programs/pg-pr
     ./programs/pg-connector
     ./programs/pg-ccaudit

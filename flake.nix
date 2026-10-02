@@ -485,6 +485,20 @@
               pkgs = final;
               inherit bashBuilders;
             }).wtdone.script;
+          # handoff-create (bead pg2-2xfbi): creates a handoff bead correctly
+          # (type/priority/title/first line/metadata/human label policy/task
+          # fallback/read-back) for session-wrapup:wrap-up-session and the
+          # beads-lifecycle:handoff-bead skill. Single mkBashScript tool, so --
+          # same rationale as wtdone/session-mode -- it takes
+          # `result.handoff-create.script` directly. `bd` is resolved from the
+          # ambient machine PATH at runtime; the beads package below is for the
+          # test check's real-bd throwaway-database fixture only.
+          handoff-create =
+            (import ./packages/handoff-create {
+              pkgs = final;
+              inherit bashBuilders;
+              beads = final.llm-agentsPkgs.beads or llm-agents.packages.${final.stdenv.hostPlatform.system}.beads;
+            }).handoff-create.script;
           # session-mode (bead pg2-gzrn2): per-session "which loop is running"
           # tracking (drain-beads / unblock-human-beads / wrap-up-session /
           # ...), consumed by the pb marketplace's commands, its SessionEnd
@@ -7081,6 +7095,14 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-handoff-create (bead pg2-2xfbi). Same one-line idiom as wtdone
+            # above: without this the suite (incl. the real-bd throwaway-DB
+            # tests) would run in no gate at all.
+            // (import ./packages/handoff-create {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+              beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+            }).checks
             # test-git-branch-maintenance / test-git-branch-status /
             # test-git-choose-branch (bead pg2-ly46t). Same one-line idiom as
             # pg-disk-reclaimer above: without this the suite ran in no gate
@@ -7208,6 +7230,10 @@
             # the same reason, so `nix build .#wtdone` resolves via
             # flake.packages.<system>.
             inherit (pkgs) wtdone;
+            # handoff-create is likewise an overlay-only attr (single mkBashScript
+            # tool holding just the script derivation) -- re-exported so
+            # `nix build .#handoff-create` resolves via flake.packages.<system>.
+            inherit (pkgs) handoff-create;
             # codeburn is a manual-bump npm package (not Go/nix-update); re-exported so
             # `nix build .#codeburn` resolves it via flake.packages.<system>.
             inherit (pkgs) codeburn;
