@@ -63,10 +63,28 @@ import (
 // SUBSET of bare `bd create`, which the already-unconditionally-approved
 // `bd` entry below covers regardless of flags — so approving this basename
 // is no more permissive than that existing entry.
+//
+// pg-hooks and pre-commit-fix (bead pg2-pla9d.17, Task 13 of the per-clone
+// hook bundle plan) belong here for the same "behavior FIXED across every
+// consumer, no more permissive than an already-approved entry" reason.
+// `pg-hooks` (phillipg-nix-repo-base modules/pg-hooks) has exactly five
+// subcommands: `status`, `list` and `explain` are read-only; `run <stage>`
+// drives the clone's own bundled `prek` (already unconditionally approved
+// above, including `prek run` with arbitrary args, so `pg-hooks run [--
+// prek-args]` is no wider); `fix` runs the repo's declared fixers
+// (formatters) over the STAGED files and `git add`s only the files a fixer
+// changed, refusing during a merge/rebase/cherry-pick — its effect surface is
+// the same as running the repo's formatter then `git add` on those paths, and
+// it never commits, pushes or touches unstaged/untracked files. Any other
+// first argument exits 2 with a usage error. `pre-commit-fix` is the
+// two-line `exec pg-hooks fix "$@"` alias. Approval is by basename like every
+// other entry here (a verb-scoped split would add no safety: the whole
+// surface is bounded by the above), and nothing else in this map changes.
 var baseApprovedTools = map[string]bool{
 	"go":     true,
 	"gradle": true, "gradlew": true, "pre-commit": true, "prek": true, "bats": true, "bd": true,
 	"tilt": true, "gogate": true, "pg-go-mutate": true, "create-child-bead.sh": true,
+	"pg-hooks": true, "pre-commit-fix": true,
 }
 
 type Rule struct {

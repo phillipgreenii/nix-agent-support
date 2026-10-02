@@ -191,6 +191,67 @@ func TestBuildtools_CreateChildBeadSh_Approve(t *testing.T) {
 	}
 }
 
+// TestBuildtools_PgHooks_Approve pins the pg2-pla9d.17 (per-clone hook bundle
+// Task 13) base-tool approval for pg-hooks and its pre-commit-fix alias
+// (phillipg-nix-repo-base modules/pg-hooks). Covers every subcommand of the
+// CLI surface (status [--porcelain], list, explain, run [-- prek-args], fix)
+// plus the no-argument usage form and the pre-commit-fix alias.
+func TestBuildtools_PgHooks_Approve(t *testing.T) {
+	commands := []string{
+		"pg-hooks",
+		"pg-hooks status",
+		"pg-hooks status --porcelain",
+		"pg-hooks list",
+		"pg-hooks explain pre-commit",
+		"pg-hooks explain pre-land",
+		"pg-hooks run pre-commit",
+		"pg-hooks run pre-commit --all-files",
+		"pg-hooks run pre-commit a.nix b.md",
+		"pg-hooks run pre-land",
+		"pg-hooks run pre-land origin/main",
+		"pg-hooks run pre-push -- --verbose",
+		"pg-hooks fix",
+		"pre-commit-fix",
+	}
+	// Both the zero config (the base binary carries no consumer literals) and
+	// a consumer config must approve: these are base generic tools.
+	cfgs := map[string]*Rule{
+		"empty":    New(testPE(), configrules.BuildtoolsConfig{}),
+		"consumer": New(testPE(), zrBuildtoolsConfig(t)),
+	}
+	for name, r := range cfgs {
+		for _, cmd := range commands {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				ToolInput: mustJSON(map[string]string{"command": cmd}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != hookio.Approve {
+				t.Errorf("%s config, cmd %q: got %s, want approve", name, cmd, got.Decision)
+			}
+		}
+	}
+}
+
+// TestBuildtools_PgHooks_NeighborsStillAbstain guards "nothing else changes":
+// approval is by exact basename, so the sibling pg-hooks-* helper binaries
+// (the installer and the stub-side runner, which are not part of the approved
+// CLI surface) and look-alike names must still abstain.
+func TestBuildtools_PgHooks_NeighborsStillAbstain(t *testing.T) {
+	r := New(testPE(), configrules.BuildtoolsConfig{})
+	for _, cmd := range []string{
+		"pg-hooks-install",
+		"pg-hooks-run pre-commit",
+		"pg-hook status",
+		"pre-commit-fix-all",
+	} {
+		input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": cmd})}
+		if got := hookio.Verdict(r.Evaluate(input)); got.Decision != hookio.NoOpinion {
+			t.Errorf("cmd %q: got %s, want abstain (not an approved pg-hooks entry point)", cmd, got.Decision)
+		}
+	}
+}
+
 func TestBuildtools_Npm_Abstain(t *testing.T) {
 	r := New(testPE(), zrBuildtoolsConfig(t))
 	input := &hookio.HookInput{
