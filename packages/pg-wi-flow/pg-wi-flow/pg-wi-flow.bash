@@ -256,16 +256,85 @@ pgwf_list_unpooled() {
     <<<"$all"
 }
 
-# pgwf_cmd_next [--stage s]... -- reads the ready set, computes the target
-# (leaf or container descent), claims it, prints "id stage workflow" or
-# "none" [design: ## Configuration C-4; ## Components write-verb table row
-# for next].
+# pgwf_next_claim_id CONFIG_JSON ID QUERY_ARGS... -- the --id-scoped
+# counterpart of pgwf_cmd_next's ready-set loop: resolves and claims EXACTLY
+# this id (and, if it is a container, its own descent per "Containers") --
+# it never consults or claims any OTHER candidate from the general ready set
+# [design: ## Components, "/drain", "`<id>` works exactly one bead ...
+# ignoring the other filters"].
+#
+# This exists because `pgwf_next_resolve_target`'s leaf case (case 1) does
+# not itself verify readiness -- it trusts its caller already filtered via
+# the ready set. `pgwf_cmd_next`'s ready-set loop upholds that invariant by
+# construction (it only ever calls resolve_target with ids it just read out
+# of the ready set); an --id caller bypasses that loop, so it must establish
+# the same invariant itself: a non-container id MUST be confirmed a member
+# of the ready set before being treated as claimable at all. A container id
+# skips that membership check and goes straight to descent, matching the
+# design's own container-id semantics ("its descent", unconditionally).
+#
+# Fixes a bug where a fixed-id `/drain <id>` run claimed (and dispatched a
+# worker against) an unrelated live bead before ever reaching <id>: the OLD
+# code routed a fixed-id run through the SAME unscoped loop below, which has
+# no id parameter at all, and only checked the RETURNED id against the
+# caller's target AFTER a claim had already happened (tc-af9ub).
+pgwf_next_claim_id() {
+  local config_json="$1" id="$2"
+  shift 2
+  local -a query_args=("$@")
+
+  if ! pgwf_tracker_has_label "$id" container; then
+    local ready_json member
+    ready_json="$(pgwf_tracker_ready "${query_args[@]}")" || return 1
+    member="$(jq -r --arg id "$id" '[.[] | select(.id == $id)] | length' <<<"$ready_json")"
+    if [[ $member -eq 0 ]]; then
+      echo none
+      return 0
+    fi
+  fi
+
+  local target
+  target="$(pgwf_next_resolve_target "$config_json" "$id" "${query_args[@]}")" || return 1
+  if [[ -z $target ]]; then
+    echo none
+    return 0
+  fi
+
+  local target_stage claim_actor
+  target_stage="$(pgwf_effective_stage_name "$config_json" "$target")" || return 1
+  claim_actor="$(pgwf_current_actor "$target_stage")" || return 1
+
+  if pgwf_tracker_try_claim "$target" "$claim_actor"; then
+    local workflow
+    workflow="$(pgwf_workflow_for "$config_json" "$target")" || return 1
+    printf '%s %s %s\n' "$target" "$target_stage" "$workflow"
+    return 0
+  fi
+
+  # lost race: this run is scoped to exactly one id, so there is no next
+  # candidate to fall through to.
+  echo none
+}
+
+# pgwf_cmd_next [--stage s]... [--id ID] -- reads the ready set, computes
+# the target (leaf or container descent), claims it, prints
+# "id stage workflow" or "none" [design: ## Configuration C-4; ## Components
+# write-verb table row for next]. With --id, scopes to exactly that one
+# bead via pgwf_next_claim_id instead of iterating the general ready set
+# [design: ## Components, "/drain", "`<id>` ... ignoring the other
+# filters"] -- --stage is accepted but ignored in that mode, matching the
+# design's "ignoring the other filters" rule for a fixed-id run.
 pgwf_cmd_next() {
   local -a stage_args=()
+  local target_id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --stage)
       stage_args+=("$2")
+      shift 2
+      ;;
+    --id)
+      target_id="$2"
       shift 2
       ;;
     *)
@@ -279,10 +348,17 @@ pgwf_cmd_next() {
   config_json="$(pgwf_config_effective)" || return 1
 
   local -a query_args
-  if [[ ${#stage_args[@]} -gt 0 ]]; then
+  if [[ -n $target_id ]]; then
+    mapfile -t query_args < <(pgwf_query_build "$config_json" default)
+  elif [[ ${#stage_args[@]} -gt 0 ]]; then
     mapfile -t query_args < <(pgwf_query_build "$config_json" stage "${stage_args[@]}")
   else
     mapfile -t query_args < <(pgwf_query_build "$config_json" default)
+  fi
+
+  if [[ -n $target_id ]]; then
+    pgwf_next_claim_id "$config_json" "$target_id" "${query_args[@]}"
+    return $?
   fi
 
   local iteration_bound

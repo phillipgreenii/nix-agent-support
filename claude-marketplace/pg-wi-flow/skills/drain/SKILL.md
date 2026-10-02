@@ -60,13 +60,13 @@ returned array, `pg-wi-flow release <id>`. Print `released N stale reservation(s
 **Step 1 — dispatch.**
 
 Dispatch ONE `dispatcher` subagent (Agent tool, `subagent_type: "dispatcher"`) with ONLY the
-flags you were given (`--stage`, and attended/unattended as resolved above) — never anything
-else, and never the id filter (a fixed `<id>` run still goes through `next`'s normal ready-set
-selection each iteration, then you personally check whether that id is what came back — the
-dispatcher itself is not told about the `<id>` restriction; if the item that comes back isn't
-`<id>`, treat this iteration as a `none` for the purposes of the `<id>`-run's own stop
-condition, and keep iterating). Read the ONE line it reports back. Context cost per item: one
-line — do not read anything else out of the dispatcher's work.
+flags you were given — a fixed `<id>` run passes `--id <id>` (and nothing else: no `--stage`,
+no `--attended`/`--unattended`, per "ignoring every other filter" above); otherwise pass
+`--stage`/attended-unattended as resolved above. The dispatcher runs `pg-wi-flow next --id
+<id>` (or plain `next [--stage s]...` with no `<id>`) — `next --id` claims EXACTLY that one
+bead (or its container descent) and never any other candidate, so there is no need to check
+what came back against `<id>` yourself. Read the ONE line it reports back. Context cost per
+item: one line — do not read anything else out of the dispatcher's work.
 
 With `--concurrency n` (n > 1): keep `n` dispatcher+worker pairs in flight at once. Dispatch
 up to `n` dispatcher subagents together (multiple Agent tool calls in a single message, so

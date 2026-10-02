@@ -228,6 +228,52 @@ show_fixture() {
   [ "$output" = "none" ]
 }
 
+# --- cmd_next --id: scoped to exactly one bead (tc-af9ub) ---
+
+@test "cmd_next --id: claims exactly the requested leaf when it is a member of the ready set" {
+  printf '[{"id":"tc-other"},{"id":"tc-target"}]' >"$MOCK_BD_READY_DIR/default.json"
+  show_fixture tc-target '{"id":"tc-target","labels":["stage:implement"],"metadata":{}}'
+  run pgwf_cmd_next --id tc-target
+  [ "$status" -eq 0 ]
+  [ "$output" = "tc-target implement $PGWF_NULL_WORKFLOW_NAME" ]
+  run grep '^update tc-other' "$MOCK_BD_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "cmd_next --id: none when the requested id is NOT a member of the ready set, and no other candidate is ever claimed" {
+  # Regression test for tc-af9ub: the ready set has a real, unrelated
+  # candidate (tc-other) -- the OLD code (no --id mode) would have claimed
+  # and reported IT instead of the id the caller actually asked for.
+  printf '[{"id":"tc-other"}]' >"$MOCK_BD_READY_DIR/default.json"
+  show_fixture tc-target '{"id":"tc-target","labels":[],"metadata":{}}'
+  run pgwf_cmd_next --id tc-target
+  [ "$status" -eq 0 ]
+  [ "$output" = "none" ]
+  run grep '^update ' "$MOCK_BD_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "cmd_next --id: a container id goes straight to its own descent, independent of the general ready set" {
+  printf '[{"id":"tc-unrelated"}]' >"$MOCK_BD_READY_DIR/default.json"
+  show_fixture tc-container '{"id":"tc-container","labels":["container"],"metadata":{}}'
+  show_fixture tc-leaf '{"id":"tc-leaf","labels":[]}'
+  printf '[{"id":"tc-child","status":"open"}]' >"$MOCK_BD_CHILDREN_DIR/tc-container.json"
+  printf '[{"id":"tc-leaf"}]' >"$MOCK_BD_READY_PARENT_DIR/tc-container.json"
+  run pgwf_cmd_next --id tc-container
+  [ "$status" -eq 0 ]
+  [ "$output" = "tc-leaf work $PGWF_NULL_WORKFLOW_NAME" ]
+  run grep '^update tc-unrelated' "$MOCK_BD_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "cmd_next --id: --stage is accepted but ignored" {
+  printf '[{"id":"tc-target"}]' >"$MOCK_BD_READY_DIR/default.json"
+  show_fixture tc-target '{"id":"tc-target","labels":["stage:implement"],"metadata":{}}'
+  run pgwf_cmd_next --stage groom --id tc-target
+  [ "$status" -eq 0 ]
+  [ "$output" = "tc-target implement $PGWF_NULL_WORKFLOW_NAME" ]
+}
+
 # --- claim / release ---
 
 @test "cmd_claim: first line is still id stage workflow" {
