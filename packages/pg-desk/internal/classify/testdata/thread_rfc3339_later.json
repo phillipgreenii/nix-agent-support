@@ -1,0 +1,12 @@
+{
+  "thread_show": {
+    "id": "1700000000.000100",
+    "channel": "C-sample",
+    "permalink": "https://chat.example.test/archives/C-sample/p1700000000000100",
+    "participants": ["teammate"],
+    "last_reply_at": "2026-01-01T00:09:00Z",
+    "reply_count": 2,
+    "text": "synthetic root message",
+    "as_of": "2026-01-01T00:11:00Z"
+  }
+}
