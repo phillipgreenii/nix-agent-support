@@ -35,6 +35,10 @@ let
   renderedOpen = lib.filterAttrs (_: v: v != null) {
     chrome_bin = cfg.open.chromeBin;
   };
+  # links (bead pg2-apuyx): each key only when set.
+  renderedLinks = lib.filterAttrs (_: v: v != null) {
+    issue_url_template = cfg.links.issueUrlTemplate;
+  };
   # sync.retry (bead pg2-xb6fs): each key only when set, so pg-desk's own
   # defaults (10 retries, 1m initial backoff, 30m cap) apply otherwise.
   renderedSyncRetry = lib.filterAttrs (_: v: v != null) {
@@ -87,7 +91,8 @@ let
   // lib.optionalAttrs (cfg.heartbeatPeriod != null) { heartbeat_period = cfg.heartbeatPeriod; }
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
   // lib.optionalAttrs (renderedServe != { }) { serve = renderedServe; }
-  // lib.optionalAttrs (renderedOpen != { }) { open = renderedOpen; };
+  // lib.optionalAttrs (renderedOpen != { }) { open = renderedOpen; }
+  // lib.optionalAttrs (renderedLinks != { }) { links = renderedLinks; };
 in
 {
   # Renders pg-desk's config.yaml from the docket design's section 7.8 key
@@ -380,6 +385,22 @@ in
           config.yaml's open.chrome_bin — the ONE operator-configured
           browser binary the composition rule (D10) permits pg-desk to
           exec besides pg-connector.
+        '';
+      };
+    };
+
+    links = {
+      issueUrlTemplate = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's links.issue_url_template: how the read-only
+          `pg-desk links` verb turns an issue-tracker key (one matching
+          ticketPatterns) into its web URL. An absolute http(s) URL with
+          exactly one `%s`, which pg-desk replaces with the URL-escaped
+          key. Null renders no template; the verb then falls back to the
+          URL stored with the issue's snapshot. Deployment-specific, so no
+          default (pg-desk validates the value at config load).
         '';
       };
     };

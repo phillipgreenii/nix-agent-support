@@ -118,6 +118,39 @@ type Config struct {
 
 	Serve ServeConfig `yaml:"serve,omitempty" json:"serve,omitempty"`
 	Open  OpenConfig  `yaml:"open,omitempty" json:"open,omitempty"`
+
+	// Links configures the read-only `pg-desk links` verb (bead pg2-apuyx).
+	Links LinksConfig `yaml:"links,omitempty" json:"links,omitempty"`
+}
+
+// LinksConfig is config.yaml's links block.
+type LinksConfig struct {
+	// IssueURLTemplate turns an issue-tracker key (one matching
+	// ticket_patterns) into its web URL: a http(s) URL containing exactly one
+	// %s, which is replaced by the URL-escaped key. Empty means no template;
+	// the verb then falls back to the URL stored with the issue's snapshot.
+	// No tracker instance name belongs in code: it arrives only here.
+	IssueURLTemplate string `yaml:"issue_url_template,omitempty" json:"issue_url_template,omitempty"`
+}
+
+// validateIssueURLTemplate checks links.issue_url_template: empty is fine;
+// otherwise it MUST be an absolute http(s) URL holding exactly one %s and no
+// other printf verb or whitespace, so a rendered link can never be a
+// non-web URI.
+func validateIssueURLTemplate(tmpl string) error {
+	if tmpl == "" {
+		return nil
+	}
+	if !strings.HasPrefix(tmpl, "http://") && !strings.HasPrefix(tmpl, "https://") {
+		return fmt.Errorf("must start with http:// or https://, got %q", tmpl)
+	}
+	if strings.ContainsAny(tmpl, " \t\r\n") {
+		return fmt.Errorf("must not contain whitespace, got %q", tmpl)
+	}
+	if strings.Count(tmpl, "%s") != 1 || strings.Count(tmpl, "%") != 1 {
+		return fmt.Errorf("must contain exactly one %%s and no other %% sequence, got %q", tmpl)
+	}
+	return nil
 }
 
 // RepoConfig is a single configured repository. Phase 9 supports exactly
@@ -396,6 +429,9 @@ func finalize(cfg *Config) error {
 	}
 	if _, _, _, err := cfg.Sync.Retry.Resolve(); err != nil {
 		return fmt.Errorf("sync.retry: %w", err)
+	}
+	if err := validateIssueURLTemplate(cfg.Links.IssueURLTemplate); err != nil {
+		return fmt.Errorf("links.issue_url_template: %w", err)
 	}
 	if cfg.Serve.Log != "" {
 		expanded, err := expandHome(cfg.Serve.Log)

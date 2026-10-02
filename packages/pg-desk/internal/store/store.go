@@ -168,6 +168,30 @@ func OpenRaw(path string) (*Store, error) {
 	return s, nil
 }
 
+// OpenReadOnly opens an EXISTING store for reading only: it never creates
+// the file or its directory, never runs a migration, never changes the
+// journal mode, and the handle rejects every write (SQLite's read-only open
+// mode plus query_only). It opens a store of any schema version, like
+// OpenRaw; the caller tolerates whatever shape it finds. A missing file is
+// an error. It exists for the read-only verbs (`links`), whose contract is
+// that they MUST NOT write the store.
+func OpenReadOnly(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(%d)&_pragma=query_only(ON)", path, busyTimeoutMillis)
+	sqlDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := sqlDB.Ping(); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
+	}
+	return &Store{sql: sqlDB, path: path}, nil
+}
+
 // Close closes the underlying handle.
 func (s *Store) Close() error { return s.sql.Close() }
 

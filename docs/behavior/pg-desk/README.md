@@ -24,7 +24,8 @@ this set and MUST NOT contradict it without a docket design amendment.
 In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes — added by Phase
 10, docket pg2-2j5ac.34), the `run` pipeline, `sweep` (bead `pg2-gznpe`'s bulk backfill over every
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
-`feedback list`/`feedback set`, `show`, `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+`feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
+links, see [`links.md`](links.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`.
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
@@ -62,6 +63,7 @@ back here — not the full list.
 | [`open.md`](open.md)                                         | `pg-desk open`                                                                                         |
 | [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                          |
 | [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                 |
+| [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links                |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                     |
 | [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                        |
 

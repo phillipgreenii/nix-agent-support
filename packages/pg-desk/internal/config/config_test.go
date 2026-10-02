@@ -47,6 +47,9 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"ci_only_attempts_threshold", "jira", "category_vocabulary",
 		"urgency", "agent_tracker_backend", "actor", "sync",
 		"heartbeat_period", "stale_after", "serve", "open",
+		// links (bead pg2-apuyx) postdates the section-7.8 table: the
+		// read-only `links` verb's URL knobs.
+		"links",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
@@ -73,6 +76,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"SyncRetryConfig", reflect.TypeOf(SyncRetryConfig{}), []string{"max_retries", "initial_backoff", "max_backoff"}},
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
+		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
 	}
 	for _, c := range cases {
 		gotSub := yamlTags(c.typ)
@@ -502,4 +506,36 @@ func writeFile(path, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func TestLoadFile_LinksIssueURLTemplate(t *testing.T) {
+	dir := t.TempDir()
+	p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\nlinks:\n  issue_url_template: https://tracker.example.invalid/browse/%s\n")
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got, want := cfg.Links.IssueURLTemplate, "https://tracker.example.invalid/browse/%s"; got != want {
+		t.Errorf("links.issue_url_template = %q; want %q", got, want)
+	}
+}
+
+func TestLoadFile_LinksIssueURLTemplateInvalidFails(t *testing.T) {
+	for name, tmpl := range map[string]string{
+		"no placeholder":         "https://tracker.example.invalid/browse/",
+		"two placeholders":       "https://tracker.example.invalid/%s/%s",
+		"non-http scheme":        "javascript:alert(%s)",
+		"relative":               "/browse/%s",
+		"other printf verb":      "https://tracker.example.invalid/%d/%s",
+		"whitespace in template": "https://tracker.example.invalid/a b/%s",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := writeYAML(t, dir, "self_login: a\nrepos:\n  - remote: o/r\nlinks:\n  issue_url_template: \""+tmpl+"\"\n")
+			_, err := LoadFile(p)
+			if err == nil || !strings.Contains(err.Error(), "links.issue_url_template") {
+				t.Fatalf("LoadFile: err = %v, want a links.issue_url_template validation error", err)
+			}
+		})
+	}
 }

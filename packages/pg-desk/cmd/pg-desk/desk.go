@@ -34,6 +34,12 @@ var deskStoreOpen = func() (*store.Store, error) { return store.Open(store.Defau
 // opening through the migrating, version-gated store.Open.
 var deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(store.DefaultPath()) }
 
+// deskStoreOpenReadOnly is the store seam for the read-only verbs (`links`):
+// it opens the existing store file without creating, migrating or writing
+// anything, in any schema state. Deliberately separate from deskStoreOpen,
+// whose store.Open creates the file and runs the migration ladder.
+var deskStoreOpenReadOnly = func() (*store.Store, error) { return store.OpenReadOnly(store.DefaultPath()) }
+
 // entityTypePR is the one entity type every command in this packet operates
 // on — Phase 9 supports PR entities only (docs/behavior/pg-desk/README.md's
 // "Scope" section); issue/thread commands are later phases.

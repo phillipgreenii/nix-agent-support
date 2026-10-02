@@ -1007,6 +1007,7 @@ MUST be live-exercised (12).
       "type": "issue",
       "id": "pg2-abc12",
       "relation": "work",
+      "url": "https://tracker.example/pg2-abc12",
       "state": "open",
       "labels": ["mine", "fbsum:ab12"],
       "metadata": { "dedup_key": "pr:acme/api#123:process-feedback:ab12" },
@@ -1017,6 +1018,7 @@ MUST be live-exercised (12).
       "type": "thread",
       "id": "C0123/1727600000.000100",
       "relation": "references",
+      "url": "https://chat.example/archives/C0123/p1727600000000100",
       "origins": [
         { "origin": "derived:thread-refs" },
         {
@@ -1038,7 +1040,10 @@ lists every link of the entity, derived or external, whichever of its two entiti
 from (6.3, S25): `relation` says how the two relate (`work` for a PR's own work items), and
 `origins` lists every claim on the link — one `derived:<extractor>` entry per extractor that finds
 it, and one `external:<actor>` entry, with `at` and an optional `reason`, per actor that added it.
-No link carries who closed a work item: no rule may depend on it (S26). `links[].assignee` (empty when
+Each link carries `url` (optional): the linked entity's own web page, from its stored snapshot
+(or, for an issue-tracker key, the configured `links.issue_url_template`); it is omitted when none
+can be determined, never empty. `show` and the read-only `pg-desk links` verb (`docs/behavior/pg-desk/links.md`)
+share this one link shape and one linked-entity read. No link carries who closed a work item: no rule may depend on it (S26). `links[].assignee` (empty when
 unclaimed) is what `fixci.failing-on-head`/`conflict.present` (7.3) read to decide whether to
 close a now-satisfied item themselves or leave it for the worker (7.4). `annotations.hidden`'s
 `{value, reason}` shape matches the real `annotation` table's `hidden`/`hidden_reason` columns
