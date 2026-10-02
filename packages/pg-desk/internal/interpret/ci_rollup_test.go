@@ -56,7 +56,7 @@ func TestComputeCIRollupHeadSHA(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"runs": tc.runs})
-			got := computeCIRollup(raw, tc.interps, tc.head)
+			got := computeCIRollup(raw, tc.interps, tc.head, nil)
 			if got.State != tc.want {
 				t.Fatalf("got %q, want %q", got.State, tc.want)
 			}

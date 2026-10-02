@@ -70,6 +70,9 @@ let
     verdict_generations = cfg.verdictGenerations;
   }
   // lib.optionalAttrs (cfg.checkInterpreters != [ ]) { check_interpreters = cfg.checkInterpreters; }
+  // lib.optionalAttrs (cfg.reviewExemptChecks != [ ]) {
+    review_exempt_checks = cfg.reviewExemptChecks;
+  }
   // lib.optionalAttrs (cfg.ciOnlyAttemptsThreshold != null) {
     ci_only_attempts_threshold = cfg.ciOnlyAttemptsThreshold;
   }
@@ -219,6 +222,19 @@ in
         config.yaml's check_interpreters list, rendered verbatim (each
         entry: patterns, type). Unconsumed by this packet's own pg-desk
         code.
+      '';
+    };
+
+    reviewExemptChecks = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        config.yaml's review_exempt_checks: CI JOB names (matched exactly,
+        case-sensitive) whose failure alone does not make a PR unreviewable.
+        When every failed job of every failed run on the PR's head is in
+        this list, the PR is treated as reviewable while its CI state still
+        reads failed. A failed run whose job results were not fetched is
+        never exempt. Empty (the default) exempts nothing.
       '';
     };
 

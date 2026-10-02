@@ -13,7 +13,7 @@
 // lines 997-1011): self_login, team_members, watch_labels, repos[]
 // (remote, beads_dir), ticket_patterns, agents[] (login, approval_regex,
 // policy), approver_allowlist, verdict_generations, check_interpreters,
-// ci_only_attempts_threshold, jira (high_priority_values, incident_labels,
+// ci_only_attempts_threshold, review_exempt_checks, jira (high_priority_values, incident_labels,
 // incident_issue_types), category_vocabulary, urgency (labels, keywords,
 // thresholds), agent_tracker_backend, actor, sync.mode, heartbeat_period,
 // stale_after, serve.addr, serve.log, and open.chrome_bin — all 21 keys are
@@ -80,6 +80,14 @@ type Config struct {
 
 	CheckInterpreters       []CheckInterpreterConfig `yaml:"check_interpreters,omitempty" json:"check_interpreters,omitempty"`
 	CIOnlyAttemptsThreshold int                      `yaml:"ci_only_attempts_threshold,omitempty" json:"ci_only_attempts_threshold,omitempty"`
+
+	// ReviewExemptChecks lists CI JOB names (matched exactly, case-sensitive)
+	// whose failure alone does not make a PR unreviewable: when every failed
+	// job of every failed run on the PR's head is in this list, the PR is
+	// treated as reviewable even though its CI state still reads "failure".
+	// Empty (the default) exempts nothing. Deployment-specific names are
+	// supplied here, never hard-coded.
+	ReviewExemptChecks []string `yaml:"review_exempt_checks,omitempty" json:"review_exempt_checks,omitempty"`
 
 	// Jira enables the layered Jira priority/incident urgency signal.
 	// Unconsumed until Phase 13 (present but unused by this phase's own

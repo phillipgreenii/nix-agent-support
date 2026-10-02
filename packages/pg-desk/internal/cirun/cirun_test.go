@@ -73,3 +73,40 @@ func TestCompileExcluder_BadPatternIgnored(t *testing.T) {
 		t.Fatalf("excluder wrong: bot-1=%v other=%v", ex("bot-1"), ex("other"))
 	}
 }
+
+func TestOnlyExemptJobsFailed(t *testing.T) {
+	isExempt := CompileExempt([]string{"slow-nightly"})
+	job := func(name, conclusion string) Job { return Job{Name: name, Status: "completed", Conclusion: conclusion} }
+	cases := []struct {
+		name string
+		c    Counted
+		want bool
+	}{
+		{"only exempt failed", Counted{Run: Run{Jobs: []Job{job("slow-nightly", "failure"), job("lint", "success")}}, Outcome: Failed}, true},
+		{"exempt and other failed", Counted{Run: Run{Jobs: []Job{job("slow-nightly", "failure"), job("lint", "failure")}}, Outcome: Failed}, false},
+		{"jobs not fetched", Counted{Run: Run{}, Outcome: Failed}, false},
+		{"no failed job in a failed run", Counted{Run: Run{Jobs: []Job{job("slow-nightly", "success")}}, Outcome: Failed}, false},
+		{"run not failed", Counted{Run: Run{Jobs: []Job{job("slow-nightly", "failure")}}, Outcome: Passed}, false},
+		{"exact match only", Counted{Run: Run{Jobs: []Job{job("slow-nightly-2", "failure")}}, Outcome: Failed}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.c.OnlyExemptJobsFailed(isExempt); got != tc.want {
+			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+	if CompileExempt(nil)("slow-nightly") {
+		t.Error("empty exempt list must exempt nothing")
+	}
+}
+
+func TestEvaluate_DecodesJobs(t *testing.T) {
+	r := run("PR Checks", "failure", "h", "1", 1)
+	r["jobs"] = []map[string]any{{"id": "9", "name": "slow-nightly", "status": "completed", "conclusion": "failure", "url": "u"}}
+	got := Evaluate(payload(t, r, run("Plain", "failure", "h", "2", 1)), nil, "h")
+	if len(got) != 2 || len(got[0].Jobs) != 1 || got[0].Jobs[0].Name != "slow-nightly" || got[0].Jobs[0].ID != "9" {
+		t.Fatalf("jobs not decoded: %+v", got)
+	}
+	if got[1].Jobs != nil {
+		t.Fatalf("a run without jobs must stay not-fetched (nil): %+v", got[1].Jobs)
+	}
+}

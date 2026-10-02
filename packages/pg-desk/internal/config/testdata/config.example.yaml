@@ -37,6 +37,9 @@ check_interpreters:
 
 ci_only_attempts_threshold: 3
 
+# CI job names whose failure alone does not make a PR unreviewable.
+review_exempt_checks: [slow-nightly]
+
 jira:
   high_priority_values: [Highest, High]
   incident_labels: [incident]

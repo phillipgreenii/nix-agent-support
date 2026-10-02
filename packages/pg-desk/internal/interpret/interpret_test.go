@@ -143,7 +143,7 @@ func TestScoreUrgency(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{
 			"runs": []map[string]any{{"name": "policy-bot: x", "status": "completed", "conclusion": "failure"}},
 		})
-		ci := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}}}, "")
+		ci := computeCIRollup(raw, []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}}}, "", nil)
 		score, reasons := scoreUrgency(prShow{Title: "x"}, nil, ci, nil)
 		if score != 0 || len(reasons) != 0 {
 			t.Fatalf("got score=%d reasons=%v; want 0/[] (excluded check must not count)", score, reasons)
@@ -319,7 +319,7 @@ func TestComputeCIRollup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := computeCIRollup(tt.raw, nil, "").State; got != tt.want {
+			if got := computeCIRollup(tt.raw, nil, "", nil).State; got != tt.want {
 				t.Errorf("computeCIRollup(%s) = %q; want %q", tt.raw, got, tt.want)
 			}
 		})

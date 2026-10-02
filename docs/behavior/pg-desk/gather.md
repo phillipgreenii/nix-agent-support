@@ -15,6 +15,12 @@ sync — MUST carry the beads backend's workspace variable (`PG_CONNECTOR_ISSUE_
 falling back to `BEADS_DIR`) for the PR's own repository, because that backend refuses to run
 without one.
 
+The `ci list` payload is stored verbatim with the PR's facts, so any per-job results it carries
+travel with it (no separate store field or migration). Job results are optional: pg-connector
+attaches them only to completed, non-passing runs on the PR's current head, so an absent `jobs`
+list means "not fetched", never "no jobs". [`interpret.md`](interpret.md)'s review-exempt checks
+rule reads them and treats their absence as not exempt.
+
 **Per-run budget.** `pr files` and `pr commits` are keyed by `head_sha` in the store and are not
 re-fetched when the head is unchanged. A `sweep` run skips stage 1 entirely for an entity whose
 content hash is unchanged since its last run.

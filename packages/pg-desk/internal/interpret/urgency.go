@@ -202,15 +202,40 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 // convention for other not-yet-consumed keys.
 
 type ciRollupResult struct {
-	State string // none | pending | success | failure
+	// State is the display/rollup state: none | pending | success | failure.
+	// It is NEVER softened by review_exempt_checks -- a failing exempt job
+	// still reads "failure" here (and in every display of CI).
+	State string
+
+	// reviewState, when non-empty, overrides State for review-blocking
+	// decisions only (see ReviewState). It is set only when State is
+	// "failure" and every failed run is provably failing solely because of
+	// review-exempt jobs.
+	reviewState string
+}
+
+// ReviewState is the CI state the review-blocking decisions (panel
+// "blocked", ready-to-promote) consult -- the single place the
+// review_exempt_checks rule applies. It equals State unless every failed run
+// is provably failing only because of review-exempt jobs, in which case those
+// failures are set aside: "pending" if other runs are still in flight,
+// otherwise "success". Absent job data never exempts a failure.
+func (r ciRollupResult) ReviewState() string {
+	if r.reviewState != "" {
+		return r.reviewState
+	}
+	return r.State
 }
 
 // computeCIRollup rolls the `pg-connector ci list` fan-out up to one state.
 // Which runs count (head-SHA only, newest per workflow name, check_interpreters
 // exclusions) is decided by internal/cirun, shared with the `links` verb so a
-// menu's build links and this rollup never disagree.
-func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string) ciRollupResult {
-	var passed, failed, pending int
+// menu's build links and this rollup never disagree. reviewExempt is config
+// review_exempt_checks (exact job names); it never changes State, only the
+// result's ReviewState.
+func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string, reviewExempt []string) ciRollupResult {
+	isExempt := cirun.CompileExempt(reviewExempt)
+	var passed, failed, pending, exemptFailed int
 	for _, r := range cirun.Evaluate(raw, interpreters, headSHA) {
 		switch r.Outcome {
 		case cirun.Pending:
@@ -219,11 +244,23 @@ func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreter
 			passed++
 		default:
 			failed++
+			if r.OnlyExemptJobsFailed(isExempt) {
+				exemptFailed++
+			}
 		}
 	}
 	switch {
 	case failed > 0:
-		return ciRollupResult{State: "failure"}
+		res := ciRollupResult{State: "failure"}
+		if exemptFailed == failed {
+			// Every failure is exempt: review sees the rest of the rollup.
+			if pending > 0 {
+				res.reviewState = "pending"
+			} else {
+				res.reviewState = "success"
+			}
+		}
+		return res
 	case pending > 0:
 		return ciRollupResult{State: "pending"}
 	case passed > 0:

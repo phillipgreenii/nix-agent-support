@@ -30,8 +30,8 @@ and MUST NOT use an LLM for any step below.
 - **Match reasons** — recomputed from facts each run, never from which named query returned the
   PR: author in the team-members list, a review requested of self, a self review already exists,
   or the PR's labels intersect the configured watch labels.
-- **Ready-to-promote** — a stored flag (own PR, not co-owned, draft, not WIP, checks green, no bot
-  disapproval, no merge conflict). It is recorded, not acted on — see "Out of scope" below.
+- **Ready-to-promote** — a stored flag (own PR, not co-owned, draft, not WIP, checks green — judged
+  by the same review-exempt rule as "blocked" below — no bot disapproval, no merge conflict). It is recorded, not acted on — see "Out of scope" below.
 - **Panel placement** — five named panels (`team_awaiting_owner`, `team_awaiting_team`,
   `team_awaiting_me`, `mine_awaiting_me`, `mine_awaiting_team`), or no panel at all for a PR that
   is not open, a draft team PR, or a team PR with zero match reasons. Operator ruling, 2026-09-25
@@ -43,6 +43,21 @@ and MUST NOT use an LLM for any step below.
   operator ruling 2026-10-01), the bot verdict is disapproved, a non-bot reviewer currently carries a
   `CHANGES_REQUESTED` review, or there is a merge conflict. Blocked always wins over every
   assignment/approval check below.
+  - **Review-exempt checks.** The configuration key `review_exempt_checks` (default empty) lists
+    CI job names whose failure alone does not make a PR unreviewable (operator ruling 2026-10-02).
+    A failed run is _exempt_ only when pg-desk can prove it: the run's per-job results were
+    gathered, at least one job failed, and every failed job's name is in the list. When every failed
+    run on the head commit is exempt, the PR is NOT blocked by CI: it is treated as `pending` when
+    other runs are still in flight and as `success` otherwise, so it falls through to the approval
+    checks below (and, for an own draft, can be ready-to-promote). The CI rollup itself is
+    unchanged: the PR's CI state, its CI display, its `ci-failing` urgency signal, and its `build`
+    links (see [`links.md`](links.md)) still report the failure. Matching is exact and
+    case-sensitive against a **job** name: no patterns, no substrings, and a run (workflow) name is
+    never matched. Job results are optional in the gathered CI facts (only a completed, non-passing
+    run on the head commit carries them, and fetching can fail), so a failed run with no job data
+    is _not provably exempt_ and keeps the PR blocked; so does a failed run that reports no failed
+    job. Any other failed run, or any other blocker (bot disapproval, requested changes, merge
+    conflict), still blocks. With an empty list the behavior is exactly the one described above.
   - **CI green** is judged only from the PR's current head commit. Workflow runs from earlier
     pushed commits are ignored — GitHub cancels a superseded commit's in-flight runs, and those
     cancellations are not failures of the current state. Within the head commit only the newest

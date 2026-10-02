@@ -260,6 +260,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	var urgencyCfg *config.UrgencyConfig
 	var jiraCfg *config.JiraConfig
 	var checkInterpreters []config.CheckInterpreterConfig
+	var reviewExempt []string
 	var verdictGenerations []config.VerdictGeneration
 	if cfg != nil {
 		selfLogin = cfg.SelfLogin
@@ -270,6 +271,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 		urgencyCfg = cfg.Urgency
 		jiraCfg = cfg.Jira
 		checkInterpreters = cfg.CheckInterpreters
+		reviewExempt = cfg.ReviewExemptChecks
 		verdictGenerations = cfg.VerdictGenerations
 	}
 
@@ -279,7 +281,7 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 	}
 	ownership := classifyOwnership(selfLogin, pr.Author, commitAuthors)
 
-	ci := computeCIRollup(facts.CI, checkInterpreters, pr.HeadSHA)
+	ci := computeCIRollup(facts.CI, checkInterpreters, pr.HeadSHA, reviewExempt)
 
 	enrichment := computeEnrichment(pr, files, commits)
 	// scoreUrgencyWithHealth fully replaces the base-only computeUrgency

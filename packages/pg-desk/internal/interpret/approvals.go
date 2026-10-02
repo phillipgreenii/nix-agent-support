@@ -400,7 +400,10 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 	// CI blocks on failure (and on "none" -- no countable run at all -- which
 	// the 2026-10-01 ruling left as it was). A "pending" rollup does NOT
 	// block: a PR still waiting on CI falls through to the approval checks.
-	blocked := ci.State != "success" && ci.State != "pending" ||
+	// ReviewState (not State) is consulted so a failure caused solely by
+	// review-exempt jobs (config review_exempt_checks) does not block either.
+	reviewCI := ci.ReviewState()
+	blocked := reviewCI != "success" && reviewCI != "pending" ||
 		appr.BotVerdict == BotVerdictDisapproved ||
 		appr.HumanChangesRequested ||
 		pr.hasConflict()
@@ -473,7 +476,7 @@ func computeReadyToPromote(own Ownership, pr prShow, ci ciRollupResult, appr App
 	if pr.hasConflict() {
 		return false
 	}
-	if ci.State != "success" {
+	if ci.ReviewState() != "success" {
 		return false
 	}
 	if appr.BotVerdict == BotVerdictDisapproved {
