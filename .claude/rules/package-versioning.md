@@ -23,8 +23,12 @@ bump only via `update-locks.sh`. Authority: `phillipg-nix-repo-base` ADR 0006; s
 
 **Go packages** (`mkGoApp`/`mkGoBinary`) use the **gomod2nix engine** — pass
 `gomod2nixToml = ./gomod2nix.toml;`, commit that toml beside `go.mod`, and refresh deps with
-`go mod tidy && nix run github:nix-community/gomod2nix -- generate` (NOT `nix-update`; there is no
-`vendorHash` for this family). A local `replace => ../sibling` (e.g. `../claude-transcript`) is
+`packages/<pkg>/update-deps.sh` (= `go mod tidy && nix run github:nix-community/gomod2nix/<locked rev> -- generate --with-deps`;
+NOT `nix-update`; there is no `vendorHash` for this family). `--with-deps` is REQUIRED
+(`phillipg-nix-repo-base` ADR 0031): it writes the `cachePackages` list that primes the Go build
+cache, and a plain `generate` silently removes it. Every `packages/*/gomod2nix.toml` module has an
+`update-deps.sh` wrapper and is refreshed by `update-locks.sh`'s module loop; the `go-deps-wired`
+flake check fails if one is missed. A local `replace => ../sibling` (e.g. `../claude-transcript`) is
 resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Authority and the full
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
