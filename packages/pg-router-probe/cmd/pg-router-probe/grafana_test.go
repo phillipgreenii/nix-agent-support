@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,35 @@ func TestFiringAlertsFiltersToRegisteredRuleUIDs(t *testing.T) {
 	}
 	if alerts[0].RuleUID != "pg-router-liveness-down" {
 		t.Fatalf("got rule uid %q", alerts[0].RuleUID)
+	}
+}
+
+// pg2-6k0l9: pg2-irowq split session-budget hard-stops into their own
+// pg-router-budget-stops rule; the default registered set must let a firing
+// instance of it through the Grafana filter, or the probe never sees it.
+func TestRegisteredRuleUIDsPassBudgetStopsAlert(t *testing.T) {
+	instances := []map[string]any{
+		{
+			"labels": map[string]string{"__alert_rule_uid__": "pg-router-budget-stops", "role": "review"},
+			"status": map[string]string{"state": "active"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(instances)
+	}))
+	defer srv.Close()
+
+	client := newGrafanaClient(srv.URL, "", &http.Client{Timeout: 5 * time.Second})
+	alerts, err := client.firingAlerts(context.Background(), registeredRuleUIDs)
+	if err != nil {
+		t.Fatalf("firingAlerts: %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].RuleUID != "pg-router-budget-stops" {
+		t.Fatalf("expected the budget-stops alert to pass the default filter, got %+v", alerts)
+	}
+	findings := checkGrafanaAlerts(alerts)
+	if len(findings) != 1 || !strings.HasPrefix(findings[0].Fingerprint, "pg-router-budget-stops|") {
+		t.Fatalf("unexpected findings: %+v", findings)
 	}
 }
 

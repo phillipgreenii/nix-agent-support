@@ -53,17 +53,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// registeredRuleUIDs are the 4 Grafana rule UIDs this probe is scoped to
+// registeredRuleUIDs are the Grafana rule UIDs this probe is scoped to
 // [design: Contract's "Grafana's alerting API" bullet]. Overridable via
 // --rule-uid so tests/fixtures never depend on a real Grafana deployment
 // having rules by these exact names. pg2-p93c0 deleted pg-router-backlog-growing;
 // pg2-o6z19 added pg-router-queue-stalled in its place (grafana/alerting/alerts.yaml
-// in packages/pg-router).
+// in packages/pg-router). pg2-irowq split the budget-exceeded cause out of
+// pg-router-failure-rate into pg-router-budget-stops (pg2-6k0l9 registered it
+// here). pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered:
+// the probe files escalated beads/dispatches triagers, so probing triager
+// failures could feed a loop (operator decision pending).
 var registeredRuleUIDs = []string{
 	"pg-router-liveness-down",
 	"pg-router-queue-stalled",
 	"pg-router-queue-depth-growing",
 	"pg-router-failure-rate",
+	"pg-router-budget-stops",
 }
 
 func defaultSnapshotPath() string {
@@ -157,7 +162,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.grafanaToken, "grafana-token", os.Getenv("PG_ROUTER_PROBE_GRAFANA_TOKEN"), "Grafana bearer token (default from PG_ROUTER_PROBE_GRAFANA_TOKEN)")
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
-	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the 4 registered rule UIDs")
+	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the registered rule UIDs")
 	cmd.Flags().IntVar(&opts.queueDepth, "queue-depth", 0, "current queue depth reading; unset skips the queue-depth drift check (the backlog check is independent)")
 	cmd.Flags().IntVar(&opts.backlog, "backlog", 0, "current backlog reading; unset skips the backlog drift check (the queue-depth check is independent)")
 	cmd.Flags().BoolVar(&opts.backlogFromStatus, "backlog-from-status", false, "read the backlog from `pg-router status --json` (sum of queues[].depth) instead of --backlog")

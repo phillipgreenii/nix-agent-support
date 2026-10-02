@@ -12,7 +12,7 @@
 // GET {base}/api/alertmanager/grafana/api/v2/alerts, returns every
 // current alert instance with its own labels (unified alerting stamps
 // __alert_rule_uid__ onto every instance) and status.state ("active" for
-// firing, "suppressed" otherwise) — filtering to the 4 registered rule
+// firing, "suppressed" otherwise) — filtering to the registered rule
 // UIDs happens client-side here, after decode, rather than server-side
 // via a query parameter, so this client's own correctness does not
 // depend on Grafana's query-parameter support for that filter.
@@ -72,7 +72,7 @@ func newGrafanaClient(baseURL, token string, httpClient *http.Client) *grafanaCl
 // firingAlerts fetches every current alert instance and returns only
 // those whose __alert_rule_uid__ label matches one of ruleUIDs and whose
 // status is "active" (Grafana's Alertmanager-API term for firing) — the
-// filtering to the 4 registered rule UIDs this packet's own Contract
+// filtering to the registered rule UIDs this packet's own Contract
 // requires [design: "pg-router-probe run checks" item 1].
 func (c *grafanaClient) firingAlerts(ctx context.Context, ruleUIDs []string) ([]grafanaAlert, error) {
 	url := c.baseURL + "/api/alertmanager/grafana/api/v2/alerts"

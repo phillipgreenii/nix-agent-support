@@ -3,7 +3,7 @@
 // checks"]:
 //
 //  1. checkGrafanaAlerts — Grafana currently-firing alerts filtered to the
-//     4 registered rule UIDs (item 1).
+//     registered rule UIDs (item 1).
 //  2. checkQueueGrowth — queue/backlog drift vs. a persisted last-run
 //     snapshot (item 2).
 //  3. checkBinaryHash — daemon/handler binary hash sanity: an unexpected
@@ -55,7 +55,7 @@ type finding struct {
 }
 
 // checkGrafanaAlerts builds one finding per currently-firing alert already
-// filtered to the 4 registered rule UIDs (the filtering itself happens in
+// filtered to the registered rule UIDs (the filtering itself happens in
 // grafana.go's FiringAlerts, since it is a property of the Grafana query,
 // not of this decision function) [design: item 1]. A non-firing/no-op
 // input yields zero findings, not an error.
