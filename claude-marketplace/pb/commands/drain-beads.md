@@ -434,8 +434,18 @@ proceeding on currently loaded text (direct interactive invocation).`)
      ```
 
      It reuses an existing worktree or parked branch, otherwise creates
-     `.worktrees/<id>` on `drain/<id>` off the repo's primary branch, and links
-     the nix-generated pre-commit config into the worktree. Exit 0 → proceed
+     `.worktrees/<id>` on `drain/<id>` off the repo's primary branch. It asks
+     `pg-hooks status --porcelain` about the hooks and links the nix-generated
+     pre-commit config into the worktree ONLY for a legacy repo (`state=legacy`,
+     or `pg-hooks` absent/unrecognized, which is the old behavior). For a repo
+     with a per-clone hook bundle it writes nothing into the worktree: git runs
+     the hooks from the shared common dir, and the `precommit=` field of the
+     output line (`Result.Precommit` in `--json`) reports
+     `bundle|stale|missing|broken` instead of `linked|present|none`. `stale`,
+     `missing` and `broken` mean the commit's own hook run will NOT happen
+     (the stubs print one `pg-hooks:` notice and exit 0), so tell the
+     implementation subagent the commit gate is not in force rather than let
+     it report hooks as passed. Exit 0 → proceed
      (the output line names the worktree). Exit 3 → conflicting isolation state
      (someone else's checkout) — do NOT force anything; route to STUCK. Any
      other failure → transient-vs-genuine per the Rules. A
@@ -574,10 +584,10 @@ proceeding on currently loaded text (direct interactive invocation).`)
      so use this pattern verbatim:
 
      ```
-     Bash({ command: "prek run --files a.go b.go > /tmp/prek.log 2>&1; echo DONE >> /tmp/prek.log",
+     Bash({ command: "pg-hooks run pre-commit a.go b.go > /tmp/hooks.log 2>&1; echo DONE >> /tmp/hooks.log",
             run_in_background: true })
-     Monitor({ command: "until grep -q '^DONE' /tmp/prek.log; do sleep 2; done; tail -c 4000 /tmp/prek.log",
-               description: "wait for prek", timeout_ms: 600000 })
+     Monitor({ command: "until grep -q '^DONE' /tmp/hooks.log; do sleep 2; done; tail -c 4000 /tmp/hooks.log",
+               description: "wait for hooks", timeout_ms: 600000 })
      # Monitor's tool result comes back immediately as "started" — that is NOT
      # completion. Do not send a final response yet. The completion event
      # (with the tailed log) arrives later as a notification INTO this same
@@ -590,11 +600,15 @@ proceeding on currently loaded text (direct interactive invocation).`)
 
    Instruct it to: implement inside THAT worktree/set only, following repo
    conventions; COMMIT as soon as the change is ready — the commit's OWN
-   pre-commit hook run, scoped to its diff (`prek run --files <the files it
-changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
-   every hook over the whole repo and can false-block on a pre-existing
-   violation the subagent never touched), IS the first gate and is folded into
-   making the commit if `.pre-commit-config.yaml` exists — ONLY THEN run any
+   pre-commit hook run, scoped to its diff (`git add` the files, then
+   `pg-hooks run pre-commit <the files it changed>`; `prek run --files …` only
+   if `pg-hooks` is absent; never `--all-files`, which re-runs every hook over
+   the whole repo and can false-block on a pre-existing violation the subagent
+   never touched), IS the first gate and is folded into making the commit when
+   the repo has hooks (`pg-hooks status` says so; do NOT probe with
+   `test -f .pre-commit-config.yaml`, which a bundle repo fails while its hooks
+   are live) — in a bundle repo it MAY run `pg-hooks fix` after `git add` to
+   autofix the staged files — ONLY THEN run any
    gate the commit did not already cover (the targeted
    `nix build .#checks.<system>.<name>` checks relevant to its change and
    `pn workspace build` for nix repos, and the repo's tests, including a slow
@@ -775,7 +789,7 @@ changed>` / `pre-commit run --files …`, never `--all-files`, which re-runs
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - the lander is itself a dispatched (non-top-level) subagent, so if any step
-     it invokes backgrounds a command (e.g. a long `prek` run in
+     it invokes backgrounds a command (e.g. a long hook run in
      `ff-merge-to-main`'s FF-1b), IT must block on that command itself in
      THIS SAME turn via a `Monitor` until-loop call, exactly the pattern given in the
      DELEGATE step above — there is no external notification for its own

@@ -138,8 +138,8 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 **Before claiming any change is complete:**
 
-- If `.pre-commit-config.yaml` exists: the pre-commit hooks MUST pass on the changed files. The `git commit` hook run (on staged files) is the gate; validate beforehand with `prek run --files <changed files>` (or `pre-commit run --files …`). Do NOT rely on `--all-files` as the per-change gate — it duplicates the commit run, forces the slow bats/nix hooks on unrelated diffs, and can false-block on a pre-existing violation elsewhere; reserve it for a deliberate full-repo sweep.
-- If `flake.nix` exists: a full `nix flake check` is NOT a per-change or land-time gate (operator ruling, Phillip, 2026-10-01; this overrides any older rule telling an agent to run a full flake check at land). This repo has no CI, so its only automatic test runners are the commit-time `run-unit-tests` hook (`pg-test-runner`, touched projects) plus `ff-merge-to-main`'s FF-1b `prek` run over the branch diff at land — an accepted interim risk; if it lets problems through, that is the signal to bring CI back. You MAY — and SHOULD when the change touched shared infrastructure (a builder, `flake.nix` wiring, a shared library) — build the targeted checks relevant to your change in the background, e.g. `nix build .#checks.aarch64-darwin.<name> -L`.
+- If the repo has pre-commit hooks (probe with `pg-hooks status --porcelain || true` and read its `state=` line — never `test -f .pre-commit-config.yaml`, which is false for a repo with a per-clone hook bundle whose hooks are live; `127`/no `state=` line means `pg-hooks` is not installed on this machine, so ask the operator to run `pn workspace apply` and fall back to the `test -f` probe): the pre-commit hooks MUST pass on the changed files. The `git commit` hook run (on staged files) is the gate; validate beforehand with `pg-hooks run pre-commit <changed files>` (works for a bundle and for a legacy `.pre-commit-config.yaml`; `prek run --files <changed files>` only when `pg-hooks` is absent). In a bundle repo, `git add` then `pg-hooks fix` (or `pre-commit-fix`) autofixes the staged files; a `legacy` repo behaves as before (run the formatter by hand). Do NOT rely on `--all-files` as the per-change gate — it duplicates the commit run, forces the slow bats/nix hooks on unrelated diffs, and can false-block on a pre-existing violation elsewhere; reserve it for a deliberate full-repo sweep. When the state is `missing`/`broken`/`unreachable`/`relocated`, the commit-time hooks do not run (one `pg-hooks:` notice, exit 0): report that rather than claiming the hooks passed.
+- If `flake.nix` exists: a full `nix flake check` is NOT a per-change or land-time gate (operator ruling, Phillip, 2026-10-01; this overrides any older rule telling an agent to run a full flake check at land). This repo has no CI, so its only automatic test runners are the commit-time `run-unit-tests` hook (`pg-test-runner`, touched projects) plus `ff-merge-to-main`'s FF-1b `pg-hooks run pre-land` over the branch diff at land — an accepted interim risk; if it lets problems through, that is the signal to bring CI back. You MAY — and SHOULD when the change touched shared infrastructure (a builder, `flake.nix` wiring, a shared library) — build the targeted checks relevant to your change in the background, e.g. `nix build .#checks.aarch64-darwin.<name> -L`.
 
 ## File Locations
 
@@ -303,10 +303,10 @@ while editing a `*.md` file.
 
 ## Pre-commit Hook Installation
 
-When you modify the pre-commit hook configuration in `flake.nix` (the `pre-commit` block), you must re-install the hooks so the generated `.pre-commit-config.yaml` is updated:
+When you modify the pre-commit hook configuration in `flake.nix` (the `pre-commit` block), you must re-install the hooks so the generated hook configuration is refreshed:
 
 ```bash
 nix run .#install-pre-commit-hooks
 ```
 
-Run this before committing to ensure the new/changed hooks are active.
+Run this before committing to ensure the new/changed hooks are active. What it refreshes depends on the repo's mode (`pg-hooks status`): a **legacy** repo gets the gitignored, nix-generated `.pre-commit-config.yaml` symlink, as before; a repo that has cut over to the per-clone hook bundle gets a freshly rooted bundle generation under `<git-common-dir>/pg-hooks/` and nothing is written into the working tree. `state=stale` means the flake's hook inputs changed since the bundle was built. A rebuild is a nix build, so run it through `bgrun` and check it with `bgcheck`. Reference: `docs/hooks.md` in `phillipg-nix-repo-base`.

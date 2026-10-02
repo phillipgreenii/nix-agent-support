@@ -443,8 +443,9 @@ func Load() (Config, error) {
 // repoRoot: <canonical-clone-root>/.pg-router/config.toml, found by running
 // `git rev-parse --git-common-dir` FROM repoRoot (pg2-xl659 design decision,
 // operator 2026-09-10: read-through, not a per-worktree symlink-in bootstrap
-// — this deliberately does NOT follow the .pre-commit-config.yaml symlink
-// precedent this repo's own CLAUDE.md documents for a different problem).
+// — this deliberately does NOT follow the per-worktree .pre-commit-config.yaml
+// symlink precedent that legacy (pre-hook-bundle) repos use for a different
+// problem; pb drain isolate and wtnew still link it, for legacy repos only).
 // A linked worktree's own .pg-router/ is never consulted: --git-common-dir
 // always resolves to the ONE canonical clone regardless of which worktree
 // pg-router is invoked from, so there is no multi-worktree ambiguity to design

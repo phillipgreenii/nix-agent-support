@@ -23,21 +23,37 @@ immediately with "system activation must now be run as root" and does NO build/e
 
 ## The `--all-files` prohibition
 
-To validate a `.pre-commit-config.yaml`-governed change before committing, run
-`prek run --files <the changed files>` (scoped, fast) — the **commit's own hook run is the real
-gate**, since a `git commit` fires `prek`/`pre-commit` on the staged files (so `git add -A` first,
-or a generated change escapes the run). Do **NOT** use `prek`/`pre-commit run --all-files` as a
-per-change completion gate: it re-runs every hook over the whole repo — duplicating the commit
-run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated diff, and
-**false-blocking** a clean change on a pre-existing violation in a file it never touched. Reserve
-`--all-files` for a deliberate full-repo sweep, not per-change validation.
+To validate a hook-governed change before committing, run
+`pg-hooks run pre-commit <the changed files>` (scoped, fast; `git add` the files first) — the
+**commit's own hook run is the real gate**, since a `git commit` fires the hooks on the staged
+files (so `git add -A` first, or a generated change escapes the run). `pg-hooks` works in both
+modes: it runs the repo's per-clone hook bundle, or, for a repo not yet cut over
+(`pg-hooks status --porcelain` reports `state=legacy`), the `.pre-commit-config.yaml` read in place; only when
+`pg-hooks` is absent (exit `127`) fall back to `prek run --files <the changed files>`. Probe
+whether a repo has hooks with `pg-hooks status`, never `test -f .pre-commit-config.yaml` — a bundle
+repo has no such file in its working tree and its hooks are still live. For autofix before
+committing in a bundle repo, `git add` the files and then run `pg-hooks fix` (also `pre-commit-fix`;
+it touches only staged files and exits `11` listing any file with both staged and unstaged
+changes). Do **NOT** use `pg-hooks run pre-commit --all-files` (or `prek run --all-files`, or
+`pre-commit run --all-files`) as a per-change completion gate: it re-runs every hook over the whole repo —
+duplicating the commit run, forcing the slow always-on hooks (bats, nix, …) even for an unrelated
+diff, and **false-blocking** a clean change on a pre-existing violation in a file it never touched.
+Reserve `--all-files` for a deliberate full-repo sweep, not per-change validation.
 
 ## Scoping a `prek`/`pre-commit` run to a commit RANGE, not just a file list
 
 `--files <list>` (above) is right when you know exactly which files one change touched. It is the
 wrong tool for checking everything a whole BRANCH touched across several commits — hand-listing
 files across multiple commits is easy to get wrong (miss one, or include a file a later commit on
-the branch reverted). For a commit-range check, use `prek`'s diff-expression form instead:
+the branch reverted). For a commit-range check, use the branch-diff stage instead:
+
+```bash
+pg-hooks run pre-land            # the pre-commit hooks over <primary>...HEAD (the checked-out commit)
+```
+
+(`pg-hooks run pre-land [<ref>]` refuses with exit `2` unless `<ref>` is the commit checked out in
+the current worktree, because the hooks read working-tree files.) In a repo where `pg-hooks` is
+absent, `prek`'s own diff-expression form is the fallback:
 
 ```bash
 prek run --from-ref <base> --to-ref <tip>     # every file changed between the two refs
@@ -47,7 +63,7 @@ prek run --last-commit                        # shorthand for --from-ref HEAD~1 
 This still only touches files the range actually changed (same cost profile as `--files`, not
 `--all-files`) — it just computes the file list from git instead of you enumerating it. This is
 what `ff-merge-to-main`'s FF-1b step runs automatically at land time, for every repo it lands
-(`integrate-branch-support --prek-branch-diff`): `prek run --from-ref <primary> --to-ref <branch>`,
+(`integrate-branch-support --prek-branch-diff`, which delegates to `pg-hooks run pre-land`),
 verifying the branch's cumulative diff in one pass rather than trusting that each commit's own
 per-commit run summed to the same thing. Reach for the same form yourself whenever you need to
 validate more than one commit's combined changes ad hoc (e.g. after an interactive rebase, or
@@ -60,14 +76,21 @@ repo, and not a per-change gate either. This overrides any older text — a cach
 a memory file, a repo doc — that tells an agent to run a full flake check at land or before
 committing. The gates are:
 
-1. **The commit's own hook run** — `prek` on the staged files (see the `--all-files` prohibition
-   above), including the commit-time `run-unit-tests` hook (`pg-test-runner`, touched projects
-   only).
-2. **At land, `ff-merge-to-main`'s FF-1b** — `integrate-branch-support --prek-branch-diff`, the
-   commit-range `prek` check above over the whole branch diff, for every repo it lands. When the
-   worktree has no usable `.pre-commit-config.yaml` (missing, or a dangling symlink) it prints one
-   `FF-1b: no prek config in <wt>, prek not run` notice line and runs nothing; never link, copy,
-   or regenerate a config to make it run.
+1. **The commit's own hook run** — the hooks on the staged files (see the `--all-files`
+   prohibition above), including the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
+   projects only).
+2. **At land, `ff-merge-to-main`'s FF-1b** — `integrate-branch-support --prek-branch-diff`, which
+   runs `pg-hooks run pre-land` (the commit-range check above) over the whole branch diff, for
+   every repo it lands. `pg-hooks` picks the hook source itself: the clone's bundle, or the legacy
+   `.pre-commit-config.yaml` for a repo not yet cut over. Two cases skip the check with a notice
+   instead of failing the land, and FF-1b records the notice line verbatim in its outcome report:
+   - No bundle and no usable legacy config (`pg-hooks` exit `13`): the one `pg-hooks:` notice line,
+     for example `pg-hooks: no hook bundle for <repo>; pre-land hooks not run. Fix: (cd <canonical> && nix run .#install-pre-commit-hooks)`.
+   - `pg-hooks` not installed (exit `127`): `pg-hooks not installed on this machine; ask the operator to run pn workspace apply`.
+
+   Never link, copy, or regenerate a config, and never build a bundle, to make the check run. A
+   hook failure (exit `10`) or any other non-zero exit halts the land as
+   `stopped:precommit-branch-diff-failed`.
 
 Beyond those, an agent MAY — and SHOULD when it touched shared infrastructure (a builder, a flake
 module, a shared library) — build the targeted checks relevant to its change, in the background
@@ -79,7 +102,7 @@ ran, and several concurrent sessions each running one saturated the machine.
 Repos with cloud CI (`phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`) keep CI as
 the whole-repo gate. Accepted interim risk: `phillipgreenii-nix-agent-support` and
 `phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners are the commit-time
-`run-unit-tests` hook plus FF-1b's `prek` run on the branch diff — the whole-repo `checks.*`
+`run-unit-tests` hook plus FF-1b's `pg-hooks run pre-land` over the branch diff — the whole-repo `checks.*`
 derivations (`checks.pre-commit`, every `*-go-tests`, golangci lint, spec-drift) run only when an
 agent builds them. If that lets problems through, that is the signal to bring CI back.
 
@@ -87,7 +110,7 @@ agent builds them. If that lets problems through, that is the signal to bring CI
 
 If a repo ships its own `./check.sh` (or similar) convenience script, a clean run of it does NOT
 prove the checks relevant to your change build. A `check.sh` that passes `--no-build` skips
-derivation builds entirely, and — like the commit-time `prek`/`pre-commit` hook — it only lints
+derivation builds entirely, and — like the commit-time pre-commit hooks — it only lints
 the files it targets, not the whole repo. A gate can be fully green on `check.sh` and `pre-commit`
 while a repo-wide lint or a consumer-input-alignment derivation the narrower script never runs
 still fails. When you need confidence beyond the commit hooks, build the actual

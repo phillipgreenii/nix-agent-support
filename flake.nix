@@ -1631,12 +1631,27 @@
                     echo "FAIL: integrate-branch-support.bash no longer delegates FF-1b to pg-hooks run pre-land" >&2
                     exit 1
                   fi
-                  for retired in "$ff" "$bashsrc" "$shsrc"; do
+                  for retired in "$ff" "$bashsrc" "$shsrc" "$surface/home/programs/agent-rules/nix-how-to.md" "$surface/home/programs/agent-rules/pgii-agent-rules.md" "$surface/CLAUDE.md" "$surface/claude-marketplace/pb/commands/drain-beads.md"; do
                     if grep -qF -- 'FF-1b: no prek config in' "$retired"; then
                       echo "FAIL: $retired still carries the retired FF-1b prek-config notice" >&2
                       exit 1
                     fi
                   done
+                  rules="$surface/home/programs/agent-rules/pgii-agent-rules.md"
+                  for want in 'pg-hooks status --porcelain' 'pg-hooks fix' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply'; do
+                    if ! grep -qF -- "$want" "$rules"; then
+                      echo "FAIL: the core agent rules lost the pg-hooks dual-mode text: $want" >&2
+                      exit 1
+                    fi
+                  done
+                  if grep -qF -- 'ask the operator to run pn workspace apply' "$rules" && grep -qF -- 'Do NOT probe with `test -f .pre-commit-config.yaml`' "$rules"; then :; else
+                    echo "FAIL: the core agent rules lost the never-probe-with-test-f rule for hook presence" >&2
+                    exit 1
+                  fi
+                  if ! grep -qF -- 'pb drain isolate' "$surface/claude-marketplace/pb/commands/drain-beads.md" || ! grep -qF -- 'ONLY for a legacy repo' "$surface/claude-marketplace/pb/commands/drain-beads.md"; then
+                    echo "FAIL: drain-beads.md lost the legacy-only wording for pb drain isolate's pre-commit config link" >&2
+                    exit 1
+                  fi
                   if ! grep -qF 'is NOT a per-change or land-time gate' "$surface/home/programs/agent-rules/pgii-agent-rules.md"; then
                     echo "FAIL: the core agent rules lost the 'full nix flake check is NOT a per-change or land-time gate' rule" >&2
                     exit 1
