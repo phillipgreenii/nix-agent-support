@@ -304,7 +304,7 @@ func sawtoothSeries(peak float64, ends []float64) []sample {
 		}
 		for i := 0; i < 60; i++ {
 			m := float64(i) / 2
-			v := peak
+			var v float64
 			if m >= drain {
 				v = end
 			} else {
