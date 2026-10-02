@@ -36,6 +36,9 @@ it by searching disk is both slower and redundant.
   `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the
   default so the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back
   in explicitly).
+  ALWAYS pass `--actor <your-session-id>[-<role>]` (your own explicit agent identity, the same one
+  you claim with): the script forwards it to both its `bd create` and `bd defer`, so packets are
+  attributed to you and not to the operator's git `user.name`.
 - `scripts/audit-docket-label-leak.sh` — read-only; run it once after each batch of
   `create-packet` calls, before `release-set`. It calls
   `bd list --label docket --status all -n 0 --json` and flags every returned bead whose

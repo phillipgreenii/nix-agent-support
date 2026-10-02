@@ -79,6 +79,30 @@ MOCK
   [[ "$create_call" == *"--labels extra-label"* ]]
 }
 
+@test "--actor reaches BOTH bd create and bd defer" {
+  mock_bd "xyz-1.11"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "criteria" --actor "sess-123-plan-decomposer"
+  [ "$status" -eq 0 ]
+  [ "$output" = "xyz-1.11" ]
+  create_call="$(grep '^create ' "$CALL_LOG")"
+  defer_call="$(grep '^defer ' "$CALL_LOG")"
+  [[ "$create_call" == *"--actor sess-123-plan-decomposer"* ]]
+  [ "$defer_call" = "defer xyz-1.11 --actor sess-123-plan-decomposer" ]
+}
+
+@test "without --actor, neither bd call carries an --actor flag" {
+  mock_bd "xyz-1.12"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "criteria"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$CALL_LOG")" != *"--actor"* ]]
+}
+
+@test "--actor without a value is a usage error" {
+  run "$SCRIPT" --parent xyz-1 --actor
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--actor requires a value"* ]]
+}
+
 @test "--acceptance-file reads acceptance text from a file" {
   mock_bd "xyz-1.9"
   run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"

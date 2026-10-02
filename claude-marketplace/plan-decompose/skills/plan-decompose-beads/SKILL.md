@@ -78,8 +78,14 @@ Run the helper script — do NOT hand-type a `bd create`/`bd defer` pair for a p
 ```bash
 claude-marketplace/plan-decompose/scripts/create-packet.sh \
   --parent <epic> --title "<title>" --body-file <content-file> \
-  --acceptance "<criteria>" --metadata '<json>'
+  --acceptance "<criteria>" --metadata '<json>' --actor "<session-id>[-<role>]"
 ```
+
+`--actor` is the caller's explicit agent identity (B-5): the script passes it to BOTH the inner
+`bd create` and `bd defer`. A caller MUST pass it. Without it `bd` records its default actor
+(`BEADS_ACTOR`, else `git user.name`), which in this workspace is the operator's own name, so
+packets created by an agent would be indistinguishable from the operator's in the audit trail
+(`pg2-0pnww`).
 
 `--no-inherit-labels` is baked into this script as its DEFAULT — it is not a flag typed at
 the call site, so it cannot be dropped by accident. Without it, a packet would inherit the

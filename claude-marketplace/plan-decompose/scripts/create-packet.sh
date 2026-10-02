@@ -30,13 +30,13 @@ Usage:
   create-packet.sh --parent <docket-id> --title <title> --body-file <file>
                     (--acceptance <text> | --acceptance-file <file>)
                     [--metadata <json>] [--label <labels>]
-                    [--allow-inherit-labels]
+                    [--allow-inherit-labels] [--actor <id>]
 
 Runs, in order:
   bd create "<title>" -t task --parent <docket-id> --no-inherit-labels \
     --body-file <file> --acceptance "<text>" [--metadata <json>] \
-    [--labels <labels>] --silent
-  bd defer <new-id>
+    [--labels <labels>] [--actor <id>] --silent
+  bd defer <new-id> [--actor <id>]
 
 --no-inherit-labels is ALWAYS passed unless --allow-inherit-labels is given
 explicitly. That is the whole point of this script: a caller who wants the
@@ -59,6 +59,13 @@ Options:
                              normally carry no explicit labels of their own
   --allow-inherit-labels     Explicit opt-out: omit --no-inherit-labels and
                              let the packet inherit the parent's labels
+  --actor <id>              Explicit agent actor identity (e.g. the session id,
+                             optionally suffixed with a role). Passed to BOTH
+                             bd create and bd defer so the audit trail records
+                             the agent, not the operator's git user.name.
+                             Callers that are agents SHOULD always pass it;
+                             when omitted, bd falls back to BEADS_ACTOR, then
+                             git user.name.
   -h, --help                 Show this help message
 HELP
 }
@@ -76,6 +83,7 @@ ACCEPTANCE_FILE=""
 METADATA=""
 LABELS=""
 ALLOW_INHERIT=0
+ACTOR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -122,6 +130,11 @@ while [[ $# -gt 0 ]]; do
     ALLOW_INHERIT=1
     shift
     ;;
+  --actor)
+    [[ $# -ge 2 ]] || die "--actor requires a value" 2
+    ACTOR="$2"
+    shift 2
+    ;;
   *)
     die "unknown option: $1" 2
     ;;
@@ -153,10 +166,14 @@ if [[ $ALLOW_INHERIT -eq 0 ]]; then
 fi
 [[ -n $METADATA ]] && ARGS+=(--metadata "$METADATA")
 [[ -n $LABELS ]] && ARGS+=(--labels "$LABELS")
+[[ -n $ACTOR ]] && ARGS+=(--actor "$ACTOR")
 
 NEW_ID="$(bd "${ARGS[@]}")" || die "bd create failed"
 [[ -n $NEW_ID ]] || die "bd create returned no id"
 
-bd defer "$NEW_ID" >/dev/null || die "bd defer $NEW_ID failed (packet $NEW_ID was created but is NOT held)"
+DEFER_ARGS=(defer "$NEW_ID")
+[[ -n $ACTOR ]] && DEFER_ARGS+=(--actor "$ACTOR")
+
+bd "${DEFER_ARGS[@]}" >/dev/null || die "bd defer $NEW_ID failed (packet $NEW_ID was created but is NOT held)"
 
 echo "$NEW_ID"

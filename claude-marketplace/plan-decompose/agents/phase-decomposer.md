@@ -54,6 +54,9 @@ the rest of the run; never `find` or `glob` the filesystem for a script by name.
   `plan-decompose`'s own `decompose` steps. It bakes `--no-inherit-labels` in as the default so
   the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back in
   explicitly).
+  ALWAYS pass `--actor <your-session-id>[-<role>]` (your own explicit agent identity, the same one
+  you claim with): the script forwards it to both its `bd create` and `bd defer`, so packets are
+  attributed to you and not to the operator's git `user.name`.
 - `scripts/audit-docket-label-leak.sh` — read-only; once your handoff continues into
   `plan-decompose`'s own `decompose` steps and you start calling `create-packet`, run this once
   after each batch, before `release-set`. It calls
