@@ -38,10 +38,6 @@ func TestLoadSnapshotVersionMismatch(t *testing.T) {
 
 func TestSaveAndLoadSnapshotRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "snapshot.json")
-	// saveSnapshot's own os.WriteFile does not create parent dirs -- this
-	// test proves that constraint too, by pre-creating the dir, since
-	// run.go's own caller is responsible for mkdir -p semantics, not this
-	// file.
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -69,5 +65,37 @@ func TestSaveSnapshotStampsCurrentVersionRegardlessOfInput(t *testing.T) {
 	}
 	if got.Version != snapshotVersion {
 		t.Fatalf("got version %d, want %d", got.Version, snapshotVersion)
+	}
+}
+
+// The default snapshot dir ($HOME/.local/state/pg-router-probe) does not exist
+// on a fresh host; saveSnapshot must create it (pg2-3gqtw).
+func TestSaveSnapshotCreatesMissingParentDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "pg-router-probe", "snapshot.json")
+	want := snapshot{Version: snapshotVersion, Backlog: 70, CheckedAt: "2026-10-02T00:00:00Z"}
+	if err := saveSnapshot(path, want); err != nil {
+		t.Fatalf("saveSnapshot into a missing dir: %v", err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got != want {
+		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("created dir has mode %o, want 700", perm)
+	}
+}
+
+// A parent that cannot be created (a regular file in the way) still errors.
+func TestSaveSnapshotUncreatableParentErrors(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSnapshot(filepath.Join(blocker, "snapshot.json"), snapshot{}); err == nil {
+		t.Fatalf("expected an error when the parent path is a regular file")
 	}
 }

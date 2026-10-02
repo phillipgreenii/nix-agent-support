@@ -300,7 +300,12 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		next.BinaryHash = currentHash
 	}
 	if err := saveSnapshot(opts.snapshotPath, next); err != nil {
+		// A snapshot that cannot be persisted silently disables the drift
+		// checks (every later run sees "no baseline"; pg2-3gqtw), so this
+		// is a degraded sub-check -- exit 4 after the run's findings are
+		// filed -- not merely a stderr warning nobody reads.
 		warn(fmt.Sprintf("failed to persist snapshot: %v", err))
+		degraded = append(degraded, fmt.Sprintf("snapshot-persist: %v", err))
 	}
 
 	skippedNote := strings.Join(skipped, "; ")

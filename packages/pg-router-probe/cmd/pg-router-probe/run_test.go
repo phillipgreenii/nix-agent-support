@@ -507,16 +507,18 @@ func TestReplayTransientDrainingSweepDoesNotEscalate(t *testing.T) {
 	}
 }
 
-// A backlog that is elevated and does not decrease across the check window
-// (flat or growing) must escalate -- on the second elevated tick, not the
-// first (see TestCheckQueueGrowthFirstElevatedSampleIsConfirmedNextTick).
+// A stuck backlog must escalate, on the second elevated tick (not the first;
+// see TestCheckQueueGrowthFirstElevatedSampleIsConfirmedNextTick): growing
+// materially, or flat in the high band. (A flat reading at routine-burst size
+// is deliberately NOT here -- see the periodic-sweep replay below.)
 func TestReplayStuckBacklogEscalates(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		first, again int
 	}{
-		{"flat", 45, 45},
+		{"flat-high", 300, 300},
 		{"growing", 45, 90},
+		{"residual-plus-new-burst", 75, 150},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap := filepath.Join(t.TempDir(), "snapshot.json")
@@ -531,5 +533,70 @@ func TestReplayStuckBacklogEscalates(t *testing.T) {
 				t.Fatalf("non-draining backlog %d -> %d must escalate, filed %d", tc.first, tc.again, n)
 			}
 		})
+	}
+}
+
+// Replay of the phase-locked cadence (pg2-3gqtw): the sweep and the probe tick
+// are both 30-minute periods, a burst drains fully (~27 min) before the next
+// one, and every tick samples a fresh burst shortly after it starts -- so each
+// tick records a near-peak reading (70-77) against an elevated previous
+// reading. A routine sweep repeated every tick must never escalate. The
+// snapshot dir does not exist up front, as on a fresh host, so this also
+// proves the persisted baseline actually exists between ticks.
+func TestReplayPhaseLockedSweepEveryTickDoesNotEscalate(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "state", "pg-router-probe", "snapshot.json")
+	t0 := time.Date(2026, 10, 2, 12, 3, 0, 0, time.UTC)
+	peaks := []int{0, 72, 75, 71, 77, 74, 77, 73, 76, 70, 77, 75}
+	for i, depth := range peaks {
+		at := t0.Add(time.Duration(i) * 30 * time.Minute)
+		if n := probeTick(t, snap, at, depth); n != 0 {
+			t.Fatalf("routine sweep tick %d (depth %d) escalated (%d issues filed)", i, depth, n)
+		}
+		got, ok := loadSnapshot(snap)
+		if !ok || got.Backlog != depth {
+			t.Fatalf("tick %d: persisted snapshot = %+v ok=%v, want backlog %d", i, got, ok, depth)
+		}
+	}
+}
+
+// The same cadence, but the backlog stops draining: each new burst stacks on
+// the residual one. Routine ticks stay quiet; the first tick showing the
+// stacked backlog escalates.
+func TestReplayPhaseLockedSweepThatStopsDrainingEscalates(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "state", "pg-router-probe", "snapshot.json")
+	t0 := time.Date(2026, 10, 2, 12, 3, 0, 0, time.UTC)
+	steps := []struct {
+		depth int
+		want  int
+	}{
+		{0, 0}, {74, 0}, {77, 0}, {72, 0}, // routine
+		{149, 1}, // burst stacked on an undrained residual
+	}
+	for i, s := range steps {
+		at := t0.Add(time.Duration(i) * 30 * time.Minute)
+		if n := probeTick(t, snap, at, s.depth); n != s.want {
+			t.Fatalf("tick %d (depth %d): filed %d issues, want %d", i, s.depth, n, s.want)
+		}
+	}
+}
+
+// A snapshot that cannot be persisted is a degraded run (exit 4), not just a
+// stderr warning: it silently disables the drift checks (pg2-3gqtw).
+func TestRunProbePersistFailureIsDegraded(t *testing.T) {
+	cmd, stderr := testCmd()
+	opts := baseOpts(t)
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts.snapshotPath = filepath.Join(blocker, "snapshot.json")
+	opts.backlogFromStatus = true
+	spy := &spyDeps{backlogResult: 3}
+	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected exit 4 (partial) on a persist failure, got %v", err)
+	}
+	if !strings.Contains(stderr.String(), "failed to persist snapshot") {
+		t.Fatalf("expected the persist warning on stderr, got %q", stderr.String())
 	}
 }

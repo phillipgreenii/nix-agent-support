@@ -20,6 +20,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // snapshotVersion is bumped whenever this file's own field shape changes,
@@ -64,11 +65,18 @@ func loadSnapshot(path string) (snapshot, bool) {
 }
 
 // saveSnapshot always stamps the current snapshotVersion, regardless of
-// what (if anything) the caller populated s.Version with.
+// what (if anything) the caller populated s.Version with. It creates the
+// parent directory (0o700) when missing: the default location,
+// $HOME/.local/state/pg-router-probe, does not exist on a fresh host, and
+// without this every write failed (pg2-3gqtw), leaving every run without a
+// baseline and the queue-growth check permanently inert.
 func saveSnapshot(path string, s snapshot) error {
 	s.Version = snapshotVersion
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)

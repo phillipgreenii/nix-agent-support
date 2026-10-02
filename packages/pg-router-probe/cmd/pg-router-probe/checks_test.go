@@ -113,17 +113,48 @@ func TestCheckQueueGrowthGrowingWhileElevated(t *testing.T) {
 	}
 }
 
-// A flat, already-elevated backlog is a stuck queue: "not decreasing" fires.
-func TestCheckQueueGrowthFlatWhileElevatedIsStuck(t *testing.T) {
+// A flat, already-elevated reading in the high band is a stuck queue: "not
+// decreasing" still fires there, since no routine periodic burst is that big.
+func TestCheckQueueGrowthFlatWhileHighBandIsStuck(t *testing.T) {
 	f := checkQueueGrowth("queue-depth", true, 500, 500)
 	if f == nil {
-		t.Fatalf("expected a finding for a flat elevated reading")
+		t.Fatalf("expected a finding for a flat high-band reading")
 	}
 	if f.State != string(bandHigh) {
 		t.Fatalf("got state %q, want %q", f.State, bandHigh)
 	}
 	if !strings.Contains(f.Summary, "not draining") {
 		t.Fatalf("got summary %q", f.Summary)
+	}
+}
+
+// A lower-band reading within the growth tolerance of the previous one is the
+// same periodic burst sampled again, not a stuck queue (pg2-3gqtw): both
+// slightly up and slightly down must stay quiet.
+func TestCheckQueueGrowthRepeatedBurstWithinToleranceIsQuiet(t *testing.T) {
+	for _, c := range []struct{ prev, cur int }{
+		{72, 75}, {75, 75}, {77, 71}, {45, 45}, {50, 62}, {100, 125},
+	} {
+		if f := checkQueueGrowth("backlog", true, c.prev, c.cur); f != nil {
+			t.Errorf("%d -> %d: expected nil finding for a repeated burst, got %+v", c.prev, c.cur, f)
+		}
+	}
+}
+
+// Material growth over the tolerance escalates, even from a modest level: a
+// residual backlog with a new burst stacked on it.
+func TestCheckQueueGrowthMaterialGrowthEscalates(t *testing.T) {
+	for _, c := range []struct{ prev, cur int }{
+		{75, 150}, {75, 98}, {45, 90}, {100, 126},
+	} {
+		f := checkQueueGrowth("backlog", true, c.prev, c.cur)
+		if f == nil {
+			t.Errorf("%d -> %d: expected a finding for material growth", c.prev, c.cur)
+			continue
+		}
+		if !strings.Contains(f.Summary, "growing") {
+			t.Errorf("%d -> %d: got summary %q", c.prev, c.cur, f.Summary)
+		}
 	}
 }
 

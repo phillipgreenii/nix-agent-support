@@ -109,29 +109,49 @@ func classifyBand(value int) severityBand {
 	}
 }
 
+// sweepGrowthTolerancePermille: current may exceed previous by up to 25%
+// (current*1000 <= previous*1250) and still be treated as the SAME routine
+// burst re-sampled. It absorbs jitter in how far into a periodic burst
+// each tick lands (e.g. 71 vs 77) while a backlog that stacks a new burst
+// on a residual one (roughly +100% per tick) clearly exceeds it.
+const sweepGrowthTolerancePermille = 1250
+
 // checkQueueGrowth compares current against the previous snapshot's own
 // reading for one kind ("queue-depth" or "backlog"). It returns nil
-// (no finding) unless the reading looks STUCK or RUNAWAY: the previous
-// reading was already in a non-none band (the queue was already
-// non-trivially backed up one check window ago) AND the current reading
-// did not decrease (current >= previous). pg2-ktbfk:
+// (no finding) unless the reading looks RUNAWAY or STUCK (pg2-ktbfk,
+// refined by pg2-3gqtw): the previous reading was already in a non-none
+// band AND the current reading is in a non-none band AND either
 //
-//   - A transient, draining spike -- e.g. a periodic sweep enqueueing a
-//     burst that the probe's tick samples right after the enqueue (depth
-//     0 -> 45, then 45 -> 33 -> ... -> 0 as it drains) -- never
-//     escalates: the first elevated sample has a none-band previous
-//     reading, and every later sample is lower than its predecessor.
-//   - A backlog that is not draining across a whole check window (flat
-//     or still growing while already elevated) escalates, including a
-//     flat one: "not decreasing" is the stuck signal, not strict growth.
+//   - it GREW materially: current exceeds previous by more than
+//     sweepGrowthTolerancePermille (25%), or
+//   - it did not decrease while in the high band (current >= previous and
+//     classifyBand(current) == bandHigh) -- a flat, very large backlog is
+//     stuck, not a routine burst.
 //
-// A single sample cannot tell a fast runaway from a sweep burst, so a
+// Why a flat, lower-band reading no longer escalates (pg2-3gqtw): a
+// periodic sweep (the pr.reconcile sweep runs every 30 minutes, phase-
+// locked to the probe's own 30-minute tick) enqueues a burst that fully
+// drains between ticks, and the probe samples it a fixed short offset
+// after each burst starts. Every tick therefore records a near-peak
+// reading (e.g. 70-77) with an elevated previous reading, so "elevated
+// and not lower than the last sample" held on roughly half of all routine
+// ticks. Two peak-phase samples cannot distinguish "the same burst again"
+// from "a flat backlog that never drained" -- but a backlog that really
+// does not drain WHILE the sweep keeps enqueueing stacks each new burst on
+// the residual, which shows up as material growth and still escalates on
+// the second tick.
+//
+// Known blind spot: a flat, non-draining backlog of routine-burst size
+// with NO further enqueues is indistinguishable from the routine burst by
+// peak-phase samples alone; the Grafana queue-stalled /
+// queue-depth-growing rules remain the signal for that case.
+//
+// A transient, draining spike (45 -> 33 -> ... -> 0) never escalates, and a
 // jump from the none band is deliberately confirmed by the NEXT tick
-// before it escalates (the Grafana queue-stalled / queue-depth-growing
-// rules remain the faster signal for that case). No prior baseline also
-// yields nil [design: item 2; Binding decisions' queue-growth-specific
-// "'Nothing new' rule" text governs whether an ALREADY-OPEN bead needs a
-// fresh comment, which is dedup.go's job, not this function's].
+// before it can escalate. No prior baseline also yields nil [design: item
+// 2; Binding decisions' queue-growth-specific "'Nothing new' rule" text
+// governs whether an ALREADY-OPEN bead needs a fresh comment, which is
+// dedup.go's job, not this function's].
 func checkQueueGrowth(kind string, hasPrevious bool, previous, current int) *finding {
 	if !hasPrevious {
 		return nil
@@ -139,11 +159,13 @@ func checkQueueGrowth(kind string, hasPrevious bool, previous, current int) *fin
 	if classifyBand(previous) == bandNone {
 		return nil
 	}
-	if current < previous {
-		return nil
-	}
 	band := classifyBand(current)
 	if band == bandNone {
+		return nil
+	}
+	grew := current*1000 > previous*sweepGrowthTolerancePermille
+	stuckHigh := current >= previous && band == bandHigh
+	if !grew && !stuckHigh {
 		return nil
 	}
 	verb := "is not draining"
