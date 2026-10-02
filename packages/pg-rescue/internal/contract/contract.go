@@ -5,6 +5,7 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,27 +103,52 @@ func (r Result) Render() ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
+// Sentinel errors ParseObject wraps, so a caller can tell the failure kinds
+// apart (Classify words its reasons from them).
+var (
+	// ErrNotJSON means the input is not JSON at all (or ends mid-value).
+	ErrNotJSON = errors.New("not JSON")
+	// ErrNotObject means the input is valid JSON but its top-level value is
+	// not an object.
+	ErrNotObject = errors.New("not a JSON object")
+	// ErrTrailingData means something other than whitespace follows the
+	// object (a second object, junk).
+	ErrTrailingData = errors.New("trailing data after the JSON object")
+)
+
+// DuplicateKeyError reports an object member name that appears twice in one
+// object, at any depth.
+type DuplicateKeyError struct{ Key string }
+
+func (e *DuplicateKeyError) Error() string { return fmt.Sprintf("duplicate key %q", e.Key) }
+
 // ParseObject strictly parses data as exactly one JSON object, optionally
 // followed by whitespace. Duplicate keys (at any depth) are rejected. It
-// returns the object's top-level members as raw JSON.
+// returns the object's top-level members as raw JSON, byte-for-byte as they
+// appeared. Errors wrap ErrNotJSON, ErrNotObject, ErrTrailingData or are a
+// *DuplicateKeyError.
 func ParseObject(data []byte) (map[string]json.RawMessage, error) {
-	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	tok, err := dec.Token()
 	if err != nil {
-		return nil, fmt.Errorf("not JSON: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrNotJSON, err)
 	}
 	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return nil, errors.New("not a JSON object")
+		return nil, ErrNotObject
 	}
 	if err := checkNoDuplicates(dec, '{'); err != nil {
-		return nil, err
+		var dup *DuplicateKeyError
+		if errors.As(err, &dup) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %v", ErrNotJSON, err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("trailing data after the JSON object")
+		return nil, ErrTrailingData
 	}
 	var out map[string]json.RawMessage
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrNotJSON, err)
 	}
 	return out, nil
 }
@@ -139,7 +165,7 @@ func checkNoDuplicates(dec *json.Decoder, open json.Delim) error {
 			}
 			key, _ := kt.(string)
 			if seen[key] {
-				return fmt.Errorf("duplicate key %q", key)
+				return &DuplicateKeyError{Key: key}
 			}
 			seen[key] = true
 		}

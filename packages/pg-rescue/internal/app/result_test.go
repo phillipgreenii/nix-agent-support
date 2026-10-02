@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,54 @@ func TestResultDetailsAndMetaFiles(t *testing.T) {
 	}
 	if _, err := contract.ParseObject([]byte(stdout)); err != nil {
 		t.Errorf("not strictly valid: %v", err)
+	}
+}
+
+// Handlers end with `pg-rescue result`, and the wrapper reads their stdout with
+// contract.Classify, so the helper's output MUST be accepted by it: same
+// outcome as the exit code, no complaint, and every claim carried over.
+func TestResultOutputIsAcceptedByClassify(t *testing.T) {
+	dir := t.TempDir()
+	details := filepath.Join(dir, "details.txt")
+	meta := filepath.Join(dir, "meta.json")
+	if err := os.WriteFile(details, []byte("multi\nline \"details\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(meta, []byte("{\n \"item_id\": \"pg2-abc12\",\n \"n\": [1, 2]\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want contract.Outcome
+	}{
+		{"bare resolved", []string{"resolved"}, contract.Resolved},
+		{"bare declined", []string{"declined"}, contract.Declined},
+		{"bare deferred", []string{"deferred"}, contract.Deferred},
+		{"summary", []string{"resolved", "relocked flake.lock"}, contract.Resolved},
+		{"multi-line summary", []string{"declined", "line one\nline two"}, contract.Declined},
+		{"details and meta", []string{"deferred", "filed", "--details-file", details, "--meta-file", meta}, contract.Deferred},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, _ := runResultCmd(t, tc.args...)
+			outcome, reason, rep := contract.Classify(code, []byte(stdout), false)
+			if outcome != tc.want || reason != fmt.Sprintf("exit %d", code) {
+				t.Fatalf("Classify(%d, %q) = %s, %q; want %s, exit %d", code, stdout, outcome, reason, tc.want, code)
+			}
+			var sent contract.Result
+			if err := json.Unmarshal([]byte(stdout), &sent); err != nil {
+				t.Fatal(err)
+			}
+			if rep.Summary != sent.Summary || rep.Details != sent.Details || string(rep.Meta) != string(sent.Meta) {
+				t.Errorf("claims lost on the way: sent %+v, classified %+v", sent, rep)
+			}
+		})
+	}
+	// Spot-check the carried values, not just their equality.
+	_, stdout, _ := runResultCmd(t, "deferred", "filed", "--details-file", details, "--meta-file", meta)
+	_, _, rep := contract.Classify(3, []byte(stdout), false)
+	if rep.Summary != "filed" || rep.Details != "multi\nline \"details\"\n" || string(rep.Meta) != `{"item_id":"pg2-abc12","n":[1,2]}` {
+		t.Errorf("classified claims = %+v", rep)
 	}
 }
 

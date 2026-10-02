@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "run_id": "20261002T160000Z-deadbeef",
+  "parent_run_id": null,
+  "depth": 1,
+  "chain": "sync",
+  "handlers": ["fix-small"],
+  "mode": "argv",
+  "command": {
+    "argv": ["git", "pull", "--rebase"],
+    "cwd": "/abs/repo",
+    "exit": 1,
+    "signal": null
+  },
+  "fingerprint": "sha256:a7b9c1af7f9a0f73d83ba7bacf6b5b903893657780f6202ef166538d8461fc78",
+  "output_file": "/abs/run-dir/output.log",
+  "output_tail": "",
+  "context": "",
+  "verify": null,
+  "host": "phillipg-mbp-02",
+  "started_at": "2026-10-02T16:00:00Z",
+  "attempts": [],
+  "new_in_v2": { "anything": true }
+}

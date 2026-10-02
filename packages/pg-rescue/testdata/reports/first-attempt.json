@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "20261002T140311Z-7f3a9c2e",
+  "parent_run_id": null,
+  "depth": 1,
+  "chain": "sync",
+  "handlers": [
+    "flake-lock-conflict",
+    "fix-small",
+    "fix-large",
+    "p1-later",
+    "notify"
+  ],
+  "mode": "argv",
+  "command": {
+    "argv": ["git", "pull", "--rebase"],
+    "cwd": "/abs/repo",
+    "exit": 1
+  },
+  "fingerprint": "sha256:a7b9c1af7f9a0f73d83ba7bacf6b5b903893657780f6202ef166538d8461fc78",
+  "output_file": "/abs/run-dir/output.log",
+  "output_tail": "error: could not apply 1a2b3c4... update flake.lock\nCONFLICT (content): Merge conflict in flake.lock\n",
+  "context": "sync-projects: rebase repo onto origin",
+  "verify": null,
+  "host": "phillipg-mbp-02",
+  "started_at": "2026-10-02T14:03:11Z",
+  "attempts": []
+}
