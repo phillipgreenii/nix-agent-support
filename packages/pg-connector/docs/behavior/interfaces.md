@@ -350,7 +350,11 @@ realization-gap register).
   (an alert backend from the alert's URL, the PR backend from the PR URL, the Jira backend from the
   issue URL) and omitted by one that does not (the beads and agent-session backends); the umbrella
   passes it through unread and never defaults it (`INV-ATTN-URL-1`). The attention capability's
-  schema version is 2 (additive over 1).
+  schema version is 2 (additive over 1). The PR backend reports two kinds of item: `pr`
+  (review-needed, severity omitted) and `pr-ci` ("CI failing on my PR", severity `high`), the
+  latter for each of the operator's own open, non-draft PRs whose head-commit CI has failed,
+  under the stable id `<owner>/<repo>#<n>` and the PR's own `url` (`INV-ATTN-CI-1`). A new item
+  type is a new value of the source-defined `type` string and does not change the schema version.
 - **`search`** — aggregated by `search` via per-source grouping, never merged across sources
   (`INV-SEARCH-1`); an optional `--fields` list requests specific result attributes, and an
   unrecognized one produces a `warnings[]` entry, never an error.

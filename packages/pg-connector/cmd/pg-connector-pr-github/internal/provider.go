@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -348,6 +349,102 @@ const (
 	attentionReasonReReview   = "re-review-after-my-approval"
 )
 
+// CI-failing attention (bead pg2-fnqqi, design
+// docs/superpowers/specs/2026-10-02-menubar-cross-reference-links-design.md
+// Q1 option C): ListAttention also emits one item per OPERATOR-AUTHORED open,
+// non-draft PR whose head-commit CI is failed, so a broken build shows up as
+// its own attention item.
+const (
+	// attentionTypeCIFailing is the item `type` of a CI-failing item. It is
+	// deliberately distinct from the review-needed item's "pr": `attention
+	// list` dedups by {type, id} (INV-ATTN-1), so sharing "pr" would let one
+	// of the two items for the same PR (same id <owner>/<repo>#<n>) swallow
+	// the other.
+	attentionTypeCIFailing = "pr-ci"
+	// attentionReasonCIFailing is the Summary prefix, distinct from the
+	// review-needed reasons above.
+	attentionReasonCIFailing = "ci-failing-on-my-pr"
+	// attentionSeverityCIFailing is the severity mapping chosen for a
+	// CI-failing item: high. A broken build on the operator's own PR blocks
+	// their own work and is theirs to fix, so it outranks the review-needed
+	// items (which carry no severity and rank as medium) while staying below
+	// critical, which is left to genuine outages (alerts).
+	attentionSeverityCIFailing = schema.SeverityHigh
+	// ownOpenPRsQuery is the GitHub search the CI-failing scan runs. It is
+	// built in rather than configured: "my open PRs" has one meaning and the
+	// scan is stateless (D3), exactly like ViewerLogin above.
+	ownOpenPRsQuery = "is:open author:@me archived:false"
+)
+
+// ciExcludeConfig is the optional {"ci_exclude": [...]} key of this backend's
+// per-backend config: regular expressions matched against each check's name
+// and workflow name; a matching check is left out of the CI-failing decision.
+// Operators SHOULD set it to the same patterns pg-desk's check_interpreters
+// carry, so the menu bar and the dashboard agree on what counts (INV-LINKS-4).
+// An unset key excludes nothing, and a pattern that does not compile is
+// skipped, never an error (mirroring pg-desk's cirun.CompileExcluder).
+type ciExcludeConfig struct {
+	CIExclude []string `json:"ci_exclude"`
+}
+
+// ciExcluderFrom compiles config's ci_exclude patterns into a predicate over a
+// check name.
+func ciExcluderFrom(config json.RawMessage) func(name string) bool {
+	var cfg ciExcludeConfig
+	if len(config) > 0 {
+		_ = scriptout.Decode(config, &cfg)
+	}
+	var pats []*regexp.Regexp
+	for _, p := range cfg.CIExclude {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		pats = append(pats, re)
+	}
+	return func(name string) bool {
+		if name == "" {
+			return false
+		}
+		for _, re := range pats {
+			if re.MatchString(name) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// ciFailingForPR reports whether pr is an operator-authored, open, non-draft,
+// unmerged PR with at least one failed head-commit check that excluded does
+// not drop. A PR whose only checks are passing, pending, or excluded yields
+// false. Unlike a review of someone else's PR (pg2-p2ojd's reviewability
+// exception for a failed build-test-validate job), nothing is exempt by
+// default here: a broken build on one's own PR is still broken. An empty
+// State is tolerated (treated as open) so a search-shaped PR is not rejected;
+// gh pr view always reports one.
+func ciFailingForPR(pr api.PR, self string, excluded func(name string) bool) bool {
+	if pr.Merged || pr.Draft {
+		return false
+	}
+	if st := strings.ToLower(pr.State); st != "" && st != "open" {
+		return false
+	}
+	if self == "" || !strings.EqualFold(pr.Author, self) {
+		return false
+	}
+	for _, c := range pr.Checks {
+		if c.Outcome != api.CheckFailure {
+			continue
+		}
+		if excluded(c.Name) || excluded(c.Workflow) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // attentionQueryConfig is the {"attention_query": ...} shape this
 // backend's own list_attention op reads from its per-backend opaque
 // config block (bead pg2-7wqkr) — a GitHub search-syntax query, or list of
@@ -523,11 +620,14 @@ func parallelMap[T, R any](ctx context.Context, items []T, fn func(ctx context.C
 // already satisfied here; the per-query SearchPRs and per-candidate
 // GetPR/ReviewsWithCommit fan-outs below (parallelMap) are what that bead
 // actually found running sequentially.
+//
+// After the review-needed scan it appends the CI-failing scan
+// (listCIFailingAttention, bead pg2-fnqqi): +1 search for the operator's own
+// open PRs and +1 GetPR per non-draft one. That scan runs even with no
+// attention_query configured, so an empty config no longer short-circuits to
+// an empty list.
 func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
 	query := attentionQueryFrom(scriptout.ConfigFromContext(ctx))
-	if len(query) == 0 {
-		return []schema.AttentionItem{}, nil
-	}
 	remaining, err := b.gh.RateLimitRemaining(ctx)
 	if err != nil {
 		return nil, classifyGHError(err)
@@ -590,6 +690,63 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 	}
 
 	items := make([]schema.AttentionItem, 0, len(perCandidate))
+	for _, item := range perCandidate {
+		if item != nil {
+			items = append(items, *item)
+		}
+	}
+
+	ciItems, err := b.listCIFailingAttention(ctx, self)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, ciItems...), nil
+}
+
+// listCIFailingAttention emits one CI-failing item per operator-authored open
+// PR whose head-commit CI is failed (bead pg2-fnqqi; see ciFailingForPR). The
+// scan runs whether or not attention_query is configured: the operator's own
+// PRs are not "team PRs", and ownOpenPRsQuery needs no configuration. Each
+// item has the stable id <owner>/<repo>#<n>, the PR's own url (INV-ATTN-URL-1;
+// no cross-entity link is synthesized), and attentionSeverityCIFailing.
+func (b *Backend) listCIFailingAttention(ctx context.Context, self string) ([]schema.AttentionItem, error) {
+	candidates, err := b.gh.SearchPRs(ctx, ownOpenPRsQuery)
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	excluded := ciExcluderFrom(scriptout.ConfigFromContext(ctx))
+
+	seen := make(map[string]bool, len(candidates))
+	var open []api.PR
+	for _, c := range candidates {
+		id := formatPRID(c.Repo, c.Number)
+		if c.Draft || seen[id] {
+			continue
+		}
+		seen[id] = true
+		open = append(open, c)
+	}
+
+	perCandidate, err := parallelMap(ctx, open, func(ctx context.Context, c api.PR) (*schema.AttentionItem, error) {
+		full, err := b.gh.GetPR(ctx, c.Repo, c.Number)
+		if err != nil {
+			return nil, err
+		}
+		if !ciFailingForPR(*full, self, excluded) {
+			return nil, nil
+		}
+		return &schema.AttentionItem{
+			Type:     attentionTypeCIFailing,
+			ID:       formatPRID(full.Repo, full.Number),
+			Summary:  fmt.Sprintf("%s: %s", attentionReasonCIFailing, full.Title),
+			Severity: attentionSeverityCIFailing,
+			URL:      full.URL,
+		}, nil
+	})
+	if err != nil {
+		return nil, classifyGHError(err)
+	}
+	var items []schema.AttentionItem
 	for _, item := range perCandidate {
 		if item != nil {
 			items = append(items, *item)

@@ -77,6 +77,13 @@ type PR struct {
 	// MergeStateStatus, which is GitHub's own branch-protection/merge-
 	// readiness signal, not a CI-health rollup.
 	ChecksRollup string `json:"checks_rollup,omitempty"`
+	// Checks are the PR's head-commit check runs / status contexts that
+	// ChecksRollup folds, each with its own classified Outcome. Filled by
+	// GetPR only (gh pr view --json statusCheckRollup); search results leave
+	// it nil. ListAttention's CI-failing predicate (bead pg2-fnqqi) reads
+	// it so configured exclusion patterns can drop individual checks, which
+	// the single folded ChecksRollup string cannot express.
+	Checks []Check `json:"checks,omitempty"`
 	// ReviewRequests are the PR's currently-requested reviewers, both
 	// individual account logins AND team slugs — unlike RequestedReviewers
 	// above (which deliberately drops teams for the "requested of me"
@@ -151,6 +158,25 @@ type PR struct {
 	// other code path in this module ever populated it — it is now always
 	// this field's zero value everywhere.
 	ReviewThreadCount int `json:"review_thread_count,omitempty"`
+}
+
+// Check outcomes (Check.Outcome), the same three-way split
+// ChecksRollup's fold uses.
+const (
+	CheckFailure = "failure"
+	CheckPending = "pending"
+	CheckSuccess = "success"
+)
+
+// Check is one check run or legacy status context on a PR's head commit.
+type Check struct {
+	// Name is the check's job name (CheckRun.name) or status context name.
+	Name string `json:"name,omitempty"`
+	// Workflow is the workflow the check ran under (CheckRun.workflowName);
+	// empty for a legacy status context.
+	Workflow string `json:"workflow,omitempty"`
+	// Outcome is CheckFailure, CheckPending or CheckSuccess.
+	Outcome string `json:"outcome"`
 }
 
 // HasConflict reports whether GitHub signals a merge conflict on this PR, via

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -305,6 +306,12 @@ func TestBackend_ListAttention_RealisticScale_CompletesWellUnderExecTimeout(t *t
 	gh := &fakeGH{
 		viewerLogin: attnSelf,
 		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			if query == ownOpenPRsQuery {
+				// The CI-failing scan (bead pg2-fnqqi): the operator has
+				// no open PRs in this fixture, so it finds nothing and
+				// is not part of the review-scan call counts below.
+				return nil, nil
+			}
 			defer tracker.begin()()
 			time.Sleep(latency)
 			idx := -1
@@ -377,5 +384,184 @@ func TestBackend_ListAttention_RealisticScale_CompletesWellUnderExecTimeout(t *t
 	wantNeed := numCandidates / 2 // every odd-numbered PR (per reviewsWithCommitFn above) needs a first review.
 	if len(got) != wantNeed {
 		t.Fatalf("len(got) = %d, want %d: %+v", len(got), wantNeed, got)
+	}
+}
+
+// --- CI-failing attention (bead pg2-fnqqi): the operator's own open PRs whose
+// head-commit CI is failed. ---
+
+func failedCheck(name string) api.Check {
+	return api.Check{Name: name, Workflow: "ci", Outcome: api.CheckFailure}
+}
+
+func passedCheck(name string) api.Check {
+	return api.Check{Name: name, Workflow: "ci", Outcome: api.CheckSuccess}
+}
+
+func pendingCheck(name string) api.Check {
+	return api.Check{Name: name, Workflow: "ci", Outcome: api.CheckPending}
+}
+
+func TestCIFailingForPR(t *testing.T) {
+	none := func(string) bool { return false }
+	ownOpen := func(mutate func(*api.PR)) api.PR {
+		pr := api.PR{Repo: "owner/repo", Number: 7, State: "open", Author: attnSelf}
+		mutate(&pr)
+		return pr
+	}
+	tests := []struct {
+		name     string
+		pr       api.PR
+		excluded func(string) bool
+		want     bool
+	}{
+		{"failed", ownOpen(func(p *api.PR) { p.Checks = []api.Check{failedCheck("unit")} }), none, true},
+		{"failed alongside passed", ownOpen(func(p *api.PR) { p.Checks = []api.Check{passedCheck("lint"), failedCheck("unit")} }), none, true},
+		{"failed alongside pending still failed", ownOpen(func(p *api.PR) { p.Checks = []api.Check{pendingCheck("e2e"), failedCheck("unit")} }), none, true},
+		{"failed build-test-validate still counts (pg2-p2ojd exception is for reviewing others)", ownOpen(func(p *api.PR) { p.Checks = []api.Check{failedCheck("build-test-validate")} }), none, true},
+		{"pending", ownOpen(func(p *api.PR) { p.Checks = []api.Check{pendingCheck("unit")} }), none, false},
+		{"passed", ownOpen(func(p *api.PR) { p.Checks = []api.Check{passedCheck("unit")} }), none, false},
+		{"no checks", ownOpen(func(p *api.PR) {}), none, false},
+		{"draft", ownOpen(func(p *api.PR) { p.Draft = true; p.Checks = []api.Check{failedCheck("unit")} }), none, false},
+		{"closed", ownOpen(func(p *api.PR) { p.State = "closed"; p.Checks = []api.Check{failedCheck("unit")} }), none, false},
+		{"merged", ownOpen(func(p *api.PR) { p.State = "closed"; p.Merged = true; p.Checks = []api.Check{failedCheck("unit")} }), none, false},
+		{"someone else's PR", ownOpen(func(p *api.PR) { p.Author = attnTeammate; p.Checks = []api.Check{failedCheck("unit")} }), none, false},
+		{"author match is case-insensitive", ownOpen(func(p *api.PR) { p.Author = "ME"; p.Checks = []api.Check{failedCheck("unit")} }), none, true},
+		{"only failure excluded by name", ownOpen(func(p *api.PR) { p.Checks = []api.Check{failedCheck("flaky"), passedCheck("unit")} }), func(n string) bool { return n == "flaky" }, false},
+		{"only failure excluded by workflow", ownOpen(func(p *api.PR) { p.Checks = []api.Check{{Name: "job", Workflow: "nightly", Outcome: api.CheckFailure}} }), func(n string) bool { return n == "nightly" }, false},
+		{"excluded failure does not hide another failure", ownOpen(func(p *api.PR) { p.Checks = []api.Check{failedCheck("flaky"), failedCheck("unit")} }), func(n string) bool { return n == "flaky" }, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ciFailingForPR(tc.pr, attnSelf, tc.excluded); got != tc.want {
+				t.Fatalf("ciFailingForPR = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCIExcluderFrom(t *testing.T) {
+	ex := ciExcluderFrom(json.RawMessage(`{"ci_exclude":["^flaky-","[unclosed"]}`))
+	if !ex("flaky-e2e") {
+		t.Fatalf("flaky-e2e should be excluded")
+	}
+	if ex("unit") || ex("") {
+		t.Fatalf("unit/empty should not be excluded")
+	}
+	if none := ciExcluderFrom(nil); none("anything") {
+		t.Fatalf("no config excludes nothing")
+	}
+}
+
+// ciGH answers the own-PR search with ownPRs and every other search with
+// nothing, and GetPR per number from byNumber.
+func ciGH(ownPRs []api.PR, byNumber map[int]api.PR) *fakeGH {
+	return &fakeGH{
+		viewerLogin: attnSelf,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			if query == ownOpenPRsQuery {
+				return ownPRs, nil
+			}
+			return nil, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) {
+			pr, ok := byNumber[number]
+			if !ok {
+				return nil, fmt.Errorf("unexpected GetPR %s#%d", repo, number)
+			}
+			return &pr, nil
+		},
+	}
+}
+
+func TestBackend_ListAttention_CIFailing_EmitsOnlyForFailedOwnOpenPRs(t *testing.T) {
+	mk := func(n int, mutate func(*api.PR)) api.PR {
+		pr := api.PR{
+			Repo: "owner/repo", Number: n, Title: fmt.Sprintf("pr %d", n), State: "open",
+			Author: attnSelf, URL: fmt.Sprintf("https://example.invalid/owner/repo/pull/%d", n),
+		}
+		mutate(&pr)
+		return pr
+	}
+	byNumber := map[int]api.PR{
+		1: mk(1, func(p *api.PR) { p.Checks = []api.Check{failedCheck("unit")} }),
+		2: mk(2, func(p *api.PR) { p.Checks = []api.Check{pendingCheck("unit")} }),
+		3: mk(3, func(p *api.PR) { p.Checks = []api.Check{passedCheck("unit")} }),
+		4: mk(4, func(p *api.PR) { p.Draft = true; p.Checks = []api.Check{failedCheck("unit")} }),
+		5: mk(5, func(p *api.PR) { p.State = "closed"; p.Checks = []api.Check{failedCheck("unit")} }),
+		6: mk(6, func(p *api.PR) { p.State = "closed"; p.Merged = true; p.Checks = []api.Check{failedCheck("unit")} }),
+	}
+	var own []api.PR
+	for n := 1; n <= 6; n++ {
+		// The search layer reports draft/closed/merged PRs too; the
+		// predicate (not only the query) must reject them.
+		own = append(own, api.PR{Repo: "owner/repo", Number: n, Draft: byNumber[n].Draft})
+	}
+	b := New(ciGH(own, byNumber))
+	got, err := b.ListAttention(context.Background())
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
+	}
+	it := got[0]
+	if it.Type != attentionTypeCIFailing || it.Type == "pr" {
+		t.Fatalf("Type = %q, want %q (distinct from review-needed \"pr\")", it.Type, attentionTypeCIFailing)
+	}
+	if it.ID != "owner/repo#1" {
+		t.Fatalf("ID = %q, want owner/repo#1", it.ID)
+	}
+	if it.Severity != schema.SeverityHigh {
+		t.Fatalf("Severity = %q, want high", it.Severity)
+	}
+	if it.URL != "https://example.invalid/owner/repo/pull/1" {
+		t.Fatalf("URL = %q, want the PR's own url", it.URL)
+	}
+	if want := attentionReasonCIFailing + ": pr 1"; it.Summary != want {
+		t.Fatalf("Summary = %q, want %q", it.Summary, want)
+	}
+}
+
+func TestBackend_ListAttention_CIFailing_AppliesConfiguredExclusions(t *testing.T) {
+	byNumber := map[int]api.PR{
+		1: {Repo: "owner/repo", Number: 1, Title: "t", State: "open", Author: attnSelf, Checks: []api.Check{failedCheck("flaky-e2e")}},
+	}
+	b := New(ciGH([]api.PR{{Repo: "owner/repo", Number: 1}}, byNumber))
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"ci_exclude":["^flaky-"]}`))
+	got, err := b.ListAttention(ctx)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("excluded-only failure should yield no item: %+v", got)
+	}
+}
+
+// A PR that needs review AND whose CI is failing yields two items with the
+// same id but distinct types, so attention list's {type, id} dedup keeps both.
+func TestBackend_ListAttention_CIFailing_CoexistsWithReviewNeededItem(t *testing.T) {
+	own := api.PR{Repo: "owner/repo", Number: 9, Title: "mine", State: "open", Author: attnSelf, HeadSHA: "h1", Checks: []api.Check{failedCheck("unit")}}
+	gh := &fakeGH{
+		viewerLogin: attnSelf,
+		searchFn: func(ctx context.Context, query string) ([]api.PR, error) {
+			return []api.PR{{Repo: "owner/repo", Number: 9}}, nil
+		},
+		getPRFn: func(ctx context.Context, repo string, number int) (*api.PR, error) { return &own, nil },
+	}
+	b := New(gh)
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"attention_query":"is:open is:pr"}`))
+	got, err := b.ListAttention(ctx)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].Type != "pr" || got[1].Type != attentionTypeCIFailing {
+		t.Fatalf("types = %q, %q; want pr then %s", got[0].Type, got[1].Type, attentionTypeCIFailing)
+	}
+	if got[0].ID != got[1].ID {
+		t.Fatalf("ids differ: %q vs %q", got[0].ID, got[1].ID)
 	}
 }

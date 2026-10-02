@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -322,6 +323,41 @@ func TestGetPR_ParsesMergeableAndMergeStateStatus(t *testing.T) {
 	}
 }
 
+// TestGetPR_ParsesPerCheckOutcomes pins the per-check view ListAttention's
+// CI-failing predicate reads (bead pg2-fnqqi): names (CheckRun name, workflow
+// name, StatusContext context) and outcomes classified by the same rule the
+// rollup folds.
+func TestGetPR_ParsesPerCheckOutcomes(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"statusCheckRollup": [
+			{"__typename": "CheckRun", "name": "unit", "workflowName": "ci", "status": "COMPLETED", "conclusion": "FAILURE"},
+			{"__typename": "CheckRun", "name": "lint", "workflowName": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
+			{"__typename": "CheckRun", "name": "e2e", "workflowName": "nightly", "status": "IN_PROGRESS"},
+			{"__typename": "StatusContext", "context": "legacy/status", "state": "ERROR"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []api.Check{
+		{Name: "unit", Workflow: "ci", Outcome: api.CheckFailure},
+		{Name: "lint", Workflow: "ci", Outcome: api.CheckSuccess},
+		{Name: "e2e", Workflow: "nightly", Outcome: api.CheckPending},
+		{Name: "legacy/status", Outcome: api.CheckFailure},
+	}
+	if !reflect.DeepEqual(pr.Checks, want) {
+		t.Fatalf("Checks = %+v, want %+v", pr.Checks, want)
+	}
+	if pr.ChecksRollup != "failure" {
+		t.Fatalf("ChecksRollup = %q, want failure", pr.ChecksRollup)
+	}
+}
+
 func TestGetPR_ParsesChecksRollup(t *testing.T) {
 	gh := newFakeGH()
 	gh.responses["pr view"] = []byte(`{
@@ -463,11 +499,7 @@ func TestGetPR_ReviewCount_NoReviewsIsZero(t *testing.T) {
 // mix of outcomes across both CheckRun and StatusContext shapes, proving
 // failure wins over pending, which wins over success.
 func TestChecksRollupFromContexts_FoldRules(t *testing.T) {
-	type ctx = struct {
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-		State      string `json:"state"`
-	}
+	type ctx = statusCheckContext
 	cases := []struct {
 		name string
 		in   []ctx

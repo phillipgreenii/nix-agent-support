@@ -225,66 +225,86 @@ type ghPR struct {
 	// runs (CheckRun) and/or legacy commit statuses (StatusContext) — see
 	// checksRollupFromContexts below for how this folds into one summary
 	// value.
-	StatusCheckRollup []struct {
-		// Status/Conclusion are CheckRun's own fields (status: QUEUED |
-		// IN_PROGRESS | COMPLETED; conclusion: SUCCESS | FAILURE |
-		// NEUTRAL | CANCELLED | TIMED_OUT | ACTION_REQUIRED | STALE |
-		// SKIPPED, populated only once Status is COMPLETED).
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-		// State is StatusContext's own field (the classic commit-status
-		// API: SUCCESS | FAILURE | PENDING | ERROR) — absent/empty on a
-		// CheckRun entry.
-		State string `json:"state"`
-	} `json:"statusCheckRollup"`
+	StatusCheckRollup []statusCheckContext `json:"statusCheckRollup"`
 	// Reviews is gh's reviews array (bead pg2-2j5ac.30.6) — decoded only
 	// to count via len(); no element field is ever read (see prListFields'
 	// own doc comment: this is the show path's review_count source).
 	Reviews []struct{} `json:"reviews"`
 }
 
+// statusCheckContext is one entry of gh's flattened statusCheckRollup array:
+// either a CheckRun or a legacy StatusContext.
+type statusCheckContext struct {
+	// Status/Conclusion are CheckRun's own fields (status: QUEUED |
+	// IN_PROGRESS | COMPLETED; conclusion: SUCCESS | FAILURE | NEUTRAL |
+	// CANCELLED | TIMED_OUT | ACTION_REQUIRED | STALE | SKIPPED, populated
+	// only once Status is COMPLETED).
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	// State is StatusContext's own field (the classic commit-status API:
+	// SUCCESS | FAILURE | PENDING | ERROR) -- absent/empty on a CheckRun.
+	State string `json:"state"`
+	// Name is a CheckRun's job/check name; WorkflowName is the workflow it
+	// ran under; Context is a StatusContext's name. They identify the check
+	// for the attention CI exclusion patterns (bead pg2-fnqqi) and do not
+	// affect the fold below.
+	Name         string `json:"name"`
+	WorkflowName string `json:"workflowName"`
+	Context      string `json:"context"`
+}
+
+// outcome classifies this one check as api.CheckFailure, api.CheckPending
+// or api.CheckSuccess. It is the single per-check rule checksRollupFromContexts
+// folds, and the Outcome api.Check carries to ListAttention's CI-failing
+// predicate (bead pg2-fnqqi), so the two can never disagree.
+func (c statusCheckContext) outcome() string {
+	switch {
+	case c.State != "": // StatusContext (legacy commit-status API)
+		switch c.State {
+		case "FAILURE", "ERROR":
+			return api.CheckFailure
+		case "PENDING":
+			return api.CheckPending
+		}
+		return api.CheckSuccess
+	case c.Status != "" && c.Status != "COMPLETED": // CheckRun still running
+		return api.CheckPending
+	default: // CheckRun completed -- classify by conclusion
+		switch c.Conclusion {
+		case "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE":
+			return api.CheckFailure
+		case "SUCCESS", "NEUTRAL", "SKIPPED":
+			// Passing/non-blocking conclusions.
+			return api.CheckSuccess
+		default:
+			// "" (no conclusion reported yet) or an unrecognized
+			// value -- treat as still pending rather than silently
+			// counting toward success.
+			return api.CheckPending
+		}
+	}
+}
+
 // checksRollupFromContexts folds gh's flattened statusCheckRollup array
 // into one of "none" | "pending" | "failure" | "success" (schema.PR.
-// ChecksRollup's closed value set) — bead pg2-2j5ac.28.2. How this fold is
+// ChecksRollup's closed value set) -- bead pg2-2j5ac.28.2. How this fold is
 // computed is a freedom-boundary choice (design pins only the field's
 // existence and closed value set, not the algorithm): failure wins over
 // pending, which wins over success, so a run still in flight alongside an
 // already-failed run reports "failure" rather than masking it as
 // "pending".
-func checksRollupFromContexts(contexts []struct {
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	State      string `json:"state"`
-},
-) string {
+func checksRollupFromContexts(contexts []statusCheckContext) string {
 	if len(contexts) == 0 {
 		return "none"
 	}
 	sawFailure := false
 	sawPending := false
 	for _, c := range contexts {
-		switch {
-		case c.State != "": // StatusContext (legacy commit-status API)
-			switch c.State {
-			case "FAILURE", "ERROR":
-				sawFailure = true
-			case "PENDING":
-				sawPending = true
-			}
-		case c.Status != "" && c.Status != "COMPLETED": // CheckRun still running
+		switch c.outcome() {
+		case api.CheckFailure:
+			sawFailure = true
+		case api.CheckPending:
 			sawPending = true
-		default: // CheckRun completed — classify by conclusion
-			switch c.Conclusion {
-			case "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE":
-				sawFailure = true
-			case "SUCCESS", "NEUTRAL", "SKIPPED":
-				// Passing/non-blocking conclusions — no-op.
-			default:
-				// "" (no conclusion reported yet) or an unrecognized
-				// value — treat as still pending rather than silently
-				// counting toward success.
-				sawPending = true
-			}
 		}
 	}
 	switch {
@@ -295,6 +315,23 @@ func checksRollupFromContexts(contexts []struct {
 	default:
 		return "success"
 	}
+}
+
+// checksFromContexts maps gh's statusCheckRollup entries onto api.Check,
+// each with its classified outcome (bead pg2-fnqqi).
+func checksFromContexts(contexts []statusCheckContext) []api.Check {
+	if len(contexts) == 0 {
+		return nil
+	}
+	out := make([]api.Check, 0, len(contexts))
+	for _, c := range contexts {
+		name := c.Name
+		if name == "" {
+			name = c.Context
+		}
+		out = append(out, api.Check{Name: name, Workflow: c.WorkflowName, Outcome: c.outcome()})
+	}
+	return out
 }
 
 func (p ghPR) toAPI(repo string) api.PR {
@@ -322,6 +359,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 		Mergeable:        p.Mergeable,
 		MergeStateStatus: p.MergeStateStatus,
 		ChecksRollup:     checksRollupFromContexts(p.StatusCheckRollup),
+		Checks:           checksFromContexts(p.StatusCheckRollup),
 		ReviewCount:      len(p.Reviews),
 	}
 	for _, l := range p.Labels {
