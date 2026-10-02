@@ -53,9 +53,13 @@ and MUST NOT use an LLM for any step below.
     app is not opted in) is a policy limit, not a review finding, and contributes no verdict. The
     most recent definite verdict comment wins.
   - **Human approval** (`human_approvers` / `human_approved`) and the non-bot
-    `CHANGES_REQUESTED` check exclude bots: `approver_allowlist` logins, any login ending in
-    `[bot]`, and a small set of known bots GitHub reports without that suffix on reviews
-    (`github-actions`, `dependabot`, `copilot-pull-request-reviewer`).
+    `CHANGES_REQUESTED` check never include any bot (operator ruling 2026-10-02): a bot-only
+    approval leaves `human_approved` false, and when a bot and a person both approve,
+    `human_approvers` counts only the person. Stored review data carries only the reviewer's
+    login (no account type), so a login is a bot when it is in `approver_allowlist` (even if it
+    does not look like a bot), ends in `[bot]`, or is one of a small set of known bots GitHub
+    reports without that suffix on reviews (`github-actions`, `dependabot`,
+    `copilot-pull-request-reviewer`). A bot's approval is carried by the bot verdict instead.
   - **Team**, once not blocked: if the operator is a requested reviewer and has not yet approved
     → `team_awaiting_me`; if the operator has already approved but is still a requested reviewer →
     also `team_awaiting_me` (GitHub drops a reviewer from the requested list once they submit any

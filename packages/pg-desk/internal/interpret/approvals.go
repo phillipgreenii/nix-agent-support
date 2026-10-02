@@ -62,9 +62,16 @@ const (
 // over approved (never silently overridden by an approval elsewhere), exactly
 // mirroring the single-signal precedence the Review-state-only read already
 // had. HumanApprovers/HumanApproved count every DISTINCT login with a
-// currently APPROVED review that is NOT a bot: approverAllowlist logins and
-// logins isBotLogin recognizes are excluded (they feed BotVerdict, not the
-// human count). SelfApproved is unaffected by the bot exclusion.
+// currently APPROVED review that is NOT a bot (operator ruling 2026-10-02,
+// pg2-k8lri: "HumanApproved does not include any bot"). Bot rule — the stored
+// review data (schema.PRReview) carries only the author login, no GitHub
+// account type, so detection is login-based: a login is a bot iff it is in
+// approverAllowlist (the configured bot logins, which need not look like bots)
+// OR isBotLogin recognizes it ("[bot]" suffix or a knownBotLogins member).
+// Bots are excluded from the human count (they feed BotVerdict) so a
+// bot-only approval leaves HumanApproved false, and with a bot AND a person
+// HumanApprovers lists only the person. SelfApproved is unaffected by the
+// bot exclusion.
 // WaitingOnMe is populated by interpret.go's caller (computeWaitingOnMe), not
 // here.
 //

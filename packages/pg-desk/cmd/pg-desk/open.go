@@ -51,9 +51,10 @@ type openRow struct {
 	URL            string
 	CIStatus       string
 	HumanApprovers int
-	// AgentApprovers is always 0: this docket's interpret stage has no agent
-	// registry to classify an approver as anything but human (see
-	// internal/interpret's own package doc comment, "No agent registry").
+	// AgentApprovers is always 0: bot approvals are excluded from
+	// HumanApprovers (internal/interpret's package doc, "No agent registry,
+	// and no account-type field") and feed the bot verdict instead, so this
+	// docket's interpret stage reports no separate agent-approver count.
 	// Carried on the row and in --json for shape parity with the porting
 	// source, and so a later phase that DOES gain an agent registry needs no
 	// shape change here.

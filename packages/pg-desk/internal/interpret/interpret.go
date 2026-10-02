@@ -25,13 +25,20 @@
 //     head-SHA-at-review field — so approvals/bot-verdict here are computed
 //     from the CURRENT pr_show read only, with no staleness axis. Documented
 //     deviation.
-//   - No agent registry: this packet's pinned Config fields (Contract
-//     section) include approver_allowlist but not the full Agents/
-//     AgentConfig list agentregistry.Registry classifies from. Per
-//     agentregistry's own documented default ("a nil registry means no
-//     agent is configured, so every approver counts as human"), this
-//     package treats every reviewer as human — approvals.go never
-//     distinguishes agent from human approvers.
+//   - No agent registry, and no account-type field: this packet's pinned
+//     Config fields (Contract section) include approver_allowlist but not
+//     the full Agents/AgentConfig list agentregistry.Registry classifies
+//     from, and schema.PRReview (id/author/state/body/comments, populated by
+//     pg-connector-pr-github's ListReviews from `gh pr view --json reviews`)
+//     carries only the author's login — no GitHub account type (Bot) — so
+//     bots cannot be told from humans by type. Bot detection is therefore
+//     login-based (bead pg2-k8lri, operator ruling 2026-10-02: "HumanApproved
+//     does not include any bot"): a login is a bot iff it is in
+//     approver_allowlist, ends in "[bot]", or is in the small knownBotLogins
+//     set of bots GitHub reports without that suffix on review authors
+//     (approvals.go's isBotLogin). HumanApprovers/HumanApproved never count
+//     such a login; their approvals feed BotVerdict instead. Any other
+//     reviewer is treated as human.
 //   - No gate-state data: pg-pr's GateState is PROJECTED from a persisted
 //     revision's gate verdict, written by internal/sync/revision.go
 //     (gateStateFromSync) — not a Phase 9 porting source, and not derivable
@@ -161,9 +168,12 @@ type Disposition struct {
 // top-level fields, since packet 3's store table carries them as separate
 // columns).
 type Approvals struct {
-	// HumanApprovers is the count of distinct logins with a currently
-	// APPROVED review. Every approver counts as human (see this package's
-	// doc comment on the missing agent registry).
+	// HumanApprovers is the count of distinct NON-BOT logins with a currently
+	// APPROVED review: approver_allowlist logins and logins isBotLogin
+	// recognizes ("[bot]" suffix, known suffix-less bots) are excluded — they
+	// feed BotVerdict, never the human count (see this package's doc comment
+	// on bot detection). HumanApproved is HumanApprovers > 0, so a bot-only
+	// approval reads false.
 	HumanApprovers int  `json:"human_approvers"`
 	HumanApproved  bool `json:"human_approved"`
 	// SelfApproved is true iff SelfLogin has a currently APPROVED review on
@@ -175,9 +185,9 @@ type Approvals struct {
 	// still reads true here — a documented, currently-unavoidable gap, not
 	// a bug in this field.
 	SelfApproved bool `json:"self_approved"`
-	// HumanChangesRequested is true iff any reviewer NOT in the configured
-	// approver_allowlist currently carries a CHANGES_REQUESTED review.
-	// Deliberately excludes allowlisted (bot) reviewers so a bot's own
+	// HumanChangesRequested is true iff any non-bot reviewer (not in the
+	// configured approver_allowlist and not isBotLogin) currently carries a
+	// CHANGES_REQUESTED review. Deliberately excludes bot reviewers so a bot's own
 	// disapproval — already carried by BotVerdict — is never double-counted
 	// here as if a second, independent human rejection existed.
 	HumanChangesRequested bool `json:"human_changes_requested"`

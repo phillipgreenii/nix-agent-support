@@ -165,3 +165,50 @@ func TestComputeApprovals_HumanChangesRequestedAlongsideBots(t *testing.T) {
 		t.Fatalf("real human CHANGES_REQUESTED lost: %+v", got)
 	}
 }
+
+// TestHumanApproved_ExcludesEveryBot pins the pg2-k8lri ruling ("HumanApproved
+// does not include any bot") end to end: computeApprovals feeding
+// classifyPanel, for each bot-detection signal (allowlisted login that is NOT a
+// Bot-looking account, "[bot]" suffix, known suffix-less bot), on both the
+// team and mine branches. A bot-only approval must not read as "nothing left
+// but merge" / "owner must act".
+func TestHumanApproved_ExcludesEveryBot(t *testing.T) {
+	allow := []string{"policy-reviewer"} // plain login: only the allowlist marks it a bot
+	green := ciRollupResult{State: "success"}
+	teamReasons := []string{MatchReasonTeamAuthored}
+
+	for _, bot := range []string{"policy-reviewer", "some-app[bot]", "github-actions"} {
+		t.Run("bot-only approval by "+bot, func(t *testing.T) {
+			pr := prShow{State: "open", Reviews: []prReview{{Author: bot, State: "APPROVED"}}}
+			appr := computeApprovals(pr, "me", allow, nil)
+			if appr.HumanApproved || appr.HumanApprovers != 0 {
+				t.Fatalf("HumanApproved=%v HumanApprovers=%d; want false/0", appr.HumanApproved, appr.HumanApprovers)
+			}
+			if got := classifyPanel(OwnershipMine, pr, green, appr, nil); got != PanelMineAwaitingTeam {
+				t.Errorf("mine panel = %q; want %q (not routed to mine_awaiting_me on a bot approval)", got, PanelMineAwaitingTeam)
+			}
+			if got := classifyPanel(OwnershipTeam, pr, green, appr, teamReasons); got != PanelTeamAwaitingTeam {
+				t.Errorf("team panel = %q; want %q (not routed to team_awaiting_owner on a bot approval)", got, PanelTeamAwaitingTeam)
+			}
+		})
+	}
+
+	t.Run("bots and a person: only the person is listed", func(t *testing.T) {
+		pr := prShow{State: "open", Reviews: []prReview{
+			{Author: "policy-reviewer", State: "APPROVED"},
+			{Author: "some-app[bot]", State: "APPROVED"},
+			{Author: "github-actions", State: "APPROVED"},
+			{Author: "alice", State: "APPROVED"},
+		}}
+		appr := computeApprovals(pr, "", allow, nil)
+		if !appr.HumanApproved || appr.HumanApprovers != 1 {
+			t.Fatalf("HumanApproved=%v HumanApprovers=%d; want true/1 (alice only)", appr.HumanApproved, appr.HumanApprovers)
+		}
+		if got := classifyPanel(OwnershipMine, pr, green, appr, nil); got != PanelMineAwaitingMe {
+			t.Errorf("mine panel = %q; want %q", got, PanelMineAwaitingMe)
+		}
+		if got := classifyPanel(OwnershipTeam, pr, green, appr, teamReasons); got != PanelTeamAwaitingOwner {
+			t.Errorf("team panel = %q; want %q", got, PanelTeamAwaitingOwner)
+		}
+	})
+}
