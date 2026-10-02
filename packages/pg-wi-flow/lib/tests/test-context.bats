@@ -92,7 +92,7 @@ children)
   fi
   ;;
 list)
-  # A key derived from the label/metadata-field arg (if any) selects a
+  # A key derived from the label/title-contains arg (if any) selects a
   # canned fixture file; anything unrecognized (or no fixture present)
   # returns an empty result set -- most tests need no list data at all.
   key=""
@@ -100,6 +100,7 @@ list)
   for ((i = 0; i < ${#args[@]}; i++)); do
     case "${args[$i]}" in
     --label-any) key="${args[$((i + 1))]}" ;;
+    --title-contains) key="${args[$((i + 1))]}" ;;
     esac
   done
   file="$MOCK_BD_LIST_DIR/list-${key}.json"
@@ -280,6 +281,55 @@ DOC
   [ "$status" -eq 0 ]
   [[ "$output" == *"WI_PREMISE_STALE=false"* ]]
   printf '%s\n' "$output" | grep -qxF 'WI_PREMISE='
+}
+
+# --- ARG_MAX safety (tc-jcrdp) -------------------------------------------
+#
+# `explain`/`context` crashed with "jq: Argument list too long" against a
+# large live tracker: a title-term or same-component match set gets
+# ACCUMULATED across jq calls, and a bead's own description can be many
+# KB -- the old implementation passed all of this through jq as
+# --arg/--argjson command-line arguments rather than piping it through
+# stdin, so it was bounded by the OS argv limit (ARG_MAX) instead of
+# available memory. These fixtures are sized well past this machine's own
+# `getconf ARG_MAX` (2 MiB) so they would reliably fail under the old
+# argv-based implementation, not just "large enough to look convincing".
+
+@test "context: WI_DUPLICATES survives a title-term match set far larger than argv can carry" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
+  show_fixture tc-1 '{"id":"tc-1","title":"zzzsprawl rollout","labels":[],"metadata":{}}'
+  local big_hits
+  big_hits="$(jq -cn '[range(3000) | {id: ("tc-dup-" + (. | tostring)), title: ("zzzsprawl match item padded to a reasonably long synthetic title " + (. | tostring))}]')"
+  list_fixture "zzzsprawl" "$big_hits"
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_DUPLICATES="*"tc-dup-0:"* ]]
+  [[ "$output" == *"tc-dup-2999:"* ]]
+}
+
+@test "context: WI_RELATED survives a same-component open+closed match set far larger than argv can carry" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
+  show_fixture tc-1 '{"id":"tc-1","title":"plain item","labels":["component:bigcomp"],"metadata":{}}'
+  local big_open
+  big_open="$(jq -cn '[range(3000) | {id: ("tc-rel-" + (. | tostring)), title: ("same-component match item padded to a reasonably long synthetic title " + (. | tostring))}]')"
+  list_fixture "component:bigcomp" "$big_open"
+  run pgwf_context_cmd tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WI_RELATED="*"tc-rel-0:"* ]]
+  [[ "$output" == *"tc-rel-2999:"* ]]
+}
+
+@test "context: a many-KB description survives unescaped (no argv involved)" {
+  repo_with_config '{"workflows":{"homelab":{"primary":true,"stages":{"work":{"order":1,"entry":true,"closes":true,"concerns":[]}}}}}'
+  local filler big_description
+  filler="$(printf 'x%.0s' $(seq 1 20000))"
+  big_description="$filler
+line two with \"quotes\" and a backslash \\ end"
+  show_fixture tc-1 "$(jq -cn --arg d "$big_description" '{id:"tc-1",title:"plain item",description:$d,labels:[],metadata:{}}')"
+  run pgwf_context_cmd --render tc-1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$filler"* ]]
+  [[ "$output" == *'line two with "quotes" and a backslash \ end'* ]]
 }
 
 # --- --render assembles the full prompt ----------------------------------

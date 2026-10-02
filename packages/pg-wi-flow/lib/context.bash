@@ -263,7 +263,11 @@ pgwf_context_duplicates() {
     [[ -z $term ]] && continue
     local hits
     hits="$(pgwf_tracker_list --title-contains "$term" --status open,in_progress,blocked,deferred --json)" || continue
-    out="$(jq -c -n --argjson a "$out" --argjson b "$hits" '$a + $b')"
+    # Accumulated match sets can grow arbitrarily large across a live
+    # tracker (every open/in_progress/blocked/deferred item whose title
+    # contains a common term) -- pass both arrays via stdin, never as a
+    # --argjson command-line argument, to stay clear of ARG_MAX.
+    out="$(printf '%s\n%s\n' "$out" "$hits" | jq -cs 'add')"
   done <<<"$terms"
   jq -c --arg id "$id" '[.[] | select(.id != $id)] | unique_by(.id) | map({id, title})' <<<"$out"
 }
@@ -286,8 +290,11 @@ pgwf_context_related() {
   closed_hits="$(pgwf_tracker_list --label-any "$label" --status closed --json)" || closed_hits='[]'
   cutoff="$(date -u -d '-30 days' +%Y-%m-%dT%H:%M:%SZ)"
   closed_hits="$(jq -c --arg cutoff "$cutoff" '[.[] | select((.closed_at // .updated_at // "") >= $cutoff)]' <<<"$closed_hits")"
-  jq -c -n --arg id "$id" --argjson a "$open_hits" --argjson b "$closed_hits" \
-    '($a + $b) as $all | [$all[] | select(.id != $id)] | unique_by(.id) | map({id, title})'
+  # Same-component open+closed match sets can grow arbitrarily large across
+  # a live tracker -- pass both arrays via stdin, never as a --argjson
+  # command-line argument, to stay clear of ARG_MAX.
+  printf '%s\n%s\n' "$open_hits" "$closed_hits" | jq -cs --arg id "$id" \
+    'add as $all | [$all[] | select(.id != $id)] | unique_by(.id) | map({id, title})'
 }
 
 # pgwf_context_docs CONFIG_JSON ITEM_JSON -- WI_APPLICABLE_DOCS: keyword
@@ -573,28 +580,55 @@ pgwf_context_facts() {
   fi
   skipped_json="$(printf '%s\n' "${skipped[@]:-}" | jq -Rn '[inputs | select(length > 0)]')"
 
-  jq -cn \
+  # Every field below can scale with live bead/tracker content (a bead's
+  # own title/description/premise/checklist text, or a duplicates/
+  # related/siblings/questions match set gathered across the whole
+  # tracker) and MUST NOT be passed to jq as a --arg/--argjson
+  # command-line argument -- argv has a fixed OS limit (ARG_MAX) that a
+  # large tracker or a long description blows past (tc-jcrdp: this is
+  # what crashed `explain` against a large live bead with "Argument list
+  # too long"). Raw strings are JSON-string-encoded via `jq -Rs` (stdin
+  # in, JSON text out); together with the already-JSON array/object
+  # pieces, everything is slurped into one array via stdin and reshaped
+  # into a single object below -- content flows through pipes, never argv.
+  local title_json description_json premise_json checklist_json content_json
+  title_json="$(printf '%s' "$title" | jq -Rs '.')"
+  description_json="$(printf '%s' "$description" | jq -Rs '.')"
+  premise_json="$(printf '%s' "$premise" | jq -Rs '.')"
+  checklist_json="$(printf '%s' "$checklist_text_val" | jq -Rs '.')"
+  content_json="$(
+    printf '%s\n' \
+      "$title_json" "$description_json" "$premise_json" "$checklist_json" \
+      "$concerns_json" "$skipped_json" \
+      "$duplicates" "$related" "$docs" \
+      "$siblings" "$blocked_parents" "$same_fp" "$questions" |
+      jq -cs '{
+        title: .[0], description: .[1], premise: .[2], checklist: .[3],
+        concerns: .[4], skipped_concerns: .[5],
+        duplicates: .[6], related: .[7], applicable_docs: .[8],
+        siblings: .[9], blocked_parents: .[10], same_fingerprint: .[11],
+        questions: .[12]
+      }'
+  )"
+
+  printf '%s' "$content_json" | jq -c \
     --arg id "$id" --arg type "$type" --arg class "$class" --arg stage "$stage" \
     --arg workflow "$workflow" --arg kind "$kind" --arg component "$component" \
     --arg kinds_rendered "$kinds_rendered" --arg topics_rendered "$topics_rendered" \
     --arg round "$round" --arg must_escalate "$must_escalate" --argjson legacy_human "$legacy_human" \
-    --arg parent "$parent" --arg worktree "$worktree" --arg premise "$premise" --argjson premise_stale "$stale" \
+    --arg parent "$parent" --arg worktree "$worktree" --argjson premise_stale "$stale" \
     --arg instructions_ref "$instructions_ref" --arg escalation_ref "$escalation_ref" \
-    --arg checklist "$checklist_text_val" --argjson concerns "$concerns_json" --argjson skipped_concerns "$skipped_json" \
-    --argjson duplicates "$duplicates" --argjson related "$related" --argjson applicable_docs "$docs" \
-    --argjson siblings "$siblings" --argjson blocked_parents "$blocked_parents" --argjson same_fingerprint "$same_fp" \
-    --argjson questions "$questions" --arg title "$title" --arg description "$description" \
-    '{
+    '. as $content | {
       id: $id, type: $type, class: $class, stage: $stage, workflow: $workflow,
       kind: $kind, component: $component,
       kinds_rendered: $kinds_rendered, topics_rendered: $topics_rendered,
       round: $round, must_escalate: $must_escalate, legacy_human: $legacy_human,
-      parent: $parent, worktree: $worktree, premise: $premise, premise_stale: $premise_stale,
+      parent: $parent, worktree: $worktree, premise: $content.premise, premise_stale: $premise_stale,
       instructions_ref: $instructions_ref, escalation_ref: $escalation_ref,
-      checklist: $checklist, concerns: $concerns, skipped_concerns: $skipped_concerns,
-      duplicates: $duplicates, related: $related, applicable_docs: $applicable_docs,
-      siblings: $siblings, blocked_parents: $blocked_parents, same_fingerprint: $same_fingerprint,
-      questions: $questions, title: $title, description: $description, lessons: ""
+      checklist: $content.checklist, concerns: $content.concerns, skipped_concerns: $content.skipped_concerns,
+      duplicates: $content.duplicates, related: $content.related, applicable_docs: $content.applicable_docs,
+      siblings: $content.siblings, blocked_parents: $content.blocked_parents, same_fingerprint: $content.same_fingerprint,
+      questions: $content.questions, title: $content.title, description: $content.description, lessons: ""
     }'
 }
 
