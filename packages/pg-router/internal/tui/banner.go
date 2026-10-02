@@ -143,13 +143,14 @@ func renderHeader(d topZoneData) string {
 	// header already runs through below, never by hand-truncating the text
 	// itself [design: Task 6.5 Files; Binding decision 5].
 	busy := dispatchSummary(d.reply.Dispatch)
+	logSize := queueLogSummary(d.reply.QueueLog)
 
 	var lines []string
 	switch tier {
 	case render.TierTiny:
 		lines = []string{
 			fmt.Sprintf(" pg-router  core: %s       up %s", coreStateLabel(ci.State), uptime),
-			" gates: " + gatesSummary(d.reply.Gates) + "  " + busy,
+			" gates: " + gatesSummary(d.reply.Gates) + "  " + busy + "  " + logSize,
 		}
 	default:
 		lines = []string{
@@ -163,12 +164,33 @@ func renderHeader(d topZoneData) string {
 			// -- the config path is muted so it competes least for
 			// attention (it's the longest, least actionable field on the
 			// banner).
-			" gates: " + gatesSummary(d.reply.Gates) + "   " + busy + "   config: " + d.theme.Muted.Render(configPath),
+			" gates: " + gatesSummary(d.reply.Gates) + "   " + busy + "   " + logSize + "   config: " + d.theme.Muted.Render(configPath),
 		}
 	}
 
 	out := strings.Join(lines, "\n")
 	return render.Block(out, render.EffectiveWidth(d.width))
+}
+
+// queueLogSummary renders the durable queue log's size for the header ("log:
+// 31.7 MiB"), the at-a-glance answer to "is the write-ahead log growing without
+// bound" (bead pg2-8e0m6).
+func queueLogSummary(l QueueLog) string {
+	return "log: " + humanBytes(l.Bytes)
+}
+
+// humanBytes renders n as a short binary-unit size ("31.7 MiB").
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // uptimeSince returns time.Since(startedAt), or 0 when startedAt is the

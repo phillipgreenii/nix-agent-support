@@ -146,6 +146,12 @@ type statusReply struct {
 		ActiveQueries  int    `json:"activeQueries"`
 	} `json:"resolvedConfig"`
 	Gates []statusGate `json:"gates"`
+	// QueueLog is the durable write-ahead log's size and compaction count (bead
+	// pg2-8e0m6); nil when the core predates the field.
+	QueueLog *struct {
+		Bytes       int64 `json:"bytes"`
+		Compactions int64 `json:"compactions"`
+	} `json:"queueLog"`
 	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
 	// operator-widened scope) — a dedicated decode target. Task 4.1 also
 	// removed the prior {id,kind,state,self} decode this array shared with
@@ -263,6 +269,12 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		fmt.Fprintln(w, "config: -")
 	}
 
+	if ql := st.QueueLog; ql != nil {
+		fmt.Fprintf(w, "queue log: bytes=%d (%s) compactions=%d\n", ql.Bytes, humanBytes(ql.Bytes), ql.Compactions)
+	} else {
+		fmt.Fprintln(w, "queue log: -")
+	}
+
 	fmt.Fprintln(w, "GATES:")
 	renderGates(w, st.Gates)
 
@@ -334,4 +346,18 @@ func renderSection(w io.Writer, name string, n int, body func()) {
 		return
 	}
 	body()
+}
+
+// humanBytes renders n as a short binary-unit size ("31.7 MiB").
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }

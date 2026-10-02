@@ -245,6 +245,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// read live off the queue on each collect (q is assigned below, before the
 	// first collect can run).
 	metricsOpts = append(metricsOpts, metrics.WithActiveGates(func() []eventqueue.Gate { return q.ActiveGates() }))
+	// Event-queue write-ahead-log size gauge (bead pg2-8e0m6), read live off the
+	// queue on each collect.
+	metricsOpts = append(metricsOpts, metrics.WithQueueLogSize(func() int64 { return q.LogSize() }))
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
@@ -300,7 +303,11 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// delivered/declined into, so composeStatusReply's listeners[] can render
 	// a per-role FAIL count alongside DLVD/DECL.
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter))
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter),
+		// Compact queue.jsonl down to live state: once at startup (before the queue
+		// replays it or accepts an event) and, at runtime, whenever it outgrows
+		// cfg.CompactThresholdBytes (bead pg2-8e0m6).
+		eventqueue.WithCompaction(cfg.CompactThresholdBytes, true))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)

@@ -82,7 +82,7 @@ core the same way `push-inject` does (`--socket`/`--token`, else
 starts one** ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
 
 The human-output form orders its sections for incident scanning — header
-(core/socket/config/gates/mode), then `QUEUES`, `DELIVERIES (live)`,
+(core/socket/config/`queue log` size/gates/mode), then `QUEUES`, `DELIVERIES (live)`,
 `ACTIVITY (last 10)`, `LISTENERS`, `SOURCES`, `UNMATCHED BINDINGS` — and never
 omits a section silently: an empty one renders an explicit `(none)` marker
 instead. `--json` emits the `cli.status-reply` wire schema verbatim, which now
@@ -116,7 +116,7 @@ There is one active gate per TYPE, the last writer wins, and **any caller may cl
 a bare `resume` clears **only** `SYSTEM_PAUSE`, so a gate another system owns is never cleared by
 accident (`resume --all` clears everything).
 
-Gates are records in the event log (`<LogDir>/queue.jsonl`), so they survive a restart and honor
+Gates are records in the event log (`<LogDir>/queue.jsonl`, see "Queue log compaction" below), so they survive a restart and honor
 their TTL across one. A gate acts on **participants, never on events**: while it is active, each
 emitter that blocks on it is not polled, each listener that blocks on it is not dispatched to (and
 its pull is rejected naming the gate), pushed events are still accepted, acks and confirmations still
@@ -230,6 +230,10 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_LOG_DIR` — override the event-log/state directory: `queue.jsonl` (events and gates), `events.jsonl`, the discovery record (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
+- `PG_ROUTER_COMPACT_THRESHOLD_BYTES` — `queue.jsonl` size above which the write-ahead log is compacted
+  to live state in the background; default `8388608` (8 MiB); `0` disables runtime compaction (the
+  startup compaction still runs). `[pool].compact_threshold_bytes` in `config.toml` overrides it. See
+  "Queue log compaction" below.
 - `PG_ROUTER_TUI_INTERVAL` — `tui`'s poll interval, floor-clamped to `250ms` (default `1s`). Precedence:
   a CLI flag (none exists yet) wins over this env var, which wins over the built-in default; a value
   that fails to parse as a duration is a usage error naming the bad value.
@@ -262,6 +266,33 @@ an OTel `go.opentelemetry.io/otel/exporters/prometheus` bridge on its own
 default), no listener opens and the package's own read-back `ManualReader` default
 stands unchanged. `run-until-idle` defines no such flag — a drain-and-exit pass has
 nothing long-lived to scrape.
+
+### Queue log compaction
+
+`<LogDir>/queue.jsonl` is the append-only write-ahead log behind both the event queue and the
+Gate Registry; an eviction is itself an appended record, so without compaction it grows for ever
+and every start re-reads all of it. The queue therefore compacts it down to **live state**:
+the retained events (FIFO order, resolved instants, accepts), the active gate projection, and the
+set of event types ever enqueued. `Replay(compact(L))` rebuilds exactly the state `Replay(L)` does
+(property-tested); only history a replay already discards is dropped. Delivery semantics (at-least-once,
+INV-EVT-2) and gate persistence are unchanged.
+
+- **When.** Once at startup, before the queue replays the log or accepts an event; and at runtime,
+  from the `Expire` sweep, once the file exceeds `compact_threshold_bytes`
+  (`[pool].compact_threshold_bytes` / `PG_ROUTER_COMPACT_THRESHOLD_BYTES`, default 8 MiB, `0` = no runtime
+  compaction). After a compaction the trigger rises to twice the compacted size when that is larger, so
+  a live set bigger than the threshold cannot make the queue compact on every sweep.
+- **How it coexists with appends.** The runtime compaction does not hold the queue lock. It notes the
+  log length `n`, folds the first `n` bytes into a temp file (`queue.jsonl.compact.tmp`) while appends keep
+  landing after `n`, then — holding only the store's own mutex, briefly — copies the bytes appended in
+  the meantime onto the temp file, fsyncs it, renames it over the log and fsyncs the directory. Nothing
+  appended is lost or reordered.
+- **Crash safety.** Until the rename the log path holds the complete old log; from it on, the complete
+  new one. A leftover temp file is removed on the next start. A torn trailing line is tolerated as before
+  and startup compaction drops it.
+- **Observability.** The `pg_router_queue_log_bytes` gauge, one `eventqueue: queue log compacted` log
+  line per compaction (trigger, bytes and records before/after, duration), a `queue log:` line in
+  `pg-router status` (`queueLog` in `--json`) and `log: <size>` in the TUI header.
 
 ### Logs
 

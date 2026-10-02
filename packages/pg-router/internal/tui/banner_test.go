@@ -154,3 +154,29 @@ func TestBannerText_NamesGatesAndKeepsPausedForSystemPause(t *testing.T) {
 		t.Errorf("no gates, not quiescing: banner = %q, want empty (header renders)", got)
 	}
 }
+
+// The header carries the durable queue log's size (bead pg2-8e0m6) in every
+// tier that shows the gates line.
+func TestBanner_HeaderShowsQueueLogSize(t *testing.T) {
+	theme := render.NewTheme(false)
+	for _, width := range []int{120, 40} {
+		got := renderTopZone(topZoneData{
+			clientVersion: "1.2.3",
+			reply: StatusReply{
+				Core:     CoreInfo{State: "started", Version: "1.2.3", StartedAt: time.Now().Add(-time.Hour)},
+				QueueLog: QueueLog{Bytes: 33291620, Compactions: 1},
+			},
+			width: width,
+			theme: theme,
+		})
+		if !strings.Contains(got, "log: 31.7 MiB") {
+			t.Errorf("width %d: header lacks the queue log size; got:\n%s", width, got)
+		}
+	}
+}
+
+func TestQueueLogSummary(t *testing.T) {
+	if got := queueLogSummary(QueueLog{}); got != "log: 0 B" {
+		t.Errorf("zero value renders %q", got)
+	}
+}

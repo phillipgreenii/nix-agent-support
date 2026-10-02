@@ -56,6 +56,11 @@ type poolTOML struct {
 	// one event of a marked type at a time, across every bound handler, until
 	// it is released. Absent/empty: marks nothing (unchanged from today).
 	SerializeTypes []string `toml:"serialize_types"`
+	// CompactThresholdBytes is the queue.jsonl size that triggers a background
+	// compaction of the log (bead pg2-8e0m6). A pointer so an explicit 0
+	// (disable runtime compaction) is distinguishable from absent (keep the
+	// default / env value).
+	CompactThresholdBytes *int64 `toml:"compact_threshold_bytes"`
 	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath are RETIRED (bead
 	// pg2-h63eu): they named the file-backed gates the Gate Registry replaced.
 	// They are still decoded so a config that carries them keeps loading;
@@ -229,6 +234,12 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// overlay for this one — see DEC-CONC-1's "not decided here".
 	if len(shape.Pool.SerializeTypes) > 0 {
 		c.SerializeTypes = shape.Pool.SerializeTypes
+	}
+	if v := shape.Pool.CompactThresholdBytes; v != nil {
+		if *v < 0 {
+			return nil, fmt.Errorf("pool.compact_threshold_bytes must be >= 0 (0 disables runtime compaction), got %d", *v)
+		}
+		c.CompactThresholdBytes = *v
 	}
 	// Pool-wide retry-cadence defaults (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz) MUST
 	// resolve before buildRole/buildQueries below, since both read c.RetryBackoff

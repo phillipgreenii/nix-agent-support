@@ -402,6 +402,18 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if len(sources) != 1 || sources[0].(map[string]any)["name"] != "feedback-ready" {
 		t.Fatalf("sources = %v, want the published tick's one source", sources)
 	}
+	// queueLog (bead pg2-8e0m6): present on every reply; this fixture's in-memory
+	// store has no size to report, so both counters read 0.
+	ql, ok := reply["queueLog"].(map[string]any)
+	if !ok {
+		t.Fatalf("queueLog = %v, want an object", reply["queueLog"])
+	}
+	if _, ok := ql["bytes"]; !ok {
+		t.Fatalf("queueLog = %v, want a bytes field", ql)
+	}
+	if _, ok := ql["compactions"]; !ok {
+		t.Fatalf("queueLog = %v, want a compactions field", ql)
+	}
 }
 
 // TestServeStatus_ActivityDroppedFalseWhenNothingEvicted proves the reply's

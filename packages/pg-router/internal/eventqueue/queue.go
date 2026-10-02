@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -426,6 +427,17 @@ type Queue struct {
 	// listenerCount already documents.
 	delivered atomic.Int64
 	declined  atomic.Int64
+
+	// Log compaction (compact.go). compactThreshold/compactOnStart are set once
+	// by WithCompaction; compactNext is the log size that triggers the next
+	// runtime compaction; compacting is the single-flight guard and compactWG
+	// lets a test (or shutdown) wait for the background run.
+	compactThreshold int64
+	compactOnStart   bool
+	compactNext      atomic.Int64
+	compacting       atomic.Bool
+	compactWG        sync.WaitGroup
+	compactions      atomic.Int64
 }
 
 // custody is one outstanding-offer record in Queue.custody. It carries no
@@ -535,6 +547,14 @@ func New(store Store, opts ...Option) (*Queue, error) {
 	for _, opt := range opts {
 		opt(q)
 	}
+	q.compactNext.Store(q.compactThreshold)
+	if q.compactOnStart {
+		// Before the queue replays or accepts anything. A failure is not fatal:
+		// the uncompacted log is intact and replays as it always did.
+		if _, err := q.compact("startup"); err != nil && !errors.Is(err, ErrCompactionUnsupported) {
+			slog.Error("eventqueue: startup queue log compaction failed; replaying the uncompacted log", "err", err)
+		}
+	}
 	if err := q.replay(); err != nil {
 		return nil, err
 	}
@@ -584,6 +604,10 @@ func (q *Queue) replay() error {
 			}
 			delete(q.entries, r.EventID)
 			q.dropFromOrder(r.EventID) // no tombstone: a re-emit must re-append fresh
+		case opSeen:
+			// Written only by compaction: a type enqueued earlier whose events are
+			// all gone (see opSeen).
+			q.publishCellLocked("", "", r.Type)
 		case opGateSet:
 			q.gates[r.GateType] = gateFromRecord(r)
 		case opGateCleared, opGateExpired:
@@ -1578,6 +1602,7 @@ func (q *Queue) Expire() (dropped int) {
 	for _, t := range misses {
 		q.obs.OnUnconsumedExpired(t)
 	}
+	q.maybeCompact()
 	return dropped
 }
 

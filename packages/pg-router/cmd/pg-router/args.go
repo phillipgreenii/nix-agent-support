@@ -145,6 +145,10 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
                            the resolved location (falls back to INFO); the explicit opt-out for
                            a deployment that intentionally runs on built-in roles (default false)
   PG_ROUTER_ACTIVITY_RING    dispatch-outcome activity ring buffer capacity (default 512)
+  PG_ROUTER_COMPACT_THRESHOLD_BYTES
+                           queue.jsonl size above which the log is compacted to live state in the
+                           background (default 8388608 = 8 MiB; 0 disables runtime compaction, the
+                           startup compaction still runs); [pool].compact_threshold_bytes overrides it
   PG_ROUTER_METRICS_ADDR     listen address (host:port) for run's OTel Prometheus /metrics
                            endpoint (default disabled); run's --metrics-addr flag > this env
                            var > disabled, the same precedence PG_ROUTER_TUI_INTERVAL uses

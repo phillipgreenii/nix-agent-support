@@ -1226,6 +1226,13 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 			"busy":  s.q.SessionsInFlight(),
 			"total": s.q.ListenerCount(),
 		},
+		// queueLog (bead pg2-8e0m6): the durable write-ahead log's current size and
+		// how many times this process has compacted it. Additive to the status
+		// tree; bytes is 0 when the queue's store cannot report a size.
+		"queueLog": map[string]any{
+			"bytes":       s.q.LogSize(),
+			"compactions": s.q.Compactions(),
+		},
 		"core": map[string]any{
 			"state":      s.State().String(),
 			"pid":        os.Getpid(),

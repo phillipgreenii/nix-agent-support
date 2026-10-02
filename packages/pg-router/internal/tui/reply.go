@@ -44,6 +44,11 @@ type StatusReply struct {
 	// requires that.
 	Dispatch Dispatch `json:"dispatch"`
 
+	// QueueLog mirrors the wire's `queueLog` object (bead pg2-8e0m6): the
+	// durable write-ahead log's size and compaction count. A zero value decodes
+	// an absent object (an older core).
+	QueueLog QueueLog `json:"queueLog"`
+
 	UnmatchedBindings []string        `json:"unmatchedBindings"`
 	Activity          []ActivityEntry `json:"activity"`
 	ActivityDropped   bool            `json:"activityDropped"`
@@ -109,6 +114,12 @@ type Delivery struct {
 type Dispatch struct {
 	Busy  int `json:"busy"`
 	Total int `json:"total"`
+}
+
+// QueueLog mirrors the wire's `queueLog` object.
+type QueueLog struct {
+	Bytes       int64 `json:"bytes"`
+	Compactions int64 `json:"compactions"`
 }
 
 // Registration mirrors one entry of the wire's `registry` array: a

@@ -52,6 +52,15 @@
       }
     },
     "mode": { "type": "string" },
+    "queueLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "compactions"],
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0 },
+        "compactions": { "type": "integer", "minimum": 0 }
+      }
+    },
     "dispatch": {
       "type": "object",
       "additionalProperties": false,

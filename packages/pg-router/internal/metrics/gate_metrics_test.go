@@ -190,3 +190,48 @@ func assertNoOwnerLabel(t *testing.T, metric string, attrs []attribute.KeyValue)
 		}
 	}
 }
+
+// The queue-log size gauge (bead pg2-8e0m6) reads the supplied size on each
+// collect, and is not registered at all without WithQueueLogSize.
+func TestQueueLogBytesGauge(t *testing.T) {
+	size := int64(1234)
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	if _, err := New(mp, func() map[string]int { return nil }, WithQueueLogSize(func() int64 { return size })); err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{reader: reader, mp: mp}
+	read := func() int64 {
+		m := findMetric(t, h.collect(t), MetricQueueLogBytes)
+		g, ok := m.Data.(metricdata.Gauge[int64])
+		if !ok || len(g.DataPoints) != 1 {
+			t.Fatalf("%s data = %#v, want one int64 gauge point", MetricQueueLogBytes, m.Data)
+		}
+		return g.DataPoints[0].Value
+	}
+	if got := read(); got != 1234 {
+		t.Fatalf("gauge = %d, want 1234", got)
+	}
+	size = 56
+	if got := read(); got != 56 {
+		t.Fatalf("gauge after the log shrank = %d, want 56", got)
+	}
+
+	// Not registered without the option.
+	reader2 := sdkmetric.NewManualReader()
+	mp2 := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader2))
+	if _, err := New(mp2, func() map[string]int { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader2.Collect(t.Context(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricQueueLogBytes {
+				t.Fatal("queue log gauge registered without WithQueueLogSize")
+			}
+		}
+	}
+}

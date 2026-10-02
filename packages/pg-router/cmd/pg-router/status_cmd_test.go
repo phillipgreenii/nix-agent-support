@@ -254,3 +254,30 @@ func TestStatusCmd_RendersWidenedListenersSources(t *testing.T) {
 		t.Fatalf("stdout = %q, want the removed `rejected` field never rendered", text)
 	}
 }
+
+// renderStatusText shows the durable queue log's size and compaction count on
+// its own header line (bead pg2-8e0m6), and an explicit "-" against a core that
+// predates the field.
+func TestRenderStatusText_QueueLogLine(t *testing.T) {
+	var out strings.Builder
+	renderStatusText(&out, "/s", statusReply{QueueLog: &struct {
+		Bytes       int64 `json:"bytes"`
+		Compactions int64 `json:"compactions"`
+	}{Bytes: 33291620, Compactions: 2}})
+	if want := "queue log: bytes=33291620 (31.7 MiB) compactions=2\n"; !strings.Contains(out.String(), want) {
+		t.Fatalf("stdout = %q, want %q", out.String(), want)
+	}
+	out.Reset()
+	renderStatusText(&out, "/s", statusReply{})
+	if want := "queue log: -\n"; !strings.Contains(out.String(), want) {
+		t.Fatalf("stdout = %q, want %q", out.String(), want)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	for in, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KiB", 3808: "3.7 KiB", 33291620: "31.7 MiB", 5 << 30: "5.0 GiB"} {
+		if got := humanBytes(in); got != want {
+			t.Errorf("humanBytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}

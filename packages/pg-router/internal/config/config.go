@@ -61,6 +61,15 @@ type Config struct {
 	// (the default) marks nothing, so an existing deployment's dispatch is
 	// unchanged.
 	SerializeTypes []string
+	// CompactThresholdBytes is the queue.jsonl size above which the queue starts
+	// a background compaction of its write-ahead log down to live state
+	// (eventqueue.WithCompaction, bead pg2-8e0m6). From [pool].compact_threshold_bytes
+	// or PG_ROUTER_COMPACT_THRESHOLD_BYTES; Default() is DefaultCompactThresholdBytes.
+	// 0 disables RUNTIME compaction only — the log is still compacted once at
+	// startup. After a compaction the trigger rises to twice the compacted size
+	// when that is larger, so a live set bigger than the threshold cannot make
+	// the queue compact on every sweep.
+	CompactThresholdBytes int64
 	// The three file-backed INV-LIFE-2 gates (OperatorPaused / CICDDown /
 	// DiskSpaceLow), their external disable kill-switches and the
 	// PG_ROUTER_OPERATOR_PAUSED / PG_ROUTER_CICD_DOWN / PG_ROUTER_DISK_SPACE_LOW[_DISABLE]
@@ -310,16 +319,17 @@ func Default() Config {
 	cwd, _ := os.Getwd()
 	state := stateHome()
 	return Config{
-		RepoRoot:      cwd,
-		BeadsPrefix:   "zr",
-		WorktreeDir:   state + "/pg-router/worktrees",
-		SkillMD:       "",
-		WorkerSkillMD: "",
-		MaxFeedback:   1,
-		MaxWorker:     1,
-		MaxWait:       1800 * time.Second,
-		PollInterval:  10 * time.Second,
-		RetryBackoff:  backoff.Default(),
+		RepoRoot:              cwd,
+		BeadsPrefix:           "zr",
+		WorktreeDir:           state + "/pg-router/worktrees",
+		SkillMD:               "",
+		WorkerSkillMD:         "",
+		MaxFeedback:           1,
+		MaxWorker:             1,
+		MaxWait:               1800 * time.Second,
+		PollInterval:          10 * time.Second,
+		RetryBackoff:          backoff.Default(),
+		CompactThresholdBytes: DefaultCompactThresholdBytes,
 		// PullFailureBackoff shares the same shape default; Retries stays 0
 		// (fail fast) so an unconfigured deployment is byte-for-byte unchanged
 		// from pg2-qq9v's original "a query failure must NOT masquerade as no
@@ -385,6 +395,7 @@ func Load() (Config, error) {
 	c.ConfirmIngest = envSecs("PG_ROUTER_CONFIRM_INGEST", c.ConfirmIngest)
 	c.LogDir = envStr("PG_ROUTER_LOG_DIR", c.LogDir)
 	c.ActivityRingSize = envInt("PG_ROUTER_ACTIVITY_RING", c.ActivityRingSize)
+	c.CompactThresholdBytes = int64(envInt("PG_ROUTER_COMPACT_THRESHOLD_BYTES", int(c.CompactThresholdBytes)))
 	c.MetricsAddr = envStr("PG_ROUTER_METRICS_ADDR", c.MetricsAddr)
 
 	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
@@ -807,6 +818,12 @@ func envBool(key string, def bool) bool {
 	}
 	return b
 }
+
+// DefaultCompactThresholdBytes is Default().CompactThresholdBytes: 8 MiB. The
+// log held 33 MB of mostly dead history after 15 days (about 2.2 MB/day) while its
+// live state was a few KB, so this compacts roughly every few days at today's
+// rate and keeps replay and restart cost small.
+const DefaultCompactThresholdBytes int64 = 8 << 20
 
 func envInt(key string, def int) int {
 	if v, ok := os.LookupEnv(key); ok {

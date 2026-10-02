@@ -513,3 +513,70 @@ binds = ["x"]
 		t.Fatalf("ExpectedIntervalMsFor() = %d, want 0 (unknown)", got)
 	}
 }
+
+// --- compact_threshold_bytes (pg2-8e0m6) ---
+
+const compactCfgBody = `
+[[query]]
+name = "s"
+emits = ["e"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "r"
+type = "command"
+binds = ["e"]
+[role.command]
+argv = ["x"]
+`
+
+func TestLoad_compactThresholdDefaultEnvAndPool(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, compactCfgBody)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CompactThresholdBytes != DefaultCompactThresholdBytes || DefaultCompactThresholdBytes != 8<<20 {
+		t.Fatalf("default CompactThresholdBytes = %d, want %d (8 MiB)", c.CompactThresholdBytes, DefaultCompactThresholdBytes)
+	}
+
+	t.Setenv("PG_ROUTER_COMPACT_THRESHOLD_BYTES", "1048576")
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CompactThresholdBytes != 1<<20 {
+		t.Fatalf("env CompactThresholdBytes = %d, want 1048576", c.CompactThresholdBytes)
+	}
+
+	// [pool] (repo config) wins over env; an explicit 0 is honoured (disables
+	// runtime compaction), not mistaken for "absent".
+	writeCfg(t, "[pool]\ncompact_threshold_bytes = 0\n"+compactCfgBody)
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CompactThresholdBytes != 0 {
+		t.Fatalf("[pool] compact_threshold_bytes = 0 gave %d", c.CompactThresholdBytes)
+	}
+	writeCfg(t, "[pool]\ncompact_threshold_bytes = 4096\n"+compactCfgBody)
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CompactThresholdBytes != 4096 {
+		t.Fatalf("[pool] compact_threshold_bytes = 4096 gave %d", c.CompactThresholdBytes)
+	}
+}
+
+func TestLoad_compactThresholdNegativeRejected(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, "[pool]\ncompact_threshold_bytes = -1\n"+compactCfgBody)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "compact_threshold_bytes") {
+		t.Fatalf("Load error = %v, want a compact_threshold_bytes rejection", err)
+	}
+}

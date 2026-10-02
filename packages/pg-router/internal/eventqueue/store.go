@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +26,13 @@ const (
 	opGateSet     opKind = "gate_set"
 	opGateCleared opKind = "gate_cleared"
 	opGateExpired opKind = "gate_expired"
+	// opSeen is written ONLY by log compaction (compact.go): it carries, in Type,
+	// an event TYPE the log once enqueued but whose events are all gone by now.
+	// A replay marks every enqueued type "ever seen" (Queue.UnmatchedBindings), so
+	// a compaction that dropped the enqueue records outright would silently
+	// change that projection; one opSeen record per such type keeps it intact. A
+	// replay of an older binary ignores the unknown kind.
+	opSeen opKind = "seen"
 )
 
 // Record is one durable write-ahead-log entry. The log is append-only; queue
@@ -69,9 +79,11 @@ type Record struct {
 // fault-injecting fake (crash-window simulation) and an in-memory double, per
 // ADR 0031's "storage mechanism is a realization choice".
 //
-// Store is not internally synchronized: every call is serialized solely by the
-// queue's own mutex (q.mu), never by the Store itself. AppendBatch's caller
-// chooses the batch's contents, and the BATCH — not the individual Record — is
+// Store is not required to synchronize its own appends: every call is serialized
+// by the queue's own mutex (q.mu). The one exception is compaction (Compactor):
+// a Store that offers it runs it OFF the queue lock, and so MUST make it safe
+// against concurrent Append/AppendBatch itself (FileStore does, with its own
+// mutex). AppendBatch's caller chooses the batch's contents, and the BATCH — not the individual Record — is
 // the caller's atomicity unit: either every record in one AppendBatch call is
 // durable before it returns, or a caller MUST NOT treat any of them as durable.
 type Store interface {
@@ -125,20 +137,67 @@ func (r Record) event() Event {
 // Each line is one Record. Append writes and fsyncs one line; AppendBatch writes
 // every line of the batch in one Write call and fsyncs once for the whole batch.
 // Either way a persisted line survives a crash.
+//
+// Appends are serialized by the queue's own mutex (see Store), but FileStore
+// ALSO carries an internal mutex because Compact (compact.go) runs on its own
+// goroutine at runtime and swaps the underlying file: mu guards f, size and
+// closed, and compactMu serializes Compact/Close against each other.
 type FileStore struct {
-	f *os.File
+	path string
+
+	compactMu sync.Mutex // serializes Compact calls and Close against a running Compact
+
+	mu     sync.Mutex
+	f      *os.File
+	size   int64 // logical byte length of the log file; guarded by mu
+	closed bool
+
+	sizeGauge atomic.Int64 // lock-free mirror of size, for LogSize
+
+	// compactHook, when non-nil, is called at each durable step of Compact with
+	// the step's name — a test seam for crash injection (see compactStage*).
+	compactHook func(stage string)
 }
 
-// NewFileStore opens (creating parent dirs) the append-only WAL at path.
+// NewFileStore opens (creating parent dirs) the append-only WAL at path. A
+// leftover compaction temp file from a crashed run is removed: it was never
+// renamed over the log, so it is not part of the log.
 func NewFileStore(path string) (*FileStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
+	}
+	if err := os.Remove(compactTempPath(path)); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("eventqueue: remove stale compaction temp file: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	return &FileStore{f: f}, nil
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	s := &FileStore{path: path, f: f, size: fi.Size()}
+	s.sizeGauge.Store(s.size)
+	return s, nil
+}
+
+// LogSize reports the log file's current byte length. Lock-free.
+func (s *FileStore) LogSize() int64 { return s.sizeGauge.Load() }
+
+// writeLocked writes b to the log and fsyncs. Caller holds s.mu.
+func (s *FileStore) writeLocked(b []byte) error {
+	if s.closed {
+		return os.ErrClosed
+	}
+	n, err := s.f.Write(b)
+	s.size += int64(n)
+	s.sizeGauge.Store(s.size)
+	if err != nil {
+		return err
+	}
+	return s.f.Sync()
 }
 
 // Append marshals and writes one record as a line, then fsyncs.
@@ -148,10 +207,9 @@ func (s *FileStore) Append(rec Record) error {
 		return err
 	}
 	b = append(b, '\n')
-	if _, err := s.f.Write(b); err != nil {
-		return err
-	}
-	return s.f.Sync()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeLocked(b)
 }
 
 // AppendBatch marshals every record in recs as its own line — the same per-line
@@ -171,26 +229,17 @@ func (s *FileStore) AppendBatch(recs []Record) error {
 		buf = append(buf, b...)
 		buf = append(buf, '\n')
 	}
-	if _, err := s.f.Write(buf); err != nil {
-		return err
-	}
-	return s.f.Sync()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeLocked(buf)
 }
 
-// Replay reads the WAL back into records. A partially-written trailing line
-// (torn by a crash mid-write) is tolerated: parsing stops at the first
-// undecodable line, mirroring a real WAL's truncate-on-torn-tail recovery.
-func (s *FileStore) Replay() ([]Record, error) {
-	f, err := os.Open(s.f.Name())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	var recs []Record
-	sc := bufio.NewScanner(f)
+// scanRecords decodes the JSONL stream r, calling fn for each record in order.
+// A partially-written trailing line (torn by a crash mid-write) is tolerated:
+// scanning stops at the first undecodable line, mirroring a real WAL's
+// truncate-on-torn-tail recovery, and torn reports that it happened.
+func scanRecords(r io.Reader, fn func(Record)) (torn bool, err error) {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -201,18 +250,46 @@ func (s *FileStore) Replay() ([]Record, error) {
 		if err := json.Unmarshal(line, &rec); err != nil {
 			// Torn trailing record from a crash mid-write: stop here; everything
 			// before it is intact and durable.
-			break
+			return true, nil
 		}
-		recs = append(recs, rec)
+		fn(rec)
 	}
 	if err := sc.Err(); err != nil {
-		return recs, fmt.Errorf("eventqueue: replay scan: %w", err)
+		return false, fmt.Errorf("eventqueue: replay scan: %w", err)
 	}
-	return recs, nil
+	return false, nil
 }
 
-// Close closes the WAL file.
-func (s *FileStore) Close() error { return s.f.Close() }
+// Replay reads the WAL back into records. A partially-written trailing line
+// (torn by a crash mid-write) is tolerated: parsing stops at the first
+// undecodable line, mirroring a real WAL's truncate-on-torn-tail recovery.
+func (s *FileStore) Replay() ([]Record, error) {
+	f, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	var recs []Record
+	_, err = scanRecords(f, func(r Record) { recs = append(recs, r) })
+	return recs, err
+}
+
+// Close closes the WAL file. It waits for a running Compact to finish first, so
+// a compaction never races a close.
+func (s *FileStore) Close() error {
+	s.compactMu.Lock()
+	defer s.compactMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.f.Close()
+}
 
 // MemStore is an in-memory Store double for tests. It keeps records in a slice
 // and is not durable across process restarts (tests simulate a "restart" by

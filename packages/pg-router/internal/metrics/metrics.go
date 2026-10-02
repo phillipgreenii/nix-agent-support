@@ -110,6 +110,12 @@ const (
 	// from the existing per-type MetricQueueDepth gauge (Task 3.3 binding
 	// decision).
 	MetricBacklog = "pg_router_backlog"
+	// MetricQueueLogBytes is the current byte size of the durable event-queue
+	// write-ahead log (<LogDir>/queue.jsonl) — events AND gates (bead pg2-8e0m6).
+	// Registered only when New is given WithQueueLogSize. It rises with every
+	// write and drops when the log is compacted, so a flat-lining saw-tooth is
+	// healthy and a line that only climbs means compaction is not keeping up.
+	MetricQueueLogBytes = "pg_router_queue_log_bytes"
 	// MetricLiveness reports 1 while the daemon's last tick is within its
 	// liveness window, else 0. Registered ONLY when New is given WithLiveness
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
@@ -310,11 +316,12 @@ var (
 type Option func(*options)
 
 type options struct {
-	activeGates func() []eventqueue.Gate
-	isLive      func() bool
-	now         func() time.Time
-	poolDir     string
-	poolTTL     time.Duration
+	queueLogBytes func() int64
+	activeGates   func() []eventqueue.Gate
+	isLive        func() bool
+	now           func() time.Time
+	poolDir       string
+	poolTTL       time.Duration
 }
 
 // WithClock injects a clock seam (default time.Now) for deterministic tests
@@ -322,6 +329,13 @@ type options struct {
 // elapsed time since an event's OnEnqueue — mirrors eventqueue.WithClock.
 func WithClock(now func() time.Time) Option {
 	return func(o *options) { o.now = now }
+}
+
+// WithQueueLogSize registers MetricQueueLogBytes, an ObservableGauge reading fn
+// (typically queue.LogSize) on each collect. Without it the gauge is simply not
+// registered.
+func WithQueueLogSize(fn func() int64) Option {
+	return func(o *options) { o.queueLogBytes = fn }
 }
 
 // WithActiveGates registers MetricActiveGates, an ObservableGauge reporting 1
@@ -438,6 +452,19 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		return nil, err
 	}
 	e := &Emitter{gateSeen: map[string]struct{}{}}
+	if cfg.queueLogBytes != nil {
+		if _, err := m.Int64ObservableGauge(
+			MetricQueueLogBytes,
+			metric.WithUnit("By"),
+			metric.WithDescription("size of the durable event-queue write-ahead log (queue.jsonl); drops when the log is compacted"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				o.Observe(cfg.queueLogBytes())
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.activeGates != nil {
 		if _, err := m.Int64ObservableGauge(
 			MetricActiveGates,
