@@ -63,6 +63,7 @@ func (c *capturingEvaluator) EvaluateStructure(source string, leaves []cmdparse.
 }
 
 func TestSafecmds_DynamicWritePath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	// Write commands whose path arg is dynamically expanded ($VAR / $(...) /
@@ -94,6 +95,7 @@ func TestSafecmds_DynamicWritePath_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Pg2_5k6pu_Commands(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -125,6 +127,7 @@ func TestSafecmds_Pg2_5k6pu_Commands(t *testing.T) {
 }
 
 func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -171,6 +174,7 @@ func TestSafecmds_AlwaysSafe_Approve(t *testing.T) {
 // irrelevant (alwaysSafe short-circuits before any path check), so an
 // out-of-zone absolute path still Approves.
 func TestSafecmds_Cd_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -196,6 +200,7 @@ func TestSafecmds_Cd_Approve(t *testing.T) {
 // approval, the same class as ps/pgrep. Every args shape below Approves
 // because alwaysSafe short-circuits before any argument inspection.
 func TestSafecmds_Bgcheck_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -223,6 +228,7 @@ func TestSafecmds_Bgcheck_Approve(t *testing.T) {
 // (deliberately excluded, pg2-c2non), bash's `set` has no NAME=VALUE
 // assignment form, so there is no env-var-injector-guard bypass to reopen.
 func TestSafecmds_Set_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -262,6 +268,7 @@ func TestSafecmds_Set_Approve(t *testing.T) {
 // bash-scripting skill prescribes
 // (claude-marketplace/bash-scripting/skills/bash-scripting/SKILL.md).
 func TestSafecmds_Shift_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -292,6 +299,7 @@ func TestSafecmds_Shift_Approve(t *testing.T) {
 // see TestUnwrapCommand_CommandRunnerPrefixes's conservative cases) must fall
 // through to the unknown-command abstain, not Approve.
 func TestSafecmds_Bgrun_NotSafe(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -316,6 +324,7 @@ func TestSafecmds_Bgrun_NotSafe(t *testing.T) {
 // every real command leaf was safe-listed — verified pre-fix: `for i in 1;
 // do true; done` abstained despite `true` being alwaysSafe.
 func TestSafecmds_DataLeavesAreNeverJudgedAsCommands(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -361,6 +370,7 @@ func TestSafecmds_DataLeavesAreNeverJudgedAsCommands(t *testing.T) {
 // already gives the quoted-argument parser issue) — filed as pg2-1m8en
 // (closed; root cause folded into pg2-0h53n).
 func TestSafecmds_ReadAndControlFlow_AlwaysSafe(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -401,6 +411,7 @@ func TestSafecmds_ReadAndControlFlow_AlwaysSafe(t *testing.T) {
 // needs the same zone check base64 already gets, not alwaysSafe). Mirrors
 // TestSafecmds_Base64_Commands' table shape exactly.
 func TestSafecmds_Paste_Commands(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -432,6 +443,7 @@ func TestSafecmds_Paste_Commands(t *testing.T) {
 // member with the same "no-operand vs. project-path vs. out-of-zone-path"
 // cases.
 func TestSafecmds_Base64_Commands(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -477,6 +489,7 @@ func TestSafecmds_Base64_Commands(t *testing.T) {
 // jq is the stand-in leaf here because, like "gh api ... --jq .content", it
 // is a safecmds-recognized read command producing the text base64 decodes.
 func TestSafecmds_Compound_JqAndBase64_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -491,6 +504,7 @@ func TestSafecmds_Compound_JqAndBase64_Approve(t *testing.T) {
 }
 
 func TestSafecmds_JqWithProjectPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -505,6 +519,7 @@ func TestSafecmds_JqWithProjectPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_JqWithNoPaths_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -519,6 +534,7 @@ func TestSafecmds_JqWithNoPaths_Approve(t *testing.T) {
 }
 
 func TestSafecmds_CatEtcPasswd_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -533,6 +549,7 @@ func TestSafecmds_CatEtcPasswd_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Rm_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -552,6 +569,7 @@ func TestSafecmds_Rm_Abstain(t *testing.T) {
 // (tc-sfpto) but NOT "~user", so `rm -rf ~someuser` was never classified and
 // slipped through as safe. Bare "~" and "~/..." MUST stay path-shaped too.
 func TestSafecmds_LooksLikePath_TildeUser(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		arg  string
 		want bool
@@ -580,6 +598,7 @@ func TestSafecmds_LooksLikePath_TildeUser(t *testing.T) {
 // cleanPath returns "" -> PathUnknown; a known user's home is also outside every
 // writable zone), `rm -rf ~someuser` is NOT auto-approved.
 func TestSafecmds_RmTildeUser_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -594,6 +613,7 @@ func TestSafecmds_RmTildeUser_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Ls_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -608,6 +628,7 @@ func TestSafecmds_Ls_Approve(t *testing.T) {
 }
 
 func TestSafecmds_HeadProjectFile_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -640,6 +661,7 @@ func TestSafecmds_HeadProjectFile_Approve(t *testing.T) {
 // computed from the OTHER leaves and attached to that single-leaf synthetic
 // HookInput — exactly what the tests below simulate directly.
 func TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -665,6 +687,7 @@ func TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf(t *testing.T) {
 // TestSafecmds_WholeCompoundDirectAbstainsAtAssignmentLeaf for why the whole
 // compound cannot be fed directly here instead).
 func TestSafecmds_InCommandLiteralRelief_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	vars := map[string]string{
@@ -689,6 +712,7 @@ func TestSafecmds_InCommandLiteralRelief_Approve(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:      "Bash",
 				CWD:           "/home/user/project",
@@ -709,6 +733,7 @@ func TestSafecmds_InCommandLiteralRelief_Approve(t *testing.T) {
 // abstaining exactly as pg2-2ke04 left it — this relief must not widen into a
 // blanket "trust any $VAR" shape.
 func TestSafecmds_InCommandLiteralRelief_AmbientStaysAbstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -727,6 +752,7 @@ func TestSafecmds_InCommandLiteralRelief_AmbientStaysAbstain(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:      "Bash",
 				CWD:           "/home/user/project",
@@ -751,6 +777,7 @@ func TestSafecmds_InCommandLiteralRelief_AmbientStaysAbstain(t *testing.T) {
 // resolved value is routed through readPathIssue's ordinary
 // looksLikePath+CanRead() check, not a weaker one.
 func TestSafecmds_InCommandLiteralRelief_ResolvedDangerousLiteralStillAbstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -784,6 +811,7 @@ func TestSafecmds_InCommandLiteralRelief_ResolvedDangerousLiteralStillAbstains(t
 // write's dynamically-expanded path arg must keep abstaining even when the SAME
 // variable is fully resolvable in-command.
 func TestSafecmds_InCommandLiteralRelief_WritePathUnaffected(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -799,6 +827,7 @@ func TestSafecmds_InCommandLiteralRelief_WritePathUnaffected(t *testing.T) {
 }
 
 func TestSafecmds_Name(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	if got := r.Name(); got != "safe-commands" {
@@ -807,6 +836,7 @@ func TestSafecmds_Name(t *testing.T) {
 }
 
 func TestSafecmds_Compound_EchoAndRm_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -821,6 +851,7 @@ func TestSafecmds_Compound_EchoAndRm_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Compound_EchoAndCatEtcPasswd_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -835,6 +866,7 @@ func TestSafecmds_Compound_EchoAndCatEtcPasswd_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Compound_EchoAndLs_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -849,6 +881,7 @@ func TestSafecmds_Compound_EchoAndLs_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Compound_JqAndYq_ProjectPaths_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -863,6 +896,7 @@ func TestSafecmds_Compound_JqAndYq_ProjectPaths_Approve(t *testing.T) {
 }
 
 func TestSafecmds_RmProjectPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -877,6 +911,7 @@ func TestSafecmds_RmProjectPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_RmNixStore_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -891,6 +926,7 @@ func TestSafecmds_RmNixStore_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_CatNixStore_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -905,6 +941,7 @@ func TestSafecmds_CatNixStore_Approve(t *testing.T) {
 }
 
 func TestSafecmds_CpReadToWrite_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -919,6 +956,7 @@ func TestSafecmds_CpReadToWrite_Approve(t *testing.T) {
 }
 
 func TestSafecmds_CpWriteToReadOnly_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -933,6 +971,7 @@ func TestSafecmds_CpWriteToReadOnly_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_MvProjectPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -947,6 +986,7 @@ func TestSafecmds_MvProjectPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_TouchProjectPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -961,6 +1001,7 @@ func TestSafecmds_TouchProjectPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_SedInPlace_WritePath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -975,6 +1016,7 @@ func TestSafecmds_SedInPlace_WritePath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_SedInPlace_ReadOnlyPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -989,6 +1031,7 @@ func TestSafecmds_SedInPlace_ReadOnlyPath_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_SedNoInPlace_ReadOnlyPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1003,6 +1046,7 @@ func TestSafecmds_SedNoInPlace_ReadOnlyPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_RmTmpPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1017,6 +1061,7 @@ func TestSafecmds_RmTmpPath_Approve(t *testing.T) {
 }
 
 func TestSafecmds_NewCommands(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/tmp/project")
 	r := New(pe)
 	tests := []struct {
@@ -1031,6 +1076,7 @@ func TestSafecmds_NewCommands(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": tt.command})}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
@@ -1041,6 +1087,7 @@ func TestSafecmds_NewCommands(t *testing.T) {
 }
 
 func TestSafecmds_GrepNixVarProfiles_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1055,6 +1102,7 @@ func TestSafecmds_GrepNixVarProfiles_Approve(t *testing.T) {
 }
 
 func TestSafecmds_LsNixVarProfiles_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1069,6 +1117,7 @@ func TestSafecmds_LsNixVarProfiles_Approve(t *testing.T) {
 }
 
 func TestSafecmds_HeadNixVarProfiles_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1083,6 +1132,7 @@ func TestSafecmds_HeadNixVarProfiles_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Pgrep_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1097,6 +1147,7 @@ func TestSafecmds_Pgrep_Approve(t *testing.T) {
 }
 
 func TestSafecmds_ReadlinkNixVar_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1111,6 +1162,7 @@ func TestSafecmds_ReadlinkNixVar_Approve(t *testing.T) {
 }
 
 func TestSafecmds_RmNixVar_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1125,6 +1177,7 @@ func TestSafecmds_RmNixVar_Abstain(t *testing.T) {
 }
 
 func TestSafecmds_Help_CommandOnly_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
@@ -1147,6 +1200,7 @@ func TestSafecmds_Help_CommandOnly_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Help_SubcommandKnown_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
@@ -1178,6 +1232,7 @@ func TestSafecmds_Help_SubcommandKnown_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Help_SubcommandForm_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
@@ -1205,6 +1260,7 @@ func TestSafecmds_Help_SubcommandForm_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Jq_ArgFlags_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	approve := []string{
@@ -1229,6 +1285,7 @@ func TestSafecmds_Jq_ArgFlags_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Help_NotApproved(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	notApproved := []string{
@@ -1253,6 +1310,7 @@ func TestSafecmds_Help_NotApproved(t *testing.T) {
 }
 
 func TestEvaluateCp_Comprehensive(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1278,6 +1336,7 @@ func TestEvaluateCp_Comprehensive(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1303,6 +1362,7 @@ func TestEvaluateCp_Comprehensive(t *testing.T) {
 // quoted glued destination must not gain a bypass it shouldn't have, and must
 // not lose an approval it should keep.
 func TestEvaluateCp_TargetDirectoryGluedQuoteParity(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1382,6 +1442,7 @@ func TestEvaluateCp_TargetDirectoryGluedQuoteParity(t *testing.T) {
 // invocation out of it — the whole command abstains via NotApplicable before
 // evaluateCp (and this fix's check) ever runs.
 func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1413,6 +1474,7 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1475,6 +1537,7 @@ func TestEvaluateCp_TargetDirectoryMalformedGluedQuotingAbstains(t *testing.T) {
 // not the standard-mode fallback) is what fires for every spelling, which the
 // reason string demonstrates.
 func TestEvaluateCp_TargetDirectoryAbbrev_NeverApproved(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1520,6 +1583,7 @@ func TestEvaluateCp_TargetDirectoryAbbrev_NeverApproved(t *testing.T) {
 // same "exact-token miss defaults toward Approve" shape as pg2-os1kq's `git
 // reset --har`.
 func TestEvaluateCp_TargetDirectoryAbbrev_MisattributionWithoutFix(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1548,6 +1612,7 @@ func TestEvaluateCp_TargetDirectoryAbbrev_MisattributionWithoutFix(t *testing.T)
 // (see TestSafecmds_SedInPlace_ReadOnlyPath_Abstain for the exact-spelling
 // twin this mirrors).
 func TestSafecmds_SedInPlaceAbbrev_ReadOnlyPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1574,6 +1639,7 @@ func TestSafecmds_SedInPlaceAbbrev_ReadOnlyPath_Abstain(t *testing.T) {
 // (TestSafecmds_SedInPlace_WritePath_Approve) — the fix must not turn every
 // abbreviation into a blanket refusal.
 func TestSafecmds_SedInPlaceAbbrev_WritePath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1598,6 +1664,7 @@ func TestSafecmds_SedInPlaceAbbrev_WritePath_Approve(t *testing.T) {
 // correctly does not treat it as in-place (it falls to the ordinary read path,
 // which is where it belongs since yq would error out and touch nothing).
 func TestSafecmds_YqInplaceAbbrev_NotRecognised(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1621,6 +1688,7 @@ func TestSafecmds_YqInplaceAbbrev_NotRecognised(t *testing.T) {
 }
 
 func TestSafecmds_Sqlite3Removed(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/tmp/project")
 	r := New(pe)
 	input := &hookio.HookInput{ToolName: "Bash", ToolInput: mustJSON(map[string]string{"command": "sqlite3 /tmp/project/test.db 'SELECT 1'"})}
@@ -1631,6 +1699,7 @@ func TestSafecmds_Sqlite3Removed(t *testing.T) {
 }
 
 func TestSafecmds_Xargs(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	// The "xargs sh -c echo" case now delegates its `-c` script through the
 	// I13 structural entry point (pg2-1zrup), so this rule needs an Evaluator
@@ -1657,6 +1726,7 @@ func TestSafecmds_Xargs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1675,6 +1745,7 @@ func TestSafecmds_Xargs(t *testing.T) {
 // NotApplicable (abstain), not panic on a nil r.exprEval and not silently
 // approve (pg2-1zrup).
 func TestSafecmds_XargsShC_NilEvaluator(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1700,6 +1771,7 @@ func TestSafecmds_XargsShC_NilEvaluator(t *testing.T) {
 // source — not on the final decision, which a coincidence elsewhere could
 // make pass for the wrong reason.
 func TestSafecmds_XargsShC_NoQuoteDestroyingJoin(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	cap := &capturingEvaluator{result: hookio.RuleResult{Decision: hookio.Approve, Reason: "ok", Module: "mock"}}
 	r := NewWithEvaluator(cap, pe)
@@ -1728,6 +1800,7 @@ func TestSafecmds_XargsShC_NoQuoteDestroyingJoin(t *testing.T) {
 }
 
 func TestSafecmds_Jar(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1743,6 +1816,7 @@ func TestSafecmds_Jar(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1757,6 +1831,7 @@ func TestSafecmds_Jar(t *testing.T) {
 }
 
 func TestSafecmds_YqSpecialHandling(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1802,6 +1877,7 @@ func TestSafecmds_YqSpecialHandling(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1830,6 +1906,7 @@ func TestSafecmds_YqSpecialHandling(t *testing.T) {
 // write flag is added/moved): this one names no verdict at all, only that the
 // family agrees with itself, so it survives that kind of retune untouched.
 func TestSafecmds_YqWriteFlagFamily_Interchangeable(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -1862,6 +1939,7 @@ func TestSafecmds_YqWriteFlagFamily_Interchangeable(t *testing.T) {
 }
 
 func TestSafecmds_Shellcheck_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1876,6 +1954,7 @@ func TestSafecmds_Shellcheck_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Lsof_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1890,6 +1969,7 @@ func TestSafecmds_Lsof_Approve(t *testing.T) {
 }
 
 func TestSafecmds_ContainedClaude_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -1904,6 +1984,7 @@ func TestSafecmds_ContainedClaude_Approve(t *testing.T) {
 }
 
 func TestSafecmds_IntegrateBranchSupport_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1915,6 +1996,7 @@ func TestSafecmds_IntegrateBranchSupport_Approve(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1929,6 +2011,7 @@ func TestSafecmds_IntegrateBranchSupport_Approve(t *testing.T) {
 }
 
 func TestSafecmds_Unzip(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1948,6 +2031,7 @@ func TestSafecmds_Unzip(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -1967,6 +2051,7 @@ func TestSafecmds_Unzip(t *testing.T) {
 // (cat/sed/yq): a path-like arg outside a readable zone Abstains; the common
 // `gofmt -l .` / `gofmt -d <name>` cases carry no path-like arg and Approve.
 func TestSafecmds_Gofmt(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1994,6 +2079,7 @@ func TestSafecmds_Gofmt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2008,6 +2094,7 @@ func TestSafecmds_Gofmt(t *testing.T) {
 }
 
 func TestSafecmds_BashSyntaxCheck(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -2023,6 +2110,7 @@ func TestSafecmds_BashSyntaxCheck(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2067,6 +2155,7 @@ func TestSafecmds_Strings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2091,6 +2180,7 @@ func TestSafecmds_Strings(t *testing.T) {
 // credential in every permission mode, while the identical `rm $F` was already
 // refused.
 func TestSafecmds_DynamicReadPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	abstain := []string{
@@ -2157,6 +2247,7 @@ func TestSafecmds_DynamicReadPath_Abstain(t *testing.T) {
 // silently widen the relief to writes/known-bad-paths, or silently fail to
 // relieve the read shape it exists for.
 func TestSafecmds_DynamicReadPath_RefusalCategory(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -2172,6 +2263,7 @@ func TestSafecmds_DynamicReadPath_RefusalCategory(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != hookio.NoOpinion {
@@ -2189,6 +2281,7 @@ func TestSafecmds_DynamicReadPath_RefusalCategory(t *testing.T) {
 // escape the pg2-2ke04 guard. Each member is asked to read a deny-listed credential
 // through one variable hop; none may approve.
 func TestSafecmds_EverySafeReadCmdGatesDynamicPath(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	if len(safeReadCmds) == 0 {
@@ -2228,6 +2321,7 @@ func TestSafecmds_EverySafeReadCmdGatesDynamicPath(t *testing.T) {
 // parameter reference) is still refused — the shape check still applies
 // whenever provenance cannot rule the expansion out.
 func TestSafecmds_ProgramOperandRole(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -2268,6 +2362,7 @@ func TestSafecmds_ProgramOperandRole(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.command})}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != tt.want {
@@ -2282,6 +2377,7 @@ func TestSafecmds_ProgramOperandRole(t *testing.T) {
 // never file CONTENT, so a dynamic path there is not an exfiltration primitive and
 // gating it would buy prompts with no security gain.
 func TestSafecmds_BrowsingCmdsKeepDynamicPaths(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	for _, cmd := range []string{"ls $d", "ls -la $HOME", "find $d -name x", "du -sh $d", "stat $f"} {
@@ -2301,6 +2397,7 @@ func TestSafecmds_BrowsingCmdsKeepDynamicPaths(t *testing.T) {
 // MEASURED ON MAIN, before this fix: `ls /etc/shadow` and `test -f /etc/shadow`
 // both measured `allow`, bare, no substitution.
 func TestSafecmds_Pg2_4k7yd_BrowsingAndTest(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	verdict := func(cmd string) hookio.RuleResult {
@@ -2360,6 +2457,7 @@ func TestSafecmds_Pg2_4k7yd_BrowsingAndTest(t *testing.T) {
 // --pre/--filter (pg2-ygjs5) — the search-root path being in-zone does not
 // make an -exec/-delete/-fprint* payload read-only.
 func TestSafecmds_Tc_zo10s_FindDangerousFlags(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	verdict := func(cmd string) hookio.RuleResult {
@@ -2404,6 +2502,7 @@ func TestSafecmds_Tc_zo10s_FindDangerousFlags(t *testing.T) {
 // would be treated as a real path operand and zone-checked against the
 // parent directory.
 func TestSafecmds_Tc_zo10s_FindPatternFlagsNotPaths(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	verdict := func(cmd string) hookio.RuleResult {
@@ -2434,6 +2533,7 @@ func TestSafecmds_Tc_zo10s_FindPatternFlagsNotPaths(t *testing.T) {
 // project root — find only lists names under it, never content — but the
 // bare filesystem root "/" is excluded (see findPathIssue's own doc).
 func TestSafecmds_Tc_zo10s_FindAncestorOfProjectRoot(t *testing.T) {
+	t.Parallel()
 	// Deliberately NOT under /tmp: /tmp is its own always-granted ReadWrite
 	// zone (classify()'s tmpRoot rule), which would make every case below
 	// approve regardless of this bead's ancestor widening and defeat the
@@ -2476,6 +2576,7 @@ func TestSafecmds_Tc_zo10s_FindAncestorOfProjectRoot(t *testing.T) {
 // no relation to preserve for them, and pg2-4k7yd's brief named them explicitly
 // out of scope.
 func TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	commands := []string{
@@ -2503,6 +2604,7 @@ func TestSafecmds_Pg2_4k7yd_SafeCmdSubstitutionsUnaffected(t *testing.T) {
 // RefusalCategoryDynamicPathRead despite the historical corpus being 86/86
 // approved (pg2-z9qw1).
 func TestSafecmds_Pg2_8oaug_ReadlinkRealpathSubstitutionApproves(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -2528,6 +2630,7 @@ func TestSafecmds_Pg2_8oaug_ReadlinkRealpathSubstitutionApproves(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != hookio.Approve {
@@ -2547,6 +2650,7 @@ func TestSafecmds_Pg2_8oaug_ReadlinkRealpathSubstitutionApproves(t *testing.T) {
 // allowlist. Only readlink/realpath answer the specific question
 // readPathIssue asks (what FILE will diff actually open); nothing else does.
 func TestSafecmds_Pg2_8oaug_OtherSubstitutionCommandStillAbstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	cases := []struct {
@@ -2559,6 +2663,7 @@ func TestSafecmds_Pg2_8oaug_OtherSubstitutionCommandStillAbstains(t *testing.T) 
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: "Bash", CWD: "/home/user/project", ToolInput: mustJSON(map[string]string{"command": tt.cmd})}
 			got := hookio.Verdict(r.Evaluate(input))
 			if got.Decision != hookio.NoOpinion {
@@ -2580,6 +2685,7 @@ func TestSafecmds_Pg2_8oaug_OtherSubstitutionCommandStillAbstains(t *testing.T) 
 // (pg2-8oaug's option (a), the envvars.go-precedent allowlist relief, applied
 // without its own separate resolution step) would have wrongly approved this.
 func TestSafecmds_Pg2_8oaug_ResolvesRealSymlinkTarget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	link := filepath.Join(dir, "marketplace-link")
 	if err := os.Symlink("/etc/shadow", link); err != nil {
@@ -2610,6 +2716,7 @@ func TestSafecmds_Pg2_8oaug_ResolvesRealSymlinkTarget(t *testing.T) {
 // `test -d /tmp && echo yes` measured allow; `[ -d /tmp ] && echo yes` and
 // `[ -n "$FOO" ] && echo yes` (no file operand at all) both measured abstain.
 func TestSafecmds_Pg2_fl9sh_BracketAliasesTest(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	verdict := func(cmd string) hookio.RuleResult {
@@ -2671,6 +2778,7 @@ func TestSafecmds_Pg2_fl9sh_BracketAliasesTest(t *testing.T) {
 // shapes (pipelines, heredocs, `git show`) this rule would clear — and an equality
 // assertion would forbid that safe direction of drift.
 func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	// Content readers only: these are the commands that can emit another file's bytes,
 	// and therefore the ones for which "may this path be read" decides anything. The
@@ -2721,6 +2829,7 @@ func TestReadPathIssue_IsNeverLooserThanTheStaticSubstitutionSeam(t *testing.T) 
 // audited THIRD (in fact fourth, see internal/rules/gitdir) caller of
 // cmdparse.GluedFlagValue, so this fixture also proves that seam was fixed.
 func TestSafecmds_GluedQuoteParity_PathCandidate(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		// A DenyRead zone NOT covered by internal/secretpath's own lexical list, so
@@ -2771,6 +2880,7 @@ func TestSafecmds_GluedQuoteParity_PathCandidate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			spaced := strings.Replace(c.template, "%s", c.space, 1)
 			gluedPlain := strings.Replace(c.template, "%s", c.glued+c.path, 1)
 			gluedQuoted := strings.Replace(c.template, "%s", c.glued+"'"+c.path+"'", 1)
@@ -2804,6 +2914,7 @@ func TestSafecmds_GluedQuoteParity_PathCandidate(t *testing.T) {
 // `/`/`./`/`../`/`~`, looksLikePath was false, and the corresponding zone/write/reject
 // check was skipped entirely.
 func TestSafecmds_MalformedGluedQuotingAbstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -2827,6 +2938,7 @@ func TestSafecmds_MalformedGluedQuotingAbstains(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2847,6 +2959,7 @@ func TestSafecmds_MalformedGluedQuotingAbstains(t *testing.T) {
 // are separate signals folded by the SAME predicate (see argsHaveDynamicExpansion's
 // doc), so this test pins both without confusing one for the other.
 func TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 
@@ -2860,6 +2973,7 @@ func TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting(t *test
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2881,6 +2995,7 @@ func TestSafecmds_ArgsHaveDynamicExpansion_IndependentOfMalformedQuoting(t *test
 // argument inspection — including the compound corpus shape from the
 // original bead's recipe, which chains a `cd` (also alwaysSafe) into wtdone.
 func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -2896,6 +3011,7 @@ func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{
 				ToolName:  "Bash",
 				CWD:       "/home/user/project",
@@ -2919,6 +3035,7 @@ func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
 // here); `f` is the for-loop's OWN iteration variable, which this bead is
 // what makes resolvable at all.
 func TestSafecmds_ForLoopVar_GomuOverlayShape_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -2942,6 +3059,7 @@ func TestSafecmds_ForLoopVar_GomuOverlayShape_Approve(t *testing.T) {
 // "read-only verb" allowlist that would let `for f in /etc/shadow …; do cat
 // "$f"; done`-shaped commands through unchecked.
 func TestSafecmds_ForLoopVar_UnsafeZone_Abstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -2966,6 +3084,7 @@ func TestSafecmds_ForLoopVar_UnsafeZone_Abstains(t *testing.T) {
 // if this bead did not exist. `SP` resolves (proving the OTHER half of the
 // argument is not what is blocking approval); `f` must not.
 func TestSafecmds_ForLoopVar_NonLiteralWordList_Abstains(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -2990,6 +3109,7 @@ func TestSafecmds_ForLoopVar_NonLiteralWordList_Abstains(t *testing.T) {
 // OUTSIDE `/proc` (cwd/root/exe/fd/environ/maps/mem — see the map's own doc),
 // plus a `..`-traversal attempt that lexically escapes `/proc` entirely.
 func TestIsProcSafeReadPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path string
 		want bool
@@ -3040,6 +3160,7 @@ func TestIsProcSafeReadPath(t *testing.T) {
 // where before this bead it abstained ("references unknown path") because
 // the zone model has no opinion on `/proc` at all.
 func TestSafecmds_ProcTopLevel_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	for _, cmd := range []string{"cat /proc/loadavg", "ls -la /proc/loadavg"} {
@@ -3059,6 +3180,7 @@ func TestSafecmds_ProcTopLevel_Approve(t *testing.T) {
 // end, matching the corpus evidence (tc-424ks: `cat /proc/<pid>/status`,
 // `cat /proc/<pid>/io`).
 func TestSafecmds_ProcPerPID_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	for _, cmd := range []string{"cat /proc/105764/io", "cat /proc/449196/status | grep State"} {
@@ -3079,6 +3201,7 @@ func TestSafecmds_ProcPerPID_Approve(t *testing.T) {
 // process) still defer to claude-code rather than auto-approving — the
 // security-relevant negative space isProcSafeReadPath's own doc names.
 func TestSafecmds_ProcEscapeVectors_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	for _, cmd := range []string{

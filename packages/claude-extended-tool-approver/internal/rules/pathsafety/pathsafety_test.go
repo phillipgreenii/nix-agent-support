@@ -18,6 +18,7 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func TestPathSafety_ReadInProject_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -32,6 +33,7 @@ func TestPathSafety_ReadInProject_Approve(t *testing.T) {
 }
 
 func TestPathSafety_WriteInProject_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -46,6 +48,7 @@ func TestPathSafety_WriteInProject_Approve(t *testing.T) {
 }
 
 func TestPathSafety_ReadNixStore_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -60,6 +63,7 @@ func TestPathSafety_ReadNixStore_Approve(t *testing.T) {
 }
 
 func TestPathSafety_WriteNixStore_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -74,6 +78,7 @@ func TestPathSafety_WriteNixStore_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_WriteUnknownPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -88,6 +93,7 @@ func TestPathSafety_WriteUnknownPath_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_ReadUnknownPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -102,6 +108,7 @@ func TestPathSafety_ReadUnknownPath_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_DeleteInProject_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -116,6 +123,7 @@ func TestPathSafety_DeleteInProject_Approve(t *testing.T) {
 }
 
 func TestPathSafety_Bash_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -130,6 +138,7 @@ func TestPathSafety_Bash_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_WriteTmp_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -144,6 +153,7 @@ func TestPathSafety_WriteTmp_Approve(t *testing.T) {
 }
 
 func TestPathSafety_Name(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	if got := r.Name(); got != "path-safety" {
@@ -152,6 +162,7 @@ func TestPathSafety_Name(t *testing.T) {
 }
 
 func TestPathSafety_DenyRead_Rejects(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		DenyRead: []string{"/Users/phillipg/.ssh"},
@@ -168,6 +179,7 @@ func TestPathSafety_DenyRead_Rejects(t *testing.T) {
 }
 
 func TestPathSafety_DenyWrite_Rejects(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		DenyWrite: []string{"/Users/phillipg/.ssh"},
@@ -184,6 +196,7 @@ func TestPathSafety_DenyWrite_Rejects(t *testing.T) {
 }
 
 func TestPathSafety_DenyWrite_CWD_Rejects(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		DenyWrite: []string{"/project/secrets"},
@@ -200,6 +213,7 @@ func TestPathSafety_DenyWrite_CWD_Rejects(t *testing.T) {
 }
 
 func TestPathSafety_AllowWrite_Approves(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		AllowWrite: []string{"/Users/phillipg/.local/share/contained-claude"},
@@ -216,6 +230,7 @@ func TestPathSafety_AllowWrite_Approves(t *testing.T) {
 }
 
 func TestPathSafety_GlobInProject_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -230,6 +245,7 @@ func TestPathSafety_GlobInProject_Approve(t *testing.T) {
 }
 
 func TestPathSafety_GlobNoPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -244,6 +260,7 @@ func TestPathSafety_GlobNoPath_Approve(t *testing.T) {
 }
 
 func TestPathSafety_GrepInProject_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -258,6 +275,7 @@ func TestPathSafety_GrepInProject_Approve(t *testing.T) {
 }
 
 func TestPathSafety_GrepNoPath_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -272,6 +290,7 @@ func TestPathSafety_GrepNoPath_Approve(t *testing.T) {
 }
 
 func TestPathSafety_GlobNixStore_Approve(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -286,6 +305,7 @@ func TestPathSafety_GlobNixStore_Approve(t *testing.T) {
 }
 
 func TestPathSafety_GlobUnknownPath_Abstain(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -300,6 +320,7 @@ func TestPathSafety_GlobUnknownPath_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_GlobDenyRead_Reject(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		DenyRead: []string{"/Users/phillipg/.ssh"},
@@ -316,6 +337,7 @@ func TestPathSafety_GlobDenyRead_Reject(t *testing.T) {
 }
 
 func TestPathSafety_GrepDenyRead_Reject(t *testing.T) {
+	t.Parallel()
 	pe := patheval.NewWithCWD("/project", "/project")
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
 		DenyRead: []string{"/Users/phillipg/.ssh"},
@@ -349,6 +371,7 @@ func writeInput(toolName, path, cwd string) *hookio.HookInput {
 }
 
 func TestPathSafety_WriteProjectAgentConfig_Abstain(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	// Each case is a path the ADR's decision covers. The four logged rows the ADR
 	// cites are the settings.local.json and rules.md shapes.
@@ -370,6 +393,7 @@ func TestPathSafety_WriteProjectAgentConfig_Abstain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			if !pe.Evaluate(tc.path).CanWrite() {
@@ -386,6 +410,7 @@ func TestPathSafety_WriteProjectAgentConfig_Abstain(t *testing.T) {
 // The decision is Abstain specifically — not Ask and not Reject. CETA encodes no
 // verdict of its own here (ADR 0041's Decision).
 func TestPathSafety_WriteAgentConfig_EncodesNoVerdict(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	pe := patheval.New(project)
 	r := New(pe)
@@ -415,6 +440,7 @@ func TestPathSafety_WriteAgentConfig_EncodesNoVerdict(t *testing.T) {
 // primarypush/dirresolve_test.go): the six real Claude Code permission modes
 // plus "" for a hook event that omits the field entirely.
 func TestPathSafety_WriteAgentConfig_AllPermissionModes_Abstain(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	modes := []string{"default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions", ""}
 	paths := []struct {
@@ -432,6 +458,7 @@ func TestPathSafety_WriteAgentConfig_AllPermissionModes_Abstain(t *testing.T) {
 		for _, tool := range tools {
 			for _, mode := range modes {
 				t.Run(p.name+"/"+tool+"/mode="+mode, func(t *testing.T) {
+					t.Parallel()
 					input := &hookio.HookInput{
 						ToolName:       tool,
 						ToolInput:      mustJSON(map[string]string{"file_path": p.path, "content": "x"}),
@@ -455,6 +482,7 @@ func TestPathSafety_WriteAgentConfig_AllPermissionModes_Abstain(t *testing.T) {
 // counterpart to the pin above: reads of the same two exact paths stay
 // allow/approved regardless of permission_mode (ADR 0041 covers writes only).
 func TestPathSafety_ReadAgentConfig_AllPermissionModes_StillApprove(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	modes := []string{"default", "plan", "acceptEdits", "dontAsk", "auto", "bypassPermissions", ""}
 	paths := []string{
@@ -466,6 +494,7 @@ func TestPathSafety_ReadAgentConfig_AllPermissionModes_StillApprove(t *testing.T
 	for _, p := range paths {
 		for _, mode := range modes {
 			t.Run(p+"/mode="+mode, func(t *testing.T) {
+				t.Parallel()
 				input := &hookio.HookInput{
 					ToolName:       "Read",
 					ToolInput:      mustJSON(map[string]string{"file_path": p}),
@@ -486,6 +515,7 @@ func TestPathSafety_ReadAgentConfig_AllPermissionModes_StillApprove(t *testing.T
 // skills, plugins, and transcripts" as the collateral that made a subtree-wide
 // denyWrite unusable, so they are explicitly out of scope.
 func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	cases := []struct {
 		name string
@@ -502,6 +532,7 @@ func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			got := hookio.Verdict(r.Evaluate(writeInput("Write", tc.path, project)))
@@ -525,6 +556,7 @@ func TestPathSafety_WriteProjectClaudeNonConfig_Approve(t *testing.T) {
 // above already pins that they stay approved.
 
 func TestPathSafety_WriteAgentHooks_Abstain(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	cases := []struct {
 		name string
@@ -543,6 +575,7 @@ func TestPathSafety_WriteAgentHooks_Abstain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			if !pe.Evaluate(tc.path).CanWrite() {
@@ -560,6 +593,7 @@ func TestPathSafety_WriteAgentHooks_Abstain(t *testing.T) {
 // real `.claude` — is untouched. This is the ccpool-plugin shape the hooks carve-out
 // ADR names explicitly as a non-match.
 func TestPathSafety_WriteHooksLookalike_Approve(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	cases := []struct {
 		name string
@@ -571,6 +605,7 @@ func TestPathSafety_WriteHooksLookalike_Approve(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			got := hookio.Verdict(r.Evaluate(writeInput("Write", tc.path, project)))
@@ -583,6 +618,7 @@ func TestPathSafety_WriteHooksLookalike_Approve(t *testing.T) {
 
 // The verdict is Abstain specifically, mirroring ADR 0041's stance.
 func TestPathSafety_WriteAgentHooks_EncodesNoVerdict(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	pe := patheval.New(project)
 	r := New(pe)
@@ -598,6 +634,7 @@ func TestPathSafety_WriteAgentHooks_EncodesNoVerdict(t *testing.T) {
 // CASE FOLDING, the same APFS-bypass reasoning as isAgentConfigPath (pg2-2ng80),
 // applied to both components this predicate tests.
 func TestPathSafety_WriteAgentHooks_CaseFolding(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	cases := []struct {
 		name string
@@ -616,6 +653,7 @@ func TestPathSafety_WriteAgentHooks_CaseFolding(t *testing.T) {
 	for _, tc := range cases {
 		for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
 			t.Run(tc.name+"/"+tool, func(t *testing.T) {
+				t.Parallel()
 				pe := patheval.New(project)
 				r := New(pe)
 				if !pe.Evaluate(tc.path).CanWrite() {
@@ -631,6 +669,7 @@ func TestPathSafety_WriteAgentHooks_CaseFolding(t *testing.T) {
 }
 
 func TestIsAgentHooksPath(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		path string
@@ -647,6 +686,7 @@ func TestIsAgentHooksPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := isAgentHooksPath(tc.path); got != tc.want {
 				t.Errorf("isAgentHooksPath(%q) = %v, want %v", tc.path, got, tc.want)
 			}
@@ -656,6 +696,7 @@ func TestIsAgentHooksPath(t *testing.T) {
 
 // Reads are unaffected, mirroring ADR 0041's Decision.
 func TestPathSafety_ReadAgentHooks_StillApprove(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	for _, p := range []string{
 		project + "/.claude/hooks/foo.sh",
@@ -697,6 +738,7 @@ func TestPathSafety_WriteUserGlobalAgentHooks_Abstain(t *testing.T) {
 
 // A symlink pointing INTO `.claude/hooks` must not slip the write past this check.
 func TestPathSafety_WriteAgentHooksViaSymlink_Abstain(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	hooksDir := filepath.Join(project, ".claude", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
@@ -722,6 +764,7 @@ func TestPathSafety_WriteAgentHooksViaSymlink_Abstain(t *testing.T) {
 // TestADR0044_PathSafety_AgentConfigSiteStaysTerminal pins for the ADR 0041 site:
 // a TERMINAL NoOpinion with a nil error, not a refusal that continues the chain.
 func TestADR_PathSafety_AgentHooksSiteStaysTerminal(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{
@@ -758,6 +801,7 @@ func TestADR_PathSafety_AgentHooksSiteStaysTerminal(t *testing.T) {
 // path exactly ONE level deeper than `.claude`, or a directory that merely resembles
 // `.claude`.
 func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	cases := []struct {
 		name string
@@ -797,6 +841,7 @@ func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
 	for _, tc := range cases {
 		for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
 			t.Run(tc.name+"/"+tool, func(t *testing.T) {
+				t.Parallel()
 				pe := patheval.New(project)
 				r := New(pe)
 				// Both directions need this precondition: an Abstain only proves the
@@ -819,6 +864,7 @@ func TestPathSafety_WriteAgentConfig_CaseFolding(t *testing.T) {
 // one property rather than inferred from end-to-end verdicts, and with the bounded
 // cases in the SAME table for the reason given above.
 func TestIsAgentConfigPath_AllThreePartsFoldCase(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		path string
@@ -838,6 +884,7 @@ func TestIsAgentConfigPath_AllThreePartsFoldCase(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := isAgentConfigPath(tc.path); got != tc.want {
 				t.Errorf("isAgentConfigPath(%q) = %v, want %v", tc.path, got, tc.want)
 			}
@@ -859,6 +906,7 @@ func TestIsAgentConfigPath_AllThreePartsFoldCase(t *testing.T) {
 // This test fails if the predicate is ever "simplified" to a ToLower/lowercased-key
 // form.
 func TestPathSafety_WriteAgentConfig_FoldsNotMerelyLowercases(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	const canonical = "settings.local.json"
 	const witness = "ſettings.local.json" // ſettings.local.json
@@ -888,6 +936,7 @@ func TestPathSafety_WriteAgentConfig_FoldsNotMerelyLowercases(t *testing.T) {
 // writes only"). The Read branch is untouched — including by the pg2-2ng80 case
 // fold, so the case-varied spellings are listed here too.
 func TestPathSafety_ReadAgentConfig_StillApprove(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	for _, p := range []string{
 		project + "/.claude/settings.local.json",
@@ -1030,6 +1079,7 @@ func TestPathSafety_WriteAgentConfig_NonAbsoluteForms_Abstain(t *testing.T) {
 
 // A symlink pointing INTO `.claude` must not slip the write past the check.
 func TestPathSafety_WriteAgentConfigViaSymlink_Abstain(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	claudeDir := filepath.Join(project, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -1055,6 +1105,7 @@ func TestPathSafety_WriteAgentConfigViaSymlink_Abstain(t *testing.T) {
 // Reject still wins over the ADR 0041 abstain. (The carve-out itself does NOT use
 // IsDenyWrite — the mechanism cannot express it, per ADR 0041's Context.)
 func TestPathSafety_WriteAgentConfig_DenyWriteStillRejects(t *testing.T) {
+	t.Parallel()
 	const project = "/home/user/project"
 	pe := patheval.NewWithCWD(project, project)
 	pe.SetSandboxConfig(&patheval.SandboxFilesystemConfig{
@@ -1081,6 +1132,7 @@ func TestPathSafety_WriteAgentConfig_DenyWriteStillRejects(t *testing.T) {
 // than NoOpinion, attributed to this rule, and still matching ErrNotApplicable so an
 // un-upgraded consumer keeps working.
 func TestADR0044_PathSafety_RefusedSites(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
@@ -1103,6 +1155,7 @@ func TestADR0044_PathSafety_RefusedSites(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.site, func(t *testing.T) {
+			t.Parallel()
 			input := &hookio.HookInput{ToolName: tt.tool, ToolInput: mustJSON(tt.toolInput), CWD: "/home/user/project"}
 			res, err := r.Evaluate(input)
 			if !errors.Is(err, hookio.ErrRefused) {
@@ -1129,6 +1182,7 @@ func TestADR0044_PathSafety_RefusedSites(t *testing.T) {
 // keep un-approved. It stays a terminal NoOpinion with a nil error — the ONE site in the
 // ruleset with that shape.
 func TestADR0044_PathSafety_AgentConfigSiteStaysTerminal(t *testing.T) {
+	t.Parallel()
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	input := &hookio.HookInput{

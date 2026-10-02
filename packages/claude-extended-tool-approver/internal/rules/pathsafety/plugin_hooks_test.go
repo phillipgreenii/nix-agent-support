@@ -24,6 +24,7 @@ import (
 // --- pluginHooksDir: the directory-matching predicate, unit-tested directly ---
 
 func TestPluginHooksDir(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		path    string
@@ -77,6 +78,7 @@ func TestPluginHooksDir(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			gotDir, gotOK := pluginHooksDir(filepath.Clean(tc.path))
 			if gotOK != tc.wantOK {
 				t.Fatalf("pluginHooksDir(%q) ok = %v, want %v", tc.path, gotOK, tc.wantOK)
@@ -91,7 +93,9 @@ func TestPluginHooksDir(t *testing.T) {
 // --- resolvePluginHookScripts: parses real hooks.json shapes seen on this machine ---
 
 func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
+	t.Parallel()
 	t.Run("single quoted CLAUDE_PLUGIN_ROOT reference (pg-pr's shape)", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		hooksDir := filepath.Join(dir, "hooks")
 		mustMkdirAll(t, hooksDir)
@@ -116,6 +120,7 @@ func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
 	})
 
 	t.Run("multiple space-separated references in one command (security-guidance's shape)", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		hooksDir := filepath.Join(dir, "hooks")
 		mustMkdirAll(t, hooksDir)
@@ -148,6 +153,7 @@ func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
 	})
 
 	t.Run("bare command with no CLAUDE_PLUGIN_ROOT reference names nothing (beads' / ceta's shape)", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		hooksDir := filepath.Join(dir, "hooks")
 		mustMkdirAll(t, hooksDir)
@@ -168,6 +174,7 @@ func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
 	})
 
 	t.Run("manifest absent reports the absent sentinel, not a generic error", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		_, err := resolvePluginHookScripts(filepath.Join(dir, "hooks", "hooks.json"), dir)
 		if err != errPluginManifestAbsent {
@@ -176,6 +183,7 @@ func TestResolvePluginHookScripts_RealShapes(t *testing.T) {
 	})
 
 	t.Run("malformed JSON is a real error, not the absent sentinel", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		hooksDir := filepath.Join(dir, "hooks")
 		mustMkdirAll(t, hooksDir)
@@ -223,6 +231,7 @@ func newPluginFixture(t *testing.T, name, manifestBody string) (project, hooksDi
 }
 
 func TestPathSafety_WritePluginHooksJSON_Abstain(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{"hooks":{}}`)
 	manifest := filepath.Join(hooksDir, "hooks.json")
 	pe := patheval.New(project)
@@ -232,6 +241,7 @@ func TestPathSafety_WritePluginHooksJSON_Abstain(t *testing.T) {
 	}
 	for _, tool := range []string{"Write", "Edit", "MultiEdit", "Delete"} {
 		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
 			got := hookio.Verdict(r.Evaluate(writeInput(tool, manifest, project)))
 			if got.Decision != hookio.NoOpinion {
 				t.Errorf("%s %s: got %s (%s), want abstain (ADR 0049)", tool, manifest, got.Decision, got.Reason)
@@ -241,6 +251,7 @@ func TestPathSafety_WritePluginHooksJSON_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_WritePluginNamedScript_Abstain(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{
 		"hooks": {"PreToolUse": [{"hooks": [
 			{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"}
@@ -262,6 +273,7 @@ func TestPathSafety_WritePluginNamedScript_Abstain(t *testing.T) {
 }
 
 func TestPathSafety_WritePluginUnnamedScript_Approve(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{
 		"hooks": {"PreToolUse": [{"hooks": [
 			{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"}
@@ -282,6 +294,7 @@ func TestPathSafety_WritePluginUnnamedScript_Approve(t *testing.T) {
 // Ordinary plugin churn — the traffic ADR 0041 already refused to break with a
 // subtree rule, and ADR 0049 explicitly rejected repeating that mistake for.
 func TestPathSafety_WritePluginOrdinaryChurn_Approve(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	pluginsRoot := filepath.Join(project, ".claude", "plugins")
 	cases := []struct {
@@ -297,6 +310,7 @@ func TestPathSafety_WritePluginOrdinaryChurn_Approve(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			got := hookio.Verdict(r.Evaluate(writeInput("Write", tc.path, project)))
@@ -310,6 +324,7 @@ func TestPathSafety_WritePluginOrdinaryChurn_Approve(t *testing.T) {
 // FAIL-SAFE: a manifest that exists but cannot be parsed must not let a candidate
 // script silently fall through to approve.
 func TestPathSafety_WritePluginUnparseableManifest_FailSafeAbstain(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{ this is not valid json`)
 	cases := []string{
 		filepath.Join(hooksDir, "hooks.json"),
@@ -318,6 +333,7 @@ func TestPathSafety_WritePluginUnparseableManifest_FailSafeAbstain(t *testing.T)
 	}
 	for _, p := range cases {
 		t.Run(p, func(t *testing.T) {
+			t.Parallel()
 			pe := patheval.New(project)
 			r := New(pe)
 			got := hookio.Verdict(r.Evaluate(writeInput("Write", p, project)))
@@ -331,6 +347,7 @@ func TestPathSafety_WritePluginUnparseableManifest_FailSafeAbstain(t *testing.T)
 // The fail-safe is scoped to the plugin's hooks/ directory, not the whole plugin —
 // a sibling file outside hooks/ is unaffected by that same broken manifest.
 func TestPathSafety_WritePluginUnparseableManifest_ScopedToHooksDir(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{ this is not valid json`)
 	pluginRoot := filepath.Dir(hooksDir)
 	sibling := filepath.Join(pluginRoot, "plugin.json")
@@ -345,6 +362,7 @@ func TestPathSafety_WritePluginUnparseableManifest_ScopedToHooksDir(t *testing.T
 // No manifest at all (a plugin that ships no hooks) — ordinary content in what
 // would be its hooks/ directory stays approved; there is nothing to fail safe about.
 func TestPathSafety_WritePluginNoManifest_Approve(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", "")
 	p := filepath.Join(hooksDir, "readme.txt")
 	pe := patheval.New(project)
@@ -358,6 +376,7 @@ func TestPathSafety_WritePluginNoManifest_Approve(t *testing.T) {
 // The verdict is Abstain specifically, never Ask or Reject (ADR 0041's stance,
 // which ADR 0049 does not revisit).
 func TestPathSafety_WritePluginHooksJSON_EncodesNoVerdict(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{"hooks":{}}`)
 	manifest := filepath.Join(hooksDir, "hooks.json")
 	pe := patheval.New(project)
@@ -371,6 +390,7 @@ func TestPathSafety_WritePluginHooksJSON_EncodesNoVerdict(t *testing.T) {
 // Reads are unaffected — the new checks live only in the Write/Edit/MultiEdit/Delete
 // branch of Evaluate.
 func TestPathSafety_ReadPluginHooksJSON_StillApprove(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{"hooks":{}}`)
 	manifest := filepath.Join(hooksDir, "hooks.json")
 	pe := patheval.New(project)
@@ -389,6 +409,7 @@ func TestPathSafety_ReadPluginHooksJSON_StillApprove(t *testing.T) {
 // A symlink pointing INTO a plugin's named script must not slip the write past
 // this check, mirroring the equivalent ADR 0041 symlink test.
 func TestPathSafety_WritePluginNamedScriptViaSymlink_Abstain(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{
 		"hooks": {"PreToolUse": [{"hooks": [
 			{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"}
@@ -413,6 +434,7 @@ func TestPathSafety_WritePluginNamedScriptViaSymlink_Abstain(t *testing.T) {
 // this verdict must be a TERMINAL NoOpinion with a nil error, not a refusal that
 // continues the chain — ADR 0041's stance, which this carve-out inherits unchanged.
 func TestADR0049_PathSafety_PluginHooksSiteStaysTerminal(t *testing.T) {
+	t.Parallel()
 	project, hooksDir := newPluginFixture(t, "myplugin", `{"hooks":{}}`)
 	manifest := filepath.Join(hooksDir, "hooks.json")
 	pe := patheval.New(project)
