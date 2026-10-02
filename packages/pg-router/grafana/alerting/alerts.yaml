@@ -28,6 +28,18 @@
 # when the daemon LaunchAgent isn't running; the rules below simply see no
 # data in that case.
 apiVersion: 1
+# Explicit deletion of rules removed from this file (pg2-87bbd). Grafana's file
+# provisioner only adds/updates rules present in the YAML; dropping a rule's
+# entry leaves the already-provisioned rule live (provenance=file) and still
+# evaluating. A rule is removed only by a `deleteRules:` entry for its uid,
+# applied on a provisioning reload/restart. Same mechanism as
+# phillipgreenii-nix-support-apps's reconcile-alert-rules.nix. Keep an entry
+# here for as long as any Grafana database may still hold the rule; it is
+# harmless once the rule is gone.
+deleteRules:
+  # pg2-p93c0 removed the rule below; pg2-87bbd found it still live after apply.
+  - orgId: 1
+    uid: pg-router-backlog-growing
 groups:
   - orgId: 1
     name: pg-router-alerts
@@ -89,7 +101,8 @@ groups:
                     params: [1]
 
       # Aggregate backlog rule REMOVED (pg2-p93c0, decision recorded below the
-      # stall rule): the old pg-router-backlog-growing paged on any 45m+ ramp of
+      # stall rule; its live copy is deleted by the deleteRules entry at the top
+      # of this file, pg2-87bbd): the old pg-router-backlog-growing paged on any 45m+ ramp of
       # the TOTAL (delta(pg_router_backlog[30m]) > 0 for 15m) even though the
       # queue fully drained afterward, and a stalled consumer is covered per
       # type by pg-router-queue-stalled. pg_router_backlog stays a dashboard

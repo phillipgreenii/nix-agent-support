@@ -702,6 +702,37 @@ func TestBacklogGrowingRuleIsGoneAndGrowthRuleKept(t *testing.T) {
 	}
 }
 
+// pg2-87bbd: removing a rule's entry from alerts.yaml does NOT remove it from
+// Grafana -- file provisioning only adds/updates, and the deleted
+// pg-router-backlog-growing stayed live (provenance=file) and evaluating after
+// apply. Only an explicit `deleteRules:` entry for the uid removes it, so the
+// file must carry one (orgId 1, matching the group's orgId) and it must sit in
+// the top-level deleteRules list, not be mistaken for a provisioned rule.
+func TestBacklogGrowingRuleHasExplicitDeleteEntry(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	re := regexp.MustCompile(`(?m)^deleteRules:\n(?:[ ]+#[^\n]*\n)*((?:[ ]+- orgId: \d+\n[ ]+uid: [^\n]+\n(?:[ ]+#[^\n]*\n)*)+)`)
+	m := re.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatal("alerts.yaml has no top-level deleteRules: list; Grafana will keep the removed rule live")
+	}
+	if !strings.Contains(m[1], "- orgId: 1\n    uid: pg-router-backlog-growing\n") {
+		t.Errorf("deleteRules lacks `orgId: 1` + `uid: pg-router-backlog-growing`; got:\n%s", m[1])
+	}
+	// deleteRules must precede groups: a delete entry nested under a group
+	// would be provisioned (or rejected) as something else.
+	if di, gi := strings.Index(src, "\ndeleteRules:"), strings.Index(src, "\ngroups:"); di < 0 || gi < 0 || di > gi {
+		t.Error("deleteRules must be a top-level key (before groups)")
+	}
+	// An active rule must never share a uid with a delete entry.
+	if strings.Contains(src, "- uid: pg-router-backlog-growing") {
+		t.Error("pg-router-backlog-growing is both deleted and provisioned")
+	}
+}
+
 // pg2-n1pm4: replay of the recorded 2026-09-30 pr.changed series (12:00Z-22:00Z,
 // testdata/pr_changed_2026-09-30.csv, metric view = what Prometheus held).
 func TestPrChangedSeries20260930(t *testing.T) {
