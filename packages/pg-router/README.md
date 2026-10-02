@@ -320,6 +320,11 @@ INV-EVT-2) and gate persistence are unchanged.
     schema, identical online and offline apart from `via`). Exit `0` ok (including "nothing to do"), `1`
     refusal or failure (log locked, core unreachable or refusing, compaction failed), `2` usage.
   - It reclaims **dead history only** — a queued event is never discarded.
+  - _In the TUI_ `c` opens a "Compact queue log" modal and runs the dry run at once, showing before/after,
+    events kept vs dropped and the last compaction; nothing has changed yet. `y` there is the
+    confirmation that runs the real compaction (it does nothing before the dry run is shown, or when a
+    compaction would not shrink the log); `esc` cancels. The header's `log:` summary does not carry the
+    last compaction (its line is already full); the modal and `pg-router status` do.
 - **Observability.** The `pg_router_queue_log_bytes` gauge, one `eventqueue: queue log compacted` log
   line per compaction (trigger, bytes and records before/after, duration), a `queue log:` line in
   `pg-router status` followed by a `last compaction:` line (`queueLog` and `queueLog.lastCompaction` in

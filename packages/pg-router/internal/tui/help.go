@@ -43,6 +43,8 @@ func (m *Model) renderModal() string {
 		return m.renderProblemsModal()
 	case ModalActivityHistory:
 		return m.renderActivityHistoryModal()
+	case ModalLogCompact:
+		return m.renderLogCompactModal()
 	default:
 		return ""
 	}

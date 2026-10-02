@@ -54,6 +54,9 @@ const (
 	ModalGates
 	ModalProblems
 	ModalActivityHistory
+	// ModalLogCompact is the queue-log compaction modal (bead pg2-maxn1,
+	// logcompact.go): a dry run first, then a confirmed compaction.
+	ModalLogCompact
 )
 
 // Options configures Run, the exported entry point cmd/pg-router/tui_cmd.go
@@ -161,6 +164,8 @@ type Model struct {
 
 	activeModal       ModalKind
 	modalScrollOffset int
+	// logCompact is the Compact modal's state (logcompact.go).
+	logCompact logCompactState
 	// preModalScreen is the screen active before a g/?/l keypress opened a
 	// modal (openModal, keybindings.go), restored by esc. Modal is a peer
 	// screen (screen.go's table), not nested under main -- esc must return
@@ -375,6 +380,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPollErr(msg.err)
 	case gateToggleResultMsg:
 		return m, m.applyGateToggleResult(msg)
+	case logCompactResultMsg:
+		return m, m.applyLogCompactResult(msg)
 	case activityHistoryResultMsg:
 		m.applyActivityHistoryResult(msg)
 	case activityHistoryErrMsg:

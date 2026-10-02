@@ -132,6 +132,20 @@ type QueueLog struct {
 		LogUnwritable int64 `json:"logUnwritable"`
 	} `json:"rejected"`
 	Detail string `json:"detail"`
+	// LastCompaction is the most recent compaction the core completed (bead
+	// pg2-maxn1); nil before the first, or against a core that predates it.
+	LastCompaction *LastCompaction `json:"lastCompaction"`
+}
+
+// LastCompaction mirrors the wire's `queueLog.lastCompaction` object.
+type LastCompaction struct {
+	At            time.Time `json:"at"`
+	Trigger       string    `json:"trigger"`
+	BytesBefore   int64     `json:"bytesBefore"`
+	BytesAfter    int64     `json:"bytesAfter"`
+	RecordsBefore int       `json:"recordsBefore"`
+	RecordsAfter  int       `json:"recordsAfter"`
+	DurationMs    int64     `json:"durationMs"`
 }
 
 // Registration mirrors one entry of the wire's `registry` array: a
