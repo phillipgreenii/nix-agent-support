@@ -102,7 +102,8 @@ type Strategy interface {
 // Registry maps an entity type name to its Strategy.
 type Registry map[string]Strategy
 
-// NewRegistry registers the supported types: pr, issue and thread. The pr
+// NewRegistry registers the supported types: pr, issue and thread (the
+// refTypeAliases, e.g. pr-ci, are folded onto these by Resolve). The pr
 // strategy is where the build producer joins: one build link per failing CI
 // run on the current head, read from the stored facts (no network).
 func NewRegistry() Registry {
@@ -111,6 +112,15 @@ func NewRegistry() Registry {
 		entityTypeIssue:  issueStrategy{},
 		entityTypeThread: threadStrategy{},
 	}
+}
+
+// refTypeAliases maps an attention-item type that names the same entity as a
+// stored type onto that stored type. `pr-ci` is the attention item
+// pg-connector-pr-github emits for the operator's own open PR whose CI failed;
+// its id is the PR's id, so it resolves exactly as `pr:` does (the Items key
+// stays the ref as given).
+var refTypeAliases = map[string]string{
+	"pr-ci": entityTypePR,
 }
 
 // ParseRef splits "<type>:<id>" at the first colon (the id may itself
@@ -148,6 +158,9 @@ func Resolve(d Deps, refs []string) (Result, error) {
 		}
 		unknown := Item{Known: false, Links: []Link{}}
 		typ, id, ok := ParseRef(ref)
+		if canon, aliased := refTypeAliases[typ]; aliased {
+			typ = canon
+		}
 		strat := reg[typ]
 		if !ok || strat == nil {
 			res.Items[ref] = unknown

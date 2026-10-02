@@ -43,6 +43,10 @@ flowchart LR
 | `issue`  | itself (`self`); the PR it tracks (`work`) or that names it (`jira`); its `parent`                                                                              |
 | `thread` | itself (`self`); the PRs it mentions (`mentions`)                                                                                                               |
 
+A `pr-ci` ref — the attention item for the operator's own open PR whose CI failed — is the same
+PR under another name: `pr-ci:<owner>/<repo>#<n>` resolves exactly as `pr:<owner>/<repo>#<n>`
+(same links, same `known`), and its item is keyed by the ref as given.
+
 A ref of any other type — an alert, an agent session — is simply unknown.
 
 A `build` link is read from the CI facts stored with the PR; the verb never asks the network for
