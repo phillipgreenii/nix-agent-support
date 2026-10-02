@@ -1133,6 +1133,38 @@
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
+              # Every Go module (packages/*/gomod2nix.toml) MUST be refreshed by
+              # update-locks.sh, MUST have the thin update-deps.sh wrapper, and the
+              # shared updater MUST run `generate --with-deps` at the gomod2nix rev
+              # flake.lock locks (phillipg-nix-repo-base ADR 0031: a toml without
+              # cachePackages leaves every Go build compiling cold). Red when a new
+              # Go package is added but not wired. The src fileset is only the files
+              # the check reads, so unrelated edits do not rebuild it.
+              go-deps-wired =
+                let
+                  goDepsWiredSrc = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./update-locks.sh
+                      ./flake.lock
+                      ./scripts/check-go-deps-wired.sh
+                      (lib.fileset.fileFilter (
+                        file:
+                        builtins.elem file.name [
+                          "gomod2nix.toml"
+                          "go.mod"
+                          "update-deps.sh"
+                          "update-gomod2nix-deps.sh"
+                        ]
+                      ) ./packages)
+                    ];
+                  };
+                in
+                pkgs.runCommand "go-deps-wired" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  bash ${goDepsWiredSrc}/scripts/check-go-deps-wired.sh ${goDepsWiredSrc}
+                  touch $out
+                '';
+
               # pg-pr agent-marker PreToolUse hook (bead pg2-o3eyk). Drives the
               # fixed script over CC-shaped stdin JSON; gates the tool-name-from-
               # stdin and byte-escaped-marker fixes (red on the pre-fix behaviour).
