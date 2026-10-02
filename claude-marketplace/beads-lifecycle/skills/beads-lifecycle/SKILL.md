@@ -203,7 +203,8 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 > is never independently removed.
 
 - **AW-1** `auto-session-wrapped` MUST be applied together with `human` in the SAME `bd create`
-  or `bd update` call that creates or refreshes the P0 handoff bead, and ONLY when this skill run
+  or `bd update` call that creates (`bd create -t handoff ...`) or refreshes the P0 handoff bead
+  (type `handoff`; a `task` only under the creation fallback in `beads-lifecycle:handoff-bead`), and ONLY when this skill run
   is itself an auto-trigger run (`args` starting with `auto-trigger`) — never on a manually
   invoked wrapup's P0, and never added to a bead this skill did not itself create as an
   auto-trigger run.

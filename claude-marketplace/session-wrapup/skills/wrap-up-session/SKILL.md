@@ -8,8 +8,8 @@ description: >-
   runs the repo's test/lint/build gates, integrates each touched repo via the integrate-branch
   skill (local ff-merge, or push + open/update PR — detected per repo), removes spent branches and worktrees,
   syncs beads to the remote, and — if any work carries over, including work deferred to next
-  session — writes a single P0 next-session bead (or, in repos without beads, records the same
-  in a committed markdown handoff doc) so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
+  session — writes a single P0 next-session handoff bead (type `handoff`; or, in repos without
+  beads, records the same in a committed markdown handoff doc) so the next session can resume cold. pn-workspace aware; acts only on what THIS session worked on and
   leaves everything else untouched. Do NOT use for mid-session commits, for grooming the
   backlog (that's bead-grooming), or for merging someone else's PR.
 ---
@@ -18,7 +18,7 @@ description: >-
 
 End-of-session ritual that takes a working session from "I'm done for now" to a clean,
 durable state: nothing uncommitted, nothing un-tracked, finished work integrated, spent
-branches gone, and — if anything's left — a single P0 bead holding the prompt to resume.
+branches gone, and — if anything's left — a single P0 handoff bead holding the prompt to resume.
 
 This is the thing you'd otherwise re-type by hand every time you stop. It runs
 **autonomously**: gather state, do the whole sequence, report what happened. You don't pause
@@ -94,7 +94,8 @@ _where_ it's recorded is detected, not assumed. Two backends:
 
 - **Beads-backed repo** — beads is available and scoped to this repo (a `.beads/` directory, or
   `bd list` returns this repo's issues). Work is captured as bd issues and the next-session
-  pointer is a single P0 bead. This is the default path throughout the phases below.
+  pointer is a single P0 handoff bead (type `handoff`). This is the default path throughout the
+  phases below.
 - **No-beads repo** — no beads for this repo (`bd` is unconfigured/unavailable and there's no
   `.beads/`). Work is captured in a **markdown handoff doc committed to the repo** — a TODO/handoff
   file that plays the exact role a bead would. Everything else — commit, gates, per-repo
@@ -317,7 +318,7 @@ Exact commands and the outcome-to-cleanup mapping are in `references/cleanup.md`
 
 The session is "done" only if the workspace is genuinely at rest. Decide it with one question:
 **when someone sits down next, is there anything to pick up?** If yes — for any reason — leave a
-single P0 "continue here" bead pointing at it. If there's truly nothing, don't.
+single P0 "continue here" handoff bead pointing at it. If there's truly nothing, don't.
 
 There's something to pick up when either holds:
 
@@ -336,16 +337,16 @@ There's something to pick up when either holds:
 When there's something to pick up:
 
 - Keep the relevant branch(es) and worktree(s) (phase 6 already did, for PR/blocked cases).
-- Write **one P0 bead** — the single next-session entry point. A cold-start brief: where the
+- Write **one P0 handoff bead** (type `handoff`) — the single next-session entry point. A cold-start brief: where the
   work stands, which branch/worktree to resume in, what's red/unmerged/deferred, and the first
   concrete step. The discovered/deferred beads from phase 2 keep their own (non-P0) identities;
   this P0 _links_ them and names the one place to start. One pointer, not many — its job is to
   resume fast and keep the next session from fanning out into parallel threads. Format in
   "Next-session handoff bead" below.
-- If a prior wrapup already left a P0 "continue here" bead for this thread, update it instead of
-  filing a second (see "Safety and idempotency").
-- The P0 is a **one-shot pointer, not a standing record**: it MUST carry a retirement condition, and
-  whoever consumes it closes it. Write it so that is possible — see "Lifecycle: the P0 is one-shot".
+- If a prior wrapup already left a P0 "continue here" handoff bead for this thread, update it
+  instead of filing a second (see "Safety and idempotency").
+- The P0 is a **one-shot pointer, not a standing record**: whoever consumes it closes it. The
+  contract is `beads-lifecycle:handoff-bead` — see "Lifecycle: the P0 is one-shot".
 
 **Truly done** — and only then skip the P0 — means all in-scope work is committed, gated green,
 integrated (merged locally or PR opened with nothing else pending), branches/worktrees retired,
@@ -372,7 +373,7 @@ STATE, and is NOT worth the operator's attention:
   `pn workspace doctor --fix`, which ff-merges in the canonical clone and cannot publish an
   ahead-only divergence anyway.
 - MUST NOT put the debt in the P0 handoff bead, the handoff doc, or a standing push bead as the
-  thing that REMEMBERS it. `pg2-5subz` was exactly a phase-7 P0 handoff bead and became the
+  thing that REMEMBERS it. `pg2-5subz` was exactly a phase-7 P0 pointer bead and became the
   accidental handle for a whole batch push — closing it would have orphaned 11 unrelated commits.
   Its replacement `pg2-dawg2` pushed all 12 and closed correctly, and the debt was back within a
   day. A bead describes one instant; the probe describes now. Full contract:
@@ -439,13 +440,19 @@ above).
 
 ## Next-session handoff bead
 
-When work remains, capture a resume brief as a single P0 bead. The body should let a fresh
-session pick up cold without re-deriving context:
+When work remains, capture a resume brief as a single P0 **handoff bead** (type `handoff`). The
+contract for what a handoff bead is, how it is handled, and how it is created lives in ONE place,
+the **`beads-lifecycle:handoff-bead`** skill — invoke it before creating or refreshing one and
+follow its "Creating a handoff" section. This skill MUST NOT restate that contract. The body should
+let a fresh session pick up cold without re-deriving context:
 
 ```bash
-bd create --type=task -p 0 \
-  --title="Resume: <short description of the work>" \
+bd create -t handoff -p 0 \
+  --title="Handoff: <short description of the work>" \
+  --metadata '{"handed_off_from_session":"<this-session-id>"}' \
   --description="$(cat <<'EOF'
+Handoff from session <this-session-id>
+
 ## Where this stands
 <1-3 sentences: what got done this session, what's left>
 
@@ -460,22 +467,39 @@ EOF
 )"
 ```
 
+- `<this-session-id>` is this run's real, observed session id (the same id used for `--actor`) —
+  never fabricated. The title MUST start `Handoff:` and the first body line MUST be
+  `Handoff from session <this-session-id>`. The metadata key is `handed_off_from_session`, so a
+  later session can look back at this one.
+- **Fallback (type not registered).** If the create fails with `invalid issue type: handoff` (the
+  real `bd` error), create it ONCE more as a `task` with the same title, body, and metadata. Any
+  other create failure MUST be reported, not retried. After creating, verify with `bd show <id>`
+  that the type and the `handed_off_from_session` metadata landed (**BF-4**).
+
+  ```bash
+  # fallback ONLY: the database does not know type `handoff`
+  bd create --type=task -p 0 --title="Handoff: <short description of the work>" \
+    --metadata '{"handed_off_from_session":"<this-session-id>"}' --description="<same body>"
+  ```
+
 One P0 bead, not many — it's the single entry point for the next session, created whenever any
 work carries over (interrupted, deferred, or discovered). The other follow-ups from phase 2 keep
 their own (non-P0) beads; this P0 doesn't replace them — it points at the one place to start and
-links them, so the next session sees a single front door instead of a scattered backlog.
+links them, so the next session sees a single front door instead of a scattered backlog. Where a
+label already indexes a cluster, cite the label (`bd list --label <label>`) instead of
+hand-copying member ids.
 
 **(auto-trigger only) provenance labels + two extra description lines, on BOTH the create and
 update path.** A directive delivered as literal typed input becomes an ordinary user turn in the
 session's own transcript, permanently, in the user's voice-slot but not their words — so the
 bead this run files or updates needs its own provenance markers, not just the nudge text's tag:
 
-- **Labels.** Whether creating (`bd create --labels human,auto-session-wrapped ...`, alongside
-  the flags above) or updating an already-open P0 from a prior run (`bd update <id> --add-label
-human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels. `human` and
-  `auto-session-wrapped` are applied together, at bead creation only — never retrofitted onto a
-  bead this skill did not itself create as an auto-trigger run (see the `beads-lifecycle` skill's
-  `auto-session-wrapped` section).
+- **Labels.** Whether creating (`bd create -t handoff --labels human,auto-session-wrapped ...`,
+  alongside the flags above) or updating an already-open handoff from a prior run (`bd update <id>
+--add-label human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels.
+  `human` and `auto-session-wrapped` are applied together, at bead creation only — never
+  retrofitted onto a bead this skill did not itself create as an auto-trigger run (see the
+  `beads-lifecycle` skill's `auto-session-wrapped` section).
 - **Two extra description lines**, built from THIS run's real, observed session id and
   transcript path — never fabricated:
   ```
@@ -484,7 +508,7 @@ human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels
   ```
   A raw transcript path alone is not directly actionable for a human; the ready-to-run
   `claude --resume` command is.
-- **On update, append — never overwrite.** When this run is refreshing an already-open P0
+- **On update, append — never overwrite.** When this run is refreshing an already-open handoff
   (see "Safety and idempotency" below), append a new dated line to the description (`bd update
 <id> --description="$(existing)\n\n## <today's date> update\n<what changed>"` or equivalent)
   rather than replacing the prior brief outright — mirroring `beads-lifecycle`'s dated-entry-marker
@@ -494,36 +518,10 @@ human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels
 
 ### Lifecycle: the P0 is one-shot
 
-A birth rule with no retirement condition turns this pointer into a permanent P0 occupant of the
-queue head holding no executable work of its own, which every autonomous drain session then pays a
-claim → probe → dispose cycle to rediscover (`pg2-9ifbn`, extracted from `pg2-m2qxu` and
-`pg2-8wy25`). So the pointer is written with an exit:
-
-- **Retirement condition — nothing in it is unique to it.** The bead is closeable as soon as every
-  item traces to a durable bead or an indexing label; at the latest that holds once a session has
-  RESUMED from it, because the cold-start brief is then spent and the work lives on in the beads it
-  linked. **Who may close it:** whoever consumes it — the resuming session, a later wrapup, or a
-  drain session that claims it — with no operator approval, because it is a pointer, not work. **On
-  what evidence:** an absorption trace RECORDED on the bead, one line per item naming the bead id or
-  label that now holds it, plus the re-probed output of any state claim the bead made.
-- **Once absorbed it MUST be CLOSED, and its priority MUST NOT be decayed instead.** P0 is justified
-  for "resume cold _next_ session", never for "this pointer still exists three sessions later" — and
-  a demoted priority is a stored value nothing recomputes, so decay would leave the same spent
-  pointer sitting at a quieter priority. While it still names carry-over it stays P0 and is
-  refreshed in place ("Safety and idempotency"); once absorbed it is closed, not demoted.
-- **It MUST NOT be the sole record of a cluster's membership.** Where a label already indexes the
-  cluster, cite the label (`bd list --label <label>`) instead of hand-copying member ids — a copied
-  list is a snapshot of a cluster that keeps growing. `pg2-m2qxu`'s hand-written map omitted
-  `pg2-ipmwi` while the `fsmonitor` label indexing the same cluster was complete, so the pointer
-  decayed into a _misleading_ index while still sitting at P0.
-- **It MUST NOT record a push obligation** — no "N unpushed commits on `<repo>` `main`, needs a
-  push". Push debt is DERIVED state, re-derived read-only from `pn workspace doctor` and never
-  stored in a bead (**U-1**/**U-2**); `pg2-m2qxu` recorded one that the `pushed?` probe showed was
-  already discharged, so a reader who trusted it would have re-pushed a satisfied obligation.
-
-A drain session that claims an already-absorbed pointer has a documented disposition —
-**close-with-absorption-trace**, in the `pb` plugin's `/drain-beads` command, where a disposer
-actually reads — rather than deriving one ad hoc as `pg2-m2qxu` forced.
+The handoff bead is a **one-shot pointer, not a standing record**: whoever consumes it closes it,
+and it MUST NOT record a push obligation (**U-1**/**U-2**; see phase 7). The retirement condition
+and the absorb-and-close procedure are the contract of `beads-lifecycle:handoff-bead`, not
+restated here.
 
 ## Markdown handoff doc (no-beads repos)
 
@@ -574,26 +572,30 @@ When a re-run finds an existing handoff doc for still-open work, **update its to
 than appending a duplicate — the next session needs one front door, same as the "update the P0
 rather than file a second" rule for beads.
 
-"Lifecycle: the P0 is one-shot" applies here too: the session that RESUMES from a "Resume here"
-brief MUST replace it with the current state (or delete it, when nothing carries over) in the same
-commit, recording the same absorption trace in the doc's history rather than leaving a spent brief
-at the top. The doc MUST likewise cite an indexing label instead of hand-copying cluster membership,
-and MUST NOT record a push obligation (**U-1**/**U-2**).
+The one-shot rule applies here too (see "Lifecycle: the P0 is one-shot"): the session that RESUMES
+from a "Resume here" brief MUST replace it with the current state (or delete it, when nothing
+carries over) in the same commit, rather than leaving a spent brief at the top. The doc MUST
+likewise cite an indexing label instead of hand-copying cluster membership, and MUST NOT record a
+push obligation (**U-1**/**U-2**).
 
 ## Safety and idempotency
 
 - **Re-running is safe.** A second wrapup with nothing new to do should find a clean tree,
   no in-scope unmerged work, and simply report "nothing to wrap up." If a prior wrapup already
-  left a P0 "continue here" bead for work that's still open, update that bead rather than filing
-  a duplicate — the next session needs one front door, not a stack of them.
+  left a P0 "continue here" handoff bead for work that's still open, update that bead rather than
+  filing a duplicate — the next session needs one front door, not a stack of them. Find it the way
+  you would find any handoff pointer: an open bead of type `handoff`, or — for pointers filed
+  before the `handoff` type existed — an open `Handoff:`- or `Resume:`-titled task. On a refresh,
+  point it at THIS session: `bd update <id> --set-metadata
+handed_off_from_session=<this-session-id>` and the first body line `Handoff from session
+<this-session-id>`, keeping the prior brief as a dated entry.
 - **Leave a P0 whenever work carries over.** Deferred, blocked, or unfinished in-scope work — or
   discovered work you mean to resume next — means there's a next session; capture it as the
-  single P0 pointer (linking the rest). Skip the P0 only when nothing carries over at all. When
+  single P0 handoff bead (linking the rest). Skip the P0 only when nothing carries over at all. When
   unsure, write it.
-- **Retire the P0 you consumed.** A pointer whose every item traces to a durable bead or label is
-  spent: close it with the recorded absorption trace instead of leaving it at P0, and never demote it
-  in place of closing it. It MUST NOT cite cluster membership by hand-copied list where a label
-  indexes it, and MUST NOT record a push obligation. See "Lifecycle: the P0 is one-shot".
+- **Retire the P0 you consumed.** A handoff bead is one-shot: when you consume one, follow
+  `beads-lifecycle:handoff-bead` (it owns the absorb-and-close procedure and its trace) rather than
+  leaving it at P0 or demoting it. See "Lifecycle: the P0 is one-shot".
 - **No-beads repos use the markdown handoff doc.** Everywhere these rules say "file/close/update a
   bead" or "leave a P0," a no-beads repo does the markdown-handoff-doc equivalent (see "Markdown
   handoff doc (no-beads repos)"). The intent — one durable, committed front door, updated in place
@@ -634,7 +636,7 @@ Integrated (via `integrate-branch`):
 | nix-personal | pr-updated | branch pushed, PR #42 updated (unmerged) |
 
 Beads: closed 3 (tc-12, tc-13, tc-15); filed 2 (tc-88 follow-up, tc-89 bug).
-Next session: P0 tc-90 — resume nix-personal PR #42 after review.
+Next session: P0 handoff tc-90 — resume nix-personal PR #42 after review.
 
 Background: stopped stray `go test ./...` watch (output already read); left the artifact watch
 on tc-88's tracking doc running (operator still reviewing it).
@@ -677,8 +679,8 @@ If nothing was in scope, say so plainly rather than inventing work.
 | set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                 |
 | remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                          |
 | prune stale worktree admin                             | `pn workspace workforest prune`                                                                                                             |
-| next-session handoff                                   | one P0 `bd create` (see "Next-session handoff bead")                                                                                        |
-| retire a spent P0 pointer                              | `bd close <id> --reason "absorbed: <item> ⇒ <bead-id\|label>, …"` (see "Lifecycle")                                                         |
+| next-session handoff                                   | one P0 `bd create -t handoff` (see "Next-session handoff bead")                                                                             |
+| retire a spent P0 pointer                              | follow `beads-lifecycle:handoff-bead` (see "Lifecycle")                                                                                     |
 | record work (no-beads repo)                            | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                                                              |
 | next-session handoff (no-beads)                        | update the handoff doc's top "Resume here" section                                                                                          |
 | this session's mode record                             | `session-mode show` (see "Preamble: mark this session's mode")                                                                              |
