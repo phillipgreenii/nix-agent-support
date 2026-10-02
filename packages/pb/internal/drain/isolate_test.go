@@ -422,3 +422,91 @@ func TestIsolate_notAGitRepoErrors(t *testing.T) {
 		t.Fatal("expected error for non-repo path")
 	}
 }
+
+// TestIsolate_healthyCanonicalHasNoWarning: the diagnosis must stay silent on
+// a healthy clone, or every isolate would cry wolf.
+func TestIsolate_healthyCanonicalHasNoWarning(t *testing.T) {
+	repo := newRepo(t)
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xe"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	if out.Warning != "" {
+		t.Errorf("Warning = %q, want empty on a healthy canonical clone", out.Warning)
+	}
+}
+
+// TestIsolate_warnsWhenCoreWorktreeSetInCanonicalConfig (pg2-lcxpf, from
+// pg2-4c4nv): a stray core.worktree in the canonical .git/config makes git
+// report another worktree's path as the toplevel, which the lander later
+// surfaces as a phantom dirty tree. Isolate must name the cause up front --
+// read-only, so the key must still be there afterwards (R-3).
+func TestIsolate_warnsWhenCoreWorktreeSetInCanonicalConfig(t *testing.T) {
+	repo := newRepo(t)
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	other = filepath.Join(other, "elsewhere-worktree")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "config", "core.worktree", other)
+
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xf"})
+	if err != nil {
+		t.Fatalf("Isolate must still succeed (warning, not failure): %v", err)
+	}
+	for _, want := range []string{"core.worktree set in canonical config", other, repo} {
+		if !strings.Contains(out.Warning, want) {
+			t.Errorf("Warning = %q, want it to contain %q", out.Warning, want)
+		}
+	}
+	// Read-only: the diagnosis must never clear the key.
+	if got := strings.TrimSpace(gitTest(t, repo, "config", "--local", "--get", "core.worktree")); got != other {
+		t.Errorf("core.worktree after Isolate = %q, want %q (diagnosis must not modify the canonical config)", got, other)
+	}
+}
+
+func TestDiagnoseCanonical_scripted(t *testing.T) {
+	const repo = "/canon"
+	cfg := []string{"-C", repo, "config", "--local", "--get", "core.worktree"}
+	cases := []struct {
+		name       string
+		coreWT     string // "" => key unset (git config exits 1)
+		gitTop     string
+		wantSubstr string // "" => healthy, no warning
+	}{
+		{"healthy", "", repo, ""},
+		{"core.worktree set", "/canon/.worktrees/x", "/canon/.worktrees/x", "core.worktree set in canonical config"},
+		{"toplevel mismatch without core.worktree", "", "/elsewhere", "no core.worktree in the canonical .git/config"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := run.NewFakeRunner()
+			if tc.coreWT != "" {
+				f.AddResponse("git", cfg, run.Result{Stdout: tc.coreWT + "\n"}, nil)
+			} else {
+				f.AddResponse("git", cfg, run.Result{ExitCode: 1}, errors.New("exit 1"))
+			}
+			got := diagnoseCanonical(context.Background(), f, repo, tc.gitTop)
+			if tc.wantSubstr == "" {
+				if got != "" {
+					t.Errorf("got %q, want no warning", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.wantSubstr) {
+				t.Errorf("got %q, want substring %q", got, tc.wantSubstr)
+			}
+			// every call must be a read: never `--unset`/set.
+			for _, c := range f.Calls() {
+				for _, a := range c.Args {
+					if a == "--unset" || a == "--unset-all" || a == "--replace-all" {
+						t.Errorf("diagnosis issued a mutating git config call: %v", c.Args)
+					}
+				}
+			}
+		})
+	}
+}

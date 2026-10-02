@@ -167,6 +167,12 @@ pb drain isolate --bead <id> --repo <abs-path> [--json]
 - Human output is one line:
   `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<linked|present|none>`.
   `--json` emits the same fields as a JSON object instead.
+- Read-only canonical-clone diagnosis: when the canonical clone's `.git/config` carries a stray
+  `core.worktree` (or `git rev-parse --show-toplevel` disagrees with `--repo`), isolate still
+  succeeds (exit `0`) but prints `pb: warning: core.worktree set in canonical config ...` to
+  stderr and adds a `warning` field to `--json`. Without it, git's lie (phantom untracked files in
+  the canonical clone) only surfaces later as a phantom dirty tree halting the land at FF-0a
+  (`pg2-4c4nv`). `pb` never clears the key (R-3); the operator unsets it.
 
 | Exit | Meaning                                                                                                                                                  |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

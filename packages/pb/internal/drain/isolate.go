@@ -31,6 +31,12 @@ type Result struct {
 	Branch    string `json:"branch"`
 	Reused    string `json:"reused"`    // none | worktree | branch
 	Precommit string `json:"precommit"` // linked | present | none
+	// Warning is a non-fatal, read-only diagnosis of the canonical clone
+	// (core.worktree set in its .git/config, or git's toplevel disagreeing
+	// with --repo). Empty when the canonical clone is healthy. The bead is
+	// still isolated; the warning exists so the orchestrator is not first
+	// told at LAND time by a phantom "dirty canonical" halt (pg2-4c4nv).
+	Warning string `json:"warning,omitempty"`
 }
 
 func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
@@ -53,13 +59,15 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%s is not a git repo: %w", p.RepoPath, err)
 	}
-	if _, err := r.Run(ctx, "git", []string{"-C", repo, "rev-parse", "--show-toplevel"}, run.Options{}); err != nil {
+	top, err := r.Run(ctx, "git", []string{"-C", repo, "rev-parse", "--show-toplevel"}, run.Options{})
+	if err != nil {
 		return Result{}, fmt.Errorf("%s is not a git repo: %w", p.RepoPath, err)
 	}
 	branch := "drain/" + p.BeadID
 	ref := "refs/heads/" + branch
 	wt := filepath.Join(repo, ".worktrees", p.BeadID)
 	res := Result{Worktree: wt, Branch: branch}
+	res.Warning = diagnoseCanonical(ctx, r, repo, strings.TrimSpace(top.Stdout))
 
 	checkouts, err := worktreeBranches(ctx, r, repo)
 	if err != nil {
@@ -116,6 +124,49 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 	}
 	res.Precommit = pc
 	return res, nil
+}
+
+// diagnoseCanonical returns a one-line, human-readable diagnosis when the
+// canonical clone's git state is lying about where its working tree is, or ""
+// when it is healthy. gitTop is `git -C repo rev-parse --show-toplevel`'s
+// stdout (what git CLAIMS the toplevel is).
+//
+// The cause pg2-4c4nv / pg2-yj06c observed is a stray core.worktree in the
+// canonical clone's own .git/config: git then reports ANOTHER worktree's path
+// as the toplevel, so `git status` there lists that worktree's files as
+// untracked and the lander halts at FF-0a on a phantom dirty tree. Naming
+// core.worktree outright turns that into a one-step diagnosis.
+//
+// Strictly READ-ONLY (R-3): `git config --local --get` only reads; this never
+// unsets the key — clearing it is the operator's call.
+func diagnoseCanonical(ctx context.Context, r run.Runner, repo, gitTop string) string {
+	// Exit 1 from `git config --get` means "key not set" — the healthy case.
+	var coreWT string
+	if out, err := r.Run(ctx, "git", []string{"-C", repo, "config", "--local", "--get", "core.worktree"}, run.Options{}); err == nil {
+		coreWT = strings.TrimSpace(out.Stdout)
+	}
+	// Compare in symlink-free space, like resolveRepo (macOS /var → /private/var).
+	topMismatch := false
+	if gitTop != "" {
+		if resolved, err := filepath.EvalSymlinks(gitTop); err == nil {
+			gitTop = resolved
+		}
+		topMismatch = gitTop != repo
+	}
+	switch {
+	case coreWT != "":
+		return fmt.Sprintf("core.worktree set in canonical config (%s/.git/config): core.worktree=%s, "+
+			"git rev-parse --show-toplevel reports %q, expected %q. git will lie about this clone "+
+			"(phantom untracked files; the lander halts at FF-0a on a phantom dirty tree). "+
+			"Read-only diagnosis, not cleared (R-3): the operator clears it with "+
+			"`git config --file %s/.git/config --unset core.worktree`",
+			repo, coreWT, gitTop, repo, repo)
+	case topMismatch:
+		return fmt.Sprintf("git rev-parse --show-toplevel reports %q, expected canonical root %q "+
+			"(no core.worktree in the canonical .git/config; check GIT_WORK_TREE/GIT_DIR in the "+
+			"environment, or whether --repo is a subdirectory)", gitTop, repo)
+	}
+	return ""
 }
 
 // resolveRepo resolves the caller-supplied repo path to an absolute,

@@ -2,7 +2,7 @@
 
 > Advisory detector for the `integrate-branch` skill: gathers a repo's branch-integration facts and, when it can, a recommended strategy.
 > Emits one JSON object on stdout (`strategy`, `reason`, `primary_branch`, `canonical`, `remote`, `open_pr`, `mr_bead`) and exits nonzero outside a git repository; never asks or halts -- that decision belongs to the calling agent.
-> `--facts` emits a stable `KEY=value` block (`WT`, `FB`, `CC`, `PRIMARY`, `DIRTY`, `AHEAD`, `BEHIND`, `PRECOMMIT`) instead, for a caller that wants plain orientation facts without a `jq` dependency.
+> `--facts` emits a stable `KEY=value` block (`WT`, `FB`, `CC`, `PRIMARY`, `DIRTY`, `AHEAD`, `BEHIND`, `PRECOMMIT`, `CC_CORE_WORKTREE`) instead, for a caller that wants plain orientation facts without a `jq` dependency.
 > `--prek-branch-diff` runs `prek` over the whole branch diff (the `ff-merge-to-main` FF-1b step); with no usable `.pre-commit-config.yaml` it prints one notice line and runs nothing.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support>.
 

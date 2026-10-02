@@ -19,7 +19,9 @@ should be integrated.
 
 Options:
   --facts             Print orientation facts as a stable KEY=value block
-                      (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT)
+                      (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT,
+                      CC_CORE_WORKTREE -- non-empty iff the canonical clone's
+                      .git/config sets core.worktree; read-only, never cleared)
   --prek-branch-diff  Run prek over the whole branch diff
                       (prek run --from-ref PRIMARY --to-ref FB, in WT) and
                       exit with prek's status. When WT has no usable
@@ -107,6 +109,7 @@ if [ "$mode" = facts ]; then
   primary_val="$(resolve_primary_branch)"
   dirty_val="$(current_dirty_yesno)"
   precommit_val="$(precommit_state "$wt_val")"
+  cc_core_worktree_val="$(canonical_core_worktree)"
 
   ahead_val=""
   behind_val=""
@@ -123,6 +126,7 @@ if [ "$mode" = facts ]; then
   printf 'AHEAD=%s\n' "$ahead_val"
   printf 'BEHIND=%s\n' "$behind_val"
   printf 'PRECOMMIT=%s\n' "$precommit_val"
+  printf 'CC_CORE_WORKTREE=%s\n' "$cc_core_worktree_val"
   exit 0
 fi
 

@@ -35,6 +35,22 @@ canonical_root() {
   git -C "$(dirname "$common_dir")" rev-parse --show-toplevel
 }
 
+# canonical_core_worktree: print the value of core.worktree set in the
+# CANONICAL clone's own .git/config (the shared config of the whole worktree
+# set), or nothing when it is unset. A stray core.worktree there makes git LIE
+# about the canonical clone: `rev-parse --show-toplevel` (and so canonical_root,
+# and the CC fact) reports ANOTHER worktree's path and `git status` lists that
+# worktree's files as untracked -- a phantom dirty tree that halts the land at
+# FF-0a (bead pg2-4c4nv). Reads the config FILE directly (`git config --file`)
+# so the answer is the ground truth rather than git's own possibly-lying
+# opinion. Strictly read-only: it never unsets or edits the key (R-3).
+canonical_core_worktree() {
+  local common_dir
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  [ -f "$common_dir/config" ] || return 0
+  git config --file "$common_dir/config" --get core.worktree 2>/dev/null || true
+}
+
 # canonical_branch: print the branch checked out in the canonical clone.
 canonical_branch() {
   git -C "$(canonical_root)" symbolic-ref --short -q HEAD || echo "(detached)"

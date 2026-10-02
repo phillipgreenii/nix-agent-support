@@ -43,6 +43,7 @@ while IFS='=' read -r key value; do
   AHEAD) AHEAD="$value" ;;
   BEHIND) BEHIND="$value" ;;
   PRECOMMIT) PRECOMMIT="$value" ;;
+  CC_CORE_WORKTREE) CC_CORE_WORKTREE="$value" ;;
   esac
 done < <(integrate-branch-support --facts)
 ```
@@ -63,6 +64,10 @@ refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
   call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
   itself. `PRECOMMIT` (`real` / `symlink` / `dangling` / `missing`) is
   informational only: FF-1b decides for itself whether a usable config exists.
+- `CC_CORE_WORKTREE` is empty on a healthy canonical clone. A non-empty value is
+  the `core.worktree` key found in the canonical clone's own `.git/config`
+  (read straight from that file, read-only); FF-0a below treats it as the
+  diagnosis for a phantom dirty tree.
 
 ## FF-0 — Precondition: canonical steady-state, and `<WT>` actually rebasable
 
@@ -76,12 +81,26 @@ Before touching anything, verify the canonical clone is in the steady state Tier
 requires:
 
 ```bash
+[ -z "$CC_CORE_WORKTREE" ]                 # MUST hold: no core.worktree in the canonical config (checked FIRST)
 git -C "$CC" rev-parse --abbrev-ref HEAD   # MUST equal the primary branch
 git -C "$CC" status --porcelain            # MUST be empty
 ```
 
-If either check fails — canonical is off the primary branch, or canonical has
-local changes — **halt and report** (R-3/R-8). Do **not** reset, stash, or
+The `CC_CORE_WORKTREE` check runs **first** because it makes the other two
+untrustworthy. A stray `core.worktree` in the canonical `.git/config` (bead
+`pg2-4c4nv`) makes git **lie** about the canonical clone: `$CC` itself (derived via
+`rev-parse --show-toplevel`) resolves to _another_ worktree's path, and `git status`
+there lists that worktree's files as untracked — a **phantom** dirty tree, with
+nothing actually wrong in the real canonical directory. When `CC_CORE_WORKTREE` is
+non-empty, **halt and report** the exact text `core.worktree set in canonical
+config` with the key's value, the (misleading) `$CC`, and the real canonical root
+(the parent of `git rev-parse --path-format=absolute --git-common-dir`) — and do
+**not** report it as an ordinary dirty canonical clone or go on to read `status`.
+The operator clears it (`git config --file <canonical>/.git/config --unset
+core.worktree`); the handler MUST NOT (R-3).
+
+If any check fails — canonical is off the primary branch, has
+local changes, or carries a `core.worktree` — **halt and report** (R-3/R-8). Do **not** reset, stash, or
 re-checkout the canonical clone to "fix" it; that is exactly the work-around Tier R
 forbids. Report the anomaly and stop; this handler goes no further.
 
@@ -483,17 +502,18 @@ does not have to re-derive it from git history. Likewise, when FF-1b skipped
 `<reason>` values, and the
 disposition each one asks of the operator:
 
-| `<reason>`                     | Raised by | What the operator does next                                              |
-| ------------------------------ | --------- | ------------------------------------------------------------------------ |
-| detached `HEAD`                | Step 0    | check out the feature branch                                             |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                    |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                     |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                 |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                          |
-| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                   |
+| `<reason>`                     | Raised by | What the operator does next                                               |
+| ------------------------------ | --------- | ------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0    | check out the feature branch                                              |
+| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                     |
+| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler |
+| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                 |
+| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
+| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                      |
+| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                  |
+| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                           |
+| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke  |
+| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                    |
 
 These reasons MUST NOT be collapsed into one another — above all,
 `rebase-conflict` MUST NOT absorb the four other rebase reasons
@@ -512,6 +532,9 @@ exist, and prescribes a `git rebase --continue` that exits 128.
 - The handler MUST halt and report — not work around — if `<CC>` is off the
   primary branch or dirty at FF-0a (R-3, R-8), even if the caller already surfaced
   the same anomaly.
+- The handler MUST check `CC_CORE_WORKTREE` before `<CC>`'s `status` at FF-0a and,
+  when non-empty, MUST report `core.worktree set in canonical config` rather than a
+  phantom dirty tree, and MUST NOT clear the key itself (R-3).
 - FF-0 MUST verify **both** trees before FF-1 runs: `<CC>` on the primary branch
   and clean (FF-0a), and `<WT>` clean with no rebase already in progress (FF-0b).
   Checking `<CC>` alone leaves the tree FF-1 actually rebases unverified.

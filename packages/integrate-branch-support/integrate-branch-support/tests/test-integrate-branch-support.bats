@@ -343,7 +343,7 @@ EOF
 @test "facts: --facts prints the documented KEY=value block" {
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
-  for key in WT FB CC PRIMARY DIRTY AHEAD BEHIND PRECOMMIT; do
+  for key in WT FB CC PRIMARY DIRTY AHEAD BEHIND PRECOMMIT CC_CORE_WORKTREE; do
     echo "$output" | grep -qE "^${key}=" || {
       echo "missing key: $key" >&2
       return 1
@@ -459,6 +459,33 @@ EOF
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^PRIMARY=develop$"
+}
+
+@test "facts: CC_CORE_WORKTREE is empty on a healthy canonical clone" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx "CC_CORE_WORKTREE="
+}
+
+# pg2-lcxpf / pg2-4c4nv: a stray core.worktree in the canonical .git/config
+# makes git report ANOTHER path as the canonical toplevel (CC lies) and shows a
+# phantom dirty tree. --facts must name the cause, read-only.
+@test "facts: CC_CORE_WORKTREE reports a core.worktree set in the canonical config, from a linked worktree, without clearing it" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  local real_test_dir decoy
+  real_test_dir="$(cd "$TEST_DIR" && pwd -P)"
+  decoy="$(mktemp -d)"
+  decoy="$(cd "$decoy" && pwd -P)"
+  add_worktree feat
+  git -C "$TEST_DIR" config core.worktree "$decoy"
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qxF "CC_CORE_WORKTREE=$decoy"
+  # Read-only (R-3): the key is still set in the canonical config afterwards.
+  [ "$(git config --file "$real_test_dir/.git/config" --get core.worktree)" = "$decoy" ]
+  rm -rf "$decoy"
 }
 
 # stub_prek [exit-code]: put a fake `prek` on PATH that records its cwd and

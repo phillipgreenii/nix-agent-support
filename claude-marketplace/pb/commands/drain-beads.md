@@ -438,7 +438,12 @@ proceeding on currently loaded text (direct interactive invocation).`)
      the nix-generated pre-commit config into the worktree. Exit 0 → proceed
      (the output line names the worktree). Exit 3 → conflicting isolation state
      (someone else's checkout) — do NOT force anything; route to STUCK. Any
-     other failure → transient-vs-genuine per the Rules.
+     other failure → transient-vs-genuine per the Rules. A
+     `pb: warning: core.worktree set in canonical config …` line on stderr
+     (exit still 0) means the canonical clone's `.git/config` carries a stray
+     `core.worktree`: git will report a phantom dirty tree there and the lander
+     will halt at FF-0a. Proceed with the work, but do NOT clear the key (R-3)
+     — surface it to the operator in your report.
 
    - Multiple repos → a coordinated set via the
      `pn-workspace-rules:fork-workforest` skill, keyed to the bead id.
