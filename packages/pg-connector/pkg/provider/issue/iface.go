@@ -59,6 +59,14 @@ type IssueUpdateFields struct {
 	Priority     string            `json:"priority,omitempty"`
 	Title        string            `json:"title,omitempty"`
 	Description  string            `json:"description,omitempty"`
+	// Status, when non-empty, moves the issue to that backend-native state
+	// in the SAME call (pg2-1pt7r) — the only way to reopen an issue and
+	// clear its assignee atomically, which a bare Transition cannot do.
+	Status string `json:"status,omitempty"`
+	// ClearAssignee, when true, clears the issue's assignee in the same
+	// call (pg2-1pt7r). A distinct bool rather than an empty-string
+	// Assignee field because "" already means "field not supplied" here.
+	ClearAssignee bool `json:"clear_assignee,omitempty"`
 }
 
 // Provider is the issue capability's provider interface. A concrete
@@ -135,8 +143,9 @@ type Provider interface {
 	// Close closes issue id, recording reason where its tracker has a
 	// place to keep one. Jira maps this to a resolving transition; beads
 	// maps it to `bd close --reason` (bead pg2-2j5ac.28.3's own Contract).
-	// Reopening a closed issue is Transition(ctx, id, "open") followed by
-	// Update — there is deliberately no dedicated reopen op (binding
+	// Reopening a closed issue is ONE Update with Status "open" (plus
+	// ClearAssignee when the previous claimant must not survive the reopen,
+	// pg2-1pt7r) — there is deliberately no dedicated reopen op (binding
 	// decision), and this method exists ONLY as a resolving write: no
 	// gate op of any kind is ever added through it (D13).
 	Close(ctx context.Context, id, reason string) error

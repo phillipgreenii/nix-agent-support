@@ -783,18 +783,26 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	var reopened, refreshed bool
+	// pg2-1pt7r: the reopen is ONE `issue update` that sets status open AND
+	// clears the assignee AND refreshes head_sha — never a separate
+	// `issue transition` (which cannot clear the assignee and would strand
+	// the bead open + still claimed by the previous reviewer, so no worker
+	// could claim the re-review; beads-lifecycle B-4).
+	var reopenedAndRefreshed bool
 	for _, r := range readCallRecords(t, recordFile) {
 		joined := strings.Join(r.Args, " ")
-		if r.verb() == "issue transition" && strings.Contains(joined, "bd-review-existing") && strings.Contains(joined, "open") {
-			reopened = true
+		if r.verb() == "issue transition" && strings.Contains(joined, "bd-review-existing") {
+			t.Fatalf("reopen must not use a separate transition (cannot clear the assignee); record: %+v", r)
 		}
-		if r.verb() == "issue update" && strings.Contains(joined, "bd-review-existing") && strings.Contains(joined, "head_sha=new-sha") {
-			refreshed = true
+		if r.verb() == "issue update" && strings.Contains(joined, "bd-review-existing") &&
+			strings.Contains(joined, "--status open") &&
+			strings.Contains(joined, "--clear-assignee") &&
+			strings.Contains(joined, "head_sha=new-sha") {
+			reopenedAndRefreshed = true
 		}
 	}
-	if !reopened || !refreshed {
-		t.Fatalf("head advance did not reopen+refresh the review request; records: %+v", readCallRecords(t, recordFile))
+	if !reopenedAndRefreshed {
+		t.Fatalf("head advance did not reopen (status open + clear assignee) and refresh in ONE update; records: %+v", readCallRecords(t, recordFile))
 	}
 
 	review, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)

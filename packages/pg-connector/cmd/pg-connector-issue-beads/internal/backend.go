@@ -458,6 +458,14 @@ func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdat
 	if fields.Description != "" {
 		args = append(args, "--description", fields.Description)
 	}
+	if fields.Status != "" {
+		args = append(args, "--status", fields.Status)
+	}
+	if fields.ClearAssignee {
+		// "--assignee=" (single token) is bd's clear-the-assignee spelling;
+		// with --status it is one atomic reopen-and-unclaim (pg2-1pt7r).
+		args = append(args, "--assignee=")
+	}
 	args = append(args, "--json", "--", id)
 	data, err := b.run(ctx, args...)
 	if err != nil {

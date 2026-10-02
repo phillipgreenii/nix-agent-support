@@ -75,8 +75,10 @@ prompts that read these shapes, in the same change:
   acts as mine.
 - **Review request** — ported verbatim from pg-router's ACL: every PR with ownership `mine` or
   `co-owned` (draft included), and every non-draft team PR, gets one `review-pr` bead. When the
-  head advances past the ledger's last-reviewed SHA, a completed bead is reopened
-  (`issue transition <id> open`) and its metadata refreshed. No gate.
+  head advances past the ledger's last-reviewed SHA, a completed bead is reopened and its
+  metadata refreshed in ONE `issue update <id> --status open --clear-assignee ...` call (the
+  previous reviewer's claim MUST NOT survive the reopen, or no worker can claim the re-review;
+  `pg2-1pt7r`). No gate.
 - **Recorded losses (D15)** — draft auto-promotion, `wip on`'s upstream draft conversion, and
   pending reply posting are not performed by sync.
 

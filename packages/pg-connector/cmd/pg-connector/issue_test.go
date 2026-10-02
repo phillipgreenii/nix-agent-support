@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,35 @@ func TestRun_IssueUpdate_Success(t *testing.T) {
 	}
 	if issue.Title != "new title" || issue.Priority != "P1" {
 		t.Fatalf("issue = %+v", issue)
+	}
+}
+
+// TestRun_IssueUpdate_StatusAndClearAssigneeReachWire pins pg2-1pt7r: --status
+// and --clear-assignee are forwarded in the update op's fields.* shape.
+func TestRun_IssueUpdate_StatusAndClearAssigneeReachWire(t *testing.T) {
+	argvLog := filepath.Join(t.TempDir(), "argv.log")
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
+		`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
+	path := filepath.Join(dir, "backend-issue-reopen")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeIssueConfigFor(t, "backend-issue-reopen")
+
+	_, _, code := executePr(t, []string{"issue", "update", "issue-1", "--status", "open", "--clear-assignee"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	b, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("read request log: %v", err)
+	}
+	for _, want := range []string{`"status":"open"`, `"clear_assignee":true`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("backend request missing %s; got %s", want, b)
+		}
 	}
 }
 

@@ -379,6 +379,16 @@ func TestNewDispatchTable_Update(t *testing.T) {
 	if gotFields.Priority != "P1" || gotFields.Metadata["foo"] != "bar" {
 		t.Fatalf("fields = %#v", gotFields)
 	}
+	if gotFields.Status != "" || gotFields.ClearAssignee {
+		t.Fatalf("status/clear_assignee must default to unset, got %#v", gotFields)
+	}
+	// pg2-1pt7r: status + clear_assignee ride the same update op.
+	if _, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","fields":{"status":"open","clear_assignee":true}}`)); err != nil {
+		t.Fatalf("Handle reopen: %v", err)
+	}
+	if gotFields.Status != "open" || !gotFields.ClearAssignee {
+		t.Fatalf("reopen fields = %#v, want Status=open ClearAssignee=true", gotFields)
+	}
 	got, ok := result.(*schema.Issue)
 	if !ok || got.ID != "issue-1" {
 		t.Fatalf("result = %#v", result)

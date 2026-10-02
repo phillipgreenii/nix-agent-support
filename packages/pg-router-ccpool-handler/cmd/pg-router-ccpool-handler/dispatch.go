@@ -149,6 +149,11 @@ func runDispatch(args []string) int {
 		return conformance.ExitBusy
 	}
 	deps := buildDeps(cfg, role)
+	// The event payload's metadata is a snapshot from enqueue time. Re-read the
+	// bead's CURRENT metadata so the rendered prompt (e.g. a review's pinned
+	// head_sha) reflects the bead as it is at dispatch time, not as it was when
+	// the event was queued before a head advance reopened the bead (pg2-1pt7r).
+	dctx.Item = executor.RefreshItem(context.Background(), deps.BD, dctx.Item)
 	// Stamp a fresh per-attempt ExternalID here — the call the old monolithic
 	// internal/orchestrator made before invoking the ccpool executor
 	// in-process, and which the Phase 5 participant extraction (docket

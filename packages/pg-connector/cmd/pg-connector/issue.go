@@ -199,7 +199,8 @@ func newIssueTransitionCmd() *cobra.Command {
 // struct dependency needed at this thin CLI layer" precedent
 // newIssueCreateCmd's own args map already sets for IssueInput.
 func newIssueUpdateCmd() *cobra.Command {
-	var priority, title, description string
+	var priority, title, description, status string
+	var clearAssignee bool
 	var addLabels, removeLabels []string
 	var metadata map[string]string
 	cmd := &cobra.Command{
@@ -216,12 +217,14 @@ func newIssueUpdateCmd() *cobra.Command {
 		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "update", map[string]any{
 			"id": args[0],
 			"fields": map[string]any{
-				"metadata":      metadata,
-				"add_labels":    addLabels,
-				"remove_labels": removeLabels,
-				"priority":      priority,
-				"title":         title,
-				"description":   description,
+				"metadata":       metadata,
+				"add_labels":     addLabels,
+				"remove_labels":  removeLabels,
+				"priority":       priority,
+				"title":          title,
+				"description":    description,
+				"status":         status,
+				"clear_assignee": clearAssignee,
 			},
 		}, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueUpdate)
@@ -232,6 +235,8 @@ func newIssueUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&priority, "priority", "", "new priority")
 	cmd.Flags().StringVar(&title, "title", "", "new title")
 	cmd.Flags().StringVar(&description, "description", "", "new description")
+	cmd.Flags().StringVar(&status, "status", "", "move the issue to this backend-native state in the same call (e.g. open, to reopen)")
+	cmd.Flags().BoolVar(&clearAssignee, "clear-assignee", false, "clear the issue's assignee in the same call (use with --status open when reopening)")
 	return cmd
 }
 

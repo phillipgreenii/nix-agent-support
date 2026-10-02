@@ -947,9 +947,44 @@ func TestBackend_Update_AppliesAllFieldsInOneCall(t *testing.T) {
 	}
 }
 
+// TestBackend_Update_ReopenClearsAssigneeInOneCall pins pg2-1pt7r: a reopen
+// (Status "open") with ClearAssignee is ONE bd update carrying both
+// --status open and --assignee= — never two calls, since a status-only
+// reopen leaves the previous claimant on the bead.
+func TestBackend_Update_ReopenClearsAssigneeInOneCall(t *testing.T) {
+	calls := 0
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
+		if args[0] != "update" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		if !containsArg(args, "--assignee=") {
+			t.Fatalf("args = %v, missing the single-token --assignee=", args)
+		}
+		for i, a := range args {
+			if a == "--status" && (i+1 >= len(args) || args[i+1] != "open") {
+				t.Fatalf("--status must be followed by open, got %v", args)
+			}
+		}
+		if !containsArg(args, "--status") {
+			t.Fatalf("args = %v, missing --status", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":2}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if _, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{
+		Status: "open", ClearAssignee: true, Metadata: map[string]string{"head_sha": "abc"},
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("bd invoked %d times, want exactly 1", calls)
+	}
+}
+
 func TestBackend_Update_OmitsUnsetFields(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description"} {
+		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description", "--status", "--assignee="} {
 			if containsArg(args, flag) {
 				t.Fatalf("did not expect %s in args when unset, got %v", flag, args)
 			}

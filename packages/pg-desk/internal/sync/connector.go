@@ -101,6 +101,13 @@ type updateInput struct {
 	AddLabels    []string
 	RemoveLabels []string
 	Priority     string
+	// Status moves the issue to this state in the same call (e.g. "open" to
+	// reopen a closed issue); "" leaves the state alone.
+	Status string
+	// ClearAssignee clears the issue's assignee in the same call. A reopen
+	// MUST set it together with Status, or the previous claimant stays on the
+	// reopened issue and no worker can claim it (pg2-1pt7r).
+	ClearAssignee bool
 }
 
 // Update execs `pg-connector issue update <id> ...`.
@@ -115,6 +122,12 @@ func (c *issueClient) Update(ctx context.Context, id string, in updateInput) err
 	}
 	if in.Priority != "" {
 		args = append(args, "--priority", in.Priority)
+	}
+	if in.Status != "" {
+		args = append(args, "--status", in.Status)
+	}
+	if in.ClearAssignee {
+		args = append(args, "--clear-assignee")
 	}
 	args = append(args, c.backendFlag()...)
 
