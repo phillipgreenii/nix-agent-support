@@ -22,11 +22,14 @@ mkGoApp {
 
   # Each reference handler is its own binary (design: one package, several
   # cmd/). Handlers are found on PATH at run time, so they ship alongside the
-  # wrapper but never link against it.
+  # wrapper but never link against it. pg-rescue-claude is the reference
+  # claude -p failure handler (it execs `claude` from PATH at run time, so it
+  # has no build-time dependency on it).
   subPackages = [
     "cmd/pg-rescue"
     "cmd/pg-rescue-notify"
     "cmd/pg-rescue-bead"
+    "cmd/pg-rescue-claude"
   ];
 
   meta = {

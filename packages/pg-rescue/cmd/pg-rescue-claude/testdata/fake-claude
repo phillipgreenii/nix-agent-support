@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# fake-claude — test stub for `claude -p --output-format json`. The tests copy
+# it onto PATH under the name `claude`. It records what it was given into
+# $FAKE_CLAUDE_DIR, then plays back a canned envelope:
+#
+#   argv      one argument per NUL-terminated entry
+#   stdin     the prompt, as received
+#   markers   the nested-session variables as this process sees them
+#   cwd       its working directory
+#   pid       its pid (written first, before it reads stdin)
+#   child-pid (hang mode) the pid of the background sleep it spawned
+#
+# Behaviour is chosen by the environment:
+#
+#   FAKE_CLAUDE_ENVELOPE  path of the file to print on stdout (default: a plain
+#                         success whose result is a resolved verdict)
+#   FAKE_CLAUDE_EXIT      exit status (default 0)
+#   FAKE_CLAUDE_MODE=hang run until killed: spawn a sleeper, then wait
+set -uo pipefail
+
+dir="${FAKE_CLAUDE_DIR:?FAKE_CLAUDE_DIR is not set}"
+echo $$ > "$dir/pid"
+printf '%s\0' "$@" > "$dir/argv"
+pwd > "$dir/cwd"
+for v in CLAUDE_CODE_CHILD_SESSION CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_EXECPATH; do
+  if [ "${!v+set}" = set ]; then
+    printf '%s=[%s]\n' "$v" "${!v}"
+  else
+    printf '%s=<unset>\n' "$v"
+  fi
+done > "$dir/markers"
+cat > "$dir/stdin"
+
+if [ "${FAKE_CLAUDE_MODE:-}" = hang ]; then
+  sleep 600 &
+  echo $! > "$dir/child-pid"
+  wait
+  exit 0
+fi
+
+if [ -n "${FAKE_CLAUDE_STDERR:-}" ]; then
+  printf '%s\n' "$FAKE_CLAUDE_STDERR" >&2
+fi
+if [ -n "${FAKE_CLAUDE_ENVELOPE:-}" ]; then
+  cat "$FAKE_CLAUDE_ENVELOPE"
+else
+  printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"{\"outcome\":\"resolved\",\"summary\":\"fixed it\"}","session_id":"sess-1"}'
+fi
+exit "${FAKE_CLAUDE_EXIT:-0}"
