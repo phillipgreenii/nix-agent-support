@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // The change log and entity-version primitives (schema version 2 only).
@@ -53,6 +54,37 @@ func (s *Store) ConflictCount() int64 { return s.conflicts.Load() }
 // it in ConflictCount, and leaves the store untouched. It requires the new
 // schema.
 func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(e, expectedVersion, nil, kinds, origin, at)
+}
+
+// entityState is the extra pair WriteEntityStateWithLog sets in the same
+// statement as the snapshot.
+type entityState struct {
+	hydratedAt string
+	active     bool
+}
+
+// WriteEntityStateWithLog is WriteEntityWithLog that additionally sets
+// hydrated_at (hydratedAt, "" meaning NULL) and active in the same
+// UPDATE/INSERT, so they commit or roll back together with the snapshot, the
+// version bump and the change_log row. Same compare-and-set, same
+// ErrVersionConflict and ConflictCount behavior, new schema only. When kinds
+// is empty it still updates the row and bumps the version (a re-hydration
+// must refresh hydrated_at) but appends NO change_log row.
+func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydratedAt string, active bool, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at)
+}
+
+// SetBetweenBumpAndAppendHook installs fn as a fault-injection seam run
+// inside WriteEntityWithLog's and WriteEntityStateWithLog's transaction after
+// the entity write and before the change_log append; a non-nil return aborts
+// and rolls back the write. Passing nil clears it. Test use only.
+func (s *Store) SetBetweenBumpAndAppendHook(fn func() error) { s.betweenBumpAndAppend = fn }
+
+// writeEntity is the shared compare-and-set write. A nil state leaves
+// hydrated_at and active untouched (WriteEntityWithLog); a non-nil state sets
+// them and skips the change_log append when kinds is empty.
+func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState, kinds []string, origin, at string) (int64, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return 0, err
 	}
@@ -63,12 +95,24 @@ func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []stri
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	newVersion := expectedVersion + 1
-	res, err := tx.Exec(
-		`UPDATE entity SET facts = ?, as_of = ?, stale = ?, content_hash = ?, head_sha = ?, version = ?
-		 WHERE repo = ? AND entity_type = ? AND entity_id = ? AND version = ?`,
-		e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion,
-		e.Repo, e.EntityType, e.EntityID, expectedVersion,
-	)
+	updateSQL := `UPDATE entity SET facts = ?, as_of = ?, stale = ?, content_hash = ?, head_sha = ?, version = ?`
+	updateArgs := []any{e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion}
+	insertCols := `repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version`
+	insertArgs := []any{e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion}
+	if state != nil {
+		activeInt := 0
+		if state.active {
+			activeInt = 1
+		}
+		updateSQL += `, hydrated_at = ?, active = ?`
+		updateArgs = append(updateArgs, nullableString(state.hydratedAt), activeInt)
+		insertCols += `, hydrated_at, active`
+		insertArgs = append(insertArgs, nullableString(state.hydratedAt), activeInt)
+	}
+	updateSQL += ` WHERE repo = ? AND entity_type = ? AND entity_id = ? AND version = ?`
+	updateArgs = append(updateArgs, e.Repo, e.EntityType, e.EntityID, expectedVersion)
+
+	res, err := tx.Exec(updateSQL, updateArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -83,11 +127,11 @@ func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []stri
 		if expectedVersion != 0 {
 			return 0, s.conflict(e)
 		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(insertArgs)), ", ")
 		ins, err := tx.Exec(
-			`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO entity (`+insertCols+`) VALUES (`+placeholders+`)
 			 ON CONFLICT (repo, entity_type, entity_id) DO NOTHING`,
-			e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion,
+			insertArgs...,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("store: write entity (%s,%s,%s): insert: %w", e.Repo, e.EntityType, e.EntityID, err)
@@ -104,16 +148,60 @@ func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []stri
 			return 0, fmt.Errorf("store: write entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
 		}
 	}
-	if _, err := s.AppendChangeLogTx(tx, ChangeRecord{
-		Repo: e.Repo, EntityType: e.EntityType, EntityID: e.EntityID,
-		Version: newVersion, Kinds: kinds, Origin: origin, At: at,
-	}); err != nil {
-		return 0, err
+	if state == nil || len(kinds) > 0 {
+		if _, err := s.AppendChangeLogTx(tx, ChangeRecord{
+			Repo: e.Repo, EntityType: e.EntityType, EntityID: e.EntityID,
+			Version: newVersion, Kinds: kinds, Origin: origin, At: at,
+		}); err != nil {
+			return 0, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): commit: %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
 	return newVersion, nil
+}
+
+// AppendEntityChange appends one change_log record for an entity other than
+// the one being written, at that entity's CURRENT version, in one
+// transaction. It does NOT bump the version (like SetAnnotation's record) and
+// returns ErrNoEntity (matchable with errors.Is) when the entity row does not
+// exist. It requires the new schema.
+func (s *Store) AppendEntityChange(repo, entityType, entityID string, kinds []string, origin, at string) (int64, error) {
+	if err := s.RequireNewSchema(); err != nil {
+		return 0, err
+	}
+	wrap := func(err error) error {
+		return fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	tx, err := s.sql.Begin()
+	if err != nil {
+		return 0, wrap(err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+
+	var version int64
+	err = tx.QueryRow(
+		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
+		repo, entityType, entityID,
+	).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, wrap(ErrNoEntity)
+	}
+	if err != nil {
+		return 0, wrap(err)
+	}
+	seq, err := s.AppendChangeLogTx(tx, ChangeRecord{
+		Repo: repo, EntityType: entityType, EntityID: entityID,
+		Version: version, Kinds: kinds, Origin: origin, At: at,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, wrap(err)
+	}
+	return seq, nil
 }
 
 // conflict counts a lost race and builds the typed error.

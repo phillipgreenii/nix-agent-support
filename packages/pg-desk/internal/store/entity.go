@@ -11,11 +11,11 @@ import (
 // docket); this packet exposes the writer/reader only.
 //
 // Schema-dual: the cutover adds version, hydrated_at and active to the
-// entity table, all with defaults. This struct and its accessors name only
-// the original columns, so they work unchanged on both schema versions: on
-// the new schema an upsert leaves the new columns at their defaults (or at
-// whatever the new-schema API last set) and a read ignores them. The
-// accessors for those columns belong to the new API.
+// entity table, all with defaults. UpsertEntity names only the original
+// columns, so it works unchanged on both schema versions: on the new schema
+// it leaves the new columns at their defaults (or at whatever the new-schema
+// API last set). Reads return the new columns on the new schema and their
+// defaults (0, "", active) on the old one.
 type Entity struct {
 	Repo        string
 	EntityType  string
@@ -31,6 +31,20 @@ type Entity struct {
 	// reads; UpsertEntity ignores it. WriteEntityWithLog takes the version
 	// the caller read as its expectedVersion and ignores this field.
 	Version int64
+
+	// HydratedAt is when the entity was last hydrated (RFC3339; "" means
+	// NULL, never hydrated). New schema only; always "" when read from an
+	// old-schema store. Populated by reads; UpsertEntity and
+	// WriteEntityWithLog ignore it. WriteEntityStateWithLog sets it.
+	HydratedAt string
+
+	// Inactive reports that the entity is no longer active (the active
+	// column is 0). It is inverted on purpose: the zero value means ACTIVE,
+	// so every existing literal keeps meaning "active". New schema only;
+	// always false when read from an old-schema store. Populated by reads;
+	// UpsertEntity and WriteEntityWithLog ignore it, so no existing caller
+	// can deactivate an entity by accident. WriteEntityStateWithLog sets it.
+	Inactive bool
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
@@ -56,24 +70,27 @@ func (s *Store) UpsertEntity(e Entity) error {
 // GetEntity returns the entity row for (repo, entityType, entityID), or
 // found=false if no such row exists.
 func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, found bool, err error) {
-	versionCol, err := s.entityVersionColumn()
+	cols, err := s.entityNewColumns()
 	if err != nil {
 		return Entity{}, false, err
 	}
-	var headSHA sql.NullString
+	var headSHA, hydratedAt sql.NullString
+	var active int
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+versionCol+`
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
 		return Entity{}, false, fmt.Errorf("store: get entity (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
 	entity.HeadSHA = headSHA.String
+	entity.HydratedAt = hydratedAt.String
+	entity.Inactive = active == 0
 	return entity, true, nil
 }
 
@@ -98,12 +115,12 @@ func (s *Store) CountEntities() (int, error) {
 // own "iterate every entity currently in the store" driver reads this list
 // rather than requiring a caller to invent its own full-table scan.
 func (s *Store) ListEntities() ([]Entity, error) {
-	versionCol, err := s.entityVersionColumn()
+	cols, err := s.entityNewColumns()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + versionCol + `
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, ` + cols + `
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -114,11 +131,14 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA sql.NullString
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version); err != nil {
+		var headSHA, hydratedAt sql.NullString
+		var active int
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
+		e.HydratedAt = hydratedAt.String
+		e.Inactive = active == 0
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -127,19 +147,19 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	return out, nil
 }
 
-// entityVersionColumn returns the SELECT expression for Entity.Version: the
-// version column on the new schema, the constant 0 on the old one (which has
-// no such column). Called before the query is issued, never while a result
-// set is open (see isNewSchema).
-func (s *Store) entityVersionColumn() (string, error) {
+// entityNewColumns returns the SELECT expressions for the new-schema entity
+// columns, in the order version, hydrated_at, active: the real columns on the
+// new schema, the constants 0, NULL, 1 on the old one (which has none of
+// them). Called before the query is issued, never while a result set is open.
+func (s *Store) entityNewColumns() (string, error) {
 	isNew, err := s.isNewSchema()
 	if err != nil {
 		return "", err
 	}
 	if isNew {
-		return "version", nil
+		return "version, hydrated_at, active", nil
 	}
-	return "0", nil
+	return "0, NULL, 1", nil
 }
 
 // nullableString maps an empty Go string to a SQL NULL, so optional
