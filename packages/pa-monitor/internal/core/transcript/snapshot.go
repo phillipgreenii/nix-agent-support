@@ -103,6 +103,11 @@ type scanState struct {
 	// Snapshot fields, so the native pricer's separate scanFile decode is
 	// eliminated (bead pg2-5sxkb). Exposed via Accumulator.Records().
 	records []usage.Record
+	// counted is the per-message-id usage already folded into modelTokens/records
+	// (field-wise maximum across that id's lines), and recordIdx maps an id to its
+	// index in records, so a multi-block turn is priced once (pg2-7250f).
+	counted   map[string]usage.ModelTokens
+	recordIdx map[string]int
 
 	openTasks  map[string]bool
 	pendingAUQ map[string]bool
@@ -130,8 +135,36 @@ type scanState struct {
 func newScanState() scanState {
 	return scanState{
 		modelTokens: map[string]usage.ModelTokens{},
+		counted:     map[string]usage.ModelTokens{},
+		recordIdx:   map[string]int{},
 		openTasks:   map[string]bool{},
 		pendingAUQ:  map[string]bool{},
+	}
+}
+
+// maxModelTokens returns the field-wise maximum of a and b. Within one message
+// id the largest value wins, which absorbs a streamed partial line followed by
+// the final one (the OutputTally rule).
+func maxModelTokens(a, b usage.ModelTokens) usage.ModelTokens {
+	return usage.ModelTokens{
+		Input:                    max(a.Input, b.Input),
+		Output:                   max(a.Output, b.Output),
+		CacheCreation:            max(a.CacheCreation, b.CacheCreation),
+		CacheRead:                max(a.CacheRead, b.CacheRead),
+		CacheCreationEphemeral1h: max(a.CacheCreationEphemeral1h, b.CacheCreationEphemeral1h),
+		CacheCreationEphemeral5m: max(a.CacheCreationEphemeral5m, b.CacheCreationEphemeral5m),
+	}
+}
+
+// subModelTokens returns a - b field-wise (callers guarantee a >= b).
+func subModelTokens(a, b usage.ModelTokens) usage.ModelTokens {
+	return usage.ModelTokens{
+		Input:                    a.Input - b.Input,
+		Output:                   a.Output - b.Output,
+		CacheCreation:            a.CacheCreation - b.CacheCreation,
+		CacheRead:                a.CacheRead - b.CacheRead,
+		CacheCreationEphemeral1h: a.CacheCreationEphemeral1h - b.CacheCreationEphemeral1h,
+		CacheCreationEphemeral5m: a.CacheCreationEphemeral5m - b.CacheCreationEphemeral5m,
 	}
 }
 
@@ -220,13 +253,35 @@ func (st *scanState) feed(line []byte) {
 			// Cumulative per-model token ingestion for the native CostPricer
 			// (ADR 0021 §6).
 			if m := ev.Message.Model; m != "" {
+				cur := usage.ModelTokens{
+					Input:                    u.InputTokens,
+					Output:                   u.OutputTokens,
+					CacheCreation:            u.CacheCreationInputTokens,
+					CacheRead:                u.CacheReadInputTokens,
+					CacheCreationEphemeral1h: u.CacheCreation.Ephemeral1hInputTokens,
+					CacheCreationEphemeral5m: u.CacheCreation.Ephemeral5mInputTokens,
+				}
+				// A multi-block assistant turn is written as one line per content
+				// block, each repeating the same message id and full usage, so
+				// each id MUST be counted once (pg2-7250f; same rule as the
+				// totalOut OutputTally, pg2-e0zo3). counted is what this id has
+				// already contributed; only the per-field growth beyond it is
+				// folded in. A no-id line cannot be deduplicated and counts whole.
+				id := ev.Message.ID
+				delta := cur
+				if id != "" {
+					prev := st.counted[id]
+					merged := maxModelTokens(prev, cur)
+					delta = subModelTokens(merged, prev)
+					st.counted[id] = merged
+				}
 				mt := st.modelTokens[m]
-				mt.Input += u.InputTokens
-				mt.Output += u.OutputTokens
-				mt.CacheCreation += u.CacheCreationInputTokens
-				mt.CacheRead += u.CacheReadInputTokens
-				mt.CacheCreationEphemeral1h += u.CacheCreation.Ephemeral1hInputTokens
-				mt.CacheCreationEphemeral5m += u.CacheCreation.Ephemeral5mInputTokens
+				mt.Input += delta.Input
+				mt.Output += delta.Output
+				mt.CacheCreation += delta.CacheCreation
+				mt.CacheRead += delta.CacheRead
+				mt.CacheCreationEphemeral1h += delta.CacheCreationEphemeral1h
+				mt.CacheCreationEphemeral5m += delta.CacheCreationEphemeral5m
 				st.modelTokens[m] = mt
 				// Timestamped pricing record for the UsagePricing observer,
 				// applying the native CostPricer's per-line skip
@@ -234,20 +289,25 @@ func (st *scanState) feed(line []byte) {
 				// branch is only reached when !IsApiErrorMessage), non-empty
 				// model (this if), and non-zero usage (below). One decode feeds
 				// both the Snapshot fold and the pricing records (pg2-5sxkb).
+				// One record per message id: later lines of the same id grow the
+				// existing record in place (keeping the first line's timestamp)
+				// instead of appending a duplicate.
 				if u.InputTokens != 0 || u.OutputTokens != 0 ||
 					u.CacheCreationInputTokens != 0 || u.CacheReadInputTokens != 0 {
-					st.records = append(st.records, usage.Record{
-						Timestamp: ev.Timestamp,
-						Model:     m,
-						Tokens: usage.ModelTokens{
-							Input:                    u.InputTokens,
-							Output:                   u.OutputTokens,
-							CacheCreation:            u.CacheCreationInputTokens,
-							CacheRead:                u.CacheReadInputTokens,
-							CacheCreationEphemeral1h: u.CacheCreation.Ephemeral1hInputTokens,
-							CacheCreationEphemeral5m: u.CacheCreation.Ephemeral5mInputTokens,
-						},
-					})
+					if idx, ok := st.recordIdx[id]; ok && id != "" {
+						st.records[idx].Tokens = st.counted[id]
+					} else {
+						tok := cur
+						if id != "" {
+							tok = st.counted[id]
+							st.recordIdx[id] = len(st.records)
+						}
+						st.records = append(st.records, usage.Record{
+							Timestamp: ev.Timestamp,
+							Model:     m,
+							Tokens:    tok,
+						})
+					}
 				}
 			}
 			st.pendingAUQ = map[string]bool{}
