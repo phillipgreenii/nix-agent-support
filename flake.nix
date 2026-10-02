@@ -1540,9 +1540,11 @@
               # an agent to run a full flake check at land" (the override
               # notice). Each file is newline-joined first so a mandate split
               # across wrapped lines is still caught. Also asserts the FF-1b
-              # skip-with-notice text exists in the skill and matches the
-              # notice integrate-branch-support actually prints (its
-              # behaviour is covered by checks.test-integrate-branch-support).
+              # pg-hooks delegation and FF-4 bundle-refresh text exist in the
+              # skill and that the not-installed notice line the skill documents
+              # is the one integrate-branch-support actually prints (its
+              # behaviour is covered by checks.test-integrate-branch-support);
+              # and that the retired prek-config notice is gone from both.
               test-no-full-flake-check-land-mandate =
                 let
                   surface = lib.fileset.toSource {
@@ -1554,11 +1556,13 @@
                       (lib.fileset.fileFilter (file: file.hasExt "md") ./.claude/rules)
                     ];
                   };
+                  bashSrc = ./packages/integrate-branch-support/integrate-branch-support/integrate-branch-support.bash;
                   shSrc = ./packages/integrate-branch-support/integrate-branch-support/integrate-branch-support.sh;
                 in
                 pkgs.runCommand "test-no-full-flake-check-land-mandate" { } ''
                   export LC_ALL=C
                   surface="${surface}"
+                  bashsrc="${bashSrc}"
                   shsrc="${shSrc}"
                   for rel in CLAUDE.md home/programs/agent-rules/pgii-agent-rules.md home/programs/agent-rules/nix-how-to.md .claude/rules/package-versioning.md claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md claude-marketplace/pb/commands/drain-beads.md; do
                     if [ ! -f "$surface/$rel" ]; then
@@ -1613,21 +1617,31 @@
                   fi
 
                   ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
-                  for want in 'integrate-branch-support --prek-branch-diff' 'FF-1b: no prek config in <WT>, prek not run' 'overrides any older rule'; do
+                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule'; do
                     if ! grep -qF -- "$want" "$ff"; then
-                      echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b skip-with-notice text: $want" >&2
+                      echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b/FF-4 pg-hooks text: $want" >&2
                       exit 1
                     fi
                   done
-                  if ! grep -qF "printf 'FF-1b: no prek config in %s, prek not run" "$shsrc"; then
-                    echo "FAIL: integrate-branch-support.sh no longer prints the FF-1b notice line the skill documents" >&2
+                  if ! grep -qF "PG_HOOKS_MISSING_NOTICE='pg-hooks not installed on this machine; ask the operator to run pn workspace apply'" "$bashsrc"; then
+                    echo "FAIL: integrate-branch-support.bash no longer prints the not-installed notice line the skill documents" >&2
                     exit 1
                   fi
+                  if ! grep -qF "pg-hooks run pre-land" "$bashsrc"; then
+                    echo "FAIL: integrate-branch-support.bash no longer delegates FF-1b to pg-hooks run pre-land" >&2
+                    exit 1
+                  fi
+                  for retired in "$ff" "$bashsrc" "$shsrc"; do
+                    if grep -qF -- 'FF-1b: no prek config in' "$retired"; then
+                      echo "FAIL: $retired still carries the retired FF-1b prek-config notice" >&2
+                      exit 1
+                    fi
+                  done
                   if ! grep -qF 'is NOT a per-change or land-time gate' "$surface/home/programs/agent-rules/pgii-agent-rules.md"; then
                     echo "FAIL: the core agent rules lost the 'full nix flake check is NOT a per-change or land-time gate' rule" >&2
                     exit 1
                   fi
-                  echo "ok: $scanned markdown file(s) scanned; no full-flake-check land mandates; FF-1b skip-with-notice documented"
+                  echo "ok: $scanned markdown file(s) scanned; no full-flake-check land mandates; FF-1b pg-hooks delegation and FF-4 refresh documented"
                   touch $out
                 '';
 

@@ -235,18 +235,19 @@ ahead_behind_primary() {
   printf '%s\n' "$(git rev-list --count HEAD.."$ref" 2>/dev/null || echo 0)"
 }
 
-# precommit_state <worktree root>: print "symlink", "dangling", "real", or
-# "missing" for the on-disk state of <worktree root>/.pre-commit-config.yaml.
-# This repo's own CLAUDE.md ("prek / pre-commit in Fresh Worktrees") documents
-# why this matters: the canonical clone's copy is a gitignored, nix-generated
-# symlink into /nix/store, which a fresh `git worktree add` worktree does not
-# get for free. "symlink" is a link whose target exists; "dangling" is a link
-# whose target does NOT exist (e.g. a garbage-collected nix store path) --
-# `-L` is checked before `-e` because `-e` (and `-f`) follow the link and are
-# false for a dangling one, which would otherwise be misreported as
-# "missing". Only "symlink" and "real" are a USABLE prek config (see
-# precommit_usable).
-precommit_state() {
+# legacy_config_state <worktree root>: print "symlink", "dangling", "real", or
+# "missing" for the on-disk state of <worktree root>/.pre-commit-config.yaml
+# (the LEGACY, pre-hook-bundle config). This repo's own CLAUDE.md ("prek /
+# pre-commit in Fresh Worktrees") documents why this matters: the canonical
+# clone's copy is a gitignored, nix-generated symlink into /nix/store, which a
+# fresh `git worktree add` worktree does not get for free. "symlink" is a link
+# whose target exists; "dangling" is a link whose target does NOT exist (e.g. a
+# garbage-collected nix store path) -- `-L` is checked before `-e` because `-e`
+# (and `-f`) follow the link and are false for a dangling one, which would
+# otherwise be misreported as "missing". Only "symlink" and "real" are a
+# USABLE prek config (see precommit_usable). Used only as the fallback when
+# `pg-hooks` is not on PATH (precommit_state below).
+legacy_config_state() {
   local path="$1/.pre-commit-config.yaml"
   if [ -L "$path" ]; then
     if [ -e "$path" ]; then
@@ -267,10 +268,149 @@ precommit_state() {
 # links, copies, or regenerates a config (operator ruling 2026-10-01, bead
 # pg2-pla9d.1: with no config, the pre-land prek step does nothing).
 precommit_usable() {
-  case "$(precommit_state "$1")" in
+  case "$(legacy_config_state "$1")" in
   real | symlink) return 0 ;;
   *) return 1 ;;
   esac
+}
+
+# precommit_state <worktree root>: print the PRECOMMIT fact -- one of
+# "bundle", "stale", "legacy", "missing", "broken" -- from `pg-hooks status
+# --porcelain` (spec 5.3: callers parse the porcelain, never prose):
+#   present -> bundle    stale -> stale    legacy -> legacy
+#   missing -> missing   broken -> broken
+#   relocated -> stale   (the bundle exists but must be rebuilt)
+#   unreachable -> missing (git never runs the hooks from this clone)
+# `pg-hooks status` encodes the state in its exit code too, so a non-zero exit
+# is expected and ignored here. When pg-hooks is not on PATH (or prints no
+# recognizable state) fall back to the legacy on-disk config: "legacy" when it
+# is usable, else "missing". Read-only.
+precommit_state() {
+  local wt="$1" out="" line state=""
+  if command -v pg-hooks >/dev/null 2>&1; then
+    out="$(cd "$wt" && pg-hooks status --porcelain 2>/dev/null)" || true
+    while IFS= read -r line; do
+      case "$line" in
+      state=*) state="${line#state=}" ;;
+      esac
+    done <<<"$out"
+    case "$state" in
+    present)
+      printf 'bundle'
+      return
+      ;;
+    stale | relocated)
+      printf 'stale'
+      return
+      ;;
+    legacy | missing | broken)
+      printf '%s' "$state"
+      return
+      ;;
+    unreachable)
+      printf 'missing'
+      return
+      ;;
+    esac
+  fi
+  if precommit_usable "$wt"; then
+    printf 'legacy'
+  else
+    printf 'missing'
+  fi
+}
+
+# PG_HOOKS_MISSING_NOTICE: the exact line spec 5.3 prescribes when pg-hooks is
+# not on PATH (exit 127 semantics). FF-1b records it and continues.
+PG_HOOKS_MISSING_NOTICE='pg-hooks not installed on this machine; ask the operator to run pn workspace apply'
+
+# pre_land_check <worktree root> <branch>: FF-1b. Run `pg-hooks run pre-land
+# <branch>` from the worktree root and map its exit status (spec 5.3):
+#   0   -> 0
+#   10  -> 10 (a hook failed; the caller reports
+#              stopped:precommit-branch-diff-failed)
+#   13  -> 0  (no bundle and no usable legacy config: pg-hooks has already
+#              printed its one `pg-hooks: no hook bundle ...` notice on stderr,
+#              which the land outcome relays verbatim; the land continues)
+#   127 -> 0  (pg-hooks missing: print PG_HOOKS_MISSING_NOTICE on stdout; the
+#              land continues)
+#   any other status (2 usage, 12 broken bundle, 11 skipped, 1 ...) is
+#   returned unchanged so the caller halts rather than land unchecked.
+# Never links, copies or regenerates a hook config.
+pre_land_check() {
+  local wt="$1" fb="$2" rc=0
+  if ! command -v pg-hooks >/dev/null 2>&1; then
+    printf '%s\n' "$PG_HOOKS_MISSING_NOTICE"
+    return 0
+  fi
+  (cd "$wt" && pg-hooks run pre-land "$fb") || rc=$?
+  case "$rc" in
+  13) return 0 ;;
+  127)
+    printf '%s\n' "$PG_HOOKS_MISSING_NOTICE"
+    return 0
+    ;;
+  *) return "$rc" ;;
+  esac
+}
+
+# bundle_refresh <old primary sha>: FF-4 (spec 4.5, D5). Run from the canonical
+# clone AFTER a successful ff-merge. When the landed diff (<old>..HEAD)
+# touches a stamp input -- flake.lock, flake.nix, or a stampPaths entry of the
+# current bundle's meta.json -- start the canonical clone's recorded
+# `reinstall` command in the background through bgrun. Prints exactly one
+# `FF-4: bundle refresh ...` line and ALWAYS returns 0: a refresh that is
+# skipped, cannot start, or later fails is reported, never a failed land.
+bundle_refresh() {
+  local old="$1" common pgdir top gen="" cmd="" repo job out rc=0
+  local -a inputs=(flake.lock flake.nix)
+  local p touched
+
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top=""
+  if [ -z "$common" ] || [ -z "$top" ]; then
+    echo "FF-4: bundle refresh skipped (not inside a git working tree)"
+    return 0
+  fi
+  pgdir="$common/pg-hooks"
+  if [ ! -f "$pgdir/reinstall" ]; then
+    echo "FF-4: bundle refresh skipped (no $pgdir/reinstall: this clone has no hook bundle)"
+    return 0
+  fi
+  if [ -f "$pgdir/current" ] && [ ! -L "$pgdir/current" ]; then
+    IFS= read -r gen <"$pgdir/current" || true
+  fi
+  if [[ $gen =~ ^gen-[0-9]+$ ]] && [ -f "$pgdir/$gen/bundle/meta.json" ]; then
+    while IFS= read -r p; do
+      [ -n "$p" ] && inputs+=("$p")
+    done < <(jq -r '(.stampPaths // [])[]' "$pgdir/$gen/bundle/meta.json" 2>/dev/null || true)
+  fi
+  if ! touched="$(git -C "$top" diff --no-ext-diff --name-only "$old" HEAD -- "${inputs[@]}" 2>/dev/null)"; then
+    echo "FF-4: bundle refresh skipped (cannot diff $old..HEAD)"
+    return 0
+  fi
+  if [ -z "$touched" ]; then
+    echo "FF-4: bundle refresh not needed (the landed diff touches no stamp input)"
+    return 0
+  fi
+  IFS= read -r cmd <"$pgdir/reinstall" || true
+  if [ -z "$cmd" ]; then
+    echo "FF-4: bundle refresh skipped ($pgdir/reinstall is empty)"
+    return 0
+  fi
+  if ! command -v bgrun >/dev/null 2>&1; then
+    echo "FF-4: bundle refresh NOT started (bgrun is not on PATH); run in the background: $cmd"
+    return 0
+  fi
+  repo="$(basename "$top")"
+  job="pg-hooks-refresh-${repo//[^A-Za-z0-9._-]/-}"
+  out="$(bgrun "$job" -- bash -c "$cmd" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "FF-4: bundle refresh NOT started (bgrun $job exited $rc: $out); run in the background: $cmd"
+    return 0
+  fi
+  echo "FF-4: bundle refresh started in the background ($out); check with: bgcheck $job"
+  return 0
 }
 
 resolve_strategy() {

@@ -3,5 +3,6 @@
 _arguments \
   '(-h --help)'{-h,--help}'[Show help message]' \
   '(-v --version)'{-v,--version}'[Show version information]' \
-  '(--prek-branch-diff)--facts[Print orientation facts as a KEY=value block]' \
-  '(--facts)--prek-branch-diff[Run prek over the whole branch diff]'
+  '(--prek-branch-diff --bundle-refresh)--facts[Print orientation facts as a KEY=value block]' \
+  '(--facts --bundle-refresh)--prek-branch-diff[Run pg-hooks pre-land over the whole branch diff]' \
+  '(--facts --prek-branch-diff)--bundle-refresh[Refresh the hook bundle after a landing]:old primary sha'

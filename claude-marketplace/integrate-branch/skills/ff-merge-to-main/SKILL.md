@@ -62,8 +62,10 @@ refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
   else `main`.
 - `DIRTY`, `AHEAD`, `BEHIND`, and `PRECOMMIT` are also available from this same
   call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
-  itself. `PRECOMMIT` (`real` / `symlink` / `dangling` / `missing`) is
-  informational only: FF-1b decides for itself whether a usable config exists.
+  itself. `PRECOMMIT` (`bundle` / `stale` / `legacy` / `missing` / `broken`,
+  from `pg-hooks status --porcelain`; `legacy` also covers a usable
+  `.pre-commit-config.yaml` when `pg-hooks` is not installed) is informational
+  only: FF-1b decides for itself, through `pg-hooks`, whether hooks can run.
 - `CC_CORE_WORKTREE` is empty on a healthy canonical clone. A non-empty value is
   the `core.worktree` key found in the canonical clone's own `.git/config`
   (read straight from that file, read-only); FF-0a below treats it as the
@@ -322,10 +324,10 @@ clean, so exit 0 here cannot be the autostash false-success FF-0b describes.
   MUST NOT assert either recovery above — which one applies is exactly what could
   not be determined, and a confident wrong answer is worse than an honest unknown.
 
-## FF-1b — Consolidated `prek` check across the whole branch diff
+## FF-1b — Consolidated hook check across the whole branch diff
 
 Every commit on `<FB>` already had its own hooks run against its own staged
-diff at commit time — but that only ever validates one commit in isolation.
+diff at commit time — but that only ever validated one commit in isolation.
 Nothing before this step has checked the **union** of every file any commit on
 the branch touched, together, in one pass. This step closes that gap, and it
 applies to **every repo this handler lands**:
@@ -334,40 +336,48 @@ applies to **every repo this handler lands**:
 (cd "$WT" && integrate-branch-support --prek-branch-diff)
 ```
 
-When `<WT>` has a **usable** `.pre-commit-config.yaml` — a regular file, or a
-symlink whose target exists — this runs
-`prek run --from-ref "$PRIMARY" --to-ref "$FB"` from `<WT>`'s root and exits
-with `prek`'s own status. `prek`'s `--from-ref`/`--to-ref` diff-expression form
-resolves exactly the file set `git diff --name-only "$PRIMARY"...` would, so
-this scopes to files the branch actually touched, not the whole repo
+`integrate-branch-support --prek-branch-diff` delegates to
+`pg-hooks run pre-land "$FB"` from `<WT>`'s root: `pg-hooks` runs the repo's
+`pre-commit` hooks over the files `git diff --name-only "$PRIMARY"...` would
+list, so this scopes to files the branch actually touched, not the whole repo
 (`--all-files` MUST NOT be used here for the same reason it MUST NOT be used
 as a per-commit gate — it forces every hook over the whole tree and can
 false-block on a pre-existing violation the branch never touched). `<FB>`
 already reflects FF-1's rebase, so this runs against the freshly-rebased tree,
 at the default `pre-commit` hook stage — the same stage every individual
 commit already ran, just scoped to the whole branch's diff instead of one
-commit's.
+commit's. `pg-hooks` picks the hook source itself: the clone's hook bundle, or,
+for a repo not yet cut over, the legacy `.pre-commit-config.yaml` read in place
+(dual mode) — this handler never chooses between them.
 
-**No usable config → skip with exactly one notice line, never silently.** When
-`<WT>/.pre-commit-config.yaml` is **missing**, or is a symlink whose target
-does **not** exist (a dangling link: `[ -e ]` and `[ -f ]` are both false for
-it, which is how an older inline `[ -f ]` guard skipped it without a word),
-the command runs nothing, creates nothing, prints exactly one line —
+The exit status maps as follows (the exit-code contract of `pg-hooks`):
+
+| Exit                                                          | Meaning                                                                   | This handler                                                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 0                                                             | hooks passed, or nothing to run                                           | continue to FF-2                                                                                                       |
+| 10                                                            | a hook failed                                                             | halt: `stopped:precommit-branch-diff-failed`                                                                           |
+| 13                                                            | no bundle (and no usable legacy config) for this clone                    | record `pg-hooks`'s one notice line verbatim in the outcome report, continue to FF-2                                   |
+| 127                                                           | `pg-hooks` is not installed (also reported when it is absent from `PATH`) | record `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
+| other non-zero (12 broken bundle, 2 usage, 11 skipped, 1 ...) | the check could not run or finish                                         | halt as `stopped:precommit-branch-diff-failed`, reporting the exit status and `pg-hooks`'s own message verbatim        |
+
+**No bundle → skip with the notice line, never silently.** On exit 13 the
+command runs nothing, creates nothing, and prints `pg-hooks`'s one notice line
+on stderr, for example
 
 ```text
-FF-1b: no prek config in <WT>, prek not run
+pg-hooks: no hook bundle for <repo>; pre-land hooks not run. Fix: (cd <canonical> && nix run .#install-pre-commit-hooks)
 ```
 
-— and exits 0; the land continues to FF-2. Operator ruling (Phillip,
-2026-10-01, bead `pg2-pla9d.1`), verbatim: "if there is no config file, then
-the pre-hook should do nothing. trying to copy or symlink to other worktrees
-didn't seem to work". So the handler MUST NOT link, copy, or regenerate a
-config to make `prek` runnable, and MUST NOT treat the notice as a failure;
+and exits 0; the land continues to FF-2. Operator ruling (Phillip, 2026-10-01,
+bead `pg2-pla9d.1`), verbatim: "if there is no config file, then the pre-hook
+should do nothing. trying to copy or symlink to other worktrees didn't seem to
+work". So the handler MUST NOT link, copy, or regenerate a hook config or build
+a bundle to make the hooks runnable, and MUST NOT treat the notice as a failure;
 it relays the notice line in its outcome report so the skip is visible.
 
-A non-zero exit here — **halt and report** `stopped:precommit-branch-diff-failed`
-with the repo name, the failing hook(s), and `prek`'s own output. Do not
-attempt to fix the violation yourself; that decision belongs to the operator.
+On exit 10, **halt and report** `stopped:precommit-branch-diff-failed` with the
+repo name, the failing hook(s), and the hooks' own output. Do not attempt to fix
+the violation yourself; that decision belongs to the operator.
 
 ### What is NOT a land-time gate: a full `nix flake check`
 
@@ -384,7 +394,7 @@ rules keep saying so until the operator next runs `pn workspace apply`).
 Interim risk, accepted by the operator: `phillipgreenii-nix-agent-support` and
 `phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners
 are now the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
-projects only) plus this FF-1b `prek` run over the branch diff. Repos with
+projects only) plus this FF-1b hook run over the branch diff. Repos with
 cloud CI keep CI as their whole-repo gate. The change's author MAY — and
 SHOULD when the change touched shared infrastructure — build the targeted
 checks relevant to it (`nix build .#checks.<system>.<name>`, in the
@@ -399,6 +409,7 @@ FF-2's single part keeps its historical label, FF-2b, because other skills
 ### FF-2b — Fast-forward-only merge in the canonical clone
 
 ```bash
+OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")   # FF-4's bundle refresh diffs from here
 git -C "$CC" merge --ff-only "$FB"
 ```
 
@@ -415,7 +426,7 @@ possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
 - `attempts = 0`.
 - If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
   (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-1b and
-  FF-2 — this re-runs FF-1b's consolidated `prek` check against the freshly
+  FF-2 — this re-runs FF-1b's consolidated hook check against the freshly
   rebased tree before FF-2b's merge is retried).
 - When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
   and ask** the user rather than retry indefinitely — a persistent ff-race
@@ -429,8 +440,34 @@ first appears on a retry is therefore reported the same way, by FF-1.
 
 ## FF-4 — Cleanup
 
-Only reached after FF-1b (a passing `prek` run, or its one-line no-config
-notice) and FF-2b's merge succeed. Delegate to
+Only reached after FF-1b (a passing hook run, or `pg-hooks`'s one-line
+no-bundle / not-installed notice) and FF-2b's merge succeed.
+
+### FF-4a — Refresh the canonical clone's hook bundle
+
+The bundle reflects the working tree at install time, and the primary branch
+just moved. Run the refresh from `<CC>`, passing the primary branch's sha as
+captured BEFORE FF-2b's merge (each Bash call is a fresh shell, so if FF-2b and
+this step are separate calls, carry the sha forward as a literal):
+
+```bash
+(cd "$CC" && integrate-branch-support --bundle-refresh "$OLD_PRIMARY")
+```
+
+When the landed diff (`$OLD_PRIMARY..HEAD`) touches a stamp input —
+`flake.lock`, `flake.nix`, or a `stampPaths` entry of the clone's current
+bundle — and the clone has a bundle, this starts the one-line command in
+`<CC>`'s `.git/pg-hooks/reinstall` in the background through `bgrun` (job
+`pg-hooks-refresh-<repo>`; check it with `bgcheck`). It prints exactly one
+`FF-4: bundle refresh ...` line and **always exits 0**: a refresh that is
+skipped (no bundle), not needed, cannot start (no `bgrun`, a job already
+running) or later fails is **reported in the outcome report, never a failed
+land**. The handler MUST NOT wait for the refresh, retry it, or fail the land
+over it, and MUST NOT run the `reinstall` command in the foreground.
+
+### FF-4b — Remove the worktree
+
+Delegate to
 `wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
 fsmonitor-stop / worktree-remove / branch-delete / prune sequence: it folds in
 a liveness guard this handler did not previously have. **Relocate the shell
@@ -468,7 +505,7 @@ flowchart TD
     F0B -->|Yes| INIT["attempts = 0"]
     INIT --> B["FF-1: git -c rerere.enabled=false -C WT rebase primary"]
     B --> C{"exit 0?"}
-    C -->|Yes| F1B{"FF-1b: integrate-branch-support --prek-branch-diff (usable config? prek --from-ref PRIMARY --to-ref FB)"}
+    C -->|Yes| F1B{"FF-1b: integrate-branch-support --prek-branch-diff (pg-hooks run pre-land FB)"}
     C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
     P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
     P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
@@ -477,10 +514,10 @@ flowchart TD
     CL -->|No| C2{"confident in the resolution?"}
     C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
     C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
-    F1B -->|"fails"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
-    F1B -->|"passes, or one notice line: no usable config, prek not run"| G["FF-2b: git -C CC merge --ff-only FB"]
+    F1B -->|"exit 10, or any other non-zero"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
+    F1B -->|"passes, or exit 13 / 127: one notice line recorded"| G["FF-2b: git -C CC merge --ff-only FB"]
     G --> H{"ff-only ok?"}
-    H -->|Yes| I["FF-4: cd to CC, then wtdone FB --cc CC"]
+    H -->|Yes| I["FF-4: bundle refresh (reported, never fails the land), then cd to CC and wtdone FB --cc CC"]
     H -->|"No: attempts++"| J{"attempts < 2?"}
     J -->|Yes| B
     J -->|No| S2["STOP: ask"]
@@ -497,23 +534,26 @@ run, a `landed` report MUST also include a line recording which side was
 picked and whether the relock produced a diff — e.g. `flake.lock conflict:
 took theirs, relocked yes` — so a reviewer or an aggregating drain session
 does not have to re-derive it from git history. Likewise, when FF-1b skipped
-`prek` for lack of a usable config, a `landed` report MUST include its
-`FF-1b: no prek config in <WT>, prek not run` notice line verbatim. Its
+the hooks (`pg-hooks` exit 13, no bundle) or could not run them (`pg-hooks`
+missing), a `landed` report MUST include the notice line verbatim
+(`pg-hooks: no hook bundle for ...`, or `pg-hooks not installed on this machine;
+ask the operator to run pn workspace apply`), and it MUST include FF-4a's
+`FF-4: bundle refresh ...` line. Its
 `<reason>` values, and the
 disposition each one asks of the operator:
 
-| `<reason>`                     | Raised by | What the operator does next                                               |
-| ------------------------------ | --------- | ------------------------------------------------------------------------- |
-| detached `HEAD`                | Step 0    | check out the feature branch                                              |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                     |
-| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                 |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                      |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                  |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                           |
-| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with prek configured), then re-invoke  |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                    |
+| `<reason>`                     | Raised by | What the operator does next                                                             |
+| ------------------------------ | --------- | --------------------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0    | check out the feature branch                                                            |
+| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                                   |
+| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler               |
+| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                               |
+| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                               |
+| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                                    |
+| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                                |
+| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                                         |
+| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with a hook bundle or legacy config), then re-invoke |
+| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                                  |
 
 These reasons MUST NOT be collapsed into one another — above all,
 `rebase-conflict` MUST NOT absorb the four other rebase reasons
@@ -566,11 +606,21 @@ false` write to `<CC>`'s `.git/config` — that would also disable rerere for
   union of every commit's changes across the whole branch. The handler MUST
   NOT substitute `prek run --all-files` (same false-block risk as a per-commit
   `--all-files` run).
-- When `<WT>` has no usable `.pre-commit-config.yaml` (missing, or a symlink
-  whose target does not exist), FF-1b MUST NOT run `prek`, MUST NOT link, copy,
-  or regenerate a config, and MUST continue the land after the single
-  `FF-1b: no prek config in <WT>, prek not run` notice line, which the outcome
-  report relays (operator ruling, Phillip, 2026-10-01).
+- When `pg-hooks` reports no bundle (exit 13) or is not installed (exit 127),
+  FF-1b MUST NOT run `prek` itself, MUST NOT link, copy, or regenerate a hook
+  config, MUST NOT build a bundle, and MUST continue the land after the single
+  notice line (`pg-hooks: no hook bundle for ...`, or `pg-hooks not installed on
+this machine; ask the operator to run pn workspace apply`), which the outcome
+  report relays verbatim (operator ruling, Phillip, 2026-10-01). An exit status
+  other than 0, 10, 13 or 127 (a broken bundle, a usage error) MUST halt the land
+  as `stopped:precommit-branch-diff-failed`, reporting the status and
+  `pg-hooks`'s message verbatim: the check could not run, which is not the
+  same as having nothing to check.
+- FF-4a (the hook-bundle refresh) MUST run after a successful FF-2b merge, MUST
+  use the primary branch sha captured before that merge, MUST run in the
+  background through `integrate-branch-support --bundle-refresh`, and MUST NOT
+  fail, retry, or block the land: any problem is reported in the outcome
+  report only.
 - The handler MUST NOT run a full `nix flake check`, or halt on one, as a step
   of its own, for any repo: a full `nix flake check` is NOT a land-time gate
   (operator ruling, Phillip, 2026-10-01). This overrides any older rule telling
@@ -631,4 +681,5 @@ false` write to `<CC>`'s `.git/config` — that would also disable rerere for
   and is NOT torn down by the removal itself, so skipping this orphans it), and
   never escalates an unmerged branch's `-d` to `-D`.
 - The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond the
-  fast-forward merge and the FF-4 cleanup step.
+  fast-forward merge, the FF-4a bundle refresh (which writes only under
+  `<CC>`'s `.git/pg-hooks`), and the FF-4b cleanup step.

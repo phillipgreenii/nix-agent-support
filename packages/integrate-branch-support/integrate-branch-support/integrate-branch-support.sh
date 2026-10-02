@@ -11,7 +11,7 @@ show_help() {
   cat <<'HELP'
 integrate-branch-support: Advisory: report a repo's integration facts + recommended strategy
 
-Usage: integrate-branch-support [--facts | --prek-branch-diff]
+Usage: integrate-branch-support [--facts | --prek-branch-diff | --bundle-refresh <old-sha>]
 
 With no option, print one JSON object (strategy, reason, primary_branch,
 canonical, remote, open_pr, mr_bead) describing how the current branch
@@ -21,25 +21,36 @@ Options:
   --facts             Print orientation facts as a stable KEY=value block
                       (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT,
                       CC_CORE_WORKTREE -- non-empty iff the canonical clone's
-                      .git/config sets core.worktree; read-only, never cleared)
-  --prek-branch-diff  Run prek over the whole branch diff
-                      (prek run --from-ref PRIMARY --to-ref FB, in WT) and
-                      exit with prek's status. When WT has no usable
-                      .pre-commit-config.yaml (missing, or a dangling
-                      symlink) print one notice line, run nothing, create
-                      nothing, and exit 0
+                      .git/config sets core.worktree; read-only, never cleared).
+                      PRECOMMIT is bundle|stale|legacy|missing|broken, from
+                      `pg-hooks status --porcelain`
+  --prek-branch-diff  FF-1b: run `pg-hooks run pre-land <FB>` in WT (the hooks
+                      over the whole branch diff). Exit 10 (a hook failed)
+                      and any other failure are passed through; exit 13 (no
+                      bundle, no usable legacy config) and a missing pg-hooks
+                      (127) record their notice line and exit 0. Never
+                      links, copies or regenerates a hook config
+  --bundle-refresh <old-sha>
+                      FF-4: run from the canonical clone after an ff-merge
+                      that moved the primary branch from <old-sha>. When the
+                      landed diff touches a stamp input (flake.lock,
+                      flake.nix, the bundle's stampPaths), start the clone's
+                      pg-hooks `reinstall` command through bgrun. Prints one
+                      `FF-4: bundle refresh ...` line and always exits 0
   -h, --help          Show this help message
   -v, --version       Show version information
 HELP
 }
 
-# This tool takes no positional arguments; --facts and --prek-branch-diff are
-# its only recognized modes (mutually exclusive), besides --help and the
-# framework-injected --version (handled above this script). Anything else --
-# an unknown flag or a stray positional -- is a generic usage error (exit 1,
-# the conventional catch-all; this tool has no branchable exit codes of its
-# own -- --prek-branch-diff passes prek's exit status through).
+# This tool takes no positional arguments; --facts, --prek-branch-diff and
+# --bundle-refresh <old-sha> are its only recognized modes (mutually
+# exclusive), besides --help and the framework-injected --version (handled
+# above this script). Anything else -- an unknown flag or a stray positional --
+# is a generic usage error (exit 1, the conventional catch-all; this tool has
+# no branchable exit codes of its own -- --prek-branch-diff passes pg-hooks's
+# exit status through, 10 meaning a hook failed).
 mode=report
+refresh_old=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -h | --help)
@@ -48,11 +59,24 @@ while [[ $# -gt 0 ]]; do
     ;;
   --facts | --prek-branch-diff)
     if [ "$mode" != report ]; then
-      echo "integrate-branch-support: --facts and --prek-branch-diff are mutually exclusive" >&2
+      echo "integrate-branch-support: --facts, --prek-branch-diff and --bundle-refresh are mutually exclusive" >&2
       exit 1
     fi
     mode="${1#--}"
     shift
+    ;;
+  --bundle-refresh)
+    if [ "$mode" != report ]; then
+      echo "integrate-branch-support: --facts, --prek-branch-diff and --bundle-refresh are mutually exclusive" >&2
+      exit 1
+    fi
+    if [[ $# -lt 2 || -z $2 ]]; then
+      echo "integrate-branch-support: --bundle-refresh requires the pre-merge primary sha" >&2
+      exit 1
+    fi
+    mode=bundle-refresh
+    refresh_old="$2"
+    shift 2
     ;;
   *)
     echo "integrate-branch-support: unexpected argument: $1" >&2
@@ -70,26 +94,30 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ "$mode" = bundle-refresh ]; then
+  # --bundle-refresh <old-sha>: ff-merge-to-main's FF-4 bundle refresh (spec
+  # 4.5, D5), run from the canonical clone after the ff-merge. Reports and
+  # never fails: see bundle_refresh.
+  bundle_refresh "$refresh_old"
+  exit 0
+fi
+
 if [ "$mode" = prek-branch-diff ]; then
   # --prek-branch-diff: ff-merge-to-main's FF-1b step, made testable here
-  # rather than as inline skill prose. Operator ruling 2026-10-01 (bead
-  # pg2-pla9d.1): "if there is no config file, then the pre-hook should do
-  # nothing" -- so with no USABLE config (missing, or a dangling symlink that
-  # `[ -f ]` would also have silently skipped) print exactly ONE notice line
-  # and succeed, and NEVER link, copy, or regenerate a config.
+  # rather than as inline skill prose. It delegates to `pg-hooks run pre-land
+  # <FB>` (per-clone hook bundle, or a legacy .pre-commit-config.yaml that
+  # pg-hooks reads in place) and NEVER links, copies, or regenerates a hook
+  # config (operator ruling 2026-10-01, bead pg2-pla9d.1). Exit-status mapping:
+  # see pre_land_check.
   wt_val="$(current_worktree_root)"
-  if ! precommit_usable "$wt_val"; then
-    printf 'FF-1b: no prek config in %s, prek not run\n' "$wt_val"
-    exit 0
-  fi
   fb_val="$(current_branch)"
   if [ "$fb_val" = "(detached)" ]; then
     echo "integrate-branch-support: detached HEAD in $wt_val -- no branch diff to check" >&2
     exit 1
   fi
-  primary_val="$(resolve_primary_branch)"
-  cd "$wt_val" || exit 1
-  exec prek run --from-ref "$primary_val" --to-ref "$fb_val"
+  rc=0
+  pre_land_check "$wt_val" "$fb_val" || rc=$?
+  exit "$rc"
 fi
 
 if [ "$mode" = facts ]; then

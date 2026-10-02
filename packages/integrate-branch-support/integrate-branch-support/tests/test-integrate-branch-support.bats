@@ -426,32 +426,138 @@ EOF
   echo "$output" | grep -q "^BEHIND=0$"
 }
 
-@test "facts: PRECOMMIT reports missing when .pre-commit-config.yaml is absent" {
+# stub_pg_hooks [exit-code] [stderr-text]: put a fake `pg-hooks` on PATH. Every
+# call records its cwd and argv to $STUB_BIN/pg-hooks-calls (outside the
+# fixture repo, so recording never dirties the tree under test); the ABSENCE
+# of that file proves pg-hooks was NOT called. `pg-hooks status` prints
+# state=$STUB_PGH_STATE (when set) and exits $STUB_PGH_STATUS_RC (default 0);
+# any other subcommand writes [stderr-text] to stderr and exits [exit-code].
+stub_pg_hooks() {
+  local rc="${1:-0}" msg="${2:-}"
+  printf '%s' "$msg" >"$STUB_BIN/pg-hooks-stderr"
+  cat >"$STUB_BIN/pg-hooks" <<STUB
+#!/usr/bin/env bash
+printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/pg-hooks-calls"
+printf 'args=%s\n' "\$*" >>"$STUB_BIN/pg-hooks-calls"
+if [ "\$1" = status ]; then
+  if [ -n "\${STUB_PGH_STATE:-}" ]; then
+    printf 'state=%s\nbundle=\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE"
+  fi
+  exit "\${STUB_PGH_STATUS_RC:-0}"
+fi
+if [ -s "$STUB_BIN/pg-hooks-stderr" ]; then
+  cat "$STUB_BIN/pg-hooks-stderr" >&2
+  echo >&2
+fi
+exit $rc
+STUB
+  chmod +x "$STUB_BIN/pg-hooks"
+  PATH="$STUB_BIN:$PATH"
+}
+
+# run_pg_hooks_absent <args...>: run the tool with PATH reduced to the linked
+# real tools only, so pg-hooks and bgrun are genuinely absent, then restore PATH
+# (the suite's teardown needs the real rm).
+run_pg_hooks_absent() {
+  local saved_path="$PATH"
+  link_real_tools
+  ln -s "$(command -v basename)" "$STUB_BIN/basename"
+  PATH="$STUB_BIN"
+  run bash "$BIN" "$@"
+  PATH="$saved_path"
+}
+
+# facts_precommit <pg-hooks porcelain state> <expected PRECOMMIT> [status rc]
+facts_precommit() {
+  STUB_PGH_STATE="$1"
+  STUB_PGH_STATUS_RC="${3:-0}"
+  export STUB_PGH_STATE STUB_PGH_STATUS_RC
+  stub_pg_hooks
   run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx "PRECOMMIT=$2"
+  grep -qxF "args=status --porcelain" "$STUB_BIN/pg-hooks-calls"
+}
+
+@test "facts: PRECOMMIT is bundle when pg-hooks status reports present" {
+  facts_precommit present bundle
+}
+
+@test "facts: PRECOMMIT is stale when pg-hooks status reports stale (non-zero exit ignored)" {
+  facts_precommit stale stale 14
+}
+
+@test "facts: PRECOMMIT is stale when pg-hooks status reports relocated" {
+  facts_precommit relocated stale 16
+}
+
+@test "facts: PRECOMMIT is legacy when pg-hooks status reports legacy" {
+  facts_precommit legacy legacy
+}
+
+@test "facts: PRECOMMIT is missing when pg-hooks status reports missing" {
+  facts_precommit missing missing 13
+}
+
+@test "facts: PRECOMMIT is broken when pg-hooks status reports broken" {
+  facts_precommit broken broken 12
+}
+
+@test "facts: PRECOMMIT is missing when pg-hooks status reports unreachable" {
+  facts_precommit unreachable missing 15
+}
+
+@test "facts: pg-hooks status runs from the worktree root of a linked worktree" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt
+  wt="$(pwd -P)"
+  mkdir -p sub
+  cd sub || return 1
+  STUB_PGH_STATE=present
+  export STUB_PGH_STATE
+  stub_pg_hooks
+  run bash "$BIN" --facts
+  [ "$status" -eq 0 ]
+  grep -qxF "cwd=$wt" "$STUB_BIN/pg-hooks-calls"
+}
+
+@test "facts: PRECOMMIT falls back to missing when pg-hooks is absent and no legacy config exists" {
+  run_pg_hooks_absent --facts
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^PRECOMMIT=missing$"
 }
 
-@test "facts: PRECOMMIT reports real for a plain file" {
+@test "facts: PRECOMMIT falls back to legacy for a plain legacy config when pg-hooks is absent" {
   echo "repos: []" >.pre-commit-config.yaml
-  run bash "$BIN" --facts
+  run_pg_hooks_absent --facts
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=real$"
+  echo "$output" | grep -q "^PRECOMMIT=legacy$"
 }
 
-@test "facts: PRECOMMIT reports symlink for a link whose target exists" {
+@test "facts: PRECOMMIT falls back to legacy for a live-target symlink when pg-hooks is absent" {
   echo "repos: []" >"$STUB_BIN/real-config.yaml"
   ln -s "$STUB_BIN/real-config.yaml" .pre-commit-config.yaml
-  run bash "$BIN" --facts
+  run_pg_hooks_absent --facts
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=symlink$"
+  echo "$output" | grep -q "^PRECOMMIT=legacy$"
 }
 
-@test "facts: PRECOMMIT reports dangling for a broken symlink (not symlink, not missing)" {
+@test "facts: PRECOMMIT falls back to missing for a dangling symlink when pg-hooks is absent" {
   ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
+  run_pg_hooks_absent --facts
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "^PRECOMMIT=missing$"
+}
+
+@test "facts: PRECOMMIT falls back to the legacy probe when pg-hooks prints no recognizable state" {
+  echo "repos: []" >.pre-commit-config.yaml
+  STUB_PGH_STATE=""
+  export STUB_PGH_STATE
+  stub_pg_hooks
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=dangling$"
+  echo "$output" | grep -q "^PRECOMMIT=legacy$"
 }
 
 @test "facts: PRIMARY resolution matches the JSON mode's (config -> origin/HEAD -> main)" {
@@ -488,122 +594,285 @@ EOF
   rm -rf "$decoy"
 }
 
-# stub_prek [exit-code]: put a fake `prek` on PATH that records its cwd and
-# argv to $STUB_BIN/prek-calls (outside the fixture repo, so recording never
-# dirties the tree under test) and exits with [exit-code] (default 0). The
-# ABSENCE of $STUB_BIN/prek-calls is how a test proves prek was NOT called.
-stub_prek() {
-  local rc="${1:-0}"
-  cat >"$STUB_BIN/prek" <<STUB
-#!/usr/bin/env bash
-printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/prek-calls"
-printf 'args=%s\n' "\$*" >>"$STUB_BIN/prek-calls"
-exit $rc
-STUB
-  chmod +x "$STUB_BIN/prek"
-  PATH="$STUB_BIN:$PATH"
-}
+# PG_HOOKS_NOTICE: the exact line spec 5.3 prescribes when pg-hooks is absent.
+PG_HOOKS_NOTICE='pg-hooks not installed on this machine; ask the operator to run pn workspace apply'
 
-# assert_no_prek_config_created <worktree>: the skip path MUST NOT link, copy,
-# or regenerate a config -- nothing at all may exist at the config path, and
-# the worktree MUST be exactly as clean as before.
-assert_no_prek_config_created() {
+# assert_no_hook_config_created <worktree>: FF-1b MUST NOT link, copy, or
+# regenerate a hook config -- nothing at all may exist at the legacy config
+# path, and the worktree MUST be exactly as clean as before.
+assert_no_hook_config_created() {
   [ ! -e "$1/.pre-commit-config.yaml" ]
   [ ! -L "$1/.pre-commit-config.yaml" ]
   [ -z "$(git -C "$1" status --porcelain)" ]
 }
 
-@test "prek-branch-diff: config present (real file) runs prek over the branch diff from WT" {
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
-  add_worktree feat
-  echo "repos: []" >.pre-commit-config.yaml
-  stub_prek
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 0 ]
-  [ -f "$STUB_BIN/prek-calls" ]
-  grep -qxF "cwd=$(pwd -P)" "$STUB_BIN/prek-calls"
-  grep -qxF "args=run --from-ref main --to-ref feat" "$STUB_BIN/prek-calls"
-  [[ "$output" != *"FF-1b: no prek config"* ]]
-}
-
-@test "prek-branch-diff: config present (symlink with a live target) runs prek" {
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
-  add_worktree feat
-  echo "repos: []" >"$STUB_BIN/real-config.yaml"
-  ln -s "$STUB_BIN/real-config.yaml" .pre-commit-config.yaml
-  stub_prek
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 0 ]
-  grep -qxF "args=run --from-ref main --to-ref feat" "$STUB_BIN/prek-calls"
-}
-
-@test "prek-branch-diff: a failing prek run passes its exit status through" {
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
-  add_worktree feat
-  echo "repos: []" >.pre-commit-config.yaml
-  stub_prek 3
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 3 ]
-  [ -f "$STUB_BIN/prek-calls" ]
-}
-
-@test "prek-branch-diff: config missing in a linked worktree prints one notice line, prek not called, nothing created" {
+@test "prek-branch-diff: runs pg-hooks run pre-land <FB> from the WT root" {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   add_worktree feat
   local wt
   wt="$(pwd -P)"
-  stub_prek
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [ "$output" = "FF-1b: no prek config in $wt, prek not run" ]
-  [ ! -e "$STUB_BIN/prek-calls" ]
-  assert_no_prek_config_created "$wt"
-}
-
-@test "prek-branch-diff: dangling symlink prints the same one notice line, prek not called, link untouched" {
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
-  add_worktree feat
-  local wt
-  wt="$(pwd -P)"
-  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
-  stub_prek
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [ "$output" = "FF-1b: no prek config in $wt, prek not run" ]
-  [ ! -e "$STUB_BIN/prek-calls" ]
-  # Not repaired, replaced, or removed: still the same dangling link.
-  [ -L .pre-commit-config.yaml ]
-  [ ! -e .pre-commit-config.yaml ]
-  [ "$(readlink .pre-commit-config.yaml)" = "/nix/store/does-not-exist/.pre-commit-config.yaml" ]
-}
-
-@test "prek-branch-diff: WT == canonical clone with config missing prints the same one notice line, prek not called, nothing created" {
-  local cc
-  cc="$(cd "$TEST_DIR" && pwd -P)"
-  git checkout -q -b feat
-  stub_prek
-  run bash "$BIN" --prek-branch-diff
-  [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]
-  [ "$output" = "FF-1b: no prek config in $cc, prek not run" ]
-  [ ! -e "$STUB_BIN/prek-calls" ]
-  assert_no_prek_config_created "$cc"
-}
-
-@test "prek-branch-diff: run from a subdirectory still checks the worktree ROOT's config" {
-  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
-  add_worktree feat
-  local wt
-  wt="$(pwd -P)"
-  echo "repos: []" >.pre-commit-config.yaml
   mkdir -p sub
   cd sub || return 1
-  stub_prek
+  stub_pg_hooks 0
   run bash "$BIN" --prek-branch-diff
   [ "$status" -eq 0 ]
-  grep -qxF "cwd=$wt" "$STUB_BIN/prek-calls"
+  [ -f "$STUB_BIN/pg-hooks-calls" ]
+  grep -qxF "cwd=$wt" "$STUB_BIN/pg-hooks-calls"
+  grep -qxF "args=run pre-land feat" "$STUB_BIN/pg-hooks-calls"
+  [ "$(grep -c '^args=' "$STUB_BIN/pg-hooks-calls")" -eq 1 ]
+}
+
+@test "prek-branch-diff: exit 10 (a hook failed) is passed through as 10" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  stub_pg_hooks 10 "pg-hooks: pre-land hooks failed in repo"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"pg-hooks: pre-land hooks failed in repo"* ]]
+}
+
+@test "prek-branch-diff: exit 13 (no bundle) relays pg-hooks's notice verbatim and exits 0" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt notice
+  wt="$(pwd -P)"
+  notice="pg-hooks: no hook bundle for repo (shared bundle lives in /cc); pre-land hooks not run. Fix: (cd /cc && nix run .#install-pre-commit-hooks)"
+  stub_pg_hooks 13 "$notice"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "$notice" ]
+  assert_no_hook_config_created "$wt"
+}
+
+@test "prek-branch-diff: exit 127 from pg-hooks records the not-installed line and exits 0" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  stub_pg_hooks 127
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "$PG_HOOKS_NOTICE" ]
+}
+
+@test "prek-branch-diff: pg-hooks absent from PATH records the not-installed line, exits 0, creates nothing" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  local wt
+  wt="$(pwd -P)"
+  run_pg_hooks_absent --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$output" = "$PG_HOOKS_NOTICE" ]
+  assert_no_hook_config_created "$wt"
+}
+
+@test "prek-branch-diff: other failures (12 broken bundle, 2 usage) pass through unchanged" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  stub_pg_hooks 12 "pg-hooks: hook bundle for repo is broken (bin/prek is not executable). Rebuild: x"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 12 ]
+  [[ "$output" == *"is broken"* ]]
+  stub_pg_hooks 2 "pg-hooks: run pre-land: cannot resolve the primary branch: main"
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 2 ]
+}
+
+@test "prek-branch-diff: never calls prek directly, even with a legacy config present" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  add_worktree feat
+  echo "repos: []" >.pre-commit-config.yaml
+  cat >"$STUB_BIN/prek" <<STUB
+#!/usr/bin/env bash
+echo called >>"$STUB_BIN/prek-calls"
+STUB
+  chmod +x "$STUB_BIN/prek"
+  stub_pg_hooks 0
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ ! -e "$STUB_BIN/prek-calls" ]
+  grep -qxF "args=run pre-land feat" "$STUB_BIN/pg-hooks-calls"
+}
+
+@test "prek-branch-diff: detached HEAD is a usage-style failure and pg-hooks is not called" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  git checkout -q --detach
+  stub_pg_hooks 0
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"detached HEAD"* ]]
+  [ ! -e "$STUB_BIN/pg-hooks-calls" ]
+}
+
+# --- --bundle-refresh (FF-4) -------------------------------------------------
+
+# stub_bgrun [exit-code] [stdout]: fake `bgrun` recording argv (one arg per
+# line, after a "call" marker) to $STUB_BIN/bgrun-calls.
+stub_bgrun() {
+  local rc="${1:-0}" out="${2:-pg-hooks-refresh 4242 /tmp/bg.log}"
+  cat >"$STUB_BIN/bgrun" <<STUB
+#!/usr/bin/env bash
+echo call >>"$STUB_BIN/bgrun-calls"
+for a in "\$@"; do printf 'arg=%s\n' "\$a" >>"$STUB_BIN/bgrun-calls"; done
+printf '%s\n' '$out'
+exit $rc
+STUB
+  chmod +x "$STUB_BIN/bgrun"
+  PATH="$STUB_BIN:$PATH"
+}
+
+# make_bundle_state [stampPath]: give the canonical clone ($TEST_DIR) the
+# pg-hooks layout `pg-hooks-install` writes: a regular-file `current`, a
+# one-line `reinstall` command (a marker-touching one, so a test can prove the
+# tool never runs it itself), and a bundle dir whose meta.json lists stampPaths.
+make_bundle_state() {
+  local common
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  mkdir -p "$common/pg-hooks/gen-1/bundle"
+  printf 'gen-1\n' >"$common/pg-hooks/current"
+  printf 'touch %s/reinstall-ran\n' "$STUB_BIN" >"$common/pg-hooks/reinstall"
+  jq -n --arg p "${1:-}" '{repo: "r", stampPaths: (if $p == "" then [] else [$p] end), stages: ["pre-commit"]}' \
+    >"$common/pg-hooks/gen-1/bundle/meta.json"
+}
+
+# land_commit <path>: commit a change to <path> and print the pre-change sha
+# (what the handler captures before FF-2b).
+land_commit() {
+  local old
+  old="$(git rev-parse HEAD)"
+  mkdir -p "$(dirname "$1")"
+  echo "$RANDOM" >>"$1"
+  git add "$1"
+  git -c user.email=t@t -c user.name=t commit -q -m "touch $1"
+  printf '%s' "$old"
+}
+
+@test "bundle-refresh: a landed flake.lock change starts the reinstall command via bgrun" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit flake.lock)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == "FF-4: bundle refresh started in the background"* ]]
+  [[ "$output" == *"bgcheck pg-hooks-refresh-"* ]]
+  [ "$(grep -c '^call$' "$STUB_BIN/bgrun-calls")" -eq 1 ]
+  sed -n '2p' "$STUB_BIN/bgrun-calls" | grep -q '^arg=pg-hooks-refresh-'
+  grep -qxF 'arg=--' "$STUB_BIN/bgrun-calls"
+  grep -qxF 'arg=bash' "$STUB_BIN/bgrun-calls"
+  grep -qxF 'arg=-c' "$STUB_BIN/bgrun-calls"
+  grep -qxF "arg=touch $STUB_BIN/reinstall-ran" "$STUB_BIN/bgrun-calls"
+  # The tool never runs the reinstall command itself.
+  [ ! -e "$STUB_BIN/reinstall-ran" ]
+}
+
+@test "bundle-refresh: a flake.nix change starts the refresh" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit flake.nix)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
+@test "bundle-refresh: a change under a meta.json stampPaths entry starts the refresh" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state modules/hooks
+  stub_bgrun
+  local old
+  old="$(land_commit modules/hooks/check.sh)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
+@test "bundle-refresh: a landed diff touching no stamp input does not start anything" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state modules/hooks
+  stub_bgrun
+  local old
+  old="$(land_commit docs/readme.md)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == "FF-4: bundle refresh not needed"* ]]
+  [ ! -e "$STUB_BIN/bgrun-calls" ]
+}
+
+@test "bundle-refresh: a clone with no reinstall file (no bundle) is skipped" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  stub_bgrun
+  local old
+  old="$(land_commit flake.lock)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == "FF-4: bundle refresh skipped (no "* ]]
+  [ ! -e "$STUB_BIN/bgrun-calls" ]
+}
+
+@test "bundle-refresh: a bgrun failure is reported with the manual command and still exits 0" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun 2 "bgrun: a job named x is still running"
+  local old
+  old="$(land_commit flake.lock)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh NOT started (bgrun "* ]]
+  [[ "$output" == *"still running"* ]]
+  [[ "$output" == *"touch $STUB_BIN/reinstall-ran"* ]]
+}
+
+@test "bundle-refresh: bgrun absent from PATH is reported with the manual command and exits 0" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  local old
+  old="$(land_commit flake.lock)"
+  run_pg_hooks_absent --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh NOT started (bgrun is not on PATH)"* ]]
+  [[ "$output" == *"touch $STUB_BIN/reinstall-ran"* ]]
+}
+
+@test "bundle-refresh: an unresolvable old sha is skipped, never a failure" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  run bash "$BIN" --bundle-refresh deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh skipped (cannot diff "* ]]
+  [ ! -e "$STUB_BIN/bgrun-calls" ]
+}
+
+@test "bundle-refresh: a symlink current pointer is ignored (stampPaths not read)" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state modules/hooks
+  local common
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  rm "$common/pg-hooks/current"
+  ln -s gen-1 "$common/pg-hooks/current"
+  stub_bgrun
+  local old
+  old="$(land_commit modules/hooks/check.sh)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh not needed"* ]]
+}
+
+@test "bundle-refresh: requires an old sha" {
+  run bash "$BIN" --bundle-refresh
+  [ "$status" -ne 0 ]
+}
+
+@test "bundle-refresh: combined with --facts is a usage error" {
+  run bash "$BIN" --facts --bundle-refresh abc
+  [ "$status" -ne 0 ]
 }
 
 @test "prek-branch-diff: combined with --facts is a usage error" {
