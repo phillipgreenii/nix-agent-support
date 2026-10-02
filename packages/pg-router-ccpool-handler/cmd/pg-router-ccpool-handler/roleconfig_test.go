@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -307,5 +308,34 @@ func TestLoadRole_budgetStopEscalateAfter(t *testing.T) {
 				t.Errorf("budget must be unchanged by the threshold, got %+v", b)
 			}
 		})
+	}
+}
+
+// pg2-lhi3b: an empty ccpool.actor would make bd fall back to git user.name
+// (the operator) for the role's claims, so loadRole rejects it.
+func TestLoadRole_rejectsEmptyCCPoolActor(t *testing.T) {
+	for _, actor := range []string{`""`, `"   "`} {
+		body := `{"name":"worker","type":"ccpool","ccpool":{"actor":` + actor + `,"completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"}}`
+		if _, err := loadRole(mustWriteRoleFile(t, body)); err == nil || !strings.Contains(err.Error(), "ccpool.actor is required") {
+			t.Errorf("actor %s: err = %v, want ccpool.actor is required", actor, err)
+		}
+	}
+}
+
+// pg2-lhi3b: the production bd runner for a role carries that role's actor, so
+// the handler's own bd writes (unclaim, labels, comments) are attributed to the
+// role identity rather than to git user.name.
+func TestBuildDeps_bdRunnerCarriesRoleActor(t *testing.T) {
+	role, err := loadRole(mustWriteRoleFile(t, budgetRoleTemplate))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	deps := buildDeps(config.Default(), role)
+	r, ok := deps.BD.(*beads.CLIRunner)
+	if !ok {
+		t.Fatalf("deps.BD is %T, want *beads.CLIRunner", deps.BD)
+	}
+	if r.Actor != "pgii-pool__worker" {
+		t.Errorf("bd runner Actor = %q, want pgii-pool__worker", r.Actor)
 	}
 }

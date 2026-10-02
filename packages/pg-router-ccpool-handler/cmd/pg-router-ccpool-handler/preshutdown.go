@@ -84,7 +84,7 @@ func runPreShutdown(args []string) int {
 		return conformance.ExitError
 	}
 
-	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot), cfg.SessionPrefix, cfg.RepoRoot, os.Stdin, os.Stdout)
+	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, os.Stdin, os.Stdout)
 }
 
 // servePreShutdown is runPreShutdown's testable core, factored out so a test

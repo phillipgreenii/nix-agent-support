@@ -42,7 +42,7 @@ func bdRepo(t *testing.T) (context.Context, *CLIRunner) {
 	t.Setenv("BD_NON_INTERACTIVE", "1")
 
 	dir := t.TempDir()
-	r := NewCLIRunnerForRepo(dir)
+	r := NewCLIRunnerForRepo(dir, "")
 
 	// Embedded Dolt init (default backend, no external server). Generous timeout:
 	// the first embedded-engine init does real work.

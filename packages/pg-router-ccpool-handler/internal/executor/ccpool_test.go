@@ -1128,6 +1128,28 @@ func TestDispatch_launchesInFreshPerBeadWorktree(t *testing.T) {
 	}
 }
 
+// pg2-lhi3b: the dispatched worker session must carry its role's actor as
+// BEADS_ACTOR, so every `bd` it runs -- including an UNWRAPPED bd build with
+// no claim guard -- resolves its actor to the role identity, never to git
+// user.name (the operator).
+func TestDispatch_exportsRoleActorAsBeadsActor(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "pg-router-worker-zr-w"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("dispatch should succeed (bead closed), got %v", err)
+	}
+	if got, want := cc.EnsuredEnv["BEADS_ACTOR"], "pgii-pool__worker"; got != want {
+		t.Errorf("session env BEADS_ACTOR = %q, want the role actor %q", got, want)
+	}
+}
+
 // TestDispatch_reviewRole_completeOnClose exercises the pg2-ynhr.3 review role
 // end-to-end through the ccpool executor: a review-pr bead (task + "review-pr: "
 // prefix + PR-coord metadata) is dispatched, the ported prompt renders, and the

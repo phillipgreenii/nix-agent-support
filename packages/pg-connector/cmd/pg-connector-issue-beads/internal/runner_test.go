@@ -233,3 +233,129 @@ func TestCLIRunner_Run_CapsStderr(t *testing.T) {
 		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
 	}
 }
+
+// ----------------------------------------------------------------------
+// bead pg2-lhi3b: every bd CLAIM carries an explicit actor
+// ----------------------------------------------------------------------
+
+// bdArgvRecorder puts a `bd` on PATH that records its argv (one arg per
+// line) into the returned file, so a test asserts what actually reached bd.
+func bdArgvRecorder(t *testing.T) (argvFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argvFile = filepath.Join(dir, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + argvFile + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o700); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argvFile
+}
+
+func recordedArgv(t *testing.T, argvFile string) string {
+	t.Helper()
+	b, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("bd stub never ran: %v", err)
+	}
+	return strings.Join(strings.Split(strings.TrimRight(string(b), "\n"), "\n"), " ")
+}
+
+// The actor from $PG_CONNECTOR_ISSUE_BEADS_ACTOR reaches the bd invocation
+// as --actor, here via the real claim-shaped Backend.Transition(in_progress).
+func TestBackend_Transition_InProgress_ActorReachesBD(t *testing.T) {
+	argvFile := bdArgvRecorder(t)
+	r := &CLIRunner{Dir: t.TempDir(), Getenv: fakeEnv(map[string]string{EnvActor: "sess-1-sync"})}
+	b := New(r)
+	if err := b.Transition(context.Background(), "pg2-x", "in_progress"); err != nil {
+		t.Fatalf("Transition: %v", err)
+	}
+	got := recordedArgv(t, argvFile)
+	if !strings.Contains(got, "--actor sess-1-sync update --status in_progress --json -- pg2-x") {
+		t.Fatalf("bd argv = %q, want it to carry --actor sess-1-sync before the update subcommand", got)
+	}
+}
+
+// $BEADS_ACTOR is honored when the backend-scoped var is unset, and the
+// backend-scoped var wins when both are set.
+func TestCLIRunner_resolveActor_Precedence(t *testing.T) {
+	cases := []struct {
+		name string
+		r    *CLIRunner
+		want string
+	}{
+		{"none", &CLIRunner{Getenv: fakeEnv(nil)}, ""},
+		{"beads actor", &CLIRunner{Getenv: fakeEnv(map[string]string{"BEADS_ACTOR": "b"})}, "b"},
+		{"backend var wins", &CLIRunner{Getenv: fakeEnv(map[string]string{EnvActor: "a", "BEADS_ACTOR": "b"})}, "a"},
+		{"field wins", &CLIRunner{Actor: "f", Getenv: fakeEnv(map[string]string{EnvActor: "a"})}, "f"},
+		{"blank is unset", &CLIRunner{Getenv: fakeEnv(map[string]string{EnvActor: "  "})}, ""},
+	}
+	for _, c := range cases {
+		if got := c.r.resolveActor(); got != c.want {
+			t.Errorf("%s: resolveActor = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A claim with no actor configured never reaches bd, whichever claim shape.
+func TestCLIRunner_Run_ClaimWithoutActor_Refused(t *testing.T) {
+	argvFile := bdArgvRecorder(t)
+	r := &CLIRunner{Dir: t.TempDir(), Getenv: fakeEnv(nil)}
+	for _, args := range [][]string{
+		{"update", "--claim", "--json", "--", "x"},
+		{"ready", "--claim", "--json"},
+		{"update", "--status", "in_progress", "--json", "--", "x"},
+		{"update", "--status=in_progress", "--", "x"},
+		{"update", "--assignee", "someone", "--", "x"},
+		{"update", "--assignee=someone", "--", "x"},
+	} {
+		_, err := r.Run(context.Background(), args...)
+		if !errors.Is(err, ErrActorNotConfigured) {
+			t.Errorf("%v: err = %v, want ErrActorNotConfigured", args, err)
+		}
+	}
+	if _, err := os.Stat(argvFile); err == nil {
+		t.Error("bd was spawned for a refused claim")
+	}
+}
+
+// Through the Backend, the refusal surfaces as an ErrUnavailable-classified
+// error naming the fix.
+func TestBackend_Transition_InProgress_NoActor_Refused(t *testing.T) {
+	bdArgvRecorder(t)
+	b := New(&CLIRunner{Dir: t.TempDir(), Getenv: fakeEnv(nil)})
+	err := b.Transition(context.Background(), "pg2-x", "in_progress")
+	if err == nil || !strings.Contains(err.Error(), "refusing to claim") {
+		t.Fatalf("err = %v, want a refusal naming the missing actor", err)
+	}
+}
+
+// Non-claiming calls (reads, close/open transitions, a release's empty
+// assignee, claim-looking text behind "--") still run with no actor, and
+// carry no --actor.
+func TestCLIRunner_Run_NonClaim_NoActorNeeded(t *testing.T) {
+	argvFile := bdArgvRecorder(t)
+	r := &CLIRunner{Dir: t.TempDir(), Getenv: fakeEnv(nil)}
+	for _, args := range [][]string{
+		{"show", "--readonly", "--json", "--", "x"},
+		{"update", "--status", "closed", "--json", "--", "x"},
+		{"update", "--status", "open", "--assignee", "", "--", "x"},
+		{"comment", "--json", "--", "x", "--claim"},
+	} {
+		if _, err := r.Run(context.Background(), args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if got := recordedArgv(t, argvFile); strings.Contains(got, "--actor") {
+			t.Errorf("%v: unexpected --actor in %q", args, got)
+		}
+	}
+}
+
+// An explicit --actor in the call is kept, not duplicated or overridden.
+func TestCLIRunner_withActor_ExplicitActorKept(t *testing.T) {
+	r := &CLIRunner{Getenv: fakeEnv(map[string]string{EnvActor: "env-actor"})}
+	got, err := r.withActor([]string{"update", "--claim", "--actor", "mine", "--", "x"})
+	if err != nil || strings.Join(got, " ") != "update --claim --actor mine -- x" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

@@ -299,10 +299,21 @@ func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
 	}
 	return executor.Deps{
 		CC:  cc,
-		BD:  beads.NewCLIRunnerForRepo(bdDir),
+		BD:  beads.NewCLIRunnerForRepo(bdDir, roleActor(role)),
 		Cfg: cfg,
 		Log: newEventLog(cfg),
 	}
+}
+
+// roleActor is the bd identity the handler's own bd writes for role are
+// attributed to (bead pg2-lhi3b): the role's ccpool actor, i.e. the same
+// identity its dispatched worker sessions claim under via BEADS_ACTOR
+// (internal/executor/ccpool.go). "" for a role with no ccpool block.
+func roleActor(role roles.Role) string {
+	if role.CCPool != nil {
+		return role.CCPool.Actor
+	}
+	return ""
 }
 
 // handlerEventLogName is the JSONL file, inside the handler state directory,

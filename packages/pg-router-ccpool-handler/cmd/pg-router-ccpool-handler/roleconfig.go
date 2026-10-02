@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
@@ -107,6 +108,13 @@ func loadRole(path string) (roles.Role, error) {
 	case "ccpool":
 		if rf.CCPool == nil {
 			return roles.Role{}, fmt.Errorf("role config %s: type is ccpool but no [ccpool] block", path)
+		}
+		// The actor is the bd identity this role's worker sessions claim under
+		// (exported as BEADS_ACTOR) and its handler-side bd writes carry as
+		// --actor. Empty would make bd fall back to git user.name -- the
+		// operator -- so a claim would be recorded in their name (pg2-lhi3b).
+		if strings.TrimSpace(rf.CCPool.Actor) == "" {
+			return roles.Role{}, fmt.Errorf("role config %s: ccpool.actor is required (an empty actor makes bd attribute claims to the operator)", path)
 		}
 		tmpl, err := prompt.Parse(rf.Name, rf.CCPool.PromptBody)
 		if err != nil {

@@ -187,13 +187,19 @@ this means the `bd` commands below; a **no-beads repo** does the same three thin
 handoff doc instead (see the note at the end of this phase).
 
 - **Close completed work.** For each in-scope bead whose work is actually finished and
-  committed: `bd close <id> [<id>...] --reason="..."`. Don't close a bead whose code didn't
-  pass gates or didn't land.
+  committed: `bd close <id> [<id>...] --reason="..." --actor "<session-id>"`. Don't close a bead
+  whose code didn't pass gates or didn't land.
 - **File discovered work.** Anything you found this session that isn't done — a follow-up, a
   TODO, a bug you noticed, a deferred cleanup — gets a bead so it isn't lost:
   `bd create --title="..." --description="why this exists + what to do" --type=task|bug|feature -p <0-4>`.
 - **File unfinished work.** If an in-scope task is partially done, leave a bead describing
   what's left (or update the existing one's notes), so the next session starts from truth.
+
+This phase only closes and creates beads; it never CLAIMS one (a bead merely created in the
+operator's name is acceptable). If a wrap-up step ever does claim or re-claim a bead
+(`--claim`, `bd ready --claim`, `--status in_progress`, or a non-empty `--assignee`), it MUST pass
+`--actor "<session-id>"` (B-5) — an actor-less claim lands in the operator's name and strands the
+bead if it is never released.
 
 Keep this lightweight — you're recording reality, not grooming the backlog (that's the
 `bead-grooming` skill). Don't write acceptance criteria here; just capture enough that the

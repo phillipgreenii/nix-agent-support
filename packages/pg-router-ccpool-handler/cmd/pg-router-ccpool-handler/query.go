@@ -109,7 +109,7 @@ func runQuery(args []string) int {
 		return conformance.ExitError
 	}
 	ctx := context.Background()
-	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot)
+	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot, "")
 	if err := precheck(ctx, cfg.RepoRoot, cfg.BeadsPrefix, br); err != nil {
 		writeErrorReply(os.Stdout, err.Error())
 		return conformance.ExitError

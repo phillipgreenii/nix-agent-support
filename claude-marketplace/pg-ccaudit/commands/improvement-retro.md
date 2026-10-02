@@ -77,7 +77,7 @@ exceeds 30 days; if the operator declines, create nothing — no bead, no window
 consumed. Once clear, create and claim the run record in one chained Bash call
 (`bd create` has no `--status` flag, so it is two `bd` calls):
 `bd -C /Users/phillipg/phillipg_mbp create "Improvement retro <start> → <end>" --labels improvement-retro …`
-then `bd -C /Users/phillipg/phillipg_mbp update <id> --claim`, body holding the
+then `bd -C /Users/phillipg/phillipg_mbp update <id> --claim --actor "<this session's id>"`, body holding the
 requested window AND this session's id (the adopt-or-STOP test above reads it).
 Then print ONE screen and proceed without asking:
 

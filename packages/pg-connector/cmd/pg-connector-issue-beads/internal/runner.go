@@ -70,6 +70,17 @@ type Runner interface {
 // names today; widening its shape is out of this bead's scope).
 const EnvWorkspaceDir = "PG_CONNECTOR_ISSUE_BEADS_DIR"
 
+// EnvActor is the env var naming this backend's own bd actor identity (bead
+// pg2-lhi3b). When set (else bd's own $BEADS_ACTOR), every bd invocation this
+// backend makes carries `--actor <value>`, so its writes are attributed to the
+// agent/daemon that launched it rather than to git user.name (the operator).
+// The launching daemon or session MUST export it with a per-process identity
+// (e.g. its session id); this package deliberately has no default.
+const EnvActor = "PG_CONNECTOR_ISSUE_BEADS_ACTOR"
+
+// envBeadsActor is bd's OWN actor env var, honored as the second source.
+const envBeadsActor = "BEADS_ACTOR"
+
 // envBeadsDir is bd's OWN native workspace override — confirmed present in
 // the real bd v1.2.2 binary ("BEADS_DIR is set: %s" / "BEADS_DIR takes
 // precedence over contributor routing", read directly from its embedded
@@ -139,6 +150,60 @@ func ResolveWorkspaceDir(getenv func(string) string) (string, error) {
 	return "", ErrWorkspaceNotConfigured
 }
 
+// ErrActorNotConfigured is returned, without spawning `bd`, when an invocation
+// would CLAIM a bead (`--claim`, `--status in_progress`, or a non-empty
+// `--assignee`) and no actor identity is configured. bd then resolves the
+// actor as git user.name, i.e. the operator, and a claim in the operator's
+// name that is never released strands the bead (pg2-w2jlm / pg2-lhi3b).
+// Non-claiming writes and reads are unaffected and run without an actor.
+var ErrActorNotConfigured = errors.New(
+	"issue-beads: refusing to claim a bead without an actor; set $" + EnvActor +
+		" (or bd's own $" + envBeadsActor + ") to this agent's identity so the claim is not recorded in the operator's name",
+)
+
+// isClaim reports whether args (up to the "--" terminator, after which
+// everything is a literal positional) claim a bead: `--claim`,
+// `--status in_progress`, or a non-empty `--assignee`. An empty assignee is a
+// release, not a claim.
+func isClaim(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		next := ""
+		if i+1 < len(args) {
+			next = args[i+1]
+		}
+		switch {
+		case a == "--":
+			return false
+		case a == "--claim":
+			return true
+		case (a == "--status" || a == "-s") && next == "in_progress":
+			return true
+		case a == "--status=in_progress":
+			return true
+		case a == "--assignee" && next != "":
+			return true
+		case strings.HasPrefix(a, "--assignee=") && a != "--assignee=":
+			return true
+		}
+	}
+	return false
+}
+
+// hasActorArg reports whether args (up to the "--" terminator) already carry
+// an explicit --actor.
+func hasActorArg(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--actor" || strings.HasPrefix(a, "--actor=") {
+			return true
+		}
+	}
+	return false
+}
+
 // CLIRunner is the default Runner. It invokes the `bd` binary from PATH.
 type CLIRunner struct {
 	// Dir pins the directory Run passes to bd via `-C` (and also sets as
@@ -165,6 +230,9 @@ type CLIRunner struct {
 	// THIS Runner reads to pick a workspace, independent of what it later
 	// hands the child.
 	Getenv func(string) string
+	// Actor pins this runner's bd actor identity, overriding EnvActor /
+	// $BEADS_ACTOR. Optional; tests and embedders set it directly.
+	Actor string
 }
 
 // NewCLIRunner returns a CLIRunner using the process env. Dir is left
@@ -184,6 +252,39 @@ func (r *CLIRunner) resolveDir() (string, error) {
 		getenv = os.Getenv
 	}
 	return ResolveWorkspaceDir(getenv)
+}
+
+// resolveActor returns r.Actor, else $PG_CONNECTOR_ISSUE_BEADS_ACTOR, else
+// $BEADS_ACTOR ("" when none is set), read via r.Getenv (os.Getenv when nil).
+func (r *CLIRunner) resolveActor() string {
+	if r.Actor != "" {
+		return r.Actor
+	}
+	getenv := r.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if a := strings.TrimSpace(getenv(EnvActor)); a != "" {
+		return a
+	}
+	return strings.TrimSpace(getenv(envBeadsActor))
+}
+
+// withActor returns the argv Run hands to bd: args prefixed with `--actor
+// <actor>` when an identity is configured and the call names none of its own.
+// It returns ErrActorNotConfigured when args claim a bead and no identity is
+// available from the call or the configuration.
+func (r *CLIRunner) withActor(args []string) ([]string, error) {
+	if hasActorArg(args) {
+		return args, nil
+	}
+	if actor := r.resolveActor(); actor != "" {
+		return append([]string{"--actor", actor}, args...), nil
+	}
+	if isClaim(args) {
+		return nil, ErrActorNotConfigured
+	}
+	return args, nil
 }
 
 // Workspace implements Runner.Workspace.
@@ -223,6 +324,10 @@ func (r *CLIRunner) command(ctx context.Context, dir string, args []string) *exe
 // ambient cwd.
 func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	dir, err := r.resolveDir()
+	if err != nil {
+		return "", err
+	}
+	args, err = r.withActor(args)
 	if err != nil {
 		return "", err
 	}

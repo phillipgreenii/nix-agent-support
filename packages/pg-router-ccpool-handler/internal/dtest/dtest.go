@@ -65,6 +65,7 @@ type FakeCC struct {
 	EnsureNames []string
 	EnsuredCwd  string            // the cwd of the last Ensure call (the per-bead worktree)
 	EnsuredMeta map[string]string // the meta of the last Ensure call
+	EnsuredEnv  map[string]string // the env of the last Ensure call (BEADS_ACTOR et al.)
 	Sent        []string
 	Closed      []string
 	ClosedPurge []bool
@@ -84,11 +85,12 @@ type FakeCC struct {
 	CapErr error
 }
 
-func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, _, meta map[string]string) error {
+func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, env, meta map[string]string) error {
 	f.Ensured = append(f.Ensured, externalID)
 	f.EnsureNames = append(f.EnsureNames, name)
 	f.EnsuredCwd = cwd
 	f.EnsuredMeta = meta
+	f.EnsuredEnv = env
 	return f.EnsureErr
 }
 
