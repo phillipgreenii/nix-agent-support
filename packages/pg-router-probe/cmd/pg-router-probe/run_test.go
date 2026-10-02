@@ -35,6 +35,13 @@ type spyDeps struct {
 
 	listEscalatedResult []connectorIssue
 	listEscalatedErr    error
+	// listEscalatedByQuery, when non-nil, overrides listEscalatedResult:
+	// it returns the beads a given named dedup query would see, letting a
+	// test model "ready-only query hides a human-labeled bead, the
+	// all-non-closed query shows it". listedQueries records every query
+	// name the probe listed through.
+	listEscalatedByQuery map[string][]connectorIssue
+	listedQueries        []string
 
 	created []struct {
 		title    string
@@ -66,7 +73,11 @@ func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 			}
 			return s.fetchAlertsFn(ctx, opts)
 		},
-		listEscalated: func(ctx context.Context, warn func(string)) ([]connectorIssue, error) {
+		listEscalated: func(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error) {
+			s.listedQueries = append(s.listedQueries, query)
+			if s.listEscalatedByQuery != nil {
+				return s.listEscalatedByQuery[query], s.listEscalatedErr
+			}
 			return s.listEscalatedResult, s.listEscalatedErr
 		},
 		createIssue: func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error) {
@@ -107,6 +118,7 @@ func baseOpts(t *testing.T) runOptions {
 		pgConnectorTimeout: time.Second,
 		ruleUIDs:           registeredRuleUIDs,
 		snapshotPath:       filepath.Join(t.TempDir(), "snapshot.json"),
+		dedupQuery:         defaultDedupQuery,
 	}
 }
 
@@ -364,5 +376,91 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
+	}
+}
+
+// TestRunProbeDedupSeesHumanLabeledBead reproduces pg2-dvkbh (2026-09-29:
+// pg2-imr6o duplicated pg2-68005). The first bead for the fingerprint had
+// gained the "human" label (and so was in neither the ready queue nor
+// "escalated-work"); the next probe tick listed only ready beads, saw no
+// match, and filed a second bead. The fake below models the two named
+// queries faithfully: the ready-only triager query hides the parked bead,
+// the dedup query shows it. No new bead MUST be created; the episode is
+// APPENDED to the existing bead (here the alert's episode count moved, so
+// the probe updates its tracked metadata and comments).
+func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
+	const fp = "pg-router-failure-rate|__alert_rule_uid__=pg-router-failure-rate,class=handler-error"
+	parked := connectorIssue{
+		ID:     "pg2-68005",
+		Labels: []string{"escalated", "human"},
+		Metadata: map[string]string{
+			metaFingerprint:  fp,
+			metaState:        "active",
+			metaEpisodeCount: "0",
+		},
+	}
+	fetch := func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
+		return []grafanaAlert{{
+			RuleUID:      "pg-router-failure-rate",
+			Labels:       map[string]string{"__alert_rule_uid__": "pg-router-failure-rate", "class": "handler-error"},
+			State:        "active",
+			EpisodeCount: 1,
+		}}, nil
+	}
+	newSpy := func() *spyDeps {
+		return &spyDeps{
+			fetchAlertsFn: fetch,
+			listEscalatedByQuery: map[string][]connectorIssue{
+				"escalated-work":  nil, // ready --label escalated --exclude-label human
+				defaultDedupQuery: {parked},
+			},
+		}
+	}
+
+	// Sanity: with the pre-fix (ready-only) query the probe cannot see the
+	// parked bead and files a duplicate -- this is the bug.
+	buggyCmd, _ := testCmd()
+	buggyOpts := baseOpts(t)
+	buggyOpts.grafanaURL = "http://example.invalid"
+	buggyOpts.dedupQuery = "escalated-work"
+	buggy := newSpy()
+	if err := runProbe(buggyCmd, buggyOpts, buggy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(buggy.created) != 1 {
+		t.Fatalf("test harness premise broken: ready-only query should reproduce the duplicate, created=%d", len(buggy.created))
+	}
+
+	// The fix: the default dedup query sees the human-labeled bead.
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	opts.grafanaURL = "http://example.invalid"
+	spy := newSpy()
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(spy.created) != 0 {
+		t.Fatalf("a duplicate bead was created while a human-labeled bead held the fingerprint: %+v", spy.created)
+	}
+	if len(spy.updated) != 1 || spy.updated[0].id != "pg2-68005" {
+		t.Fatalf("expected the episode to update pg2-68005, got %+v", spy.updated)
+	}
+	if len(spy.commented) != 1 || spy.commented[0].id != "pg2-68005" {
+		t.Fatalf("expected the episode to be commented on pg2-68005, got %+v", spy.commented)
+	}
+	if len(spy.listedQueries) != 1 || spy.listedQueries[0] != defaultDedupQuery {
+		t.Fatalf("expected dedup to list through %q, got %v", defaultDedupQuery, spy.listedQueries)
+	}
+}
+
+// TestRunCmdDedupQueryDefault pins the CLI default so a deployment that
+// omits --dedup-query still dedups against every non-closed bead.
+func TestRunCmdDedupQueryDefault(t *testing.T) {
+	f := newRunCmd().Flags().Lookup("dedup-query")
+	if f == nil {
+		t.Fatalf("--dedup-query flag missing")
+	}
+	if f.DefValue != defaultDedupQuery || defaultDedupQuery == "escalated-work" {
+		t.Fatalf("dedup-query default = %q (want %q, never the ready-only escalated-work)", f.DefValue, defaultDedupQuery)
 	}
 }

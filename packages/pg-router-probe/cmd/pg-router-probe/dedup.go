@@ -1,6 +1,7 @@
 // dedup.go: the "nothing new" rule [Binding decisions: "'Nothing new'
 // rule" bullet] — given a finding and the existing `escalated`-labeled
-// beads returned by connector.go's listEscalated, decides whether to
+// beads (in EVERY non-closed state, human-labeled included) returned by
+// connector.go's listEscalated, decides whether to
 // create a fresh bead, comment+update an existing one, or write nothing.
 //
 // Metadata keys this probe reads back on a matched bead
@@ -26,7 +27,7 @@ const (
 )
 
 // dedupAction is what run.go should do about one finding, given the
-// existing escalated-work beads.
+// existing escalated beads.
 type dedupAction int
 
 const (

@@ -115,18 +115,37 @@ type connectorIssueListEnvelope struct {
 	Entities []connectorIssue `json:"entities"`
 }
 
-// listEscalated runs `pg-connector issue list --query escalated-work
-// --backend pg-connector-issue-beads --output json` — the dedup check's
+// defaultDedupQuery is the named pg-connector query this probe's dedup
+// check runs by default (--dedup-query overrides it). It MUST be a query
+// that returns EVERY non-closed escalated bead -- open, in_progress,
+// blocked, deferred, and human-labeled -- NOT the triager's own
+// dispatch query "escalated-work" ("ready --label escalated
+// --exclude-label human"). That dispatch query is a ready-queue view: it
+// drops a bead the moment it gains the human label, is claimed
+// (in_progress), is deferred, or gains an open blocker. Using it for
+// dedup let the probe file a second bead for a fingerprint a human-parked
+// bead already held (pg2-dvkbh: pg2-imr6o duplicated pg2-68005 on
+// 2026-09-29, the tick after pg2-68005 gained "human"). The deployment
+// config (the pg-connector-issue-beads backend's queries block) MUST
+// define this name as a bd "list" expression, e.g.
+//
+//	escalated-all = "list --label escalated --status open,in_progress,blocked,deferred"
+const defaultDedupQuery = "escalated-all"
+
+// listEscalated runs `pg-connector issue list --query <query>
+// --backend pg-connector-issue-beads --output json` -- the dedup check's
 // ONLY allowed data source [Binding decisions: "'Nothing new' rule"
 // closing paragraph: "This check MUST run via pg-connector issue list
-// ..., never bd search/bd list directly"]. issue list's own exit-code
-// scheme is the fan-out scheme (0 ok, 2 degraded-but-usable) — mirroring
+// ..., never bd search/bd list directly"]. query is the dedup query name
+// (defaultDedupQuery unless overridden), see its doc comment for the
+// required semantics. issue list's own exit-code
+// scheme is the fan-out scheme (0 ok, 2 degraded-but-usable) -- mirroring
 // pg-router-source-pg-connector's own classifyExit for the same reason:
 // list is a fan-out op, unlike create/update/comment below.
-func listEscalated(ctx context.Context, warn func(string)) ([]connectorIssue, error) {
+func listEscalated(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error) {
 	out, err := invokeOrFail(ctx, []string{
 		"issue", "list",
-		"--query", "escalated-work",
+		"--query", query,
 		"--backend", pgConnectorBackend,
 		"--output", "json",
 	}, map[int]bool{0: true, 2: true}, warn)
