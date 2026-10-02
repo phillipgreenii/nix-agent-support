@@ -25,22 +25,24 @@ func TestEnvironmentIsIsolated(t *testing.T) {
 	}
 }
 
-// TestWrapperErrorsExit70BeforeTheCommandRuns covers every case in the
-// "wrapper errors" list: each must exit 70 and the Executor (the only thing
-// that would spawn the command) must never be reached.
-func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
-	type tc struct {
-		name   string
-		config string // "" leaves the default good config in place; "-" writes no file
-		args   func(h *harness) []string
-		prep   func(h *harness)
-		want   []string
-	}
+// wrapperErrCase is one wrapper-error scenario.
+type wrapperErrCase struct {
+	name   string
+	config string // "" leaves the default good config in place; "-" writes no file
+	args   func(h *harness) []string
+	prep   func(h *harness)
+	want   []string
+}
+
+// wrapperErrorCases lists every wrapper-error case. Each argument list ends in
+// the command `true` after `--` (or has none); the end-to-end test swaps in a
+// command that records whether it ran.
+func wrapperErrorCases(t *testing.T) []wrapperErrCase {
 	cfgFlag := func(h *harness) []string { return []string{"--config", h.cfgPath} }
 	with := func(rest ...string) func(h *harness) []string {
 		return func(h *harness) []string { return append(cfgFlag(h), rest...) }
 	}
-	cases := []tc{
+	return []wrapperErrCase{
 		{name: "no selector", args: with("--", "true"), want: []string{"exactly one of --handlers or --chain"}},
 		{name: "both selectors", args: with("--handlers", "notify", "--chain", "sync", "--", "true"), want: []string{"mutually exclusive"}},
 		{name: "empty --handlers", args: with("--handlers", "", "--", "true"), want: []string{"--handlers", "empty"}},
@@ -118,6 +120,13 @@ func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
 			args: with("--chain", "sync", "--", "true"), want: []string{"cannot create run directory"},
 		},
 	}
+}
+
+// TestWrapperErrorsExit70BeforeTheCommandRuns covers every case in the
+// "wrapper errors" list: each must exit 70 and the Executor (the only thing
+// that would spawn the command) must never be reached.
+func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
+	cases := wrapperErrorCases(t)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := c.config
@@ -222,6 +231,10 @@ func TestHandlersFlagAllowsRepeatsAndLeavesChainEmpty(t *testing.T) {
 
 func TestDirFlagBecomesAbsoluteCwd(t *testing.T) {
 	h := newHarness(t, goodConfig)
+	t.Chdir(h.root)
+	if err := os.MkdirAll(filepath.Join(h.root, "relative", "dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	h.run("--config", h.cfgPath, "--chain", "sync", "-C", "relative/dir", "--", "true")
 	p := h.rec.calls[0]
 	if !filepath.IsAbs(p.Cwd) || !strings.HasSuffix(p.Cwd, filepath.Join("relative", "dir")) {
@@ -257,18 +270,6 @@ func TestConfigIsReadOnceAtStartup(t *testing.T) {
 type executorFunc func(*Plan) int
 
 func (f executorFunc) Execute(p *Plan) int { return f(p) }
-
-func TestPendingExecutorReportsAndCleansUp(t *testing.T) {
-	h := newHarness(t, goodConfig)
-	h.rt.Executor = pendingExecutor{}
-	code, _, stderr := h.run("--config", h.cfgPath, "--chain", "sync", "--", "true")
-	if code != 70 || !strings.Contains(stderr, "not implemented") {
-		t.Errorf("code=%d stderr=%q", code, stderr)
-	}
-	if dirs := h.runDirs(); len(dirs) != 0 {
-		t.Errorf("run directory left behind: %v", dirs)
-	}
-}
 
 func TestConfigLookupOrderEndToEnd(t *testing.T) {
 	one := "[handler.one]\ncommand=[\"x\"]\n"

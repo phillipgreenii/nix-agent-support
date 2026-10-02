@@ -46,6 +46,9 @@ type Runtime struct {
 	Getwd     func() (string, error)
 	Home      string
 	LookPath  func(string) (string, error)
+	// Stdin is the wrapper's stdin: the command inherits it, and --stdin
+	// mode reads the failure text from it.
+	Stdin io.Reader
 	// Executor runs the command and the handler chain once the plan is made.
 	Executor Executor
 }
@@ -59,6 +62,7 @@ type Plan struct {
 	Cwd       string   // absolute directory the command runs in
 	RunID     string
 	RunDir    string
+	StateRoot string // the pg-rescue state directory holding runs/ and runs.jsonl
 	StartedAt time.Time
 	Host      string
 	Runtime   *Runtime
@@ -87,18 +91,9 @@ func DefaultRuntime(version string) *Runtime {
 		Getwd:     os.Getwd,
 		Home:      home,
 		LookPath:  exec.LookPath,
-		Executor:  pendingExecutor{},
+		Stdin:     os.Stdin,
+		Executor:  &ChainExecutor{},
 	}
-}
-
-// pendingExecutor stands in until command execution lands: it reports that
-// plainly (a wrapper error, exit 70) and removes the run directory it was
-// given, so no half-run is left behind.
-type pendingExecutor struct{}
-
-func (pendingExecutor) Execute(p *Plan) int {
-	_ = os.RemoveAll(p.RunDir)
-	return failf(p.Stderr, "running the command and the handler chain is not implemented in this build")
 }
 
 // Main runs pg-rescue with args (without the program name) and returns its
@@ -161,6 +156,13 @@ func runWrapper(rt *Runtime, args []string, stdout, stderr io.Writer) int {
 		return failf(stderr, "cannot resolve -C %q: %v", opts.Dir, err)
 	}
 
+	if fi, err := os.Stat(cwd); err != nil || !fi.IsDir() {
+		if err == nil {
+			err = errors.New("not a directory")
+		}
+		return failf(stderr, "cannot run in %s: %v", cwd, err)
+	}
+
 	host, err := rt.Hostname()
 	if err != nil {
 		host = "unknown"
@@ -180,6 +182,7 @@ func runWrapper(rt *Runtime, args []string, stdout, stderr io.Writer) int {
 		Cwd:       cwd,
 		RunID:     id,
 		RunDir:    dir,
+		StateRoot: stateRoot,
 		StartedAt: rt.Now().UTC(),
 		Host:      host,
 		Runtime:   rt,
