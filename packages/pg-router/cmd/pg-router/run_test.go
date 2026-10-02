@@ -827,6 +827,71 @@ func TestBootCore_wiresMetricsEmitterAsProduceTickSourceFailureObserver(t *testi
 	}
 }
 
+// TestBootCore_failFastSourceGiveUpIncrementsSourceFailures is bead
+// pg2-jgbnp's end-to-end regression: a fail-fast source (zero-value
+// FailureBackoff, Retries == 0 -- e.g. a rate-limited GraphQL source) never
+// takes the retry branch, so before the fix MetricSourceFailures was never
+// emitted for it and pg-router-source-failure-rate could not fire. The give-up
+// path must drive the same bootCore-wired emitter.
+func TestBootCore_failFastSourceGiveUpIncrementsSourceFailures(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	calls := 0
+	cfg := config.Config{
+		LogDir:        shortDir(t), // AF_UNIX path length cap; see shortDir's doc (ingest_event_test.go)
+		MeterProvider: mp,
+		Queries: query.SourceSet{
+			{Name: "failfast-src", Query: flakySourceQuery{
+				Meta:      query.Meta{EmitTypes: []string{"t1"}}, // zero-value FB: Retries == 0
+				failTimes: 100,
+				calls:     &calls,
+			}},
+		},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	for i := 0; i < 2; i++ {
+		if _, err := o.ProduceTick(ctx, q); err != nil {
+			t.Fatalf("ProduceTick: %v", err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("Run was called %d times, want 2 (one fail-fast attempt per tick)", calls)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	got := int64(-1)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != metrics.MetricSourceFailures {
+				continue
+			}
+			s, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, dp := range s.DataPoints {
+				if v, present := dp.Attributes.Value(attribute.Key("source")); present && v.AsString() == "failfast-src" {
+					got = dp.Value
+				}
+			}
+		}
+	}
+	if got != 2 {
+		t.Fatalf("%s{source=failfast-src} = %d, want 2 (one per fail-fast give-up; the series must exist even with no retries)", metrics.MetricSourceFailures, got)
+	}
+}
+
 // TestBootCore_DefaultMeterProviderWiresReadableMetricsReader proves the
 // Task 3.6-prereq value-read-back acceptance criterion end to end at the
 // production wiring site: when Config.MeterProvider is unset (the default —

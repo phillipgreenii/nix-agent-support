@@ -274,9 +274,15 @@ func TestProduce_pullSourceIsolatedAfterRetriesExhausted(t *testing.T) {
 			calls:     &calls,
 		}},
 	}
-	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, nil, nil)
+	obs := &recordingSourceFailureObserver{}
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, obs, nil)
 	if err != nil {
 		t.Fatalf("a source failure must not abort the pass; got produce error %v", err)
+	}
+	// Every failed attempt is counted exactly once (bead pg2-jgbnp): 2 retries
+	// plus the final give-up attempt = 3 failed attempts = 3 notifications.
+	if want := []string{"down", "down", "down"}; !equalStrings(obs.sources, want) {
+		t.Fatalf("observer.sources = %v, want %v (one OnSourceFailure per failed attempt, including the give-up)", obs.sources, want)
 	}
 	if rpt.SourceErrors["down"] == nil || !strings.Contains(rpt.SourceErrors["down"].Error(), sentinel.Error()) {
 		t.Fatalf("SourceErrors[down] = %v, want it to wrap %q once retries are exhausted", rpt.SourceErrors["down"], sentinel)
@@ -286,6 +292,41 @@ func TestProduce_pullSourceIsolatedAfterRetriesExhausted(t *testing.T) {
 	}
 	if !equalDurations(waits, []time.Duration{time.Second, 2 * time.Second}) {
 		t.Fatalf("waits = %v, want [1s 2s]", waits)
+	}
+}
+
+// TestProduce_failFastSourceGiveUpNotifiesObserver is bead pg2-jgbnp's
+// regression test: a source with NO retries (zero-value FailureBackoff, the
+// default) never enters the retry branch, so its failure reaches the observer
+// only through the give-up path. Before the fix the observer was never called
+// and pg_router_source_failures_total was never emitted for such a source.
+func TestProduce_failFastSourceGiveUpNotifiesObserver(t *testing.T) {
+	calls := 0
+	var waits []time.Duration
+	sources := query.SourceSet{
+		{Name: "fastfail", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"x"}}, // zero-value FB: Retries == 0
+			failTimes: 100,
+			calls:     &calls,
+		}},
+		{Name: "healthy", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"work.ready"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("work.ready", "wk-1")},
+		}},
+	}
+	obs := &recordingSourceFailureObserver{}
+	rpt, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x", "work.ready"), Cadence{}, recordingSleep(&waits), time.Now, obs, nil)
+	if err != nil {
+		t.Fatalf("a failing source must not abort the pass; got produce error %v", err)
+	}
+	if rpt.SourceErrors["fastfail"] == nil {
+		t.Fatalf("SourceErrors[fastfail] = nil, want the give-up recorded")
+	}
+	if calls != 1 || len(waits) != 0 {
+		t.Fatalf("calls = %d, waits = %v, want exactly 1 attempt and no backoff for a fail-fast source", calls, waits)
+	}
+	if want := []string{"fastfail"}; !equalStrings(obs.sources, want) {
+		t.Fatalf("observer.sources = %v, want %v (the give-up must be counted once; the healthy sibling must not be)", obs.sources, want)
 	}
 }
 

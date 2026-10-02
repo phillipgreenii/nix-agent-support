@@ -130,8 +130,9 @@ const (
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
 	// silently idle pass" (register gap R21, bead pg2-00jpn). Fed by
 	// OnSourceFailure, which discover.go's runAndEnqueue calls (via the
-	// SourceFailureObserver seam) on every retry after a pull-source failure,
-	// alongside the log-only Warn that already existed there.
+	// SourceFailureObserver seam) on every failed pull-source query attempt:
+	// each one that will be retried after backoff, and the final give-up one
+	// (so a fail-fast source with no retries is counted too, bead pg2-jgbnp).
 	MetricSourceFailures = "pg_router_source_failures"
 	// MetricDeduped counts a duplicate event id the core absorbed because
 	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
@@ -846,10 +847,10 @@ func (e *Emitter) RecordFailure(class string) {
 // defined in internal/discover to keep the dependency direction the queue's
 // own Observer already uses: the producer side declares the hook, metrics
 // implements it). It increments the source-failures counter for a pull
-// source whose query failed and is about to retry after backoff
-// (INV-FAIL-3, register gap R21 / bead pg2-00jpn) — the metrics half of the
-// log-only Warn line discover.go's runAndEnqueue already writes at that same
-// retry point.
+// source whose query attempt failed — whether it will be retried after
+// backoff or is the final give-up attempt (INV-FAIL-3, register gap R21 /
+// beads pg2-00jpn, pg2-jgbnp) — the metrics half of the log lines
+// discover.go's runAndEnqueue writes at those points.
 func (e *Emitter) OnSourceFailure(source string) {
 	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("source", source)))
 }

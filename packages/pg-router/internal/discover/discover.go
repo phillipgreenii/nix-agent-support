@@ -111,11 +111,13 @@ func DeriveContextFromQueueEvent(role roles.Role, evt eventqueue.Event) Dispatch
 	return DispatchContext{Role: role, Item: item.Item{ID: id}}
 }
 
-// SourceFailureObserver is notified when a pull-source query exhausts a
-// retry attempt and is about to back off before trying again (INV-FAIL-3,
-// register gap R21 / bead pg2-00jpn) — the metrics half of the log-only Warn
-// line runAndEnqueue already writes at that same point (metrics.Emitter
-// implements this via OnSourceFailure). A nil Observer (Produce's default
+// SourceFailureObserver is notified once for EVERY failed pull-source query
+// attempt (INV-FAIL-3, register gap R21 / beads pg2-00jpn, pg2-jgbnp): each
+// attempt that fails and is about to back off before trying again, and the
+// final attempt that exhausts the retry budget (the only attempt for a
+// fail-fast source with Retries == 0). It is the metrics half of the log lines
+// runAndEnqueue writes at those points (metrics.Emitter implements this via
+// OnSourceFailure). A nil Observer (Produce's default
 // when no option is given) is a safe no-op.
 type SourceFailureObserver interface {
 	OnSourceFailure(source string)
@@ -125,8 +127,8 @@ type SourceFailureObserver interface {
 // activity (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's per-source recent-history
 // and "processing now" signal) — a second, purely-observational seam
 // alongside SourceFailureObserver, not a replacement for it:
-// SourceFailureObserver fires on each RETRY within a pass's backoff loop,
-// while this one brackets the pass's underlying s.Query.Run call itself
+// SourceFailureObserver fires on each failed ATTEMPT within a pass's backoff
+// loop, while this one brackets the pass's underlying s.Query.Run call itself
 // (OnSourceFetchStart/OnSourceFetchEnd, the "currently fetching" window) and
 // reports that call's own final outcome (OnSourceProduced on success,
 // OnSourceGaveUp when the retry budget this pass is exhausted — mirroring
@@ -521,6 +523,15 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			if activityObs != nil {
 				activityObs.OnSourceGaveUp(s.Name)
 			}
+			// The metrics half of the give-up (bead pg2-jgbnp): the final failed
+			// attempt is a failure too. A fail-fast (Retries == 0) source never
+			// reaches the retry branch below, so without this its failures were
+			// never counted and pg-router-source-failure-rate could not fire.
+			// Together with the per-retry notification below, every failed
+			// attempt notifies the observer exactly once.
+			if obs != nil {
+				obs.OnSourceFailure(s.Name)
+			}
 			return nil
 		}
 		wait := fb.Policy.Duration(attempt + 1)
@@ -529,8 +540,8 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			"source", s.Name, "attempt", attempt+1, "wait", wait, "err", err)
 		// The metrics half of the log line above (INV-FAIL-3, register gap R21 /
 		// bead pg2-00jpn): every retry notifies the configured observer, same as
-		// the log fires — not the final give-up return above, which rpt.SourceErrors
-		// surfaces its own way.
+		// the log fires. The final give-up attempt above notifies it too (bead
+		// pg2-jgbnp), so each failed attempt is counted exactly once.
 		if obs != nil {
 			obs.OnSourceFailure(s.Name)
 		}

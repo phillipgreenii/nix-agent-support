@@ -563,7 +563,7 @@ groups:
                     type: gt
                     params: [0]
 
-      # Source failure rate: pg_router_source_failures, emitted by
+      # Source failure rate: pg_router_source_failures_total, emitted by
       # internal/discover/discover.go's SourceFailureObserver for every
       # query source (not scoped to any specific probe package), aggregated
       # by its `source` label. This is a DIFFERENT metric from
@@ -585,7 +585,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router source {{ $labels.source }} has been failing to produce events"
-          description: "sum by (source) (rate(pg_router_source_failures[10m])) has stayed above 0 for over 10 minutes for source {{ $labels.source }} -- a query's own command is failing, which is invisible to pg_router_failures_total (dispatch-side only). Added alongside the pg-router-probe/ccpool-probe self-monitoring system (2026-09-22) specifically so a probe's own failure to run is not itself a silent gap."
+          description: "sum by (source) (rate(pg_router_source_failures_total[10m])) has stayed above 0 for over 10 minutes for source {{ $labels.source }} -- a query's own command is failing, which is invisible to pg_router_failures_total (dispatch-side only). Added alongside the pg-router-probe/ccpool-probe self-monitoring system (2026-09-22) specifically so a probe's own failure to run is not itself a silent gap."
         data:
           - refId: A
             relativeTimeRange: { from: 600, to: 0 }
@@ -594,7 +594,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (source) (rate(pg_router_source_failures[10m]))
+              expr: sum by (source) (rate(pg_router_source_failures_total[10m]))
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }
