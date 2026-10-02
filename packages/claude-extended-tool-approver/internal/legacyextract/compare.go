@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
+	"sync"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/claudecodeadapter"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
@@ -60,51 +62,108 @@ func CompareAgainstNewEngine(rows []goldencorpus.Row) (*CompareResult, error) {
 	policies := effectpolicy.DefaultPolicies()
 	graphPolicies := effectpolicy.DefaultGraphPolicies()
 
+	// Each row's evaluation is independent and dominated by filesystem
+	// latency (pathspec stats every ancestor of every operand; on macOS a
+	// path under the autofs-backed /home costs ~20ms per stat), so rows are
+	// evaluated by a bounded worker pool and merged back IN ROW ORDER below:
+	// the result (counters, Disagreements order, first error) is identical
+	// to a sequential pass.
+	outs := make([]rowOutcome, len(rows))
+	workers := runtime.GOMAXPROCS(0) * 4
+	if workers > len(rows) {
+		workers = len(rows)
+	}
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				outs[i] = compareRow(rows[i], reg, policies, graphPolicies)
+			}
+		}()
+	}
+	for i := range rows {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+
 	cr := &CompareResult{}
-	for _, row := range rows {
-		toolName := row.ToolInput.ToolName
-		if toolName != "Bash" && !claudecodeadapter.IsFileEditTool(toolName) {
+	for _, o := range outs {
+		if o.err != nil {
+			return nil, o.err
+		}
+		switch o.kind {
+		case rowNotComparable:
 			cr.NotComparable++
-			continue
-		}
-		raw, err := json.Marshal(row.ToolInput.ToolInput)
-		if err != nil {
-			return nil, fmt.Errorf("legacyextract: marshalling tool_input for %s: %w", row.Case, err)
-		}
-		input := &hookio.HookInput{
-			ToolName:  toolName,
-			ToolInput: raw,
-			CWD:       row.CWDPathState.CWD,
-		}
-		cfg := claudecodeadapter.RequestConfig{ProjectRoot: row.CWDPathState.ProjectRoot}
-		resp, err := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
-		if err != nil {
-			// The adapter refused the input outright (e.g. an unparseable
-			// command) -- not comparable, not a disagreement.
-			cr.NotComparable++
-			continue
-		}
-		cr.Comparable++
-		newVerdict := evalVerdict[resp.Decision]
-		if newVerdict == row.ExpectedVerdict {
+		case rowAgreed:
+			cr.Comparable++
 			cr.Agreed++
-			continue
+		case rowDisagreed:
+			cr.Comparable++
+			cr.Disagreements = append(cr.Disagreements, o.disagreement)
 		}
-		cmd, _ := row.ToolInput.ToolInput["command"].(string)
-		disposition, rationale := disagreementDisposition(row, newVerdict, resp.Reason)
-		cr.Disagreements = append(cr.Disagreements, Disagreement{
-			Case:        row.Case,
-			Family:      familyTag(row),
-			ToolName:    toolName,
-			Command:     cmd,
-			OldVerdict:  row.ExpectedVerdict,
-			NewVerdict:  newVerdict,
-			NewReason:   resp.Reason,
-			Disposition: disposition,
-			Rationale:   rationale,
-		})
 	}
 	return cr, nil
+}
+
+type rowOutcomeKind int
+
+const (
+	rowNotComparable rowOutcomeKind = iota
+	rowAgreed
+	rowDisagreed
+)
+
+// rowOutcome is the per-row result of compareRow, merged in row order by
+// CompareAgainstNewEngine.
+type rowOutcome struct {
+	kind         rowOutcomeKind
+	disagreement Disagreement
+	err          error
+}
+
+// compareRow evaluates ONE legacy row against the new engine.
+func compareRow(row goldencorpus.Row, reg cmddesc.Registry, policies []effectpolicy.Policy, graphPolicies []effectpolicy.GraphPolicy) rowOutcome {
+	toolName := row.ToolInput.ToolName
+	if toolName != "Bash" && !claudecodeadapter.IsFileEditTool(toolName) {
+		return rowOutcome{kind: rowNotComparable}
+	}
+	raw, err := json.Marshal(row.ToolInput.ToolInput)
+	if err != nil {
+		return rowOutcome{err: fmt.Errorf("legacyextract: marshalling tool_input for %s: %w", row.Case, err)}
+	}
+	input := &hookio.HookInput{
+		ToolName:  toolName,
+		ToolInput: raw,
+		CWD:       row.CWDPathState.CWD,
+	}
+	cfg := claudecodeadapter.RequestConfig{ProjectRoot: row.CWDPathState.ProjectRoot}
+	resp, err := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
+	if err != nil {
+		// The adapter refused the input outright (e.g. an unparseable
+		// command) -- not comparable, not a disagreement.
+		return rowOutcome{kind: rowNotComparable}
+	}
+	newVerdict := evalVerdict[resp.Decision]
+	if newVerdict == row.ExpectedVerdict {
+		return rowOutcome{kind: rowAgreed}
+	}
+	cmd, _ := row.ToolInput.ToolInput["command"].(string)
+	disposition, rationale := disagreementDisposition(row, newVerdict, resp.Reason)
+	return rowOutcome{kind: rowDisagreed, disagreement: Disagreement{
+		Case:        row.Case,
+		Family:      familyTag(row),
+		ToolName:    toolName,
+		Command:     cmd,
+		OldVerdict:  row.ExpectedVerdict,
+		NewVerdict:  newVerdict,
+		NewReason:   resp.Reason,
+		Disposition: disposition,
+		Rationale:   rationale,
+	}}
 }
 
 func familyTag(row goldencorpus.Row) string {
