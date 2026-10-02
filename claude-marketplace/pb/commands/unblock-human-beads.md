@@ -73,7 +73,7 @@ Main loop step 1) is NEVER the bare atomic form — it is always this two-step s
    set — see below — when one of those flags is active):
 
    ```bash
-   bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
    ```
 
 2. **Filter client-side**: walk `.data[]` in the returned (priority) order and skip any entry
@@ -95,6 +95,15 @@ same id unchanged. If EVERY candidate step 1 returns is a template (`is_template
 reads as an EMPTY result for whatever step invoked this sequence (Goal/termination → STOP per
 "Goal / termination"; Main loop step 1 → no bead this pass) — never fall back to claiming a
 template as a last resort.
+
+**Handoff exclusion — every claim and list query carries `--exclude-type handoff`.** A bead of
+type `handoff` created ATTENDED is labelled `human` on purpose (the operator, working with an
+agent, asked for the handoff and wants to continue it with an agent; ruling of 2026-10-02, bead
+`pg2-2xfbi`, recorded in the `beads-lifecycle:handoff-bead` skill), so it WOULD match
+`--label human`. This command MUST NOT take it: every `bd ready` / `bd list` query this command
+uses to source work (the claim query, the goal-check query, the specific-id confirmation query)
+MUST include `--exclude-type handoff`, as shown in the commands in this file. Arguments MAY NOT
+remove it. An UNATTENDED handoff carries no `human` label and is `/drain-beads`' to absorb.
 
 **`human-focus-required` — dual-labeling invariant and default exclusion.**
 `human-focus-required` is applied ONLY in addition to `human`, never instead of it — a bead
@@ -134,7 +143,7 @@ You are DONE when a SUCCESSFUL run of the preview-then-claim sequence ("Sourcing
 mode is active:
 
 ```bash
-bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
+bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
 ```
 
 zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -229,7 +238,7 @@ and it STOPs unconditionally regardless of this flag.
    an unreleasable template):
 
    ```bash
-   bd ready --label human --exclude-label refactor-campaign,human-focus-required --json
+   bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
    ```
 
    zr-refactor campaign beads carry their own protocol; excluded here by design (zr-
@@ -413,7 +422,7 @@ output verbatim:
 | --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1a  | **substrate-mutating, PROVABLY LOSSLESS** | the class-1 SHAPE — carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on — AND all three legs of the LOSSLESSNESS PROOF hold, run by YOU in THIS session, in EVERY member repo: a CLEAN `git status --porcelain`, and every commit on the branch either an ancestor of the primary branch or patch-identical to one that is, corroborated by `git range-diff` | **TEAR DOWN, then CLOSE-AS-PROVABLY-LOSSLESS. NO operator prompt.** Record every probe output verbatim on the bead. **Still NEVER RELEASEd to drain.** See below.                                                                                                                                                                                                                                                                                                                                                                                        |
 | 1b  | **substrate-mutating, NOT proven**        | the class-1 SHAPE (as in 1a) and ANY leg of that proof fails, is unrunnable, or was not run — a DIRTY worktree, an unmatched commit, an inconclusive `range-diff`, a repo or worktree path the probes cannot resolve                                                                                                                                                                                                                                                                                          | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **CLOSE-WITH-ABSORPTION-TRACE. NO operator prompt.** Follow the `beads-lifecycle:handoff-bead` skill's unattended handling. Never RELEASEd, never demoted. See below.                                                                                                                                                                                                                                                                                                                                                                                    |
+| 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **NO operator prompt. Follow the `beads-lifecycle:handoff-bead` skill's unattended handling:** a handoff carrying `human` (every bead this command claims) is the skill's EXCEPTION, so LEAVE it (release unchanged, session skip-set); typed handoffs are excluded from the claim query. Never demoted or deferred. See below.                                                                                                                                                                                                                          |
 | 3   | **label-to-dependency conversion**        | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority                                                                                                                                                                                                                                                              | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 4   | **planning session already required**     | carries the `planning-session-required` label — an earlier run already concluded the blocker is a design/planning SESSION, not a single answerable question                                                                                                                                                                                                                                                                                                                                                   | **RE-CHECK the recorded evidence; NEVER re-present the question.** Still required (no evidence) → **DEFER**: a silent skip to the next bead, NO operator prompt. Session CONFIRMED held → drop that label (KEEP `human`) and re-enter the rubric. See below.                                                                                                                                                                                                                                                                                             |
 | 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                        | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -559,14 +568,26 @@ A handoff bead (type `handoff`) is a pointer to a previous session's work, not w
 `beads-lifecycle:handoff-bead` skill is the SOLE contract for what counts as one, and for how it
 is handled: invoke it and follow its unattended handling (trace, file what traces nowhere, write
 the trace comment, close). This command restates none of it. An ambiguous bead is NOT a handoff
-(the skill says so), and this command does not retype beads either way. Drain claims with
-`--exclude-label human`, so a handoff carrying `human` never reaches that route; this class is
-it for the queue that DOES claim the bead (provenance: `pg2-9ifbn`).
+(the skill says so), and this command does not retype beads either way. `/drain-beads`
+claims with `--exclude-label human`, and this command's claim query excludes type `handoff`
+(`--exclude-type handoff`, provenance `pg2-2xfbi`), so NEITHER queue claims a typed handoff: an
+unattended one (no `human` label) is drain's to absorb, an attended one (`human`) is the
+operator's to continue with an agent. What can still reach this class is a bead that is
+unmistakably a handoff (per the skill) but not typed `handoff`; it carries `human`, because
+everything this command claims does. The skill's EXCEPTION governs it: **a handoff labelled
+`human` is NOT absorbed unattended.** LEAVE it: release the claim unchanged
+(`bd update <id> --status open --assignee "" --actor "ID"` in ONE call, keeping `human`; no
+comment, no close, no defer, no demotion, no retype), add `<id>` to your session skip-set, and
+mention it in the end-of-run summary. The trace-and-close handling the skill describes applies to
+a handoff WITHOUT `human`, which this command never holds; where this file says "absorbed" or
+"CLOSE-WITH-ABSORPTION-TRACE" for class 2, read it as the skill's handling for that bead, which
+for a `human` handoff is this LEAVE. (Provenance of the original class: `pg2-9ifbn`.)
 
 **This class MUST NOT ENGAGE the operator.** `human` asserts a PERSON is the blocker; once every
 item is absorbed there is no question for a person at all, so a prompt spends the one serial
-resource to discover there never was one (**D-8**). The terminal action is the skill's CLOSE:
-never a RELEASE, DEFER, re-park, or priority demotion.
+resource to discover there never was one (**D-8**). The terminal action is whatever the skill
+prescribes for the bead (see above: LEAVE for a `human` handoff): never a DEFER, re-park, or
+priority demotion, and no operator exchange.
 
 **Ranking.** BELOW class 1 — the substrate guard's never-release half is unconditional (**W-8**),
 so a `worktree-review` pointer is dispositioned by class 1 like any other class-1 bead: 1b's
@@ -1104,7 +1125,7 @@ the work this command claims — e.g. an extra label, a priority, a parent/epic,
 specific bead id, or a one-bead / N-bead limit ("just one"). Apply it as extra `bd ready`
 filters on the list step of the CLAIM sequence (see "Sourcing invariant" →
 "Template/formula exclusion"). Honor a specific bead id via the safe path: first confirm the id
-appears in `bd ready --label human --exclude-label refactor-campaign,human-focus-required
+appears in `bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff
 [scope] --json` (under the DEFAULT mode; adjust `--label`/`--exclude-label` to match whichever
 mode flag is active, exactly as the CLAIM query does) — ready, in-scope, `human`, not deferred —
 AND that its `is_template` field is NOT `true` (a template MUST NOT be targeted even by an
@@ -1125,7 +1146,7 @@ queue minus `human-focus-required` beads (the default exclusion).
 ## Rules (RFC 2119)
 
 - **Sourcing.** Work MUST be claimed only via the preview-then-claim sequence — list with
-  `bd ready --label human --exclude-label refactor-campaign,human-focus-required --json` (DEFAULT
+  `bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json` (DEFAULT
   mode; plus narrowing `$ARGUMENTS`), skip any `is_template=true` entry client-side, then
   `bd update <id> --claim --actor "ID"` on the first surviving candidate — and MUST NOT use the
   bare atomic `bd ready --claim` (it cannot exclude templates, and a claimed template's write
@@ -1184,11 +1205,12 @@ queue minus `human-focus-required` beads (the default exclusion).
 - **RELEASE only when drain can progress.** A bead MUST be RELEASEd only when drain can
   make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
   and a class-3 label-to-dependency conversion are exempt).
-- **Handoff bead (class 2) MUST NOT prompt.** A claimed `human` bead that is a handoff bead MUST
-  be dispositioned by CLOSE-WITH-ABSORPTION-TRACE as the `beads-lifecycle:handoff-bead` skill
-  defines it (the sole contract) — not implemented, not RELEASEd, not DEFERred, and not handed to
-  the operator. The operator MUST NOT be engaged to authorize it (**D-8**). This class ranks above
-  class 3 and below class 1.
+- **Handoff bead (class 2) MUST NOT prompt.** Every query that sources work MUST carry
+  `--exclude-type handoff`. A claimed `human` bead that is nonetheless unmistakably a handoff bead
+  MUST be dispositioned as the `beads-lifecycle:handoff-bead` skill defines it (the sole
+  contract), which for a handoff labelled `human` is LEAVE (release unchanged) — not implemented,
+  not DEFERred, not retyped, and not handed to the operator. The operator MUST NOT be engaged to
+  authorize it (**D-8**). This class ranks above class 3 and below class 1.
 - **Label-to-dependency conversion (class 3) MUST NOT prompt.** A claimed `human` bead whose
   every live blocker is ANOTHER BEAD is MISLABELED, not blocked on a person: the agent MUST
   convert the label into dependencies and MUST NOT ENGAGE the operator to do it — there is no
@@ -1334,7 +1356,7 @@ Freshness` rules (F-3) —
 flowchart TD
     A["Start: set actor ID = session-unblock, bd prime, parse $ARGUMENTS<br/>(mode flags first), empty skip-set"] --> R{Own an unfinished<br/>in_progress human bead?}
     R -- yes --> U
-    R -- no --> C["CLAIM (preview-then-claim): bd ready --label human<br/>--exclude-label refactor-campaign,human-focus-required (default mode)<br/>[+narrowing] --json, skip is_template=true, then<br/>bd update id --claim --actor ID --json"]
+    R -- no --> C["CLAIM (preview-then-claim): bd ready --label human<br/>--exclude-label refactor-campaign,human-focus-required --exclude-type handoff (default mode)<br/>[+narrowing] --json, skip is_template=true, then<br/>bd update id --claim --actor ID --json"]
     C -->|successful + empty| DONE([Goal met: 0 ready human in scope. STOP])
     C -->|id already in skip-set| DONE
     C -->|transient bd/dolt error| C
@@ -1352,7 +1374,7 @@ flowchart TD
     CLOM --> C
     T -->|"1a substrate-mutating, PROVABLY lossless"| S1A["Run ALL THREE legs yourself, in EVERY member repo:<br/>git status --porcelain EMPTY, and every commit either<br/>landed (merge-base --is-ancestor) or patch-identical<br/>(git cherry -v '-' line), corroborated by range-diff.<br/>Then TEAR DOWN: git worktree remove, then branch -d<br/>(or -D for a patch-identical single repo),<br/>or cleanup-workforest. NEVER a workforest force flag"]
     T -->|"1b substrate-mutating, any leg fails, unrunnable, or unrun — a DIRTY tree is ALWAYS 1b"| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
-    T -->|"2 handoff bead"| ABS["CLOSE-WITH-ABSORPTION-TRACE, NO operator prompt:<br/>trace each item to a bead id or indexing label →<br/>re-probe every state claim, never trust it as recorded →<br/>file anything that traces nowhere FIRST →<br/>absorb per beads-lifecycle:handoff-bead → close, never demote"]
+    T -->|"2 handoff bead"| ABS["NO operator prompt: follow beads-lifecycle:handoff-bead<br/>human-labelled handoff (every claimed bead) = LEAVE:<br/>release unchanged, session skip-set;<br/>typed handoffs never reach here (--exclude-type handoff)"]
     T -->|"3 label-to-dependency conversion"| CDEP["CONVERT, NO operator prompt:<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment BLOCKED-BY-BEADS + FRESHNESS"]
     T -->|"4 planning-session-required label"| PSR{"RE-CHECK the recorded evidence, never re-ask:<br/>bd comments id, bd list --desc-contains SEARCH TERM<br/>--status all, git log/grep over docs.<br/>Has the design session HAPPENED?"}
     T -->|"5 stale-precondition label"| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]

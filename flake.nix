@@ -1550,23 +1550,40 @@
               #     POINTER holding no executable work"), checked after joining
               #     wrapped lines so a re-wrapped copy is still caught;
               #   - nothing still names the removed `drain-absorb-pointer`.
+              # Handoff CREATION is single-contract too (bead pg2-2xfbi): the
+              # `handoff-create` script plus the skill own the mechanics, so
+              #   - no instruction file outside the skill (every *.md under
+              #     claude-marketplace/ and home/programs/agent-rules/) may spell
+              #     out a `bd create ... -t handoff` (or `--type handoff`), checked
+              #     after joining wrapped lines;
+              #   - nothing may pair `human` with `auto-session-wrapped` in one
+              #     label list again (an unattended handoff carries NO human);
+              #   - every `bd ready --label human --exclude-label ...` claim query
+              #     in unblock-human-beads.md carries `--exclude-type handoff`;
+              #   - the wrap-up skill still calls `handoff-create`.
               # The scan is a standalone script taking the root to scan, so it
               # can be pointed at a temp copy with an old line restored to show
               # it fails: `nix build .#checks.<system>.test-handoff-bead-single-contract.script`
-              # then run `result <copy-of-claude-marketplace's parent>`.
+              # then run `result <copy-of-the-repo-subset's root>` (a directory
+              # holding claude-marketplace/ and home/programs/agent-rules/).
               test-handoff-bead-single-contract =
                 let
                   surface = lib.fileset.toSource {
                     root = ./.;
-                    fileset = ./claude-marketplace;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace
+                      ./home/programs/agent-rules
+                    ];
                   };
                   skillRel = "claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md";
+                  wrapRel = "claude-marketplace/session-wrapup/skills/wrap-up-session/SKILL.md";
                   script = pkgs.writeShellScript "check-handoff-bead-single-contract" ''
                     export PATH=${
                       lib.makeBinPath [
                         pkgs.coreutils
                         pkgs.findutils
                         pkgs.gnugrep
+                        pkgs.gnused
                       ]
                     }
                     root="$1"
@@ -1575,6 +1592,8 @@
                     # zero, so "found nothing" cannot double as proof the scan ran.
                     for want in \
                       ${skillRel} \
+                      ${wrapRel} \
+                      claude-marketplace/beads-lifecycle/skills/beads-lifecycle/SKILL.md \
                       claude-marketplace/pb/commands/drain-beads.md \
                       claude-marketplace/pb/commands/unblock-human-beads.md; do
                       if [ ! -f "$root/$want" ]; then
@@ -1588,6 +1607,13 @@
                       echo "      it is the sole owner of; the single-contract count below would be vacuous" >&2
                       exit 1
                     fi
+                    for owner in "$root/${skillRel}" "$root/${wrapRel}"; do
+                      if ! grep -q 'handoff-create' "$owner"; then
+                        echo "FAIL: $owner no longer mentions the handoff-create script; the creation" >&2
+                        echo "      checks below would be vacuous" >&2
+                        exit 1
+                      fi
+                    done
                     scanned="$(find "$root/claude-marketplace" -type f -name '*.md' | wc -l)"
                     if [ "$scanned" -lt 3 ]; then
                       echo "FAIL: guard scanned only $scanned markdown file(s) under claude-marketplace/; expected at least 3" >&2
@@ -1613,6 +1639,42 @@
                       fi
                     done < <(find "$root/claude-marketplace" -type f -name '*.md')
 
+                    # Creation single-contract (pg2-2xfbi): outside the skill, no file
+                    # spells out a `bd create ... -t handoff`, and no label list pairs
+                    # human with auto-session-wrapped.
+                    instr_scanned=0
+                    while IFS= read -r f; do
+                      instr_scanned=$((instr_scanned + 1))
+                      joined="$(tr '\n' ' ' < "$f" | sed 's/\\ / /g' | tr -s ' ')"
+                      if [ "$f" != "$root/${skillRel}" ] \
+                        && printf '%s' "$joined" | grep -Eq 'bd create[^`]{0,300}(-t|--type)[ =]+.?handoff'; then
+                        echo "FAIL: $f spells out a bd create of type handoff; call the" >&2
+                        echo "      handoff-create script (see the beads-lifecycle:handoff-bead skill) instead" >&2
+                        fail=1
+                      fi
+                      if printf '%s' "$joined" | grep -Eq 'human,auto-session-wrapped|auto-session-wrapped,human'; then
+                        echo "FAIL: $f pairs human with auto-session-wrapped; an unattended handoff" >&2
+                        echo "      carries NO human label (beads-lifecycle AW-1)" >&2
+                        fail=1
+                      fi
+                    done < <(find "$root/claude-marketplace" "$root/home/programs/agent-rules" -type f -name '*.md')
+                    if [ "$instr_scanned" -lt 3 ]; then
+                      echo "FAIL: creation scan covered only $instr_scanned markdown file(s); expected at least 3" >&2
+                      fail=1
+                    fi
+
+                    # unblock-human-beads must not take attended (human) handoffs.
+                    ub_joined="$(tr '\n' ' ' < "$root/claude-marketplace/pb/commands/unblock-human-beads.md" | tr -s ' ')"
+                    ub_total="$(printf '%s' "$ub_joined" | grep -oE 'bd ready --label human --exclude-label' | wc -l)"
+                    ub_ok="$(printf '%s' "$ub_joined" | grep -oE 'bd ready --label human --exclude-label [^ ]+ --exclude-type handoff' | wc -l)"
+                    if [ "$ub_total" -lt 3 ]; then
+                      echo "FAIL: found only $ub_total unblock-human-beads claim queries; expected at least 3" >&2
+                      fail=1
+                    elif [ "$ub_total" -ne "$ub_ok" ]; then
+                      echo "FAIL: $((ub_total - ub_ok)) of $ub_total 'bd ready --label human' queries in unblock-human-beads.md lack --exclude-type handoff" >&2
+                      fail=1
+                    fi
+
                     stale="$(grep -rn 'drain-absorb-pointer' "$root/claude-marketplace" || true)"
                     if [ -n "$stale" ]; then
                       echo "FAIL: the retired pb:drain-absorb-pointer skill is still referenced:" >&2
@@ -1623,7 +1685,7 @@
                     if [ "$fail" -ne 0 ]; then
                       exit 1
                     fi
-                    echo "ok: $scanned markdown file(s) scanned; ABSORBED: lives only in the handoff-bead skill, no old detector, no drain-absorb-pointer reference"
+                    echo "ok: $scanned markdown file(s) scanned; ABSORBED: lives only in the handoff-bead skill, no old detector, no drain-absorb-pointer reference; $instr_scanned instruction file(s) spell out no bd create -t handoff; unblock-human-beads excludes type handoff ($ub_ok queries)"
                   '';
                 in
                 pkgs.runCommand "test-handoff-bead-single-contract" { passthru = { inherit script; }; } ''

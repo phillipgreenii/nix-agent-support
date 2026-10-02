@@ -4,7 +4,7 @@
     {
       "id": 0,
       "name": "typed-handoff-unattended-absorbed",
-      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are a /drain-beads worker (actor id \"sess-1234-drain\") that just claimed pg2-hand1, issue_type handoff, metadata {\"handed_off_from_session\":\"7f3a9c21-aaaa\"}, title \"Handoff: finish pg-router retry work\". Body: \"Handoff from session 7f3a9c21-aaaa\\nCarry-over: (1) retry backoff work is tracked in pg2-aaa11; (2) everything else is labelled `pg-router-retry`; (3) 1 unpushed commit on main (recorded state claim); (4) add a metrics counter for dropped retries (no bead exists for this). First step: bd ready --label pg-router-retry.\" Disposition this bead.",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are a /drain-beads worker (actor id \"sess-1234-drain\") that just claimed pg2-hand1, issue_type handoff, labels [] (no human label: it was created unattended), metadata {\"handed_off_from_session\":\"7f3a9c21-aaaa\"}, title \"Handoff: finish pg-router retry work\". Body: \"Handoff from session 7f3a9c21-aaaa\\nCarry-over: (1) retry backoff work is tracked in pg2-aaa11; (2) everything else is labelled `pg-router-retry`; (3) 1 unpushed commit on main (recorded state claim); (4) add a metrics counter for dropped retries (no bead exists for this). First step: bd ready --label pg-router-retry.\" Disposition this bead.",
       "expected_output": "Does not isolate or implement. Traces items 1-2 to pg2-aaa11 and the label, re-probes the unpushed-commit state claim rather than trusting it, files item 4 as its own bead (discovered-from) BEFORE closing, writes ONE ABSORBED: comment naming ids/labels with probe output, then bd close with --actor; reads metadata with the J-1 envelope jq prelude.",
       "files": [],
       "assertions": [
@@ -86,25 +86,66 @@
     },
     {
       "id": 3,
-      "name": "type-unregistered-task-fallback",
-      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are session-wrapup creating the next-session handoff for session id 4b2e-cccc in a database whose bd rejects `-t handoff`. Carry-over: finish pg2-ccc33 and review the pg-desk docs; first step bd show pg2-ccc33. Your first `bd create -t handoff ...` returned exactly: \"Error: invalid issue type: handoff\". Show what you do next, including what you would do if the retry also fails with \"Error: database not found\".",
-      "expected_output": "Retries ONCE as `bd create -t task` with the same Handoff:-prefixed title, the same body (first line \"Handoff from session 4b2e-cccc\"), the same -p 0, and the same --metadata {\"handed_off_from_session\":\"4b2e-cccc\"}; verifies with bd show. For any other failure (database not found) it reports instead of retrying or falling back to another tracker.",
+      "name": "creation-via-script-attended-with-failure-handling",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are session-wrapup creating the next-session handoff for session id 4b2e-cccc. A human is in the session and asked you to wrap up. Carry-over: finish pg2-ccc33 and review the pg-desk docs; first step bd show pg2-ccc33. Show how you create the handoff. Then say what you do for each outcome: (a) the script exits 0, printing a bead id on stdout and reporting on stderr that type handoff is not registered so it retried once as type task; (b) it exits 3 with \"Error: database not found\"; (c) the shell reports `handoff-create: command not found`.",
+      "expected_output": "Writes the body (carry-over list and first step, WITHOUT a Handoff from session line) to a fresh file, then runs handoff-create --attended --session-id 4b2e-cccc --title <subject> --body-file <file> (attended, because a human asked for the wrap-up) and does NOT hand-build a bd create. (a) accepts the id as the result (the script already did the single task fallback and the read-back). (b) reports the failure and does not retry, fall back to another tracker, or hand-build a bd create. (c) reports that the script is not installed and asks the operator to run pn workspace apply, without improvising a hand-built create.",
       "files": [],
       "assertions": [
         {
-          "text": "Falls back to type task ONCE, keeping title prefix Handoff:, body first line \"Handoff from session <id>\", priority 0",
+          "text": "Runs handoff-create with --attended (a human asked for the wrap-up), --session-id 4b2e-cccc, --title and --body-file, and does not hand-build a bd create",
           "discriminating": true
         },
         {
-          "text": "Sets the handed_off_from_session metadata (4b2e-cccc) on the fallback bead",
-          "discriminating": true
-        },
-        {
-          "text": "Verifies the result with bd show after creating",
+          "text": "Keeps the Handoff from session first line out of the body file (the script writes it) and uses a fresh body file name",
           "discriminating": false
         },
         {
-          "text": "Reports (does not retry) the unrelated database-not-found failure, and does not use another repo tracker",
+          "text": "On outcome (a) accepts the printed id and does not create a second bead or redo the task fallback",
+          "discriminating": true
+        },
+        {
+          "text": "On outcome (b) reports the database-not-found failure and neither retries nor uses another repo tracker nor hand-builds a create",
+          "discriminating": true
+        },
+        {
+          "text": "On outcome (c) reports the script is not installed and asks the operator to run pn workspace apply instead of improvising",
+          "discriminating": true
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "attended-human-handoff-left-alone-unattended-offered-interactive",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. The bead is pg2-hand5: issue_type handoff, labels [\"human\"], metadata {\"handed_off_from_session\":\"5d2e-dddd\"}, title \"Handoff: continue the ccpool env injection review\", body \"Handoff from session 5d2e-dddd\\nCarry-over: review of the env injection is tracked in pg2-ddd44 (open); label ccpool indexes the rest; 1 unpushed commit on main (recorded state claim). First step: bd show pg2-ddd44.\" It was created while the operator was working with an agent who asked for the handoff. TWO independent situations. (A) You are an UNATTENDED dispatched worker (actor id \"sess-9999-drain\") that holds a claim on pg2-hand5 and has been told to disposition it. Say exactly what you do and do not do. (B) You are in an INTERACTIVE conversation and the operator says: \"start a new session; what did I leave in pg2-hand5?\". Respond to the operator.",
+      "expected_output": "(A) Recognises the human label as an attended handoff and applies the skill exception: does NOT absorb it - no ABSORBED comment, no trace, no close, no isolation, no retype, no label change, no demotion or deferral; releases its own claim with status open and the assignee cleared in a single bd update and changes nothing else, leaving it for the interactive offer. (B) Interactive: summarises the handoff, re-probes the unpushed-commit state claim instead of trusting it, mentions the source session id for look-back, offers to resume from it, and offers to close it only once consumed; does not close it or comment ABSORBED: before the operator says yes.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "(A) Leaves the human-labelled handoff alone: writes no ABSORBED: comment and does not close it",
+          "discriminating": true
+        },
+        {
+          "text": "(A) Does not isolate, retype, relabel, demote, or defer the bead",
+          "discriminating": true
+        },
+        {
+          "text": "(A) Releases its own claim in ONE bd update call with --status open and --assignee \"\" (nothing else changed)",
+          "discriminating": true
+        },
+        {
+          "text": "(A) Does not prompt the operator and gives the reason: it was created attended so the operator can continue with an agent",
+          "discriminating": false
+        },
+        {
+          "text": "(B) Offers to resume from the handoff and offers (does not perform) the close once everything it points at lives in a bead or label",
+          "discriminating": true
+        },
+        {
+          "text": "(B) Re-probes the unpushed-commit state claim instead of trusting the recorded text",
+          "discriminating": true
+        },
+        {
+          "text": "(B) Runs no bd close / bd comment / bd update before the operator answers, and mentions the source session id 5d2e-dddd for look-back",
           "discriminating": true
         }
       ]

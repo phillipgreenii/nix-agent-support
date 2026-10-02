@@ -443,44 +443,47 @@ above).
 When work remains, capture a resume brief as a single P0 **handoff bead** (type `handoff`). The
 contract for what a handoff bead is, how it is handled, and how it is created lives in ONE place,
 the **`beads-lifecycle:handoff-bead`** skill — invoke it before creating or refreshing one and
-follow its "Creating a handoff" section. This skill MUST NOT restate that contract. The body should
-let a fresh session pick up cold without re-deriving context:
+follow its "Creating a handoff" section. This skill MUST NOT restate that contract. The bead is
+created with the **`handoff-create`** script, never a hand-built `bd create`. The body should let a
+fresh session pick up cold without re-deriving context; write it to a fresh file (a unique name),
+WITHOUT the `Handoff from session ...` line (the script adds it):
 
-```bash
-bd create -t handoff -p 0 \
-  --title="Handoff: <short description of the work>" \
-  --metadata '{"handed_off_from_session":"<this-session-id>"}' \
-  --description="$(cat <<'EOF'
-Handoff from session <this-session-id>
-
+```markdown
 ## Where this stands
+
 <1-3 sentences: what got done this session, what's left>
 
 ## Resume here
+
 - Repo / worktree: <path or branch to check out>
 - State: <branch ahead of main by N, PR #NN open, gates red, etc.>
 - First step: <the concrete next action>
 
 ## Watch out for
+
 <gate failures, stopped rebase/conflict, decisions still open>
-EOF
-)"
 ```
 
-- `<this-session-id>` is this run's real, observed session id (the same id used for `--actor`) —
-  never fabricated. The title MUST start `Handoff:` and the first body line MUST be
-  `Handoff from session <this-session-id>`. The metadata key is `handed_off_from_session`, so a
-  later session can look back at this one.
-- **Fallback (type not registered).** If the create fails with `invalid issue type: handoff` (the
-  real `bd` error), create it ONCE more as a `task` with the same title, body, and metadata. Any
-  other create failure MUST be reported, not retried. After creating, verify with `bd show <id>`
-  that the type and the `handed_off_from_session` metadata landed (**BF-4**).
+Then create the bead, choosing the mode:
 
-  ```bash
-  # fallback ONLY: the database does not know type `handoff`
-  bd create --type=task -p 0 --title="Handoff: <short description of the work>" \
-    --metadata '{"handed_off_from_session":"<this-session-id>"}' --description="<same body>"
-  ```
+```bash
+# a human is in this session and asked for or approved the wrap-up
+handoff-create --attended --session-id "<this-session-id>" --title "<short description of the work>" --body-file "<body-file>"
+# no human present (auto-trigger run, ran out of context, any agent-initiated wrap-up)
+handoff-create --unattended --session-id "<this-session-id>" --title "<short description of the work>" --body-file "<body-file>"
+```
+
+- **Mode.** Pass `--attended` when a human is in the session and asked for or approved the wrap-up
+  (the bead is then labelled `human`, so no drain agent picks it up before the operator starts the
+  next session); pass `--unattended` otherwise (no `human` label, so a drain agent MAY pick it
+  up). An **auto-trigger** run is always `--unattended`. The policy and its provenance (operator
+  ruling, 2026-10-02) live in the `beads-lifecycle:handoff-bead` skill.
+- `<this-session-id>` is this run's real, observed session id (the same id used for `--actor`) —
+  never fabricated. The script verifies, per **BF-4**, that the type, `Handoff:` title prefix,
+  first body line, and `handed_off_from_session` metadata (and `human` iff attended) landed, and
+  falls back to type `task` ONCE if the database does not register `handoff`. It prints the new id
+  on stdout (use it for `session-mode set-status finished --handoff-bead <id>`); a non-zero exit
+  MUST be reported, not worked around with a hand-built `bd create`.
 
 One P0 bead, not many — it's the single entry point for the next session, created whenever any
 work carries over (interrupted, deferred, or discovered). The other follow-ups from phase 2 keep
@@ -489,18 +492,21 @@ links them, so the next session sees a single front door instead of a scattered 
 label already indexes a cluster, cite the label (`bd list --label <label>`) instead of
 hand-copying member ids.
 
-**(auto-trigger only) provenance labels + two extra description lines, on BOTH the create and
+**(auto-trigger only) provenance label + two extra description lines, on BOTH the create and
 update path.** A directive delivered as literal typed input becomes an ordinary user turn in the
 session's own transcript, permanently, in the user's voice-slot but not their words — so the
 bead this run files or updates needs its own provenance markers, not just the nudge text's tag:
 
-- **Labels.** Whether creating (`bd create -t handoff --labels human,auto-session-wrapped ...`,
-  alongside the flags above) or updating an already-open handoff from a prior run (`bd update <id>
---add-label human,auto-session-wrapped ...` — idempotent, safe to repeat), add both labels.
-  `human` and `auto-session-wrapped` are applied together, at bead creation only — never
-  retrofitted onto a bead this skill did not itself create as an auto-trigger run (see the
-  `beads-lifecycle` skill's `auto-session-wrapped` section).
-- **Two extra description lines**, built from THIS run's real, observed session id and
+- **Label.** An auto-trigger run is unattended, so it runs `handoff-create --unattended --label
+auto-session-wrapped ...` and the bead carries **no** `human` label (a drain agent MAY pick it
+  up). When updating an already-open handoff from a prior run, re-apply the provenance label
+  idempotently with `bd update <id> --add-label auto-session-wrapped`, and leave its `human`
+  label exactly as found. `auto-session-wrapped` is applied at bead creation (or that idempotent
+  re-application) only — never retrofitted onto a bead this skill did not itself create as an
+  auto-trigger run (see the `beads-lifecycle` skill's `auto-session-wrapped` section,
+  **AW-1**..**AW-3**).
+- **Two extra description lines**, put at the top of the body file (the script writes the
+  `Handoff from session ...` line above them), built from THIS run's real, observed session id and
   transcript path — never fabricated:
   ```
   Prior session: claude --resume <session_id>
@@ -588,7 +594,9 @@ push obligation (**U-1**/**U-2**).
   before the `handoff` type existed — an open `Handoff:`- or `Resume:`-titled task. On a refresh,
   point it at THIS session: `bd update <id> --set-metadata
 handed_off_from_session=<this-session-id>` and the first body line `Handoff from session
-<this-session-id>`, keeping the prior brief as a dated entry.
+<this-session-id>`, keeping the prior brief as a dated entry. A refresh never removes labels; an
+  ATTENDED refresh of a handoff that lacks `human` adds it (`bd update <id> --add-label human`),
+  and an unattended refresh leaves `human` exactly as found.
 - **Leave a P0 whenever work carries over.** Deferred, blocked, or unfinished in-scope work — or
   discovered work you mean to resume next — means there's a next session; capture it as the
   single P0 handoff bead (linking the rest). Skip the P0 only when nothing carries over at all. When
@@ -679,7 +687,7 @@ If nothing was in scope, say so plainly rather than inventing work.
 | set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                 |
 | remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                          |
 | prune stale worktree admin                             | `pn workspace workforest prune`                                                                                                             |
-| next-session handoff                                   | one P0 `bd create -t handoff` (see "Next-session handoff bead")                                                                             |
+| next-session handoff                                   | one P0 via `handoff-create` (see "Next-session handoff bead")                                                                               |
 | retire a spent P0 pointer                              | follow `beads-lifecycle:handoff-bead` (see "Lifecycle")                                                                                     |
 | record work (no-beads repo)                            | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                                                              |
 | next-session handoff (no-beads)                        | update the handoff doc's top "Resume here" section                                                                                          |

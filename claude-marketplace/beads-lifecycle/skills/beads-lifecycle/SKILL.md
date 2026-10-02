@@ -192,7 +192,8 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 > `beads-lifecycle:handoff-bead` skill, not here) that
 > `session-wrapup:wrap-up-session` created or updated in its **auto-trigger** mode — an
 > unattended run kicked off by `pa-monitor`'s AutoSessionWrapUp nudge (bead tc-m08w3), not a
-> human typing "wrap up this session". It exists because the bead's body is, permanently, the
+> human typing "wrap up this session". (Because that run is unattended, the bead is NOT labelled
+> `human`; see AW-1.) It exists because the bead's body is, permanently, the
 > record of an unattended action taken in the user's voice-slot but not their words — a later
 > reader (the user, a future agent) needs to be able to tell that apart from a manually-invoked
 > wrapup at a glance, the same way a nudge's own delivered text opens with
@@ -202,20 +203,26 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 > "Lifecycle: the P0 is one-shot"), so this label rides along for as long as that bead exists and
 > is never independently removed.
 
-- **AW-1** `auto-session-wrapped` MUST be applied together with `human` in the SAME `bd create`
-  or `bd update` call that creates (`bd create -t handoff ...`) or refreshes the P0 handoff bead
-  (type `handoff`; a `task` only under the creation fallback in `beads-lifecycle:handoff-bead`), and ONLY when this skill run
-  is itself an auto-trigger run (`args` starting with `auto-trigger`) — never on a manually
-  invoked wrapup's P0, and never added to a bead this skill did not itself create as an
-  auto-trigger run.
-- **AW-2** The label MUST be applied at CREATION (first `bd create`) or, on a later auto-trigger
-  run for the SAME still-open P0, RE-applied idempotently via `bd update <id> --add-label
-human,auto-session-wrapped ...` — it MUST NOT be retrofitted onto a P0 that a prior MANUAL
-  wrapup created (doing so would misattribute a human-authored bead as machine-authored).
+- **AW-1** `auto-session-wrapped` MUST be applied in the SAME call that creates the P0 handoff bead
+  (`handoff-create --unattended --label auto-session-wrapped ...`; type `handoff`, a `task` only
+  under the creation fallback described in `beads-lifecycle:handoff-bead`) or refreshes it, and ONLY
+  when this skill run is itself an auto-trigger run (`args` starting with `auto-trigger`) — never on
+  a manually invoked wrapup's P0, and never added to a bead this skill did not itself create as an
+  auto-trigger run. An auto-trigger run is UNATTENDED, so the label MUST NOT be applied together with
+  `human`: per the operator ruling of 2026-10-02 recorded in `beads-lifecycle:handoff-bead`, an
+  unattended handoff carries NO `human` label (a drain agent MAY pick it up), and `human` marks only
+  a handoff created ATTENDED. This INVERTS the earlier rule, which required `human` here.
+- **AW-2** The label MUST be applied at CREATION (the first `handoff-create` call) or, on a later
+  auto-trigger run for the SAME still-open P0, RE-applied idempotently via `bd update <id>
+--add-label auto-session-wrapped` — it MUST NOT be retrofitted onto a P0 that a prior MANUAL
+  wrapup created (doing so would misattribute a human-authored bead as machine-authored). A refresh
+  MUST leave the bead's `human` label exactly as it found it: an auto-trigger refresh MUST NOT add
+  `human`, and MUST NOT remove it from a handoff that was created attended.
 - **AW-3** There is no exit condition or release step of its own: `auto-session-wrapped` is a
   permanent provenance marker, not a working-state marker like `worktree-review`. It is removed
   only as a side effect of the bead itself being closed (per wrap-up-session's one-shot P0
-  lifecycle) — never by an explicit `--remove-label` call on its own.
+  lifecycle) — never by an explicit `--remove-label` call on its own. It says nothing about
+  `human`, which is governed solely by whether the handoff was attended.
 
 ## Blocker Modeling: Dependency vs Human
 
