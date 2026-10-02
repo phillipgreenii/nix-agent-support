@@ -3,6 +3,7 @@ package interpret
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,6 +351,119 @@ func TestComputeEnrichment_TitleAndURL(t *testing.T) {
 	}
 	if got.URL != pr.URL {
 		t.Errorf("URL = %q; want %q", got.URL, pr.URL)
+	}
+}
+
+// TestComputeEnrichment_Author pins that Author is the PR author's login,
+// copied verbatim (bot logins included) and "" when the PR has none
+// (pg2-cggq0: the Owner column on the dashboard's Team panels).
+func TestComputeEnrichment_Author(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   prShow
+		want string
+	}{
+		{"human login copied verbatim", prShow{Author: "alice-dev"}, "alice-dev"},
+		{"bot login copied verbatim", prShow{Author: "dependabot[bot]"}, "dependabot[bot]"},
+		{"empty stays empty", prShow{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := computeEnrichment(tt.pr, nil, nil).Author; got != tt.want {
+				t.Errorf("Author = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEnrichment_AuthorKeyAlwaysMarshaled pins that the JSON key "author" is
+// NOT omitempty: an empty author serializes as "" (consistent with title and
+// url), so buildRow's flat merge gives every row the key.
+func TestEnrichment_AuthorKeyAlwaysMarshaled(t *testing.T) {
+	for _, e := range []Enrichment{{Author: "alice-dev"}, {}} {
+		raw, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("unmarshal %s: %v", raw, err)
+		}
+		v, ok := m["author"]
+		if !ok {
+			t.Fatalf("marshaled Enrichment %s lacks the key \"author\"", raw)
+		}
+		if v != e.Author {
+			t.Errorf("author = %v; want %q", v, e.Author)
+		}
+	}
+}
+
+// structJSONTags returns the set of JSON keys v's struct tags declare
+// (omitempty fields included, so the guard also covers keys that are
+// absent from a zero-value marshal).
+func structJSONTags(t *testing.T, v any) map[string]bool {
+	t.Helper()
+	typ := reflect.TypeOf(v)
+	keys := map[string]bool{}
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		name := strings.Split(tag, ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		keys[name] = true
+	}
+	return keys
+}
+
+// TestRowBlobKeySetsAreDisjoint is the durable collision guard for
+// httpapi.buildRow's later-wins flat merge of the Enrichment, Urgency and
+// Approvals blobs: a future field that reused another blob's JSON key would
+// silently shadow (or be shadowed by) "author", so the key sets MUST stay
+// pairwise disjoint.
+func TestRowBlobKeySetsAreDisjoint(t *testing.T) {
+	sets := []struct {
+		name string
+		keys map[string]bool
+	}{
+		{"Enrichment", structJSONTags(t, Enrichment{})},
+		{"Urgency", structJSONTags(t, Urgency{})},
+		{"Approvals", structJSONTags(t, Approvals{})},
+	}
+	if !sets[0].keys["author"] {
+		t.Fatal("Enrichment lost its \"author\" key")
+	}
+	for i := range sets {
+		for j := i + 1; j < len(sets); j++ {
+			for k := range sets[i].keys {
+				if sets[j].keys[k] {
+					t.Errorf("JSON key %q appears in both %s and %s; buildRow's later-wins merge would shadow one", k, sets[i].name, sets[j].name)
+				}
+			}
+		}
+	}
+}
+
+// TestInterpret_EnrichmentAuthor pins the full Interpret path: the PR show
+// fixture's author reaches Interpretation.Enrichment.Author, and the
+// degraded (no PRShow) case yields "" with no error.
+func TestInterpret_EnrichmentAuthor(t *testing.T) {
+	facts := factsFor(t, map[string]any{"author": "alice-dev", "title": "x"})
+	interp, err := Interpret(facts, FixedClock(time.Unix(0, 0)), &config.Config{SelfLogin: "me"})
+	if err != nil {
+		t.Fatalf("Interpret: %v", err)
+	}
+	if interp.Enrichment.Author != "alice-dev" {
+		t.Fatalf("Enrichment.Author = %q; want %q", interp.Enrichment.Author, "alice-dev")
+	}
+
+	degraded, err := Interpret(gather.Facts{RemovedState: "not_found"}, FixedClock(time.Unix(0, 0)), &config.Config{})
+	if err != nil {
+		t.Fatalf("Interpret (no PRShow): %v", err)
+	}
+	if degraded.Enrichment.Author != "" {
+		t.Fatalf("degraded Enrichment.Author = %q; want \"\"", degraded.Enrichment.Author)
 	}
 }
 

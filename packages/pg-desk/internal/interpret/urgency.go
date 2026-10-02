@@ -183,6 +183,7 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 		Size:      bucketSize(pr.Additions + pr.Deletions),
 		Title:     pr.Title,
 		URL:       pr.URL,
+		Author:    pr.Author,
 	}
 }
 

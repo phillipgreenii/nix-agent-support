@@ -130,12 +130,20 @@ func (SystemClock) Now() time.Time { return time.Now() }
 // this is the one place those two fields need to be captured to reach it —
 // they were decoded into prShow already but, before this, went no further
 // (pg2-2j5ac, "no human-readable columns" gap).
+//
+// Author is the PR author's login (prShow.Author), copied verbatim — bot
+// logins included — and "" when the PR facts are absent. It is NOT omitempty,
+// consistent with Title and URL, so every row carries the key. The JSON key is
+// "author" (not "owner", which issue entities use, and not "ownership", the
+// mine/team/co-owned class buildRow already emits); a Grafana panel shows it
+// as the Owner column (pg2-cggq0).
 type Enrichment struct {
 	Kind      string   `json:"kind"`
 	Languages []string `json:"languages,omitempty"`
 	Size      string   `json:"size"`
 	Title     string   `json:"title"`
 	URL       string   `json:"url"`
+	Author    string   `json:"author"`
 }
 
 // Urgency is the base-urgency scoring result (labels, keywords, checks

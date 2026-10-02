@@ -7,6 +7,9 @@
   "dropped_count": 0,
   "team_awaiting_owner": [
     {
+      "title": "feat(widgets): add sprocket",
+      "url": "https://example.invalid/acme/widgets/pull/202",
+      "author": "alice-dev",
       "human_approved": false,
       "self_approved": false,
       "human_changes_requested": false,

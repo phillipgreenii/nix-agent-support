@@ -8,7 +8,12 @@ and MUST NOT use an LLM for any step below.
 
 - **Ownership** — classifies a PR as mine, co-owned, or team, from config and the commit-author
   logins `pr commits` reported.
-- **Enrichment** — derives kind, languages, and size from `pr files` and `pr commits`.
+- **Enrichment** — derives kind, languages, and size from `pr files` and `pr commits`, and carries
+  three display facts copied verbatim from the PR facts: its title, its URL, and its `author` (the
+  PR author's login, bot logins included; the empty string when the PR facts are absent). The
+  `author` fact is the PR's author, not its ownership class — a PR classified as co-owned still
+  reports one author. The dashboard payload served per [`serve.md`](serve.md) carries these on each
+  row, so a human-facing view can show who owns a team PR.
 - **Urgency (base + layered Jira half)** — the base signal (labels, keywords, checks rollup, and
   bugfix commits) is always computed first, unchanged since Phase 9. Starting Phase 13 (docket
   `pg2-2j5ac.40`), it is layered with ONE additional signal read from the PR's own

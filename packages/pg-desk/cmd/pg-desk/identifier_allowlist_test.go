@@ -54,6 +54,10 @@ var allowlistedIdentifiers = map[string]struct{}{
 	// generic-placeholder convention.
 	"teammate":   {},
 	"review-bot": {},
+	// generic placeholder PR-author login used by the dashboard payload golden
+	// (internal/httpapi/testdata/dashboard_golden.json's team row "author",
+	// pg2-cggq0). Not a real person: it is invented for the fixture.
+	"alice-dev": {},
 }
 
 func isAllowlistedIdentifier(id string) bool {

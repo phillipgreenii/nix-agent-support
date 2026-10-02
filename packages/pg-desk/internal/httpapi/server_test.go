@@ -273,7 +273,8 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 // 2026-09-25 awaiting-owner/team/me redesign.
 //
 //   - Team panels (team_awaiting_owner, team_awaiting_team,
-//     team_awaiting_me) read: entity_id, human_approved, self_approved,
+//     team_awaiting_me) read: entity_id, title, url, author (the Owner
+//     column), human_approved, self_approved,
 //     human_changes_requested, bot_verdict, match_team_authored,
 //     match_review_requested, match_has_watch_label, ready_to_promote,
 //     degraded, sync_error.
@@ -320,6 +321,10 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "202",
 		Ownership: "team", Category: "feature", GateState: "unsatisfied",
+		// Enrichment carries the three display facts the Team panels select
+		// (title, url, and author -- the Owner column, pg2-cggq0). Generic
+		// placeholder values only: this is a public repo.
+		Enrichment:   `{"title":"feat(widgets): add sprocket","url":"https://example.invalid/acme/widgets/pull/202","author":"alice-dev"}`,
 		Approvals:    `{"human_approved":false,"self_approved":false,"human_changes_requested":false,"bot_verdict":"disapproved"}`,
 		MatchReasons: `["team-authored","label:urgent"]`,
 		Panel:        PanelTeamAwaitingOwner, ReadyToPromote: false, Degraded: true,
@@ -360,7 +365,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 
 	mineColumns := []string{"entity_id", "human_approved", "human_changes_requested", "bot_verdict", "ready_to_promote", "degraded"}
 	teamColumns := []string{
-		"entity_id", "human_approved", "self_approved", "human_changes_requested", "bot_verdict",
+		"entity_id", "title", "url", "author", "human_approved", "self_approved", "human_changes_requested", "bot_verdict",
 		"match_team_authored", "match_review_requested", "match_has_watch_label", "ready_to_promote", "degraded",
 	}
 	hiddenColumns := []string{"entity_id", "category", "ready_to_promote", "degraded", "sync_error"}
@@ -374,6 +379,11 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 		t.Fatalf("TeamAwaitingOwner = %+v, want exactly 1 row", payload.TeamAwaitingOwner)
 	}
 	requireColumns(t, "team_awaiting_owner[0]", payload.TeamAwaitingOwner[0], teamColumns)
+	// requireColumns checks key presence only; the Owner column's data
+	// contract is the VALUE of "author" (pg2-cggq0).
+	if got := payload.TeamAwaitingOwner[0]["author"]; got != "alice-dev" {
+		t.Fatalf("team_awaiting_owner[0][\"author\"] = %v, want %q", got, "alice-dev")
+	}
 
 	if len(payload.Hidden) != 1 {
 		t.Fatalf("Hidden = %+v, want exactly 1 row (entity 303, excluded from mine_awaiting_team)", payload.Hidden)
