@@ -263,7 +263,7 @@ func TestLogCompact_OfflineRefusedWhileLocked(t *testing.T) {
 		t.Fatalf("dry run must report that a real run would be refused: %v", dry)
 	}
 	human, _, _ := runLogCompactCapture(t, logCompactOpts{dryRun: true, logDir: dir})
-	if !strings.Contains(human, "a real run would be REFUSED") {
+	if !strings.Contains(human, "a real run would be REFUSED (exit 1): the log is locked by another pg-router process") {
 		t.Fatalf("human dry run lacks the refusal:\n%s", human)
 	}
 	if held, _ := eventqueue.LogLocked(path); !held {
@@ -358,7 +358,7 @@ func TestRenderLogCompact(t *testing.T) {
 		{"dry run, torn", func(v *core.LogCompactView) { v.DryRun = true; v.Torn = true }, []string{"undecodable line"}, nil},
 		{
 			"dry run, would refuse", func(v *core.LogCompactView) { v.DryRun = true; v.Via = core.ViaOffline; v.WouldRefuse = "locked" },
-			[]string{"offline, no daemon running", "a real run would be REFUSED: locked"},
+			[]string{"offline, no daemon running", "a real run would be REFUSED (exit 1): locked"},
 			[]string{"would shrink"},
 		},
 		{

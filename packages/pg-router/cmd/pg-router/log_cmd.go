@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -97,6 +98,12 @@ type logCompactOpts struct {
 // an offline run reports. An unreadable config is not a reason to refuse to
 // compact: the percentages are simply left out.
 func offlineLogLimit() int64 {
+	// config.Load narrates itself (a WARN when no config.toml exists, an INFO per
+	// layer it reads); that is noise on an operator's terminal here, where only
+	// the one number matters.
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer slog.SetDefault(prev)
 	cfg, err := config.Load()
 	if err != nil {
 		return 0
@@ -180,7 +187,7 @@ func logCompactOffline(stderr io.Writer, o logCompactOpts) (core.LogCompactView,
 	if o.dryRun {
 		// The dry run took no lock, so say whether a real run would find it held.
 		if held, lerr := eventqueue.LogLocked(path); lerr == nil && held {
-			view.WouldRefuse = "the log is locked by another pg-router process; a real run would be refused (exit 1)"
+			view.WouldRefuse = "the log is locked by another pg-router process"
 		}
 	}
 	return view, exitOK
@@ -225,7 +232,7 @@ func renderLogCompact(w io.Writer, v core.LogCompactView) {
 	if v.DryRun {
 		switch {
 		case v.WouldRefuse != "":
-			fmt.Fprintf(w, "  a real run would be REFUSED: %s\n", textsafe.Sanitize(v.WouldRefuse))
+			fmt.Fprintf(w, "  a real run would be REFUSED (exit 1): %s\n", textsafe.Sanitize(v.WouldRefuse))
 		case v.NoProgress:
 			fmt.Fprintln(w, "  a real run would do nothing: no progress is possible")
 		default:

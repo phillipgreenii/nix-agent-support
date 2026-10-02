@@ -38,8 +38,7 @@ type ErrLogLocked struct {
 
 func (e *ErrLogLocked) Error() string {
 	return fmt.Sprintf("the event log %s is in use by another pg-router process (lock %s is held); "+
-		"a pg-router daemon is probably already running against this log directory. "+
-		"Stop it first, or talk to it over its socket instead", e.Path, e.LockPath)
+		"a pg-router daemon is probably already running against this log directory", e.Path, e.LockPath)
 }
 
 // lockLog creates (if needed) and exclusively flocks the lock file beside logPath,
