@@ -1,0 +1,113 @@
+{
+  "skill_name": "handoff-bead",
+  "evals": [
+    {
+      "id": 0,
+      "name": "typed-handoff-unattended-absorbed",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are a /drain-beads worker (actor id \"sess-1234-drain\") that just claimed pg2-hand1, issue_type handoff, metadata {\"handed_off_from_session\":\"7f3a9c21-aaaa\"}, title \"Handoff: finish pg-router retry work\". Body: \"Handoff from session 7f3a9c21-aaaa\\nCarry-over: (1) retry backoff work is tracked in pg2-aaa11; (2) everything else is labelled `pg-router-retry`; (3) 1 unpushed commit on main (recorded state claim); (4) add a metrics counter for dropped retries (no bead exists for this). First step: bd ready --label pg-router-retry.\" Disposition this bead.",
+      "expected_output": "Does not isolate or implement. Traces items 1-2 to pg2-aaa11 and the label, re-probes the unpushed-commit state claim rather than trusting it, files item 4 as its own bead (discovered-from) BEFORE closing, writes ONE ABSORBED: comment naming ids/labels with probe output, then bd close with --actor; reads metadata with the J-1 envelope jq prelude.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Treats the bead as a handoff (does not isolate, delegate, or implement it)",
+          "discriminating": false
+        },
+        {
+          "text": "Files the untraced item (the metrics counter) as its own bead with discovered-from BEFORE closing the handoff",
+          "discriminating": true
+        },
+        {
+          "text": "Re-probes the unpushed-commit state claim instead of trusting the recorded text",
+          "discriminating": true
+        },
+        {
+          "text": "Writes exactly one ABSORBED: comment that names bead ids / labels, then closes the bead with --actor",
+          "discriminating": true
+        },
+        {
+          "text": "Any jq it uses starts from the envelope prelude (if type==\"object\" and has(\"data\") then .data else . end)",
+          "discriminating": false
+        },
+        {
+          "text": "Does not release, defer, demote, or prompt the operator",
+          "discriminating": true
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "typed-handoff-interactive-offered-not-closed",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are in an INTERACTIVE conversation with the operator, who says: \"what is pg2-hand2?\" It is issue_type handoff, metadata {\"handed_off_from_session\":\"9c1d-bbbb\"}, title \"Handoff: wrap up the ccpool env injection\", body \"Handoff from session 9c1d-bbbb\\nCarry-over: ccpool env injection is tracked in pg2-bbb22 (open); label ccpool indexes the rest. First step: bd show pg2-bbb22.\" Respond to the operator.",
+      "expected_output": "Summarises the handoff, mentions the source session id for look-back, and OFFERS to close it once everything it points at lives in a bead or label. Does NOT close it, comment ABSORBED:, or run any mutating command unless the operator says yes.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Summarises what the handoff points at (pg2-bbb22 and the ccpool label)",
+          "discriminating": false
+        },
+        {
+          "text": "Offers to close the bead rather than closing it",
+          "discriminating": true
+        },
+        {
+          "text": "Runs no bd close / bd comment / bd update (no ABSORBED: trace) before the operator answers",
+          "discriminating": true
+        },
+        {
+          "text": "Mentions the source session id (9c1d-bbbb) as available for look-back",
+          "discriminating": false
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ambiguous-resume-task-not-a-handoff",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are a /drain-beads worker (actor id \"sess-5678-drain\") that just claimed pg2-t8807, issue_type task, no handed_off_from_session metadata, title \"Resume: cache Go builds properly (mkGoApp cache decoupling + --with-deps) so pg-desk/apply builds stop compiling cold\", P0. Snapshot of its description (first 2500 chars) and acceptance criteria (first 1200 chars) follow.\n\n--- DESCRIPTION ---\nRESUME / NEXT-SESSION. Research is DONE and verified; the check-phase decision is MADE (see DECISION MADE below); what remains is implementation. Do not redo the research. Read this body first, then the artifacts listed at the end.\n\n## Problem\n`pn workspace apply` is slow; the visible symptom is a stream of `building '/nix/store/<hash>-desk-issue.json.drv'...` lines with different hashes. Those derivations are trivial `writeText` files whose text embeds `${pkgs.pg-desk}/bin/pg-desk`, so each new pg-desk version makes a new hash. The real time is pg-desk (and pg-connector) building just before them. It is NOT downloads: the build logs contain zero `copying path|downloading|fetching|substitut` lines; dependencies are vendored from the store (GOPROXY=off, -mod=vendor). It is NOT integration/e2e tests either: the in-build tests are plain unit tests (slowest single test ~1.5s, ~30s total test run time).\n\n## Root cause (VERIFIED)\n1. `packages/pg-desk/default.nix` uses `mkGoApp` with no `subPackages`, so gomod2nix's hooks run `go install` per directory and `go test -v -vet=off` per test directory, sequentially, with `-p 1` (enableParallelBuilding unset => NIX_BUILD_CORES=1). CGO_ENABLED=1, no -race.\n2. gomod2nix restores a Go build cache tarball from a `go-cache-env` derivation, populated ONLY from a `cachePackages` list in gomod2nix.toml, which is written ONLY by `gomod2nix generate --with-deps`. None of the 17 `packages/*/gomod2nix.toml` has `cachePackages`, so the tarball is 99 bytes (empty) and every build compiles the whole dependency graph cold: 469 packages for cmd/pg-desk (213 std; modernc.org/sqlite, libc, grpc, protobuf, otel).\n3. The check phase compiles everything again: `goCheckHook` strips `-trimpath` from GOFLAGS (after preCheck runs) and dropping -trimpath invalidates every dependency compile action (VERIFIED natively: 65/65 and 55/55 compiles miss). So even a primed cache does not help the check phase.\n4. Measured, sandbox rebuild of pg-desk at load ~80-150: build phase 9m35s (9m07s in the first `go install ./cmd/pg-desk`), check phase 10m16s (tests themselves ~30s). The same commands natively with a cold GOCACHE, -p 1, -trimpath took ~105s. Native-vs-sandbox gap is NOT -p 1, cc-wrapper, vendor mode, cgo or Go version; native `taskpolicy -b` (macOS background QoS) reproduces it (7.4s -> 59.1s), so the leading hypothesis is QoS/clamp throttling of nix builders under machine load (load average was 80-400 on 10 cores: ~30 concurrent sessions running\n\n--- ACCEPTANCE CRITERIA ---\nScope per the 2026-10-01 operator ruling (doCheck=false default, option b): Fix C plus review must-fixes 1 and 3-8; must-fix 2 is resolved by the blocking doCheck bead pg2-pla9d.2. No custom -trimpath checkPhase.\n\nrepo-base (phillipg-nix-repo-base, lib/go-builders.nix):\n- [ ] mkGoApp builds its Go cache env from go.mod/go.sum/gomod2nix.toml only (caller ldflags, NOT the version ldflag), with a source-independent vendor env and local-replace roots dropped; `nix eval --raw .#pg-desk.goCacheEnv.drvPath` is identical before and after a comment-only edit in pg-desk and in sibling pg-connector\n- [ ] `pg-desk --version` still equals the derivation-name source-digest suffix (ADR 0006 invariant preserved)\n- [ ] mkGoLint and mkGoTest pass `disableGoCache = true`; `nix derivation show` on ccpool-go-tests and pg-pr-go-tests contains no go-cache-env\n- [ ] A broken or OS-specific cache root fails the cache-env build loudly (no `|| true`), and a flake check asserts the tarball is non-trivial (> ~1 MiB) when `cachePackages` is non-empty\n- [ ] The mkGoCacheEnv assertion at go-builders.nix:17 is added; a base check asserts `toString pkg.passthru.goCacheEnv == pkg.drvAttrs.goCacheDir`; a fixture with\n\nDecide how to treat this bead.",
+      "expected_output": "Concludes the bead is NOT a handoff (issue_type task, no handed_off_from_session metadata, title is Resume: not Handoff:, it carries its own acceptance criteria and implementation plan): treats it as an ordinary bead (isolate/delegate/implement), does NOT write an ABSORBED: comment, does NOT close it as absorbed, and does NOT retype it.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Concludes the bead is not a handoff and treats it as an ordinary bead",
+          "discriminating": true
+        },
+        {
+          "text": "Does not write an ABSORBED: comment or close it as absorbed",
+          "discriminating": true
+        },
+        {
+          "text": "Does not convert/retype the bead to handoff (or from task)",
+          "discriminating": true
+        },
+        {
+          "text": "Cites why it is ambiguous/not unmistakable (title is not Handoff:, no session metadata, has acceptance criteria and a plan)",
+          "discriminating": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "type-unregistered-task-fallback",
+      "prompt": "Use the beads-lifecycle:handoff-bead skill (SKILL.md at <REPO_ROOT>/claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md; read it first). Simulation only: do not run any bd or other state-changing command; instead list, in order, the exact commands you WOULD run and what you would say. You are session-wrapup creating the next-session handoff for session id 4b2e-cccc in a database whose bd rejects `-t handoff`. Carry-over: finish pg2-ccc33 and review the pg-desk docs; first step bd show pg2-ccc33. Your first `bd create -t handoff ...` returned exactly: \"Error: invalid issue type: handoff\". Show what you do next, including what you would do if the retry also fails with \"Error: database not found\".",
+      "expected_output": "Retries ONCE as `bd create -t task` with the same Handoff:-prefixed title, the same body (first line \"Handoff from session 4b2e-cccc\"), the same -p 0, and the same --metadata {\"handed_off_from_session\":\"4b2e-cccc\"}; verifies with bd show. For any other failure (database not found) it reports instead of retrying or falling back to another tracker.",
+      "files": [],
+      "assertions": [
+        {
+          "text": "Falls back to type task ONCE, keeping title prefix Handoff:, body first line \"Handoff from session <id>\", priority 0",
+          "discriminating": true
+        },
+        {
+          "text": "Sets the handed_off_from_session metadata (4b2e-cccc) on the fallback bead",
+          "discriminating": true
+        },
+        {
+          "text": "Verifies the result with bd show after creating",
+          "discriminating": false
+        },
+        {
+          "text": "Reports (does not retry) the unrelated database-not-found failure, and does not use another repo tracker",
+          "discriminating": true
+        }
+      ]
+    }
+  ]
+}
