@@ -15,15 +15,17 @@ session automatically.
 
 ## Flag surface [design: `## Components` → "/drain" section, verbatim]
 
-`/drain [<id>] [--attended | --unattended] [--stage <s>]... [--concurrency <n>] [--questions]`
+`/drain [<id> | --id <id>] [--attended | --unattended] [--stage <s>]... [--concurrency <n>] [--questions]`
 
 Raw filters are not accepted — no named-query wording, no "overnight" concept. Parse
-`$ARGUMENTS` for exactly these:
+`$ARGUMENTS` for exactly these, and nothing else:
 
-- `<id>` (optional, positional): work exactly this one bead — and, if it is a container, its
-  descent per "Containers" — ignoring every other filter below except attended/unattended.
-  Finishes when the item is closed, is parked (escalated to `human`, unattended mode), or
-  errors; for a container, when its descent yields no ready descendant.
+- `<id>` (optional, positional) **or** `--id <id>` (same meaning, accepted because it is the
+  exact spelling Step 1 below uses when relaying the id to the dispatcher — treat the two forms
+  as interchangeable, never as two different things): work exactly this one bead — and, if it
+  is a container, its descent per "Containers" — ignoring every other filter below except
+  attended/unattended. Finishes when the item is closed, is parked (escalated to `human`,
+  unattended mode), or errors; for a container, when its descent yields no ready descendant.
 - `--attended` / `--unattended`: interview mode. Default is `--unattended`: escalations that
   reach `human` are parked (bead labeled, loop moves on) with no questions to the operator.
   `--attended` interviews human escalations in-session as they occur.
@@ -33,15 +35,21 @@ Raw filters are not accepted — no named-query wording, no "overnight" concept.
 - `--questions`: visit ONLY attention items (open questions labeled `human`, plus legacy
   `human` items) and do no new stage work. Implies `--attended`.
 
+Any token in `$ARGUMENTS` that matches none of the forms above (a typo'd flag, a raw filter, an
+unrecognized word) MUST NOT be silently dropped and MUST NOT be silently absorbed into a nearby
+flag's value. Stop before dispatching anything and report the unparseable argument to the
+operator — a fixed-id run that fails to parse its own id MUST NOT fall through to the unscoped
+general-ready-set loop, which would work a different bead than the one asked for.
+
 Five common intents, for reference:
 
-| Intent                   | Command                           |
-| ------------------------ | --------------------------------- |
-| Everything, unattended   | `/drain`                          |
-| Groom only, attended     | `/drain --attended --stage groom` |
-| One bead                 | `/drain tc-x`                     |
-| Answer pending questions | `/drain --questions`              |
-| Three in flight          | `/drain --concurrency 3`          |
+| Intent                   | Command                               |
+| ------------------------ | ------------------------------------- |
+| Everything, unattended   | `/drain`                              |
+| Groom only, attended     | `/drain --attended --stage groom`     |
+| One bead                 | `/drain tc-x` (or `/drain --id tc-x`) |
+| Answer pending questions | `/drain --questions`                  |
+| Three in flight          | `/drain --concurrency 3`              |
 
 ## Loop body, per iteration [design: same section, "Loop body, per iteration" list, verbatim]
 
