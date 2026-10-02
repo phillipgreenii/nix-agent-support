@@ -572,9 +572,23 @@ groups:
       # failure-rate rule, so without this rule that failure mode is
       # invisible. Added alongside the pg-router-probe/ccpool-probe
       # self-monitoring system (2026-09-22) specifically so a probe's own
-      # failure to run is not itself a silent gap (pg2-93e5s). noDataState:
-      # OK, matching the failure-rate rule's own reasoning above -- an
-      # absent series means zero source failures have ever been recorded.
+      # failure to run is not itself a silent gap (pg2-93e5s).
+      #
+      # noDataState: OK is a DECIDED setting (pg2-vicjc, 2026-10-02) -- do not
+      # re-open it as "silent green hid the original bug". The counter is
+      # created lazily: the OTel Int64Counter exports NO series for a source
+      # until that source's first OnSourceFailure (internal/metrics pins this in
+      # TestSourceFailureSeriesAbsentUntilFirstFailure), so an absent series is
+      # the NORMAL healthy state, not a fault. noDataState NoData/Alerting would
+      # therefore fire permanently on every healthy install. It also could not
+      # have caught the pg2-jgbnp bug: that bug produced exactly an absent
+      # series, indistinguishable from health by data alone; it is guarded by
+      # the unit tests on the give-up path instead. A genuinely dead daemon or
+      # unreachable /metrics endpoint is already covered by
+      # pg-router-liveness-down (noDataState: Alerting), so no separate
+      # liveness signal is added here. A source that failed once and then
+      # recovers keeps its series at a flat rate of 0, which the threshold
+      # (> 0) correctly reads as healthy.
       - uid: pg-router-source-failure-rate
         title: pg-router event source failure rate is non-zero (by source)
         condition: C

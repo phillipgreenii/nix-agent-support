@@ -307,6 +307,29 @@ func TestOnSourceFailurePerSource(t *testing.T) {
 	}
 }
 
+// The source-failures counter is created lazily: until a source's first
+// OnSourceFailure there is NO datapoint for it, so on a live scrape an absent
+// series is the normal healthy state (pg2-vicjc). This is why
+// pg-router-source-failure-rate keeps noDataState: OK — see alerts.yaml.
+func TestSourceFailureSeriesAbsentUntilFirstFailure(t *testing.T) {
+	h := newHarness(t)
+	for _, sm := range h.collect(t).ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != MetricSourceFailures {
+				continue
+			}
+			if s, ok := m.Data.(metricdata.Sum[int64]); ok && len(s.DataPoints) > 0 {
+				t.Fatalf("source_failures has %d datapoints before any failure, want none", len(s.DataPoints))
+			}
+		}
+	}
+	h.emitter.OnSourceFailure("github-pulls")
+	m := findMetric(t, h.collect(t), MetricSourceFailures)
+	if got := sumFor(m, "source", "github-pulls"); got != 1 {
+		t.Fatalf("source_failures[github-pulls] = %d after first failure, want 1", got)
+	}
+}
+
 // OnDeduped (INV-EVT-3, bead pg2-cz31d) increments the deduped counter, per
 // type.
 func TestOnDedupedPerType(t *testing.T) {
