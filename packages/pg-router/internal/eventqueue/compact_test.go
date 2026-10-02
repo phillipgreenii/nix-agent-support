@@ -100,6 +100,13 @@ func newFileQueue(t *testing.T, path string, opts ...Option) (*Queue, *FileStore
 	return q, fs
 }
 
+// replayStateOfCopy is replayState over a COPY of path, for a path an open
+// FileStore still holds (and so has flocked, see lock.go).
+func replayStateOfCopy(t *testing.T, path string) string {
+	t.Helper()
+	return replayState(t, copyPath(t, path))
+}
+
 // replayState opens path afresh (as a restart would) and returns its state.
 func replayState(t *testing.T, path string) string {
 	t.Helper()
@@ -499,7 +506,7 @@ func TestCompactCrashAtEveryStep(t *testing.T) {
 			if stats.BytesAfter >= stats.BytesBefore {
 				t.Fatalf("expected the dead-weight log to shrink: %d -> %d", stats.BytesBefore, stats.BytesAfter)
 			}
-			wantNew := replayState(t, path)
+			wantNew := replayStateOfCopy(t, path)
 			if withRacingAppend {
 				if !strings.Contains(wantNew, `"raced"`) {
 					t.Fatalf("racing append lost by compaction: %s", wantNew)
@@ -781,6 +788,7 @@ func TestFileStoreLogSizeTracksFile(t *testing.T) {
 	check("compact")
 	_ = fs.Append(Record{Op: opAccept, EventID: "b", ListenerID: "h"})
 	check("append after compact")
+	_ = fs.Close() // release the log lock before reopening
 	reopened, err := NewFileStore(path)
 	if err != nil {
 		t.Fatal(err)

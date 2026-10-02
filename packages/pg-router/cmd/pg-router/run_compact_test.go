@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -80,5 +83,33 @@ func TestBootCore_CompactsQueueLogAtStartup(t *testing.T) {
 	}
 	if gates := q.ActiveGates(); len(gates) != 1 || gates[0].Type != "SYSTEM_PAUSE" {
 		t.Fatalf("active gate lost across startup compaction: %v", gates)
+	}
+}
+
+// A second bootCore over the same LogDir (a double start, a run-until-idle beside
+// the daemon) is refused before it can compact or rename the log under the first
+// one (bead pg2-maxn1): the error names the lock and the log is untouched.
+func TestBootCore_RefusesSecondOpenerOfTheLog(t *testing.T) {
+	dir := shortDir(t)
+	cfg := config.Config{
+		LogDir: dir,
+		Roles:  roles.RoleSet{{Name: "r1", Enabled: true, Binds: []string{"t1"}}},
+	}
+	svc, _, _, storeClose, err := bootCore(context.Background(), cfg, &orchestrator.Orchestrator{Cfg: cfg}, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("first bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+	before, _ := os.ReadFile(filepath.Join(dir, "queue.jsonl"))
+
+	_, _, _, _, err = bootCore(context.Background(), cfg, &orchestrator.Orchestrator{Cfg: cfg}, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	var locked *eventqueue.ErrLogLocked
+	if !errors.As(err, &locked) {
+		t.Fatalf("second bootCore err = %v, want *eventqueue.ErrLogLocked", err)
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "queue.jsonl"))
+	if !bytes.Equal(before, after) {
+		t.Fatal("a refused second opener changed queue.jsonl")
 	}
 }

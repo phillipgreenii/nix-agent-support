@@ -146,6 +146,12 @@ func (r Record) event() Event {
 type FileStore struct {
 	path string
 
+	// lock is the exclusive advisory lock on <path>.lock, held from NewFileStore
+	// until Close (bead pg2-maxn1; see lockLog). It is a SEPARATE file because
+	// compaction renames a new inode over the log, which would drop a flock taken
+	// on the log itself.
+	lock *os.File
+
 	compactMu sync.Mutex // serializes Compact calls and Close against a running Compact
 
 	mu     sync.Mutex
@@ -168,26 +174,42 @@ type FileStore struct {
 	writeFn func(f *os.File, b []byte) (int, error)
 }
 
-// NewFileStore opens (creating parent dirs) the append-only WAL at path. A
-// leftover compaction temp file from a crashed run is removed: it was never
-// renamed over the log, so it is not part of the log.
+// NewFileStore opens (creating parent dirs) the append-only WAL at path, holding
+// an exclusive advisory lock on <path>.lock for the store's lifetime (released by
+// Close or by the process dying). A second opener of the same log — a double
+// start, a run-until-idle beside the daemon, an offline `log compact` beside a
+// live daemon — fails fast with *ErrLogLocked instead of appending to (or
+// compacting and renaming under) a log another process owns: a rename under a
+// live writer would leave it appending to the unlinked old inode and silently
+// lose every later record (bead pg2-8e0m6 item 6, pg2-maxn1).
+//
+// A leftover compaction temp file from a crashed run is removed, but only AFTER
+// the lock is held (it may be the live temp file of the lock's owner): it was
+// never renamed over the log, so it is not part of the log.
 func NewFileStore(path string) (*FileStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	lock, err := lockLog(path)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.Remove(compactTempPath(path)); err != nil && !os.IsNotExist(err) {
+		_ = lock.Close()
 		return nil, fmt.Errorf("eventqueue: remove stale compaction temp file: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		_ = lock.Close()
 		return nil, err
 	}
 	fi, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
+		_ = lock.Close()
 		return nil, err
 	}
-	s := &FileStore{path: path, f: f, size: fi.Size()}
+	s := &FileStore{path: path, f: f, size: fi.Size(), lock: lock}
 	s.sizeGauge.Store(s.size)
 	return s, nil
 }
@@ -373,7 +395,14 @@ func (s *FileStore) Close() error {
 		return nil
 	}
 	s.closed = true
-	return s.f.Close()
+	err := s.f.Close()
+	if s.lock != nil {
+		// Closing the descriptor releases the flock.
+		if lerr := s.lock.Close(); err == nil {
+			err = lerr
+		}
+	}
+	return err
 }
 
 // MemStore is an in-memory Store double for tests. It keeps records in a slice

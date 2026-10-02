@@ -293,6 +293,13 @@ INV-EVT-2) and gate persistence are unchanged.
   landing after `n`, then — holding only the store's own mutex, briefly — copies the bytes appended in
   the meantime onto the temp file, fsyncs it, renames it over the log and fsyncs the directory. Nothing
   appended is lost or reordered.
+- **One opener at a time.** `pg-router` takes an exclusive, non-blocking `flock` on
+  `<LogDir>/queue.jsonl.lock` before it touches the log, and holds it until it exits (the kernel drops it
+  if the process dies, so a crash never leaves a stale lock). A second opener — a double start, a
+  `run-until-idle` beside the daemon — fails fast with a message naming the lock instead of compacting and
+  renaming the log under a live writer (which would leave that writer appending to the unlinked file and
+  silently losing every later record). The lock is a sibling file because compaction renames a new file over
+  `queue.jsonl`; the empty `queue.jsonl.lock` is left in place.
 - **Crash safety.** Until the rename the log path holds the complete old log; from it on, the complete
   new one. A leftover temp file is removed on the next start. A torn trailing line is tolerated as before
   and startup compaction drops it.
