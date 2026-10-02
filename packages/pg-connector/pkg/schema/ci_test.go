@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,9 @@ func TestCIRun_JSONRoundTrip(t *testing.T) {
 		Attempt:    2,
 		AsOf:       "2026-09-09T00:00:00Z",
 		Stale:      false,
+		Jobs: []CIJob{
+			{ID: "9", Name: "build-test-validate", Status: "completed", Conclusion: "failure", URL: "https://example.invalid/job/9"},
+		},
 	}
 
 	raw, err := json.Marshal(in)
@@ -32,7 +36,7 @@ func TestCIRun_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if out != in {
+	if !reflect.DeepEqual(out, in) {
 		t.Fatalf("round-trip mismatch: got %+v, want %+v", out, in)
 	}
 }
@@ -118,7 +122,49 @@ func TestCIRun_AttemptOmittedWhenZero(t *testing.T) {
 // TestCISchemaVersion_IsCurrent pins CISchemaVersion at its current value
 // so a bump is a deliberate, reviewed change.
 func TestCISchemaVersion_IsCurrent(t *testing.T) {
-	if CISchemaVersion != 4 {
-		t.Fatalf("CISchemaVersion = %d, want 4", CISchemaVersion)
+	if CISchemaVersion != 5 {
+		t.Fatalf("CISchemaVersion = %d, want 5", CISchemaVersion)
+	}
+}
+
+func TestCIRun_JobsOmittedWhenNil(t *testing.T) {
+	raw, err := json.Marshal(CIRun{ID: "run-1", PRID: "pr-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := out["jobs"]; ok {
+		t.Fatalf("jobs present in %s, want omitted when nil", raw)
+	}
+}
+
+func TestCIRun_JobsWireShape(t *testing.T) {
+	raw, err := json.Marshal(CIRun{ID: "run-1", Jobs: []CIJob{
+		{ID: "7", Name: "build-test-validate", Status: "completed", Conclusion: "failure", URL: "https://example.test/job/7"},
+		{Name: "lint", Status: "completed", Conclusion: "success"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out struct {
+		Jobs []map[string]any `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.Jobs) != 2 {
+		t.Fatalf("jobs = %v, want 2 entries", out.Jobs)
+	}
+	if out.Jobs[0]["name"] != "build-test-validate" || out.Jobs[0]["conclusion"] != "failure" || out.Jobs[0]["id"] != "7" || out.Jobs[0]["url"] == nil {
+		t.Fatalf("job[0] = %v", out.Jobs[0])
+	}
+	if _, ok := out.Jobs[1]["id"]; ok {
+		t.Fatalf("job[1] id present, want omitted when empty: %v", out.Jobs[1])
+	}
+	if _, ok := out.Jobs[1]["url"]; ok {
+		t.Fatalf("job[1] url present, want omitted when empty: %v", out.Jobs[1])
 	}
 }

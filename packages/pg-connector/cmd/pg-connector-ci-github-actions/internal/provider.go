@@ -178,7 +178,97 @@ func (b *Backend) listRunsByBranch(ctx context.Context, prID, repo, branch strin
 		cr.Stale = false
 		out = append(out, cr)
 	}
+	b.attachJobs(ctx, repo, runs, out)
 	return out, nil
+}
+
+// maxJobFetchesPerList bounds the extra per-run `gh run view --json jobs`
+// calls one ListRuns makes (bead pg2-gllcn): with the eligibility filter in
+// jobsEligible this is a backstop against a pathological branch with many
+// failed runs on the current head, not the common case.
+const maxJobFetchesPerList = 10
+
+// jobsEligible reports whether run r should have its jobs fetched: only a
+// completed run with a non-successful conclusion (the rerunnableConclusions
+// set — failure, timed_out, startup_failure, cancelled) on the PR's current
+// head SHA. Successful, skipped, in-progress and superseded (older-head)
+// runs never trigger a job fetch, so an all-success PR costs zero extra
+// calls (bead pg2-gllcn).
+func jobsEligible(r ghRun, headSHA string) bool {
+	return strings.EqualFold(r.Status, "completed") &&
+		rerunnableConclusions[strings.ToLower(r.Conclusion)] &&
+		r.HeadSHA == headSHA
+}
+
+// ghJob is one entry of `gh run view --json jobs`' "jobs" array (only the
+// fields CIJob carries).
+type ghJob struct {
+	DatabaseID int64  `json:"databaseId"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url"`
+}
+
+// attachJobs fills out[i].Jobs for every eligible run (see jobsEligible),
+// bounded by maxJobFetchesPerList. out is index-parallel to runs. The
+// current head is the first (most recent) run's head SHA, per gh's
+// most-recent-first ordering. A failed or unparseable job fetch leaves that
+// run's Jobs omitted (Jobs is advisory detail on an otherwise valid run
+// listing, so it never fails ListRuns).
+func (b *Backend) attachJobs(ctx context.Context, repo string, runs []ghRun, out []schema.CIRun) {
+	if len(runs) == 0 {
+		return
+	}
+	headSHA := runs[0].HeadSHA
+	fetches := 0
+	for i, r := range runs {
+		if !jobsEligible(r, headSHA) {
+			continue
+		}
+		if fetches >= maxJobFetchesPerList {
+			return
+		}
+		fetches++
+		jobs, err := b.fetchJobs(ctx, repo, out[i].ID)
+		if err != nil {
+			continue
+		}
+		out[i].Jobs = jobs
+	}
+}
+
+// fetchJobs runs `gh run view --json jobs` for one run and converts the
+// result to schema.CIJob values. The "--" terminator keeps a
+// caller-influenced run id positional (see GetLogs, bead pg2-uziwu).
+func (b *Backend) fetchJobs(ctx context.Context, repo, runID string) ([]schema.CIJob, error) {
+	raw, err := b.gh.Run(ctx, "run", "view", "--repo", repo, "--json", "jobs", "--", runID)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Jobs []ghJob `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Jobs) == 0 {
+		return nil, nil
+	}
+	jobs := make([]schema.CIJob, 0, len(resp.Jobs))
+	for _, j := range resp.Jobs {
+		cj := schema.CIJob{
+			Name:       j.Name,
+			Status:     strings.ToLower(j.Status),
+			Conclusion: strings.ToLower(j.Conclusion),
+			URL:        j.URL,
+		}
+		if j.DatabaseID != 0 {
+			cj.ID = fmt.Sprintf("%d", j.DatabaseID)
+		}
+		jobs = append(jobs, cj)
+	}
+	return jobs, nil
 }
 
 // GetLogs implements ci.Provider.GetLogs. Unlike ghactions.go's own

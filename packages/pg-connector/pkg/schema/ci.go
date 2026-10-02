@@ -38,7 +38,13 @@ package schema
 // Bumped 3 -> 4 by bead pg2-2j5ac.52.6.3, which added the Attempt field
 // below (additive, omitempty; one bump per field-shape change, as with
 // PRSchemaVersion).
-const CISchemaVersion = 4
+//
+// Bumped 4 -> 5 by bead pg2-gllcn, which added the Jobs field (and the
+// CIJob type) below: per-job results attributed to their run (additive,
+// omitempty; existing run-level fields are untouched). Note CIRun is no
+// longer comparable with == (it now holds a slice); compare with
+// reflect.DeepEqual.
+const CISchemaVersion = 5
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by
@@ -77,6 +83,22 @@ type CIRun struct {
 	// backend reports no attempt; it is never synthesized. gh reports only
 	// each run's latest attempt.
 	Attempt int `json:"attempt,omitempty"`
+
+	// Jobs lists this run's per-job results, added by CISchemaVersion's
+	// 4 -> 5 bump (bead pg2-gllcn) so a consumer can tell WHICH job of a
+	// failed run failed (e.g. pg-desk's pg2-p2ojd: a PR whose only failing
+	// job is build-test-validate is still reviewable). Additive and
+	// optional: omitted (nil) means "not fetched", never "the run has no
+	// jobs" — consumers that ignore the field are unaffected, and every
+	// run-level field above is unchanged.
+	//
+	// Jobs are fetched with one extra per-run API call, so a backend MUST
+	// bound that cost; pg-connector-ci-github-actions fetches them only for
+	// non-successful, completed runs on the PR's current head SHA (capped
+	// per list call), and a failed job fetch leaves Jobs omitted rather
+	// than failing the run listing. An all-success PR therefore triggers
+	// no job fetches at all.
+	Jobs []CIJob `json:"jobs,omitempty"`
 
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
 	// pg2-4aoeg, extending the pr capability's own AsOf/Stale contract
@@ -121,4 +143,26 @@ type CIRun struct {
 	// time on the runs it returns — D3 stands (no backend gained a store;
 	// only the umbrella did).
 	Stale bool `json:"stale"`
+}
+
+// CIJob is one job of a CIRun, carried by CIRun.Jobs. A job belongs to
+// exactly the CIRun that holds it (attribution is by containment, so there
+// is no run-id back-reference field).
+type CIJob struct {
+	// ID is the backend's own job id (GitHub Actions: the job's databaseId,
+	// rendered as a decimal string like CIRun.ID). Omitted when the backend
+	// reports none.
+	ID string `json:"id,omitempty"`
+	// Name is the job's display name (e.g. "build-test-validate").
+	Name string `json:"name"`
+	// Status is the job's lifecycle state, lower-cased (queued,
+	// in_progress, completed), matching CIRun.Status's convention.
+	Status string `json:"status"`
+	// Conclusion is the job's outcome, lower-cased (success, failure,
+	// cancelled, skipped, ...); empty until the job completes, matching
+	// CIRun.Conclusion's convention.
+	Conclusion string `json:"conclusion"`
+	// URL links to the job in the backend's UI when the backend has one
+	// (omitted otherwise); a build-link consumer (pg2-gnu5v) MAY reuse it.
+	URL string `json:"url,omitempty"`
 }

@@ -110,8 +110,9 @@ func TestListRuns_ResolvesRepoAndBranchAndFilters(t *testing.T) {
 		t.Fatalf("provider tag: %q", runs[0].Provider)
 	}
 
-	// Verify gh args.
-	last := gh.calls[len(gh.calls)-1]
+	// Verify gh args. `run list` is the first gh call (a failed run's
+	// follow-up job fetch, bead pg2-gllcn, comes after it).
+	last := gh.calls[0]
 	joined := strings.Join(last, " ")
 	if !strings.Contains(joined, "--repo foo/bar") {
 		t.Fatalf("expected --repo foo/bar: %v", last)
@@ -614,7 +615,7 @@ func TestListRuns_RequestsAttemptField(t *testing.T) {
 	if _, err := p.ListRuns(context.Background(), "foo/bar#42"); err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
-	last := gh.calls[len(gh.calls)-1]
+	last := gh.calls[0] // the `run list` call; job fetches (pg2-gllcn) follow it
 	var jsonArg string
 	for i, a := range last {
 		if a == "--json" && i+1 < len(last) {
