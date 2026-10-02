@@ -195,6 +195,11 @@ timeout = "10s"
 	run("new", "delta") // default pool
 	run("--pool", poolA, "new", "alpha")
 	run("--pool", poolN, "new", "november")
+	// Cap eviction closes only a session whose turn has ended (ADR 0072), so run
+	// one blocking turn on each: fake-claude's Stop leaves it idle.
+	run("reply", "delta", "ping")
+	run("--pool", poolA, "reply", "alpha", "ping")
+	run("--pool", poolN, "reply", "november", "ping")
 	time.Sleep(50 * time.Millisecond)
 
 	if _, code := run("reap-all"); code != 0 {

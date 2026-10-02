@@ -63,9 +63,13 @@ timeout = "10s"
 		return string(out), code
 	}
 
+	// Cap eviction closes only a session whose turn has ended (ADR 0072), so run
+	// one blocking turn on each: fake-claude's Stop leaves it idle.
 	run("new", "first")
+	run("reply", "first", "ping")
 	time.Sleep(50 * time.Millisecond)
-	run("new", "second") // newer activity than "first"
+	run("new", "second")
+	run("reply", "second", "ping") // newer activity than "first"
 	if _, code := run("reap"); code != 0 {
 		t.Fatal("reap failed")
 	}
