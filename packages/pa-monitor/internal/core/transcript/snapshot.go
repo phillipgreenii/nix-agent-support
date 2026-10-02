@@ -95,7 +95,7 @@ type scanState struct {
 
 	lastCtxTotal int
 	lastCtxModel string
-	totalOut     int
+	totalOut     ct.OutputTally // output_tokens, once per distinct assistant message id
 	modelTokens  map[string]usage.ModelTokens
 	// records is the timestamped pricing ingestion for the UsagePricing
 	// observer: one usage.Record per non-error, modeled, non-zero-usage
@@ -216,7 +216,7 @@ func (st *scanState) feed(line []byte) {
 				st.lastCtxTotal = ctx
 				st.lastCtxModel = ev.Message.Model
 			}
-			st.totalOut += u.OutputTokens
+			st.totalOut.Add(ev.Message.ID, u.OutputTokens)
 			// Cumulative per-model token ingestion for the native CostPricer
 			// (ADR 0021 §6).
 			if m := ev.Message.Model; m != "" {
@@ -295,7 +295,7 @@ func (st *scanState) finalize() Snapshot {
 		FirstPrompt:   st.firstPrompt,
 		Model:         st.lastCtxModel,
 		ContextTokens: st.lastCtxTotal,
-		TotalTokens:   st.totalOut,
+		TotalTokens:   int(st.totalOut.Total()),
 		SubagentCount: len(st.openTasks),
 		AwaitingInput: len(st.pendingAUQ) > 0,
 	}

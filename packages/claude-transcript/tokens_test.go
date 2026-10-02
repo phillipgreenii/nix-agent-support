@@ -85,3 +85,20 @@ func TestOutputTokens_emptyTranscriptIsZero(t *testing.T) {
 		t.Errorf("OutputTokens = %d, %v; want 0, nil", got, err)
 	}
 }
+
+// OutputTally is the incremental form of the same rule OutputTokens applies.
+func TestOutputTally_dedupesByIDAndCountsNoID(t *testing.T) {
+	var tally OutputTally
+	if got := tally.Total(); got != 0 {
+		t.Fatalf("zero-value Total = %d, want 0", got)
+	}
+	tally.Add("msg_1", 5)
+	tally.Add("msg_1", 90)
+	tally.Add("msg_1", 60)
+	tally.Add("msg_2", 40)
+	tally.Add("", 7)
+	tally.Add("", 8)
+	if got := tally.Total(); got != 90+40+15 {
+		t.Errorf("Total = %d, want %d", got, 90+40+15)
+	}
+}

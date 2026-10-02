@@ -24,8 +24,7 @@ func OutputTokens(path string) (int64, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	perID := map[string]int64{}
-	var noID int64
+	var tally OutputTally
 	sc := newTranscriptScanner(f)
 	for sc.Scan() {
 		var ev Event
@@ -35,21 +34,47 @@ func OutputTokens(path string) (int64, error) {
 		if ev.Type != "assistant" {
 			continue
 		}
-		out := int64(ev.Message.Usage.OutputTokens)
-		if ev.Message.ID == "" {
-			noID += out
-			continue
-		}
-		if out > perID[ev.Message.ID] {
-			perID[ev.Message.ID] = out
-		}
+		tally.Add(ev.Message.ID, ev.Message.Usage.OutputTokens)
 	}
 	if err := sc.Err(); err != nil {
 		return 0, err
 	}
-	total := noID
-	for _, v := range perID {
+	return tally.Total(), nil
+}
+
+// OutputTally accumulates output_tokens across assistant transcript lines
+// incrementally, counting each distinct message id once (see OutputTokens for
+// why a naive per-line sum over-counts). It is the single definition of that
+// rule for callers that fold a transcript line by line (pa-monitor's
+// incremental scanner) rather than reading a whole file. The zero value is
+// ready to use.
+type OutputTally struct {
+	perID map[string]int64
+	noID  int64
+}
+
+// Add folds one assistant line's output_tokens in. Within one id the largest
+// value wins (absorbing a streamed partial line followed by the final one); an
+// empty id cannot be deduplicated and counts on its own.
+func (t *OutputTally) Add(messageID string, outputTokens int) {
+	out := int64(outputTokens)
+	if messageID == "" {
+		t.noID += out
+		return
+	}
+	if t.perID == nil {
+		t.perID = map[string]int64{}
+	}
+	if out > t.perID[messageID] {
+		t.perID[messageID] = out
+	}
+}
+
+// Total returns the deduplicated output_tokens folded in so far.
+func (t *OutputTally) Total() int64 {
+	total := t.noID
+	for _, v := range t.perID {
 		total += v
 	}
-	return total, nil
+	return total
 }

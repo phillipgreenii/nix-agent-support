@@ -104,9 +104,11 @@ Chosen over the recording-rule option (`max_over_time` per
   their whole transcript to date at their first emitted run after migration 011
   (a one-time catch-up).
 - Subagent (sidechain) transcripts are not summed, same as pa-monitor.
-- Finding: `pa_monitor_session_tokens` does not deduplicate assistant lines by
-  message id, although a multi-block assistant turn is written as one line per
-  block with the same usage. On one real transcript the line sum was 687297
-  against 294537 over distinct message ids (about 2.3x). The finished-session
-  counter uses distinct ids, so the live and finished panels differ for the
-  same work until pa-monitor is fixed; both panel descriptions say so.
+- History: `pa_monitor_session_tokens` originally did not deduplicate assistant
+  lines by message id, although a multi-block assistant turn is written as one
+  line per block with the same usage. On one real transcript the line sum was
+  687297 against 294537 over distinct message ids (about 2.3x). pa-monitor now
+  counts each distinct message id once (claude-transcript `OutputTally`, the
+  same rule as `OutputTokens`), so the live gauge and the finished-session
+  counter use the same counting (pg2-e0zo3). A pa-monitor build older than that
+  fix still overcounts until it is applied.
