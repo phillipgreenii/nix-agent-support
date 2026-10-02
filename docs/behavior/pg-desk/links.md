@@ -37,13 +37,23 @@ flowchart LR
 
 ## Per-type links
 
-| Ref type | Links produced                                                                                                                                            |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pr`     | itself (`self`); each issue its text names (`jira`); each thread that mentions it (`mentions`). Build links (`ci`) for failing runs are a later addition. |
-| `issue`  | itself (`self`); the PR it tracks (`work`) or that names it (`jira`); its `parent`                                                                        |
-| `thread` | itself (`self`); the PRs it mentions (`mentions`)                                                                                                         |
+| Ref type | Links produced                                                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr`     | itself (`self`); one `build` link (`ci`) per failing CI run on the current head; each issue its text names (`jira`); each thread that mentions it (`mentions`). |
+| `issue`  | itself (`self`); the PR it tracks (`work`) or that names it (`jira`); its `parent`                                                                              |
+| `thread` | itself (`self`); the PRs it mentions (`mentions`)                                                                                                               |
 
 A ref of any other type — an alert, an agent session — is simply unknown.
+
+A `build` link is read from the CI facts stored with the PR; the verb never asks the network for
+them. A failing run is one the dashboard's CI rollup counts as failed: a run on the PR's current
+head (the newest run per workflow, so a green re-run supersedes an earlier failure), whose name no
+`check_interpreters` pattern excludes, and whose conclusion is neither a pass (`success`,
+`neutral`, `skipped`) nor undecided (still running, `pending`, `expected`). A cancelled run that is
+the newest for its workflow counts as failed. The link's `label` is "`<run name> (<state>)`", its
+`url` is the run's URL and its `state` is the run's conclusion. A PR with no failing run — green,
+still running, or with no stored CI facts — has no `build` link. A failing run with no usable URL
+is omitted (INV-LINKS-3).
 
 A ticket key becomes a URL through the configuration key `links.issue_url_template`: an absolute
 `http(s)` URL containing exactly one `%s`, which is replaced by the URL-escaped key. Where no
@@ -62,8 +72,8 @@ name appears in `pg-desk`.
   stored snapshot URL and no template — MUST NOT be emitted empty. Only plain `http(s)` URLs
   without whitespace or control characters are emitted.
 - **INV-LINKS-4.** Build links MUST honor the same check exclusions as the CI rollup the dashboard
-  shows, so a menu and the dashboard never disagree about whether a build is failing. (Build links
-  themselves ship after the first version of this verb; until they do, no `build` link is emitted.)
+  shows, so a menu and the dashboard never disagree about whether a build is failing. A `build` link
+  is emitted for exactly the CI runs the rollup counts as failed, and for no others.
 
 ## Unmigrated store
 

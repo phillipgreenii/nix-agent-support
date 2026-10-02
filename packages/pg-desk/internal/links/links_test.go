@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -313,5 +314,155 @@ func TestUnmigratedStoreIsDegradedEvenWhenNoRefIsSupported(t *testing.T) {
 	r := resolve(t, deps(st), "alert:grafana:abc")
 	if !r.Degraded || r.Items["alert:grafana:abc"].Known {
 		t.Errorf("result = %+v; want degraded and unknown", r)
+	}
+}
+
+// prFactsWithCI is a stored PR fact set: the PR snapshot (head "h") plus the
+// `ci list` fan-out payload.
+func prFactsWithCI(t *testing.T, headSHA string, runs ...map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"pr_show": map[string]any{"url": "https://scm.example.invalid/acme/api/pull/123", "head_sha": headSHA},
+		"ci":      map[string]any{"runs": runs},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func ciRun(name, conclusion, sha, id, runURL string) map[string]any {
+	return map[string]any{"name": name, "status": "completed", "conclusion": conclusion, "head_sha": sha, "id": id, "attempt": 1, "url": runURL}
+}
+
+func buildKindLinks(r Result, ref string) []Link {
+	var out []Link
+	for _, l := range r.Items[ref].Links {
+		if l.Kind == KindBuild {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// A failing run on the current head becomes one build link (relation ci) with
+// its run URL and state, right after the PR's own link.
+func TestPRLinks_BuildLinkPerFailingRunOnCurrentHead(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", prFactsWithCI(
+		t, "h",
+		ciRun("lint", "success", "h", "1", "https://ci.example.invalid/run/1"),
+		ciRun("unit-tests", "failure", "h", "2", "https://ci.example.invalid/run/2"),
+		ciRun("e2e", "cancelled", "h", "3", "https://ci.example.invalid/run/3"),
+		map[string]any{"name": "slow", "status": "in_progress", "head_sha": "h", "id": "4", "attempt": 1, "url": "https://ci.example.invalid/run/4"},
+	))
+	putDerived(t, st, "pr", testPR, "issue", "ABC-42", "jira", "jira-key")
+
+	links := resolve(t, deps(st), "pr:"+testPR).Items["pr:"+testPR].Links
+	want := []Link{
+		{Kind: KindPR, Relation: "self", Label: "PR #123", URL: "https://scm.example.invalid/acme/api/pull/123"},
+		{Kind: KindBuild, Relation: "ci", Label: "unit-tests (failure)", URL: "https://ci.example.invalid/run/2", State: "failure"},
+		{Kind: KindBuild, Relation: "ci", Label: "e2e (cancelled)", URL: "https://ci.example.invalid/run/3", State: "cancelled"},
+		{Kind: KindIssue, Relation: "jira", Label: "ABC-42", URL: "https://tracker.example.invalid/browse/ABC-42"},
+	}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("links =\n%+v\nwant\n%+v", links, want)
+	}
+}
+
+// No failing run -> no build link: green, pending-only, empty and absent CI
+// facts, and failures that only exist on an older head.
+func TestPRLinks_NoFailingRunsEmitsNoBuildLink(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts func(t *testing.T) string
+	}{
+		{"all green", func(t *testing.T) string {
+			return prFactsWithCI(t, "h", ciRun("lint", "success", "h", "1", "https://ci.example.invalid/run/1"), ciRun("t", "skipped", "h", "2", "https://ci.example.invalid/run/2"))
+		}},
+		{"pending only", func(t *testing.T) string {
+			return prFactsWithCI(t, "h", map[string]any{"name": "slow", "status": "queued", "head_sha": "h", "id": "4", "attempt": 1, "url": "https://ci.example.invalid/run/4"})
+		}},
+		{"no runs", func(t *testing.T) string { return prFactsWithCI(t, "h") }},
+		{"no ci facts at all", func(t *testing.T) string {
+			return `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123","head_sha":"h"}}`
+		}},
+		{"failure only on an older head", func(t *testing.T) string {
+			return prFactsWithCI(t, "h", ciRun("unit", "failure", "old", "1", "https://ci.example.invalid/run/1"), ciRun("unit", "success", "h", "2", "https://ci.example.invalid/run/2"))
+		}},
+		{"failed run superseded by a green rerun on the head", func(t *testing.T) string {
+			return prFactsWithCI(t, "h", ciRun("unit", "failure", "h", "1", "https://ci.example.invalid/run/1"), ciRun("unit", "success", "h", "2", "https://ci.example.invalid/run/2"))
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st := store.OpenNewSchemaForTest(t)
+			putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", c.facts(t))
+			r := resolve(t, deps(st), "pr:"+testPR)
+			if got := buildKindLinks(r, "pr:"+testPR); len(got) != 0 {
+				t.Errorf("build links = %+v; want none", got)
+			}
+			if !r.Items["pr:"+testPR].Known || len(r.Items["pr:"+testPR].Links) != 1 {
+				t.Errorf("item = %+v; want known with only the PR's own link", r.Items["pr:"+testPR])
+			}
+		})
+	}
+}
+
+// INV-LINKS-4: a failing run whose name a check_interpreters pattern excludes
+// is not a build link, exactly as the dashboard's CI rollup ignores it.
+func TestPRLinks_BuildLinksHonorCheckInterpreterExclusions(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", prFactsWithCI(
+		t, "h",
+		ciRun("policy-bot: approvals", "failure", "h", "1", "https://ci.example.invalid/run/1"),
+		ciRun("unit-tests", "failure", "h", "2", "https://ci.example.invalid/run/2"),
+	))
+	d := deps(st)
+	d.CheckInterpreters = []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}, Type: "approval"}}
+	got := buildKindLinks(resolve(t, d, "pr:"+testPR), "pr:"+testPR)
+	want := []Link{{Kind: KindBuild, Relation: "ci", Label: "unit-tests (failure)", URL: "https://ci.example.invalid/run/2", State: "failure"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("build links = %+v; want %+v", got, want)
+	}
+	// Without the interpreter entry both fail, so the exclusion is what hid it.
+	if n := len(buildKindLinks(resolve(t, deps(st), "pr:"+testPR), "pr:"+testPR)); n != 2 {
+		t.Errorf("without exclusions got %d build links; want 2", n)
+	}
+}
+
+// The menu agrees with the dashboard: the build links are non-empty exactly
+// when the CI rollup (cirun-derived) says failure, with a matching head
+// fallback to the stored entity head_sha when pr_show carries none.
+func TestPRLinks_HeadFallsBackToEntityHeadSHA(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	facts, _ := json.Marshal(map[string]any{
+		"pr_show": map[string]any{"url": "https://scm.example.invalid/acme/api/pull/123"},
+		"ci": map[string]any{"runs": []map[string]any{
+			ciRun("unit", "failure", "old", "1", "https://ci.example.invalid/run/1"),
+			ciRun("unit", "success", "h", "2", "https://ci.example.invalid/run/2"),
+		}},
+	})
+	if err := st.UpsertEntity(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testPR, Facts: string(facts), AsOf: "2026-10-01T10:00:00Z", HeadSHA: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := buildKindLinks(resolve(t, deps(st), "pr:"+testPR), "pr:"+testPR); len(got) != 0 {
+		t.Errorf("build links = %+v; want none (the failure is on an older head)", got)
+	}
+}
+
+// INV-LINKS-3: a failing run without a usable URL is omitted, not emitted empty.
+func TestPRLinks_FailingRunWithoutUsableURLIsOmitted(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", prFactsWithCI(
+		t, "h",
+		ciRun("no-url", "failure", "h", "1", ""),
+		ciRun("bad-url", "failure", "h", "2", "javascript:alert(1)"),
+		ciRun("good", "timed_out", "h", "3", "https://ci.example.invalid/run/3"),
+	))
+	got := buildKindLinks(resolve(t, deps(st), "pr:"+testPR), "pr:"+testPR)
+	want := []Link{{Kind: KindBuild, Relation: "ci", Label: "good (timed_out)", URL: "https://ci.example.invalid/run/3", State: "timed_out"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("build links = %+v; want %+v", got, want)
 	}
 }

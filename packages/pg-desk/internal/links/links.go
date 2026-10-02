@@ -13,12 +13,15 @@
 package links
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cirun"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
@@ -76,6 +79,9 @@ type Deps struct {
 	Patterns []string
 	// IssueURLTemplate is config links.issue_url_template ("" when unset).
 	IssueURLTemplate string
+	// CheckInterpreters is config check_interpreters: the build links drop the
+	// runs these patterns exclude, exactly as the dashboard's CI rollup does.
+	CheckInterpreters []config.CheckInterpreterConfig
 }
 
 // Subject is what a Strategy is handed for one ref.
@@ -96,9 +102,9 @@ type Strategy interface {
 // Registry maps an entity type name to its Strategy.
 type Registry map[string]Strategy
 
-// NewRegistry registers the supported types: pr, issue and thread. Build links
-// (CI runs on the current head) join the pr strategy as a further producer in
-// a later change; nothing in the contract changes when they do.
+// NewRegistry registers the supported types: pr, issue and thread. The pr
+// strategy is where the build producer joins: one build link per failing CI
+// run on the current head, read from the stored facts (no network).
 func NewRegistry() Registry {
 	return Registry{
 		entityTypePR:     prStrategy{},
@@ -245,12 +251,14 @@ func selfLink(kind, label, u string) []Link {
 
 type prStrategy struct{}
 
-// Links for a PR: itself; the issues its text names (relation jira); the
-// threads that mention it.
+// Links for a PR: itself; one build link per failing CI run on its current
+// head (relation ci); the issues its text names (relation jira); the threads
+// that mention it.
 func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 	var out []Link
 	if s.Entity != nil {
 		out = append(out, selfLink(KindPR, prLabel(s.ID), SnapshotURL(entityTypePR, s.Entity.Facts))...)
+		out = append(out, buildLinks(d, s.Entity)...)
 	}
 	prFacts := ""
 	if s.Entity != nil {
@@ -273,6 +281,37 @@ func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 		}
 	}
 	return out, nil
+}
+
+// buildLinks is the build producer of the pr strategy: one link per CI run on
+// the PR's current head that the dashboard's CI rollup counts as failed. The
+// runs come from the stored facts (the `ci list` fan-out), read through
+// cirun so the head-only, newest-per-workflow and check_interpreters
+// exclusion rules are the rollup's own (INV-LINKS-4). A failed run without a
+// usable URL is dropped by dedupe (INV-LINKS-3).
+func buildLinks(d Deps, e *store.Entity) []Link {
+	var facts struct {
+		PRShow struct {
+			HeadSHA string `json:"head_sha"`
+		} `json:"pr_show"`
+		CI json.RawMessage `json:"ci"`
+	}
+	if err := json.Unmarshal([]byte(e.Facts), &facts); err != nil || len(facts.CI) == 0 {
+		return nil
+	}
+	head := facts.PRShow.HeadSHA
+	if head == "" {
+		head = e.HeadSHA
+	}
+	var out []Link
+	for _, r := range cirun.Evaluate(facts.CI, d.CheckInterpreters, head) {
+		if r.Outcome != cirun.Failed {
+			continue
+		}
+		state := r.Conclusion
+		out = append(out, Link{Kind: KindBuild, Relation: relationCI, Label: r.Name + " (" + state + ")", URL: cleanURL(r.URL), State: state})
+	}
+	return out
 }
 
 type issueStrategy struct{}

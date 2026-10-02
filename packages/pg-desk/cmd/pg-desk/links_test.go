@@ -236,3 +236,48 @@ func TestAttentionPRIDEqualsPgDeskPREntityID(t *testing.T) {
 		t.Errorf("the attention item %s:%s is unknown to the links verb", item.Type, item.ID)
 	}
 }
+
+// The verb wires config check_interpreters into the build links: the failing
+// run an interpreter pattern excludes is not offered, the other one is.
+func TestLinksVerbBuildLinksHonorConfigCheckInterpreters(t *testing.T) {
+	store.SetSynchronousForTests("OFF")
+	path := filepath.Join(t.TempDir(), "links-ci.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEntity(store.Entity{
+		Repo: "acme/api", EntityType: "pr", EntityID: "acme/api#123", AsOf: "2026-10-01T10:00:00Z",
+		Facts: `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123","head_sha":"h"},` +
+			`"ci":{"runs":[` +
+			`{"id":"1","name":"policy-bot: approvals","status":"completed","conclusion":"failure","head_sha":"h","attempt":1,"url":"https://ci.example.invalid/run/1"},` +
+			`{"id":"2","name":"unit-tests","status":"completed","conclusion":"failure","head_sha":"h","attempt":1,"url":"https://ci.example.invalid/run/2"}]}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Cutover(); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repos:             []config.RepoConfig{{Remote: "acme/api"}},
+		CheckInterpreters: []config.CheckInterpreterConfig{{Patterns: []string{"^policy-bot"}, Type: "approval"}},
+	}
+	withLinksSeams(t, cfg, func() (*store.Store, error) { return store.OpenReadOnly(path) })
+	out, err := runLinks(t, "", []string{"json"}, "pr:acme/api#123")
+	if err != nil {
+		t.Fatalf("links: %v", err)
+	}
+	var builds []links.Link
+	for _, l := range decodeLinks(t, out).Items["pr:acme/api#123"].Links {
+		if l.Kind == links.KindBuild {
+			builds = append(builds, l)
+		}
+	}
+	want := links.Link{Kind: "build", Relation: "ci", Label: "unit-tests (failure)", URL: "https://ci.example.invalid/run/2", State: "failure"}
+	if len(builds) != 1 || builds[0] != want {
+		t.Fatalf("build links = %+v; want [%+v]", builds, want)
+	}
+}

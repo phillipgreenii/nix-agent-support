@@ -22,7 +22,7 @@ var linksFlags linksCmdFlags
 
 // linksCmd implements `pg-desk links --json <type>:<id>... | --stdin`
 // [docs/behavior/pg-desk/links.md]: a read-only batch lookup of the
-// cross-reference links (PR, issue, thread) the local store knows for each
+// cross-reference links (PR, build, issue, thread) the local store knows for each
 // attention-style ref. It reads the store only (INV-LINKS-1): no network, no
 // hydration, no write. An unknown ref is data (known:false), not an error
 // (INV-LINKS-2). Exit 0 on any answer; exit 1 when the store cannot be read,
@@ -74,10 +74,11 @@ func execLinks(cmd *cobra.Command, args []string) error {
 	defer func() { _ = st.Close() }()
 
 	res, err := links.Resolve(links.Deps{
-		Store:            st,
-		Repo:             cfg.Repos[0].Remote,
-		Patterns:         cfg.TicketPatterns,
-		IssueURLTemplate: cfg.Links.IssueURLTemplate,
+		Store:             st,
+		Repo:              cfg.Repos[0].Remote,
+		Patterns:          cfg.TicketPatterns,
+		IssueURLTemplate:  cfg.Links.IssueURLTemplate,
+		CheckInterpreters: cfg.CheckInterpreters,
 	}, refs)
 	if err != nil {
 		return fmt.Errorf("links: %w", err)

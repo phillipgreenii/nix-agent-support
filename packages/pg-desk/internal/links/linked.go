@@ -50,6 +50,7 @@ const (
 	relationWork     = "work"
 	relationParent   = "parent"
 	relationMentions = "mentions"
+	relationCI       = "ci"
 	entityTypePR     = "pr"
 	entityTypeIssue  = "issue"
 	entityTypeThread = "thread"

@@ -5,9 +5,9 @@ import (
 	"path"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cirun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
 
@@ -187,10 +187,10 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 }
 
 // --- CI rollup (checks rollup signal) ---------------------------------------
-// Ported from packages/pg-pr/internal/cirollup.Compute/Classify, decoding
-// gather.Facts.CI's raw `ci list` fan-out payload ({"runs":[...],
-// "sources":[...]}) directly rather than importing pkg/schema (see
-// interpret.go's decode-shape comment). The exclusion set is derived from
+// Ported from packages/pg-pr/internal/cirollup.Compute/Classify; the run
+// reading itself now lives in internal/cirun (shared with the links verb).
+// The fan-out payload gather.Facts.CI is decoded directly rather than via
+// pkg/schema (see interpret.go's decode-shape comment). The exclusion set is derived from
 // cfg.CheckInterpreters' Patterns (union across every entry regardless of
 // Type — mirroring internal/snapshot/builder.go's excluderFromInterpreters),
 // consuming this packet's pinned check_interpreters Config field.
@@ -201,115 +201,21 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 // by this phase's own code, mirroring config.go's own established
 // convention for other not-yet-consumed keys.
 
-type ciRunFact struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	HeadSHA    string `json:"head_sha"`
-	Attempt    int    `json:"attempt"`
-}
-
-type ciFanOut struct {
-	Runs []ciRunFact `json:"runs"`
-}
-
 type ciRollupResult struct {
 	State string // none | pending | success | failure
 }
 
-func compileExcluder(interps []config.CheckInterpreterConfig) func(name string) bool {
-	var pats []*regexp.Regexp
-	for _, ip := range interps {
-		for _, p := range ip.Patterns {
-			re, err := regexp.Compile(p)
-			if err != nil {
-				continue // mis-configured pattern must not break interpretation
-			}
-			pats = append(pats, re)
-		}
-	}
-	if len(pats) == 0 {
-		return func(string) bool { return false }
-	}
-	return func(name string) bool {
-		for _, re := range pats {
-			if re.MatchString(name) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-// ciRunNewer reports whether a supersedes b (same workflow name, same SHA):
-// higher attempt wins, then higher numeric id (string compare if unparsable).
-func ciRunNewer(a, b ciRunFact) bool {
-	if a.Attempt != b.Attempt {
-		return a.Attempt > b.Attempt
-	}
-	ai, aerr := strconv.ParseUint(a.ID, 10, 64)
-	bi, berr := strconv.ParseUint(b.ID, 10, 64)
-	if aerr == nil && berr == nil {
-		return ai > bi
-	}
-	return a.ID > b.ID
-}
-
-// currentCIRuns narrows the fan-out's run history to the runs that describe the
-// PR's current state: only runs on the head SHA, collapsed to the newest run per
-// workflow name. Runs that cannot be attributed to a SHA (headSHA unknown, or the
-// run carries no head_sha) fall back to the old behavior: kept as-is, uncollapsed.
-func currentCIRuns(runs []ciRunFact, headSHA string) []ciRunFact {
-	var out []ciRunFact
-	newest := map[string]int{} // workflow name -> index in out
-	for _, r := range runs {
-		if headSHA == "" || r.HeadSHA == "" {
-			out = append(out, r)
-			continue
-		}
-		if r.HeadSHA != headSHA {
-			continue
-		}
-		if i, ok := newest[r.Name]; ok {
-			if ciRunNewer(r, out[i]) {
-				out[i] = r
-			}
-			continue
-		}
-		newest[r.Name] = len(out)
-		out = append(out, r)
-	}
-	return out
-}
-
 // computeCIRollup rolls the `pg-connector ci list` fan-out up to one state.
-// That payload is the PR branch's workflow-run HISTORY across every pushed
-// commit (capped at 100), not just the head commit: pushing a new commit makes
-// GitHub cancel the previous commit's in-flight runs (concurrency
-// cancel-in-progress), and counting those `cancelled` runs would report a
-// failure for a PR whose head commit is green (pg-connector marks them
-// stale:false, so that flag cannot be used). So only runs on headSHA count, and
-// among those only the newest run per workflow name (highest attempt, then
-// highest id) — re-runs supersede earlier attempts. A cancelled run that is
-// itself the newest for its name still counts as failure.
+// Which runs count (head-SHA only, newest per workflow name, check_interpreters
+// exclusions) is decided by internal/cirun, shared with the `links` verb so a
+// menu's build links and this rollup never disagree.
 func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string) ciRollupResult {
-	var fo ciFanOut
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &fo) // malformed payload degrades to no runs, not an error
-	}
-	excluded := compileExcluder(interpreters)
 	var passed, failed, pending int
-	for _, r := range currentCIRuns(fo.Runs, headSHA) {
-		if excluded(r.Name) {
-			continue
-		}
-		if r.Status != "completed" || r.Conclusion == "" || r.Conclusion == "pending" || r.Conclusion == "expected" {
+	for _, r := range cirun.Evaluate(raw, interpreters, headSHA) {
+		switch r.Outcome {
+		case cirun.Pending:
 			pending++
-			continue
-		}
-		switch r.Conclusion {
-		case "success", "neutral", "skipped":
+		case cirun.Passed:
 			passed++
 		default:
 			failed++
