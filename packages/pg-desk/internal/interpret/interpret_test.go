@@ -424,8 +424,9 @@ func TestComputeApprovals(t *testing.T) {
 }
 
 // TestComputeApprovals_SelfApproved covers the "do I already have a current
-// APPROVED review" signal classifyPanel's team branch needs to route an
-// assigned reviewer to team_awaiting_owner instead of team_awaiting_me.
+// APPROVED review" signal computeApprovals exposes on the served payload.
+// (classifyPanel no longer routes a requested reviewer on it: requested &&
+// SelfApproved is a re-request and stays team_awaiting_me, pg2-4ajtt.)
 func TestComputeApprovals_SelfApproved(t *testing.T) {
 	pr := prShow{Reviews: []prReview{
 		{Author: "alice", State: "APPROVED"},
@@ -788,7 +789,9 @@ func TestClassifyPanel(t *testing.T) {
 				PanelTeamAwaitingOwner,
 			},
 			{"clean, I'm requested, I haven't approved -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingMe},
-			{"clean, I'm requested, I already approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingOwner},
+			{"clean, I'm requested, I already approved (re-request) -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingMe},
+			{"clean, I'm requested, I already approved and others approved (re-request) -> awaiting me", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true, HumanApproved: true}, []string{MatchReasonReviewRequested}, PanelTeamAwaitingMe},
+			{"clean, NOT requested, I already approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{SelfApproved: true, HumanApproved: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 			{"clean, not requested, nobody approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingTeam},
 			{"clean, not requested, someone else approved -> awaiting owner", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, []string{MatchReasonTeamAuthored}, PanelTeamAwaitingOwner},
 		}

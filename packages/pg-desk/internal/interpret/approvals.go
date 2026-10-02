@@ -369,8 +369,12 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     "blocked wins even if I'm assigned and already approved".
 //   - Team, once not blocked: if I'm a requested reviewer
 //     (MatchReasonReviewRequested) and haven't approved yet ->
-//     team_awaiting_me; if I have -> team_awaiting_owner (the ball is back
-//     with the PR's owner/other reviewers). If I'm not requested: any
+//     team_awaiting_me; if I have ALREADY approved, a live request still
+//     -> team_awaiting_me (operator ruling, 2026-10-02, bead pg2-4ajtt:
+//     GitHub drops a reviewer from review_requests once they submit any
+//     review, so requested && SelfApproved is the RE-REQUEST case -- the
+//     PR author explicitly asked me to look again -- and a live
+//     re-request wins over the prior approval). If I'm not requested: any
 //     existing human approval -> team_awaiting_owner, otherwise ->
 //     team_awaiting_team.
 //   - Mine, once not blocked: any unresolved review-thread comment ->
@@ -418,9 +422,9 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 
 	_, requested := toSet(matchReasons)[MatchReasonReviewRequested]
 	if requested {
-		if appr.SelfApproved {
-			return PanelTeamAwaitingOwner
-		}
+		// A live review request wins over a prior self-approval: GitHub
+		// clears the request on any submitted review, so requested &&
+		// SelfApproved means the author re-requested (pg2-4ajtt).
 		return PanelTeamAwaitingMe
 	}
 	if appr.HumanApproved {

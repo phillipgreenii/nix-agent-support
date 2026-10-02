@@ -167,9 +167,10 @@ type Approvals struct {
 	HumanApprovers int  `json:"human_approvers"`
 	HumanApproved  bool `json:"human_approved"`
 	// SelfApproved is true iff SelfLogin has a currently APPROVED review on
-	// this PR — classifyPanel's team branch uses this to route an assigned
-	// reviewer who has already approved to team_awaiting_owner instead of
-	// team_awaiting_me. No staleness axis (see this package's own doc
+	// this PR. classifyPanel's team branch no longer routes on it (operator
+	// ruling 2026-10-02, pg2-4ajtt: a requested reviewer who has already
+	// approved is a RE-REQUEST and stays team_awaiting_me), but it remains
+	// part of the served Approvals payload. No staleness axis (see this package's own doc
 	// comment): a self-approval standing from before the PR's latest push
 	// still reads true here — a documented, currently-unavoidable gap, not
 	// a bug in this field.

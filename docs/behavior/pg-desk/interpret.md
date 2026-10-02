@@ -57,9 +57,11 @@ and MUST NOT use an LLM for any step below.
     `[bot]`, and a small set of known bots GitHub reports without that suffix on reviews
     (`github-actions`, `dependabot`, `copilot-pull-request-reviewer`).
   - **Team**, once not blocked: if the operator is a requested reviewer and has not yet approved
-    → `team_awaiting_me`; if the operator has already approved → `team_awaiting_owner` (the ball
-    is back with the PR's owner or other reviewers). If the operator is not a requested reviewer:
-    any existing human approval → `team_awaiting_owner`, otherwise → `team_awaiting_team`. Blocked
+    → `team_awaiting_me`; if the operator has already approved but is still a requested reviewer →
+    also `team_awaiting_me` (GitHub drops a reviewer from the requested list once they submit any
+    review, so a requested-and-already-approved operator means the PR author re-requested a look,
+    usually after new commits; a live re-request wins over the prior approval). If the operator is
+    not a requested reviewer: any existing human approval → `team_awaiting_owner`, otherwise → `team_awaiting_team`. Blocked
     → `team_awaiting_owner` (fixing CI/conflicts/disapprovals is the PR owner's job, not the
     reviewer's).
   - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
