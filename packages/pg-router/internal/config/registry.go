@@ -19,6 +19,31 @@ import (
 // Duration. Used for [pool].budget.time and per-role budget.time.
 type duration struct{ D time.Duration }
 
+// byteSize is a TOML byte-count value: an integer ("max_log_bytes = 67108864") or a
+// string with a unit ("max_log_bytes = \"64MiB\""), parsed by ParseBytes - the same
+// grammar PG_ROUTER_MAX_LOG_BYTES takes (bead pg2-maxn1, which closes the gap
+// pg2-5d3ui left: TOML used to accept an integer only). Anything else (a float, a
+// boolean, an unparseable string) is an error naming the value, never a silent
+// default.
+type byteSize int64
+
+// UnmarshalTOML implements toml.Unmarshaler.
+func (b *byteSize) UnmarshalTOML(data any) error {
+	switch v := data.(type) {
+	case int64:
+		*b = byteSize(v)
+		return nil
+	case string:
+		n, err := ParseBytes(v)
+		if err != nil {
+			return err
+		}
+		*b = byteSize(n)
+		return nil
+	}
+	return fmt.Errorf("want an integer byte count or a string with a unit such as \"64MiB\", got %v (%T)", data, data)
+}
+
 func (d *duration) UnmarshalText(text []byte) error {
 	v, err := time.ParseDuration(string(text))
 	if err != nil {
@@ -60,11 +85,11 @@ type poolTOML struct {
 	// compaction of the log (bead pg2-8e0m6). A pointer so an explicit 0
 	// (disable runtime compaction) is distinguishable from absent (keep the
 	// default / env value).
-	CompactThresholdBytes *int64 `toml:"compact_threshold_bytes"`
+	CompactThresholdBytes *byteSize `toml:"compact_threshold_bytes"`
 	// MaxLogBytes is the HARD size limit of the queue.jsonl write-ahead log (bead
 	// pg2-5d3ui). A pointer so an explicit 0 is distinguishable from absent (and
 	// rejected, rather than silently meaning "default").
-	MaxLogBytes *int64 `toml:"max_log_bytes"`
+	MaxLogBytes *byteSize `toml:"max_log_bytes"`
 	// OperatorPausedPath / CICDDownPath / DiskSpaceLowPath are RETIRED (bead
 	// pg2-h63eu): they named the file-backed gates the Gate Registry replaced.
 	// They are still decoded so a config that carries them keeps loading;
@@ -243,13 +268,13 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 		if *v < 0 {
 			return nil, fmt.Errorf("pool.compact_threshold_bytes must be >= 0 (0 disables runtime compaction), got %d", *v)
 		}
-		c.CompactThresholdBytes = *v
+		c.CompactThresholdBytes = int64(*v)
 	}
 	if v := shape.Pool.MaxLogBytes; v != nil {
 		if *v <= 0 {
 			return nil, fmt.Errorf("pool.max_log_bytes must be > 0, got %d", *v)
 		}
-		c.MaxLogBytes = *v
+		c.MaxLogBytes = int64(*v)
 	}
 	// Pool-wide retry-cadence defaults (INV-FAIL-2 / INV-FAIL-3, pg2-0c8yz) MUST
 	// resolve before buildRole/buildQueries below, since both read c.RetryBackoff

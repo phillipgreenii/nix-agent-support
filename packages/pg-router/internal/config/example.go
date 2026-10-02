@@ -60,6 +60,7 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # log size limit"):
 # [pool]
 # max_log_bytes = 67108864
+# (an integer byte count, or a string with a unit: max_log_bytes = "64MiB")
 # The retired [pool].operator_paused_path / cicd_down_path / disk_space_low_path
 # keys are ignored (with a warning); see MIGRATION.md.
 #

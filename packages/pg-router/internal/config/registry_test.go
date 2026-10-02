@@ -645,6 +645,53 @@ func TestLoad_maxLogBytesBadValuesRejected(t *testing.T) {
 	}
 }
 
+// [pool] max_log_bytes and compact_threshold_bytes take an integer OR a string with
+// a unit - the same grammar PG_ROUTER_MAX_LOG_BYTES takes (bead pg2-maxn1) - and a
+// value that is neither is an error naming the key, never a silent default.
+func TestLoad_poolByteSizesTakeStringsWithUnits(t *testing.T) {
+	absentGlobalConfig(t)
+	for _, tc := range []struct {
+		name        string
+		toml        string
+		wantMax     int64
+		wantCompact int64
+	}{
+		{"integers", "[pool]\nmax_log_bytes = 134217728\ncompact_threshold_bytes = 2097152\n", 128 << 20, 2 << 20},
+		{"strings with units", "[pool]\nmax_log_bytes = \"128MiB\"\ncompact_threshold_bytes = \"2 MiB\"\n", 128 << 20, 2 << 20},
+		{"decimal unit", "[pool]\nmax_log_bytes = \"200MB\"\ncompact_threshold_bytes = \"1MB\"\n", 200_000_000, 1_000_000},
+		{"a bare-number string", "[pool]\nmax_log_bytes = \"134217728\"\ncompact_threshold_bytes = \"0\"\n", 128 << 20, 0},
+		{"mixed", "[pool]\nmax_log_bytes = \"1GiB\"\ncompact_threshold_bytes = 4096\n", 1 << 30, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeCfg(t, tc.toml+compactCfgBody)
+			c, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.MaxLogBytes != tc.wantMax || c.CompactThresholdBytes != tc.wantCompact {
+				t.Fatalf("MaxLogBytes = %d, CompactThresholdBytes = %d; want %d, %d", c.MaxLogBytes, c.CompactThresholdBytes, tc.wantMax, tc.wantCompact)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, toml, wantErr string }{
+		{"max: unparseable string", "[pool]\nmax_log_bytes = \"lots\"\n", "max_log_bytes"},
+		{"max: unknown unit", "[pool]\nmax_log_bytes = \"64megabytes\"\n", "unknown unit"},
+		{"max: negative string", "[pool]\nmax_log_bytes = \"-5\"\n", "max_log_bytes"},
+		{"max: zero string", "[pool]\nmax_log_bytes = \"0\"\n", "max_log_bytes must be > 0"},
+		{"max: float", "[pool]\nmax_log_bytes = 1.5\n", "max_log_bytes"},
+		{"max: boolean", "[pool]\nmax_log_bytes = true\n", "max_log_bytes"},
+		{"compact: unparseable string", "[pool]\ncompact_threshold_bytes = \"some\"\n", "compact_threshold_bytes"},
+		{"compact: float", "[pool]\ncompact_threshold_bytes = 0.5\n", "compact_threshold_bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeCfg(t, tc.toml+compactCfgBody)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load error = %v, want one containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseBytes(t *testing.T) {
 	for _, tc := range []struct {
 		in      string

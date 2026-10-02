@@ -165,7 +165,7 @@ Pool-wide settings come from PG_ROUTER_* environment variables:
   PG_ROUTER_MAX_LOG_BYTES    HARD size limit of queue.jsonl (default 67108864 = 64 MiB; a plain byte count or
                            a unit such as 64MiB / 200MB; zero, negative or unparseable is an error). Above 90%
                            of it polled emitters are halted (listeners, timers and pushed events keep running);
-                           at it new events are rejected with a log_full reason. [pool].max_log_bytes overrides it
+                           at it new events are rejected with a log_full reason. [pool].max_log_bytes (an integer or a string such as "64MiB") overrides it
   PG_ROUTER_METRICS_ADDR     listen address (host:port) for run's OTel Prometheus /metrics
                            endpoint (default disabled); run's --metrics-addr flag > this env
                            var > disabled, the same precedence PG_ROUTER_TUI_INTERVAL uses

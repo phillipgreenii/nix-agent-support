@@ -237,7 +237,8 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_MAX_LOG_BYTES` — the HARD size limit of `queue.jsonl`: at or above it new events are
   rejected with a `log_full` reason; default `67108864` (64 MiB). Accepts a plain byte count or a
   unit (`64MiB`, `200MB`, `1 GiB`); an unparseable value, zero or a negative is an error (never
-  silently the default). `[pool].max_log_bytes` in `config.toml` overrides it. The derived soft
+  silently the default). `[pool].max_log_bytes` in `config.toml` overrides it and takes the same
+  grammar: an integer or a string (`max_log_bytes = "64MiB"`); so does `compact_threshold_bytes`. The derived soft
   threshold is 90% of it, and `compact_threshold_bytes < soft < max_log_bytes` is enforced at load.
   See "Queue log size limit" below.
 - `PG_ROUTER_TUI_INTERVAL` — `tui`'s poll interval, floor-clamped to `250ms` (default `1s`). Precedence:
