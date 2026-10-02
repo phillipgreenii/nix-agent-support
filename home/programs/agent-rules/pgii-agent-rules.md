@@ -128,6 +128,10 @@
   the `worktree-review` or `human` labels, an agent MUST invoke the `beads-lifecycle` skill
   first if it has not already done so this session.
 - Rule-ID family map: `B-*`/`D-*`/`F-*`/`P-*`/`W-*` all live in `beads-lifecycle`.
+- **Handoff beads**: when a bead you are about to read, claim, work, or close is of type
+  `handoff`, or before creating one (for example at session wrap-up), invoke the
+  `beads-lifecycle:handoff-bead` skill first. It is the sole contract; an ambiguous bead is NOT a
+  handoff.
 - **B-1/B-2 essence** (always-on regardless of skill invocation, since a tool-restricted
   subagent with Bash but no Skill tool can still violate it): whatever claims a bead MUST
   release it before ending — every exit path MUST end `closed` or released — and a release

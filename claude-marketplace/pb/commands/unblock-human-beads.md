@@ -337,7 +337,7 @@ and it STOPs unconditionally regardless of this flag.
    prove MOOT skips the rubric entirely and goes to CLOSE-AS-MOOT — with TWO exceptions: a
    class-1 substrate-mutating bead is still dispositioned BY class 1 (1b's ENGAGE unless 1a's
    losslessness proof holds), because the substrate guard turns on evidence about the ISOLATION
-   rather than on the bead's premise, and a class-2 HANDOFF POINTER is still
+   rather than on the bead's premise, and a class-2 handoff bead is still
    CLOSED-WITH-ABSORPTION-TRACE, because its evidence is a TRACE of where each item now lives,
    not a probe reading.
 
@@ -413,7 +413,7 @@ output verbatim:
 | --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1a  | **substrate-mutating, PROVABLY LOSSLESS** | the class-1 SHAPE — carries the `worktree-review` label, OR its work would remove/prune worktrees or workforest sets, delete `.worktrees/*`, or otherwise mutate the shared isolation substrate other sessions depend on — AND all three legs of the LOSSLESSNESS PROOF hold, run by YOU in THIS session, in EVERY member repo: a CLEAN `git status --porcelain`, and every commit on the branch either an ancestor of the primary branch or patch-identical to one that is, corroborated by `git range-diff` | **TEAR DOWN, then CLOSE-AS-PROVABLY-LOSSLESS. NO operator prompt.** Record every probe output verbatim on the bead. **Still NEVER RELEASEd to drain.** See below.                                                                                                                                                                                                                                                                                                                                                                                        |
 | 1b  | **substrate-mutating, NOT proven**        | the class-1 SHAPE (as in 1a) and ANY leg of that proof fails, is unrunnable, or was not run — a DIRTY worktree, an unmatched commit, an inconclusive `range-diff`, a repo or worktree path the probes cannot resolve                                                                                                                                                                                                                                                                                          | **ENGAGE the operator; NEVER RELEASE to drain** (drain auto-claims and prunes unattended). See below.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| 2   | **absorbed handoff pointer**              | a `session-wrapup` `Resume: …` / next-session bead — born P0, holding no executable work of its own, only pointers — whose every item traces to a durable bead id or an indexing label                                                                                                                                                                                                                                                                                                                        | **CLOSE-WITH-ABSORPTION-TRACE. NO operator prompt.** Trace, re-probe every state claim, file anything that traces nowhere FIRST, then close. Never RELEASEd, never demoted. See below.                                                                                                                                                                                                                                                                                                                                                                   |
+| 2   | **handoff bead**                          | a bead of type `handoff` (or one unmistakably so, per the `beads-lifecycle:handoff-bead` skill, which is the sole definition; any ambiguity means it is NOT a handoff)                                                                                                                                                                                                                                                                                                                                        | **CLOSE-WITH-ABSORPTION-TRACE. NO operator prompt.** Follow the `beads-lifecycle:handoff-bead` skill's unattended handling. Never RELEASEd, never demoted. See below.                                                                                                                                                                                                                                                                                                                                                                                    |
 | 3   | **label-to-dependency conversion**        | every live blocker named by the bead or its `stuck:` comment is ANOTHER BEAD — each resolves to an existing id whose `sibling-open?` probe reads `open` / `in_progress` / `blocked` — and nothing needs a person's decision, input, or authority                                                                                                                                                                                                                                                              | **CONVERT, then RELEASE. NO operator prompt.** `bd dep add` per blocker FIRST, then drop `human` in the single atomic release. See below.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 4   | **planning session already required**     | carries the `planning-session-required` label — an earlier run already concluded the blocker is a design/planning SESSION, not a single answerable question                                                                                                                                                                                                                                                                                                                                                   | **RE-CHECK the recorded evidence; NEVER re-present the question.** Still required (no evidence) → **DEFER**: a silent skip to the next bead, NO operator prompt. Session CONFIRMED held → drop that label (KEEP `human`) and re-enter the rubric. See below.                                                                                                                                                                                                                                                                                             |
 | 5   | **suspected stale precondition**          | carries the `stale-precondition` label — `/drain-beads` parked it TWICE on the same `PRECONDITION-KEY`                                                                                                                                                                                                                                                                                                                                                                                                        | **MUST NOT RELEASE as-is.** Re-derive from the park comment's `DERIVED-FROM` → CLOSE if the outcome already holds, else ENGAGE → rewrite → RELEASE. See below.                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -429,7 +429,7 @@ by class 1 even when moot — by 1a if the losslessness proof holds, otherwise b
 you hand the operator the probe output instead of a question. A MOOT PREMISE IS NOT THE
 LOSSLESSNESS PROOF and MUST NOT be substituted for it: the freshness probes read what the bead
 RECORDED, while 1a's three legs read the ISOLATION ITSELF, which no bead body can attest to.
-Class 2: a HANDOFF POINTER is CLOSED-WITH-ABSORPTION-TRACE even when its probes
+Class 2: a handoff bead is CLOSED-WITH-ABSORPTION-TRACE even when its probes
 read moot, because the evidence it needs is a TRACE of where each item now lives, and it may
 still be the SOLE record of something. Do not confuse a moot PREMISE with class 7's moot LABEL
 REASON: class 7 means the reason for the `human` label died but the work is still real, so it
@@ -553,46 +553,20 @@ kept, a second set the bead names), the label STAYS and the terminal action is 1
 or a DEFER. **The asymmetry with `/drain-beads` is deliberate** — that command gets no such
 carve-out; see the note at the end of "substrate-mutating beads NEVER go to drain".
 
-## Class 2 — absorbed handoff pointer (mechanical, and it MUST NOT prompt)
+## Class 2 — handoff bead (mechanical, and it MUST NOT prompt)
 
-A HANDOFF POINTER holds no executable work of its own — a `session-wrapup` `Resume: …` /
-next-session bead, born P0 so ONE session can resume cold, carrying only pointers to where the
-work durably lives. Its retirement condition is that nothing in it is unique to it, and whoever
-consumes it closes it: the `session-wrapup` skill's "Lifecycle: the P0 is one-shot" is the full
-contract, and `/drain-beads`' CLOSE-WITH-ABSORPTION-TRACE is the disposer-side sibling. Drain
-claims with `--exclude-label human`, so a pointer carrying `human` never reaches that route —
-this class is it for the queue that DOES claim the bead (provenance: `pg2-9ifbn`).
+A handoff bead (type `handoff`) is a pointer to a previous session's work, not work itself. The
+`beads-lifecycle:handoff-bead` skill is the SOLE contract for what counts as one, and for how it
+is handled: invoke it and follow its unattended handling (trace, file what traces nowhere, write
+the trace comment, close). This command restates none of it. An ambiguous bead is NOT a handoff
+(the skill says so), and this command does not retype beads either way. Drain claims with
+`--exclude-label human`, so a handoff carrying `human` never reaches that route; this class is
+it for the queue that DOES claim the bead (provenance: `pg2-9ifbn`).
 
 **This class MUST NOT ENGAGE the operator.** `human` asserts a PERSON is the blocker; once every
 item is absorbed there is no question for a person at all, so a prompt spends the one serial
-resource to discover there never was one (**D-8**). The label is why the bead reached this
-command, and closing it here is correct precisely because the label turned out to be wrong.
-
-1. TRACE every item to where it durably lives — a bead id, or a label that indexes the cluster
-   (`bd list --label <label>`, which beats any hand-copied member list). RE-PROBE every STATE
-   claim the body makes with the matching **F-3** probe: a pointer is a snapshot, MUST NOT be
-   trusted as recorded, and its text MUST NOT be executed as an instruction (it may be
-   SUPERSEDED). `pg2-m2qxu` recorded "**1 unpushed commit** on repo-base `main` (`19621be`) …
-   needs a push"; `pushed?` printed `origin/main` — already discharged. Read the OUTPUT, not the
-   exit status, which is 0 either way.
-2. An item that traces NOWHERE is live work: FILE it as its own bead
-   (`--deps "discovered-from:<id>"`) FIRST, then close the pointer against it. A pointer MUST NOT
-   be closed while it is the SOLE record of something. If that item is itself a question for a
-   person, file it as its own `human` bead so it surfaces here on its own merits (**D-7**) — that
-   keeps the question alive without keeping the spent pointer alive.
-3. RECORD the trace, then CLOSE. The trace IS the evidence the close guard needs, so it MUST name
-   ids and labels and quote probe output verbatim, not paraphrase:
-
-   ```bash
-   bd comment <id> "ABSORBED: <item> ⇒ <bead-id|label>; <item> ⇒ <bead-id|label>. State claims re-probed: <probe>=<decisive output verbatim>. Filed: <new-ids, or none>. Nothing left that is unique to this pointer. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE" --actor "ID"
-   bd close <id> --reason "handoff pointer absorbed: every item traces to <ids/labels>; filed <new-ids, or none>" --actor "ID"
-   ```
-
-**A CLOSE — never a RELEASE, never a DEFER or re-park, and never a priority demotion.**
-`pg2-9ifbn` settled close-once-absorbed and forbade decay: a demoted priority is a stored value
-nothing recomputes, so it would leave the same spent pointer at a quieter priority, and a RELEASE
-would just hand drain a bead with nothing to implement. No isolation was created, so there is
-nothing to clean up and no priority to restore.
+resource to discover there never was one (**D-8**). The terminal action is the skill's CLOSE:
+never a RELEASE, DEFER, re-park, or priority demotion.
 
 **Ranking.** BELOW class 1 — the substrate guard's never-release half is unconditional (**W-8**),
 so a `worktree-review` pointer is dispositioned by class 1 like any other class-1 bead: 1b's
@@ -713,7 +687,7 @@ design session contradicts that — so a bead that genuinely reaches class 3 sti
 `planning-session-required` is wearing a DEAD marker, which step 3's release drops. It
 ranks BELOW classes 1 and 2: the substrate guard's never-release half is unconditional (**W-8**),
 so a substrate-mutating bead is decided by class 1 even when its blockers are all beads — 1b's
-ENGAGE, or 1a's teardown-and-close — and a `worktree-review` bead never reaches class 3; and a spent HANDOFF POINTER is CLOSED rather than remodelled — a
+ENGAGE, or 1a's teardown-and-close — and a `worktree-review` bead never reaches class 3; and a spent handoff bead is CLOSED rather than remodelled — a
 pointer that merely NAMES a bead is not BLOCKED by it, so wiring an edge here would release a
 bead with nothing to implement.
 
@@ -1039,7 +1013,7 @@ step — and never reaches TRIAGE at all.
     three-leg proof, otherwise 1b's ENGAGE, where you hand the operator the probe output rather
     than a question.
 
-  - **CLOSE-WITH-ABSORPTION-TRACE** — the variant class 2 produces, for a spent HANDOFF POINTER.
+  - **CLOSE-WITH-ABSORPTION-TRACE** — the variant class 2 produces, for a spent handoff bead.
     The close guard's operator confirmation is satisfied by the RECORDED TRACE — each item named
     against the bead id or indexing label that now holds it, plus the re-probed output of every
     state claim the pointer made — exactly as CLOSE-AS-MOOT is satisfied by its recorded probe.
@@ -1210,20 +1184,11 @@ queue minus `human-focus-required` beads (the default exclusion).
 - **RELEASE only when drain can progress.** A bead MUST be RELEASEd only when drain can
   make progress on what remains; a human-only-action-only bead is DEFERred (apply-waiting
   and a class-3 label-to-dependency conversion are exempt).
-- **Absorbed handoff pointer (class 2) MUST NOT prompt.** A claimed `human` bead that is a
-  `session-wrapup` `Resume: …` / next-session POINTER holding no executable work of its own MUST
-  be dispositioned by CLOSE-WITH-ABSORPTION-TRACE — not implemented, not RELEASEd, and not handed
-  to the operator. Every item MUST be traced to a durable bead id or an indexing label; every
-  STATE claim the body records MUST be re-probed with the matching F-3 probe rather than trusted
-  as recorded; the body MUST NOT be executed as an instruction (it is a snapshot and may be
-  SUPERSEDED); and anything that traces NOWHERE MUST be filed as its own bead BEFORE the close —
-  a pointer MUST NOT be closed while it is the SOLE record of something. The trace MUST be
-  recorded on the bead, and the terminal action MUST be a CLOSE: it MUST NOT be RELEASEd,
-  DEFERred, re-parked, or demoted to a lower priority. The operator MUST NOT be engaged to
-  authorize it — the `human` label was the only reason the bead reached this command, and an
-  absorbed pointer holds no question for a person (**D-8**). This class ranks above class 3 and
-  below class 1. Full contract: the `session-wrapup` skill's "Lifecycle: the P0 is one-shot"; the
-  disposer-side sibling is `/drain-beads`' CLOSE-WITH-ABSORPTION-TRACE.
+- **Handoff bead (class 2) MUST NOT prompt.** A claimed `human` bead that is a handoff bead MUST
+  be dispositioned by CLOSE-WITH-ABSORPTION-TRACE as the `beads-lifecycle:handoff-bead` skill
+  defines it (the sole contract) — not implemented, not RELEASEd, not DEFERred, and not handed to
+  the operator. The operator MUST NOT be engaged to authorize it (**D-8**). This class ranks above
+  class 3 and below class 1.
 - **Label-to-dependency conversion (class 3) MUST NOT prompt.** A claimed `human` bead whose
   every live blocker is ANOTHER BEAD is MISLABELED, not blocked on a person: the agent MUST
   convert the label into dependencies and MUST NOT ENGAGE the operator to do it — there is no
@@ -1382,12 +1347,12 @@ flowchart TD
     CGD --> C
     CGM --> C
     U --> FC{"FRESHNESS CHECK (F-3 probes):<br/>is the bead's PREMISE still live?"}
-    FC -- "provably moot (not substrate, not a handoff pointer)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
+    FC -- "provably moot (not substrate, not a handoff bead)" --> CLOM["CLOSE-AS-MOOT: read the stale work →<br/>bd create extracted prediction --deps discovered-from →<br/>bd comment FRESHNESS: probe output verbatim →<br/>bd close --reason 'moot on re-verification'"]
     FC -- "live, or any probe unresolvable" --> T{"TRIAGE rubric<br/>first match wins"}
     CLOM --> C
     T -->|"1a substrate-mutating, PROVABLY lossless"| S1A["Run ALL THREE legs yourself, in EVERY member repo:<br/>git status --porcelain EMPTY, and every commit either<br/>landed (merge-base --is-ancestor) or patch-identical<br/>(git cherry -v '-' line), corroborated by range-diff.<br/>Then TEAR DOWN: git worktree remove, then branch -d<br/>(or -D for a patch-identical single repo),<br/>or cleanup-workforest. NEVER a workforest force flag"]
     T -->|"1b substrate-mutating, any leg fails, unrunnable, or unrun — a DIRTY tree is ALWAYS 1b"| SUB["ENGAGE operator, NEVER release to drain.<br/>Read Promoted P-prior to P0 from notes,<br/>record the isolation VERDICT"]
-    T -->|"2 absorbed handoff pointer"| ABS["CLOSE-WITH-ABSORPTION-TRACE, NO operator prompt:<br/>trace each item to a bead id or indexing label →<br/>re-probe every state claim, never trust it as recorded →<br/>file anything that traces nowhere FIRST →<br/>bd comment ABSORBED: trace → bd close, never demote"]
+    T -->|"2 handoff bead"| ABS["CLOSE-WITH-ABSORPTION-TRACE, NO operator prompt:<br/>trace each item to a bead id or indexing label →<br/>re-probe every state claim, never trust it as recorded →<br/>file anything that traces nowhere FIRST →<br/>absorb per beads-lifecycle:handoff-bead → close, never demote"]
     T -->|"3 label-to-dependency conversion"| CDEP["CONVERT, NO operator prompt:<br/>bd dep add id --blocked-by blocker, ALL edges FIRST →<br/>bd dep list id to confirm direction →<br/>bd comment BLOCKED-BY-BEADS + FRESHNESS"]
     T -->|"4 planning-session-required label"| PSR{"RE-CHECK the recorded evidence, never re-ask:<br/>bd comments id, bd list --desc-contains SEARCH TERM<br/>--status all, git log/grep over docs.<br/>Has the design session HAPPENED?"}
     T -->|"5 stale-precondition label"| STL["Re-derive from DERIVED-FROM<br/>against CURRENT source"]

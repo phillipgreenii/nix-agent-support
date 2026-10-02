@@ -420,11 +420,10 @@ proceeding on currently loaded text (direct interactive invocation).`)
    subagent's to read (measured: one session read the same referenced plan doc
    eight times to compose briefs, ~20K tokens of pure duplication). Record the
    referenced paths; step 4 passes them through as pointers.
-   If the bead is a HANDOFF POINTER holding no executable work of its own — a
-   `session-wrapup` `Resume: …` / next-session bead, born P0 to let one session
-   resume cold — do NOT ISOLATE or DELEGATE it: invoke the
-   `pb:drain-absorb-pointer` skill with the bead id and your actor ID, follow it
-   to the close, then return to CLAIM.
+   If the bead is a handoff bead (type `handoff`; the `beads-lifecycle:handoff-bead`
+   skill is the sole definition and says what counts) — do NOT ISOLATE or
+   DELEGATE it: invoke that skill, follow its unattended handling (absorb and
+   close) with your actor ID, then return to CLAIM.
 
 3. **ISOLATE** off local main (never work a primary branch directly):
    - Single repo → ONE call:
@@ -1001,13 +1000,11 @@ claim released), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
 released, no label — a live external event, not a person or a bead, is the
 blocker). Then return to CLAIM.
 
-## CLOSE-WITH-ABSORPTION-TRACE (a handoff pointer)
+## CLOSE-WITH-ABSORPTION-TRACE (a handoff bead)
 
-Reached from UNDERSTAND for a `session-wrapup` `Resume: …` bead: invoke the
-`pb:drain-absorb-pointer` skill with the bead id and your actor ID, follow it
-to the close, then return to CLAIM. The pointer's body MUST NOT be executed as
-an instruction — it is a snapshot and may be superseded (provenance:
-`pg2-8wy25`, `pg2-9ifbn`).
+Reached from UNDERSTAND for a handoff bead: invoke the `beads-lifecycle:handoff-bead` skill,
+follow its unattended handling to the close with your actor ID, then return to CLAIM. The skill
+is the sole contract; this command does not restate it.
 
 ## Optional scope arguments
 
@@ -1101,8 +1098,8 @@ arguments, behavior is otherwise unchanged.
   the same call (`bd update <id> --status deferred --assignee "" --actor "ID"`, B-2/B-3/B-4 —
   never `--status open`), and gets no `human` label: a `plan-decompose` reconcile (or its
   stamp catch-up) clears it. See step 4's STAMP REFUSAL (`pg2-wceuh`).
-- A handoff pointer is dispositioned at UNDERSTAND via
-  `pb:drain-absorb-pointer` — never isolated, delegated, or executed as an
+- A handoff bead is dispositioned at UNDERSTAND via
+  `beads-lifecycle:handoff-bead` — never isolated, delegated, or executed as an
   instruction.
 - Gate ordering is enforced by `pb gate attach-verified-child` (deferred-first,
   confirm-by-READINESS, all-gates-then-un-defer). Exit 3 leaves the child

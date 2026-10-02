@@ -10,7 +10,8 @@ description: >-
   (observable outcomes, not implementation mechanisms), premise-freshness re-verification before
   acting on stale state, the `worktree-review` label's full lifecycle (entry marker,
   promotion, exit verdict, release), and the lightweight `auto-session-wrapped` provenance
-  label applied by session-wrapup:wrap-up-session's auto-trigger mode. Do NOT use for ordinary
+  label applied by session-wrapup:wrap-up-session's auto-trigger mode. Handoff BEADS (type
+  `handoff`) have their own skill, `beads-lifecycle:handoff-bead`. Do NOT use for ordinary
   read-only `bd list`/`bd show` queries, or for the beads-as-issue-tracker BINDING question
   (that's `wayfinder-beads`).
 ---
@@ -186,7 +187,9 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 
 ## Auto-Session-Wrapped Label
 
-> `auto-session-wrapped` marks a P0 next-session handoff bead that
+> `auto-session-wrapped` marks a P0 next-session handoff bead (a bead of type `handoff` where the
+> database knows the type; the definition, handling, and creation rules live in the
+> `beads-lifecycle:handoff-bead` skill, not here) that
 > `session-wrapup:wrap-up-session` created or updated in its **auto-trigger** mode — an
 > unattended run kicked off by `pa-monitor`'s AutoSessionWrapUp nudge (bead tc-m08w3), not a
 > human typing "wrap up this session". It exists because the bead's body is, permanently, the

@@ -1525,6 +1525,98 @@
                   touch $out
                 '';
 
+              # Single-contract guard for handoff beads (bead pg2-kftf9.9). The
+              # `beads-lifecycle:handoff-bead` skill is the SOLE place the
+              # handoff-bead rules live, so:
+              #   - the `ABSORBED:` trace-comment text appears in exactly ONE
+              #     file under claude-marketplace/ -- that skill's SKILL.md
+              #     (the retired pb:drain-absorb-pointer skill and the two pb
+              #     commands used to each carry a copy);
+              #   - no file still carries the old prose detector ("HANDOFF
+              #     POINTER holding no executable work"), checked after joining
+              #     wrapped lines so a re-wrapped copy is still caught;
+              #   - nothing still names the removed `drain-absorb-pointer`.
+              # The scan is a standalone script taking the root to scan, so it
+              # can be pointed at a temp copy with an old line restored to show
+              # it fails: `nix build .#checks.<system>.test-handoff-bead-single-contract.script`
+              # then run `result <copy-of-claude-marketplace's parent>`.
+              test-handoff-bead-single-contract =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = ./claude-marketplace;
+                  };
+                  skillRel = "claude-marketplace/beads-lifecycle/skills/handoff-bead/SKILL.md";
+                  script = pkgs.writeShellScript "check-handoff-bead-single-contract" ''
+                    export PATH=${
+                      lib.makeBinPath [
+                        pkgs.coreutils
+                        pkgs.findutils
+                        pkgs.gnugrep
+                      ]
+                    }
+                    root="$1"
+
+                    # Liveness self-check FIRST: the expected violation count is
+                    # zero, so "found nothing" cannot double as proof the scan ran.
+                    for want in \
+                      ${skillRel} \
+                      claude-marketplace/pb/commands/drain-beads.md \
+                      claude-marketplace/pb/commands/unblock-human-beads.md; do
+                      if [ ! -f "$root/$want" ]; then
+                        echo "FAIL: guard never scanned $want -- it was renamed or moved" >&2
+                        echo "      out from under this check; update the guard in flake.nix" >&2
+                        exit 1
+                      fi
+                    done
+                    if ! grep -q 'ABSORBED:' "$root/${skillRel}"; then
+                      echo "FAIL: the handoff-bead skill no longer carries the ABSORBED: trace text" >&2
+                      echo "      it is the sole owner of; the single-contract count below would be vacuous" >&2
+                      exit 1
+                    fi
+                    scanned="$(find "$root/claude-marketplace" -type f -name '*.md' | wc -l)"
+                    if [ "$scanned" -lt 3 ]; then
+                      echo "FAIL: guard scanned only $scanned markdown file(s) under claude-marketplace/; expected at least 3" >&2
+                      exit 1
+                    fi
+
+                    fail=0
+
+                    owners="$(grep -rl 'ABSORBED:' "$root/claude-marketplace" --include='*.md' || true)"
+                    expected="$root/${skillRel}"
+                    if [ "$owners" != "$expected" ]; then
+                      echo "FAIL: ABSORBED: must appear in exactly one file, the handoff-bead skill; found in:" >&2
+                      printf '%s\n' "$owners" >&2
+                      fail=1
+                    fi
+
+                    while IFS= read -r f; do
+                      if tr '\n' ' ' < "$f" | tr -s ' ' | grep -q 'HANDOFF POINTER holding no executable work'; then
+                        echo "FAIL: $f still carries the old prose handoff detector" >&2
+                        echo "      (\"HANDOFF POINTER holding no executable work\"); point at the" >&2
+                        echo "      beads-lifecycle:handoff-bead skill instead of restating it" >&2
+                        fail=1
+                      fi
+                    done < <(find "$root/claude-marketplace" -type f -name '*.md')
+
+                    stale="$(grep -rn 'drain-absorb-pointer' "$root/claude-marketplace" || true)"
+                    if [ -n "$stale" ]; then
+                      echo "FAIL: the retired pb:drain-absorb-pointer skill is still referenced:" >&2
+                      printf '%s\n' "$stale" >&2
+                      fail=1
+                    fi
+
+                    if [ "$fail" -ne 0 ]; then
+                      exit 1
+                    fi
+                    echo "ok: $scanned markdown file(s) scanned; ABSORBED: lives only in the handoff-bead skill, no old detector, no drain-absorb-pointer reference"
+                  '';
+                in
+                pkgs.runCommand "test-handoff-bead-single-contract" { passthru = { inherit script; }; } ''
+                  ${script} ${surface}
+                  touch $out
+                '';
+
               # Guard for the operator ruling of 2026-10-01 (bead pg2-pla9d.1):
               # ff-merge-to-main's repo-scoped full-flake-check land step was
               # dropped, and a full `nix flake check` is NOT a per-change or
