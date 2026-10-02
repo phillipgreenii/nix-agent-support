@@ -1,7 +1,8 @@
 # pg-rescue: script-first command runner with a failure-handler chain
 
-Status: draft, under review (revision 2: incorporates the completeness, correctness, security,
-agent-protection, UX, observability and test-coverage reviews)
+Status: approved for implementation (operator, 2026-10-02, "generate the beads"). Revision 2
+incorporates the completeness, correctness, security, agent-protection, UX, observability and
+test-coverage reviews.
 Date: 2026-10-02
 Bead: `pg2-v4fot` (brainstorm), label `agent-support`
 
@@ -65,20 +66,20 @@ Out of scope:
 
 ## Decisions settled in the brainstorm (operator, 2026-10-02)
 
-| ID  | Decision                                                                                                                                                                                                                                                 |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | Handlers are named in config and selected explicitly at every call site (`--handlers` or `--chain`). There is no implicit default chain.                                                                                                                 |
-| R2  | The wrapper is backend-neutral. No flag names a backend ("bead", "claude"). Concrete backends are handler implementations.                                                                                                                               |
-| R3  | A handler's outcome comes from its exit code. Optional JSON on stdout adds a summary, details and metadata. If the JSON contains `outcome`, it MUST agree with the exit code.                                                                            |
-| R4  | A `resolved` claim is checked mechanically: `--verify CMD` if given, otherwise a re-run of the original command. If the check fails, the attempt becomes `failed`.                                                                                       |
-| R5  | The wrapper never cleans up after a failure. A caller that cannot afford to leave the state in place MUST NOT include a deferring handler.                                                                                                               |
-| R6  | An incompatible handler result marks that handler `failed`, and the chain continues.                                                                                                                                                                     |
-| R7  | Each handler sees every earlier handler's attempt in the report.                                                                                                                                                                                         |
-| R8  | On the happy path the output looks the same as without the wrapper; byte-exact transparency (a pty) is not required. When a handler runs, a block is appended for each handler. Verbosity ranges from completely silent (`-q`, exit code only) to `-vv`. |
-| R9  | Text produced by a handler or by the command is printed on lines of its own, with no tool text before or after it on the same line, so it can be copied. A blank line separates handler sections.                                                        |
-| R10 | Handlers are configured only through `pg-rescue`'s config. An instance's argv is its configuration.                                                                                                                                                      |
-| R11 | The agent handler can reach MCP servers, and which servers it uses is configurable.                                                                                                                                                                      |
-| R12 | Keep the scope small. Add no extra limitations on scripts or agents.                                                                                                                                                                                     |
+| ID  | Decision                                                                                                                                                                                                                                                                                                                   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Handlers are named in config and selected explicitly at every call site (`--handlers` or `--chain`). There is no implicit default chain.                                                                                                                                                                                   |
+| R2  | The wrapper is backend-neutral. No flag names a backend ("bead", "claude"). Concrete backends are handler implementations.                                                                                                                                                                                                 |
+| R3  | A handler's outcome comes from its exit code. Optional JSON on stdout adds a summary, details and metadata. If the JSON contains `outcome`, it MUST agree with the exit code.                                                                                                                                              |
+| R4  | A `resolved` claim is checked mechanically: `--verify CMD` if given, otherwise a re-run of the original command. If the check fails, the attempt becomes `failed`.                                                                                                                                                         |
+| R5  | The wrapper never cleans up after a failure. A caller that cannot afford to leave the state in place MUST NOT include a deferring handler.                                                                                                                                                                                 |
+| R6  | An incompatible handler result marks that handler `failed`, and the chain continues.                                                                                                                                                                                                                                       |
+| R7  | Each handler sees every earlier handler's attempt in the report.                                                                                                                                                                                                                                                           |
+| R8  | On the happy path the output looks the same as without the wrapper; byte-exact transparency (a pty) is not required. When a handler runs, a block is appended for each handler. Verbosity ranges from `-q` (no pg-rescue text at all; the command's own output still passes through, operator ruling 2026-10-02) to `-vv`. |
+| R9  | Text produced by a handler or by the command is printed on lines of its own, with no tool text before or after it on the same line, so it can be copied. A blank line separates handler sections.                                                                                                                          |
+| R10 | Handlers are configured only through `pg-rescue`'s config. An instance's argv is its configuration.                                                                                                                                                                                                                        |
+| R11 | The agent handler can reach MCP servers, and which servers it uses is configurable.                                                                                                                                                                                                                                        |
+| R12 | Keep the scope small. Add no extra limitations on scripts or agents.                                                                                                                                                                                                                                                       |
 
 How this answers the `pg2-v4fot` questions:
 
@@ -531,7 +532,7 @@ matches.
   in memory beyond the tail kept for `output_tail`.
 - **Capture cap:** `output.log`, `--stdin` input and the per-attempt stderr and verify files are each
   capped at 32 MiB. Past the cap, the first and last 16 MiB are kept, with a truncation marker.
-- **`-q`:** neither stream is printed, but both are still captured.
+- **`-q`:** both streams still pass through and are captured; only pg-rescue's own display is suppressed. A caller wanting total silence adds `>/dev/null 2>&1`.
 - **TTY:** the command sees pipes, not a TTY, so some tools change their output (colours, progress
   bars). This is accepted (R8).
 
@@ -594,7 +595,7 @@ wrapper cannot clean up. Two things mitigate it:
 
 | Level   | Command output | When a handler ran                                                                                                             |
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `-q`    | suppressed     | nothing; exit code only (R8)                                                                                                   |
+| `-q`    | passthrough    | nothing from pg-rescue (R8)                                                                                                    |
 | default | passed through | header; for each attempted handler, a delimiter `[i/n] name: outcome (reason)` and the summary; a verify delimiter; the footer |
 | `-v`    | passed through | the default, plus `details`, verify output, skipped handlers, and the run directory                                            |
 | `-vv`   | passed through | the `-v` output, plus each handler's argv, exit code, duration, timeout, `description`, `meta` and stderr                      |
@@ -1179,7 +1180,7 @@ Fake handlers are Go re-exec helpers (the `GO_WANT_HELPER_PROCESS` pattern in
 - **Display (section 6):**
   - golden files for every verbosity level × every result (`resolved`, `deferred`, `unhandled`,
     `interrupted`), built from the section 6.2 scenario
-  - `-q` prints nothing at all
+  - `-q` prints no pg-rescue text, while the command output still passes through
   - R9 holds when the command or handler output has no final newline
   - a multi-line summary shows its first line only
   - ESC and C0 characters and forged delimiters are stripped from handler text
@@ -1276,9 +1277,9 @@ the operator excluded under R12, were not adopted. They are recorded here for in
 - limits on agent tools
 - keeping summaries out of lock-screen notifications
 
-One finding conflicts with an operator decision and is left to the operator: UX review finding 4,
-that `-q` should still pass the command's output through. Revision 2 keeps R8 as ruled, so `-q`
-suppresses everything and returns the exit code only.
+UX review finding 4 proposed that `-q` should still pass the command's output through, which
+conflicted with the original R8. The operator ruled on 2026-10-02: "-q only silences pg-rescues own
+text". R8, section 5.1 and section 6.1 were amended to match.
 
 ## 15. Follow-up beads
 
