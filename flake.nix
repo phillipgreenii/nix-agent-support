@@ -2753,15 +2753,16 @@
                   testFlags = [
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
-                    # `-short` (bead tc-6l70b): internal/eventqueue's
+                    # `-short` (beads tc-6l70b, pg2-0w1pc): internal/eventqueue's
                     # TestDispatchOverheadUnderRingReader self-skips under
-                    # -short — see its own doc comment in perf_test.go. That
-                    # test's total wall time (9 rounds * 6000 dispatches * 2
-                    # arms * 2 subtests, one with a concurrent 4Hz reader)
-                    # made this whole check narrowly pass go test's fixed
-                    # 600s per-package timeout on a quiet host (~472s, 79% of
-                    # budget) and exceed it outright under shared-builder
-                    # load. `-short` is additive here: it does not remove
+                    # -short — see its own doc comment in perf_test.go. It is a
+                    # host wall-clock gate, which a hermetic check should not
+                    # depend on. Its coverage path is INTENDED to be the
+                    # commit-time / pre-land hook runner (pg-test-runner's Go
+                    # unit run does not pass -short), not this check; the
+                    # allocation-budget tests still run here. (The original
+                    # ~472s runtime that motivated this flag is obsolete after
+                    # pg2-pv7ai: ~8s now.) `-short` is additive here: it does not remove
                     # any currently-enforced coverage, since the only other
                     # testing.Short()-gated file in this fileset
                     # (cmd/pg-router/e2e_test.go) already skips in this

@@ -24,15 +24,40 @@ import (
 //
 // TestDispatchOverheadUnderRingReader is the one exception (bead tc-6l70b):
 // it is a wall-CLOCK budget, so unlike the allocation-counted budgets below
-// its own duration — not just its pass/fail threshold — is at the mercy of
-// how fast the host is, and a shared nix builder under load can make its
-// ~470s-on-a-quiet-host runtime exceed go test's fixed 600s per-package
-// timeout outright. It self-skips under `-short` for exactly that reason
-// (see its own doc comment); `pg-router-go-tests` passes `-short`, so
-// `nix flake check` never depends on this one test's wall time, while
+// both its duration and its pass/fail threshold are at the mercy of how
+// fast, and how loaded, the host is. It self-skips under `-short` (see its
+// own doc comment); `pg-router-go-tests` passes `-short`, so `nix flake
+// check` never depends on this one test's wall time, while
 // TestEnqueueAllocBudget/TestDispatchAllocBudget (allocation-counted, not
 // wall-clock-budgeted — host speed cannot exhaust them) keep enforcing the
 // hard gate this file's Task 3.11 Objective describes.
+//
+// Coverage path for the wall-time gate (decision, bead pg2-0w1pc): the
+// commit-time `run-unit-tests` hook and the pre-land `pg-hooks run pre-land`
+// run `pg-test-runner`, whose Go "unit" selection is `go test -race -run
+// '^(Test|Example)' ./...` — it does NOT pass `-short`, so this test runs
+// there on every change that touches packages/pg-router. That hook-runner-only
+// coverage is INTENDED; no separate nix perf check is wired. Why:
+//
+//   - A hermetic nix check is expected to be deterministic on any builder,
+//     whereas this gate asserts on host wall-clock time. The pg2-pv7ai
+//     estimator (per-call minimum + bounded retry) makes it robust in
+//     practice — measured 2026-10-02, 24 concurrent copies at host load ~100
+//     on 11 cores, 144/144 measurements passed on attempt 1 — but that is
+//     evidence from one host, not a guarantee for a shared/remote builder,
+//     and the original failure (pg2-pv7ai) was exactly a load-induced
+//     wall-time miss inside `nix flake check`.
+//   - The hook run executes on the developer's own machine against the
+//     developer's own change, where a real overhead regression is
+//     attributable and a load-induced one is simply re-run; the allocation
+//     budgets keep the hermetic nix tier honest in the meantime.
+//
+// The original cost argument for `-short` (a ~470s runtime that could
+// exhaust go test's 600s per-package timeout) is obsolete: after pg2-pv7ai
+// the test takes ~8s on a quiet host (~31s under -race; ~75s with 24
+// concurrent copies), so cost alone would no longer block wiring it into
+// `pg-router-go-tests` — revisit by dropping the skip if this host-wall-time
+// gate is ever wanted in the hermetic tier.
 
 // ringObserver is the MINIMAL Observer this file needs to measure "the
 // observability path": recording straight onto an activity.Ring using the
@@ -334,19 +359,17 @@ func overheadPct(t *testing.T, rounds, n int, caseObs Observer, readerHz int, ri
 // genuine multi-x regression in the observability path (a 2x regression is
 // a 100% overhead).
 func TestDispatchOverheadUnderRingReader(t *testing.T) {
-	// Skip under -short (bead tc-6l70b): this test's wall time is real and
-	// NOT load-relative — rounds*n*2 arms*2 subtests*maxAttempts
+	// Skip under -short (beads tc-6l70b, pg2-0w1pc): this test's wall time
+	// is real and NOT load-relative — rounds*n*2 arms*2 subtests*maxAttempts
 	// Enqueue+Dispatch pairs, one arm with a concurrent 4Hz ring reader
-	// running throughout. On a quiet host it takes seconds; under
-	// shared-builder load it was observed running past go test's fixed
-	// 600s per-package deadline (bead tc-6l70b), which this test cannot
-	// make load-relative no matter how the internal ratio is computed — so
-	// the flake-check path (`checks.pg-router-go-tests`, which the repo's
-	// `pg-router-go-tests` nix derivation runs with `-short` for exactly
-	// this reason) skips it and relies on
+	// running throughout. The flake-check path (`checks.pg-router-go-tests`,
+	// which the repo's `pg-router-go-tests` nix derivation runs with
+	// `-short`) skips it and relies on
 	// TestEnqueueAllocBudget/TestDispatchAllocBudget (allocation-counted,
 	// so host speed cannot exhaust them) to keep enforcing the
-	// observability-path hard gate under `nix flake check`. Run this test
+	// observability-path hard gate under `nix flake check`. The wall-time
+	// gate itself is covered by the hook runner, which does not pass
+	// -short (intended; see the file-level comment above). Run this test
 	// directly for the wall-time overhead signal: `go test
 	// ./internal/eventqueue/... -run TestDispatchOverheadUnderRingReader
 	// -v`.
