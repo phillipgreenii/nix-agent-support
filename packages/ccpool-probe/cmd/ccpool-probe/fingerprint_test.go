@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestNeedsInputFingerprint(t *testing.T) {
-	got := needsInputFingerprint("sess-1")
+	got := needsInputFingerprint("", "sess-1")
 	want := "needs-input:sess-1"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)

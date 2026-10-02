@@ -1,16 +1,19 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCheckNeedsInputEmptyRows(t *testing.T) {
-	if got := checkNeedsInput(nil); len(got) != 0 {
+	if got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, nil); len(got) != 0 {
 		t.Fatalf("expected no findings for empty input, got %v", got)
 	}
 }
 
 func TestCheckNeedsInputOneRow(t *testing.T) {
 	rows := []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", CWD: "/tmp/w1"}}
-	got := checkNeedsInput(rows)
+	got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, rows)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
@@ -31,7 +34,7 @@ func TestCheckNeedsInputMultipleRowsIndependentFindings(t *testing.T) {
 		{ExternalID: "sess-1", State: "needs_input"},
 		{ExternalID: "sess-2", State: "needs_input"},
 	}
-	got := checkNeedsInput(rows)
+	got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, rows)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 findings, got %d", len(got))
 	}
@@ -145,5 +148,53 @@ func TestCountZombieSessions(t *testing.T) {
 	}
 	if got := countZombieSessions(rows); got != 2 {
 		t.Fatalf("got %d, want 2", got)
+	}
+}
+
+func TestCheckNeedsInputNamesNamedPool(t *testing.T) {
+	pool := poolRef{Label: "pg-router-ccpool-review", Dir: "/pools/pg-router-ccpool-review"}
+	got := checkNeedsInput(pool, []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input"}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(got))
+	}
+	if got[0].Fingerprint != "needs-input:pg-router-ccpool-review:sess-1" {
+		t.Errorf("fingerprint = %q", got[0].Fingerprint)
+	}
+	if !strings.Contains(got[0].Summary, "pg-router-ccpool-review") || !strings.Contains(got[0].Evidence, "pool=pg-router-ccpool-review") {
+		t.Errorf("finding does not name its pool: %+v", got[0])
+	}
+}
+
+func TestCheckNeverPrompted(t *testing.T) {
+	pool := poolRef{Label: "pg-router-ccpool-worker", Dir: "/pools/pg-router-ccpool-worker"}
+	rows := []ccpoolSessionRow{
+		{ExternalID: "old", State: "ready", Live: true},      // seen last run -> finding
+		{ExternalID: "new", State: "ready", Live: true},      // first sighting -> no finding
+		{ExternalID: "dead", State: "ready", Live: false},    // not live -> ignored
+		{ExternalID: "busy", State: "working", Live: true},   // prompted -> ignored
+		{ExternalID: "gone-idle", State: "idle", Live: true}, // ran a turn -> ignored
+	}
+	prev := map[string]bool{
+		readyKey(pool, "old"):  true,
+		readyKey(pool, "dead"): true,
+		readyKey(pool, "busy"): true,
+	}
+	findings, current := checkNeverPrompted(pool, rows, prev)
+	if len(findings) != 1 || findings[0].Kind != kindNeverPrompted {
+		t.Fatalf("expected exactly the one repeat-ready live session, got %+v", findings)
+	}
+	if findings[0].Fingerprint != "never-prompted:pg-router-ccpool-worker:old" {
+		t.Errorf("fingerprint = %q", findings[0].Fingerprint)
+	}
+	if len(current) != 2 {
+		t.Errorf("current ready set must hold both live ready sessions, got %v", current)
+	}
+}
+
+func TestCheckNeverPromptedNoBaselineIsQuiet(t *testing.T) {
+	pool := poolRef{Label: ambientPoolLabel}
+	findings, current := checkNeverPrompted(pool, []ccpoolSessionRow{{ExternalID: "a", State: "ready", Live: true}}, nil)
+	if len(findings) != 0 || len(current) != 1 {
+		t.Fatalf("findings=%v current=%v", findings, current)
 	}
 }

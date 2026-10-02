@@ -4,14 +4,29 @@
 // identity and schema", "Fingerprint metadata key" paragraph]:
 //   - needs_input findings: needs-input:<ccpool session external_id>
 //     [design: same paragraph, second bullet].
+//   - Pool scoping (bead pg2-bkzrc): a session in a NAMED role pool is
+//     fingerprinted needs-input:<pool label>:<external_id>, because
+//     external ids are only unique within one pool. The ambient pool keeps
+//     the legacy needs-input:<external_id> form so beads filed before the
+//     probe scanned every pool still deduplicate.
+//   - Never-prompted sessions: never-prompted:<pool label>:<external_id>.
 //   - Zombie-count drift: zombie-count:<severity band> [design: same
 //     paragraph, third bullet].
 package main
 
 // needsInputFingerprint renders "needs-input:<external_id>" [design:
-// "Fingerprint metadata key" paragraph, second bullet].
-func needsInputFingerprint(externalID string) string {
-	return "needs-input:" + externalID
+// "Fingerprint metadata key" paragraph, second bullet], with the pool
+// scope inserted for a named pool (see the package comment above).
+func needsInputFingerprint(scope, externalID string) string {
+	if scope == "" {
+		return "needs-input:" + externalID
+	}
+	return "needs-input:" + scope + ":" + externalID
+}
+
+// neverPromptedFingerprint renders "never-prompted:<pool label>:<external_id>".
+func neverPromptedFingerprint(poolLabel, externalID string) string {
+	return "never-prompted:" + poolLabel + ":" + externalID
 }
 
 // zombieDriftFingerprint renders "zombie-count:<severity band>" [design:

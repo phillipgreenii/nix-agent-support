@@ -39,6 +39,12 @@ type snapshot struct {
 	ZombieCount             int    `json:"zombie_count"`
 	ZombieConsecutiveGrowth int    `json:"zombie_consecutive_growth"`
 	CheckedAt               string `json:"checked_at"`
+	// ReadySeen is every live "ready" session (checks.go's readyKey) the
+	// previous run observed across all scanned pools; checkNeverPrompted
+	// only flags a session seen ready in TWO consecutive runs. Additive
+	// field: a snapshot written before pg2-bkzrc decodes with it nil, so
+	// snapshotVersion is unchanged.
+	ReadySeen []string `json:"ready_seen,omitempty"`
 }
 
 // loadSnapshot returns (zero value, false) for EVERY failure mode the

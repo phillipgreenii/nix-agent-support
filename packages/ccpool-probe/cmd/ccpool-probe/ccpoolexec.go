@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -49,10 +50,21 @@ type ccpoolResult struct {
 }
 
 // runCcpool execs ccpool with args, inheriting this process's environment
-// verbatim. The returned error is non-nil only when the child could never
+// verbatim — except that a non-empty poolDir is exported to the child as
+// CCPOOL_POOL, scoping the call to that pool (bead pg2-bkzrc; the same
+// per-subprocess override pg-router-ccpool-handler's internal/ccpool
+// NewCLIRunnerForPool uses — this process's own environment is never
+// mutated). The returned error is non-nil only when the child could never
 // even be started.
-func runCcpool(ctx context.Context, args []string) (ccpoolResult, error) {
+func runCcpool(ctx context.Context, poolDir string, args []string) (ccpoolResult, error) {
 	cmd := ccpoolExecCmdFactory(ctx, ccpoolBinary, args...)
+	if poolDir != "" {
+		env := cmd.Env
+		if env == nil {
+			env = os.Environ()
+		}
+		cmd.Env = append(env, "CCPOOL_POOL="+poolDir)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -82,21 +94,22 @@ type ccpoolSessionRow struct {
 	ExternalID string            `json:"external_id"`
 	Name       string            `json:"name"`
 	State      string            `json:"state"`
+	Live       bool              `json:"live"`
 	CWD        string            `json:"cwd"`
 	Meta       map[string]string `json:"meta,omitempty"`
 }
 
 // listCcpoolSessions runs `ccpool list --all --filter pgrouter.pool=pg-router
-// --json`, optionally narrowed by --state, and decodes the JSON array of
-// rows. --all is required so a hidden-by-retention (but still real) row is
+// --json` against the pool at poolDir ("" = the ambient pool), optionally
+// narrowed by --state, and decodes the JSON array of rows. --all is required so a hidden-by-retention (but still real) row is
 // not silently dropped from either check's own view [design: Contract's
 // "ccpool's own list CLI" bullet].
-func listCcpoolSessions(ctx context.Context, state string, warn func(string)) ([]ccpoolSessionRow, error) {
+func listCcpoolSessions(ctx context.Context, poolDir, state string, warn func(string)) ([]ccpoolSessionRow, error) {
 	args := []string{"list", "--all", "--filter", pgRouterPoolFilter, "--json"}
 	if state != "" {
 		args = append(args, "--state", state)
 	}
-	res, err := runCcpool(ctx, args)
+	res, err := runCcpool(ctx, poolDir, args)
 	if err != nil {
 		warn(err.Error())
 		return nil, errCcpoolFailed

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 
 func TestListCcpoolSessionsEmpty(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_empty")
-	rows, err := listCcpoolSessions(context.Background(), "", noopWarn)
+	rows, err := listCcpoolSessions(context.Background(), "", "", noopWarn)
 	if err != nil {
 		t.Fatalf("listCcpoolSessions: %v", err)
 	}
@@ -20,7 +21,7 @@ func TestListCcpoolSessionsEmpty(t *testing.T) {
 
 func TestListCcpoolSessionsNeedsInput(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_needs_input_one")
-	rows, err := listCcpoolSessions(context.Background(), "needs_input", noopWarn)
+	rows, err := listCcpoolSessions(context.Background(), "", "needs_input", noopWarn)
 	if err != nil {
 		t.Fatalf("listCcpoolSessions: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestListCcpoolSessionsNeedsInput(t *testing.T) {
 
 func TestListCcpoolSessionsMixedStates(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_mixed_states")
-	rows, err := listCcpoolSessions(context.Background(), "", noopWarn)
+	rows, err := listCcpoolSessions(context.Background(), "", "", noopWarn)
 	if err != nil {
 		t.Fatalf("listCcpoolSessions: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestListCcpoolSessionsMixedStates(t *testing.T) {
 
 func TestListCcpoolSessionsFailure(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_fail")
-	_, err := listCcpoolSessions(context.Background(), "", noopWarn)
+	_, err := listCcpoolSessions(context.Background(), "", "", noopWarn)
 	if err == nil {
 		t.Fatalf("expected an error")
 	}
@@ -63,7 +64,7 @@ func TestListCcpoolSessionsHonorsExplicitTimeout(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := listCcpoolSessions(ctx, "", noopWarn)
+	_, err := listCcpoolSessions(ctx, "", "", noopWarn)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("expected a timeout error")
@@ -80,7 +81,7 @@ func TestListCcpoolSessionsHonorsExplicitTimeout(t *testing.T) {
 func TestListCcpoolSessionsArgvShape(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_empty")
 	got := recordedArgs(t, func() {
-		_, _ = listCcpoolSessions(context.Background(), "needs_input", noopWarn)
+		_, _ = listCcpoolSessions(context.Background(), "", "needs_input", noopWarn)
 	})
 	for _, want := range []string{"--all", "--filter", pgRouterPoolFilter, "--json", "--state", "needs_input"} {
 		if !strings.Contains(got, want) {
@@ -92,9 +93,40 @@ func TestListCcpoolSessionsArgvShape(t *testing.T) {
 func TestListCcpoolSessionsArgvOmitsStateWhenUnset(t *testing.T) {
 	withCcpoolFactory(t, "ccpool_list_empty")
 	got := recordedArgs(t, func() {
-		_, _ = listCcpoolSessions(context.Background(), "", noopWarn)
+		_, _ = listCcpoolSessions(context.Background(), "", "", noopWarn)
 	})
 	if strings.Contains(got, "--state") {
 		t.Errorf("expected no --state flag when unset, got %s", got)
+	}
+}
+
+// TestListCcpoolSessionsScopesChildToPoolDir proves the pool directory is
+// really exported to the child as CCPOOL_POOL (bead pg2-bkzrc): the fake
+// ccpool answers differently per pool, so a probe that ignored poolDir
+// would see an empty list for the review pool.
+func TestListCcpoolSessionsScopesChildToPoolDir(t *testing.T) {
+	withCcpoolFactory(t, "ccpool_list_by_pool")
+	root := t.TempDir()
+
+	rows, err := listCcpoolSessions(context.Background(), filepath.Join(root, "pg-router-ccpool-review"), "needs_input", noopWarn)
+	if err != nil {
+		t.Fatalf("review pool: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ExternalID != "sess-r1" || !rows[0].Live {
+		t.Fatalf("review pool: got %+v, want its one live needs_input session", rows)
+	}
+
+	rows, err = listCcpoolSessions(context.Background(), filepath.Join(root, "pg-router-ccpool-worker"), "needs_input", noopWarn)
+	if err != nil {
+		t.Fatalf("worker pool: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("worker pool: got %+v, want none", rows)
+	}
+
+	t.Setenv("CCPOOL_POOL", "")
+	rows, err = listCcpoolSessions(context.Background(), "", "needs_input", noopWarn)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("ambient pool: rows=%+v err=%v, want none", rows, err)
 	}
 }

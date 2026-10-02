@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -113,6 +114,17 @@ func helperMain() {
 			`{"external_id":"sess-2","name":"b","state":"errored","cwd":"/tmp/b"},`+
 			`{"external_id":"sess-3","name":"c","state":"idle","cwd":"/tmp/c"}`+
 			`]`)
+		os.Exit(0)
+	case "ccpool_list_by_pool":
+		// Answers according to the CCPOOL_POOL the probe exported on the
+		// child (bead pg2-bkzrc): only the review pool holds a stuck
+		// session; every other pool (and the ambient one, CCPOOL_POOL
+		// unset) is empty.
+		if filepath.Base(os.Getenv("CCPOOL_POOL")) == "pg-router-ccpool-review" {
+			_, _ = fmt.Fprint(os.Stdout, `[{"external_id":"sess-r1","name":"reviewer","state":"needs_input","live":true,"cwd":"/tmp/r1"}]`)
+		} else {
+			_, _ = fmt.Fprint(os.Stdout, `[]`)
+		}
 		os.Exit(0)
 	case "ccpool_list_fail":
 		_, _ = fmt.Fprintln(os.Stderr, "ccpool: list: store open failed")

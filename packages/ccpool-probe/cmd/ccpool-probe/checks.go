@@ -1,4 +1,4 @@
-// checks.go: the two deterministic health checks run performs, each
+// checks.go: the deterministic health checks run performs, each
 // independently testable via fixtures [design: "ccpool-probe run
 // checks"]:
 //
@@ -6,6 +6,13 @@
 //     pg-router-ccpool-handler dispatched (item 1).
 //  2. checkZombieDrift — errored/working "zombie" session count vs. a
 //     persisted baseline (item 2).
+//  3. checkNeverPrompted — live sessions parked in ccpool's "ready" state
+//     (launched, no turn ever started) across two consecutive runs
+//     (bead pg2-bkzrc).
+//
+// Checks 1 and 3 run once PER ccpool pool (pools.go) and name the pool in
+// the finding; check 2 compares one count aggregated across every scanned
+// pool.
 //
 // Every function here is a pure function of its typed inputs: it makes no
 // subprocess call and touches no file — that plumbing lives in
@@ -19,12 +26,15 @@ package main
 
 import "fmt"
 
-// findingKind identifies which of the two checks produced a finding.
+// findingKind identifies which of the checks produced a finding.
 type findingKind string
 
 const (
 	kindNeedsInput  findingKind = "needs-input"
 	kindZombieDrift findingKind = "zombie-drift"
+	// kindNeverPrompted: a live session sitting in "ready" — launched but
+	// never given a prompt (bead pg2-bkzrc).
+	kindNeverPrompted findingKind = "never-prompted"
 )
 
 // finding is one real, new-or-changed detection surfaced by a check.
@@ -55,18 +65,56 @@ type finding struct {
 // needs_input state and pg-router's own session pool (ccpoolexec.go's
 // listCcpoolSessions with state="needs_input") [design: item 1]. An empty
 // input yields zero findings, not an error.
-func checkNeedsInput(rows []ccpoolSessionRow) []finding {
+func checkNeedsInput(pool poolRef, rows []ccpoolSessionRow) []finding {
 	findings := make([]finding, 0, len(rows))
 	for _, r := range rows {
 		findings = append(findings, finding{
 			Kind:        kindNeedsInput,
-			Fingerprint: needsInputFingerprint(r.ExternalID),
-			Summary:     fmt.Sprintf("ccpool session %s is stuck in needs_input", r.ExternalID),
-			Evidence:    fmt.Sprintf("external_id=%s\nname=%s\nstate=%s\ncwd=%s", r.ExternalID, r.Name, r.State, r.CWD),
+			Fingerprint: needsInputFingerprint(pool.fingerprintScope(), r.ExternalID),
+			Summary:     fmt.Sprintf("ccpool session %s in pool %s is stuck in needs_input", r.ExternalID, pool.Label),
+			Evidence:    fmt.Sprintf("pool=%s\nexternal_id=%s\nname=%s\nstate=%s\ncwd=%s", pool.Label, r.ExternalID, r.Name, r.State, r.CWD),
 			State:       "needs_input",
 		})
 	}
 	return findings
+}
+
+// readyKey identifies one session across runs and pools in the persisted
+// snapshot (snapshot.ReadySeen).
+func readyKey(pool poolRef, externalID string) string {
+	return pool.Label + "\x00" + externalID
+}
+
+// checkNeverPrompted flags every LIVE session in ccpool's "ready" state
+// that was ALSO live-and-ready in the previous run (prevReady, keyed by
+// readyKey) — i.e. it has sat launched-but-unprompted for at least one full
+// probe interval. A single observation is never a finding: the handler's
+// Ensure->Send window legitimately leaves a session briefly ready, and
+// ccpool's list --json carries no state-entry timestamp to age it by. It
+// also returns this run's complete ready key set for run.go to persist
+// (unconditionally — including on the first run, which has no baseline and
+// therefore reports nothing). Pure: no I/O.
+func checkNeverPrompted(pool poolRef, rows []ccpoolSessionRow, prevReady map[string]bool) ([]finding, []string) {
+	var findings []finding
+	var current []string
+	for _, r := range rows {
+		if r.State != "ready" || !r.Live {
+			continue
+		}
+		key := readyKey(pool, r.ExternalID)
+		current = append(current, key)
+		if !prevReady[key] {
+			continue
+		}
+		findings = append(findings, finding{
+			Kind:        kindNeverPrompted,
+			Fingerprint: neverPromptedFingerprint(pool.Label, r.ExternalID),
+			Summary:     fmt.Sprintf("ccpool session %s in pool %s is live but has never been prompted (stuck in ready)", r.ExternalID, pool.Label),
+			Evidence:    fmt.Sprintf("pool=%s\nexternal_id=%s\nname=%s\nstate=%s\nlive=true\ncwd=%s", pool.Label, r.ExternalID, r.Name, r.State, r.CWD),
+			State:       "ready",
+		})
+	}
+	return findings, current
 }
 
 // severityZombieBand classifies how much the errored/working "zombie"

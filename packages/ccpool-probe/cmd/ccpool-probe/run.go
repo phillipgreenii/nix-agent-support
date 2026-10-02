@@ -1,5 +1,6 @@
-// run.go: the "run" verb — the real work. Runs the two checks
-// (checks.go), applies the "nothing new" dedup rule (dedup.go) against
+// run.go: the "run" verb — the real work. Runs the health checks
+// (checks.go) over EVERY ccpool pool (pools.go: the ambient pool plus each
+// registered role pool, bead pg2-bkzrc), applies the "nothing new" dedup rule (dedup.go) against
 // pg-connector's own escalated-work query (connector.go), files/updates a
 // bd issue on a genuine finding, and signals the caller via one of the
 // four documented exit codes [Binding decisions: "Exit codes"
@@ -21,9 +22,9 @@
 //	                 carries a note about which sub-check was skipped or
 //	                 degraded [design: same paragraph].
 //
-// Unlike pg-router-probe's own run.go, this binary's two sub-checks are
-// never individually "unconfigured" -- both always attempt a ccpool call
-// on every invocation, so there is no skipped/degraded split here: a
+// Unlike pg-router-probe's own run.go, this binary's sub-checks are
+// never individually "unconfigured" -- they always attempt a ccpool call
+// per pool on every invocation, so there is no skipped/degraded split here: a
 // sub-check either ran (ranAny=true, no entry in degraded) or it failed
 // outright (an entry in degraded). This packet's own implementation
 // choice; no design citation for the configured/attempted distinction
@@ -55,6 +56,9 @@ type runOptions struct {
 	ccpoolTimeout      time.Duration
 	pgConnectorTimeout time.Duration
 	snapshotPath       string
+	// registryDir overrides the ccpool pool-registry directory pools.go
+	// reads; "" = resolve it the way ccpool does.
+	registryDir string
 }
 
 // runDeps is every external side effect runProbe performs, gathered into
@@ -64,8 +68,9 @@ type runOptions struct {
 // directly.
 type runDeps struct {
 	now                 func() time.Time
-	listNeedsInput      func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error)
-	listAllPoolSessions func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error)
+	listPools           func(registryDir string, warn func(string)) []poolRef
+	listNeedsInput      func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error)
+	listAllPoolSessions func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error)
 	listEscalated       func(ctx context.Context, warn func(string)) ([]connectorIssue, error)
 	createIssue         func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error)
 	updateMetadata      func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error
@@ -74,12 +79,13 @@ type runDeps struct {
 
 func defaultRunDeps() runDeps {
 	return runDeps{
-		now: time.Now,
-		listNeedsInput: func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error) {
-			return listCcpoolSessions(ctx, "needs_input", warn)
+		now:       time.Now,
+		listPools: discoverPools,
+		listNeedsInput: func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+			return listCcpoolSessions(ctx, pool.Dir, "needs_input", warn)
 		},
-		listAllPoolSessions: func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error) {
-			return listCcpoolSessions(ctx, "", warn)
+		listAllPoolSessions: func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+			return listCcpoolSessions(ctx, pool.Dir, "", warn)
 		},
 		listEscalated:  listEscalated,
 		createIssue:    createIssue,
@@ -101,6 +107,7 @@ func newRunCmd() *cobra.Command {
 	}
 	cmd.Flags().DurationVar(&opts.ccpoolTimeout, "ccpool-timeout", opts.ccpoolTimeout, "explicit timeout for each ccpool subprocess call (list)")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
+	cmd.Flags().StringVar(&opts.registryDir, "registry-dir", opts.registryDir, "ccpool pool-registry directory listing every pool to scan (default: CCPOOL_REGISTRY_DIR, else $XDG_STATE_HOME/ccpool/pools.d)")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		return runProbe(cmd, opts, defaultRunDeps())
@@ -131,36 +138,75 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	var degraded []string
 	ranAny := false
 
-	// Sub-check 1: ccpool sessions stuck in needs_input.
-	niCtx, cancel := withCcpoolTimeout()
-	niRows, err := deps.listNeedsInput(niCtx, warn)
-	cancel()
-	if err != nil {
-		degraded = append(degraded, fmt.Sprintf("needs-input: %v", err))
-	} else {
+	pools := deps.listPools(opts.registryDir, warn)
+
+	// Sub-check 1: ccpool sessions stuck in needs_input, per pool.
+	for _, pool := range pools {
+		niCtx, cancel := withCcpoolTimeout()
+		niRows, err := deps.listNeedsInput(niCtx, pool, warn)
+		cancel()
+		if err != nil {
+			degraded = append(degraded, fmt.Sprintf("needs-input[pool %s]: %v", pool.Label, err))
+			continue
+		}
 		ranAny = true
-		findings = append(findings, checkNeedsInput(niRows)...)
+		findings = append(findings, checkNeedsInput(pool, niRows)...)
 	}
 
-	// Sub-check 2: errored/working zombie-count drift.
-	zCtx, cancel := withCcpoolTimeout()
-	allRows, err := deps.listAllPoolSessions(zCtx, warn)
-	cancel()
+	// Sub-check 2: errored/working zombie-count drift (one count summed
+	// over every pool) and sub-check 3: live sessions stuck in ready
+	// (per pool), both fed by one full list per pool.
+	prevReady := make(map[string]bool, len(prevSnap.ReadySeen))
+	for _, k := range prevSnap.ReadySeen {
+		prevReady[k] = true
+	}
+	var readySeen []string
+	zombieTotal := 0
+	var perPool []string
+	var failedPools []poolRef
+	for _, pool := range pools {
+		zCtx, cancel := withCcpoolTimeout()
+		allRows, err := deps.listAllPoolSessions(zCtx, pool, warn)
+		cancel()
+		if err != nil {
+			degraded = append(degraded, fmt.Sprintf("zombie-drift[pool %s]: %v", pool.Label, err))
+			failedPools = append(failedPools, pool)
+			continue
+		}
+		ranAny = true
+		n := countZombieSessions(allRows)
+		zombieTotal += n
+		perPool = append(perPool, fmt.Sprintf("%s=%d", pool.Label, n))
+		npFindings, ready := checkNeverPrompted(pool, allRows, prevReady)
+		findings = append(findings, npFindings...)
+		readySeen = append(readySeen, ready...)
+	}
+	// A pool whose list failed this run has no fresh ready observation:
+	// carry its previous keys forward rather than forgetting them, so one
+	// flaky listing cannot reset a never-prompted session's two-run clock.
+	for _, k := range prevSnap.ReadySeen {
+		for _, fp := range failedPools {
+			if strings.HasPrefix(k, fp.Label+"\x00") {
+				readySeen = append(readySeen, k)
+				break
+			}
+		}
+	}
+
 	// zombieCount/consecutiveGrowth default to the PREVIOUS snapshot's own
-	// values -- if this sub-check degrades, the persisted snapshot below
-	// must not clobber the last real baseline with a zero it never
-	// observed [design: "Snapshot robustness" paragraph, generalized to
-	// every run, not only the broken-snapshot-file path].
+	// values -- if this sub-check degrades (for ANY pool: a partial sum
+	// would read as a false drop), the persisted snapshot below must not
+	// clobber the last real baseline with a number it never observed
+	// [design: "Snapshot robustness" paragraph, generalized to every run,
+	// not only the broken-snapshot-file path].
 	zombieCount := prevSnap.ZombieCount
 	consecutiveGrowth := prevSnap.ZombieConsecutiveGrowth
-	if err != nil {
-		degraded = append(degraded, fmt.Sprintf("zombie-drift: %v", err))
-	} else {
-		ranAny = true
-		zombieCount = countZombieSessions(allRows)
+	if len(failedPools) == 0 && len(pools) > 0 {
+		zombieCount = zombieTotal
 		var f *finding
 		f, consecutiveGrowth = checkZombieDrift(hadPrev, prevSnap.ZombieCount, zombieCount, prevSnap.ZombieConsecutiveGrowth)
 		if f != nil {
+			f.Evidence += "\nper_pool: " + strings.Join(perPool, ", ")
 			findings = append(findings, *f)
 		}
 	}
@@ -176,6 +222,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		ZombieCount:             zombieCount,
 		ZombieConsecutiveGrowth: consecutiveGrowth,
 		CheckedAt:               deps.now().UTC().Format(time.RFC3339),
+		ReadySeen:               readySeen,
 	}); err != nil {
 		warn(fmt.Sprintf("failed to persist snapshot: %v", err))
 	}

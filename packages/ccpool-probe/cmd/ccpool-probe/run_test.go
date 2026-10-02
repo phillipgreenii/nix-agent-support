@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,14 @@ func testCmd() (*cobra.Command, *bytes.Buffer) {
 // dependencies, so a test can assert on WHAT was attempted without a
 // real ccpool/pg-connector binary or real snapshot I/O.
 type spyDeps struct {
+	// pools is what discovery returns; nil = the single ambient pool.
+	pools []poolRef
+	// Per-pool overrides keyed by poolRef.Label; a pool with no entry falls
+	// back to the flat needsInputRows/allPoolRows/*Err fields below.
+	needsInputByPool map[string][]ccpoolSessionRow
+	allByPool        map[string][]ccpoolSessionRow
+	allErrByPool     map[string]error
+
 	needsInputRows []ccpoolSessionRow
 	needsInputErr  error
 
@@ -61,10 +70,25 @@ type spyDeps struct {
 func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 	return runDeps{
 		now: func() time.Time { return clock },
-		listNeedsInput: func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error) {
+		listPools: func(string, func(string)) []poolRef {
+			if s.pools == nil {
+				return []poolRef{{Label: ambientPoolLabel}}
+			}
+			return s.pools
+		},
+		listNeedsInput: func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+			if rows, ok := s.needsInputByPool[pool.Label]; ok {
+				return rows, nil
+			}
 			return s.needsInputRows, s.needsInputErr
 		},
-		listAllPoolSessions: func(ctx context.Context, warn func(string)) ([]ccpoolSessionRow, error) {
+		listAllPoolSessions: func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+			if err, ok := s.allErrByPool[pool.Label]; ok {
+				return nil, err
+			}
+			if rows, ok := s.allByPool[pool.Label]; ok {
+				return rows, nil
+			}
 			return s.allPoolRows, s.allPoolErr
 		},
 		listEscalated: func(ctx context.Context, warn func(string)) ([]connectorIssue, error) {
@@ -270,5 +294,135 @@ func TestRunProbeDedupQueryFailureIsPartial(t *testing.T) {
 	}
 	if len(spy.created) != 0 {
 		t.Fatalf("expected no create when the dedup query itself fails")
+	}
+}
+
+var (
+	workerPool = poolRef{Label: "pg-router-ccpool-worker", Dir: "/pools/pg-router-ccpool-worker"}
+	reviewPool = poolRef{Label: "pg-router-ccpool-review", Dir: "/pools/pg-router-ccpool-review"}
+)
+
+// TestRunProbeReportsStuckSessionInRolePoolNamingThePool is the pg2-bkzrc
+// acceptance test: two role pools, one holding a stuck session, which must
+// be reported with that pool named; the clean pool contributes nothing.
+func TestRunProbeReportsStuckSessionInRolePoolNamingThePool(t *testing.T) {
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	stuck := ccpoolSessionRow{ExternalID: "sess-r1", Name: "reviewer", State: "needs_input", CWD: "/tmp/r1"}
+	spy := &spyDeps{
+		pools: []poolRef{{Label: ambientPoolLabel}, workerPool, reviewPool},
+		needsInputByPool: map[string][]ccpoolSessionRow{
+			ambientPoolLabel: nil,
+			workerPool.Label: nil,
+			reviewPool.Label: {stuck},
+		},
+	}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(spy.created) != 1 {
+		t.Fatalf("expected exactly 1 bd issue (the stuck review-pool session), got %d", len(spy.created))
+	}
+	got := spy.created[0]
+	if got.metadata[metaFingerprint] != "needs-input:"+reviewPool.Label+":sess-r1" {
+		t.Errorf("fingerprint %q does not scope the finding to the review pool", got.metadata[metaFingerprint])
+	}
+	if !strings.Contains(got.title, reviewPool.Label) || !strings.Contains(got.body, "pool="+reviewPool.Label) {
+		t.Errorf("finding must name the pool; title=%q body=%q", got.title, got.body)
+	}
+	if strings.Contains(got.body, workerPool.Label) {
+		t.Errorf("clean worker pool must not appear in the finding: %q", got.body)
+	}
+}
+
+// TestRunProbeScansEveryPoolForNeedsInput proves each pool is queried (not
+// only the first), by stuck sessions with the SAME external id in two
+// pools producing two distinct, pool-scoped findings.
+func TestRunProbeScansEveryPoolForNeedsInput(t *testing.T) {
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	row := ccpoolSessionRow{ExternalID: "same-id", State: "needs_input"}
+	spy := &spyDeps{
+		pools: []poolRef{workerPool, reviewPool},
+		needsInputByPool: map[string][]ccpoolSessionRow{
+			workerPool.Label: {row},
+			reviewPool.Label: {row},
+		},
+	}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if len(spy.created) != 2 {
+		t.Fatalf("expected 2 findings (one per pool), got %d", len(spy.created))
+	}
+	if spy.created[0].metadata[metaFingerprint] == spy.created[1].metadata[metaFingerprint] {
+		t.Errorf("same external id in two pools must not collapse to one fingerprint")
+	}
+}
+
+func TestRunProbeNeverPromptedNeedsTwoConsecutiveRuns(t *testing.T) {
+	opts := baseOpts(t)
+	ready := ccpoolSessionRow{ExternalID: "sess-w1", Name: "w", State: "ready", Live: true}
+	mk := func() *spyDeps {
+		return &spyDeps{
+			pools:     []poolRef{{Label: ambientPoolLabel}, workerPool},
+			allByPool: map[string][]ccpoolSessionRow{workerPool.Label: {ready}},
+		}
+	}
+
+	cmd1, _ := testCmd()
+	spy1 := mk()
+	if err := runProbe(cmd1, opts, spy1.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if len(spy1.created) != 0 {
+		t.Fatalf("first sighting of a ready session must not be a finding, got %d", len(spy1.created))
+	}
+
+	cmd2, _ := testCmd()
+	spy2 := mk()
+	if err := runProbe(cmd2, opts, spy2.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(spy2.created) != 1 {
+		t.Fatalf("second consecutive sighting must be a finding, got %d", len(spy2.created))
+	}
+	got := spy2.created[0]
+	if got.metadata[metaFingerprint] != "never-prompted:"+workerPool.Label+":sess-w1" {
+		t.Errorf("fingerprint = %q", got.metadata[metaFingerprint])
+	}
+	if !strings.Contains(got.body, "pool="+workerPool.Label) {
+		t.Errorf("finding must name the pool: %q", got.body)
+	}
+}
+
+// TestRunProbeFailedPoolKeepsReadyClockAndBaseline: one pool's listing
+// failing makes the run partial (exit 4), must not reset that pool's
+// never-prompted clock, and must not overwrite the zombie baseline with a
+// partial sum.
+func TestRunProbeFailedPoolKeepsReadyClockAndBaseline(t *testing.T) {
+	opts := baseOpts(t)
+	key := readyKey(workerPool, "sess-w1")
+	if err := saveSnapshot(opts.snapshotPath, snapshot{ZombieCount: 5, ReadySeen: []string{key}}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := testCmd()
+	spy := &spyDeps{
+		pools:        []poolRef{{Label: ambientPoolLabel}, workerPool},
+		allErrByPool: map[string]error{workerPool.Label: errCcpoolFailed},
+	}
+	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected exit 4 (partial), got %v", err)
+	}
+	snap, ok := loadSnapshot(opts.snapshotPath)
+	if !ok {
+		t.Fatal("snapshot not written")
+	}
+	if snap.ZombieCount != 5 {
+		t.Errorf("zombie baseline clobbered by a partial sum: %d", snap.ZombieCount)
+	}
+	if len(snap.ReadySeen) != 1 || snap.ReadySeen[0] != key {
+		t.Errorf("failed pool's ready keys must carry forward, got %v", snap.ReadySeen)
 	}
 }
