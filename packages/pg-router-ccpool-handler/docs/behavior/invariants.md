@@ -187,3 +187,10 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     `max_sessions`, so `INV-CCH-6` stops the next daemon from launching past the cap while they
     run. Not covered: the spared session's bead stays claimed by the old daemon until the session
     ends and its bead is resolved or reconciled, because no executor watches it any more.
+- **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
+  MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
+  or `needs_input` still uses the same directory; the last session to detach removes it. A
+  per-bead worktree is shared by every role's session for that bead, so closing the first one
+  (or its bead) must not delete the working directory out from under a peer. If the session list
+  cannot be read the worktree is left in place. This extends the same sharing rule that
+  `INV-CCH-14` and the dispatch-time reconcile apply to their own purges (bead `pg2-aqpqx`).

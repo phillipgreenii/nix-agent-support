@@ -368,6 +368,11 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 			"session", name, "worktree", wt)
 		return
 	}
+	if r.worktreeSharedWithLivePeer(ctx, name, wt) {
+		slog.Info("dispatch: worktree cleanup deferred -- another live session still uses it",
+			"session", name, "worktree", wt)
+		return
+	}
 	if !r.waitSessionQuiet(ctx, name) {
 		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
 			"session", name, "worktree", wt, "quietWindow", r.deps.Cfg.WorktreeQuietWindow)
@@ -458,6 +463,33 @@ func (r *ccpoolRun) needsInputAlive(ctx context.Context, externalID string) bool
 		}
 	}
 	return false // absent ⇒ gone ⇒ safe to clean up
+}
+
+// worktreeSharedWithLivePeer reports whether a session other than name that
+// is live and not idle/errored still uses wt as its working directory
+// (pg2-aqpqx). A per-bead worktree path is keyed by bead id alone
+// (worktree.Ensure), so every role's session for one bead shares it: the
+// session that finishes first must not delete the directory out from under
+// a peer that is starting, ready, working or awaiting input -- the last
+// session to detach removes it. Mirrors the reconcile path's
+// worktreeInUseByPeer (cmd/pg-router-ccpool-handler/reconcile.go), except
+// that a needs_input peer is also protected here: its own cleanup is
+// deferred until it closes, so removing its cwd now would strand it. A list
+// error is treated as "in use" (can't tell => don't delete).
+func (r *ccpoolRun) worktreeSharedWithLivePeer(ctx context.Context, name, wt string) bool {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return true
+	}
+	for _, s := range sessions {
+		if s.ExternalID == name || s.CWD != wt || !s.Live {
+			continue
+		}
+		if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {
+			return true
+		}
+	}
+	return false
 }
 
 // usesWorktreeIsolation reports whether cfg selects the "worktree" isolation
