@@ -89,6 +89,43 @@ type CompactStats struct {
 	Duration      time.Duration
 }
 
+// CompactPlan is what a compaction WOULD do, computed without changing anything
+// (the dry run): the same fold a real compaction runs, minus the write.
+type CompactPlan struct {
+	// BytesBefore / RecordsBefore describe the log as it is; BytesAfter /
+	// RecordsAfter the compacted log a real run would leave.
+	BytesBefore, BytesAfter     int64
+	RecordsBefore, RecordsAfter int
+	// EventsKept are the events still live (retained); EventsDropped the events
+	// whose final state is evicted and whose records compaction would discard.
+	EventsKept, EventsDropped int
+	// GatesKept are the active gates the compacted log would still carry.
+	GatesKept int
+	// Torn is true when the log has an undecodable line: everything from it on is
+	// ignored by a replay and a real compaction would discard it.
+	Torn bool
+}
+
+// NoProgress is true when a real compaction would not make the log smaller.
+func (p CompactPlan) NoProgress() bool { return p.BytesAfter >= p.BytesBefore }
+
+// Planner is implemented by a Store that can compute a CompactPlan without
+// writing anything. Like Compactor it is OPTIONAL (like RestoreObserver), so a
+// store double that only implements Store keeps compiling.
+type Planner interface {
+	PlanCompaction() (CompactPlan, error)
+}
+
+// CompactionInfo describes the most recent compaction this process ran.
+type CompactionInfo struct {
+	// At is when it finished (the queue's clock).
+	At time.Time
+	// Trigger is what started it: "startup", "threshold" (compact_threshold_bytes),
+	// "limit" (the soft log-size threshold) or "manual" (log compact).
+	Trigger string
+	CompactStats
+}
+
 // foldEvent is one live event in a logFold.
 type foldEvent struct {
 	pos     int      // FIFO position: assigned at first insert, kept across a re-enqueue
@@ -105,6 +142,9 @@ type logFold struct {
 	gates   map[string]Record
 	seen    map[string]struct{}
 	applied int
+	// dropped counts events a later evict removed (the dead history compaction
+	// discards); only the dry-run plan reports it.
+	dropped int
 }
 
 func newLogFold() *logFold {
@@ -143,6 +183,9 @@ func (f *logFold) apply(r Record) {
 		}
 		e.accepts = append(e.accepts, r.ListenerID)
 	case opEvict:
+		if _, ok := f.events[r.EventID]; ok {
+			f.dropped++
+		}
 		delete(f.events, r.EventID)
 	case opGateSet:
 		f.gates[r.GateType] = r
@@ -205,6 +248,75 @@ func compactRecords(recs []Record) []Record {
 		f.apply(r)
 	}
 	return f.records()
+}
+
+// planFrom folds the log bytes r (size of them, torn tail included) into the
+// CompactPlan a real compaction of them would execute. It writes nothing: the
+// compacted size is the encoded length of the records a real run would write.
+func planFrom(r io.Reader, size int64) (CompactPlan, error) {
+	fold := newLogFold()
+	torn, err := scanRecords(r, fold.apply)
+	if err != nil {
+		return CompactPlan{}, err
+	}
+	live := fold.records()
+	plan := CompactPlan{
+		BytesBefore:   size,
+		RecordsBefore: fold.applied,
+		RecordsAfter:  len(live),
+		EventsKept:    len(fold.events),
+		EventsDropped: fold.dropped,
+		GatesKept:     len(fold.gates),
+		Torn:          torn,
+	}
+	for _, rec := range live {
+		b, merr := json.Marshal(rec)
+		if merr != nil {
+			return CompactPlan{}, merr
+		}
+		plan.BytesAfter += int64(len(b)) + 1
+	}
+	return plan, nil
+}
+
+// PlanCompactionFile computes the CompactPlan for the log at path WITHOUT opening
+// it as a store: it only reads, takes no lock, creates no file and leaves no
+// temp file, so it is safe beside a live daemon (it folds the bytes present when
+// it stats the file) and is how an offline dry run works. A log that does not
+// exist plans to nothing.
+func PlanCompactionFile(path string) (CompactPlan, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return CompactPlan{}, nil
+		}
+		return CompactPlan{}, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return CompactPlan{}, err
+	}
+	return planFrom(io.NewSectionReader(f, 0, fi.Size()), fi.Size())
+}
+
+// PlanCompaction is the dry run of Compact: it folds the log's current prefix
+// (appends keep landing meanwhile, untouched) and reports what Compact would
+// leave, changing nothing — no temp file, no rename, no handle swap.
+func (s *FileStore) PlanCompaction() (CompactPlan, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return CompactPlan{}, os.ErrClosed
+	}
+	n := s.size
+	s.mu.Unlock()
+	rf, err := os.Open(s.path)
+	if err != nil {
+		return CompactPlan{}, err
+	}
+	defer func() { _ = rf.Close() }()
+	return planFrom(io.NewSectionReader(rf, 0, n), n)
 }
 
 // syncDir fsyncs a directory so a rename inside it is durable.
@@ -376,6 +488,27 @@ func (q *Queue) LogSize() int64 {
 // Compactions reports how many compactions have completed in this process.
 func (q *Queue) Compactions() int64 { return q.compactions.Load() }
 
+// LastCompaction reports the most recent compaction this process completed
+// (startup, threshold, limit or manual); ok is false before the first one.
+// Lock-free; safe from the status path.
+func (q *Queue) LastCompaction() (info CompactionInfo, ok bool) {
+	p := q.lastCompaction.Load()
+	if p == nil {
+		return CompactionInfo{}, false
+	}
+	return *p, true
+}
+
+// PlanCompaction is the dry run of CompactNow: what a compaction would do right
+// now, changing nothing. Safe to call concurrently with every other Queue method.
+func (q *Queue) PlanCompaction() (CompactPlan, error) {
+	p, ok := q.store.(Planner)
+	if !ok {
+		return CompactPlan{}, ErrCompactionUnsupported
+	}
+	return p.PlanCompaction()
+}
+
 // CompactNow compacts the log synchronously, regardless of threshold. Safe to
 // call concurrently with every other Queue method.
 func (q *Queue) CompactNow() (CompactStats, error) { return q.compact("manual") }
@@ -390,6 +523,7 @@ func (q *Queue) compact(trigger string) (CompactStats, error) {
 		return st, err
 	}
 	q.compactions.Add(1)
+	q.lastCompaction.Store(&CompactionInfo{At: q.now(), Trigger: trigger, CompactStats: st})
 	next := q.compactThreshold
 	if twice := 2 * st.BytesAfter; twice > next {
 		next = twice

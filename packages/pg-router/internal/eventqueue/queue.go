@@ -438,6 +438,7 @@ type Queue struct {
 	compacting       atomic.Bool
 	compactWG        sync.WaitGroup
 	compactions      atomic.Int64
+	lastCompaction   atomic.Pointer[CompactionInfo]
 
 	// lim is the log-size limit enforcement state (limits.go, bead pg2-5d3ui).
 	lim limitState
