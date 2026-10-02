@@ -7,7 +7,7 @@
 mkBashScript {
   name = "wtnew";
   src = ./.;
-  description = "Create a fresh git worktree for manual (non-drain) work, with the pre-commit symlink guaranteed and integrate-branch-support's facts block printed";
+  description = "Create a fresh git worktree for manual (non-drain) work, linking the pre-commit config for legacy repos and printing integrate-branch-support's facts block";
   runtimeDeps = [
     pkgs.git
     pkgs.jq

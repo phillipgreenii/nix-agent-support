@@ -1,8 +1,11 @@
 // Package drain implements /drain-beads isolation: one call that creates (or
-// reuses) a bead's worktree on its drain/<id> branch and links the canonical
-// clone's nix-generated pre-commit config into it (the config is a gitignored
-// symlink — absent from fresh worktrees, so commits there would abort;
-// phillipg-nix-repo-base ADR 0016).
+// reuses) a bead's worktree on its drain/<id> branch and, for a LEGACY repo
+// only, links the canonical clone's nix-generated pre-commit config into it
+// (the config is a gitignored symlink — absent from fresh worktrees, so
+// commits there would abort; phillipg-nix-repo-base ADR 0016). A repo with a
+// per-clone hook bundle needs no link: git runs the bundle's hooks from the
+// shared common dir, so isolate writes no file and reports the bundle state
+// (spec 7.1; `pg-hooks status --porcelain`).
 package drain
 
 import (
@@ -27,10 +30,14 @@ type Params struct {
 }
 
 type Result struct {
-	Worktree  string `json:"worktree"`
-	Branch    string `json:"branch"`
-	Reused    string `json:"reused"`    // none | worktree | branch
-	Precommit string `json:"precommit"` // linked | present | none
+	Worktree string `json:"worktree"`
+	Branch   string `json:"branch"`
+	Reused   string `json:"reused"` // none | worktree | branch
+	// Precommit is the hook-config outcome. Legacy repos (and machines without
+	// pg-hooks): linked | present | none, exactly as before. Repos with a hook
+	// bundle: bundle | stale | missing | broken (the PRECOMMIT vocabulary of
+	// integrate-branch-support --facts) and NO file is written.
+	Precommit string `json:"precommit"`
 	// Warning is a non-fatal, read-only diagnosis of the canonical clone
 	// (core.worktree set in its .git/config, or git's toplevel disagreeing
 	// with --repo). Empty when the canonical clone is healthy. The bead is
@@ -118,12 +125,61 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 		}
 	}
 
+	// Link the legacy prek config ONLY when pg-hooks says "legacy" (or is not
+	// installed / gives no recognizable state: today's behavior, so a machine
+	// that has not applied yet is no worse off). Any other state means the repo
+	// has (or needs) a hook bundle; writing a config into the worktree would
+	// be wrong, so report the state instead.
+	if state := hooksState(ctx, r, wt); state != "" && state != "legacy" {
+		res.Precommit = precommitFact(state)
+		return res, nil
+	}
 	pc, err := linkPrecommitConfig(repo, wt)
 	if err != nil {
 		return Result{}, err
 	}
 	res.Precommit = pc
 	return res, nil
+}
+
+// hooksState runs `pg-hooks status --porcelain` in dir and returns its
+// state= value (present|stale|missing|broken|unreachable|relocated|legacy), or
+// "" when pg-hooks is absent (exec failure or exit 127) or prints no
+// recognizable state. The exit code is deliberately ignored: status encodes
+// the state in its exit code too (14 stale, 13 missing, ...), so a non-zero
+// exit is expected; callers parse the porcelain, never prose (spec 5.3).
+func hooksState(ctx context.Context, r run.Runner, dir string) string {
+	out, _ := r.Run(ctx, "pg-hooks", []string{"status", "--porcelain"}, run.Options{Dir: dir})
+	for _, line := range strings.Split(out.Stdout, "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "state=")
+		if !ok {
+			continue
+		}
+		switch v {
+		case "present", "stale", "missing", "broken", "unreachable", "relocated", "legacy":
+			return v
+		}
+		return ""
+	}
+	return ""
+}
+
+// precommitFact maps a pg-hooks state to the PRECOMMIT vocabulary
+// integrate-branch-support --facts defines (bundle|stale|legacy|missing|broken):
+// relocated is a bundle that must be rebuilt (stale); unreachable means git
+// never runs this clone's hooks (missing).
+func precommitFact(state string) string {
+	switch state {
+	case "present":
+		return "bundle"
+	case "stale", "relocated":
+		return "stale"
+	case "broken":
+		return "broken"
+	case "legacy":
+		return "legacy"
+	}
+	return "missing"
 }
 
 // diagnoseCanonical returns a one-line, human-readable diagnosis when the

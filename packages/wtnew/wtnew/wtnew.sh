@@ -1,10 +1,11 @@
 # shellcheck shell=bash
 # wtnew - create a fresh git worktree for MANUAL (non-drain) work: adds the
-# worktree on a new branch, guarantees the pre-commit config symlink that a
-# fresh worktree is otherwise missing (CLAUDE.md "prek / pre-commit in
-# Fresh Worktrees"; phillipg-nix-repo-base ADR 0016), and prints the same
-# integration-facts JSON block `integrate-branch-support` prints, computed
-# from inside the new worktree.
+# worktree on a new branch, links the pre-commit config that a fresh worktree
+# of a LEGACY repo is otherwise missing (CLAUDE.md "prek / pre-commit in
+# Fresh Worktrees"; phillipg-nix-repo-base ADR 0016; a repo with a hook bundle
+# needs no link and gets none), and prints the same integration-facts JSON
+# block `integrate-branch-support` prints, computed from inside the new
+# worktree.
 #
 # nix build already sources wtnew.bash ahead of this body (mkBashScript's
 # hasSupportBash injection); this guard only fires for a raw `bash
@@ -24,10 +25,13 @@ wtnew: Create a fresh git worktree for manual (non-drain) work
 
 Usage: wtnew <bead-or-name> [OPTIONS]
 
-Creates .worktrees/<bead-or-name> off a base ref on a new branch,
-guarantees the pre-commit config symlink a fresh worktree is otherwise
-missing, and prints the same integration-facts JSON block
-`integrate-branch-support` prints (computed from inside the new worktree).
+Creates .worktrees/<bead-or-name> off a base ref on a new branch, links the
+pre-commit config a fresh worktree of a LEGACY repo is otherwise missing
+(`pg-hooks status --porcelain` says state=legacy, or pg-hooks is not
+installed; a repo with a hook bundle gets no file), and prints the same
+integration-facts JSON block `integrate-branch-support` prints (computed from
+inside the new worktree). On stderr it also reports `PRECOMMIT=<value>`, the
+facts-block vocabulary: bundle|stale|legacy|missing|broken.
 
 Arguments:
   <bead-or-name>    Directory name under .worktrees/, and (unless --branch
@@ -121,7 +125,14 @@ if ! git -C "$root" worktree add "$wt" -b "$branch" "$base" >&2; then
   die "git worktree add failed"
 fi
 
-link_status="$(wtnew_link_precommit_config "$root/.pre-commit-config.yaml" "$wt/.pre-commit-config.yaml")"
-echo "wtnew: pre-commit config: $link_status" >&2
+hooks_state="$(wtnew_hooks_state "$wt")"
+link_status=""
+if wtnew_should_link_precommit "$hooks_state"; then
+  link_status="$(wtnew_link_precommit_config "$root/.pre-commit-config.yaml" "$wt/.pre-commit-config.yaml")"
+  echo "wtnew: pre-commit config: $link_status" >&2
+else
+  echo "wtnew: pre-commit config: not linked (pg-hooks status: $hooks_state)" >&2
+fi
+echo "wtnew: PRECOMMIT=$(wtnew_precommit_fact "$hooks_state" "$link_status")" >&2
 
 (cd "$wt" && integrate-branch-support)

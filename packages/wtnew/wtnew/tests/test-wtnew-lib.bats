@@ -131,3 +131,96 @@ EOF
   [ "$output" = "none" ]
   [ ! -e "$TEST_DIR/wt/.pre-commit-config.yaml" ]
 }
+
+# --- Task 11 (pg2-pla9d.15) ---------------------------------------------------
+
+# stub_pg_hooks <state> <exit>: a `pg-hooks` on PATH printing that status.
+stub_pg_hooks() {
+  printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$1'" "exit $2" >"$STUB_BIN/pg-hooks"
+  chmod +x "$STUB_BIN/pg-hooks"
+  PATH="$STUB_BIN:$PATH"
+}
+
+@test "wtnew_hooks_state: prints the state value, ignoring pg-hooks' non-zero exit" {
+  stub_pg_hooks stale 14
+  run wtnew_hooks_state "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "stale" ]
+}
+
+@test "wtnew_hooks_state: runs pg-hooks inside the given directory" {
+  mkdir -p "$TEST_DIR/sub"
+  cat >"$STUB_BIN/pg-hooks" <<'EOF'
+#!/bin/sh
+case "$(pwd -P)" in */sub) echo state=present ;; *) echo state=missing ;; esac
+EOF
+  chmod +x "$STUB_BIN/pg-hooks"
+  PATH="$STUB_BIN:$PATH"
+  run wtnew_hooks_state "$TEST_DIR/sub"
+  [ "$output" = "present" ]
+}
+
+@test "wtnew_hooks_state: prints nothing when pg-hooks is absent (127)" {
+  printf '#!/bin/sh\nexit 127\n' >"$STUB_BIN/pg-hooks"
+  chmod +x "$STUB_BIN/pg-hooks"
+  PATH="$STUB_BIN:$PATH"
+  run wtnew_hooks_state "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "wtnew_hooks_state: prints nothing for an unrecognized state value" {
+  stub_pg_hooks weird 0
+  run wtnew_hooks_state "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "wtnew_should_link_precommit: only legacy, or no/unrecognized state, links" {
+  run wtnew_should_link_precommit legacy
+  [ "$status" -eq 0 ]
+  run wtnew_should_link_precommit ""
+  [ "$status" -eq 0 ]
+  local st
+  for st in present stale missing broken unreachable relocated; do
+    run wtnew_should_link_precommit "$st"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "wtnew_precommit_fact: maps every pg-hooks state onto the shared PRECOMMIT vocabulary" {
+  local pair st want
+  for pair in present:bundle stale:stale relocated:stale broken:broken legacy:legacy missing:missing unreachable:missing; do
+    st="${pair%%:*}"
+    want="${pair##*:}"
+    run wtnew_precommit_fact "$st"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$want" ]
+  done
+}
+
+@test "wtnew_precommit_fact: with no state, falls back to what the link step produced" {
+  run wtnew_precommit_fact "" linked
+  [ "$output" = "legacy" ]
+  run wtnew_precommit_fact "" copied
+  [ "$output" = "legacy" ]
+  run wtnew_precommit_fact "" none
+  [ "$output" = "missing" ]
+  run wtnew_precommit_fact ""
+  [ "$output" = "missing" ]
+}
+
+@test "wtnew_precommit_fact: agrees with integrate-branch-support --facts for every state (drift guard)" {
+  # Only meaningful against an integrate-branch-support that has the pg-hooks
+  # PRECOMMIT vocabulary (the --bundle-refresh era); an older build on PATH
+  # derives PRECOMMIT from the on-disk config alone.
+  command -v integrate-branch-support >/dev/null 2>&1 || skip "integrate-branch-support not on PATH"
+  integrate-branch-support --help | grep -q -e '--bundle-refresh' || skip "integrate-branch-support predates the pg-hooks PRECOMMIT vocabulary"
+  local st stub_status
+  for st in present stale relocated broken legacy missing unreachable; do
+    printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$st'" "exit 0" >"$STUB_BIN/pg-hooks"
+    chmod +x "$STUB_BIN/pg-hooks"
+    stub_status="$(PATH="$STUB_BIN:$PATH" integrate-branch-support --facts | sed -n 's/^PRECOMMIT=//p')"
+    [ "$stub_status" = "$(wtnew_precommit_fact "$st")" ]
+  done
+}

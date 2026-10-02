@@ -48,6 +48,21 @@ setup() {
 
   BIN="${SCRIPTS_DIR}/wtnew.sh"
   TEST_DIR="$GFH_REPO"
+
+  # PGH_BIN: a `pg-hooks` stub shadowing any real one for the whole test, so
+  # nothing depends on whether this machine has applied. Default (no
+  # PG_HOOKS_STUB_STATE) = "pg-hooks not installed" (exit 127); a test opts into
+  # a state by exporting PG_HOOKS_STUB_STATE. Deliberately OUTSIDE $TEST_DIR so
+  # it cannot dirty the fixture repo. Both wtnew and the integrate-branch-support
+  # it runs resolve this stub.
+  PGH_BIN="$(mktemp -d)"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    '[ -n "${PG_HOOKS_STUB_STATE:-}" ] || exit 127' \
+    "printf 'state=%s\\nbundle=\\ngeneration=\\nstages=\\nreinstall=\\n' \"\$PG_HOOKS_STUB_STATE\"" \
+    'exit "${PG_HOOKS_STUB_EXIT:-0}"' >"$PGH_BIN/pg-hooks"
+  chmod +x "$PGH_BIN/pg-hooks"
+  export PATH="$PGH_BIN:$PATH"
   cd "$TEST_DIR" || return 1
 }
 
@@ -57,6 +72,9 @@ teardown() {
   gfh_teardown
   if [ -n "${WT_DIR:-}" ]; then
     rm -rf "$WT_DIR"
+  fi
+  if [ -n "${PGH_BIN:-}" ]; then
+    rm -rf "$PGH_BIN"
   fi
 }
 
@@ -189,4 +207,65 @@ add_worktree() {
   [ "$status" -eq 0 ]
   [ -d "$TEST_DIR/.worktrees/pg2-abcde" ]
   [ ! -d "$WT_DIR/wt/.worktrees" ]
+}
+
+# --- Task 11 (pg2-pla9d.15): link the prek config only for legacy repos ------
+
+@test "pg-hooks state legacy: the config is linked, as today, and PRECOMMIT=legacy is reported" {
+  mkdir -p "$TEST_DIR/store-target"
+  touch "$TEST_DIR/store-target/config.yaml"
+  ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
+  export PG_HOOKS_STUB_STATE=legacy
+  run bash "$BIN" pg2-abcde
+  [ "$status" -eq 0 ]
+  [ -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [[ "$output" == *"pre-commit config: linked"* ]]
+  [[ "$output" == *"PRECOMMIT=legacy"* ]]
+}
+
+@test "pg-hooks state present (bundle): nothing is written into the worktree and PRECOMMIT=bundle is reported" {
+  mkdir -p "$TEST_DIR/store-target"
+  touch "$TEST_DIR/store-target/config.yaml"
+  ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
+  export PG_HOOKS_STUB_STATE=present
+  run bash "$BIN" pg2-abcde
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [ ! -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [[ "$output" == *"not linked (pg-hooks status: present)"* ]]
+  [[ "$output" == *"PRECOMMIT=bundle"* ]]
+}
+
+@test "pg-hooks bundle states report the shared PRECOMMIT vocabulary and write no file" {
+  echo "repos: []" >"$TEST_DIR/.pre-commit-config.yaml"
+  local i=0 pair st want
+  for pair in "stale:stale" "broken:broken" "missing:missing" "relocated:stale" "unreachable:missing"; do
+    st="${pair%%:*}"
+    want="${pair##*:}"
+    i=$((i + 1))
+    PG_HOOKS_STUB_STATE="$st" run bash "$BIN" "pg2-state$i"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_DIR/.worktrees/pg2-state$i/.pre-commit-config.yaml" ]
+    [[ "$output" == *"PRECOMMIT=$want"* ]]
+  done
+}
+
+@test "pg-hooks absent (127): today's behavior -- the config is linked" {
+  mkdir -p "$TEST_DIR/store-target"
+  touch "$TEST_DIR/store-target/config.yaml"
+  ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
+  unset PG_HOOKS_STUB_STATE
+  run bash "$BIN" pg2-abcde
+  [ "$status" -eq 0 ]
+  [ -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [[ "$output" == *"pre-commit config: linked"* ]]
+}
+
+@test "stdout stays exactly the facts block when a bundle is present (state goes to stderr only)" {
+  export PG_HOOKS_STUB_STATE=present
+  stdout="$(bash "$BIN" pg2-abcde 2>/dev/null)"
+  status=$?
+  [ "$status" -eq 0 ]
+  echo "$stdout" | jq -e '.primary_branch == "main"'
+  [[ "$stdout" != *PRECOMMIT* ]]
 }

@@ -148,10 +148,13 @@ pb gate attach-verified-child \
 
 Idempotent isolation for one bead in the `/drain-beads` work loop: creates or reuses
 `.worktrees/<bead>` on branch `drain/<bead>` (branching off the repo's primary branch when
-neither the worktree nor the branch already exists), then links the canonical clone's
-gitignored, nix-generated `.pre-commit-config.yaml` into the worktree so commits there run
-the hooks (`phillipg-nix-repo-base` ADR 0016). Safe to re-run: an existing worktree or parked
-branch is reused rather than recreated, and an already-linked pre-commit config is left alone.
+neither the worktree nor the branch already exists). For a **legacy** repo (`pg-hooks status
+--porcelain` reports `state=legacy`, or `pg-hooks` is not installed) it then links the canonical
+clone's gitignored, nix-generated `.pre-commit-config.yaml` into the worktree so commits there
+run the hooks (`phillipg-nix-repo-base` ADR 0016). For a repo with a per-clone hook bundle it
+writes **no file** and reports the bundle state instead. Safe to re-run: an existing worktree or
+parked branch is reused rather than recreated, and an already-linked pre-commit config is left
+alone.
 
 ```
 pb drain isolate --bead <id> --repo <abs-path> [--json]
@@ -165,7 +168,9 @@ pb drain isolate --bead <id> --repo <abs-path> [--json]
   since the id lands in both a filesystem path and a branch ref; bare `.`/`..` are also
   rejected. Dots are otherwise legal — live ids such as `pg2-4dz88.2.3` exist.
 - Human output is one line:
-  `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<linked|present|none>`.
+  `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<linked|present|none|bundle|stale|missing|broken>`
+  (`linked|present|none` for legacy repos; `bundle|stale|missing|broken` is the PRECOMMIT
+  vocabulary of `integrate-branch-support --facts`, with nothing written to the worktree).
   `--json` emits the same fields as a JSON object instead.
 - Read-only canonical-clone diagnosis: when the canonical clone's `.git/config` carries a stray
   `core.worktree` (or `git rev-parse --show-toplevel` disagrees with `--repo`), isolate still

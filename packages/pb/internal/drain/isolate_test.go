@@ -50,7 +50,62 @@ func TestMain(m *testing.M) {
 	for _, v := range gitEnvVars {
 		_ = os.Unsetenv(v)
 	}
-	os.Exit(m.Run())
+	// Shadow any real pg-hooks with a stub for the whole run, so no test depends
+	// on whether the machine has applied (pg-hooks on PATH) or on the real
+	// clone's bundle. Default = "not installed" (exit 127), i.e. today's
+	// behavior; tests opt into a state with stubPgHooks.
+	dir, err := os.MkdirTemp("", "pb-drain-stub-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pg-hooks"), []byte(pgHooksStub), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// pgHooksStub: with PG_HOOKS_STUB_STATE unset it behaves as "pg-hooks not
+// installed" (exit 127, no output); otherwise it prints the porcelain for that
+// state, records its argv and cwd in PG_HOOKS_STUB_LOG, and exits with
+// PG_HOOKS_STUB_EXIT (default 0) as the real status does for non-present states.
+const pgHooksStub = `#!/bin/sh
+[ -n "${PG_HOOKS_STUB_STATE:-}" ] || exit 127
+if [ -n "${PG_HOOKS_STUB_LOG:-}" ]; then
+  printf '%s|%s\n' "$*" "$(pwd -P)" >>"$PG_HOOKS_STUB_LOG"
+fi
+printf 'state=%s\nbundle=\ngeneration=\nstages=\nreinstall=\n' "$PG_HOOKS_STUB_STATE"
+exit "${PG_HOOKS_STUB_EXIT:-0}"
+`
+
+// stubPgHooks makes the stub report state (exiting with exitCode, as the real
+// `pg-hooks status` does) and returns the path of the log recording each call.
+func stubPgHooks(t *testing.T, state string, exitCode int) string {
+	t.Helper()
+	log := filepath.Join(t.TempDir(), "pg-hooks.log")
+	t.Setenv("PG_HOOKS_STUB_STATE", state)
+	t.Setenv("PG_HOOKS_STUB_EXIT", fmt.Sprint(exitCode))
+	t.Setenv("PG_HOOKS_STUB_LOG", log)
+	return log
+}
+
+// withCanonicalConfig gives repo the canonical clone's gitignored-symlink
+// .pre-commit-config.yaml and returns its path.
+func withCanonicalConfig(t *testing.T, repo string) string {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), "generated-config.yaml")
+	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(repo, ".pre-commit-config.yaml")
+	if err := os.Symlink(target, src); err != nil {
+		t.Fatal(err)
+	}
+	return src
 }
 
 // gitTest runs git with a hermetic config (no user/global gitconfig) and a
@@ -506,6 +561,134 @@ func TestDiagnoseCanonical_scripted(t *testing.T) {
 						t.Errorf("diagnosis issued a mutating git config call: %v", c.Args)
 					}
 				}
+			}
+		})
+	}
+}
+
+// Task 11 (pg2-pla9d.15): link the prek config only when pg-hooks says legacy.
+
+func TestIsolate_legacyStateLinksPrecommitConfig(t *testing.T) {
+	repo := newRepo(t)
+	src := withCanonicalConfig(t, repo)
+	log := stubPgHooks(t, "legacy", 0)
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11a"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	if out.Precommit != "linked" {
+		t.Errorf("Precommit = %q, want linked", out.Precommit)
+	}
+	if got, err := os.Readlink(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); err != nil || got != src {
+		t.Errorf("worktree config link = %q, %v; want %q", got, err, src)
+	}
+	// status is asked from inside the new worktree (it resolves the clone from cwd)
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("pg-hooks was never called: %v", err)
+	}
+	if want := "status --porcelain|" + out.Worktree + "\n"; string(b) != want {
+		t.Errorf("pg-hooks calls = %q, want %q", b, want)
+	}
+}
+
+func TestIsolate_bundleStatesWriteNoFileAndReportState(t *testing.T) {
+	cases := []struct {
+		state string
+		exit  int
+		want  string
+	}{
+		{"present", 0, "bundle"},
+		{"stale", 14, "stale"},
+		{"relocated", 16, "stale"},
+		{"broken", 12, "broken"},
+		{"missing", 13, "missing"},
+		{"unreachable", 15, "missing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			repo := newRepo(t)
+			withCanonicalConfig(t, repo) // a config exists, yet must NOT be linked
+			stubPgHooks(t, tc.state, tc.exit)
+			out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11b"})
+			if err != nil {
+				t.Fatalf("Isolate: %v", err)
+			}
+			if out.Precommit != tc.want {
+				t.Errorf("Precommit = %q, want %q", out.Precommit, tc.want)
+			}
+			if _, err := os.Lstat(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); !os.IsNotExist(err) {
+				t.Errorf("a file/link was written into the worktree (Lstat err = %v)", err)
+			}
+		})
+	}
+}
+
+func TestIsolate_bundleStateOnReuseStillWritesNothing(t *testing.T) {
+	repo := newRepo(t)
+	withCanonicalConfig(t, repo)
+	stubPgHooks(t, "present", 0)
+	for i := 0; i < 2; i++ {
+		out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11c"})
+		if err != nil {
+			t.Fatalf("Isolate #%d: %v", i, err)
+		}
+		if out.Precommit != "bundle" {
+			t.Errorf("#%d Precommit = %q, want bundle", i, out.Precommit)
+		}
+		if _, err := os.Lstat(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); !os.IsNotExist(err) {
+			t.Errorf("#%d: a file/link was written into the worktree (Lstat err = %v)", i, err)
+		}
+	}
+}
+
+func TestIsolate_pgHooksAbsentKeepsTodaysBehavior(t *testing.T) {
+	// The default stub exits 127, standing in for "pg-hooks not installed".
+	t.Setenv("PG_HOOKS_STUB_STATE", "")
+	repo := newRepo(t)
+	withCanonicalConfig(t, repo)
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11d"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	if out.Precommit != "linked" {
+		t.Errorf("Precommit = %q, want linked (pg-hooks absent => today's behavior)", out.Precommit)
+	}
+}
+
+func TestIsolate_unrecognizedPgHooksStateKeepsTodaysBehavior(t *testing.T) {
+	repo := newRepo(t)
+	withCanonicalConfig(t, repo)
+	stubPgHooks(t, "frobnicated", 0)
+	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11e"})
+	if err != nil {
+		t.Fatalf("Isolate: %v", err)
+	}
+	if out.Precommit != "linked" {
+		t.Errorf("Precommit = %q, want linked (unrecognized state => today's behavior)", out.Precommit)
+	}
+}
+
+func TestHooksState_scripted(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		err    error
+		want   string
+	}{
+		{"present", "state=present\nbundle=/x\n", nil, "present"},
+		{"stale with non-zero exit", "state=stale\n", fmt.Errorf("exit 14"), "stale"},
+		{"legacy", "state=legacy\nbundle=\n", nil, "legacy"},
+		{"absent", "", fmt.Errorf("exec: not found"), ""},
+		{"no state line", "bundle=/x\n", nil, ""},
+		{"unknown state", "state=weird\n", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := run.NewFakeRunner()
+			f.AddResponse("pg-hooks", []string{"status", "--porcelain"}, run.Result{Stdout: tc.stdout}, tc.err)
+			if got := hooksState(context.Background(), f, "/wt"); got != tc.want {
+				t.Errorf("hooksState = %q, want %q", got, tc.want)
 			}
 		})
 	}

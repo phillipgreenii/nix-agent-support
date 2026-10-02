@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Core logic (canonical-root resolution, default-branch naming, pre-commit
-# symlink guarantee, base-ref resolution) as testable functions, split out
+# link-for-legacy-repos, base-ref resolution) as testable functions, split out
 # of wtnew.sh. No top-level code -- mkBashScript sources this file before
 # the .sh body.
 
@@ -89,4 +89,69 @@ wtnew_link_precommit_config() {
     return
   fi
   printf 'none'
+}
+
+# wtnew_hooks_state: print the `state=` value of `pg-hooks status --porcelain`
+# run inside DIR ($1) -- present|stale|missing|broken|unreachable|relocated|
+# legacy -- or nothing when pg-hooks is not on PATH or prints no recognized
+# state. The exit code is ignored on purpose: status encodes the state in its
+# exit code too (14 stale, 13 missing, ...), so non-zero is expected; callers
+# parse the porcelain, never prose (spec 5.3).
+wtnew_hooks_state() {
+  local dir="$1" out line v
+  command -v pg-hooks >/dev/null 2>&1 || return 0
+  out="$(cd "$dir" && pg-hooks status --porcelain 2>/dev/null)" || true
+  while IFS= read -r line; do
+    case "$line" in
+    state=*)
+      v="${line#state=}"
+      case "$v" in
+      present | stale | missing | broken | unreachable | relocated | legacy) printf '%s' "$v" ;;
+      esac
+      return 0
+      ;;
+    esac
+  done <<<"$out"
+}
+
+# wtnew_should_link_precommit: succeed iff the pre-commit config link step
+# applies, given STATE ($1) from wtnew_hooks_state. It applies ONLY to legacy
+# repos -- and, so a machine that has not applied yet is no worse off, when
+# pg-hooks is absent or reports nothing recognizable (STATE empty). Every
+# other state means the repo has (or needs) a per-clone hook bundle and
+# git runs its hooks from the shared common dir: nothing is written into the
+# worktree (spec 7.1).
+wtnew_should_link_precommit() {
+  case "$1" in
+  "" | legacy) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# wtnew_precommit_fact STATE [LINK_STATUS]: print the PRECOMMIT fact -- the
+# bundle|stale|legacy|missing|broken vocabulary `integrate-branch-support
+# --facts` defines (its precommit_state) -- from STATE ($1, wtnew_hooks_state's
+# output) with the SAME mapping:
+#   present -> bundle   stale|relocated -> stale   broken -> broken
+#   legacy -> legacy    missing|unreachable -> missing
+# With no STATE (pg-hooks absent or unrecognized) it falls back, like that
+# tool, to the on-disk config: LINK_STATUS ($2, wtnew_link_precommit_config's
+# output) linked|copied -> legacy, anything else -> missing. The mapping is
+# duplicated rather than read back from integrate-branch-support because wtnew
+# already holds the state (no second pg-hooks call, no dependence on which
+# integrate-branch-support build is on PATH); keep the two in sync.
+wtnew_precommit_fact() {
+  case "$1" in
+  present) printf 'bundle' ;;
+  stale | relocated) printf 'stale' ;;
+  broken) printf 'broken' ;;
+  legacy) printf 'legacy' ;;
+  missing | unreachable) printf 'missing' ;;
+  *)
+    case "${2:-}" in
+    linked | copied) printf 'legacy' ;;
+    *) printf 'missing' ;;
+    esac
+    ;;
+  esac
 }
