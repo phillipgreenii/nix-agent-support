@@ -1,4 +1,11 @@
 schema = 3
+cachePackages = [
+  'github.com/gofrs/flock',
+  'github.com/spf13/cobra',
+  'github.com/spf13/pflag',
+  'golang.org/x/sys/unix',
+  'gopkg.in/yaml.v3'
+]
 
 [mod]
   [mod.'github.com/gofrs/flock']

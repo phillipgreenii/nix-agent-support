@@ -1,4 +1,8 @@
 schema = 3
+cachePackages = [
+  'github.com/BurntSushi/toml',
+  'github.com/spf13/pflag'
+]
 
 [mod]
   [mod.'github.com/BurntSushi/toml']

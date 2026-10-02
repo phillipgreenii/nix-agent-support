@@ -1,4 +1,11 @@
 schema = 3
+cachePackages = [
+  'github.com/phillipgreenii/claude-transcript',
+  'github.com/phillipgreenii/pg-router/conformance',
+  'github.com/phillipgreenii/pg-router/conformance/driver',
+  'github.com/phillipgreenii/pg-router/schemas',
+  'github.com/phillipgreenii/x/gitclient'
+]
 
 [mod]
   [mod.'github.com/BurntSushi/toml']
@@ -17,21 +24,21 @@ schema = 3
     version = 'v0.0.24'
     hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
 
-  [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260828055400-434334771eea'
-    hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
-
   [mod.'github.com/ncruces/go-strftime']
     version = 'v1.0.0'
     hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
+
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20260828055400-434334771eea'
+    hash = 'sha256-HlFyPQs0qle76h6Ia3Qi0HhFe+Y+HR26vzlheDUYTA4='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
 
   [mod.'golang.org/x/sys']
-    version = 'v0.45.0'
-    hash = 'sha256-hkBoNazrDA67ER6sWhb+EKxx9nJ24+nz3zGy+zT5Hvw='
+    version = 'v0.47.0'
+    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'modernc.org/libc']
     version = 'v1.72.3'
