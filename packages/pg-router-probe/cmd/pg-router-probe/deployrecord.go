@@ -7,7 +7,10 @@
 // hash to. Absent entirely (the common case until a deploy pipeline
 // writes one), every hash change is treated as unexpected — the safer
 // default, since "no record" and "a record that doesn't mention this
-// hash" both mean the same thing here.
+// hash" both mean the same thing here. Exception (pg2-1jkai): a binary
+// resolved into /nix/store needs no record for a changed STORE PATH —
+// checkBinaryHash treats that as a normal deploy; the record is the only
+// allowance for non-store binaries.
 package main
 
 import (

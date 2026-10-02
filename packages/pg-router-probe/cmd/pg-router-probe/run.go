@@ -260,6 +260,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 	// Sub-check 3: binary hash sanity.
 	var currentHash string
+	var currentPath string
 	var haveHash bool
 	if opts.binaryPath == "" {
 		skipped = append(skipped, "binary-hash: not configured (--binary-path unset)")
@@ -271,8 +272,10 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		ranAny = true
 		haveHash = true
 		currentHash = h
+		currentPath = resolveBinaryPath(opts.binaryPath)
 		deployExpected := deployRecordAllows(opts.deployRecordPath, h)
-		if f := checkBinaryHash(hadPrev && prevSnap.BinaryHash != "", prevSnap.BinaryHash, h, deployExpected); f != nil {
+		prevID := binaryIdentity{Hash: prevSnap.BinaryHash, Path: prevSnap.BinaryPath}
+		if f := checkBinaryHash(hadPrev && prevSnap.BinaryHash != "", prevID, binaryIdentity{Hash: h, Path: currentPath}, deployExpected); f != nil {
 			findings = append(findings, *f)
 		}
 	}
@@ -289,7 +292,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// value a DIFFERENT invocation is tracking [design: "Snapshot
 	// robustness" paragraph, generalized to every successful run, not
 	// only the broken-snapshot path].
-	next := snapshot{QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, CheckedAt: deps.now().UTC().Format(time.RFC3339)}
+	next := snapshot{QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, BinaryPath: prevSnap.BinaryPath, CheckedAt: deps.now().UTC().Format(time.RFC3339)}
 	if opts.haveQueueDepth {
 		next.QueueDepth = opts.queueDepth
 	}
@@ -298,6 +301,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	}
 	if haveHash {
 		next.BinaryHash = currentHash
+		next.BinaryPath = currentPath
 	}
 	if err := saveSnapshot(opts.snapshotPath, next); err != nil {
 		// A snapshot that cannot be persisted silently disables the drift

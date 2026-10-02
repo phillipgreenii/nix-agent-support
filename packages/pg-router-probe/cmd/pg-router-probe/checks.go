@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // findingKind identifies which of the three checks produced a finding —
@@ -181,28 +183,90 @@ func checkQueueGrowth(kind string, hasPrevious bool, previous, current int) *fin
 	}
 }
 
-// checkBinaryHash compares the current binary hash against the previous
-// snapshot's own stored hash. deployExpected is the caller's own
+// nixStorePrefix is the immutable store root. A binary resolved into it is
+// content-addressed by its store path: any change to its inputs yields a
+// DIFFERENT store path, so a different path with a different hash is an
+// ordinary deploy, not tampering (pg2-1jkai).
+const nixStorePrefix = "/nix/store/"
+
+// storeObject returns the top-level store object of a resolved path
+// (e.g. "/nix/store/abc-name" for "/nix/store/abc-name/bin/x"), or ""
+// when path is not under the nix store.
+func storeObject(path string) string {
+	rest, ok := strings.CutPrefix(path, nixStorePrefix)
+	if !ok || rest == "" {
+		return ""
+	}
+	name, _, _ := strings.Cut(rest, "/")
+	if name == "" {
+		return ""
+	}
+	return nixStorePrefix + name
+}
+
+// binaryIdentity is a binary's content hash plus the symlink-resolved path
+// it was hashed from. Path is empty when unknown (a snapshot written
+// before pg2-1jkai persisted only the hash).
+type binaryIdentity struct {
+	Hash string
+	Path string
+}
+
+// checkBinaryHash compares the current binary against the previous
+// snapshot's own stored identity. deployExpected is the caller's own
 // "corresponding deploy record" verdict (deployrecord.go) — this function
 // itself makes no I/O decision about what counts as expected, only what
 // to do given that verdict [design: item 3].
-func checkBinaryHash(hasPrevious bool, previousHash, currentHash string, deployExpected bool) *finding {
-	if !hasPrevious || previousHash == "" {
+//
+// Store-path rule (pg2-1jkai, option b): when the CURRENT path is a
+// nix-store path, a hash change is an expected update if the store object
+// differs from the previous one (an apply replaced the handler), and a
+// tamper signal only when the SAME store object now has a different hash
+// (the store is immutable, so that cannot be a deploy). A non-store
+// current path keeps the pre-existing behaviour: any hash change alerts
+// unless the deploy record allows it.
+//
+// Unknown previous path (old snapshot with no path field): treated as an
+// expected update when the current path is a store path, and otherwise
+// falls back to the pre-existing behaviour. Rationale: the first tick
+// after upgrading the probe frequently coincides with an apply that also
+// replaced the handler, so alerting there would reproduce the very false
+// positive this rule removes; and a tampered store path is not reachable
+// to an unprivileged writer, so the one-tick blind spot is small. The
+// snapshot is re-baselined with the path on that tick, so the strict
+// same-store-path check applies from the next tick on.
+func checkBinaryHash(hasPrevious bool, previous, current binaryIdentity, deployExpected bool) *finding {
+	if !hasPrevious || previous.Hash == "" {
 		return nil
 	}
-	if previousHash == currentHash {
+	if previous.Hash == current.Hash {
 		return nil
 	}
 	if deployExpected {
 		return nil
 	}
+	if curObj := storeObject(current.Path); curObj != "" && curObj != storeObject(previous.Path) {
+		// Includes previous.Path == "" (unknown) and a previous non-store
+		// path: either way the store object is new to us.
+		return nil
+	}
 	return &finding{
 		Kind:        kindBinaryHashMismatch,
 		Fingerprint: binaryHashMismatchFingerprint,
-		Summary:     fmt.Sprintf("handler binary hash changed unexpectedly (%s -> %s)", previousHash, currentHash),
-		Evidence:    fmt.Sprintf("previous_hash=%s\ncurrent_hash=%s", previousHash, currentHash),
-		State:       currentHash,
+		Summary:     fmt.Sprintf("handler binary hash changed unexpectedly (%s -> %s)", previous.Hash, current.Hash),
+		Evidence:    fmt.Sprintf("previous_hash=%s\ncurrent_hash=%s\nprevious_path=%s\ncurrent_path=%s", previous.Hash, current.Hash, previous.Path, current.Path),
+		State:       current.Hash,
 	}
+}
+
+// resolveBinaryPath returns path with symlinks evaluated, falling back to
+// the cleaned input when evaluation fails (the file was just hashed, so
+// failure here is an unlikely race, not a reason to skip the check).
+func resolveBinaryPath(path string) string {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		return p
+	}
+	return filepath.Clean(path)
 }
 
 // hashFile computes the sha256 hex digest of path's contents, streaming

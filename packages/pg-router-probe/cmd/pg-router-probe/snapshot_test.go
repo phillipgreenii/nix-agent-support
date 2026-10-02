@@ -99,3 +99,30 @@ func TestSaveSnapshotUncreatableParentErrors(t *testing.T) {
 		t.Fatalf("expected an error when the parent path is a regular file")
 	}
 }
+
+// pg2-1jkai: binary_path is additive. A snapshot written before the field
+// existed still loads at the current version (no baseline reset) with an
+// empty = unknown path, and the field round-trips once set.
+func TestLoadSnapshotWithoutBinaryPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	raw := `{"version":1,"queue_depth":1,"backlog":2,"binary_hash":"abc","checked_at":"2026-09-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got.BinaryHash != "abc" || got.BinaryPath != "" {
+		t.Fatalf("got %+v ok=%v, want hash abc and empty path", got, ok)
+	}
+}
+
+func TestSaveAndLoadSnapshotRoundTripsBinaryPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	want := snapshot{Version: snapshotVersion, BinaryHash: "abc", BinaryPath: "/nix/store/x-y/bin/z"}
+	if err := saveSnapshot(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got != want {
+		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
+	}
+}

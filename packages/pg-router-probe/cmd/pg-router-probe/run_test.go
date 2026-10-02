@@ -600,3 +600,111 @@ func TestRunProbePersistFailureIsDegraded(t *testing.T) {
 		t.Fatalf("expected the persist warning on stderr, got %q", stderr.String())
 	}
 }
+
+// writeBinary writes content to dir/name and returns its symlink-resolved
+// path (t.TempDir() can itself sit behind a symlink, e.g. /var on macOS).
+func writeBinary(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+// pg2-1jkai: the snapshot persists the symlink-resolved binary path next to
+// the hash, and an unchanged binary files nothing.
+func TestRunProbeBinaryHashPersistsResolvedPath(t *testing.T) {
+	dir := t.TempDir()
+	target := writeBinary(t, dir, "real-handler", "v1")
+	link := filepath.Join(dir, "handler-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	opts := baseOpts(t)
+	opts.binaryPath = link
+	spy := &spyDeps{}
+	for i := 0; i < 2; i++ { // second run: same binary, must stay quiet
+		cmd, _ := testCmd()
+		if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	if len(spy.created) != 0 {
+		t.Fatalf("unchanged binary must not file anything, got %+v", spy.created)
+	}
+	snap, ok := loadSnapshot(opts.snapshotPath)
+	if !ok || snap.BinaryPath != target {
+		t.Fatalf("snapshot path = %q (ok=%v), want resolved target %q", snap.BinaryPath, ok, target)
+	}
+}
+
+// Table-driven end-to-end coverage of the non-store-path rules through
+// runProbe (real hashing, real snapshot I/O, spy connector). Store-path
+// decisions are covered exhaustively in TestCheckBinaryHash; /nix/store
+// itself cannot be written here.
+func TestRunProbeBinaryHashChange(t *testing.T) {
+	cases := []struct {
+		name        string
+		oldSnapshot bool // seed a pre-pg2-1jkai snapshot with no binary_path
+		deployAllow bool
+		wantCreated int
+	}{
+		{"non-store path hash change alerts", false, false, 1},
+		{"non-store path hash change allowed by deploy record", false, true, 0},
+		{"old snapshot without path, non-store: falls back to alerting once", true, false, 1},
+		{"old snapshot without path, deploy record allows", true, true, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bin := writeBinary(t, dir, "handler", "v1")
+			opts := baseOpts(t)
+			opts.binaryPath = bin
+			spy := &spyDeps{}
+			if c.oldSnapshot {
+				oldHash, err := hashFile(bin)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw := `{"version":1,"queue_depth":0,"backlog":0,"binary_hash":"` + oldHash + `","checked_at":"2026-09-01T00:00:00Z"}`
+				if err := os.WriteFile(opts.snapshotPath, []byte(raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				cmd, _ := testCmd()
+				if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+					t.Fatalf("baseline run: %v", err)
+				}
+			}
+			writeBinary(t, dir, "handler", "v2-changed")
+			if c.deployAllow {
+				newHash, err := hashFile(bin)
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts.deployRecordPath = filepath.Join(dir, "deploys.txt")
+				if err := os.WriteFile(opts.deployRecordPath, []byte(newHash+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd, _ := testCmd()
+			if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if len(spy.created) != c.wantCreated {
+				t.Fatalf("created %d beads, want %d: %+v", len(spy.created), c.wantCreated, spy.created)
+			}
+			// Either way the snapshot is re-baselined with hash AND path.
+			snap, _ := loadSnapshot(opts.snapshotPath)
+			wantHash, _ := hashFile(bin)
+			if snap.BinaryHash != wantHash || snap.BinaryPath != bin {
+				t.Fatalf("snapshot = %+v, want hash %s path %s", snap, wantHash, bin)
+			}
+		})
+	}
+}

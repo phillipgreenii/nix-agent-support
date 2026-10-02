@@ -41,6 +41,11 @@ type snapshot struct {
 	QueueDepth int    `json:"queue_depth"`
 	Backlog    int    `json:"backlog"`
 	BinaryHash string `json:"binary_hash"`
+	// BinaryPath is the symlink-resolved path BinaryHash was computed from
+	// (pg2-1jkai). Additive and omitempty: snapshotVersion is NOT bumped,
+	// because a bump would discard the whole baseline; a snapshot without
+	// it decodes to "" = unknown path (see checkBinaryHash).
+	BinaryPath string `json:"binary_path,omitempty"`
 	CheckedAt  string `json:"checked_at"`
 }
 
