@@ -71,7 +71,7 @@ func TestCommentIssueFail(t *testing.T) {
 
 func TestListEscalatedOK(t *testing.T) {
 	withFactory(t, "list_ok_with_match")
-	issues, err := listEscalated(context.Background(), noopWarn)
+	issues, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
 	if err != nil {
 		t.Fatalf("listEscalated: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestListEscalatedOK(t *testing.T) {
 // fan-out op.
 func TestListEscalatedDegradedStillOK(t *testing.T) {
 	withFactory(t, "list_degraded_empty")
-	issues, err := listEscalated(context.Background(), noopWarn)
+	issues, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
 	if err != nil {
 		t.Fatalf("listEscalated: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestListEscalatedDegradedStillOK(t *testing.T) {
 
 func TestListEscalatedTotalFailure(t *testing.T) {
 	withFactory(t, "list_total_failure")
-	_, err := listEscalated(context.Background(), noopWarn)
+	_, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
 	if err == nil {
 		t.Fatalf("expected an error for exit 3")
 	}
@@ -122,7 +122,7 @@ func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := listEscalated(ctx, noopWarn)
+	_, err := listEscalated(ctx, defaultDedupQuery, noopWarn)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("expected a timeout error")
@@ -152,13 +152,18 @@ func recordedArgs(t *testing.T, fn func()) string {
 func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {
 	withFactory(t, "list_ok_with_match")
 	got := recordedArgs(t, func() {
-		_, _ = listEscalated(context.Background(), noopWarn)
+		_, _ = listEscalated(context.Background(), defaultDedupQuery, noopWarn)
 	})
 	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
 		t.Fatalf("issue list: expected --backend %s in argv, got %s", pgConnectorBackend, got)
 	}
-	if !strings.Contains(got, "escalated-work") {
-		t.Fatalf("issue list: expected the escalated-work named query in argv, got %s", got)
+	if !strings.Contains(got, defaultDedupQuery) {
+		t.Fatalf("issue list: expected the %s dedup query in argv, got %s", defaultDedupQuery, got)
+	}
+	// pg2-p48mo: the ready-only triager dispatch query hides human-labeled,
+	// claimed, and deferred beads; dedup MUST NOT use it.
+	if strings.Contains(got, "escalated-work") {
+		t.Fatalf("issue list: dedup must not use the ready-only escalated-work query, got %s", got)
 	}
 
 	withFactory(t, "create_ok")

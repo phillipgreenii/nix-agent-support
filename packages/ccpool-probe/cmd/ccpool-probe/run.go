@@ -1,7 +1,8 @@
 // run.go: the "run" verb — the real work. Runs the health checks
 // (checks.go) over EVERY ccpool pool (pools.go: the ambient pool plus each
 // registered role pool, bead pg2-bkzrc), applies the "nothing new" dedup rule (dedup.go) against
-// pg-connector's own escalated-work query (connector.go), files/updates a
+// pg-connector's every-non-closed-escalated-bead dedup query (connector.go's
+// defaultDedupQuery, NOT the ready-only escalated-work triager query), files/updates a
 // bd issue on a genuine finding, and signals the caller via one of the
 // four documented exit codes [Binding decisions: "Exit codes"
 // paragraph]:
@@ -56,6 +57,9 @@ type runOptions struct {
 	ccpoolTimeout      time.Duration
 	pgConnectorTimeout time.Duration
 	snapshotPath       string
+	// dedupQuery is the named pg-connector query the dedup check lists
+	// existing beads through; see connector.go's defaultDedupQuery.
+	dedupQuery string
 	// registryDir overrides the ccpool pool-registry directory pools.go
 	// reads; "" = resolve it the way ccpool does.
 	registryDir string
@@ -71,7 +75,7 @@ type runDeps struct {
 	listPools           func(registryDir string, warn func(string)) []poolRef
 	listNeedsInput      func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error)
 	listAllPoolSessions func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error)
-	listEscalated       func(ctx context.Context, warn func(string)) ([]connectorIssue, error)
+	listEscalated       func(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error)
 	createIssue         func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error)
 	updateMetadata      func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error
 	comment             func(ctx context.Context, id, body string, warn func(string)) error
@@ -99,6 +103,7 @@ func newRunCmd() *cobra.Command {
 		ccpoolTimeout:      10 * time.Second,
 		pgConnectorTimeout: 30 * time.Second,
 		snapshotPath:       defaultSnapshotPath(),
+		dedupQuery:         defaultDedupQuery,
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -108,6 +113,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&opts.ccpoolTimeout, "ccpool-timeout", opts.ccpoolTimeout, "explicit timeout for each ccpool subprocess call (list)")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringVar(&opts.registryDir, "registry-dir", opts.registryDir, "ccpool pool-registry directory listing every pool to scan (default: CCPOOL_REGISTRY_DIR, else $XDG_STATE_HOME/ccpool/pools.d)")
+	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		return runProbe(cmd, opts, defaultRunDeps())
@@ -241,7 +247,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 	if len(findings) > 0 {
 		listCtx, cancel := withPgTimeout()
-		existing, err := deps.listEscalated(listCtx, warn)
+		existing, err := deps.listEscalated(listCtx, opts.dedupQuery, warn)
 		cancel()
 		if err != nil {
 			// Not added to `skippedNote` (already computed) -- this run is

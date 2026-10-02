@@ -173,7 +173,7 @@ directly.
 > triager dispatch query, which hides a bead once it gains `human`, is claimed, or deferred and so
 > let pg-router-probe file a duplicate (pg2-imr6o vs pg2-68005). `pg-router-probe` now defaults
 > `--dedup-query` to `escalated-all` (`list --label escalated --status open,in_progress,blocked,deferred`).
-> `ccpool-probe` still uses `escalated-work` and has the same defect.
+> `ccpool-probe` (pg2-p48mo, 2026-10-01) now does the same: `--dedup-query` defaults to `escalated-all`.
 
 **Body template** (mirrors `local-alert-triage`'s own):
 
