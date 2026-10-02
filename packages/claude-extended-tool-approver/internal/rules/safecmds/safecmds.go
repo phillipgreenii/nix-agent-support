@@ -376,6 +376,16 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			}
 			continue
 		}
+		// handoff-create (pg2-8ksxn): see handoffCreatePathIssue's doc. It is
+		// deliberately NOT an alwaysSafe member (unlike wtdone/session-mode): its
+		// flag surface is closed and one flag reads a file, so it gets an
+		// argument-aware branch.
+		if basename == "handoff-create" {
+			if issue, cat := handoffCreatePathIssue(pc.Args, pe, vars); issue != "" {
+				return r.refuseCategorized(cat, "safe-commands: handoff-create "+issue+" (deferred to claude-code)")
+			}
+			continue
+		}
 		if browsingCmds[basename] {
 			if issue := browsingPathIssue(pc.Args, pe); issue != "" {
 				return r.refuse("safe-commands: " + basename + " " + issue + " (deferred to claude-code)")
@@ -1120,6 +1130,58 @@ func browsingPathIssue(args []string, pe *patheval.PathEvaluator) string {
 var findPatternFlags = map[string]bool{
 	"-path": true, "-wholename": true, "-ipath": true, "-iwholename": true,
 	"-name": true, "-iname": true, "-regex": true, "-iregex": true,
+}
+
+// handoffCreateBoolFlags / handoffCreateValueFlags are handoff-create's ENTIRE
+// flag surface (packages/handoff-create/handoff-create/handoff-create.sh's
+// argument loop: anything else is a `die "unknown argument"` usage error, and
+// the `--flag=value` glued spelling is not accepted either).
+var handoffCreateBoolFlags = map[string]bool{
+	"--attended": true, "--unattended": true,
+	"-h": true, "--help": true, "-v": true, "--version": true,
+}
+
+var handoffCreateValueFlags = map[string]bool{
+	"--session-id": true, "--title": true, "--body-file": true,
+	"--label": true, "--actor": true, "--bd-dir": true,
+}
+
+// handoffCreatePathIssue judges one handoff-create invocation (pg2-8ksxn); it
+// returns ("", _) when the invocation may be approved, else a reason fragment
+// plus its refusal category.
+//
+// WHY ARGUMENT-AWARE rather than an alwaysSafe basename entry like wtdone: the
+// script's whole effect is ONE `bd create` (type handoff/task, P0) plus a
+// `bd show` read-back through the same `bd` that the "bd" entry already
+// approves unconditionally (hasSubcommands / buildtools), so it adds no
+// mutation surface beyond what `bd create` already has. It does, however, take
+// a --body-file whose CONTENT is copied into the bead body, i.e. a file-read
+// primitive. That read is held to the same zone check every content reader
+// (cat/head/…) gets (readPathIssue), and --bd-dir (a tracker root handed to
+// `bd -C`) gets the same check. Free-text flag values (--title, --label,
+// --actor, --session-id) are NOT paths and are not zone-checked. Any flag
+// outside the closed surface above, any missing value, or any positional
+// argument is refused, since the script would only reject it anyway.
+func handoffCreatePathIssue(args []string, pe *patheval.PathEvaluator, vars map[string][]string) (string, hookio.RefusalCategory) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case handoffCreateBoolFlags[a]:
+		case handoffCreateValueFlags[a]:
+			if i+1 >= len(args) {
+				return "flag " + a + " is missing its value", hookio.RefusalCategoryUnspecified
+			}
+			i++
+			if a == "--body-file" || a == "--bd-dir" {
+				if issue, cat := readPathIssue([]string{args[i]}, pe, "", true, vars); issue != "" {
+					return a + " " + issue, cat
+				}
+			}
+		default:
+			return "has an argument outside its closed flag surface: " + a, hookio.RefusalCategoryUnspecified
+		}
+	}
+	return "", hookio.RefusalCategoryUnspecified
 }
 
 // findDangerousFlags are find predicates that MUTATE (-delete), RUN A PROGRAM

@@ -3025,6 +3025,96 @@ func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_HandoffCreate pins handoff-create's argument-aware branch
+// (pg2-8ksxn): wrap-up-session's documented invocations (both modes) approve;
+// anything outside the script's closed flag surface, a missing flag value, a
+// positional argument, or a --body-file/--bd-dir outside a readable zone is
+// refused rather than approved.
+func TestSafecmds_HandoffCreate(t *testing.T) {
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	tests := []struct {
+		name    string
+		command string
+		want    hookio.Decision
+	}{
+		{
+			"attended (SKILL.md shape)",
+			`handoff-create --attended --session-id "f4277a73-7f61-46e3-aad7-283884ee5324" --title "finish pg-router retry" --body-file "/tmp/body.md"`,
+			hookio.Approve,
+		},
+		{
+			"unattended with provenance label",
+			`handoff-create --unattended --session-id abc123 --title "finish the work" --body-file /home/user/project/body.md --label auto-session-wrapped`,
+			hookio.Approve,
+		},
+		{
+			"title naming a sensitive path is free text, not a read",
+			`handoff-create --attended --session-id abc --title "fix /etc/shadow handling" --body-file /tmp/body.md`,
+			hookio.Approve,
+		},
+		{
+			"explicit actor and bd-dir inside the project",
+			`handoff-create --unattended --session-id abc --title t --body-file /tmp/b.md --actor abc-wrapup --bd-dir /home/user/project`,
+			hookio.Approve,
+		},
+		{"help", `handoff-create --help`, hookio.Approve},
+		{
+			"body-file outside any readable zone",
+			`handoff-create --attended --session-id abc --title t --body-file /etc/shadow`,
+			hookio.NoOpinion,
+		},
+		{
+			"body-file is a credential store",
+			`handoff-create --attended --session-id abc --title t --body-file ~/.ssh/id_rsa`,
+			hookio.NoOpinion,
+		},
+		{
+			"body-file dynamically expanded",
+			`handoff-create --attended --session-id abc --title t --body-file "$BODY"`,
+			hookio.NoOpinion,
+		},
+		{
+			"bd-dir outside any readable zone",
+			`handoff-create --unattended --session-id abc --title t --body-file /tmp/b.md --bd-dir /etc`,
+			hookio.NoOpinion,
+		},
+		{
+			"unknown flag",
+			`handoff-create --attended --session-id abc --title t --body-file /tmp/b.md --force`,
+			hookio.NoOpinion,
+		},
+		{
+			"glued flag=value spelling is outside the surface",
+			`handoff-create --attended --session-id=abc --title t --body-file /tmp/b.md`,
+			hookio.NoOpinion,
+		},
+		{
+			"positional argument",
+			`handoff-create --attended --session-id abc --title t --body-file /tmp/b.md extra`,
+			hookio.NoOpinion,
+		},
+		{
+			"flag missing its value",
+			`handoff-create --attended --session-id abc --title`,
+			hookio.NoOpinion,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := &hookio.HookInput{
+				ToolName:  "Bash",
+				CWD:       "/home/user/project",
+				ToolInput: mustJSON(map[string]string{"command": tt.command}),
+			}
+			got := hookio.Verdict(r.Evaluate(input))
+			if got.Decision != tt.want {
+				t.Errorf("cmd %q: got %s (%s), want %s", tt.command, got.Decision, got.Reason, tt.want)
+			}
+		})
+	}
+}
+
 // TestSafecmds_ForLoopVar_GomuOverlayShape_Approve is pg2-jk1t5's end-to-end
 // fix: the gomu_overlay compound (pg2-2ti41, 112/112 historically-approved
 // rows measured always-abstaining) must now APPROVE. `SP` is set the same
