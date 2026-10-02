@@ -2,7 +2,7 @@
 
 - **Date**: 2026-09-30 (run on 2026-09-30 UTC)
 - **Bead**: `pg2-kftf9.11` (experiment); design under test: `2026-09-29-pending-review-handling-investigation.md` (bead `pg2-kftf9.10`), section "Prerequisite proof plan".
-- **Verdict summary**: the technical mechanics the design relies on are PROVEN (P2, P4, P5, P7, P8 PASS; P1 and P3 PASS on the API-observable parts). Three items are NOT fully proven because they need something this run was not authorized to use: a second GitHub identity (P1 part b), a human web-UI edit (P3 UI part), and fine-grained tokens (P6). The operator ruling that ALL prerequisites MUST be proven therefore still has open items; they are listed under "Gaps" and MUST be closed (or explicitly waived by the operator) before the dependent implementation beads proceed.
+- **Verdict summary**: the technical mechanics the design relies on are PROVEN (P2, P4, P5, P7, P8 PASS; P1 and P3 PASS on the API-observable parts). The 2026-09-30 run left three gaps (G1 to G3) because they needed something that run was not authorized to use: a second GitHub identity (P1 part b), a human web-UI edit (P3 UI part), and fine-grained tokens (P6). All three were closed by the operator on 2026-10-02, and the outcomes are recorded under "Gap closure (2026-10-02)": G1 confirmed, G2 measured (and it produced two new design corrections), G3 closed by an operator decision that is NOT a measurement of fine-grained tokens.
 
 ## Method and environment
 
@@ -13,16 +13,16 @@
 
 ## Results
 
-| ID  | Verdict                                                        | One-line finding                                                                                                                                                                                 |
-| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P1  | PASS for (a) and (c); part (b) UNPROVEN (gap G1)               | Both REST and GraphQL list the author's own PENDING review with id, commit, state. Author-only visibility could not be tested without a second account.                                          |
-| P2  | PASS                                                           | Author can delete a pending review via REST and GraphQL; a submitted review cannot be deleted (422); the submit/delete race has exactly one winner and the loser gets a clear 422/404.           |
-| P3  | PASS for marker round-trip; UI-edit part UNPROVEN (gap G2)     | Marker round-trips on body and every comment in REST and GraphQL. Marker removal and unmarked additions are detectable; a text-only edit that keeps the marker is NOT detectable except by hash. |
-| P4  | PASS                                                           | A review keeps its anchor commit when the PR head advances; a review created without `commit_id` anchors to the current head.                                                                    |
-| P5  | PASS (observation recorded)                                    | A thread added to an old pending review anchors to the CURRENT head, while the review itself stays anchored to the old commit.                                                                   |
-| P6  | PARTIAL: classic `repo` scope only; fine-grained UNPROVEN (G3) | Every call works with the classic `repo` scope. The read-only vs write fine-grained matrix was not run.                                                                                          |
-| P7  | PASS                                                           | All five mutations exist with the assumed inputs; live calls returned the expected fields.                                                                                                       |
-| P8  | PASS                                                           | After a force-push removes the review's commit, the pending review stays listed, its comments become `outdated`, DELETE still succeeds, and submit as `COMMENT` also still succeeds.             |
+| ID  | Verdict                                                       | One-line finding                                                                                                                                                                                 |
+| --- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P1  | PASS for (a) and (c); part (b) CONFIRMED by the operator (G1) | Both REST and GraphQL list the author's own PENDING review with id, commit, state. Author-only visibility could not be tested without a second account.                                          |
+| P2  | PASS                                                          | Author can delete a pending review via REST and GraphQL; a submitted review cannot be deleted (422); the submit/delete race has exactly one winner and the loser gets a clear 422/404.           |
+| P3  | PASS for marker round-trip; UI-edit part MEASURED (G2)        | Marker round-trips on body and every comment in REST and GraphQL. Marker removal and unmarked additions are detectable; a text-only edit that keeps the marker is NOT detectable except by hash. |
+| P4  | PASS                                                          | A review keeps its anchor commit when the PR head advances; a review created without `commit_id` anchors to the current head.                                                                    |
+| P5  | PASS (observation recorded)                                   | A thread added to an old pending review anchors to the CURRENT head, while the review itself stays anchored to the old commit.                                                                   |
+| P6  | classic `repo` PASS; fine-grained WAIVED by the operator (G3) | Every call works with the classic `repo` scope. The read-only vs write fine-grained matrix was not run.                                                                                          |
+| P7  | PASS                                                          | All five mutations exist with the assumed inputs; live calls returned the expected fields.                                                                                                       |
+| P8  | PASS                                                          | After a force-push removes the review's commit, the pending review stays listed, its comments become `outdated`, DELETE still succeeds, and submit as `COMMENT` also still succeeds.             |
 
 ### P1: visibility of the author's own pending review
 
@@ -30,7 +30,7 @@ Created R1 with `POST /repos/{o}/{r}/pulls/1/reviews` (`commit_id=H1`, marker-st
 
 - (a) `GET /repos/{o}/{r}/pulls/1/reviews` returned R1 with `state=PENDING`, `commit_id=H1`, `submitted_at=null`, the full body. It did NOT include inline comments; those need `GET .../reviews/{id}/comments`. PASS.
 - (c) GraphQL `pullRequest(number:1){ reviews(first:50, states:[PENDING]){ nodes{ id databaseId state author{login} commit{oid} body comments(first:50){ nodes{ body } } } } }` returned the same review in one round trip: `databaseId` equals the REST `id` (5360090761), `commit.oid=H1`, body and both comment bodies. PASS.
-- (b) UNPROVEN: needs a second, different identity. Recorded as gap G1.
+- (b) The 2026-09-30 run could not test this: it needs a second, different identity. Closed as gap G1 (see "Gap closure (2026-10-02)").
 
 Design meaning: the structured lookup (bead `pg2-kftf9.12`) can be built on GraphQL alone (one query returns id, commit, body, and per-comment bodies) or on REST list plus the review-comments endpoint. REST `line` is `null` for pending-review comments (only `position` and `original_position` are populated), so REST is not a drop-in for line-based logic.
 
@@ -48,7 +48,7 @@ Design meaning: the delete-and-recreate path is executable. A delete that loses 
 
 - Marker round-trip: body and both comments, read back through REST (`/reviews`, `/reviews/{id}/comments`) and GraphQL, all carried `<!-- pg-pr -->` verbatim. PASS.
 - Edits were made programmatically with the same token instead of the web UI (see G2): GraphQL `updatePullRequestReviewComment` to remove the marker from comment 1; the same mutation to keep the marker but change the text of comment 2; `addPullRequestReviewThread` to add a fifth, unmarked comment. Read-back showed: the marker-removed comment and the unmarked addition are plainly detectable (no marker); the text-only edit still carries the marker and is indistinguishable from an untouched comment by marker alone.
-- Additional signals observed: REST comment `updated_at` differed from `created_at` for the two edited comments and was equal for untouched ones; GraphQL `lastEditedAt` stayed `null` for API edits and `includesCreatedEdit` was `false`. Whether a web-UI edit populates `lastEditedAt` is unknown (G2).
+- Additional signals observed: REST comment `updated_at` differed from `created_at` for the two edited comments and was equal for untouched ones; GraphQL `lastEditedAt` stayed `null` for API edits and `includesCreatedEdit` was `false`. Whether a web-UI edit populates `lastEditedAt` was answered by G2: it does not (see "Gap closure (2026-10-02)").
 
 Design meaning: confirms the risk section's premise. The marker guard catches removal and additions; only the post-time hash (bead `pg2-kftf9.14`) catches a marker-preserving text edit. REST `updated_at != created_at` MAY be used as a cheap extra tripwire but MUST NOT replace the hash, since its behavior under non-edit updates (for example anchor shifts after a push) was not isolated.
 
@@ -69,7 +69,7 @@ Design meaning (section 4.1 decision): reuse is technically feasible, because ne
 
 ### P6: token scope
 
-Only the classic OAuth token with scope `repo` was available. With it: list, create, update (`PUT`), delete, submit, and every GraphQL mutation succeeded (see P1, P2, P7). The response header `X-Accepted-Oauth-Scopes` was empty for create and `X-Oauth-Scopes` was `gist, read:org, repo`. The fine-grained matrix (`Pull requests: read` only, then `write`) and the actual router-worker token could not be exercised: minting or reading another token was outside the authorization. Recorded as gap G3.
+Only the classic OAuth token with scope `repo` was available. With it: list, create, update (`PUT`), delete, submit, and every GraphQL mutation succeeded (see P1, P2, P7). The response header `X-Accepted-Oauth-Scopes` was empty for create and `X-Oauth-Scopes` was `gist, read:org, repo`. The fine-grained matrix (`Pull requests: read` only, then `write`) and the actual router-worker token could not be exercised: minting or reading another token was outside the authorization. Recorded as gap G3, closed by an operator decision (see "Gap closure (2026-10-02)").
 
 ### P7: GraphQL mutation details
 
@@ -93,7 +93,7 @@ Scenario B (separate copy): pending review at the then-current head, second forc
 
 PASS: the required property (DELETE still succeeds after a force-push) holds. A force-push does NOT create an unremovable pending review.
 
-## Gaps and what they mean
+## Gaps and what they mean (as found 2026-09-30; closed below)
 
 | Gap | Missing proof                                                                                                                      | Why not done                                                                                                                  | Design consequence until closed                                                                                                                                                                                       |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,6 +103,41 @@ PASS: the required property (DELETE still succeeds after a force-push) holds. A 
 
 The bead's operator ruling says all prerequisites MUST be proven. G1, G2, and G3 require a human (or explicit authorization for a second account and token minting) and SHOULD be filed as a human bead. Whether the dependent implementation beads may start before G1/G2 close is an operator decision: none of P2, P4, P7, P8 (which gate the replace path) depends on them. G3 gates only token-grant documentation and the operator verbs' permission notes.
 
+## Gap closure (2026-10-02)
+
+Closed by the operator in a live session. Bead `pg2-6nzpx`.
+
+### G1: a second identity does not see the author's pending review
+
+The operator confirmed that a second GitHub identity does NOT see the author's pending review. This is the operator's observation; no raw output was captured here. P1 part (b) is therefore closed as "author-only visibility confirmed".
+
+### G2: web-UI edit of a pending comment
+
+Method: a fresh pending review (three marker-stamped comments, A, B and C) was created through the API on the scratch PR. The operator then edited it in the web UI: A untouched, B text edited with the marker line kept, C marker line removed. The review was never submitted. Before and after snapshots were taken through GraphQL and REST.
+
+| Signal                                      | A (untouched)    | B (text edited, marker kept) | C (marker removed) |
+| ------------------------------------------- | ---------------- | ---------------------------- | ------------------ |
+| GraphQL `lastEditedAt`                      | `null`           | `null`                       | `null`             |
+| GraphQL `includesCreatedEdit`               | `false`          | `false`                      | `false`            |
+| `updatedAt` (GraphQL) / `updated_at` (REST) | equal to created | moved forward                | moved forward      |
+| Marker present                              | yes              | yes                          | no                 |
+| Newlines in the stored body                 | LF               | CRLF                         | not applicable     |
+
+Findings:
+
+- `lastEditedAt` is `null` for a web-UI edit of a pending comment, exactly as for an API edit. It MUST NOT be used as an edit signal.
+- `updated_at` moves on a UI edit and equals `created_at` for an untouched comment. It remains a cheap extra tripwire only (see P3); the earlier caveat about non-edit updates still applies.
+- Saving a UI edit rewrites the comment's newlines from LF to CRLF. Any post-time hash comparison MUST normalize `\r\n` to `\n` before hashing and comparing.
+- The marker guard catches C. B keeps the marker and is caught only by the hash, as predicted.
+- Not measured: whether opening a comment in the editor and saving it with NO change also alters the stored body (the CRLF conversion would then make a no-op save look like an edit).
+- "Finish your review" is the dialog GitHub's UI opens when the author clicks "Submit review". It is the submit dialog; the operator reported no other pending-state observation.
+
+### G3: token class
+
+What the code does: pg-pr resolves its GitHub token from `GH_TOKEN` or `GITHUB_TOKEN` in the environment, and otherwise from `gh auth token` (`packages/pg-pr/pkg/provider/vcs/github/token.go`, `defaultTokenSource`). Whether the router worker's launchd environment sets either variable was not checked.
+
+Decision (operator, 2026-10-02): a SINGLE read/write token is used. The read-only versus read/write fine-grained matrix was NOT run, and no fine-grained token was exercised. What is proven is unchanged: the classic OAuth token with scope `repo` is sufficient for every call in P1, P2, P7 and P8. The operator waived the fine-grained matrix. If a fine-grained token is adopted later, the calls to exercise are: list reviews (REST and GraphQL), create a pending review, update its body, add a thread, delete it, and create then submit one.
+
 ## Design corrections to carry into the dependent beads
 
 1. Stale check: use the review-level commit (`commit_id` or `commit.oid`) against GraphQL `headRefOid`; never a comment-level commit; tolerate REST `head.sha` lag.
@@ -110,3 +145,5 @@ The bead's operator ruling says all prerequisites MUST be proven. G1, G2, and G3
 3. Marker guard alone is insufficient for text-only edits; the post-time hash is mandatory (confirmed).
 4. Treat HTTP 422 with `non-pending` (REST) or `UNPROCESSABLE` (GraphQL) on delete as `delete_refused`; a lost race yields exactly this.
 5. Pending review comments are visible in REST only via `/reviews/{id}/comments` and report `line=null`; prefer GraphQL for the structured lookup.
+6. The post-time hash MUST be computed over newline-normalized text (`\r\n` to `\n`): a web-UI edit stores CRLF (G2).
+7. `lastEditedAt` is NOT an edit signal for pending comments (`null` after a web-UI edit, G2); do not build the edit tripwire on it.
