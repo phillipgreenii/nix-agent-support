@@ -270,7 +270,7 @@ func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 	}
 	// Seed a prior snapshot so the queue-growth sub-check has a baseline
 	// to diff against and actually produces a finding.
-	if err := saveSnapshot(opts.snapshotPath, snapshot{QueueDepth: 1, Backlog: 1}); err != nil {
+	if err := saveSnapshot(opts.snapshotPath, snapshot{QueueDepth: 20, Backlog: 20}); err != nil {
 		t.Fatal(err)
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
@@ -280,7 +280,7 @@ func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 	// binary-hash was never configured either, but the run still
 	// proceeded on the queue-growth sub-check that DID run, and filed a
 	// finding for it.
-	if len(spy.created) != 2 { // queue-depth AND backlog both grew past the none band
+	if len(spy.created) != 2 { // queue-depth AND backlog both grew while already elevated
 		t.Fatalf("expected 2 created issues (queue-depth, backlog), got %d: %+v", len(spy.created), spy.created)
 	}
 	for _, c := range spy.created {
@@ -301,7 +301,7 @@ func TestRunProbeBacklogAloneConfiguresDriftCheck(t *testing.T) {
 	opts := baseOpts(t)
 	opts.haveBacklog = true
 	opts.backlog = 60 // only --backlog; --queue-depth deliberately unset
-	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 1, QueueDepth: 5}); err != nil {
+	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 20, QueueDepth: 5}); err != nil {
 		t.Fatal(err)
 	}
 	spy := &spyDeps{}
@@ -321,7 +321,7 @@ func TestRunProbeBacklogFromStatus(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	opts.backlogFromStatus = true
-	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 1}); err != nil {
+	if err := saveSnapshot(opts.snapshotPath, snapshot{Backlog: 20}); err != nil {
 		t.Fatal(err)
 	}
 	spy := &spyDeps{backlogResult: 80}
@@ -463,5 +463,73 @@ func TestRunCmdDedupQueryDefault(t *testing.T) {
 	}
 	if f.DefValue != defaultDedupQuery || defaultDedupQuery == "escalated-work" {
 		t.Fatalf("dedup-query default = %q (want %q, never the ready-only escalated-work)", f.DefValue, defaultDedupQuery)
+	}
+}
+
+// probeTick runs one --backlog-from-status probe tick at the given fake time
+// against a fake status source reporting depth, sharing snapshotPath across
+// ticks like the real scheduled role does. It returns the issues the tick
+// filed.
+func probeTick(t *testing.T, snapshotPath string, at time.Time, depth int) int {
+	t.Helper()
+	cmd, _ := testCmd()
+	opts := baseOpts(t)
+	opts.snapshotPath = snapshotPath
+	opts.backlogFromStatus = true
+	spy := &spyDeps{backlogResult: depth}
+	if err := runProbe(cmd, opts, spy.toRunDeps(at)); err != nil {
+		t.Fatalf("tick at %s depth %d: unexpected error %v", at.Format(time.RFC3339), depth, err)
+	}
+	return len(spy.created)
+}
+
+// Replay of the periodic-sweep shape (pg2-ktbfk, from the pg2-1jx2x
+// escalation): a burst is enqueued just before a probe tick, the tick samples
+// it mid-drain (45), and it has drained (33 two minutes later, then 0) by the
+// following ticks. No tick may escalate.
+func TestReplayTransientDrainingSweepDoesNotEscalate(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "snapshot.json")
+	t0 := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
+	steps := []struct {
+		after time.Duration
+		depth int
+	}{
+		{0, 0},                                // quiet baseline tick
+		{30*time.Minute + 14*time.Second, 45}, // first tick after the sweep enqueue: mid-drain
+		{32 * time.Minute, 33},                // still draining two minutes later
+		{60 * time.Minute, 0},                 // next scheduled tick: fully drained
+		{90 * time.Minute, 0},
+	}
+	for _, s := range steps {
+		if n := probeTick(t, snap, t0.Add(s.after), s.depth); n != 0 {
+			t.Fatalf("draining sweep escalated at +%s depth %d (%d issues filed)", s.after, s.depth, n)
+		}
+	}
+}
+
+// A backlog that is elevated and does not decrease across the check window
+// (flat or growing) must escalate -- on the second elevated tick, not the
+// first (see TestCheckQueueGrowthFirstElevatedSampleIsConfirmedNextTick).
+func TestReplayStuckBacklogEscalates(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		first, again int
+	}{
+		{"flat", 45, 45},
+		{"growing", 45, 90},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := filepath.Join(t.TempDir(), "snapshot.json")
+			t0 := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
+			if n := probeTick(t, snap, t0, 0); n != 0 {
+				t.Fatalf("baseline tick filed %d issues", n)
+			}
+			if n := probeTick(t, snap, t0.Add(30*time.Minute), tc.first); n != 0 {
+				t.Fatalf("first elevated tick must wait for confirmation, filed %d", n)
+			}
+			if n := probeTick(t, snap, t0.Add(60*time.Minute), tc.again); n != 1 {
+				t.Fatalf("non-draining backlog %d -> %d must escalate, filed %d", tc.first, tc.again, n)
+			}
+		})
 	}
 }

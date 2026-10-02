@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,12 +64,12 @@ func TestCheckQueueGrowthNoPriorBaseline(t *testing.T) {
 	}
 }
 
-func TestCheckQueueGrowthNotGrowing(t *testing.T) {
-	if f := checkQueueGrowth("queue-depth", true, 500, 500); f != nil {
-		t.Fatalf("expected nil finding when value did not grow, got %+v", f)
-	}
+func TestCheckQueueGrowthShrinkingIsDraining(t *testing.T) {
 	if f := checkQueueGrowth("queue-depth", true, 500, 100); f != nil {
 		t.Fatalf("expected nil finding when value shrank, got %+v", f)
+	}
+	if f := checkQueueGrowth("backlog", true, 45, 33); f != nil {
+		t.Fatalf("expected nil finding for a draining 45 -> 33, got %+v", f)
 	}
 }
 
@@ -76,10 +77,25 @@ func TestCheckQueueGrowthStillNoneBand(t *testing.T) {
 	if f := checkQueueGrowth("queue-depth", true, 1, 5); f != nil {
 		t.Fatalf("expected nil finding while still in the none band, got %+v", f)
 	}
+	// Dropping back into the none band is never a finding either.
+	if f := checkQueueGrowth("queue-depth", true, 60, 5); f != nil {
+		t.Fatalf("expected nil finding when falling into the none band, got %+v", f)
+	}
 }
 
-func TestCheckQueueGrowthRealFinding(t *testing.T) {
-	f := checkQueueGrowth("backlog", true, 5, 60)
+// A first elevated sample after a quiet baseline (a sweep burst sampled right
+// after its enqueue) must not escalate on its own (pg2-ktbfk).
+func TestCheckQueueGrowthFirstElevatedSampleIsConfirmedNextTick(t *testing.T) {
+	if f := checkQueueGrowth("backlog", true, 0, 45); f != nil {
+		t.Fatalf("expected nil finding for a 0 -> 45 jump, got %+v", f)
+	}
+	if f := checkQueueGrowth("backlog", true, 5, 600); f != nil {
+		t.Fatalf("expected nil finding for a none-band -> high jump, got %+v", f)
+	}
+}
+
+func TestCheckQueueGrowthGrowingWhileElevated(t *testing.T) {
+	f := checkQueueGrowth("backlog", true, 20, 60)
 	if f == nil {
 		t.Fatalf("expected a finding")
 	}
@@ -91,6 +107,23 @@ func TestCheckQueueGrowthRealFinding(t *testing.T) {
 	}
 	if f.State != string(bandMedium) {
 		t.Fatalf("got state %q, want %q", f.State, bandMedium)
+	}
+	if !strings.Contains(f.Summary, "growing") {
+		t.Fatalf("got summary %q", f.Summary)
+	}
+}
+
+// A flat, already-elevated backlog is a stuck queue: "not decreasing" fires.
+func TestCheckQueueGrowthFlatWhileElevatedIsStuck(t *testing.T) {
+	f := checkQueueGrowth("queue-depth", true, 500, 500)
+	if f == nil {
+		t.Fatalf("expected a finding for a flat elevated reading")
+	}
+	if f.State != string(bandHigh) {
+		t.Fatalf("got state %q, want %q", f.State, bandHigh)
+	}
+	if !strings.Contains(f.Summary, "not draining") {
+		t.Fatalf("got summary %q", f.Summary)
 	}
 }
 

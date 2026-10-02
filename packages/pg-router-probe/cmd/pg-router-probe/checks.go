@@ -111,27 +111,49 @@ func classifyBand(value int) severityBand {
 
 // checkQueueGrowth compares current against the previous snapshot's own
 // reading for one kind ("queue-depth" or "backlog"). It returns nil
-// (no finding) whenever there is no prior baseline to diff against, the
-// value did not grow, or the current band is bandNone — a finding exists
-// only once growth has pushed the value into a non-none band [design:
-// item 2; Binding decisions' queue-growth-specific "'Nothing new' rule"
-// text governs whether an ALREADY-OPEN bead needs a fresh comment, which
-// is dedup.go's job, not this function's].
+// (no finding) unless the reading looks STUCK or RUNAWAY: the previous
+// reading was already in a non-none band (the queue was already
+// non-trivially backed up one check window ago) AND the current reading
+// did not decrease (current >= previous). pg2-ktbfk:
+//
+//   - A transient, draining spike -- e.g. a periodic sweep enqueueing a
+//     burst that the probe's tick samples right after the enqueue (depth
+//     0 -> 45, then 45 -> 33 -> ... -> 0 as it drains) -- never
+//     escalates: the first elevated sample has a none-band previous
+//     reading, and every later sample is lower than its predecessor.
+//   - A backlog that is not draining across a whole check window (flat
+//     or still growing while already elevated) escalates, including a
+//     flat one: "not decreasing" is the stuck signal, not strict growth.
+//
+// A single sample cannot tell a fast runaway from a sweep burst, so a
+// jump from the none band is deliberately confirmed by the NEXT tick
+// before it escalates (the Grafana queue-stalled / queue-depth-growing
+// rules remain the faster signal for that case). No prior baseline also
+// yields nil [design: item 2; Binding decisions' queue-growth-specific
+// "'Nothing new' rule" text governs whether an ALREADY-OPEN bead needs a
+// fresh comment, which is dedup.go's job, not this function's].
 func checkQueueGrowth(kind string, hasPrevious bool, previous, current int) *finding {
 	if !hasPrevious {
 		return nil
 	}
-	if current <= previous {
+	if classifyBand(previous) == bandNone {
+		return nil
+	}
+	if current < previous {
 		return nil
 	}
 	band := classifyBand(current)
 	if band == bandNone {
 		return nil
 	}
+	verb := "is not draining"
+	if current > previous {
+		verb = "is growing"
+	}
 	return &finding{
 		Kind:        kindQueueGrowth,
 		Fingerprint: queueGrowthFingerprint(kind),
-		Summary:     fmt.Sprintf("%s is growing (%d -> %d, %s band)", kind, previous, current, band),
+		Summary:     fmt.Sprintf("%s %s (%d -> %d, %s band)", kind, verb, previous, current, band),
 		Evidence:    fmt.Sprintf("kind=%s\nprevious=%d\ncurrent=%d\nband=%s", kind, previous, current, band),
 		State:       string(band),
 	}
