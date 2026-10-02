@@ -4,7 +4,7 @@
 // notices the variable and runs helperMain instead of the suite. The behavior
 // is the first argument after "--"; leading key=value arguments after it
 // parameterize the behavior and anything after those is literal.
-package app
+package runner_test
 
 import (
 	"encoding/json"

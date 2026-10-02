@@ -1,4 +1,4 @@
-package app
+package runner_test
 
 import (
 	"os"

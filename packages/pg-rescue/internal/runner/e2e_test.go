@@ -1,4 +1,4 @@
-package app
+package runner_test
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-rescue/internal/app"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/runner"
 )
@@ -29,7 +30,7 @@ type hd struct {
 // the helper process, with a real PATH lookup and a real environment.
 type e2e struct {
 	*harness
-	exec  *ChainExecutor
+	exec  *app.ChainExecutor
 	flags []string // wrapper flags added to every run
 }
 
@@ -82,7 +83,7 @@ func configText(top string, hs []hd, chains map[string][]string) string {
 func newE2E(t *testing.T, top string, hs []hd, chains map[string][]string) *e2e {
 	t.Helper()
 	h := newHarness(t, configText(top, hs, chains))
-	e := &e2e{harness: h, exec: &ChainExecutor{Foreground: func() bool { return false }}}
+	e := &e2e{harness: h, exec: &app.ChainExecutor{Foreground: func() bool { return false }}}
 	h.rt.Executor = e.exec
 	h.rt.LookPath = exec.LookPath
 	h.rt.Environ = func() []string {
@@ -187,7 +188,7 @@ func names(hs []hd) []string {
 // bufs gives a test direct access to the wrapper's two output streams.
 func (e *e2e) runBuf(args []string) (code int, stdout, stderr *bytes.Buffer) {
 	stdout, stderr = &bytes.Buffer{}, &bytes.Buffer{}
-	code = Main(e.rt, args, stdout, stderr)
+	code = app.Main(e.rt, args, stdout, stderr)
 	return
 }
 

@@ -7,11 +7,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
-
-func TestMain(m *testing.M) { os.Exit(testenv.Run(m)) }
 
 func TestLimitTail(t *testing.T) {
 	lines := func(from, to int) string {

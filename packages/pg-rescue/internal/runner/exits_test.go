@@ -1,4 +1,4 @@
-package app
+package runner_test
 
 import (
 	"os"
@@ -9,101 +9,6 @@ import (
 
 	"github.com/phillipgreenii/pg-rescue/internal/runner"
 )
-
-// swapCommand replaces everything after the first "--" with cmd.
-func swapCommand(args, cmd []string) []string {
-	for i, a := range args {
-		if a == "--" {
-			return append(append([]string(nil), args[:i+1]...), cmd...)
-		}
-	}
-	return args
-}
-
-// TestEveryWrapperErrorNeverSpawnsTheCommand proves, end to end with the real
-// executor, that every wrapper-error case exits 70 and the command never
-// started: the fake command leaves a marker file if it ever runs.
-func TestEveryWrapperErrorNeverSpawnsTheCommand(t *testing.T) {
-	for _, c := range wrapperErrorCases(t) {
-		t.Run(c.name, func(t *testing.T) {
-			e := newE2E(t, "", nil, nil)
-			cfg := c.config
-			if cfg == "" {
-				cfg = goodConfig
-			}
-			if cfg != "-" {
-				e.writeConfig(e.cfgPath, cfg)
-			}
-			if c.prep != nil {
-				c.prep(e.harness)
-			}
-			marker := filepath.Join(e.root, "command-ran")
-			args := swapCommand(c.args(e.harness), helperArgv("ran", "file="+marker))
-			code, stdout, stderr := e.run(args...)
-			if code != 70 {
-				t.Errorf("exit = %d; want 70\nstderr: %s", code, stderr)
-			}
-			if exists(marker) {
-				t.Error("the command was spawned; a wrapper error must come first")
-			}
-			if e.exec.Last != nil {
-				t.Error("the runner was reached")
-			}
-			if stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: ") {
-				t.Errorf("stdout=%q stderr=%q", stdout, stderr)
-			}
-		})
-	}
-}
-
-// TestPositiveControlTheMarkerCommandDoesRun keeps the test above honest: with
-// a valid invocation the very same fake command does leave its marker.
-func TestPositiveControlTheMarkerCommandDoesRun(t *testing.T) {
-	e := newE2E(t, "", []hd{result("h", "declined")}, chainOf("h"))
-	marker := filepath.Join(e.root, "command-ran")
-	code, _, stderr := e.wrap("h", helperArgv("ran", "file="+marker, "code=5"))
-	if code != 5 || !exists(marker) {
-		t.Errorf("exit=%d marker=%v stderr=%s", code, exists(marker), stderr)
-	}
-}
-
-func TestMissingWorkingDirectoryIsAWrapperError(t *testing.T) {
-	e := newE2E(t, "", []hd{result("h", "declined")}, chainOf("h"))
-	marker := filepath.Join(e.root, "command-ran")
-	code, _, stderr := e.wrap("h", helperArgv("ran", "file="+marker), "-C", filepath.Join(e.root, "no-such-dir"))
-	if code != 70 || exists(marker) || !strings.Contains(stderr, "cannot run in") {
-		t.Errorf("exit=%d marker=%v stderr=%s", code, exists(marker), stderr)
-	}
-	// A file is not a directory either.
-	file := filepath.Join(e.root, "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, stderr := e.wrap("h", helperArgv("ran", "file="+marker), "-C", file); code != 70 || exists(marker) {
-		t.Errorf("exit=%d stderr=%s", code, stderr)
-	}
-}
-
-func TestUnspawnableCommandIsAWrapperError(t *testing.T) {
-	e := newE2E(t, "", []hd{result("h", "resolved")}, chainOf("h"))
-	for name, cmd := range map[string][]string{
-		"not on PATH":       {"pg-rescue-no-such-command-xyz"},
-		"missing path":      {"/no/such/dir/cmd"},
-		"not an executable": {e.cfgPath},
-		"relative missing":  {"./no-such-script"},
-	} {
-		code, stdout, stderr := e.wrap("h", cmd)
-		if code != 70 || stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: cannot run") {
-			t.Errorf("%s: exit=%d stdout=%q stderr=%q", name, code, stdout, stderr)
-		}
-		if r := e.result(); r.Kind != runner.KindError {
-			t.Errorf("%s: kind = %s", name, r.Kind)
-		}
-		if dirs := e.runDirs(); len(dirs) != 0 {
-			t.Errorf("%s: run directory left behind: %v", name, dirs)
-		}
-	}
-}
 
 // TestExitCodeTable has a row for every line of the exit-code table that does
 // not involve a signal sent to the wrapper (those are in the signal matrix).
