@@ -241,19 +241,30 @@ groups:
       #     series at all (OTel counters are created lazily on first increment) has
       #     nothing to match, so it is treated as stalled, which is right.
       #
-      # Known limitation (do NOT widen this rule to hide it; fix the metric):
-      # pg_router_throughput_total only counts events whose OnEnqueue this daemon
-      # process saw. eventqueue.Queue.replay() restores the durable queue on start
-      # WITHOUT calling Observer.OnEnqueue, so the Emitter's pending map is empty
-      # for restored events and their accepts are silently skipped. After every
-      # daemon restart, a type with a backlog >= 10 therefore reads "zero
-      # throughput" until the restored events drain, even though the consumer is
-      # working. The recorded 2026-09-30 14:19Z-17:29Z "stall" is partly this
-      # artifact (restarts at 14:49:52Z and 16:17:51Z; the queue log shows
-      # pr.changed accepts continuing at a reduced rate from 15:00Z), so the rule
-      # alerts there for that reason, and the same artifact can page after a
-      # restart on a busy day (replay of 2026-10-01). Proposed fix: seed the
-      # Emitter's pending map during replay (separate bead, see pg2-o6z19).
+      # Former limitation, FIXED (pg2-0efop): before that fix,
+      # pg_router_throughput_total only counted events whose OnEnqueue this daemon
+      # process saw. eventqueue.Queue.replay() restored the durable queue on start
+      # without telling the Observer, so Emitter.OnAccept found no pending entry for
+      # restored events and silently skipped them. A type with a backlog >= 10
+      # therefore read "zero throughput" after every daemon restart until the
+      # restored events drained, even though the consumer was working. The recorded
+      # 2026-09-30 14:19Z-17:29Z "stall" was partly this artifact (restarts at
+      # 14:49:52Z and 16:17:51Z; the queue log shows pr.changed accepts continuing
+      # at a reduced rate from 15:00Z).
+      # The fix: replay() now calls the optional eventqueue.RestoreObserver once
+      # per retained event, and Emitter.OnRestore seeds the pending correlation
+      # (type and the ORIGINAL enqueue instant) without counting an enqueue, so
+      # restored accepts DO count in pg_router_throughput_total and dispatch
+      # latency. Verified live 2026-10-01 (pg2-t0l6b): two daemon restarts on the
+      # fixed build with non-empty durable queues (75 and 61 events) -- throughput
+      # matched the queue.jsonl accepts for the restored events (e.g. 56 of 56
+      # pr.reconcile), and this rule's expression did NOT match after either
+      # restart, with backlogs of 52+16 and 57 (both >= the 10 floor). The only
+      # matches seen were on the pre-fix build and shorter than `for: 30m`. The
+      # alertrules model test keeps the pre-fix 2026-09-30 series as a recorded
+      # replay. Residual: the emitter's correlation map is capped (4096 entries,
+      # oldest evicted first), so a restored backlog larger than that cap is not
+      # fully counted; this was not exercised live.
       #
       # Known gap (pg2-o6z19 R1, partially met): a periodic type whose troughs
       # rise cycle over cycle while the consumer keeps dispatching never goes a
@@ -290,7 +301,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue for type {{ $labels.type }} is stalled: depth held at 10 or more with no dispatches"
-          description: "pg_router_queue_depth for type {{ $labels.type }} stayed at 10 or more (and the type never drained) across a 30 minute window in which pg_router_throughput_total for that type did not advance, and the condition held for another 30 minutes -- the consumer for this event type is not making counted progress. Check `pg-router status` and the role that binds this type. If the daemon restarted recently, events restored from the durable queue are not counted in the throughput metric, so the queue MAY be draining; compare the queue log before acting."
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed at 10 or more (and the type never drained) across a 30 minute window in which pg_router_throughput_total for that type did not advance, and the condition held for another 30 minutes -- the consumer for this event type is not making counted progress. Check `pg-router status` and the role that binds this type. Events restored from the durable queue after a daemon restart are counted in the throughput metric (pg2-0efop), so a restart alone is not expected to trigger this alert; if it fires shortly after a restart, compare the queue log before acting."
         data:
           - refId: A
             relativeTimeRange:
