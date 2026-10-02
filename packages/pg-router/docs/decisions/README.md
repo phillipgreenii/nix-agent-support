@@ -60,7 +60,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-OBS-2`](observability.md) — per-participant history widens the existing activity ring; the
   in-flight signal is read from existing dispatch/produce state, not newly tracked.
 - [`DEC-OBS-3`](observability.md) — a handler error carrying the budget-stop sentinel is counted under
-  `handler-error` with `reason` and `role` labels; pool/limit detail stays in event text.
+  `handler-error` with `reason` and `role` labels; pool/limit detail stays in event text. A triage
+  role's failures are bulkheaded under `reason="triager-failure"` (amended, `pg2-u2yub`).
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit

@@ -13,7 +13,8 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m]))`
+	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
 func ruleBlock(t *testing.T, uid string) string {
@@ -63,13 +64,29 @@ func TestResidualFailureRateRule(t *testing.T) {
 	}
 	// The residual excludes exactly the causes handled elsewhere: origin-unavailable
 	// (own rule, pg2-o03wl so an outage pages once), at-capacity
-	// (intentionally silent) and budget-exceeded (its own rule). Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded and origin-unavailable: %q", got)
+	// (intentionally silent), budget-exceeded (its own rule) and triager-failure
+	// (its own rule, pg2-u2yub: a failing escalation triager must not fire the
+	// worker/review failure-rate alert). Nothing else.
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable and triager-failure: %q", got)
 	}
 	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "{{ $labels.role }}", "{{ $labels.class }}"} {
 		if !strings.Contains(r, need) {
 			t.Errorf("residual rule lost %q", need)
+		}
+	}
+}
+
+// pg2-u2yub: triager failures are bulkheaded out of the residual and alerted
+// on under their own rule, selecting exactly the series the residual excludes.
+func TestTriagerFailuresRule(t *testing.T) {
+	r := ruleBlock(t, "pg-router-triager-failures")
+	if got := ruleExpr(t, r); got != wantTriagerExpr {
+		t.Errorf("triager-failures expr:\n got %q\nwant %q", got, wantTriagerExpr)
+	}
+	for _, need := range []string{"for: 30m", "noDataState: OK", "execErrState: Error", "severity: warning", "{{ $labels.role }}"} {
+		if !strings.Contains(r, need) {
+			t.Errorf("triager-failures rule lost %q", need)
 		}
 	}
 }

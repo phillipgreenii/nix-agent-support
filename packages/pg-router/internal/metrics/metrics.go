@@ -225,6 +225,27 @@ const BudgetExceededSentinel = "session budget exceeded"
 // carries when the handler error contains BudgetExceededSentinel. (pg2-irowq)
 const ReasonBudgetExceeded = "budget-exceeded"
 
+// ReasonTriagerFailure is the "reason" label a FailureClassHandlerError series
+// carries when the failing role is an escalation-triage role (IsTriagerRole).
+// It bulkheads triager-dispatch failures (including a triager that cannot
+// observe an item's completion) out of the worker/review failure-rate series
+// so they cannot fire pg-router-failure-rate; they are alerted on separately
+// (pg-router-triager-failures). It takes precedence over ReasonBudgetExceeded:
+// a triager hitting its budget is still a triager failure. (pg2-u2yub)
+const ReasonTriagerFailure = "triager-failure"
+
+// TriagerRoleMarker is the substring that marks a role name as an
+// escalation-triage role. It deliberately mirrors the handler's own
+// convention (pg-router-ccpool-handler's humanOnlyReason treats a role as
+// "triage" when its name contains "triage"), so one naming rule serves both
+// sides without a new role-config field. (pg2-u2yub)
+const TriagerRoleMarker = "triage"
+
+// IsTriagerRole reports whether role names an escalation-triage role.
+func IsTriagerRole(role string) bool {
+	return strings.Contains(role, TriagerRoleMarker)
+}
+
 // Emitter emits the core's declared metric catalog over an OTel meter. It
 // implements eventqueue.Observer (the queue's own hooks), core.IngestObserver
 // (the ingest-time conditions), and discover.SourceFailureObserver (the
@@ -716,12 +737,21 @@ func (e *Emitter) OnDispatchFailure(_ string) {
 // FailureClassHandlerError. listenerID (this task, widening the interface
 // for a per-role handler-failure tally) is likewise not part of this
 // pool-wide metric's label set, so it is accepted and ignored here too.
+//
+// Reason (pg2-irowq, pg2-u2yub): a triage role's failures carry
+// reason=ReasonTriagerFailure (bulkhead, wins over every other reason); else a
+// budget-stop sentinel carries reason=ReasonBudgetExceeded; else no reason.
 func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("class", FailureClassHandlerError),
 		attribute.String("role", listenerID),
 	}
-	if err != nil && strings.Contains(err.Error(), BudgetExceededSentinel) {
+	switch {
+	case IsTriagerRole(listenerID):
+		// Bulkhead (pg2-u2yub): triager failures never share the worker/
+		// review failure-rate series, whatever their cause.
+		attrs = append(attrs, attribute.String("reason", ReasonTriagerFailure))
+	case err != nil && strings.Contains(err.Error(), BudgetExceededSentinel):
 		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))

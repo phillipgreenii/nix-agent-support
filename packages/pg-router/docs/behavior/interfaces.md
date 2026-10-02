@@ -365,7 +365,10 @@ over**; they are the accepting **handler's own observability concern** and live 
 surface (for a ccpool-backed handler, ccpool's own metrics and logs), so their absence from pg-router's
 metric catalog is the boundary working, not an oversight. The one deliberate exception is a
 `resource-limit` budget stop, whose handler error text carries the budget-stop sentinel below and is
-counted under `handler-error` with `reason="budget-exceeded"` (`DEC-OBS-3`).
+counted under `handler-error` with `reason="budget-exceeded"` (`DEC-OBS-3`); and a handler error from
+an escalation-triage role (role name contains `triage`) is counted under `handler-error` with
+`reason="triager-failure"` instead, so triager failures never share the worker/review failure-rate
+series (`DEC-OBS-3`, amended).
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |

@@ -995,6 +995,67 @@ func (h *harness) enqueue(t *testing.T, id, typ string, expiresIn time.Duration)
 	}
 }
 
+// pg2-u2yub: a triage role's handler failures are bulkheaded under
+// reason=triager-failure (even a budget stop), and a triager failure does not
+// move the worker/review series: the residual failure-rate selector
+// (reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure")
+// matches only the non-triager series.
+func TestOnHandlerFailure_TriagerFailuresAreBulkheaded(t *testing.T) {
+	h := newHarness(t)
+	notDone := errors.New(`wireclient: role "alpha-escalation-triager" exited 1: session exited before completing`)
+	budgetErr := errors.New(`wireclient: role "beta-escalation-triager" exited 1: session budget exceeded: role=beta-escalation-triager limit=time`)
+	h.emitter.OnHandlerFailure("d1", "escalated.alpha", "alpha-escalation-triager", notDone)
+	h.emitter.OnHandlerFailure("d2", "escalated.alpha", "alpha-escalation-triager", notDone)
+	h.emitter.OnHandlerFailure("d3", "escalated.beta", "beta-escalation-triager", budgetErr)
+	h.emitter.OnHandlerFailure("d4", "work-ready", "worker", errors.New("boom"))
+
+	m := findMetric(t, h.collect(t), MetricFailures)
+	s := m.Data.(metricdata.Sum[int64])
+	got := map[string]int64{}
+	residual := int64(0)
+	for _, dp := range s.DataPoints {
+		role, _ := dp.Attributes.Value("role")
+		reason, _ := dp.Attributes.Value("reason")
+		got[role.AsString()+"|"+reason.AsString()] += dp.Value
+		switch reason.AsString() {
+		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure:
+		default:
+			residual += dp.Value
+		}
+	}
+	want := map[string]int64{
+		"alpha-escalation-triager|triager-failure": 2,
+		"beta-escalation-triager|triager-failure":  1,
+		"worker|": 1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+	if residual != 1 {
+		t.Errorf("residual (failure-rate) series total = %d, want 1 (only the worker failure; triager failures must not move it)", residual)
+	}
+}
+
+func TestIsTriagerRole(t *testing.T) {
+	for role, want := range map[string]bool{
+		"alpha-escalation-triager": true,
+		"beta-escalation-triager":  true,
+		"split-triage":             true,
+		"worker":                   false,
+		"review":                   false,
+		"":                         false,
+	} {
+		if got := IsTriagerRole(role); got != want {
+			t.Errorf("IsTriagerRole(%q) = %v, want %v", role, got, want)
+		}
+	}
+}
+
 // pg2-irowq: a handler error containing the documented sentinel "session
 // budget exceeded" maps to reason=budget-exceeded, and every handler-error
 // carries the (config-bounded) role label. Other handler errors carry no

@@ -85,3 +85,14 @@ error text and the handler's eventlog `hard_stop` record only. Matching is on th
 substring because the core cannot test error identity across the process boundary; the substring is
 therefore a documented contract (`interfaces.md`, "Budget-stop sentinel"). The alert rules split by
 this `reason` (`grafana/alerting/alerts.yaml`).
+
+**Amended** (bead `pg2-u2yub`, extracted from the `pg2-68005` triager follow-ups). A `handler-error`
+from an **escalation-triage role** (role name contains `triage`, the handler's own convention) is
+counted with `reason="triager-failure"` instead, and that reason wins over `budget-exceeded`. Why:
+a triager's dispatch failures (including a triager that cannot observe an item's completion) are
+unrelated to worker/review health, yet shared the residual `pg-router-failure-rate` series and
+fired it. The residual rule now excludes `triager-failure`; a separate rule
+(`pg-router-triager-failures`) keeps those failures visible under their own series and `role` label.
+Same bounds as above: the reason is a fixed constant and `role` stays config-bounded. This is a
+classification of an error the core already receives, not a status stream, so `INV-FAIL-1`'s
+other clauses are unchanged.

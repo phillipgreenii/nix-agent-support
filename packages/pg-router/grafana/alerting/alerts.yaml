@@ -361,7 +361,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is empty for classes that carry none, e.g. declined) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the three causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops) and reason=origin-unavailable (its own rule, pg-router-origin-unavailable). See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is empty for classes that carry none, e.g. declined) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the four causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable) and reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures). See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -372,7 +372,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable"}[10m]))
+              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -422,6 +422,56 @@ groups:
               editorMode: code
               instant: true
               expr: sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Triager failures (pg2-u2yub, operator-extracted from pg2-68005's triager
+      # follow-ups): an escalation-triage role's handler failures are counted
+      # by internal/metrics OnHandlerFailure as class=handler-error,
+      # reason=triager-failure (role name contains "triage", the handler's own
+      # convention) and are excluded from pg-router-failure-rate, so a failing
+      # triager can no longer fire the worker/review failure-rate alert for a
+      # cause unrelated to worker/review health. They stay visible here under
+      # their own series and role label. `for: 30m` and no bead-filing
+      # consumer: a triager failing is a signal to look, not a page, and the
+      # triager is itself the consumer of escalations.
+      - uid: pg-router-triager-failures
+        title: pg-router escalation-triager failures (by role)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router escalation-triage role {{ $labels.role }} is failing"
+          description: 'sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m])) has stayed above 0 for over 30 minutes for role {{ $labels.role }} -- the triager role''s dispatches are failing. Bulkheaded out of pg-router-failure-rate (pg2-u2yub); the handler error text and eventlog carry the cause.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:
