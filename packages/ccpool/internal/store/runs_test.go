@@ -242,3 +242,58 @@ func TestClaimRunEmission_onlyEndedRunsAndExactlyOneWinner(t *testing.T) {
 		t.Fatalf("claimed run still pending: %+v", pend)
 	}
 }
+
+// RecordRunOutputTokens attributes only the tokens produced since the session's
+// previous run snapshot: a resume appends to the SAME transcript, so each run's
+// delta is its transcript total minus what earlier runs already accounted for.
+func TestRecordRunOutputTokens_deltaSincePreviousRunSnapshot(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	insertSess(t, st, "a")
+	insertSess(t, st, "b")
+	r1, _ := st.OpenRun(ctx, "a")
+	d, err := st.RecordRunOutputTokens(ctx, r1, 100)
+	if err != nil || d != 100 {
+		t.Fatalf("run1 delta=%d err=%v, want 100", d, err)
+	}
+	r2, _ := st.OpenRun(ctx, "a")
+	if d, err = st.RecordRunOutputTokens(ctx, r2, 250); err != nil || d != 150 {
+		t.Fatalf("run2 delta=%d err=%v, want 150", d, err)
+	}
+	// A shrunken transcript total never yields a negative delta and never
+	// lowers the high-water mark.
+	r3, _ := st.OpenRun(ctx, "a")
+	if d, err = st.RecordRunOutputTokens(ctx, r3, 10); err != nil || d != 0 {
+		t.Fatalf("run3 delta=%d err=%v, want 0", d, err)
+	}
+	r4, _ := st.OpenRun(ctx, "a")
+	if d, err = st.RecordRunOutputTokens(ctx, r4, 300); err != nil || d != 50 {
+		t.Fatalf("run4 delta=%d err=%v, want 50 (300-250)", d, err)
+	}
+	// Another session is independent.
+	rb, _ := st.OpenRun(ctx, "b")
+	if d, err = st.RecordRunOutputTokens(ctx, rb, 7); err != nil || d != 7 {
+		t.Fatalf("session b delta=%d err=%v, want 7", d, err)
+	}
+}
+
+func TestRecordRunOutputTokens_unknownRunIsError(t *testing.T) {
+	st := newTestStore(t)
+	if _, err := st.RecordRunOutputTokens(context.Background(), 9999, 5); err == nil {
+		t.Fatal("want error for an unknown run id")
+	}
+}
+
+func TestMigration011_addsOutputTokensColumnDefaultingToZero(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	insertSess(t, st, "a")
+	id, _ := st.OpenRun(ctx, "a")
+	var v int64
+	if err := st.db.QueryRowContext(ctx, `SELECT output_tokens_total FROM session_runs WHERE id = ?`, id).Scan(&v); err != nil {
+		t.Fatalf("column missing: %v", err)
+	}
+	if v != 0 {
+		t.Errorf("default output_tokens_total = %d, want 0", v)
+	}
+}

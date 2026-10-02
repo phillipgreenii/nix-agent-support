@@ -519,3 +519,48 @@ func TestSessionClosed_histogramAndCounter(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionOutputTokens_counterCarriesOnlyPoolAndLabels: the finished-session
+// token counter adds NO attribute of its own (cardinality guard: no session
+// id, no result, no path) and ignores a non-positive delta.
+func TestSessionOutputTokens_counterCarriesOnlyPoolAndLabels(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	inst, err := newMetricsInstruments(mp.Meter("test"))
+	if err != nil {
+		t.Fatalf("newMetricsInstruments: %v", err)
+	}
+	attrs := []attribute.KeyValue{attribute.String("pgrouter.role", "review"), attribute.String("pool", "p1")}
+	inst.sessionOutputTokens(context.Background(), 1200, attrs)
+	inst.sessionOutputTokens(context.Background(), 300, attrs)
+	inst.sessionOutputTokens(context.Background(), 0, attrs)
+	inst.sessionOutputTokens(context.Background(), -5, attrs)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var dps []metricdata.DataPoint[int64]
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "ccpool_session_output_tokens_total" {
+				continue
+			}
+			s, ok := m.Data.(metricdata.Sum[int64])
+			if !ok || !s.IsMonotonic {
+				t.Fatalf("data = %#v, want a monotonic int64 Sum", m.Data)
+			}
+			dps = s.DataPoints
+		}
+	}
+	if len(dps) != 1 {
+		t.Fatalf("data points = %d, want 1", len(dps))
+	}
+	if dps[0].Value != 1500 {
+		t.Errorf("value = %d, want 1500 (1200+300; zero and negative ignored)", dps[0].Value)
+	}
+	if dps[0].Attributes.Len() != 2 {
+		t.Errorf("attrs = %v, want exactly pool and pgrouter.role", dps[0].Attributes)
+	}
+}

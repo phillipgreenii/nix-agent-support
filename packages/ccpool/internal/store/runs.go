@@ -184,3 +184,33 @@ func (s *Store) RunsPendingEmission(ctx context.Context) ([]PendingEmission, err
 	}
 	return out, rows.Err()
 }
+
+// RecordRunOutputTokens snapshots total (the session transcript's cumulative
+// output_tokens) onto runID and returns the run's own contribution: total minus
+// the largest snapshot of the same session's EARLIER runs, never negative. The
+// stored snapshot is a high-water mark (a shrunken total does not lower it), so
+// a later run never re-counts tokens an earlier run already attributed. The
+// caller MUST hold the run's emission claim (ClaimRunEmission), which is what
+// makes this read-then-write exclusive per run.
+func (s *Store) RecordRunOutputTokens(ctx context.Context, runID, total int64) (delta int64, err error) {
+	var sessionID int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT session_id FROM session_runs WHERE id = ?`, runID).Scan(&sessionID); err != nil {
+		return 0, fmt.Errorf("record run %d output tokens: %w", runID, err)
+	}
+	var prev int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(output_tokens_total), 0) FROM session_runs
+		 WHERE session_id = ? AND id < ?`, sessionID, runID).Scan(&prev); err != nil {
+		return 0, fmt.Errorf("record run %d output tokens: %w", runID, err)
+	}
+	if total > prev {
+		delta = total - prev
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE session_runs SET output_tokens_total = ? WHERE id = ?`,
+		max(total, prev), runID); err != nil {
+		return 0, fmt.Errorf("record run %d output tokens: %w", runID, err)
+	}
+	return delta, nil
+}

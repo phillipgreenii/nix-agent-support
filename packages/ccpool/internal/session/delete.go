@@ -38,7 +38,7 @@ import (
 
 // emitRun claims one ended run and records its lifecycle metrics if the claim
 // won. attrs MUST have been resolved before any delete of the session.
-func (s *Service) emitRun(ctx context.Context, run store.Run, attrs []attribute.KeyValue) error {
+func (s *Service) emitRun(ctx context.Context, externalID string, run store.Run, attrs []attribute.KeyValue) error {
 	won, err := s.d.Store.ClaimRunEmission(ctx, run.ID)
 	if err != nil || !won {
 		return err
@@ -52,7 +52,45 @@ func (s *Service) emitRun(ctx context.Context, run store.Run, attrs []attribute.
 		result = "exited"
 	}
 	recordSessionClosed(float64(dur), result, attrs)
+	s.attributeRunTokens(ctx, externalID, run, attrs)
 	return nil
+}
+
+// attributeRunTokens attributes the output tokens one ended run produced to its
+// pool (ccpool_session_output_tokens_total), so a finished session's tokens
+// survive the disappearance of its live-session gauge series. The total is the
+// transcript's distinct-message output_tokens; the run's own contribution is
+// that total minus the largest snapshot of the session's earlier runs
+// (Store.RecordRunOutputTokens), because a resume appends to the SAME
+// transcript. Best-effort and never fatal: a nil Transcript, an empty
+// transcript path, an unreadable transcript or a store error records nothing
+// and logs, and because the snapshot only advances on success a later run
+// catches the tokens up. A session whose transcript is already gone (a pruned
+// phantom) cannot be attributed. Called only by the emitter that won the run's
+// emission claim, so it runs at most once per run. attrs carries pool and the
+// allowlisted labels and NO per-session id: the counter stays bounded by
+// pools x roles.
+func (s *Service) attributeRunTokens(ctx context.Context, externalID string, run store.Run, attrs []attribute.KeyValue) {
+	if s.d.Transcript == nil {
+		return
+	}
+	row, ok, err := s.d.Store.GetByExternalID(ctx, externalID)
+	if err != nil || !ok || row.TranscriptPath == "" {
+		return
+	}
+	total, err := s.d.Transcript.OutputTokens(row.TranscriptPath)
+	if err != nil {
+		slog.Warn("ccpool: read transcript output tokens failed", append([]any{"err", err}, sessionLogArgs(externalID)...)...)
+		return
+	}
+	delta, err := s.d.Store.RecordRunOutputTokens(ctx, run.ID, total)
+	if err != nil {
+		slog.Warn("ccpool: record run output tokens failed", append([]any{"err", err}, sessionLogArgs(externalID)...)...)
+		return
+	}
+	if delta > 0 {
+		recordSessionOutputTokens(delta, attrs)
+	}
 }
 
 // emitEndedRuns emits every ended, not-yet-emitted run of externalID, whoever
@@ -66,7 +104,7 @@ func (s *Service) emitEndedRuns(ctx context.Context, externalID string, attrs []
 		if r.Open() || r.MetricsEmitted {
 			continue
 		}
-		if err := s.emitRun(ctx, r, attrs); err != nil {
+		if err := s.emitRun(ctx, externalID, r, attrs); err != nil {
 			return err
 		}
 	}
@@ -84,7 +122,7 @@ func (s *Service) emitPendingRuns(ctx context.Context) {
 		return
 	}
 	for _, p := range pending {
-		if err := s.emitRun(ctx, p.Run, s.metricAttrs(p.ExternalID)); err != nil {
+		if err := s.emitRun(ctx, p.ExternalID, p.Run, s.metricAttrs(p.ExternalID)); err != nil {
 			slog.Warn("ccpool: emit run metrics failed", append([]any{"err", err}, sessionLogArgs(p.ExternalID)...)...)
 		}
 	}

@@ -54,6 +54,7 @@ type metricsInstruments struct {
 	sessionInfo               metric.Int64Gauge
 	sessionDuration           metric.Float64Histogram
 	sessionsClosedTotal       metric.Int64Counter
+	sessionOutputTokensTotal  metric.Int64Counter
 }
 
 // newMetricsInstruments builds the seven instruments against meter, under
@@ -132,6 +133,12 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 		metric.WithDescription("Session runs that ended, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited)."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_sessions_closed_total: %w", err)
+	}
+	if m.sessionOutputTokensTotal, err = meter.Int64Counter(
+		"ccpool_session_output_tokens_total",
+		metric.WithDescription("Output tokens produced by sessions whose run has ENDED, attributed to the pool (and allowlisted labels) at run end from the session transcript, counted once per distinct assistant message. Complements the live-session gauge pa_monitor_session_tokens, whose series vanishes when a session ends. Carries no per-session attribute."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_output_tokens_total: %w", err)
 	}
 
 	return m, nil
@@ -321,6 +328,13 @@ func (m metricsInstruments) sessionClosed(ctx context.Context, durationSeconds f
 	}
 }
 
+func (m metricsInstruments) sessionOutputTokens(ctx context.Context, tokens int64, attrs []attribute.KeyValue) {
+	if m.sessionOutputTokensTotal == nil || tokens <= 0 {
+		return
+	}
+	m.sessionOutputTokensTotal.Add(ctx, tokens, withAttrs(attrs))
+}
+
 // ClaudeSessionIDAttrKey is the attribute key carrying a Claude session id on
 // ccpool_session_info, and on that gauge ONLY.
 //
@@ -449,4 +463,15 @@ func RecordSessionInfo(claudeSessionID string, attrs []attribute.KeyValue) {
 // claim guarantees that).
 func RecordSessionClosed(durationSeconds float64, result string, attrs []attribute.KeyValue) {
 	ensureInstruments().sessionClosed(context.Background(), durationSeconds, result, attrs)
+}
+
+// RecordSessionOutputTokens increments ccpool_session_output_tokens_total by
+// tokens (the output tokens one ended run produced) for the pool and
+// allowlisted labels attrs identifies. A non-positive tokens records nothing.
+// It adds no attribute of its own: the series stays bounded by pools x roles,
+// so the finished-session total never carries a per-session id. The caller
+// MUST invoke it at most once per run (the session_runs metrics_emitted claim
+// guarantees that).
+func RecordSessionOutputTokens(tokens int64, attrs []attribute.KeyValue) {
+	ensureInstruments().sessionOutputTokens(context.Background(), tokens, attrs)
 }

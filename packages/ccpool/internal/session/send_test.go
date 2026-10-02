@@ -38,6 +38,9 @@ type fakeTranscript struct {
 	// turn yet" (the dropped-prompt case).
 	firstAt time.Time
 	firstOK bool
+	// tokens/tokensErr back OutputTokens (the run-end token attribution).
+	tokens    int64
+	tokensErr error
 }
 
 func (f fakeTranscript) LastAssistantText(string) (string, error) { return f.reply, nil }
@@ -45,6 +48,8 @@ func (f fakeTranscript) IsAwaitingInput(string) (bool, error)     { return f.awa
 func (f fakeTranscript) FirstMessageActivity(string) (time.Time, bool) {
 	return f.firstAt, f.firstOK
 }
+
+func (f fakeTranscript) OutputTokens(string) (int64, error) { return f.tokens, f.tokensErr }
 
 func newSendService(t *testing.T, st *store.Store, tm Tmux, tr Transcript, w Waiter) *Service {
 	t.Helper()

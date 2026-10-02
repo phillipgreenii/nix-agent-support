@@ -316,7 +316,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Output tokens used so far by each LIVE Claude session, grouped by pool. Source: pa-monitor session_tokens, which is CUMULATIVE over the session (the sum of output_tokens across all assistant events in the session transcript; it is not the current context size, which pa-monitor reports separately as context_tokens). Only live sessions appear: a session's series vanishes when it ends, so this is not a per-pool lifetime total. Sessions not managed by ccpool are excluded. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "description": "Output tokens used so far by each LIVE Claude session, grouped by pool. Source: pa-monitor session_tokens, which is CUMULATIVE over the session (the sum of output_tokens across all assistant events in the session transcript; it is not the current context size, which pa-monitor reports separately as context_tokens). Only live sessions appear: a session's series vanishes when it ends, so this is not a per-pool lifetime total; see the finished-session panels for ended sessions. pa-monitor counts a multi-block assistant message once per content block, so this live figure can read well above the finished-session counter for the same work (about 2.3x on one real transcript) until pa-monitor deduplicates by message id. Sessions not managed by ccpool are excluded. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
       "gridPos": {
         "x": 0,
         "y": 19,
@@ -396,6 +396,98 @@
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Tokens in finished sessions",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Output tokens produced by sessions whose run has ENDED, over the selected time range, by pool and role. Source: ccpool_session_output_tokens_total, incremented once per ended run from the session transcript (counted once per distinct assistant message, so a resumed session contributes only the tokens produced since its previous run ended). Use together with 'Tokens in live sessions' for sessions still running; the two are not summed because a resumed live session's cumulative gauge already includes tokens counted when its earlier run ended. A session whose transcript is gone before the run is emitted (a pruned phantom) cannot be attributed. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (pool, pgrouter_role) (increase(ccpool_session_output_tokens_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__range])), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "legendFormat": "{{pool}} / {{pgrouter_role}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Tokens in finished sessions over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Output tokens produced by sessions whose run ended in each interval, by pool and role (see 'Tokens in finished sessions' for the counting rules). A run is attributed at the reaper's next sweep after it ends, so bars lag the actual end by up to 300 s. Manual operator CLI invocations without an OTLP endpoint in their environment are not counted (out of scope). A run ended by the hook is counted at the reaper's next sweep (up to 300 s late). Counter panels require delta temporality end to end.",
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "label_replace(sum by (pool, pgrouter_role) (increase(ccpool_session_output_tokens_total{pool=~\"$pool\",pgrouter_role=~\"$role\"}[$__rate_interval])), \"pgrouter_role\", \"unlabelled\", \"pgrouter_role\", \"^$\")",
+          "legendFormat": "{{pool}} / {{pgrouter_role}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
           }
         },
         "overrides": []

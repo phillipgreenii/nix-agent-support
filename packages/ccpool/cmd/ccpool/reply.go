@@ -28,6 +28,8 @@ func (transcriptAdapter) FirstMessageActivity(p string) (time.Time, bool) {
 	return ct.LastMessageActivity(p)
 }
 
+func (transcriptAdapter) OutputTokens(p string) (int64, error) { return ct.OutputTokens(p) }
+
 func runReply(args []string) int {
 	fs := flag.NewFlagSet("reply", flag.ExitOnError)
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")

@@ -42,6 +42,7 @@ var (
 	recordSessionStates             = telemetry.RecordSessionStates
 	recordSessionInfo               = telemetry.RecordSessionInfo
 	recordSessionClosed             = telemetry.RecordSessionClosed
+	recordSessionOutputTokens       = telemetry.RecordSessionOutputTokens
 )
 
 // metricAttrs returns the attribute set for a per-session metric record: the
@@ -111,6 +112,8 @@ type (
 		Delete(ctx context.Context, externalID string) error
 		RunsFor(ctx context.Context, externalID string) ([]store.Run, error)
 		ClaimRunEmission(ctx context.Context, runID int64) (bool, error)
+		// RecordRunOutputTokens snapshots the transcript total onto a run and returns the run's own contribution (see store.Store.RecordRunOutputTokens).
+		RecordRunOutputTokens(ctx context.Context, runID, total int64) (int64, error)
 		RunsPendingEmission(ctx context.Context) ([]store.PendingEmission, error)
 		List(ctx context.Context) ([]store.Session, error)
 		// SetMeta upserts caller-supplied session metadata (single autocommit UPSERT).
@@ -146,6 +149,11 @@ type Transcript interface {
 	// turn). Backed by claude-transcript.LastMessageActivity. A missing/half-
 	// written transcript yields (zero, false) — tolerated, never an error.
 	FirstMessageActivity(path string) (time.Time, bool)
+	// OutputTokens reports the total output_tokens the model produced in the
+	// transcript, counted once per distinct assistant message. Backed by
+	// claude-transcript.OutputTokens. Used at run end to attribute a finished
+	// session's tokens to its pool.
+	OutputTokens(path string) (int64, error)
 }
 
 // Mode selects send behavior when (and how) to deliver.

@@ -299,8 +299,8 @@ func TestRunMetrics_overlappingEmittersCountOnce(t *testing.T) {
 	svc := closeSvc(st, &closeTmux{}, 300)
 	run := mustRuns(t, st, "a")[0]
 	// Both emitters read the run as unemitted, then both try to claim.
-	_ = svc.emitRun(ctx, run, nil)
-	_ = svc.emitRun(ctx, run, nil)
+	_ = svc.emitRun(ctx, "a", run, nil)
+	_ = svc.emitRun(ctx, "a", run, nil)
 	wantOneClosed(t, calls, 100, "exited")
 }
 
