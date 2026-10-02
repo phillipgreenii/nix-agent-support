@@ -14,8 +14,9 @@ import "time"
 // recorded, as of 2026-09-29, that this repo has no ceta-specific CI
 // workflow in .forgejo/ or .github/ (only the unrelated
 // .github/workflows/update-flakes.yml) — this repo's own CLAUDE.md
-// confirms it has no external CI at all; ff-merge-to-main's FF-2a running
-// `nix flake check` at land time is the whole-repo gate. There is therefore
+// confirms it has no external CI at all, and (operator ruling 2026-10-01,
+// bead pg2-pla9d.1) a full `nix flake check` is not a land-time gate either,
+// so nothing runs the benchmark automatically. There is therefore
 // no automated place to wire a "run the benchmark, commit the new constant"
 // step into yet. Until that lands (tracked as a gap, not implemented by this
 // packet — see this file's own history), update this constant BY HAND:
