@@ -121,26 +121,68 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 }
 
 // teardownAllSessions closes every session whose name carries prefix — this
-// process's own sessions and strays left by a crashed prior run — EXCEPT
-// sessions in needs_input WHOSE BEAD IS STILL OPEN, which are preserved (left
-// alive) so the operator can still `ccpool attach` after the pass. A
-// needs_input session whose own bead has ALREADY been closed is reconciled
-// like any other closable session (closeUnlessNeedsInput's own doc comment;
-// pg2-5sirm). For every session it does close, it also best-effort removes
-// that session's own worktree (s.CWD) via open, undoing internal/worktree.
-// Ensure's creation side (pg2-a8h6c — the short-term stopgap; the full
-// redesign is pg2-4roho). Sessions outside the prefix are left untouched.
-// Returns the number actually closed.
+// process's own sessions and strays left by a crashed prior run — EXCEPT two
+// groups that are SPARED (left alive, worktree and anchor branch untouched):
+//
+//   - sessions that are actively working (starting / ready / working; see
+//     sparedAtShutdown). Operator ruling (Phillip, 2026-09-30, bead
+//     pg2-hwt7v), superseding the earlier "close everything, force-remove
+//     worktrees" behavior: a daemon restart is not a reason to kill an
+//     in-flight turn, and removing its worktree out from under it destroyed
+//     uncommitted work. Such a session is spared even if its bead has
+//     already closed -- it is mid-turn, and it becomes closable on its own
+//     terms once the turn ends (see "What bounds leaked sessions" below).
+//   - sessions in needs_input WHOSE BEAD IS STILL OPEN, preserved so the
+//     operator can still `ccpool attach` after the pass. A needs_input
+//     session whose own bead has ALREADY been closed is reconciled like any
+//     other closable session (closeUnlessNeedsInput's own doc comment;
+//     pg2-5sirm).
+//
+// For every session it does close, it also best-effort removes that session's
+// own worktree (s.CWD) via open, undoing internal/worktree.Ensure's creation
+// side (pg2-a8h6c — the short-term stopgap; the full redesign is pg2-4roho)
+// -- EXCEPT when a spared peer session still uses the same directory
+// (worktreeHeldBySparedPeer): a per-bead worktree is keyed by bead id alone,
+// so every role's session for one bead shares it. Sessions outside the
+// prefix are left untouched. Returns the number actually closed.
+//
+// What bounds leaked sessions after the daemon exits (pg2-hwt7v): a spared
+// session outlives the daemon, so it is a deliberate leak. It is bounded by
+// three independent mechanisms (ADR 0072, ADR 0037):
+//
+//  1. Next-start reconcile. The next daemon's dispatch-time
+//     reconcileClosedBeadSessions (reconcile.go) purges a spared session once
+//     its turn has ended (idle/needs_input) AND its bead is closed, worktree
+//     and anchor branch included, transcript-quiet guarded -- as soon as new
+//     work arrives for any ccpool role; the next shutdown sweep purges it
+//     too. This is the ONLY bound for a session that parks in needs_input
+//     (ccpool's reaper exempts needs_input rows, ADR 0037) with an open
+//     bead: it waits for the operator, by design.
+//  2. ccpool's own reaper (packages/ccpool, ADR 0072). Pass 1 closes any
+//     live non-needs_input session whose last_activity_at is older than
+//     idle_ttl -- a hung working row included -- and Pass 2 evicts
+//     idle/errored rows (never starting/ready/working) over max_sessions;
+//     both stamp close_reason. A spared session whose turn ends idle with
+//     its bead still open is therefore reclaimed by ccpool after idle_ttl.
+//  3. Pool capacity (INV-CCH-6). Spared starting/ready/working rows count
+//     toward max_sessions, so the next daemon cannot launch past the cap
+//     while they run; the leak cannot grow the pool beyond the cap.
+//
+// Not covered, accepted: a spared session's bead stays claimed by the old
+// daemon until that session's turn ends and the bead is resolved or
+// reconciled -- the old daemon's in-memory dispatch tracking is gone, so no
+// executor watches it any more.
 //
 // This is the once-per-process-lifetime sweep half of this module's
 // INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not
 // scoped to one dispatch, unlike internal/ccpool's own per-dispatch
 // start/observe/reap half.
 //
-// Ported verbatim from packages/pg-router's own (now-deleted)
+// Ported from packages/pg-router's own (now-deleted)
 // Orchestrator.teardownAll — this module's own local re-implementation, not
 // an import (Go's internal-package visibility rule; docs/adr/0065's
-// Addendum), since that package no longer exists in this module.
+// Addendum), since that package no longer exists in this module. No longer
+// verbatim: pg2-hwt7v added the spare-active rule above.
 func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
@@ -151,17 +193,64 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 		if !strings.HasPrefix(s.ExternalID, prefix) {
 			continue
 		}
-		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, s) {
+		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, s, worktreeHeldBySparedPeer(sessions, s)) {
 			closed++
 		}
 	}
 	return closed
 }
 
-// closeUnlessNeedsInput tears down one session UNLESS it is in needs_input
-// AND its own bead is still open, in which case it is PRESERVED (left alive,
-// worktree untouched) so the operator can still `ccpool attach
-// <external_id>`. Returns true iff the session was actually closed (purged).
+// sparedAtShutdown reports whether a session in state is ACTIVELY WORKING
+// and so must be spared entirely by the shutdown sweep (pg2-hwt7v): starting
+// (launch in flight), ready (awaiting its prompt), or working (mid-turn).
+// idle (turn ended), errored, needs_input (decided by its bead's status,
+// closeUnlessNeedsInput) and an unrecognized/empty state are NOT active and
+// stay closable. Liveness (ccpool.Session.Live) is deliberately NOT
+// consulted: this sweep fails toward preservation, and a row whose tmux
+// session briefly looks dead is reclaimed later by the bounds listed on
+// teardownAllSessions.
+func sparedAtShutdown(state ccpool.SessionState) bool {
+	switch state {
+	case ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking:
+		return true
+	}
+	return false
+}
+
+// worktreeHeldBySparedPeer reports whether another session in sessions that
+// the shutdown sweep SPARES (sparedAtShutdown) still uses s's working
+// directory. A per-bead worktree path is keyed by bead id alone
+// (worktree.Ensure), so purging one idle session must not delete the
+// directory out from under a spared working peer of the same bead
+// (pg2-u3t04 / pg2-aqpqx, applied at shutdown). A peer that is itself being
+// purged does not protect the worktree: the same sweep reclaims it.
+func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool {
+	if s.CWD == "" {
+		return false
+	}
+	for _, o := range sessions {
+		if o.ExternalID != s.ExternalID && o.CWD == s.CWD && sparedAtShutdown(o.State) {
+			return true
+		}
+	}
+	return false
+}
+
+// closeUnlessNeedsInput tears down one session UNLESS it must be spared, in
+// which case it is left alive with its worktree untouched. Returns true iff
+// the session was actually closed (purged). Two spare rules, checked in
+// order:
+//
+//  1. ACTIVELY WORKING (sparedAtShutdown: starting / ready / working) --
+//     spared unconditionally, bead status not consulted (pg2-hwt7v; operator
+//     ruling, Phillip, 2026-09-30: "spare working sessions entirely").
+//     No cc.Close, no worktree removal, no anchor-branch delete.
+//  2. needs_input WHOSE BEAD IS STILL OPEN -- preserved so the operator can
+//     still `ccpool attach <external_id>`.
+//
+// keepWorktree is passed through to closeSession when the session IS closed:
+// true leaves its worktree and anchor branch in place because a spared peer
+// still uses the same directory (worktreeHeldBySparedPeer).
 //
 // A needs_input session whose bead has ALREADY been closed is reconciled —
 // closed like any other session — rather than preserved forever: this is
@@ -181,18 +270,23 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 // to attach to.
 //
 // The actual purge — cc.Close plus the best-effort worktree removal — is
-// closeSessionAndWorktree below, shared verbatim with reconcile.go's
+// closeSession below, shared with reconcile.go's
 // reconcileClosedBeadSessions (pg2-hrppg): the periodic counterpart to this
 // once-per-shutdown sweep, which reconciles a closed-bead session's
 // StateIdle/StateNeedsInput row while the daemon is still up, rather than
 // leaving it to leak until the next shutdown.
-func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot string, s ccpool.Session) bool {
+func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
+	if sparedAtShutdown(s.State) {
+		slog.Info("preShutdown: teardown sparing actively working session (left alive, worktree untouched)",
+			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
+		return false
+	}
 	if s.State == ccpool.StateNeedsInput && !beadAlreadyClosed(ctx, br, s) {
 		slog.Info("preShutdown: teardown preserving needs_input session for operator attach",
 			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
 		return false
 	}
-	return closeSessionAndWorktree(ctx, cc, open, repoRoot, s)
+	return closeSession(ctx, cc, open, repoRoot, s, keepWorktree)
 }
 
 // closeSessionAndWorktree purges s via cc.Close(purge=true), then

@@ -67,6 +67,10 @@ func containsSubstring(msgs []string, substr string) bool {
 // failed" log line rather than ever touching a real ccpool pool.
 func TestRunDispatch_reconciliationRunsForCcpoolRole(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
+	// Isolate the origin-probe state dir: TestMain's XDG_STATE_HOME is shared
+	// by every test in this package, so a gated-origin state left by an
+	// earlier test would make dispatch decline before reaching reconcile.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	dir := t.TempDir()
 	rolePath := filepath.Join(dir, "role.json")

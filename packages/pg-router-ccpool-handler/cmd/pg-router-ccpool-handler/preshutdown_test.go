@@ -266,7 +266,7 @@ func TestCloseUnlessNeedsInput_worktreeOpenFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{OpenErrAt: map[string]bool{"/scratch/not-a-repo": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/scratch/not-a-repo"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a worktree-open failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -286,7 +286,7 @@ func TestCloseUnlessNeedsInput_removeWorktreeFailsSoft(t *testing.T) {
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{RemoveErrAt: map[string]bool{"/repo/root": true}}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: ccpool.StateIdle, CWD: "/repo/root"}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a RemoveWorktree failure must not be treated as a close failure")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-x" {
@@ -312,7 +312,7 @@ func TestCloseUnlessNeedsInput_reconcilesNeedsInputWhenBeadClosed(t *testing.T) 
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-50s7h.2"},
 	}
-	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
+	if !closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = false, want true: a needs_input session whose bead is already closed must be reconciled")
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != s.ExternalID {
@@ -332,7 +332,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputWhenBeadOpen(t *testing.T) {
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-0t0z7.3"},
 	}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session whose bead is still open must be preserved")
 	}
 	if len(cc.Closed) != 0 {
@@ -348,7 +348,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputWithoutBeadMeta(t *testing.T) 
 	cc := &fakeCC{}
 	open := &fakeWorktreeOpener{}
 	s := ccpool.Session{ExternalID: "pg-router-worker-zr-old", State: ccpool.StateNeedsInput}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a needs_input session with no bead metadata must be preserved")
 	}
 	if len(cc.Closed) != 0 {
@@ -368,7 +368,7 @@ func TestCloseUnlessNeedsInput_preservesNeedsInputOnBeadLookupError(t *testing.T
 		State:      ccpool.StateNeedsInput,
 		Meta:       map[string]string{ccpool.MetaKeyBead: "zr-x"},
 	}
-	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s) {
+	if closeUnlessNeedsInput(context.Background(), cc, open.Open, br, "/repo/root", s, false) {
 		t.Fatal("closeUnlessNeedsInput = true, want false: a bd lookup failure must fail soft and preserve the session")
 	}
 	if len(cc.Closed) != 0 {
@@ -494,6 +494,104 @@ func TestCloseSessionAndWorktree_noBeadMetaSkipsBranchDelete(t *testing.T) {
 	}
 	if len(open.BranchDeletes) != 0 {
 		t.Errorf("branch must not be deleted without a bead id; deletes=%v", open.BranchDeletes)
+	}
+}
+
+// TestTeardownAllSessions_sparesActiveSessions is pg2-hwt7v's core
+// regression (operator ruling, Phillip, 2026-09-30): at daemon shutdown a
+// session that is actively working (starting / ready / working) MUST be
+// spared ENTIRELY -- no cc.Close, no worktree removal, no anchor-branch
+// delete -- even when its bead has already closed, while a closable session
+// (idle) in the same sweep is still purged with its worktree and branch.
+func TestTeardownAllSessions_sparesActiveSessions(t *testing.T) {
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking, CWD: "/wt/zr-w", Meta: map[string]string{ccpool.MetaKeyBead: "zr-w"}},
+		{ExternalID: "pg-router-worker-zr-s", Live: true, State: ccpool.StateStarting, CWD: "/wt/zr-s", Meta: map[string]string{ccpool.MetaKeyBead: "zr-s"}},
+		{ExternalID: "pg-router-worker-zr-r", Live: true, State: ccpool.StateReady, CWD: "/wt/zr-r", Meta: map[string]string{ccpool.MetaKeyBead: "zr-r"}},
+		{ExternalID: "pg-router-worker-zr-i", Live: true, State: ccpool.StateIdle, CWD: "/wt/zr-i", Meta: map[string]string{ccpool.MetaKeyBead: "zr-i"}},
+	}}}
+	// Every bead is closed: a working session must still be spared (its
+	// bead closing mid-turn does not make it closable at shutdown).
+	br := fakeBR{out: map[string]string{
+		"show zr-w --json": `{"status":"closed"}`,
+		"show zr-s --json": `{"status":"closed"}`,
+		"show zr-r --json": `{"status":"closed"}`,
+		"show zr-i --json": `{"status":"closed"}`,
+	}}
+	open := &fakeWorktreeOpener{}
+	n := teardownAllSessions(context.Background(), cc, open.Open, br, "pg-router-", "/repo/root")
+	if n != 1 {
+		t.Errorf("teardownAllSessions closed count = %d, want 1 (only the idle session); closed=%v", n, cc.Closed)
+	}
+	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-i" {
+		t.Fatalf("only the idle session may be closed; closed=%v", cc.Closed)
+	}
+	if len(open.Removed) != 1 || open.Removed[0] != "/wt/zr-i" {
+		t.Errorf("RemoveWorktree must run for the idle session's cwd ONLY; calls=%v", open.Removed)
+	}
+	if len(open.BranchDeletes) != 1 || open.BranchDeletes[0].Branch != "pg-router/zr-i" {
+		t.Errorf("only the purged session's anchor branch may be deleted; deletes=%v", open.BranchDeletes)
+	}
+}
+
+// TestCloseUnlessNeedsInput_sparesActiveStates covers each actively-working
+// state individually through the per-session decision: spared means returns
+// false with no close and no worktree open at all.
+func TestCloseUnlessNeedsInput_sparesActiveStates(t *testing.T) {
+	for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking} {
+		t.Run(string(st), func(t *testing.T) {
+			cc := &fakeCC{}
+			open := &fakeWorktreeOpener{}
+			s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: st, CWD: "/wt/zr-x", Meta: map[string]string{ccpool.MetaKeyBead: "zr-x"}}
+			if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s, false) {
+				t.Fatalf("closeUnlessNeedsInput = true, want false: a %s session must be spared at shutdown", st)
+			}
+			if len(cc.Closed) != 0 {
+				t.Errorf("session must NOT be closed; closed=%v", cc.Closed)
+			}
+			if len(open.Opens) != 0 || len(open.Removed) != 0 || len(open.BranchDeletes) != 0 {
+				t.Errorf("worktree must be untouched; opens=%v removed=%v deletes=%v", open.Opens, open.Removed, open.BranchDeletes)
+			}
+		})
+	}
+}
+
+// TestCloseUnlessNeedsInput_stillPurgesErroredAndIdle pins the other side of
+// the ruling: only ACTIVE sessions are spared. errored and idle sessions
+// (turn ended) remain closable at shutdown, worktree included.
+func TestCloseUnlessNeedsInput_stillPurgesErroredAndIdle(t *testing.T) {
+	for _, st := range []ccpool.SessionState{ccpool.StateIdle, ccpool.StateErrored} {
+		t.Run(string(st), func(t *testing.T) {
+			cc := &fakeCC{}
+			open := &fakeWorktreeOpener{}
+			s := ccpool.Session{ExternalID: "pg-router-worker-zr-x", State: st, CWD: "/wt/zr-x"}
+			if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", s, false) {
+				t.Fatalf("closeUnlessNeedsInput = false, want true: a %s session is closable at shutdown", st)
+			}
+			if len(open.Removed) != 1 || open.Removed[0] != "/wt/zr-x" {
+				t.Errorf("worktree must be removed; calls=%v", open.Removed)
+			}
+		})
+	}
+}
+
+// TestTeardownAllSessions_keepsWorktreeSharedWithSparedPeer: a per-bead
+// worktree is keyed by bead id alone, so a purged idle review session can
+// share its cwd with a spared working feedback session of the same bead.
+// The idle session is still purged, but the shared worktree and anchor
+// branch MUST stay (pg2-u3t04 / pg2-aqpqx semantics, applied at shutdown).
+func TestTeardownAllSessions_keepsWorktreeSharedWithSparedPeer(t *testing.T) {
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{ExternalID: "pg-router-review-zr-x", Live: true, State: ccpool.StateIdle, CWD: "/wt/zr-x", Meta: map[string]string{ccpool.MetaKeyBead: "zr-x"}},
+		{ExternalID: "pg-router-feedback-zr-x", Live: true, State: ccpool.StateWorking, CWD: "/wt/zr-x", Meta: map[string]string{ccpool.MetaKeyBead: "zr-x"}},
+	}}}
+	open := &fakeWorktreeOpener{}
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-", "/repo/root")
+	if n != 1 || len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-review-zr-x" {
+		t.Fatalf("only the idle session may be closed; n=%d closed=%v", n, cc.Closed)
+	}
+	if len(open.Removed) != 0 || len(open.BranchDeletes) != 0 {
+		t.Errorf("a worktree shared with a spared session must be kept; removed=%v deletes=%v", open.Removed, open.BranchDeletes)
 	}
 }
 

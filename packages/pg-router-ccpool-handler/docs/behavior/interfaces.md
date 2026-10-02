@@ -31,7 +31,7 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
 
 - **`INTF-CCH-CCPOOL`** <!-- uuid: d1fc9c42-5d04-4df3-bfb1-a11cc97d668d --> — a ccpool-backed
   handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session,
-  PLUS (pg2-oju6w.15) this module's own `preShutdown` hook sweeping every prefix-matching session
+  PLUS (pg2-oju6w.15) this module's own `preShutdown` hook sweeping the prefix-matching sessions
   across the whole process — not scoped to one dispatch — the once-per-process-lifetime
   relocation of a sweep pg-router's own core used to run directly against `ccpool` before this
   module existed. **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its
@@ -39,6 +39,9 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   for the per-dispatch crossing; one sweep per `preShutdown` call (itself once per enabled role
   sharing this process, per `INTF-HANDLER`'s own lifecycle-hooks note on no cross-role
   de-duplication).
+  The `preShutdown` sweep MUST spare every actively working session (`INV-CCH-14`): it purges only
+  sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
+  and leaves a working session and its worktree untouched.
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

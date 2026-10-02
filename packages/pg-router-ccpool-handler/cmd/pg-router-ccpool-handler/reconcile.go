@@ -54,13 +54,12 @@ import (
 // shutdown-time sweep already uses. Returns the number of sessions actually
 // closed.
 //
-// Deliberately narrower than closeUnlessNeedsInput's own shutdown-time
-// decision: at shutdown EVERY session is torn down regardless of state (the
-// whole daemon is exiting, so "still working" no longer means anything —
-// see closeUnlessNeedsInput's own doc). Here the daemon keeps running, so a
-// session actively working a turn, or in a transitional state this sweep
-// does not recognize as "done with nothing left to do" (starting/ready/
-// errored), is left untouched even once its bead has closed — only
+// Deliberately different from closeUnlessNeedsInput's own shutdown-time
+// decision: that sweep also spares actively working sessions (pg2-hwt7v) but
+// purges errored sessions and any idle/needs_input one at shutdown. Here the
+// daemon keeps running, so a session actively working a turn, or in a
+// transitional state this sweep does not recognize as "done with nothing
+// left to do" (starting/ready/errored), is left untouched even once its bead has closed — only
 // StateIdle/StateNeedsInput qualify (reconcilableState below), matching
 // pg2-hrppg's own Ask verbatim: "if the bead is closed AND the session is
 // idle/needs_input (not actively working), close/purge the session."
