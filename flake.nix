@@ -2507,7 +2507,7 @@
                   rules="$surface/home/programs/agent-rules/pgii-agent-rules.md"
                   for want in 'pg-hooks status --porcelain' 'pg-hooks fix' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply'; do
                     if ! grep -qF -- "$want" "$rules"; then
-                      echo "FAIL: the core agent rules lost the pg-hooks dual-mode text: $want" >&2
+                      echo "FAIL: the core agent rules lost the pg-hooks hook text: $want" >&2
                       exit 1
                     fi
                   done
