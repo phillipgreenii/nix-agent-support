@@ -125,3 +125,58 @@ type ReviewSubmitResult struct {
 type ReviewSubmitter interface {
 	SubmitReview(ctx context.Context, req ReviewSubmitRequest) (ReviewSubmitResult, error)
 }
+
+// PendingReviewRequest is the review_pending op's input (contract 9.1a). ID is
+// the PR id, in the same style as every other pr op's args.
+type PendingReviewRequest struct {
+	ID string `json:"id"`
+}
+
+// PendingReviewComment is one inline comment of the acting identity's pending
+// review (contract 9.1a). Line is 0 when the host reports no line. Marked is
+// whether the comment body carries a bot-authorship marker.
+type PendingReviewComment struct {
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Body   string `json:"body"`
+	Marked bool   `json:"marked"`
+}
+
+// PendingReview is the structured record of the acting identity's PENDING
+// review on a PR (contract 9.1a). CommitSHA is the REVIEW-level anchored
+// commit, never a comment's commit. Stale is true when CommitSHA is not the
+// PR head the result reports (an empty CommitSHA is stale). AllMarked is true
+// only when the body and every comment carry the marker.
+type PendingReview struct {
+	ReviewID   string                 `json:"review_id"`
+	DatabaseID int64                  `json:"database_id"`
+	State      string                 `json:"state"`
+	CommitSHA  string                 `json:"commit_sha"`
+	Stale      bool                   `json:"stale"`
+	Body       string                 `json:"body"`
+	BodyMarked bool                   `json:"body_marked"`
+	Comments   []PendingReviewComment `json:"comments"`
+	AllMarked  bool                   `json:"all_marked"`
+}
+
+// PendingReviewResult is the review_pending op's output (contract 9.1a).
+// Pending false with a nil Review is the explicit "none" answer: the lookup
+// succeeded and the acting identity has no pending review. A failed lookup is
+// never expressed here; it is an error from the closed INV-ERR-1 taxonomy.
+type PendingReviewResult struct {
+	Pending bool           `json:"pending"`
+	HeadSHA string         `json:"head_sha"`
+	AsOf    string         `json:"as_of"`
+	Review  *PendingReview `json:"review,omitempty"`
+}
+
+// PendingReviewReader is an OPTIONAL capability of a pr backend: it resolves
+// the acting identity's pending review on a PR. It is deliberately not part of
+// Provider; NewDispatchTable registers the review_pending op only when the
+// provider type-asserts to it. It MUST be read-only and fail-closed: any
+// uncertainty is an error (wrapped with scriptout.Err* from INV-ERR-1's
+// taxonomy), never a "none" result.
+type PendingReviewReader interface {
+	PendingReview(ctx context.Context, req PendingReviewRequest) (PendingReviewResult, error)
+}

@@ -16,6 +16,15 @@ answer the two design questions that were still open when this ADR was accepted 
 `pg2-2j5ac.52.1`); S27 and S28 record two further operator rulings from 2026-09-29. Each is in
 the cluster it belongs to, and the text it supersedes was rewritten in place.
 
+**Amended 2026-10-03** (bead `pg2-kftf9.12`): the design gains section 9.1a, the read-only
+`pg-connector pr review pending <id>` contract (a structured lookup of the acting identity's
+pending review). No decision-log row is added: its placement in pg-connector rather than pg-pr is
+the operator's ruling of 2026-10-03 ("no further changes are to be made to pg-pr, it is going
+away"), and the contract itself is derived from the pending-review investigation and its
+prerequisite results (`docs/superpowers/specs/2026-09-29-pending-review-handling-investigation.md`,
+`docs/superpowers/specs/2026-09-30-pending-review-prerequisites-results.md`). It changes none of
+S1 to S28; like `review submit`, it follows `INV-EXIT-1`'s Targeted scheme (S27).
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)

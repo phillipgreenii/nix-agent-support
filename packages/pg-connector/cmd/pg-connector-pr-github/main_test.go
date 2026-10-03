@@ -76,6 +76,10 @@ func (fakeGH) PostPendingReview(ctx context.Context, repo string, number int, co
 	return &api.Review{ID: "RV", State: "pending"}, nil
 }
 
+func (fakeGH) GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error) {
+	return &github.PendingReviewData{HeadSHA: "deadbeef"}, nil
+}
+
 func newTestBackend(t *testing.T) *internal.Backend {
 	t.Helper()
 	return internal.New(fakeGH{})
@@ -282,5 +286,15 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"owner/repo#1"}}`), &out)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("disabled event log wrote files: %v", entries)
+	}
+}
+
+// TestNewDispatchTable_ListsReviewPending: the GitHub backend implements the
+// optional PendingReviewReader capability, so review_pending is registered and
+// therefore listed in capabilities.ops.
+func TestNewDispatchTable_ListsReviewPending(t *testing.T) {
+	table := newDispatchTable(newTestBackend(t))
+	if _, ok := table["review_pending"]; !ok {
+		t.Fatalf("review_pending missing from dispatch table; ops = %v", table.Ops())
 	}
 }

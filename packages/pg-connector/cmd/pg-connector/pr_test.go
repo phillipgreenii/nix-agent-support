@@ -664,3 +664,91 @@ func TestReviewSubmitInvalidArgumentExits1(t *testing.T) {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
 }
+
+// reviewPendingRecordResp is a well-formed review_pending wire response for a
+// stale, partly-unmarked pending review.
+const reviewPendingRecordResp = `{"protocolVersion":1,"schemaVersion":4,"result":{"pending":true,"head_sha":"h2","as_of":"t","review":{"review_id":"PRR_1","database_id":7,"state":"pending","commit_sha":"h1","stale":true,"body":"b","body_marked":true,"comments":[{"id":"C1","path":"a.go","line":3,"body":"c","marked":false}],"all_marked":false}}}`
+
+func TestReviewPendingPrintsRecordAndExits0(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rp-rec", map[string]string{"review_pending": reviewPendingRecordResp}, `{}`)
+	writeConfigFor(t, "backend-rp-rec")
+	stdout, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "pending", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v\n%s", err, stdout)
+	}
+	var res struct {
+		Pending bool `json:"pending"`
+		Review  struct {
+			ReviewID  string `json:"review_id"`
+			CommitSHA string `json:"commit_sha"`
+			Stale     bool   `json:"stale"`
+			AllMarked bool   `json:"all_marked"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(resp.Result, &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Pending || res.Review.ReviewID != "PRR_1" || res.Review.CommitSHA != "h1" || !res.Review.Stale || res.Review.AllMarked {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestReviewPendingNoneIsExplicitAndExits0(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rp-none", map[string]string{
+		"review_pending": `{"protocolVersion":1,"schemaVersion":4,"result":{"pending":false,"head_sha":"h2","as_of":"t"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rp-none")
+	stdout, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "pending", "pr-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, `"pending":false`) {
+		t.Fatalf("none must be an explicit pending:false result; stdout=%s", stdout)
+	}
+}
+
+// A failed lookup is an error envelope and a non-zero exit, never a none
+// result that a caller could mistake for "safe to post".
+func TestReviewPendingLookupFailureExitsNonZeroWithError(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rp-fail", map[string]string{
+		"review_pending": `{"protocolVersion":1,"schemaVersion":4,"error":{"code":"unavailable","message":"review_pending: detection_failed: boom"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rp-fail")
+	stdout, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "pending", "pr-1"})
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "detection_failed") || strings.Contains(stdout, `"pending"`) {
+		t.Fatalf("stdout must carry the error and no pending result; got %s", stdout)
+	}
+}
+
+func TestReviewPendingNotFoundExits4(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rp-nf", map[string]string{
+		"review_pending": `{"protocolVersion":1,"schemaVersion":4,"error":{"code":"not_found","message":"no such pr"}}`,
+	}, `{}`)
+	writeConfigFor(t, "backend-rp-nf")
+	_, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "pending", "pr-1"})
+	if code != 4 {
+		t.Fatalf("exit code = %d, want 4", code)
+	}
+}
+
+func TestHumanizeReviewPending(t *testing.T) {
+	got, err := humanizeReviewPending(json.RawMessage(`{"pending":false,"head_sha":"h2","as_of":"t"}`))
+	if err != nil || !strings.Contains(got, "no pending review") {
+		t.Fatalf("none: %q %v", got, err)
+	}
+	var env scriptout.Response
+	if err := json.Unmarshal([]byte(reviewPendingRecordResp), &env); err != nil {
+		t.Fatal(err)
+	}
+	got, err = humanizeReviewPending(env.Result)
+	if err != nil || !strings.Contains(got, "STALE") || !strings.Contains(got, "a.go:3 marked=false") {
+		t.Fatalf("record: %q %v", got, err)
+	}
+}

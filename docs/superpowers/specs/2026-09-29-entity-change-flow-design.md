@@ -9,7 +9,8 @@
   agent-closed), were answered by the operator (Phillip) on 2026-09-29 in `pg2-2j5ac.52.1` and are
   recorded as decision log rows S25 and S26; rows S27 (exit codes) and S28 (mergeability in the
   summary) record two further operator rulings from the same day. Follow-up `pg2-2j5ac.52.2.2`
-  wrote all four into this design and into ADR 0077. This design governs `pg2-2j5ac.46`
+  wrote all four into this design and into ADR 0077. Amended 2026-10-03 (bead `pg2-kftf9.12`):
+  section 9.1a adds the read-only `pg-connector pr review pending <id>` contract. This design governs `pg2-2j5ac.46`
   (`2026-09-23-pg-desk-generic-entity-pipeline-design.md`) where they overlap (decision log row
   S23; migration step 0). Per this repo's citation conventions, `docs/superpowers/specs/` files
   (including this one, and `.46`) are not durable citation targets — the ADR is.
@@ -343,6 +344,11 @@ attempt instead, so a `fix-ci` build id is run `id` + `attempt` (S26).
 
 `pg-connector pr review submit <id>` (contract 9.1). Required before pg-pr can be removed (G8);
 SHOULD be done first.
+
+Its read counterpart, `pg-connector pr review pending <id>` (contract 9.1a, amendment 2026-10-03,
+bead `pg2-kftf9.12`), resolves the acting identity's pending review to a structured record. The
+guarded supersede (bead `pg2-kftf9.13`) uses it internally, and the pg-desk dashboard (bead
+`pg2-kftf9.18`) hydrates from it.
 
 ### 5.3 Consumer cursors (existing, reused)
 
@@ -887,6 +893,87 @@ meaning without a version bump of the containing contract (S11).
   `supersede_pending: true`. Any other `invalid_argument` is a rejected review (check the comment
   anchors); a refresh will not fix it.
 
+### 9.1a `pg-connector pr review pending <id>`
+
+> Amendment 2026-10-03 (bead `pg2-kftf9.12`). Placement: operator ruling (Phillip, 2026-10-03),
+> "no further changes are to be made to pg-pr, it is going away", so the structured pending-review
+> lookup lands in pg-connector, not pg-pr. Design basis:
+> `docs/superpowers/specs/2026-09-29-pending-review-handling-investigation.md` (policies 1, 2 and 7
+> of section 5) and `docs/superpowers/specs/2026-09-30-pending-review-prerequisites-results.md`
+> (P1, P3, P4, P7 proven; design corrections 1 and 5). It does not change 9.1.
+
+- **Wire op**: `review_pending`, a targeted, read-only, id-keyed op on the `pr` capability
+  (optional, like `review_submit`: registered only by a backend that implements it).
+- **Input**: `{"id": "<pr id>"}` on the wire; the CLI takes the id positionally and reads no
+  stdin.
+- **Behavior**: resolves the acting identity's PENDING review on the PR to one record, in one
+  GraphQL round trip that also reads the PR head (`headRefOid`). GraphQL is used because REST
+  lists pending-review comments only through a second call and reports `line` as `null` for them
+  (P1, correction 5). The op posts, deletes and submits nothing.
+- **Output** (`result`):
+
+  ```json
+  {
+    "pending": true,
+    "head_sha": "9f3c1e2...",
+    "as_of": "2026-10-03T00:00:00Z",
+    "review": {
+      "review_id": "PRR_...",
+      "database_id": 5360090761,
+      "state": "pending",
+      "commit_sha": "4b1d7aa...",
+      "stale": true,
+      "body": "Summary text\n<!-- pg-connector-pr-github:review -->",
+      "body_marked": true,
+      "comments": [
+        {
+          "id": "PRRC_...",
+          "path": "src/a.go",
+          "line": 42,
+          "body": "...",
+          "marked": false
+        }
+      ],
+      "all_marked": false
+    }
+  }
+  ```
+
+  - `review_id` is the GraphQL node id (the same id space as 9.1's `review_id`); `database_id` is
+    the REST id, which the REST delete endpoint needs.
+  - `commit_sha` is the REVIEW-level anchored commit (`commit.oid`). `head_sha` is the PR head
+    from `headRefOid`. `stale` is `commit_sha != head_sha` (case-insensitive); an empty
+    `commit_sha` (the host reported a null commit, as it does after a force-push removes the
+    commit) is stale. A comment's own commit is never read: it is not stable once the head
+    advances (P4). REST `head.sha` lags a push by seconds (P4), which is why the head comes from
+    the same GraphQL query.
+  - `body_marked` and each comment's `marked` report whether the text carries a bot-authorship
+    marker: this backend's `<!-- pg-connector-pr-github:review -->`, or pg-pr's `<!-- pg-pr -->`
+    (pg-pr is still the live review path until it is removed, and a review it left behind is
+    agent-authored). `all_marked` is true only when the body and every comment are marked. A
+    marker is NOT proof the text is unedited: a text-only edit keeps it, and only the post-time
+    hash (bead `pg2-kftf9.14`) detects that. `lastEditedAt` MUST NOT be used as an edit signal
+    (null after a web-UI edit, G2).
+
+- **No pending review**: `{"pending": false, "head_sha": "...", "as_of": "..."}` with no `review`
+  key. This is a well-formed answer: exit 0.
+- **Lookup failure** is a different outcome from "no pending review". It is an error from the
+  fixed `INV-ERR-1` taxonomy (no new code): `not_found` (the PR does not exist), `unauthenticated`
+  (host-reported permission failure), or `unavailable` (any other failure, including a response
+  that does not parse). Its `message` begins `review_pending: detection_failed:`, so a caller
+  reports reason `detection_failed` without a new code. The op is fail-closed: it answers "none"
+  only when the host affirmatively reported zero pending reviews. It returns an error, never a
+  "none", when the PR did not resolve, the head is missing, the viewer is unknown, the pending
+  review is not authored by the viewer, more than one pending review is reported, or the review's
+  comment list was truncated (marker presence could not be established). Nothing is posted,
+  deleted or submitted by this op, and a caller MUST NOT post, delete or submit on an error.
+- **Exit codes**: pg-connector's own `INV-EXIT-1` Targeted scheme, 0/4/1 (9.12, S27): 0 = a record
+  or the explicit none result; 4 = `not_found`; 1 = any other error. The JSON envelope (default
+  output mode) prints the result, or the error, on stdout.
+- **Consumers**: the guarded supersede in `pr review submit` (bead `pg2-kftf9.13`, policies 2 to 4)
+  and the pg-desk dashboard's pending-review state (bead `pg2-kftf9.18`, policy 11). Both use this
+  record; neither reads the pending review any other way.
+
 ### 9.2 `pg-desk <type> changes`
 
 ```
@@ -1339,7 +1426,7 @@ cross-reference accessors keep reading and writing until they are deleted with t
 ### 9.12 Exit codes (consolidated)
 
 The single place every new or changed CLI's exit-code scheme is defined; contracts elsewhere
-(5.2, 6.9, 9.1, 9.2, 9.4, 9.7) cross-reference these tables rather than restate them.
+(5.2, 6.9, 9.1, 9.1a, 9.2, 9.4, 9.7) cross-reference these tables rather than restate them.
 
 Each tool keeps its own exit-code scheme; the schemes of pg-router, pg-connector and pg-desk are
 not bound together, and an adapter translates between what it calls and who calls it (S27). The
@@ -1353,10 +1440,11 @@ CLIs this design defines use 0/2/3:
 
 The two CLIs that sit on another tool's scheme:
 
-| CLI                                   | Exit codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pg-connector pr review submit` (9.1) | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, the review posted, including when the `supersede_pending` delete failed, which the JSON output reports; 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, `invalid_argument`); nothing is posted on 4 or 1                                                                                                                                                                                       |
-| source adapter (9.4)                  | translates pg-desk's codes into pg-router's command-query contract; it does not mirror them. pg-desk 0 or 2 → exit 0, emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3 → exit 1. Why: pg-router's command-query runner discards a source's whole output on any non-zero exit, and pg-desk's exit 2 means records were written and the cursor advanced, so mirroring 2 would lose them. Precedent: `pg-router-source-pg-connector`'s `classifyExit` |
+| CLI                                     | Exit codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-connector pr review submit` (9.1)   | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, the review posted, including when the `supersede_pending` delete failed, which the JSON output reports; 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, `invalid_argument`); nothing is posted on 4 or 1                                                                                                                                                                                       |
+| `pg-connector pr review pending` (9.1a) | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, a record or the explicit none result (`pending: false`); 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, including a failed lookup, whose message begins `review_pending: detection_failed:`); nothing is posted, deleted or submitted on any exit code                                                                                                                                        |
+| source adapter (9.4)                    | translates pg-desk's codes into pg-router's command-query contract; it does not mirror them. pg-desk 0 or 2 → exit 0, emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3 → exit 1. Why: pg-router's command-query runner discards a source's whole output on any non-zero exit, and pg-desk's exit 2 means records were written and the cursor advanced, so mirroring 2 would lose them. Precedent: `pg-router-source-pg-connector`'s `classifyExit` |
 
 ## 10. Failure modes
 

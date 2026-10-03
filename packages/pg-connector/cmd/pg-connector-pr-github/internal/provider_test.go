@@ -66,6 +66,10 @@ type fakeGH struct {
 	postErr      error
 	deleted      []int64
 	posts        []postedReview
+
+	// review_pending seam (see review_pending_test.go).
+	pendingData *github.PendingReviewData
+	pendingErr  error
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {

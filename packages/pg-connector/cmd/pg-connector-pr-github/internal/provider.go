@@ -72,6 +72,8 @@ type ghProvider interface {
 	FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error)
 	DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error
 	PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error)
+	// GetPendingReview backs review_pending (PendingReview, review_pending.go).
+	GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.

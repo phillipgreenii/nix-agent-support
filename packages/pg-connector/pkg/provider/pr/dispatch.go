@@ -145,5 +145,21 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 		}
 	}
 
+	// review_pending is an optional capability (same type-assert pattern):
+	// registered, and so listed in capabilities.ops, only for a provider
+	// implementing PendingReviewReader.
+	if rp, ok := p.(PendingReviewReader); ok {
+		table["review_pending"] = scriptout.OpHandler{
+			SchemaVersion: schema.PRSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a PendingReviewRequest
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode review_pending args: "+err.Error())
+				}
+				return rp.PendingReview(ctx, a)
+			},
+		}
+	}
+
 	return table
 }
