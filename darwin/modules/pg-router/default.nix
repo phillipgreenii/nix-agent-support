@@ -173,12 +173,21 @@ in
           # keep growing before the dedup fix's own effect and pg2-5sirm
           # (tracked separately, out of scope here) catch up.
           #
-          # pg2-euh4f raised 30 -> 90: shutdown now first drains in-flight
-          # dispatches for up to shutdownDrainTimeout (30s,
+          # pg2-euh4f raised 30 -> 60: shutdown now first drains in-flight
+          # dispatches for up to shutdownDrainTimeout (20s,
           # cmd/pg-router/run.go) BEFORE the sweep, so the budget is
-          # drain (30s) + the 30s sweep allowance above + the 5s
-          # inFlightDrainTimeout tail + margin. Keep in step with those.
-          ExitTimeOut = 90;
+          # drain (20s) + the 30s sweep allowance above + the 5s
+          # inFlightDrainTimeout tail = 55s, leaving 5s margin. Keep in step
+          # with those.
+          #
+          # 60 is launchd's HARD CAP, not a tuning choice (pg2-s3fzr,
+          # measured 2026-10-03 on macOS 26 / Darwin 25.6.0 with a throwaway
+          # `sleep` job): launchd silently clamps ExitTimeOut to 60 --
+          # 61, 90 and 120 all print `exit timeout = 60` in `launchctl
+          # print`, while 45 prints 45. pg2-euh4f first set 90, which the
+          # plist carried faithfully but launchd ignored above 60. Do NOT
+          # raise this past 60; shrink shutdownDrainTimeout instead.
+          ExitTimeOut = 60;
         };
       };
     })

@@ -72,13 +72,16 @@ const inFlightDrainTimeout = 5 * time.Second
 //
 // Sizing evidence (bead pg2-euh4f, from events.jsonl): desk-pr dispatch
 // durations have median ~19s, p90 ~31s, p99 ~50s (a loose upper bound); the
-// two killed dispatches ran <= 15s. 30s covers roughly the p90 and, with the
-// session sweep and inFlightDrainTimeout's tail, fits inside the launchd
-// ExitTimeOut (90s, darwin/modules/pg-router/default.nix) -- keep the two in
-// step. A drain that
-// times out is no worse than the old behavior: the dispatch context is then
-// cancelled and the handler killed as before.
-const shutdownDrainTimeout = 30 * time.Second
+// two killed dispatches ran <= 15s. 20s comfortably covers those and the
+// median; it does NOT cover the p90 (~31s), which is the price of fitting the
+// launchd budget: launchd clamps ExitTimeOut at 60s (pg2-s3fzr, measured),
+// so drain (20s) + the 30s session-sweep allowance + inFlightDrainTimeout's
+// 5s tail = 55s must stay under the 60s ExitTimeOut in
+// darwin/modules/pg-router/default.nix with margin -- keep the two in step,
+// and never raise this without shrinking another term. A drain that times out
+// is no worse than the old behavior: the dispatch context is then cancelled
+// and the handler killed as before.
+const shutdownDrainTimeout = 20 * time.Second
 
 // inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
 // the wait inFlightDrainTimeout bounds.
