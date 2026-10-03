@@ -1,6 +1,9 @@
 // attention.go: Backend's attention.Provider implementation — per-session
-// blocked/long-idle escalations, plus an account-level item when the
-// active 5h block or 7-day week usage cap has been hit.
+// blocked/long-idle escalations only. It deliberately emits NO account-level
+// usage-cap item (5h block / 7-day week): Grafana already alerts on those
+// (pa-monitor-5h-usage-limit-hit, pa-monitor-weekly-usage-limit-hit) and the
+// alerts reach the same menu through pg-connector-alert-grafana, so an item
+// here would show the same fact twice (INV-AGS-2).
 package internal
 
 import (
@@ -53,18 +56,6 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 				Severity: schema.SeverityLow,
 			})
 		}
-	}
-	if doc.ActiveBlock != nil && doc.ActiveBlock.CapHitAt != "" {
-		items = append(items, schema.AttentionItem{
-			Type: "agentsession-usage-limit", ID: doc.ActiveBlock.ID,
-			Summary: "5-hour usage block cap has been hit", Severity: schema.SeverityCritical,
-		})
-	}
-	if doc.ActiveWeek != nil && doc.ActiveWeek.CapHitAt != "" {
-		items = append(items, schema.AttentionItem{
-			Type: "agentsession-usage-limit", ID: doc.ActiveWeek.ID,
-			Summary: "7-day usage week cap has been hit", Severity: schema.SeverityCritical,
-		})
 	}
 	return items, nil
 }

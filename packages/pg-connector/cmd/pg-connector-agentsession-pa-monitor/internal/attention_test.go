@@ -50,21 +50,52 @@ func TestListAttention_WorkingSessionRaisesNothing(t *testing.T) {
 	}
 }
 
-func TestListAttention_BlockCapHit(t *testing.T) {
-	r := &fakeRunner{statusJSON: `{"sessions":[],"active_block":{"id":"b1","cost_usd":140,"cap_hit_at":"2026-09-18T12:00:00Z"}}`}
-	b := New(r)
-	items, _ := b.ListAttention(context.Background())
-	if len(items) != 1 || items[0].Severity != schema.SeverityCritical || items[0].Type != "agentsession-usage-limit" {
-		t.Errorf("got %+v", items)
+// INV-AGS-2: a hit usage cap (5h block or 7-day week) is covered by Grafana
+// alerts, so ListAttention MUST NOT emit an item for it.
+func TestListAttention_CapHitRaisesNothing(t *testing.T) {
+	cases := map[string]string{
+		"block cap hit": `{"sessions":[],"active_block":{"id":"b1","cost_usd":140,"cap_hit_at":"2026-09-18T12:00:00Z"}}`,
+		"week cap hit":  `{"sessions":[],"active_week":{"id":"w1","cost_usd":900,"cap_hit_at":"2026-09-18T12:00:00Z"}}`,
+		"both cap hit":  `{"sessions":[],"active_block":{"id":"b1","cap_hit_at":"2026-09-18T12:00:00Z"},"active_week":{"id":"w1","cap_hit_at":"2026-09-18T12:00:00Z"}}`,
+	}
+	for name, js := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := New(&fakeRunner{statusJSON: js})
+			items, err := b.ListAttention(context.Background())
+			if err != nil {
+				t.Fatalf("ListAttention: %v", err)
+			}
+			if len(items) != 0 {
+				t.Errorf("got %+v, want no items (cap hits are Grafana's)", items)
+			}
+		})
 	}
 }
 
-func TestListAttention_WeekNotHit(t *testing.T) {
-	r := &fakeRunner{statusJSON: `{"sessions":[],"active_week":{"id":"w1","cost_usd":10}}`}
-	b := New(r)
-	items, _ := b.ListAttention(context.Background())
-	if len(items) != 0 {
-		t.Errorf("got %+v, want no items (cap not hit)", items)
+// A hit cap MUST NOT suppress or alter the per-session items alongside it.
+func TestListAttention_CapHitLeavesSessionItemsUnchanged(t *testing.T) {
+	r := &fakeRunner{statusJSON: `{"sessions":[` +
+		`{"session_id":"s1","status":"blocked","blocker":"human_input"},` +
+		`{"session_id":"s2","status":"idle","long_idle":true}],` +
+		`"active_block":{"id":"b1","cap_hit_at":"2026-09-18T12:00:00Z"},` +
+		`"active_week":{"id":"w1","cap_hit_at":"2026-09-18T12:00:00Z"}}`}
+	items, err := New(r).ListAttention(context.Background())
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %+v, want exactly the blocked and long-idle items", items)
+	}
+	if items[0].ID != "s1" || items[0].Severity != schema.SeverityHigh {
+		t.Errorf("items[0] = %+v, want s1 High", items[0])
+	}
+	if items[1].ID != "s2" || items[1].Severity != schema.SeverityLow {
+		t.Errorf("items[1] = %+v, want s2 Low", items[1])
+	}
+	for _, it := range items {
+		if it.Type != "agentsession" {
+			t.Errorf("item %+v has type %q, want agentsession", it, it.Type)
+		}
 	}
 }
 
