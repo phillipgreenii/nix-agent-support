@@ -4438,11 +4438,40 @@
                         };
                       };
                     };
+                    # Handler-wide pool (bead pg2-h5vno): the pool every role
+                    # WITHOUT its own pool dispatches into (the production
+                    # escalation-triager roles) -- poolMetrics must report it
+                    # as ccpool_pool_capacity{pool="pg-router-ccpool"}.
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-h5vno/pg-router-ccpool";
+                    };
                     poolMetrics = {
                       enable = true;
                       intervalSeconds = 30;
                     };
                   };
+                  poolMetricsScript =
+                    roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.script;
+
+                  # Handler-wide pool only (no role with its own pool):
+                  # poolMetrics must be accepted (no failed assertion) and
+                  # report just the handler pool; pool.enable = false and no
+                  # role pools still fires the guard (firedPoolMetricsAssertion).
+                  handlerPoolOnlyMetrics = evalHM {
+                    enable = true;
+                    roles = { };
+                    pool = {
+                      enable = true;
+                      dir = "/tmp/pg2-h5vno/pg-router-ccpool";
+                    };
+                    poolMetrics.enable = true;
+                  };
+                  handlerPoolOnlyFailedAssertion = lib.findFirst (
+                    a: a.assertion == false
+                  ) null handlerPoolOnlyMetrics.assertions;
+                  handlerPoolOnlyScript =
+                    handlerPoolOnlyMetrics.phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.script;
                   roleWithOwnPoolHandlerDir =
                     roleWithOwnPool.phillipgreenii.programs.pg-router-ccpool-handler.handlerCommandDir;
                   reviewPoolActivation = roleWithOwnPool.home.activation.pgRouterCcpoolHandlerPool_review;
@@ -4764,6 +4793,8 @@
                           launchConfigFile
                           defaultLaunchConfigFile
                           roleWithOwnPoolHandlerDir
+                          poolMetricsScript
+                          handlerPoolOnlyScript
                           ;
                       }
                       ''
@@ -4848,6 +4879,15 @@
                         # opted in) must carry no such key at all.
                         [ "$(jq -r .ccpool.poolDir "$roleWithOwnPoolHandlerDir/review.json")" = /tmp/pg2-mr0sl-review-pool ]
                         jq -e '.ccpool | has("poolDir") | not' "$handlerCommandDir/feedback.json" >/dev/null
+
+                        # poolMetrics script argv (bead pg2-h5vno): the
+                        # per-role pool AND the handler-wide pool (whose dir
+                        # basename pg-router-ccpool becomes the metric's
+                        # pool label) are both passed to pool-capacity.
+                        grep -qF -- "--pool review=/tmp/pg2-mr0sl-review-pool" "$poolMetricsScript"
+                        grep -qF -- "--pool handler=/tmp/pg2-h5vno/pg-router-ccpool" "$poolMetricsScript"
+                        grep -qF -- "--pool handler=/tmp/pg2-h5vno/pg-router-ccpool" "$handlerPoolOnlyScript"
+                        ! grep -qF -- "--pool review=" "$handlerPoolOnlyScript"
                         touch $out
                       '';
                 in
@@ -4949,6 +4989,8 @@
                 # misconfigurations they exist to catch.
                 assert firedPoolMetricsAssertion != null;
                 assert lib.hasInfix "poolMetrics.enable" firedPoolMetricsAssertion.message;
+                # pg2-h5vno: pool.enable alone satisfies the guard.
+                assert handlerPoolOnlyFailedAssertion == null;
                 assert firedMissingDirAssertion != null;
                 assert lib.hasInfix "ccpool.pool.dir" firedMissingDirAssertion.message;
                 # pg2-4roho decision item 4: exactly one registry entry,

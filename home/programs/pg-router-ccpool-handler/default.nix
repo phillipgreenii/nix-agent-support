@@ -266,11 +266,20 @@ let
   # so no shell redirection is needed -- but the script is kept as a
   # derivation so the systemd/LaunchAgent wiring and its eval checks are
   # unchanged.
+  #
+  # The handler-wide pool (`pool.enable`, dir `pool.dir`) is reported too,
+  # under the display label "handler" (bead pg2-h5vno). It is the pool every
+  # role WITHOUT its own `ccpool.pool` dispatches into (e.g. the
+  # escalation-triager roles), so without it
+  # `ccpool_pool_capacity{pool="pg-router-ccpool"}` (pool = basename of
+  # `pool.dir`) was never emitted and that pool's capacity was invisible.
   mkPoolMetricsScript =
     let
-      poolArgs = lib.concatMapStrings (
+      rolePoolArgs = lib.concatMapStrings (
         name: " --pool ${name}=${lib.escapeShellArg cfg.roles.${name}.ccpool.pool.dir}"
       ) (lib.attrNames ccpoolRolesWithOwnPool);
+      handlerPoolArg = lib.optionalString cfg.pool.enable " --pool handler=${lib.escapeShellArg cfg.pool.dir}";
+      poolArgs = rolePoolArgs + handlerPoolArg;
     in
     pkgs.writeShellScript "pg-router-ccpool-handler-pool-metrics" ''
       set -eu
@@ -1254,7 +1263,8 @@ in
       enable = lib.mkEnableOption ''
         a systemd --user timer that periodically runs
         `pg-router-ccpool-handler pool-capacity` for every role with
-        `ccpool.pool.enable` set, making ccpool emit the
+        `ccpool.pool.enable` set, plus the handler-wide `pool` when
+        `pool.enable` is set, making ccpool emit the
         `ccpool_pool_capacity` OTLP gauge (needs OTEL_* env; the darwin
         LaunchAgent supplies it via obs.mkEmitterEnv, the Linux systemd
         unit does not). On darwin,
@@ -1286,7 +1296,8 @@ in
         description = ''
           Read-only output: the rendered pool-capacity script
           (`mkPoolMetricsScript`) -- one `--pool <name>=<dir>` per role with
-          `ccpool.pool.enable`, which triggers ccpool's OTLP capacity emission.
+          `ccpool.pool.enable`, plus `--pool handler=<pool.dir>` when
+          `pool.enable`, which triggers ccpool's OTLP capacity emission.
           Exposed (mirroring `handlerCommandDir`/`launchConfigFile`'s own
           cross-module re-export pattern) so
           `darwin/modules/pg-router-ccpool-handler` can wire its own
@@ -1408,12 +1419,12 @@ in
           # at eval time rather than silently shipping a timer whose every
           # run exits usage-error (runPoolCapacity's own "at least one --pool
           # name=dir is required" guard).
-          assertion = !cfg.poolMetrics.enable || (ccpoolRolesWithOwnPool != { });
+          assertion = !cfg.poolMetrics.enable || cfg.pool.enable || (ccpoolRolesWithOwnPool != { });
           message = ''
             phillipgreenii.programs.pg-router-ccpool-handler.poolMetrics.enable
-            requires at least one `roles.<name>.ccpool.pool.enable = true` entry
-            -- there is no per-role dedicated pool to report capacity for
-            otherwise.
+            requires `pool.enable = true` or at least one
+            `roles.<name>.ccpool.pool.enable = true` entry -- there is no
+            dedicated pool to report capacity for otherwise.
           '';
         }
         {
