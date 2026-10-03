@@ -302,8 +302,31 @@ groups:
                     type: gt
                     params: [0]
 
+      # pg2-h7grf: same policy as the row-count rules above, applied to the
+      # age rule. There is NO per-state age metric (the age is of the oldest
+      # sync_error row whatever its retry state, measured from the row's
+      # as_of -- internal/httpapi/metrics_handler.go's syncErrorStats), so a
+      # row that is healthily retrying also ages, and the old 3600s threshold
+      # paged critical on it: the 2026-10-01 burst (rows aged to ~4215s, then
+      # healed, all rows retrying, none exhausted) is the evidence. The rule
+      # stays critical but its threshold now sits ABOVE the retry horizon, so
+      # it fires only for a row that outlived every automatic retry; a row
+      # that exhausts is already paged by pg-desk-sync-error-rows.
+      #
+      # Threshold 21600s (6h), derived from the pg-desk defaults
+      # (internal/config DefaultSyncRetry*; sync.RetryPolicy.Backoff):
+      #   - backoff alone: the 10 automatic retries wait 1m, 2m, 4m, 8m, 16m,
+      #     then 30m x5 = 181m = 10860s before the row is exhausted;
+      #   - but retries run only when `pg-desk reconcile` does (ZR's
+      #     desk-reconcile role, every 30m), so once the backoff is <= 30m each
+      #     retry costs one whole 30m tick: <= 10 x 30m = 300m = 18000s;
+      #   - plus a 1h margin for a slow/budget-limited reconcile pass and the
+      #     5m `for` => 21600s.
+      # The test (sync_error_rules_test.go) derives the backoff sum and the
+      # tick-bound horizon from the Go constants and fails if the threshold
+      # drops to or below either, so retuning sync.retry must retune this.
       - uid: pg-desk-unreconciled-anchor-age
-        title: pg-desk oldest sync_error is older than 1 hour
+        title: pg-desk oldest sync_error is older than 6 hours (past every automatic retry)
         condition: C
         for: 5m
         noDataState: OK
@@ -311,8 +334,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "pg-desk has had an unreconciled sync_error anchor for over an hour"
-          description: "pg_desk_oldest_sync_error_age_seconds has exceeded 3600 for over 5 minutes -- an anchor with a recorded sync_error has not been reconciled by a later successful run."
+          summary: "pg-desk has had an unreconciled sync_error anchor for over 6 hours"
+          description: "pg_desk_oldest_sync_error_age_seconds has exceeded 21600 (6h) for over 5 minutes -- longer than every automatic retry can take (10 retries, 1m backoff doubling to 30m, run on the 30m reconcile cadence, about 5h at most), so an anchor with a recorded sync_error was not reconciled by any retry. It has exhausted its retries or needs a person: run `pg-desk doctor` (or `pg-desk status`), then `pg-desk reconcile --retry-all`. A row still retrying younger than this is expected and does not page here."
         data:
           - refId: A
             relativeTimeRange:
@@ -340,4 +363,4 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [3600]
+                    params: [21600]

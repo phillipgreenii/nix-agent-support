@@ -46,7 +46,12 @@ by their automatic-retry state (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s "Au
 is non-transient; these need an operator). The Grafana alert rules follow that split (bead
 `pg2-qki4v`): `pg_desk_sync_error_exhausted_rows > 0` pages critical, while
 `pg_desk_sync_error_retrying_rows > 0` is only a warning, and only once it outlives 30 minutes — a
-row a restart left mid-dispatch heals on its own. `serve`'s WARN/ERROR-level operational
+row a restart left mid-dispatch heals on its own. The age rule (`pg-desk-unreconciled-anchor-age`,
+bead `pg2-h7grf`) follows the same policy: `pg_desk_oldest_sync_error_age_seconds` has no per-state
+variant, so a healthily retrying row ages too, and the rule stays critical but only above 21600
+seconds (6 hours), which is past every automatic retry (the default 10 retries back off 1m, 2m, 4m,
+8m, 16m, then 30m five times, 181 minutes in total, and run only on the 30m `reconcile` cadence, so
+at most about 5 hours) — a row that old is exhausted or stuck, not retrying. `serve`'s WARN/ERROR-level operational
 log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 (`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
 `serve` still logs to the path its launchd module configures, defaulting to
