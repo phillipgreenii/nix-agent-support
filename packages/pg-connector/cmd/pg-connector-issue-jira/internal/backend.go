@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -272,6 +273,12 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 	}
 }
 
+// pjiraAuthStatusRE matches (on lower-cased text) pjira's two auth-failure
+// shapes: "status 401" / "status 403" (a whole number, so "status 4010" is
+// not one) and the ": unauthenticated" literal pjira prints for a 401 on its
+// write paths.
+var pjiraAuthStatusRE = regexp.MustCompile(`\bstatus 40[13]\b|: unauthenticated\b`)
+
 // classifyPJIRAErrorMessage maps pjira's own free-text error message onto
 // scriptout's closed error taxonomy. pjira's not-found phrasing is
 // consistently "issue <KEY> not found" [verified against
@@ -286,6 +293,16 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 // AuthStatus check) is classified as unauthenticated — the taxonomy's
 // closest fit, since scriptout has no separate "forbidden" sentinel.
 // Anything else falls back to ErrUnavailable.
+//
+// Auth is recognised only by the shapes pjira really emits [verified against
+// phillipg-nix-repo-base's modules/jira/pkg/pjira/client.go]: a non-2xx is
+// `fmt.Errorf("pjira: <op> <KEY>: status %s", resp.Status)` where Go's
+// resp.Status is "<code> <reason>" (so "status 401 Unauthorized" /
+// "status 403 Forbidden"), and a 401 on create/transition/add-comment is the
+// literal ": unauthenticated". Bare "401"/"403"/"forbidden"/"unauthorized"
+// are deliberately NOT matched: an issue key such as PROJ-401 or ABC-403 (or
+// a key whose project part is spelled FORBIDDEN) appears in nearly every
+// pjira error and must never read as an auth failure (bead pg2-uzsfj).
 //
 // One case is deliberately distinguished from that fallback:
 // Client.Transition's own "no transition to state %q available" message
@@ -308,9 +325,7 @@ func classifyPJIRAErrorMessage(msg string) error {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, msg)
 	case strings.Contains(lower, "not found") && !strings.Contains(lower, "executable"):
 		return scriptout.WrapError(scriptout.ErrNotFound, msg)
-	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") ||
-		strings.Contains(lower, "unauthenticated") || strings.Contains(lower, "403") ||
-		strings.Contains(lower, "forbidden"):
+	case pjiraAuthStatusRE.MatchString(lower):
 		return scriptout.WrapError(scriptout.ErrUnauthenticated, msg)
 	default:
 		return scriptout.WrapError(scriptout.ErrUnavailable, msg)

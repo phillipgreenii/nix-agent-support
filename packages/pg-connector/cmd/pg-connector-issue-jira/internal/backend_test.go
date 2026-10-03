@@ -839,7 +839,7 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 
 func TestBackend_List_RunFailure_ClassifiedError(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		return "", errors.New("pjira: 401 unauthorized")
+		return "", errors.New("exit status 1: pjira: search: status 401 Unauthorized")
 	}}
 	b := New(fr)
 
@@ -1056,7 +1056,7 @@ func TestBackend_Search_EmptyQuery_IsInvalidArgument(t *testing.T) {
 
 func TestBackend_Search_RunFailure_ClassifiedError(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		return "", errors.New("pjira: 401 unauthorized")
+		return "", errors.New("exit status 1: pjira: search: status 401 Unauthorized")
 	}}
 	b := New(fr)
 
@@ -1073,4 +1073,56 @@ func containsArg(args []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestClassifyPJIRAErrorMessage_AuthStatusNotKeyDigits pins the
+// anchored-match fix for bead pg2-uzsfj: the classifier recognises auth only
+// by pjira's real shapes ("status 401 Unauthorized", "status 403 Forbidden",
+// and the write paths' ": unauthenticated"), never by bare digits or words,
+// so an issue key like PROJ-401 in an otherwise-unrelated failure is not an
+// auth failure. Messages use pjira's real format (client.go:
+// "pjira: <op> <KEY>: status <resp.Status>", wrapped by the runner as
+// "exit status 1: ...").
+func TestClassifyPJIRAErrorMessage_AuthStatusNotKeyDigits(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want error
+	}{
+		// Real auth failures stay unauthenticated.
+		{"real 401 get issue", "exit status 1: pjira: get issue PROJ-1: status 401 Unauthorized", scriptout.ErrUnauthenticated},
+		{"real 403 get issue", "exit status 1: pjira: get issue PROJ-1: status 403 Forbidden", scriptout.ErrUnauthenticated},
+		{"real 401 search", "exit status 1: pjira: search: status 401 Unauthorized", scriptout.ErrUnauthenticated},
+		{"real 401 with key containing 401", "exit status 1: pjira: get issue PROJ-401: status 401 Unauthorized", scriptout.ErrUnauthenticated},
+		{"real 403 with key containing 403", "exit status 1: pjira: get issue ABC-403: status 403 Forbidden", scriptout.ErrUnauthenticated},
+		{"create issue unauthenticated", "exit status 1: pjira: create issue: unauthenticated", scriptout.ErrUnauthenticated},
+		{"transition unauthenticated", "exit status 1: pjira: transition PROJ-7: unauthenticated", scriptout.ErrUnauthenticated},
+		{"add comment unauthenticated", "exit status 1: pjira: add comment PROJ-7: unauthenticated", scriptout.ErrUnauthenticated},
+
+		// An issue key that merely contains 401/403 is NOT an auth failure.
+		{"key PROJ-401 with 500", "exit status 1: pjira: get issue PROJ-401: status 500 Internal Server Error", scriptout.ErrUnavailable},
+		{"key ABC-403 with 502", "exit status 1: pjira: get issue ABC-403: status 502 Bad Gateway", scriptout.ErrUnavailable},
+		{"key PROJ-4010 with 500", "exit status 1: pjira: get issue PROJ-4010: status 500 Internal Server Error", scriptout.ErrUnavailable},
+		{"transition key PROJ-401 list failure", "exit status 1: pjira: transition PROJ-401: list transitions: status 503 Service Unavailable", scriptout.ErrUnavailable},
+		{"key PROJ-403 not found stays not_found", "exit status 1: pjira: issue PROJ-403 not found", scriptout.ErrNotFound},
+		{"key PROJ-401 no transition stays invalid_argument", `exit status 1: pjira: transition PROJ-401: no transition to state "Done" available`, scriptout.ErrInvalidArgument},
+		{"key PROJ-401 with a 429", "exit status 1: pjira: get issue PROJ-401: status 429 Too Many Requests", scriptout.ErrUnavailable},
+
+		// The words alone (an issue key or summary fragment) are not auth either.
+		{"key spelled FORBIDDEN", "exit status 1: pjira: get issue FORBIDDEN-12: status 500 Internal Server Error", scriptout.ErrUnavailable},
+		{"key spelled UNAUTHORIZED", "exit status 1: pjira: get issue UNAUTHORIZED-3: status 500 Internal Server Error", scriptout.ErrUnavailable},
+		{"key spelled UNAUTHENTICATED", "exit status 1: pjira: get issue UNAUTHENTICATED-5: status 500 Internal Server Error", scriptout.ErrUnavailable},
+		{"exec failure stays unavailable", `exec: "pjira": executable file not found in $PATH`, scriptout.ErrUnavailable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyPJIRAErrorMessage(tc.msg)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("classifyPJIRAErrorMessage(%q) = %v, want errors.Is(err, %v)", tc.msg, err, tc.want)
+			}
+			if tc.want != scriptout.ErrUnauthenticated && errors.Is(err, scriptout.ErrUnauthenticated) {
+				t.Fatalf("classifyPJIRAErrorMessage(%q) = %v, must NOT be unauthenticated", tc.msg, err)
+			}
+		})
+	}
 }
