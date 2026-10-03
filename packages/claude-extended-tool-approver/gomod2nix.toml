@@ -65,12 +65,12 @@ cachePackages = [
     hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
 
   [mod.'github.com/ncruces/go-strftime']
-    version = 'v1.0.0'
-    hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
+    version = 'v1.1.0'
+    hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260903063345-1f37a8dfe05a'
-    hash = 'sha256-crJAQzMth6pTLAzRqVwsW9RtDhwwGK8D6PDmJf8cMmA='
+    version = 'v0.0.0-20261001151509-f7717596dec9'
+    hash = 'sha256-LqFHu5sRoCN2V3NA5LDEB8A6FqkG4JyIBc3nZnNjltU='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -101,8 +101,8 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.60.0'
-    hash = 'sha256-ot2nO8b43WdhbM2V0bAs02yJP+WGG6FqcbOJkpm4BRE='
+    version = 'v1.60.1'
+    hash = 'sha256-NEuPcq63wseHfHZ0BorTAesJ0dPBwaPepsbFQOjM8Jo='
 
   [mod.'mvdan.cc/sh/v3']
     version = 'v3.14.1'
