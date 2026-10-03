@@ -140,7 +140,11 @@ A dispatch, core → handler (`INTF-HANDLER`):
 Its two replies: the **inline completion**
 `{ "schemaVersion": "1", "id": "hs-771e", "outcome": "delivered" }` — `outcome` is an **opaque
 string** the core stores and never interprets (docket `pg2-oju6w`'s Task 5.4, `ADR 0065`'s "Wire
-contract" section) — and the **deferred ack**
+contract" section). The core never _branches_ on it, but the event log's `dispatch result`
+`actions` field relays it: an outcome that is a JSON object `{"actions":[{"verb":"…","refs":[…]}]}`
+(what `pg-router-ccpool-handler` returns) logs each handler verb with its refs, and `{"actions":[]}`
+logs no actions; any other string is logged verbatim as the single verb (bead `pg2-tq9q5`) — and the
+**deferred ack**
 `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — which is itself the acceptance, so
 nothing further is owed for that dispatch.
 

@@ -753,6 +753,57 @@ func TestNewListener_mixedOutcomesAcrossPasses(t *testing.T) {
 	}
 }
 
+// TestNewListener_structuredOutcomeRelaysHandlerVerbs (bead pg2-tq9q5): a
+// handler that returns the ccpool shape {"actions":[...]} as its outcome
+// string must surface the handler's own verb in the event log (not the raw
+// JSON body as a bogus verb), and an empty {"actions":[]} must log no
+// actions at all.
+func TestNewListener_structuredOutcomeRelaysHandlerVerbs(t *testing.T) {
+	cfg := fastCfg()
+	o := newOrch(cfg, testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{repliesByItem: map[string]wireclient.Reply{
+		"zr-real":  {Outcome: `{"actions":[{"verb":"closed","refs":[{"type":"bead","id":"zr-real"}]}]}`},
+		"zr-empty": {Outcome: `{"actions":[]}`},
+	}}
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatalf("eventlog.New: %v", err)
+	}
+	o.Log = lw
+	ctx := context.Background()
+	q := newTestQueue(t)
+	q.Register(o.NewListener(ctx, feedbackRole(o)))
+	for _, id := range []string{"zr-real", "zr-empty"} {
+		if _, err := q.Enqueue(discover.ToQueueEvent(event.NewItemEvent("feedback.ready", "t", item.Item{ID: id}))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q.Dispatch()
+	q.Dispatch()
+
+	actionsFor := func(bead string) []any {
+		for _, r := range readEventLog(t, logPath) {
+			if r["bead"] == bead {
+				a, _ := r["actions"].([]any)
+				return a
+			}
+		}
+		t.Fatalf("no dispatch result logged for %s", bead)
+		return nil
+	}
+	real := actionsFor("zr-real")
+	if len(real) != 1 {
+		t.Fatalf("zr-real actions = %v, want exactly one", real)
+	}
+	if v, _ := real[0].(map[string]any)["verb"].(string); v != "closed" {
+		t.Errorf("zr-real verb = %q, want %q (the handler's verb, not the raw JSON body)", v, "closed")
+	}
+	if empty := actionsFor("zr-empty"); len(empty) != 0 {
+		t.Errorf("zr-empty actions = %v, want none", empty)
+	}
+}
+
 // TestTeardownAll_purges/_returnsClosedCount/_preservesNeedsInput and
 // TestRunOne_preservesNeedsInputSession were DELETED here (pg2-oju6w.15):
 // teardownAll/closeUnlessNeedsInput/sessionStateByID no longer exist in this

@@ -261,7 +261,7 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventque
 }
 
 // buildResult stores the handler-reported outcome as pg-router's own opaque
-// dispatch record: reply.Outcome, verbatim, with no switch on its value.
+// dispatch record: reply.Outcome, relayed (see report.FromOutcome) with no switch on its value.
 // Before docket pg2-oju6w's Task 5.5 this method instead re-derived a
 // created/closed/handed-back verdict itself — a created-bead snapshot diff
 // (the retired snapshotIDs/createdByActor pair) plus a post-dispatch
@@ -282,9 +282,12 @@ func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.
 	if dispatchErr != nil || reply.Outcome == "" {
 		return report.Result{}
 	}
-	return report.Result{Actions: []report.Action{
-		{Verb: report.Verb(reply.Outcome), Refs: beadRefs([]string{d.Item.ID})},
-	}}
+	// A handler that returns the structured {"actions":[...]} shape (the
+	// ccpool handler JSON-encodes its Result.Fields() into outcome) has its
+	// verbs and refs relayed; any other string is stored verbatim as one
+	// verb. See report.FromOutcome (bead pg2-tq9q5): wrapping the raw body
+	// as the verb logged `{"actions":[]}` for every ccpool dispatch.
+	return report.FromOutcome(reply.Outcome, beadRefs([]string{d.Item.ID}))
 }
 
 // emitResult writes the dispatch report to the event log (when configured) and the
