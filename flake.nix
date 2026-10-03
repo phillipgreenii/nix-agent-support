@@ -494,6 +494,16 @@
               pkgs = final;
               inherit bashBuilders;
             }).wtdone.script;
+          # pg-rescue-flake-lock-conflict (bead pg2-3ybxg): the deterministic
+          # flake.lock-only rebase-conflict handler for pg-rescue. Single
+          # mkBashScript tool, so -- same rationale as wtdone above -- it takes
+          # `result.pg-rescue-flake-lock-conflict.script` directly. It lives in
+          # its own packages/ entry (not inside the Go module packages/pg-rescue).
+          pg-rescue-flake-lock-conflict =
+            (import ./packages/pg-rescue-flake-lock-conflict {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pg-rescue-flake-lock-conflict.script;
           # handoff-create (bead pg2-2xfbi): creates a handoff bead correctly
           # (type/priority/title/first line/metadata/human label policy/task
           # fallback/read-back) for session-wrapup:wrap-up-session and the
@@ -2447,6 +2457,10 @@
               # The display's golden tests (bead pg2-ymqvd) put fake git and
               # handler shell scripts first on PATH, and the README's jq recipes
               # are run verbatim against a fixture run log (jq).
+              # The flake-lock-conflict handler's wrapper-driven tests (bead
+              # pg2-3ybxg) run the real pg-rescue (this test binary re-executed)
+              # against scratch git repos with a fake nix written by the test;
+              # the handler itself is a separate package, found on PATH.
               pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-go-tests";
                 src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
@@ -2455,6 +2469,7 @@
                   pkgs.bash
                   pkgs.git
                   pkgs.jq
+                  pkgs.pg-rescue-flake-lock-conflict
                 ];
               };
 
@@ -7226,6 +7241,14 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-pg-rescue-flake-lock-conflict (bead pg2-3ybxg). Same
+            # one-line idiom as wtdone above: the overlay attr takes only the
+            # script derivation, so without this the bats suite would run in
+            # no gate at all.
+            // (import ./packages/pg-rescue-flake-lock-conflict {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-handoff-create (bead pg2-2xfbi). Same one-line idiom as wtdone
             # above: without this the suite (incl. the real-bd throwaway-DB
             # tests) would run in no gate at all.
@@ -7362,6 +7385,11 @@
             # the same reason, so `nix build .#wtdone` resolves via
             # flake.packages.<system>.
             inherit (pkgs) wtdone;
+            # pg-rescue-flake-lock-conflict is likewise an overlay-only attr
+            # (single mkBashScript tool) -- re-exported so
+            # `nix build .#pg-rescue-flake-lock-conflict` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) pg-rescue-flake-lock-conflict;
             # handoff-create is likewise an overlay-only attr (single mkBashScript
             # tool holding just the script derivation) -- re-exported so
             # `nix build .#handoff-create` resolves via flake.packages.<system>.

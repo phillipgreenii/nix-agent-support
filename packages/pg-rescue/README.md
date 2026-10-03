@@ -359,6 +359,30 @@ To test a handler on its own, feed it a saved failure:
 pg-rescue --stdin --handlers my-handler --verify true -vv < saved-output.log
 ```
 
+## pg-rescue-flake-lock-conflict
+
+A deterministic handler, with no model: it resolves a rebase that stopped only on a `flake.lock`
+conflict. It is a bash script in its own package (`packages/pg-rescue-flake-lock-conflict`), not a
+`cmd/` of this module. It takes no arguments, so its config is `command = ["pg-rescue-flake-lock-conflict"]`.
+
+1. If the repository is not mid-rebase, or `flake.lock` is not the only conflicted file, it ends with
+   `declined`. A conflict in another file gives the summary
+   `Conflict spans source files, not just flake.lock`, with the conflicted files in `details`.
+2. Otherwise it extracts the names of the conflicted inputs from the conflict markers, takes
+   upstream's `flake.lock` (`git checkout --ours`: during a rebase, ours is the branch being rebased
+   onto), and runs `nix flake update <those inputs>`. Only when no names could be extracted does it
+   run a bare `nix flake update`. It never runs `nix flake lock`, which fills only missing entries
+   and leaves an already-pinned input stale.
+3. It runs `git add flake.lock` and `GIT_EDITOR=true git rebase --continue`. The relock happens
+   before the rebase continues and makes no commit of its own: verification re-runs
+   `git pull --rebase`, which needs a clean tree.
+4. If the rebase stops again on a later commit, it ends with `declined` and
+   `Rebase stopped again at <sha> (<subject>)`, leaving the rebase stopped for the next handler.
+   Otherwise it ends with `resolved` and the summary `relocked flake.lock`.
+
+If `nix` or `git` itself fails, the handler exits `1` (`failed`) and leaves the working copy as it
+is. `nix` is taken from `PATH`, so the relock uses the caller's own nix configuration.
+
 ## pg-rescue-claude
 
 Runs `claude -p --output-format json` synchronously, in the failed command's working directory, with

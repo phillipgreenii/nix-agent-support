@@ -1038,14 +1038,35 @@ command. To test a handler on its own:
 pg-rescue --stdin --handlers my-handler --verify true -vv < saved-output.log
 ```
 
-Example deterministic handler, `pg-rescue-flake-lock-conflict`:
+Example deterministic handler, `pg-rescue-flake-lock-conflict` (implemented in
+`packages/pg-rescue-flake-lock-conflict`, bead `pg2-3ybxg`):
 
 1. If `flake.lock` is not the only conflicted file, it ends with `pg-rescue result declined …`.
-2. Otherwise it takes upstream's `flake.lock`, runs `nix flake lock` and `git add flake.lock`, then
-   runs `GIT_EDITOR=true git rebase --continue`.
-3. If the rebase stops again on a later commit, it ends with `declined` and a summary of where it
-   stopped.
-4. Otherwise it ends with `pg-rescue result resolved "relocked flake.lock"`.
+2. Otherwise it extracts the names of the conflicted inputs from the conflict markers, with the same
+   `awk` extraction `integrate-branch:ff-merge-to-main` uses. This MUST happen before step 3, which
+   removes the markers.
+3. It takes upstream's `flake.lock`. During a rebase upstream is `--ours`. Either side works,
+   because the relock in step 4 recomputes the pins; the checkout only hands `git rebase --continue`
+   a resolved, marker-free file.
+4. It runs `nix flake update <conflicted inputs>`, falling back to a bare `nix flake update` only
+   when no names were extracted. It MUST NOT run `nix flake lock`.
+5. It runs `git add flake.lock`, then `GIT_EDITOR=true git rebase --continue`.
+6. If the rebase stops again on a later commit, it ends with `declined` and a summary of where it
+   stopped. Otherwise it ends with `pg-rescue result resolved "relocked flake.lock"`.
+
+**Deviations from the first draft of this section and from `ff-merge-to-main`**
+
+- The first draft said the handler "runs `nix flake lock`". That is wrong. A bare `nix flake lock`
+  only fills _missing_ lock entries and leaves an already-pinned input at its stale, conflicting
+  revision, so the conflict would be "resolved" with stale pins. The relock is a targeted
+  `nix flake update`, as in the `ff-merge-to-main` skill's flake.lock-only resolution.
+- `ff-merge-to-main` continues the rebase first and then commits the relock as a separate
+  `chore: relock flake.lock after rebase` commit. This handler relocks _before_
+  `git rebase --continue` and makes no separate commit, on purpose: verification re-runs
+  `git pull --rebase`, which needs a clean tree, and the relocked lock is part of the commit being
+  replayed.
+- `ff-merge-to-main` picks `--theirs`; this handler picks `--ours` (upstream). The choice is
+  arbitrary for the reason in step 3.
 
 ## 9. Edge cases
 
@@ -1071,7 +1092,11 @@ Example deterministic handler, `pg-rescue-flake-lock-conflict`:
   - `cmd/pg-rescue-claude`
   - `cmd/pg-rescue-bead`
   - `cmd/pg-rescue-notify`
-  - `cmd/pg-rescue-flake-lock-conflict` (bash, built with `mkBashScript`)
+  - `pg-rescue-flake-lock-conflict`, which is not part of the Go module: bash, built with
+    `mkBashScript`, with its own derivation in `packages/pg-rescue-flake-lock-conflict/` rather than
+    a `cmd/` directory. No
+    package in the repo mixes a Go module with `mkBashScript`, and `mkGoApp` builds the module from
+    `lib.cleanSource ./.`. The `pg-rescue-go-tests` check lists it in `testDeps`.
 - **Home-manager module:** `home/programs/pg-rescue/`, with
   `programs.pg-rescue.{enable, redact, handlers.<name>, chains.<name>}`.
   - It generates `config.toml`.
