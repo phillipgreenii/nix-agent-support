@@ -285,7 +285,7 @@ func TestLevelForCode(t *testing.T) {
 	for code, want := range map[string]string{
 		"": "info", "unauthenticated": "error", "unavailable": "error",
 		"not_found": "warn", "invalid_argument": "warn", "unknown_op": "warn",
-		"version_mismatch": "warn", "query_not_recognized": "warn",
+		"version_mismatch": "warn", "query_not_recognized": "info",
 	} {
 		if got := LevelForCode(code); got != want {
 			t.Errorf("LevelForCode(%q) = %q, want %q", code, got, want)

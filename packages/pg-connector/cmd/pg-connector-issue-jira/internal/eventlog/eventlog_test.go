@@ -150,6 +150,16 @@ func TestInstrument_NotFoundIsAWarnWithNoFailureClass(t *testing.T) {
 	}
 }
 
+// query_not_recognized is the umbrella fan-out's "not applicable to this
+// backend" answer (INV-ERR-3), so it is an info event, not a warn (pg2-6y4ot);
+// the code and message are still recorded.
+func TestInstrument_QueryNotRecognizedIsInfoWithCodeKept(t *testing.T) {
+	ev := failing(t, scriptout.ErrQueryNotRecognized, `query "work-beads" is not defined in this backend's config.queries`)
+	if ev.Level != "info" || ev.ErrorCode != "query_not_recognized" || ev.Msg != "show failed: query_not_recognized" || ev.FailureClass != "" {
+		t.Errorf("query_not_recognized event = %+v", ev)
+	}
+}
+
 func TestInstrument_AuthStatusStatesAreRecordedOnASuccessfulCall(t *testing.T) {
 	for _, c := range []struct {
 		state     string

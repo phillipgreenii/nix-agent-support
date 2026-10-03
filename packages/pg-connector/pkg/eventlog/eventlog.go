@@ -113,9 +113,17 @@ func NewBase(service, op, version string, start, end time.Time, err error) Base 
 // LevelForCode maps a wire error code to a log level: unauthenticated and
 // unavailable mean the backend cannot do its job (error); the other codes
 // describe the caller's request (warn); no code is success (info).
+//
+// query_not_recognized is the exception among the request-describing codes
+// (bead pg2-6y4ot): INV-ERR-3 defines it as "not applicable to this backend".
+// The umbrella's list fan-out asks EVERY registered backend of a type for a
+// named query and skips the ones that do not define it, so a backend that
+// answers it is behaving as designed (e.g. the Jira backend asked for the
+// beads-only work-beads / escalated-work queries). It is logged at info, not
+// warn, so the expected asymmetric fan-out does not read as a fault.
 func LevelForCode(code string) string {
 	switch code {
-	case "":
+	case "", "query_not_recognized":
 		return LevelInfo
 	case "unauthenticated", "unavailable":
 		return LevelError
