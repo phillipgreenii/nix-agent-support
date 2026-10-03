@@ -7580,7 +7580,12 @@
                   evalCfg =
                     cfg:
                     (lib.evalModules {
-                      specialArgs = { inherit pkgs lib; };
+                      # osConfig = null: standalone home-manager (the module system does not
+                      # honour the module's `osConfig ? null` default for an arg missing here).
+                      specialArgs = {
+                        inherit pkgs lib;
+                        osConfig = null;
+                      };
                       modules = [
                         ./home/programs/pa-monitor/default.nix
                         (
@@ -7593,6 +7598,23 @@
                                 default = [ ];
                               };
                               xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              # pg2-sgs4y: the daemon LaunchAgent now registers from this HM module via
+                              # personal's phillipgreenii.programs.launchdServices.userAgents (not in
+                              # this flake's inputs), so daemon.enable also reads xdg.stateHome and
+                              # defines that registry. Stubbed minimally; the full field-for-field stub
+                              # lives in test-pa-monitor-hm-launchd below.
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.anything;
+                                default = [ ];
+                              };
+                              xdg.stateHome = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/Users/tester/.local/state";
+                              };
+                              phillipgreenii.programs.launchdServices.userAgents = lib.mkOption {
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
@@ -7636,6 +7658,218 @@
                 assert !(hasConfig neither); # nothing enabled ⇒ no file
                 assert hasConfig bothEnabled; # both gates ⇒ still rendered
                 pkgs.runCommand "pa-monitor-config-gating-ok" { } "touch $out";
+
+              # pg2-sgs4y (V3 of the HM launchdServices work; personal ADR 0055): the
+              # pa-monitor-daemon LaunchAgent is registered from the HM module
+              # (home/programs/pa-monitor) via phillipgreenii.programs.launchdServices
+              # .userAgents, gated on daemon.enable, with the OTel endpoint sourced
+              # null-safely from osConfig.phillipgreenii.observability. This flake has
+              # NO input on personal (the real option lives there), so the option is
+              # stubbed below with the SAME field names/types as personal's
+              # lib/launchd-service-submodule.nix (only the fields this module touches);
+              # the real composition is validated at the terminal. Pure module eval.
+              test-pa-monitor-hm-launchd =
+                let
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      enable = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "org.nixos.stub";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.nullOr lib.types.lines;
+                        default = null;
+                      };
+                      execPath = lib.mkOption {
+                        type = lib.types.nullOr lib.types.str;
+                        default = null;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                      logCollection = lib.mkOption {
+                        type = lib.types.submodule {
+                          options.enable = lib.mkOption {
+                            type = lib.types.bool;
+                            default = true;
+                          };
+                        };
+                        default = { };
+                      };
+                    };
+                  };
+
+                  stubOptions =
+                    { lib, ... }:
+                    {
+                      options = {
+                        phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
+                        home.packages = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                        xdg.configFile = lib.mkOption {
+                          type = lib.types.attrsOf lib.types.anything;
+                          default = { };
+                        };
+                        xdg.stateHome = lib.mkOption {
+                          type = lib.types.str;
+                          default = "/Users/tester/.local/state";
+                        };
+                        assertions = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                      };
+                    };
+                  launchdOption =
+                    { lib, ... }:
+                    {
+                      options.phillipgreenii.programs.launchdServices.userAgents = lib.mkOption {
+                        type = lib.types.attrsOf userAgentSubmodule;
+                        default = { };
+                      };
+                    };
+
+                  # Mirrors phillipgreenii-nix-support-apps' mkEmitterEnv: {} when the
+                  # stack is disabled, else the gRPC OTLP endpoint.
+                  obsOsConfig = enable: {
+                    phillipgreenii.observability = {
+                      inherit enable;
+                      mkEmitterEnv =
+                        _:
+                        lib.optionalAttrs enable {
+                          OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317";
+                        };
+                    };
+                  };
+
+                  evalWith =
+                    {
+                      pkgs' ? pkgs,
+                      declareLaunchd ? true,
+                      osConfig ? null,
+                      cfg,
+                    }:
+                    (lib.evalModules {
+                      # osConfig is always passed (null = standalone home-manager): the
+                      # module system does not honour a module function's `osConfig ? null`
+                      # default for an arg missing from specialArgs; real HM supplies it.
+                      specialArgs = {
+                        pkgs = pkgs';
+                        inherit lib osConfig;
+                      };
+                      modules = [
+                        ./home/programs/pa-monitor/default.nix
+                        stubOptions
+                        cfg
+                      ]
+                      ++ lib.optional declareLaunchd launchdOption;
+                    }).config;
+
+                  entries = c: c.phillipgreenii.programs.launchdServices.userAgents;
+                  daemonOn = {
+                    phillipgreenii.programs.pa-monitor.daemon.enable = true;
+                  };
+
+                  disabled = evalWith { cfg = { }; };
+                  enabled = evalWith {
+                    cfg = daemonOn;
+                    osConfig = obsOsConfig true;
+                  };
+                  e = (entries enabled).pa-monitor-daemon;
+                  settingsOf = c: c.phillipgreenii.programs.pa-monitor.settings;
+
+                  # OTel endpoint lands in settings iff daemon.enable AND the stack is on.
+                  obsOn = evalWith {
+                    cfg = daemonOn;
+                    osConfig = obsOsConfig true;
+                  };
+                  obsOff = evalWith {
+                    cfg = daemonOn;
+                    osConfig = obsOsConfig false;
+                  };
+                  daemonOffObsOn = evalWith {
+                    cfg = { };
+                    osConfig = obsOsConfig true;
+                  };
+                  noOsConfig = evalWith { cfg = daemonOn; };
+                  osConfigNoObs = evalWith {
+                    cfg = daemonOn;
+                    osConfig = { };
+                  };
+                  # observability without mkEmitterEnv (older stack) must not throw.
+                  obsNoEmitter = evalWith {
+                    cfg = daemonOn;
+                    osConfig.phillipgreenii.observability.enable = true;
+                  };
+                  # Darwin host that does NOT import personal's home module: no silent
+                  # no-op -- an assertion fails with a clear message.
+                  darwinNoRegistry = evalWith {
+                    declareLaunchd = false;
+                    cfg = daemonOn;
+                  };
+                  failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
+                  # Linux: the registry is a darwin-only construct; the module must
+                  # neither emit the entry nor require the (undeclared) option.
+                  linux = evalWith {
+                    pkgs' = pkgs // {
+                      stdenv = {
+                        hostPlatform.isDarwin = false;
+                      };
+                    };
+                    declareLaunchd = false;
+                    cfg = daemonOn;
+                  };
+                in
+                # entry exists iff daemon.enable
+                assert !((entries disabled) ? pa-monitor-daemon);
+                assert (entries enabled) ? pa-monitor-daemon;
+                assert (builtins.attrNames (entries enabled)) == [ "pa-monitor-daemon" ];
+                # label and script
+                assert e.label == "com.phillipg.pa-monitor-daemon";
+                assert e.script == ''exec ${pkgs.pa-monitor}/bin/pa-monitor daemon "$@"'' + "\n";
+                assert e.execPath == null; # HM scope cannot honour ADR 0054 execPath
+                assert e.runAtLoad && e.keepAlive == true;
+                assert e.enable;
+                # pg2-fdtvv: ADR 0011 -- no log file for a filelog logSources entry
+                assert e.logCollection.enable == false;
+                assert
+                  e.serviceConfig.StandardOutPath == "/Users/tester/.local/state/pa-monitor/launchd-stdout.log";
+                assert
+                  e.serviceConfig.StandardErrorPath == "/Users/tester/.local/state/pa-monitor/launchd-stderr.log";
+                # OTel now lands in settings from osConfig (replacing home-manager.sharedModules)
+                assert (settingsOf obsOn).otel.endpoint == "http://127.0.0.1:4317";
+                assert (settingsOf obsOn) == { otel.endpoint = "http://127.0.0.1:4317"; };
+                assert (settingsOf obsOff) == { };
+                assert (settingsOf daemonOffObsOn) == { };
+                assert obsOn.xdg.configFile ? "pa-monitor/config.toml";
+                # null-safe fallbacks: standalone HM, no observability, no mkEmitterEnv
+                assert (settingsOf noOsConfig) == { };
+                assert (settingsOf osConfigNoObs) == { };
+                assert (settingsOf obsNoEmitter) == { };
+                assert (entries noOsConfig) ? pa-monitor-daemon;
+                # linux: no registry entry, no declaration needed
+                assert !(linux ? phillipgreenii.programs.launchdServices);
+                assert failedAssertions linux == [ ];
+                assert failedAssertions enabled == [ ];
+                assert failedAssertions disabled == [ ];
+                assert builtins.length (failedAssertions darwinNoRegistry) == 1;
+                assert (settingsOf linux) == { };
+                pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
 
               # Rendering guard for home/programs/pg-connector (bead pg2-9tql6):
               # evaluates the module (tests/pg-connector-home-render.nix) and

@@ -57,6 +57,25 @@ Each program module:
 - Contains all configuration for that program
 - Respects shell enable flags (bash/zsh)
 
+### HM-scoped launchd agents (pa-monitor)
+
+A daemon whose enable flag and per-user config live in an HM module MAY register its LaunchAgent
+right there via `phillipgreenii.programs.launchdServices.userAgents.<name>`
+(`phillipgreenii-nix-personal` ADR 0055, amending ADR 0049) instead of the darwin module's
+`phillipgreenii.system.launchdServices.userAgents`. `home/programs/pa-monitor` is the first
+consumer; `darwin/modules/pa-monitor` keeps only the system-scope Grafana wiring. Rules:
+
+- This flake has NO input on personal, so that option is **stubbed** in tests
+  (`checks.<system>.test-pa-monitor-hm-launchd`) with the field names/types of personal's
+  `lib/launchd-service-submodule.nix`; the real composition is exercised at the terminal flake.
+  A terminal MUST NOT take this module without a personal revision that declares the option.
+- Platform-gate the definition with `lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin`, never
+  `mkIf`: a definition of an undeclared option errors even under `mkIf false`, and a linux host may
+  not import personal's home module. Gate the ENTRY on `daemon.enable` with `mkIf`.
+- `execPath` and `manageLogs.enable` are unsupported in the HM scope (asserted by the option).
+- OTel settings come from `osConfig.phillipgreenii.observability` read null-safely (`osConfig ? null`),
+  not from `home-manager.sharedModules`.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to
