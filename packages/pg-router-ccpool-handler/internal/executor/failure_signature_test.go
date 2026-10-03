@@ -92,6 +92,11 @@ func findKind(t *testing.T, raw, kind string) map[string]any {
 type ccpoolRunnerFor struct {
 	transcript string
 	onClose    func()
+	// state is the ccpool state the dead row shows; "" means errored.
+	state ccpool.SessionState
+	live  bool // the row's liveness (default false: dead)
+	// absent makes the session missing from the ccpool list.
+	absent bool
 }
 
 type closeHookCC struct {
@@ -107,9 +112,15 @@ func (c *closeHookCC) Close(ctx context.Context, id string, purge bool) error {
 }
 
 func (c ccpoolRunnerFor) fake() ccpool.Runner {
-	base := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
-		{{ExternalID: sigSession, Live: false, State: ccpool.StateErrored, TranscriptPath: c.transcript}},
-	}}
+	state := c.state
+	if state == "" {
+		state = ccpool.StateErrored
+	}
+	rows := []ccpool.Session{{ExternalID: sigSession, Live: c.live, State: state, TranscriptPath: c.transcript}}
+	if c.absent {
+		rows = nil
+	}
+	base := &dtest.FakeCC{ListSeq: [][]ccpool.Session{rows}}
 	return &closeHookCC{FakeCC: base, hook: c.onClose}
 }
 
@@ -136,31 +147,94 @@ func TestFailureSignature_oauthFixtureIsGitAuth(t *testing.T) {
 
 func TestFailureSignature_toolResultBlockArrayAndStringContent(t *testing.T) {
 	arr := jsonlRecord(t, "user", []map[string]any{{"type": "tool_result", "content": []map[string]any{{"type": "text", "text": oauthFailure}}}})
-	if got := classifyTranscript(writeTranscript(t, arr)).Signature; got != failsig.GitAuth {
+	if got := classifyExit(writeTranscript(t, arr), failsig.ExitFacts{}).Signature; got != failsig.GitAuth {
 		t.Errorf("array-form tool_result = %v", got)
 	}
 	str := jsonlRecord(t, "user", oauthFailure) // plain-string message content
-	if got := classifyTranscript(writeTranscript(t, str)).Signature; got != failsig.GitAuth {
+	if got := classifyExit(writeTranscript(t, str), failsig.ExitFacts{}).Signature; got != failsig.GitAuth {
 		t.Errorf("string-form content = %v", got)
 	}
 }
 
-func TestFailureSignature_emptyOrUnreadablePathIsUnknown(t *testing.T) {
+// An errored session whose transcript is empty or unreadable is classified on
+// the observed session facts alone, and its evidence is never empty.
+func TestFailureSignature_emptyOrUnreadablePathUsesSessionFacts(t *testing.T) {
 	for name, p := range map[string]string{"empty": "", "missing": filepath.Join(t.TempDir(), "nope.jsonl")} {
 		rec, _ := failedDispatch(t, ccpoolRunnerFor{transcript: p}, p)
-		if rec["failure_signature"] != "unknown" || rec["signature_evidence"] != "" {
-			t.Errorf("%s: got %v / %q, want unknown / empty", name, rec["failure_signature"], rec["signature_evidence"])
+		ev, _ := rec["signature_evidence"].(string)
+		if rec["failure_signature"] != "session-errored" || !strings.HasPrefix(ev, "ccpool-session: state=errored") {
+			t.Errorf("%s: got %v / %q, want session-errored / the session facts", name, rec["failure_signature"], ev)
 		}
 	}
 }
 
-func TestFailureSignature_successWithNonzeroExitIsUnknown(t *testing.T) {
+// A transcript that shows success text for a session that nonetheless errored
+// gets no transcript-derived cause: only the observed state names the exit.
+func TestFailureSignature_successTextButErroredIsSessionErrored(t *testing.T) {
 	p := writeTranscript(t,
 		toolResult(t, "Everything up-to-date\nbead zr-w closed; all checks passed"),
 		jsonlRecord(t, "assistant", []map[string]any{{"type": "text", "text": "Done. Task completed successfully."}}))
 	rec, _ := failedDispatch(t, ccpoolRunnerFor{transcript: p}, p)
-	if rec["failure_signature"] != "unknown" {
-		t.Fatalf("success transcript = %v, want unknown", rec["failure_signature"])
+	if rec["failure_signature"] != "session-errored" {
+		t.Fatalf("success transcript, errored session = %v, want session-errored", rec["failure_signature"])
+	}
+}
+
+// The bead's acceptance case: a session that errors before completing, whose
+// transcript names no known cause, records NON-EMPTY evidence: the session
+// facts plus the last transcript lines.
+func TestFailureSignature_erroredBeforeCompleteRecordsEvidence(t *testing.T) {
+	p := writeTranscript(t,
+		jsonlRecord(t, "assistant", []map[string]any{{"type": "text", "text": "reading the PR diff"}}),
+		toolResult(t, "diff --git a/x b/x"),
+		jsonlRecord(t, "assistant", []map[string]any{{"type": "text", "text": "about to post the review"}}))
+	rec, _ := failedDispatch(t, ccpoolRunnerFor{transcript: p}, p)
+	ev, _ := rec["signature_evidence"].(string)
+	if ev == "" || len(ev) > failsig.MaxEvidenceLen {
+		t.Fatalf("signature_evidence = %q, want non-empty and <= %d bytes", ev, failsig.MaxEvidenceLen)
+	}
+	for _, want := range []string{"state=errored", "diff --git a/x b/x", "about to post the review"} {
+		if !strings.Contains(ev, want) {
+			t.Errorf("evidence %q lacks %q", ev, want)
+		}
+	}
+}
+
+// Each common exit shape, end to end through the death path: the row ccpool
+// last showed and the transcript tail decide the recorded signature.
+func TestFailureSignature_exitShapes(t *testing.T) {
+	apiErr := func(text string) []string {
+		return []string{jsonlRecord(t, "assistant", []map[string]any{{"type": "text", "text": text}})}
+	}
+	cases := []struct {
+		name  string
+		lines []string
+		run   ccpoolRunnerFor
+		want  string
+	}{
+		{"api 529", apiErr("API Error: 529 Overloaded"), ccpoolRunnerFor{}, "api-transient"},
+		{"api 500", apiErr("API Error: 500 Internal server error. This is a server-side issue, usually temporary."), ccpoolRunnerFor{}, "api-transient"},
+		{"socket closed", apiErr("API Error: The socket connection was closed unexpectedly."), ccpoolRunnerFor{}, "api-transient"},
+		{"rate limit", apiErr("You've hit your limit · resets 3:30pm (America/New_York)"), ccpoolRunnerFor{}, "api-rate-limit"},
+		{"auth", apiErr("Please run /login · API Error: 401 Invalid authentication credentials"), ccpoolRunnerFor{}, "api-auth"},
+		{"context limit", apiErr("Prompt is too long"), ccpoolRunnerFor{}, "context-limit"},
+		{"errored, nothing recognizable", apiErr("working"), ccpoolRunnerFor{}, "session-errored"},
+		{"idle, bead not completed", apiErr("I believe the review is posted."), ccpoolRunnerFor{state: ccpool.StateIdle, live: true}, "session-idle"},
+		{"dead pane", apiErr("working"), ccpoolRunnerFor{state: ccpool.StateWorking}, "session-gone"},
+		{"row absent", apiErr("working"), ccpoolRunnerFor{absent: true}, "session-gone"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := writeTranscript(t, c.lines...)
+			c.run.transcript = p
+			rec, _ := failedDispatch(t, c.run, p)
+			if rec["failure_signature"] != c.want {
+				t.Errorf("failure_signature = %v, want %s; rec=%v", rec["failure_signature"], c.want, rec)
+			}
+			if ev, _ := rec["signature_evidence"].(string); ev == "" {
+				t.Errorf("signature_evidence is empty; rec=%v", rec)
+			}
+		})
 	}
 }
 
@@ -190,11 +264,11 @@ func TestFailureSignature_truncatedFirstLineDropped(t *testing.T) {
 	for range 80 {
 		lines = append(lines, filler)
 	}
-	if got := classifyTranscript(writeTranscript(t, lines...)).Signature; got != failsig.Unknown {
+	if got := classifyExit(writeTranscript(t, lines...), failsig.ExitFacts{}).Signature; got != failsig.Unknown {
 		t.Errorf("failure outside the 64 KB tail = %v, want unknown", got)
 	}
 	lines = append(lines, toolResult(t, oauthFailure))
-	if got := classifyTranscript(writeTranscript(t, lines...)).Signature; got != failsig.GitAuth {
+	if got := classifyExit(writeTranscript(t, lines...), failsig.ExitFacts{}).Signature; got != failsig.GitAuth {
 		t.Errorf("failure inside the tail with truncated first line = %v, want git-auth", got)
 	}
 }

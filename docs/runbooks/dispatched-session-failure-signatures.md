@@ -13,12 +13,13 @@ handler's default state directory). Each record carries `time`, `failure_signatu
 `limit`, `used`, and `cap`.
 
 `failure_signature` is one of `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
-or `unknown`. `signature_evidence` is redacted and at most 300 characters. There is no metric and
-no separate store: the event log is the record.
+`api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`, `session-idle`,
+`session-gone`, or `unknown`. `signature_evidence` is redacted and at most 300 characters. There is
+no metric and no separate store: the event log is the record.
 
 ```mermaid
 flowchart LR
-    S["session fails or is hard-stopped"] --> C["classify last 64 KB of transcript\nBEFORE the session is closed"]
+    S["session fails or is hard-stopped"] --> C["classify last 64 KB of transcript\n+ last observed ccpool session facts\nBEFORE the session is closed"]
     C --> E["dispatch_result event\n(failure_signature, evidence, role, pool, bead, session)"]
     E --> J["jq recipes below"]
 ```
@@ -55,9 +56,20 @@ Fixture output for the first recipe is `2026-09-23T14:01:00.000000000Z` / `worke
 
 ## Reading the result
 
-- An `unknown` signature with empty evidence means the transcript path was empty or unreadable, or
-  the transcript text matched no rule (including a transcript that shows success despite a
-  non-zero exit). It is not evidence of success or of a specific cause.
+- `api-transient`, `api-rate-limit`, `api-auth`, and `context-limit` mean Claude Code wrote that
+  API error into the transcript tail (a 5xx or `529 Overloaded`, a dropped socket or idle
+  stream; a usage limit or 429; a 401 or `Please run /login`; `Prompt is too long`). Evidence is
+  the matching transcript line.
+- `session-errored`, `session-idle`, and `session-gone` mean no transcript text explained the
+  exit, so the ccpool session facts last observed named it: state `errored` (a StopFailure with
+  no recognizable error text), state `idle` (the turn ended and the bead is not complete), or a
+  dead pane or a row that left the list. Their evidence, and the evidence of `unknown`, is the
+  facts line (`ccpool-session: state=... live=... present=... close_reason=...`) followed by
+  `| tail:` and the last three non-empty transcript lines, so it is never empty. ccpool exposes
+  no process exit status or signal, so none is recorded.
+- An `unknown` signature means the session was still alive and working when the failure was
+  recorded (for example, `not complete within MAX_WAIT`), or no session row was ever observed. It
+  is not evidence of success or of a specific cause; read its evidence.
 - Records written before this change do not exist; "first seen" is the first record in the log,
   not the first failure ever.
 - If a metric is wanted later, file a separate bead deciding the wire transport; the handler has

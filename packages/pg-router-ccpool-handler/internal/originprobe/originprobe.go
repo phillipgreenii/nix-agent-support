@@ -361,9 +361,10 @@ func (p *Prober) probe(ctx context.Context, w config.WatchedOrigin) (Class, stri
 	return Unknown, tailOf(text)
 }
 
-// fromSignature maps failsig's closed set onto probe classes. Budget and
-// index-lock cannot come from a read-only ls-remote, so they (and unknown) are
-// not mapped and fall to the timeout/unknown handling.
+// fromSignature maps failsig's closed set onto probe classes. Budget,
+// index-lock, and the api-* and session-* signatures cannot come from a
+// read-only ls-remote, so they (and unknown) are not mapped and fall to the
+// timeout/unknown handling.
 func fromSignature(s failsig.Signature) (Class, bool) {
 	switch s {
 	case failsig.GitAuth:

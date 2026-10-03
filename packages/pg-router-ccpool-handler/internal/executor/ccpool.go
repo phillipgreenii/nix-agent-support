@@ -40,8 +40,9 @@ type ccpoolRun struct {
 
 	// sigMu guards the failure-signature state below (INV-CCH-9).
 	sigMu      sync.Mutex
-	transcript string          // last-seen TranscriptPath of the dispatched session
-	captured   *failsig.Result // signature captured before teardown; first capture wins
+	transcript string            // last-seen TranscriptPath of the dispatched session
+	exit       failsig.ExitFacts // last-observed ccpool session facts (state, liveness, close reason)
+	captured   *failsig.Result   // signature captured before teardown; first capture wins
 }
 
 // ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
@@ -580,7 +581,7 @@ func crashOrphaned(s ccpool.Session) bool {
 // waitFailureResult) so the terminal verb reported here is identical to what
 // a first-time dispatch of the same work would have reported.
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
-	r.noteTranscript(existing)
+	r.noteSession(existing)
 	cc := d.Role.CCPool
 	// pg2-oq6cy: a live session still in `ready` never took a turn — no prompt
 	// was ever delivered (a healthy dispatched session moves ready->working
@@ -966,10 +967,11 @@ func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
 	}
 	for _, s := range sessions {
 		if s.ExternalID == externalID {
-			r.noteTranscript(s)
+			r.noteSession(s)
 			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
 		}
 	}
+	r.noteAbsent()
 	return false // absent ⇒ gone
 }
 
@@ -985,7 +987,7 @@ func (r *ccpoolRun) sessionState(ctx context.Context, externalID string) (ccpool
 	}
 	for _, s := range sessions {
 		if s.ExternalID == externalID {
-			r.noteTranscript(s)
+			r.noteSession(s)
 			return s.State, true
 		}
 	}

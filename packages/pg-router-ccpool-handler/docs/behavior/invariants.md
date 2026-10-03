@@ -50,9 +50,10 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   resource shortage is a pre-accept signal, not a post-accept or per-bead outcome.
 - **`INV-CCH-9`** — whenever this module records why a handler session failed, or why a check
   it runs before launching one failed, it MUST name the cause as exactly one failure signature
-  from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`, or
-  `unknown`. It MUST NOT use a free-form or empty label. The signature MUST come from one
-  classification that every caller in this module shares, applied in a fixed precedence order,
+  from a closed set: `git-auth`, `git-network`, `mount-or-path`, `budget`, `index-lock`,
+  `api-transient`, `api-rate-limit`, `api-auth`, `context-limit`, `session-errored`,
+  `session-idle`, `session-gone`, or `unknown`. It MUST NOT use a free-form or empty label. The
+  signature MUST come from one classification that every caller in this module shares, applied in a fixed precedence order,
   so two callers never label the same failure text differently. Text that matches no rule is
   `unknown`. That includes text that shows success even though the process exited non-zero, and
   a word such as "oauth" in unrelated prose. Any evidence recorded beside the signature MUST be
@@ -65,12 +66,23 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   - **Dispatch result.** When a dispatched session fails, exits without completing its bead, or is
     hard-stopped by the budget watchdog, the handler MUST record one `dispatch_result` event-log
     entry (and a log line) carrying `failure_signature`, `signature_evidence` (redacted, at most
-    300 characters), `role`, `pool`, `bead`, and `session`. The signature MUST be classified from
-    the last 64 KB of the session transcript (its `tool_result` and text content, with a
-    truncated first line dropped) and MUST be captured BEFORE any step that closes or purges the
-    session, because teardown can make the transcript unreadable. An empty or unreadable
-    transcript path yields `unknown` with empty evidence. `budget` MUST be set only for a watchdog
-    hard stop and reuses its `limit`, `used`, and `cap` fields; there MUST be no second budget
+    300 characters, and never empty for a dispatched session), `role`, `pool`, `bead`, and
+    `session`. The signature MUST be classified from the last 64 KB of the session transcript
+    (its `tool_result` and text content, with a truncated first line dropped) together with the
+    ccpool session facts last observed for the session (its state, whether it was live, whether
+    it was still listed, and its close reason), and MUST be captured BEFORE any step that closes
+    or purges the session, because teardown can make the transcript unreadable. An empty or
+    unreadable transcript path is classified on the session facts alone. A transcript match
+    always outranks the session facts: `api-transient` (a 5xx or `529 Overloaded` API error, a
+    dropped socket or idle stream), `api-rate-limit`, `api-auth`, and `context-limit` name an
+    error Claude Code wrote into the transcript. When no transcript text explains the exit, the
+    facts decide: `session-errored` (state `errored`), `session-idle` (the turn ended and the
+    bead is not complete), `session-gone` (the pane is dead or the row vanished). When the
+    signature is `unknown` or one of the `session-*` signatures, the evidence MUST be the
+    session facts followed by the last three non-empty transcript lines, so it is never empty.
+    ccpool reports no process exit status or signal (`ADR 0015`: observed state only), so none is
+    recorded. `budget` MUST be set only for a watchdog hard stop and reuses its `limit`, `used`,
+    and `cap` fields; there MUST be no second budget
     counter. The raw transcript MUST never be logged. There is no new metric or store: "first
     seen" and "how often" are answered from the event log's own timestamps (see
     `docs/runbooks/dispatched-session-failure-signatures.md` in the repo root).

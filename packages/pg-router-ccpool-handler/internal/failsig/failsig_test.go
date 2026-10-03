@@ -72,6 +72,52 @@ var positives = map[string][]string{
 		"fatal: Unable to create '/repo/.git/index.lock': File exists.\n\n" +
 			"Another git process seems to be running in this repository",
 	},
+	"prompt-too-long": {
+		"Prompt is too long",
+		"API Error: Prompt is too long: 215000 tokens > 200000 maximum",
+	},
+	"usage-limit-hit": {
+		"You've hit your limit · resets 7:10pm (America/New_York)",
+		"You\u2019ve hit your usage limit",
+	},
+	"api-error-429": {
+		"API Error: 429 Too Many Requests",
+	},
+	"please-run-login": {
+		"Not logged in · Please run /login",
+		"Please run /login · API Error: 401 Invalid authentication credentials",
+	},
+	"api-error-401": {
+		"API Error: 401 Invalid authentication credentials",
+	},
+	"api-error-5xx": {
+		"API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment.",
+		"API Error: 529 Overloaded",
+		"API Error: 502 Bad Gateway",
+	},
+	"api-transport-drop": {
+		"API Error: The socket connection was closed unexpectedly.",
+		// Outranks git-network's "connection refused" even when both appear.
+		"API Error: Unable to connect to API (ConnectionRefused)",
+		"Unable to connect to API (ECONNRESET)",
+		"Stream idle timeout - partial response received",
+	},
+	"api-bare-server-error": {
+		"Overloaded",
+		"some output\n  Internal server error.  \nmore output",
+	},
+	"exit-state-errored": {
+		"ccpool-session: state=errored live=false present=true close_reason=none",
+		// Transcript text that matches no row does not outrank the facts.
+		"all quiet\nccpool-session: state=errored live=true present=true close_reason=none",
+	},
+	"exit-state-idle": {
+		"ccpool-session: state=idle live=true present=true close_reason=none",
+	},
+	"exit-session-gone": {
+		"ccpool-session: state=working live=false present=true close_reason=none",
+		"ccpool-session: state=none live=false present=false close_reason=none",
+	},
 }
 
 // negatives maps each table row's name to near-miss texts for that row:
@@ -126,6 +172,51 @@ var negatives = map[string][]string{
 	"index-lock": {
 		"[main 1a2b3c4] fix: thing\n 1 file changed, 2 insertions(+)",
 		"the index was locked briefly and then released",
+	},
+	"prompt-too-long": {
+		"the prompt was short enough to fit",
+		"a long prompt is fine here",
+	},
+	"usage-limit-hit": {
+		"You've hit the target; the limit was not reached",
+		"the usage limit was raised to 500",
+	},
+	"api-error-429": {
+		"API Error: 4290 is not a status",
+		"returned 429 from the mirror, retried and succeeded",
+	},
+	"please-run-login": {
+		"run /login to authenticate",
+		"login succeeded; please run the tests",
+	},
+	"api-error-401": {
+		"API Error: 4010 is not a status",
+		"the proxy answered 401 once and then accepted the token",
+	},
+	"api-error-5xx": {
+		"API Error: 200 OK",
+		"API Error: 5000 is not a status",
+	},
+	"api-transport-drop": {
+		"the socket was opened and stayed open",
+		"the stream finished well inside the idle limit",
+	},
+	"api-bare-server-error": {
+		"Overloaded functions are covered in chapter 3",
+		"internal server error handling was reviewed in the design doc",
+	},
+	"exit-state-errored": {
+		"state=errored",
+		"ccpool-session: state=working live=true present=true close_reason=none",
+		"ccpool-session: not-observed",
+	},
+	"exit-state-idle": {
+		"state=idle live=true",
+		"the session is idle",
+	},
+	"exit-session-gone": {
+		"live=false",
+		"ccpool-session: state=working live=true present=true close_reason=none",
 	},
 }
 
@@ -252,7 +343,12 @@ func TestSuccessTextIsUnknown(t *testing.T) {
 }
 
 func TestSignaturesIsClosedSet(t *testing.T) {
-	want := []Signature{"git-auth", "git-network", "mount-or-path", "budget", "index-lock", "unknown"}
+	want := []Signature{
+		"git-auth", "git-network", "mount-or-path", "budget", "index-lock",
+		"api-transient", "api-rate-limit", "api-auth", "context-limit",
+		"session-errored", "session-idle", "session-gone",
+		"unknown",
+	}
 	got := Signatures()
 	if !slices.Equal(got, want) {
 		t.Fatalf("Signatures() = %v, want exactly %v", got, want)

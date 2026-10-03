@@ -24,47 +24,61 @@ const transcriptTailBytes = 64 << 10
 // carrying failure_signature (INV-CCH-9). One record per failed dispatch.
 const dispatchResultKind = "dispatch_result"
 
-// noteTranscript remembers the transcript path of the dispatched session from
-// a ccpool list row the poll loop already read. Capturing from rows already in
-// hand adds no extra List call, and it keeps the path available after ccpool
-// has closed or purged the row (INV-CCH-9).
-func (r *ccpoolRun) noteTranscript(s ccpool.Session) {
-	if s.TranscriptPath == "" {
-		return
-	}
+// noteSession remembers what the poll loop saw of the dispatched session from
+// a ccpool list row it already read: the transcript path and the session facts
+// (state, liveness, close reason). Capturing from rows already in hand adds no
+// extra List call, and it keeps both available after ccpool has closed or
+// purged the row (INV-CCH-9).
+func (r *ccpoolRun) noteSession(s ccpool.Session) {
 	r.sigMu.Lock()
-	r.transcript = s.TranscriptPath
-	r.sigMu.Unlock()
+	defer r.sigMu.Unlock()
+	if s.TranscriptPath != "" {
+		r.transcript = s.TranscriptPath
+	}
+	r.exit = failsig.ExitFacts{
+		Observed: true, Present: true,
+		State: string(s.State), Live: s.Live, CloseReason: s.CloseReason,
+	}
 }
 
-// captureSignature classifies the session transcript's tail, once. The first
-// call wins, so a call placed BEFORE a teardown step (Close) is not replaced
-// by a later call after the transcript may be gone. An empty or unreadable
-// transcript path yields unknown with empty evidence.
+// noteAbsent records that the session was missing from the ccpool list. The
+// last state seen, if any, is kept.
+func (r *ccpoolRun) noteAbsent() {
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	r.exit.Observed = true
+	r.exit.Present = false
+}
+
+// captureSignature classifies the session's exit, once: the transcript tail
+// plus the session facts last observed. The first call wins, so a call placed
+// BEFORE a teardown step (Close) is not replaced by a later call after the
+// transcript may be gone. Its evidence is never empty: with an unreadable
+// transcript it still carries the session facts.
 func (r *ccpoolRun) captureSignature() failsig.Result {
 	r.sigMu.Lock()
 	defer r.sigMu.Unlock()
 	if r.captured != nil {
 		return *r.captured
 	}
-	res := classifyTranscript(r.transcript)
+	res := classifyExit(r.transcript, r.exit)
 	r.captured = &res
 	return res
 }
 
-// classifyTranscript reads the last transcriptTailBytes of the JSONL at path
-// and classifies the text of its tool_result/text content. The raw text is
-// never retained: only failsig's redacted, bounded Result leaves this function.
-func classifyTranscript(path string) failsig.Result {
-	unknown := failsig.Result{Signature: failsig.Unknown}
-	if path == "" {
-		return unknown
+// classifyExit reads the last transcriptTailBytes of the JSONL at path and
+// classifies the text of its tool_result/text content together with the
+// session facts observed at exit. An empty or unreadable path classifies on
+// the facts alone. The raw text is never retained: only failsig's redacted,
+// bounded Result leaves this function.
+func classifyExit(path string, facts failsig.ExitFacts) failsig.Result {
+	var text string
+	if path != "" {
+		if tail, err := readTail(path, transcriptTailBytes); err == nil {
+			text = transcriptText(tail)
+		}
 	}
-	tail, err := readTail(path, transcriptTailBytes)
-	if err != nil {
-		return unknown
-	}
-	return failsig.Classify(transcriptText(tail))
+	return failsig.ClassifyExit(text, facts)
 }
 
 // readTail returns the last max bytes of the file. When the file is longer

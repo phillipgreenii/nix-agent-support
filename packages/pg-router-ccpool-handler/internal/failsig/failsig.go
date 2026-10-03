@@ -61,6 +61,13 @@
 // Evidence is that redacted line, windowed around the match and cut to at
 // most [MaxEvidenceLen] bytes.
 //
+// # Exits
+//
+// [ClassifyExit] is [Classify] for a session that exited before completing.
+// It also takes the ccpool session facts observed at exit ([ExitFacts]), and
+// the session-exit rows at the end of the table name the exit from them when
+// no transcript text did. Its evidence is never empty (see exit.go).
+//
 // Redaction fails closed. A long path or identifier that is lexically a
 // 32+ character run is masked too. That over-redaction is deliberate: the
 // Signature is the fact that matters, the Evidence is only a debugging aid, and
@@ -89,10 +96,28 @@ const (
 	Budget      Signature = "budget"
 	IndexLock   Signature = "index-lock"
 	Unknown     Signature = "unknown"
+
+	// The API-error family: the session's own model API call failed, and
+	// Claude Code wrote the error into the transcript (StopFailure).
+	APITransient Signature = "api-transient" // 5xx, 529 Overloaded, socket/stream drop
+	APIRateLimit Signature = "api-rate-limit"
+	APIAuth      Signature = "api-auth" // 401, "Please run /login"
+	ContextLimit Signature = "context-limit"
+
+	// The session-exit family: no transcript text explained the exit, so the
+	// ccpool session facts observed at exit name its shape (see [ExitFacts]).
+	SessionErrored Signature = "session-errored" // ccpool state errored, cause unstated
+	SessionIdle    Signature = "session-idle"    // turn ended; bead not completed
+	SessionGone    Signature = "session-gone"    // pane dead or row absent
 )
 
 // signatures is the closed set, in declaration order.
-var signatures = []Signature{GitAuth, GitNetwork, MountOrPath, Budget, IndexLock, Unknown}
+var signatures = []Signature{
+	GitAuth, GitNetwork, MountOrPath, Budget, IndexLock,
+	APITransient, APIRateLimit, APIAuth, ContextLimit,
+	SessionErrored, SessionIdle, SessionGone,
+	Unknown,
+}
 
 // Signatures returns every member of the closed set. The caller owns the
 // returned slice.
@@ -115,12 +140,13 @@ const MaxEvidenceLen = 300
 // inside the evidence window instead of cutting it off.
 const evidenceLead = 100
 
-// Result is the outcome of [Classify].
+// Result is the outcome of [Classify] and [ClassifyExit].
 type Result struct {
 	// Signature is never empty. It is [Unknown] when no row matched.
 	Signature Signature
 	// Evidence is the redacted line the match was on, at most
-	// MaxEvidenceLen bytes. It is empty for Unknown.
+	// MaxEvidenceLen bytes. [Classify] leaves it empty for Unknown;
+	// [ClassifyExit] never does (see there).
 	Evidence string
 }
 
