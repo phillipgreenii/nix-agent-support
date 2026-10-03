@@ -383,7 +383,7 @@ func TestBackend_ListAttention_TierBoundaries(t *testing.T) {
 
 // TestBackend_ListAttention_RampIsMonotoneOverTime walks one event across
 // the whole ramp for every modifier combination and requires severity to
-// be non-decreasing as time passes (INV-CAL-4: modifiers never invert it).
+// be non-decreasing as time passes (INV-CAL-2; INV-CAL-4: modifiers never affect it).
 func TestBackend_ListAttention_RampIsMonotoneOverTime(t *testing.T) {
 	start := rampNow
 	end := start.Add(time.Hour)
@@ -416,70 +416,66 @@ func TestBackend_ListAttention_RampIsMonotoneOverTime(t *testing.T) {
 	}
 }
 
-// CAL-RAMP-6 design: each modifier shifts the time tier by exactly one
-// level (capped); fixtures use the "soon" tier (base high) for the
-// downward shift and the "far" tier (base low) for the upward shift so the
-// clamp at the enum's ends does not hide the effect.
-func TestBackend_ListAttention_CalendarPriorityShiftsTier(t *testing.T) {
-	far := attnEvent("ev", rampNow.Add(time.Hour), rampNow.Add(2*time.Hour))
-	b, _, ctx := attentionBackend(t, backendConfig{Calendars: []calendarConfig{{Name: "Cal", Priority: "high"}}}, far)
-	if got := severityByID(t, b, ctx)["ev"]; got != schema.SeverityMedium {
-		t.Errorf("far + high priority = %q, want medium (low shifted up one)", got)
-	}
-	b, _, ctx = attentionBackend(t, backendConfig{Calendars: []calendarConfig{{Name: "Cal", Priority: "low"}}}, far)
-	if got := severityByID(t, b, ctx)["ev"]; got != schema.SeverityLow {
-		t.Errorf("far + low priority = %q, want low", got)
-	}
-}
-
-func TestBackend_ListAttention_ImportantPeopleShiftsTier(t *testing.T) {
-	matched := attnEvent("matched", rampNow.Add(time.Hour), rampNow.Add(2*time.Hour))
-	matched.Attendees = []apiAttendee{{Name: "Boss", Email: "boss@example.com"}}
-	unmatched := attnEvent("unmatched", rampNow.Add(time.Hour), rampNow.Add(2*time.Hour))
-	unmatched.Attendees = []apiAttendee{{Name: "Nobody", Email: "nobody@example.com"}}
-	b, _, ctx := attentionBackend(t, backendConfig{ImportantPeople: []string{"BOSS@example.com"}}, matched, unmatched)
-	sev := severityByID(t, b, ctx)
-	if sev["matched"] != schema.SeverityMedium || sev["unmatched"] != schema.SeverityLow {
-		t.Fatalf("matched=%q unmatched=%q, want medium/low", sev["matched"], sev["unmatched"])
-	}
-}
-
-func TestBackend_ListAttention_TentativeShiftsTierDown(t *testing.T) {
-	tent := attnEvent("tent", rampNow.Add(10*time.Minute), rampNow.Add(time.Hour))
-	tent.SelfStatus = "tentative"
-	conf := attnEvent("conf", rampNow.Add(10*time.Minute), rampNow.Add(time.Hour))
-	running := attnEvent("running", rampNow.Add(-time.Minute), rampNow.Add(time.Hour))
-	running.SelfStatus = "tentative"
+// CAL-RAMP-1 (INV-CAL-4): the level is time-only. Calendar priority,
+// important_people and a tentative RSVP MUST NOT change it, in any tier.
+func TestBackend_ListAttention_ModifiersDoNotAffectLevel(t *testing.T) {
 	yes := true
-	b, _, ctx := attentionBackend(t, backendConfig{Calendars: []calendarConfig{{Name: "Cal", IncludeTentative: &yes}}}, tent, conf, running)
-	sev := severityByID(t, b, ctx)
-	if sev["tent"] != schema.SeverityMedium || sev["conf"] != schema.SeverityHigh {
-		t.Errorf("tent=%q conf=%q, want medium/high", sev["tent"], sev["conf"])
+	type tier struct {
+		name       string
+		start, end time.Time
+		want       schema.Severity
 	}
-	if sev["running"] != schema.SeverityHigh {
-		t.Errorf("tentative in-progress = %q, want high (critical shifted down one)", sev["running"])
+	tiers := []tier{
+		{"far", rampNow.Add(time.Hour), rampNow.Add(2 * time.Hour), schema.SeverityLow},
+		{"soon", rampNow.Add(5 * time.Minute), rampNow.Add(time.Hour), schema.SeverityHigh},
+		{"in-progress", rampNow.Add(-time.Minute), rampNow.Add(time.Hour), schema.SeverityCritical},
+	}
+	for _, tr := range tiers {
+		for _, prio := range []string{"", "low", "normal", "medium", "high"} {
+			for _, important := range []bool{false, true} {
+				for _, status := range []string{"accepted", "tentative"} {
+					ev := attnEvent("e", tr.start, tr.end)
+					ev.SelfStatus = status
+					if important {
+						ev.Attendees = []apiAttendee{{Name: "Boss", Email: "boss@example.com"}}
+					}
+					cfg := backendConfig{
+						Calendars:       []calendarConfig{{Name: "Cal", Priority: prio, IncludeTentative: &yes}},
+						ImportantPeople: []string{"BOSS@example.com"},
+					}
+					b, _, ctx := attentionBackend(t, cfg, ev)
+					if got := severityByID(t, b, ctx)["e"]; got != tr.want {
+						t.Errorf("%s prio=%q important=%v status=%s: severity = %q, want %q", tr.name, prio, important, status, got, tr.want)
+					}
+				}
+			}
+		}
 	}
 }
 
-func TestBackend_ListAttention_ModifierShiftIsCappedAtOneLevel(t *testing.T) {
-	// high priority AND an important attendee: +2 uncapped, +1 capped.
-	soon := attnEvent("soon", rampNow.Add(5*time.Minute), rampNow.Add(time.Hour))
-	soon.Attendees = []apiAttendee{{Email: "boss@example.com"}}
-	far := attnEvent("far", rampNow.Add(time.Hour), rampNow.Add(2*time.Hour))
-	far.Attendees = []apiAttendee{{Email: "boss@example.com"}}
-	cfg := backendConfig{Calendars: []calendarConfig{{Name: "Cal", Priority: "high"}}, ImportantPeople: []string{"boss@example.com"}}
-	b, _, ctx := attentionBackend(t, cfg, soon, far)
-	sev := severityByID(t, b, ctx)
-	if sev["soon"] != schema.SeverityCritical {
-		t.Errorf("soon + two boosts = %q, want critical (high +1, capped)", sev["soon"])
+// CAL-RAMP-2: tentative events are reported at the same time tier as
+// accepted ones.
+func TestBackend_ListAttention_TentativeSameTierAsAccepted(t *testing.T) {
+	var evs []apiEvent
+	for id, start := range map[string]time.Time{
+		"far": rampNow.Add(time.Hour), "soon": rampNow.Add(10 * time.Minute), "running": rampNow.Add(-time.Minute),
+	} {
+		acc := attnEvent("acc-"+id, start, start.Add(time.Hour))
+		tent := attnEvent("tent-"+id, start, start.Add(time.Hour))
+		tent.SelfStatus = "tentative"
+		evs = append(evs, acc, tent)
 	}
-	if sev["far"] != schema.SeverityMedium {
-		t.Errorf("far + two boosts = %q, want medium (low +1, capped)", sev["far"])
+	b, _, ctx := attentionBackend(t, backendConfig{}, evs...)
+	sev := severityByID(t, b, ctx)
+	for id, want := range map[string]schema.Severity{"far": schema.SeverityLow, "soon": schema.SeverityHigh, "running": schema.SeverityCritical} {
+		if sev["acc-"+id] != want || sev["tent-"+id] != want {
+			t.Errorf("%s: accepted=%q tentative=%q, want both %q", id, sev["acc-"+id], sev["tent-"+id], want)
+		}
 	}
 }
 
-// CAL-RAMP-5 design: all-day events are reported at low, never ramped and
-// never raised by a modifier, for the whole day.
+// CAL-RAMP-5 design: all-day events are reported at low, never ramped, for
+// the whole day.
 func TestBackend_ListAttention_AllDayStaysLow(t *testing.T) {
 	dayStart := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
 	running := attnEvent("allday-running", dayStart, dayStart.Add(24*time.Hour-time.Second))

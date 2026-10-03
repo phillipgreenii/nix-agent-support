@@ -430,22 +430,28 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   call time alone — no state is kept between calls (`INV-STATE-1`).
 - **`INV-CAL-3`** <!-- uuid: b6943fd0-1c4c-4d18-8dee-67ccebc55e9f --> — An all-day event has no
   meaningful start instant and MUST NOT be ramped: a backend MUST report it at `low` for as long
-  as it overlaps the attention window and MUST NOT raise it by any modifier (`INV-CAL-4`). It MUST
+  as it overlaps the attention window and MUST NOT raise it by any other input (`INV-CAL-4`). It MUST
   NOT be reported `critical` for its day. Chosen over omitting it because an all-day event (a
   holiday, an out-of-office marker, a deadline) is still information a consumer MAY want, and a
   consumer can already filter on `low`; omitting would lose it silently.
-- **`INV-CAL-4`** <!-- uuid: fcd393b5-d8d9-44aa-8c3c-dbb5b9445f3f --> — The pre-existing modifiers
-  — the event's calendar `priority`, a match against `important_people` (`INV-CAL-1`), and a
-  tentative RSVP — MUST be kept as a one-level shift of the time tier, not dropped and not
-  additive without bound. A `high` calendar priority and an `important_people` match each shift
-  the tier UP one level; a tentative RSVP shifts it DOWN one level; the net shift is the sum capped
-  to one level in either direction, and the result is clamped to the `low`..`critical` enum.
-  Because one event receives the same constant shift in every tier and the clamp is monotone, an
-  event's severity MUST be non-decreasing as time passes (far, then soon, then in progress) under
-  every modifier combination: a modifier MUST NOT invert the ramp. Other priority values
-  (`medium`, `normal`, `low`, unset) do not shift the tier. (Dropping the modifiers was rejected
-  because `important_people` has no other use, and an uncapped additive score was rejected because
-  it lets a far-off event outrank a running one.)
+- **`INV-CAL-4`** <!-- uuid: fcd393b5-d8d9-44aa-8c3c-dbb5b9445f3f --> — The attention level of a
+  calendar event MUST be driven by time ONLY (`INV-CAL-2`, `INV-CAL-3`). The event's calendar
+  `priority`, a match against `important_people` (`INV-CAL-1`), and a tentative RSVP MUST NOT
+  affect it: the same event MUST yield the same `severity` whatever those three are. A tentative
+  event is still reported (`INV-CAL-6` excludes only declined events) and sits at the same time
+  tier as an accepted one. As a consequence `important_people` is currently UNUSED for attention:
+  no `calendar` backend consumes the match, and the config key and `INV-CAL-1` matching are kept
+  only as the contract for a future consumer.
+
+  > Operator ruling (Phillip, 2026-10-03, recorded in bead `pg2-pf1rb`, CAL-RAMP-1): "for now, the
+  > attention for calendar is only driven by time. for any iten on my calendar, which i have not
+  > declined (so tenantivve and approved) will show for the day and bump up 15 minutes before and
+  > through the meeting afterwhich it drops off. in-progress meetings must come back" — CAL-RAMP-1:
+  > attention MUST be driven by time ONLY; calendar priority, `important_people` and tentative
+  > status MUST NOT affect its level (for now). Implemented by bead `pg2-ib03r`, which SUPERSEDES
+  > the earlier text of this invariant (a one-level, capped shift of the time tier by those three
+  > modifiers, which `pg2-pf1rb`'s first landing, `86f026db`, had wrongly kept; removed).
+
 - **`INV-CAL-5`** <!-- uuid: 23fb614d-c60f-40b3-9428-adb228d6a6d7 --> — The lead time and the
   look-ahead window MUST be per-backend config keys, `attention_lead_time` (default 15 minutes) and
   `attention_window` (default 24 hours), each a Go `time.ParseDuration` string. An event is a

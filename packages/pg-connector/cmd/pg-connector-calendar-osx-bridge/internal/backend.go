@@ -49,15 +49,12 @@
 //     packet's own Contract asks to be documented here, since a later
 //     reader (and pg-connector-mail-osx-bridge) will need to know it.
 //
-//   - include_tentative's dual role: a calendar configured
-//     include_tentative:false (a) excludes a tentative-SelfStatus event
-//     from that calendar's own List/ListEvents/ListAttention results
-//     ENTIRELY (fetchOccurrences drops it before dedup even runs), and (b)
-//     — moot once (a) excludes it — is also a ListAttention severity input
-//     for an event that DOES survive (i.e. one whose own calendar has
-//     include_tentative:true and is itself tentative): computeSeverity
-//     lowers its score by one tier relative to an otherwise-identical
-//     confirmed event.
+//   - include_tentative: a calendar configured include_tentative:false
+//     excludes a tentative-SelfStatus event from that calendar's own
+//     List/ListEvents/ListAttention results ENTIRELY (fetchOccurrences
+//     drops it before dedup even runs). It is NOT an attention-level input:
+//     a tentative event that survives is graded at the same time tier as an
+//     accepted one (INV-CAL-4, CAL-RAMP-1/2).
 //
 //   - important_people matching implements INV-CAL-1
 //     (packages/pg-connector/docs/behavior/invariants.md) exactly:
@@ -66,9 +63,14 @@
 //     non-"@"-containing entry matches only an attendee's own name
 //     (case-insensitive, exact match). "Organizer matching" is attendee-list
 //     matching only — apiEvent (mirroring calendarapi.Event [landed:
-//     pg2-p9ap3]) carries no separate Organizer field.
+//     pg2-p9ap3]) carries no separate Organizer field. Since the
+//     CAL-RAMP-1 time-only ruling (pg2-ib03r) NOTHING in this backend
+//     consumes the match: ListAttention no longer calls it, so the
+//     important_people config key is currently unused for attention. The
+//     key and importantPersonMatches are kept as the INV-CAL-1 contract
+//     surface for a future consumer.
 //
-//   - ListAttention's severity is a TIME-BASED RAMP with bounded modifiers
+//   - ListAttention's severity is a TIME-ONLY RAMP
 //     (bead pg2-pf1rb; INV-CAL-2..INV-CAL-6 in
 //     packages/pg-connector/docs/behavior/invariants.md): an event not yet
 //     started and starting later than attention_lead_time is "low"; one
@@ -85,21 +87,12 @@
 //     for 24h; omitting it would silently lose information the operator
 //     may want to see (consumers can already filter low severity out).
 //
-//   - CAL-RAMP-6 design choice (modifiers): the existing modifiers
-//     (calendar priority, important_people, tentative) are KEPT as a
-//     one-level shift of the time tier, capped at one level and clamped to
-//     the [low, critical] enum: delta = clamp(+1 if the calendar priority
-//     is "high", +1 if any attendee matches important_people, -1 if
-//     SelfStatus is tentative; -1..+1). Reasoning: dropping them would
-//     leave important_people (used by nothing else) and calendar_priority
-//     as dead config, while an uncapped additive score would let a
-//     modifier swallow the ramp (a far-off event outranking a running
-//     one). Because the shift is the same constant at every tier and the
-//     clamp is monotone, one event's severity is NON-DECREASING over time
-//     (far <= soon <= in progress) for every modifier combination: the
-//     ramp is never inverted. Priority "medium"/"normal" no longer
-//     differs from "low"/unset for attention (it still feeds the dedup
-//     tie-break priorityWeight).
+//   - CAL-RAMP-1 (modifiers): the level is driven by time ONLY. Calendar
+//     priority, important_people and tentative RSVP MUST NOT affect it
+//     (INV-CAL-4, operator ruling in pg2-pf1rb; the earlier one-level
+//     modifier shift was removed by pg2-ib03r). Calendar priority still
+//     feeds the dedup tie-break priorityWeight; a tentative event is
+//     reported (CAL-RAMP-2) at the same tier as an accepted one.
 //
 //   - Look-back: ListAttention queries [now - attentionLookback,
 //     now + attention_window) and filters locally to events that have not
@@ -319,10 +312,9 @@ func (b *Backend) resolveCalendars(ctx context.Context, cfg backendConfig) ([]re
 	return resolved, nil
 }
 
-// priorityWeight ranks a configured calendar_priority string, used both
-// as fetchOccurrences' own dedup tie-break weight and as one of
-// computeSeverity's three additive inputs (see this file's package doc
-// comment). Recognized tiers, highest first: "high" (2) > "medium"/
+// priorityWeight ranks a configured calendar_priority string, used as
+// fetchOccurrences' own dedup tie-break weight only (it never affects the
+// attention level, INV-CAL-4). Recognized tiers, highest first: "high" (2) > "medium"/
 // "normal" (1) > "low"/anything else, including empty (0) — case-
 // insensitive.
 func priorityWeight(priority string) int {
@@ -536,19 +528,6 @@ func (b *Backend) ListEvents(ctx context.Context, start, end time.Time, calendar
 	return b.listEvents(ctx, start, end, calendarName, false)
 }
 
-// normalizeImportantPeople trims cfg's own configured important_people
-// entries, dropping any that are empty after trimming.
-func normalizeImportantPeople(people []string) []string {
-	out := make([]string, 0, len(people))
-	for _, p := range people {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 // importantPersonMatches implements INV-CAL-1's own disambiguation rule
 // (packages/pg-connector/docs/behavior/invariants.md): an "@"-containing
 // entry matches only attendee's own email (case-insensitive, no domain
@@ -563,21 +542,6 @@ func importantPersonMatches(person string, attendee apiAttendee) bool {
 	return attendee.Name != "" && strings.EqualFold(attendee.Name, person)
 }
 
-// attendeesMatchImportantPeople reports whether any of attendees matches
-// any of important (both per importantPersonMatches) — "organizer
-// matching" degraded to attendee-list matching only, per INV-CAL-1 (see
-// this file's package doc comment).
-func attendeesMatchImportantPeople(attendees []apiAttendee, important []string) bool {
-	for _, a := range attendees {
-		for _, p := range important {
-			if importantPersonMatches(p, a) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // severityLevels is the ramp's ladder in ascending rank (the
 // schema.ValidSeverities order), indexed by level.
 var severityLevels = []schema.Severity{schema.SeverityLow, schema.SeverityMedium, schema.SeverityHigh, schema.SeverityCritical}
@@ -589,35 +553,13 @@ const (
 	levelInProgress = 3 // critical: start <= now < end
 )
 
-// modifierDelta is the one-level, capped shift the existing modifiers
-// apply to the time tier (INV-CAL-4): +1 for a "high" calendar priority,
-// +1 when any attendee matches important_people, -1 when SelfStatus is
-// tentative, summed and clamped to [-1, +1].
-func modifierDelta(priority string, importantMatch bool, selfStatus string) int {
-	d := 0
-	if priorityWeight(priority) >= 2 {
-		d++
-	}
-	if importantMatch {
-		d++
-	}
-	if isTentative(selfStatus) {
-		d--
-	}
-	if d > 1 {
-		return 1
-	}
-	if d < -1 {
-		return -1
-	}
-	return d
-}
-
 // computeSeverity maps one event's timing onto the attention ramp
-// (INV-CAL-2..INV-CAL-4). ok is false when the event MUST NOT be reported
-// (already ended, starts at/after the window's end, or declined). now is
-// the call's clock reading; lead/window come from attentionTiming.
-func computeSeverity(now time.Time, ev apiEvent, lead, window time.Duration, priority string, importantMatch bool) (sev schema.Severity, ok bool) {
+// (INV-CAL-2..INV-CAL-4): the level depends on time ONLY, never on
+// calendar priority, important_people or tentative status. ok is false
+// when the event MUST NOT be reported (already ended, starts at/after the
+// window's end, or declined). now is the call's clock reading;
+// lead/window come from attentionTiming.
+func computeSeverity(now time.Time, ev apiEvent, lead, window time.Duration) (sev schema.Severity, ok bool) {
 	if isDeclined(ev.SelfStatus) {
 		return "", false // INV-CAL-6
 	}
@@ -629,7 +571,7 @@ func computeSeverity(now time.Time, ev apiEvent, lead, window time.Duration, pri
 		return "", false // starts at/after the look-ahead window's end
 	}
 	if ev.AllDay {
-		return schema.SeverityLow, true // INV-CAL-3: never ramped, never raised
+		return schema.SeverityLow, true // INV-CAL-3: never ramped
 	}
 	level := levelFar
 	switch {
@@ -637,13 +579,6 @@ func computeSeverity(now time.Time, ev apiEvent, lead, window time.Duration, pri
 		level = levelInProgress
 	case ev.Start.Sub(now) <= lead:
 		level = levelSoon
-	}
-	level += modifierDelta(priority, importantMatch, ev.SelfStatus)
-	if level < 0 {
-		level = 0
-	}
-	if level >= len(severityLevels) {
-		level = len(severityLevels) - 1
 	}
 	return severityLevels[level], true
 }
@@ -668,7 +603,6 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 	if err != nil {
 		return nil, err
 	}
-	important := normalizeImportantPeople(cfg.ImportantPeople)
 
 	now := b.now().UTC()
 	occs, err := b.fetchOccurrences(ctx, cfg, now.Add(-attentionLookback), now.Add(window), "", "")
@@ -678,8 +612,7 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 
 	items := make([]schema.AttentionItem, 0, len(occs))
 	for _, occ := range occs {
-		matched := attendeesMatchImportantPeople(occ.event.Attendees, important)
-		severity, ok := computeSeverity(now, occ.event, lead, window, occ.cal.Priority, matched)
+		severity, ok := computeSeverity(now, occ.event, lead, window)
 		if !ok {
 			continue
 		}
