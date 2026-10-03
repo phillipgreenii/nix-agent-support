@@ -434,13 +434,11 @@ proceeding on currently loaded text (direct interactive invocation).`)
 
      It reuses an existing worktree or parked branch, otherwise creates
      `.worktrees/<id>` on `drain/<id>` off the repo's primary branch. It asks
-     `pg-hooks status --porcelain` about the hooks and links the nix-generated
-     pre-commit config into the worktree ONLY for a legacy repo (`state=legacy`,
-     or `pg-hooks` absent/unrecognized, which is the old behavior). For a repo
-     with a per-clone hook bundle it writes nothing into the worktree: git runs
-     the hooks from the shared common dir, and the `precommit=` field of the
-     output line (`Result.Precommit` in `--json`) reports
-     `bundle|stale|missing|broken` instead of `linked|present|none`. `stale`,
+     `pg-hooks status --porcelain` about the hooks and writes nothing into the
+     worktree: git runs the hooks from the shared common dir, and the
+     `precommit=` field of the output line (`Result.Precommit` in `--json`)
+     reports `bundle|stale|missing|broken` (`missing` also covers `pg-hooks`
+     absent or an unrecognized state). `stale`,
      `missing` and `broken` mean the commit's own hook run will NOT happen
      (the stubs print one `pg-hooks:` notice and exit 0), so tell the
      implementation subagent the commit gate is not in force rather than let

@@ -26,9 +26,8 @@ immediately with "system activation must now be run as root" and does NO build/e
 To validate a hook-governed change before committing, run
 `pg-hooks run pre-commit <the changed files>` (scoped, fast; `git add` the files first) — the
 **commit's own hook run is the real gate**, since a `git commit` fires the hooks on the staged
-files (so `git add -A` first, or a generated change escapes the run). `pg-hooks` works in both
-modes: it runs the repo's per-clone hook bundle, or, for a repo not yet cut over
-(`pg-hooks status --porcelain` reports `state=legacy`), the `.pre-commit-config.yaml` read in place; only when
+files (so `git add -A` first, or a generated change escapes the run). `pg-hooks` runs the
+clone's per-clone hook bundle; only when
 `pg-hooks` is absent (exit `127`) fall back to `prek run --files <the changed files>`. Probe
 whether a repo has hooks with `pg-hooks status`, never `test -f .pre-commit-config.yaml` — a bundle
 repo has no such file in its working tree and its hooks are still live. For autofix before
@@ -81,10 +80,9 @@ committing. The gates are:
    projects only).
 2. **At land, `ff-merge-to-main`'s FF-1b** — `integrate-branch-support --prek-branch-diff`, which
    runs `pg-hooks run pre-land` (the commit-range check above) over the whole branch diff, for
-   every repo it lands. `pg-hooks` picks the hook source itself: the clone's bundle, or the legacy
-   `.pre-commit-config.yaml` for a repo not yet cut over. Two cases skip the check with a notice
+   every repo it lands. `pg-hooks` resolves the clone's hook bundle itself. Two cases skip the check with a notice
    instead of failing the land, and FF-1b records the notice line verbatim in its outcome report:
-   - No bundle and no usable legacy config (`pg-hooks` exit `13`): the one `pg-hooks:` notice line,
+   - No hook bundle (`pg-hooks` exit `13`): the one `pg-hooks:` notice line,
      for example `pg-hooks: no hook bundle for <repo>; pre-land hooks not run. Fix: (cd <canonical> && nix run .#install-pre-commit-hooks)`.
    - `pg-hooks` not installed (exit `127`): `pg-hooks not installed on this machine; ask the operator to run pn workspace apply`.
 

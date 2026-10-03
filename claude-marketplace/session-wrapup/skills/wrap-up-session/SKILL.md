@@ -219,8 +219,8 @@ the repo, in this rough order of authority:
 
 - A `justfile` / `Makefile` target (`just check`, `just test`, `make check`).
 - Repo convention from `CLAUDE.md` / `AGENTS.md`. (For the `nix-*` repos here that's the
-  pre-commit hooks SCOPED to the session's changed files — `prek run --files <the files this
-session changed>` (or `pre-commit run --files …`), NOT `--all-files` (which re-runs every
+  pre-commit hooks SCOPED to the session's changed files — `pg-hooks run pre-commit <the files this
+session changed>` (`prek run --files …` only when `pg-hooks` is absent), NOT `--all-files` (which re-runs every
   hook over the whole repo and can false-block on a pre-existing violation this session never
   touched; the commit's own hook run is the real gate) — then the targeted
   `nix build .#checks.<system>.<name>` checks relevant to the session's changes, in the
@@ -674,25 +674,25 @@ If nothing was in scope, say so plainly rather than inventing work.
 
 ## Command quick reference
 
-| need                                                   | command                                                                                                                                     |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| in-progress beads (scope check)                        | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)                                               |
-| PR-tracker beads                                       | `bd list --type=merge-request`                                                                                                              |
-| close finished work                                    | `bd close <id> [<id>...] --reason="..."`                                                                                                    |
-| file discovered/unfinished                             | `bd create --title=... --description=... --type=... -p <0-4>`                                                                               |
-| dirty state                                            | `git status` ; ahead of main: `git log main..`                                                                                              |
-| unpushed blocks the work?                              | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                            |
-| run gates (nix-\* repos)                               | `prek run --files <changed files>` (or `pre-commit run --files …`), NOT `--all-files`; targeted `nix build .#checks.<system>.<name>`        |
-| integrate a repo's work                                | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)                                       |
-| set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                 |
-| remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                          |
-| prune stale worktree admin                             | `pn workspace workforest prune`                                                                                                             |
-| next-session handoff                                   | one P0 via `handoff-create` (see "Next-session handoff bead")                                                                               |
-| retire a spent P0 pointer                              | follow `beads-lifecycle:handoff-bead` (see "Lifecycle")                                                                                     |
-| record work (no-beads repo)                            | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                                                              |
-| next-session handoff (no-beads)                        | update the handoff doc's top "Resume here" section                                                                                          |
-| this session's mode record                             | `session-mode show` (see "Preamble: mark this session's mode")                                                                              |
-| record this run's handoff bead on the mode record      | `session-mode set-status finished --handoff-bead <id>` (see end of phase 7)                                                                 |
-| cancel a live --monitor-if-empty monitor               | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor")                                  |
-| inventory session background jobs/monitors/wakeups     | review the ScheduleWakeup/Monitor task listing plus any `run_in_background` jobs this session started, then keep-or-stop each (see phase 8) |
-| stop a session background job/monitor no longer needed | `TaskStop`, or kill the backgrounded job, or stop the Monitor loop (see phase 8)                                                            |
+| need                                                   | command                                                                                                                                                           |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| in-progress beads (scope check)                        | `bd list --status in_progress --assignee <you>` or `--label <repo-label>` (tracker is shared)                                                                     |
+| PR-tracker beads                                       | `bd list --type=merge-request`                                                                                                                                    |
+| close finished work                                    | `bd close <id> [<id>...] --reason="..."`                                                                                                                          |
+| file discovered/unfinished                             | `bd create --title=... --description=... --type=... -p <0-4>`                                                                                                     |
+| dirty state                                            | `git status` ; ahead of main: `git log main..`                                                                                                                    |
+| unpushed blocks the work?                              | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                                                  |
+| run gates (nix-\* repos)                               | `pg-hooks run pre-commit <changed files>` (`prek run --files …` only when `pg-hooks` is absent), NOT `--all-files`; targeted `nix build .#checks.<system>.<name>` |
+| integrate a repo's work                                | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)                                                             |
+| set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                                       |
+| remove pn workforest set                               | `pn workspace workforest remove <branch>` (only when every repo reported `landed`)                                                                                |
+| prune stale worktree admin                             | `pn workspace workforest prune`                                                                                                                                   |
+| next-session handoff                                   | one P0 via `handoff-create` (see "Next-session handoff bead")                                                                                                     |
+| retire a spent P0 pointer                              | follow `beads-lifecycle:handoff-bead` (see "Lifecycle")                                                                                                           |
+| record work (no-beads repo)                            | append to the repo's handoff doc (see "Markdown handoff doc (no-beads repos)")                                                                                    |
+| next-session handoff (no-beads)                        | update the handoff doc's top "Resume here" section                                                                                                                |
+| this session's mode record                             | `session-mode show` (see "Preamble: mark this session's mode")                                                                                                    |
+| record this run's handoff bead on the mode record      | `session-mode set-status finished --handoff-bead <id>` (see end of phase 7)                                                                                       |
+| cancel a live --monitor-if-empty monitor               | `ScheduleWakeup({stop: true})`, best-effort (see "Preamble: cancel any live `--monitor-if-empty` monitor")                                                        |
+| inventory session background jobs/monitors/wakeups     | review the ScheduleWakeup/Monitor task listing plus any `run_in_background` jobs this session started, then keep-or-stop each (see phase 8)                       |
+| stop a session background job/monitor no longer needed | `TaskStop`, or kill the backgrounded job, or stop the Monitor loop (see phase 8)                                                                                  |
