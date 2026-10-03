@@ -41,6 +41,9 @@ mkGoApp {
       ./pkg/provider/issue
       ./pkg/provider/search
       ./pkg/provider/attention
+      # Shared event-log writer (bead pg2-ltddq): this backend's internal/eventlog
+      # imports it, so it is part of the build+test dependency graph.
+      ./pkg/eventlog
       ./cmd/pg-connector-issue-jira
     ];
   };

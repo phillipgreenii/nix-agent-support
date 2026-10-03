@@ -1886,6 +1886,186 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-connector-issue-jira (bead pg2-ltddq): the Jira
+              # sibling of test-pg-connector-{pr-github,thread-slack}-darwin-module
+              # above -- registers the backend's own event log as a Loki log source
+              # and its LogQL alert rules from its own nix module rather than
+              # through pg-connector's config. Same stub technique (a stub of the
+              # observability surface mirroring the REAL logSources submodule's
+              # defaults), so the assertions prove the module leaves
+              # `path`/`serviceName` at their defaults -- which the Go side
+              # (eventlog.Path) and the alert selectors depend on -- and switches
+              # the generic error-rate alert off. The runCommand then checks the
+              # alert file itself: exactly three rules (auth, availability,
+              # throttling; NO remaining-budget rule, because the backend reads no
+              # Jira quota figure -- only the 429 itself) with unique <=40-char uids
+              # and Loki datasources, every query selecting the registered
+              # service_name and parsing as LogQL (logcli --stdin parses offline;
+              # "metrics Query: not supported" is the parse-success sentinel), the
+              # availability rule excluding the throttle so one incident pages once,
+              # and every event field a rule reads still being a json tag on the
+              # backend's Event or the shared Base.
+              test-pg-connector-issue-jira-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-issue-jira/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-connector-issue-jira;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/issue-jira-alerts.yaml;
+                in
+                assert disabled.logSources == { };
+                assert disabled.alertRuleFiles == [ ];
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-issue-jira/*.jsonl";
+                assert src.serviceName == "pg-connector-issue-jira";
+                assert src.format == "jsonl";
+                assert src.errorAlert.enable == false;
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                pkgs.runCommand "test-pg-connector-issue-jira-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                    ];
+                    glob = src.path;
+                    alerts = alertsFile;
+                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog/eventlog.go;
+                    # error_code lives on the shared evlog.Base; failure_class, pjira_calls and
+                    # auth_state on this backend's Event.
+                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The default glob selects events.jsonl and not the rotated
+                    # copy or the rotation lock.
+                    state="$TMPDIR/state/pg-connector-issue-jira"
+                    mkdir -p "$state"
+                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
+
+                    # Alert file structure: auth + availability + throttling, and no
+                    # remaining-budget rule.
+                    [ "$(yq '.groups[0].rules | length' "$alerts")" = 3 ] || fail "want exactly 3 rules"
+                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
+                    uids="$(yq '.groups[0].rules[].uid' "$alerts")"
+                    [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 3 ] || fail "uids are not unique"
+                    printf '%s\n' "$uids" | while read -r u; do
+                      [ "''${#u}" -le 40 ] || fail "uid $u exceeds Grafana's 40-char cap"
+                    done
+                    for want in pg-conn-issue-jira-auth-failing pg-conn-issue-jira-unavailable pg-conn-issue-jira-rate-limited; do
+                      printf '%s\n' "$uids" | grep -qx "$want" || fail "missing rule $want"
+                    done
+                    if printf '%s\n' "$uids" | grep -qi 'quota\|remaining\|reserve\|budget'; then
+                      fail "a budget rule appeared: the backend reads no Jira quota figure"
+                    fi
+                    [ "$(yq '[.groups[0].rules[] | select(.condition == "C" and .noDataState == "OK" and .data[0].datasourceUid == "loki" and .data[0].model.queryType == "instant")] | length' "$alerts")" = 3 ] \
+                      || fail "a rule is not a loki instant query with condition C and noDataState OK"
+
+                    # Every query selects the registered service_name and parses
+                    # as LogQL; the fields it reads are still json tags on the
+                    # event types.
+                    for i in 0 1 2; do
+                      e="$(yq ".groups[0].rules[$i].data[0].model.expr" "$alerts")"
+                      case "$e" in
+                        *'{service_name="pg-connector-issue-jira"}'*) ;;
+                        *) fail "rule $i does not select the registered service_name: $e" ;;
+                      esac
+                      parsed="$(logcli query --stdin --quiet "$e" </dev/null 2>&1 | tail -n 1 || true)"
+                      case "$parsed" in
+                        *"metrics Query: not supported"*) ;;
+                        *) fail "rule $i does not parse as LogQL: $parsed" ;;
+                      esac
+                    done
+                    for field in error_code failure_class pjira_calls auth_state; do
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" "$sharedEventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+
+                    # Rule semantics. Auth reads failure_class="auth"; the
+                    # throttle rule reads failure_class="rate_limited"; the
+                    # availability rule must exclude the throttle so one 429
+                    # incident does not page twice. Both class values must still
+                    # be what the writer emits.
+                    exprOf() { yq ".groups[0].rules[] | select(.uid == \"$1\") | .data[0].model.expr" "$alerts"; }
+                    case "$(exprOf pg-conn-issue-jira-auth-failing)" in
+                      *'failure_class="auth"'*) ;;
+                      *) fail "auth rule does not read failure_class=auth" ;;
+                    esac
+                    case "$(exprOf pg-conn-issue-jira-rate-limited)" in
+                      *'failure_class="rate_limited"'*) ;;
+                      *) fail "throttle rule does not read failure_class=rate_limited" ;;
+                    esac
+                    case "$(exprOf pg-conn-issue-jira-unavailable)" in
+                      *'error_code="unavailable"'*'failure_class!="rate_limited"'*) ;;
+                      *) fail "availability rule does not exclude the throttle" ;;
+                    esac
+                    for class in auth rate_limited; do
+                      grep -q "= \"$class\"" "$eventlogSrc" || fail "eventlog writes no failure_class $class"
+                    done
+
+                    # The backend reads no Jira quota figure: no event field may
+                    # carry one and no query may reference one. If this fails
+                    # because a field was ADDED, add the matching budget rule.
+                    if grep -Eq 'json:"[a-z_]*(remaining|limit|reserve|reset|retry)[a-z_]*[,"]' "$eventlogSrc" "$sharedEventlogSrc"; then
+                      fail "the event gained a quota field: add a budget alert rule for it"
+                    fi
+                    if yq '.groups[0].rules[].data[0].model.expr' "$alerts" | grep -Eqi 'remaining|reserve|retry'; then
+                      fail "a query references a quota figure the backend does not log"
+                    fi
+                    touch $out
+                  '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #

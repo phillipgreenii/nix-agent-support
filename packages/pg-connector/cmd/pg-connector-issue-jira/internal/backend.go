@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
@@ -57,7 +58,23 @@ type Backend struct {
 // New returns a Backend wrapping the given Runner. Production wiring passes
 // NewCLIRunner(); tests inject a fake Runner.
 func New(r Runner) *Backend {
-	return &Backend{runner: r}
+	return &Backend{runner: recordingRunner{Runner: r}}
+}
+
+// recordingRunner notes each pjira execution and each failed run on the
+// in-flight call's event log entry (bead pg2-ltddq; see package eventlog). It
+// is a transparent decorator: results and errors pass through untouched, and
+// the Record* calls are no-ops when the context carries no recorder (every
+// unit test that calls the backend directly).
+type recordingRunner struct{ Runner }
+
+func (r recordingRunner) Run(ctx context.Context, args ...string) (string, error) {
+	eventlog.RecordPjiraCall(ctx)
+	out, err := r.Runner.Run(ctx, args...)
+	if err != nil {
+		eventlog.RecordPjiraFailure(ctx, err.Error())
+	}
+	return out, err
 }
 
 // getenvFunc returns b.getenv, defaulting to os.Getenv when unset.
@@ -464,6 +481,10 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 // CheckAuth-delegates-to-gh precedent).
 func (b *Backend) CheckAuth(ctx context.Context) error {
 	out, err := b.runner.Run(ctx, "auth-status")
+	// pjira prints its state on stdout even when it exits non-zero for a bad
+	// credential, so the event records the state whichever way the run ended
+	// (the error returned below is unchanged; bead pg2-ltddq).
+	eventlog.RecordAuthState(ctx, eventlog.NormalizeAuthState(out, err != nil))
 	if err != nil {
 		return err
 	}

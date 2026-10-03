@@ -173,7 +173,19 @@ failure text looks like an authentication problem; the wire `error_code` stays `
 `Retry-After` (claude's envelope is decoded for `result`/`is_error` only), so it has no quota reading
 to log.
 
-The writer mechanics both backends share (the common event fields, size-based rotation, the path
+`pg-connector-issue-jira` follows the same pattern: it appends to
+`${XDG_STATE_HOME}/pg-connector-issue-jira/events.jsonl` (override with
+`PG_CONNECTOR_ISSUE_JIRA_EVENTS_FILE`; `off` disables it), same rotation, with the common fields plus
+`pjira_calls` (how many `pjira` runs the call made), `auth_state` (on `auth_status` calls: `pjira
+auth-status`'s own state, since that op answers with a well-formed result even for a bad credential)
+and `failure_class` (`auth` for a 401/403 or an `auth_status` of `MISSING`/`UNAUTHENTICATED`/
+`FORBIDDEN`; `rate_limited` when pjira's error text carries an HTTP 429; the wire `error_code` stays
+`unavailable` for a 429). `packages/pg-connector/grafana/alerting/issue-jira-alerts.yaml` alerts on
+auth failure, sustained `unavailable` (excluding throttling) and repeated 429s. There is deliberately
+NO remaining-budget alert: the backend reads no Jira quota figure, header or `Retry-After`, so the 429
+itself is the only quota signal it can see.
+
+The writer mechanics all three backends share (the common event fields, size-based rotation, the path
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
 

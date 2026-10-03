@@ -1,0 +1,200 @@
+# pg-connector-issue-jira unified-alerting rules (bead pg2-ltddq): LogQL rules
+# over the backend's OWN event log (packages/pg-connector/cmd/
+# pg-connector-issue-jira/internal/eventlog), shipped to Loki by the logSources
+# entry in darwin/modules/pg-connector-issue-jira/default.nix. Sibling of
+# pr-github-alerts.yaml (bead pg2-ph0o4) and thread-slack-alerts.yaml (bead
+# pg2-kjdfi).
+#
+# Why these three, and why log-derived: the backend is a one-shot process, so
+# Prometheus cannot scrape it, and before this file nothing alerted when its
+# pjira calls to Jira started failing -- the only trace was a JSON error code
+# on a stdout nobody kept. Contract: OBS-1/OBS-2/OBS-3 of the pg-connector
+# observability ruling (Phillip, 2026-10-02): each connector owns its log and
+# its alert rules, tracks availability / auth / quota where exposed, and
+# registers them in nix, not through pg-connector's config.
+#
+# What this backend can and cannot tell:
+#   - authentication: a call pjira answered with 401/403 is error_code=
+#     unauthenticated, and the auth_status op (pjira auth-status) answers with a
+#     well-formed result even for a bad credential, so its event carries
+#     auth_state. Both are tagged failure_class=auth. Rule (a).
+#   - availability: every other call that produced no usable answer is
+#     error_code=unavailable (pjira missing, a 5xx, a transport failure, an
+#     undecodable reply). Rule (b).
+#   - quota: the backend reads NO Jira remaining/limit figure, header or
+#     Retry-After, so there is deliberately NO budget rule ("remaining below
+#     X"). What it can see is the throttle itself: pjira surfaces an HTTP 429 in
+#     its error text, which the backend tags failure_class=rate_limited (the
+#     wire error_code stays unavailable). Rule (c) alerts on repeated
+#     throttling. Add a budget rule only if the backend starts reading a
+#     quota figure.
+#
+# Event fields queried (all written by eventlog.Event):
+#   error_code     wire taxonomy code; absent on success
+#   failure_class  "auth" or "rate_limited"
+# The generic Daemon Health error-rate rule is switched off for this source
+# (errorAlert.enable = false in the nix module): these bespoke rules cover the
+# same error-level lines with the right semantics, and leaving it on would
+# double-page every one of them.
+#
+# Shape notes, copied from phillipgreenii-nix-support-apps's
+# logsource-health/alerting-template.nix (the first Loki-datasource rule in
+# the stack, which documents these in full): datasourceUid is `loki`, the
+# query model uses the string `queryType: instant` (NOT Prometheus's boolean
+# `instant`), and every rule's noDataState is OK -- a quiet log just means
+# nothing called the backend, the healthy case.
+#
+# Series arithmetic: `| json` lifts every event field into a label, so the
+# range aggregations split into one series per distinct field combination;
+# the outer sum() collapses them to the single series the reduce stage
+# expects.
+#
+# Folder "pg-connector" converges by title (ADR 0039 in
+# phillipgreenii-nix-support-apps -- no folderUid, since alerting file
+# provisioning has no such field). Rule uids stay under Grafana's 40-char cap.
+#
+# Surfacing in SwiftBar needs no menubar change: pg-connector-alert-grafana
+# lists every firing Grafana alert and maps labels.severity (error -> high,
+# warning -> medium).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-issue-jira
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # (a) Auth: Jira rejected the credential (a 401/403 on a real call, or
+      # `pjira auth-status` reporting MISSING / UNAUTHENTICATED / FORBIDDEN).
+      # Every Jira read fails until fixed, so ONE occurrence in the last 15m
+      # is enough. No `for` beyond the evaluation tick: the 15m window is the
+      # "within 15m".
+      - uid: pg-conn-issue-jira-auth-failing
+        title: pg-connector-issue-jira authentication failing
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-issue-jira: Jira rejected the credential within the last 15 minutes"
+          description: 'pg-connector-issue-jira saw an authentication failure (a 401/403 from Jira, or `pjira auth-status` not OK) at least once in the last 15 minutes, so every Jira panel it feeds is empty or stale. Run `pjira auth-status` and refresh the API token in pjira''s secret source. Inspect the events with {service_name="pg-connector-issue-jira"} | json | failure_class="auth" and read error or auth_state.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira"} | json | failure_class="auth" [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (b) Availability: calls keep failing as `unavailable` (pjira missing
+      # from PATH, Jira answering 5xx or unreachable, an undecodable reply).
+      # Sustained = at least one such failure in every trailing 5m window for
+      # 10m running. Throttling is `unavailable` on the wire too but is rule
+      # (c)'s business, so it is excluded via failure_class (an event with no
+      # failure_class passes the != filter). Authentication failures are
+      # `unauthenticated`, never `unavailable`, so they cannot reach this rule.
+      - uid: pg-conn-issue-jira-unavailable
+        title: pg-connector-issue-jira unavailable
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira has been failing as unavailable for over 10 minutes"
+          description: 'pg-connector-issue-jira has answered unavailable (not counting throttling) in every 5 minute window for over 10 minutes -- pjira is missing or failing, or Jira is unreachable or answering 5xx. Inspect the events with {service_name="pg-connector-issue-jira"} | json | error_code="unavailable" and read error.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira"} | json | error_code="unavailable" | failure_class!="rate_limited" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (c) Throttling: Jira answered HTTP 429 (pjira surfaces it in its error
+      # text). The backend reads no quota figure, so this is the only quota
+      # signal it can observe. One 429 is routine burst behaviour, so the rule
+      # needs MORE THAN TWO within a trailing 10m and that to hold for 5m.
+      - uid: pg-conn-issue-jira-rate-limited
+        title: pg-connector-issue-jira rate limited
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-issue-jira is being rate limited by Jira (HTTP 429)"
+          description: 'Jira answered HTTP 429 to pg-connector-issue-jira more than twice in the last 10 minutes, sustained for 5 minutes, so Jira panels and attention data are going stale. Something is polling Jira too often (pg-router, pg-desk or SwiftBar). Inspect the events with {service_name="pg-connector-issue-jira"} | json | failure_class="rate_limited" and read op and error.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-issue-jira"} | json | failure_class="rate_limited" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
