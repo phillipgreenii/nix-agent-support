@@ -55,12 +55,30 @@ const idleDrainTick = 500 * time.Millisecond
 // inFlightDrainTimeout bounds runRun's/runRunUntilIdle's shutdown-ordering
 // wait (this package's design doc's "shutdown ordering" note) for every
 // Kick()-launched offer still outstanding on q to settle before the durable
-// store closes underneath it. By the time this runs, ctx has already been
-// cancelled (SIGINT/SIGTERM) -- which is what unsticks a genuinely-stuck
+// store closes underneath it. By the time this runs, the dispatch context has
+// already been cancelled (runRun: after shutdownDrainTimeout's grace; run-
+// until-idle: on SIGINT/SIGTERM) -- which is what unsticks a genuinely-stuck
 // subprocess call via wireclient's exec.CommandContext -- so this bound only
 // needs to cover that unwind's own tail latency, never a fresh MaxWait
 // window; a few seconds is ample.
 const inFlightDrainTimeout = 5 * time.Second
+
+// shutdownDrainTimeout bounds how long runRun, after SIGINT/SIGTERM, lets
+// the dispatches already in flight finish before it cancels their context
+// (and, only then, runs the ccpool session sweep in preShutdownAll). Without
+// it a pn workspace apply that reloads the launchd agent (~2.5x/day) SIGKILLed
+// a running handler ("role desk-pr exited -1") and left a transient pg-desk
+// sync_error row.
+//
+// Sizing evidence (bead pg2-euh4f, from events.jsonl): desk-pr dispatch
+// durations have median ~19s, p90 ~31s, p99 ~50s (a loose upper bound); the
+// two killed dispatches ran <= 15s. 30s covers roughly the p90 and, with the
+// session sweep and inFlightDrainTimeout's tail, fits inside the launchd
+// ExitTimeOut (90s, darwin/modules/pg-router/default.nix) -- keep the two in
+// step. A drain that
+// times out is no worse than the old behavior: the dispatch context is then
+// cancelled and the handler killed as before.
+const shutdownDrainTimeout = 30 * time.Second
 
 // inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
 // the wait inFlightDrainTimeout bounds.
@@ -90,6 +108,23 @@ func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error) {
 			"timeout", inFlightDrainTimeout, "sessionsInFlight", q.SessionsInFlight())
 	}
 	_ = storeClose()
+}
+
+// drainThenCancelDispatch is runRun's graceful-shutdown step: it waits (up to
+// timeout) for every Kick()-launched offer still in flight on q to finish --
+// dispatches run under a context decoupled from the signal context, so they are
+// NOT cancelled by SIGTERM -- and then cancels the dispatch context, which
+// unsticks any handler that outlived the timeout (wireclient's
+// exec.CommandContext kills it). The caller MUST run this before
+// preShutdownAll so the ccpool session sweep never races a live dispatch.
+func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelFunc, timeout time.Duration) {
+	drainCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if !q.WaitForInFlightDrain(drainCtx, inFlightDrainPollInterval) {
+		slog.Warn("shutdown: in-flight dispatch(es) did not finish before the drain timeout; cancelling them",
+			"timeout", timeout, "sessionsInFlight", q.SessionsInFlight())
+	}
+	cancelDispatch()
 }
 
 // handlerCommandFor builds the wireclient.CommandFor seam bootCore and
@@ -1218,7 +1253,12 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	for name, n := range rpt.LogRejected {
 		slog.Warn("producer tick: events refused; the event log is at its hard size limit or unwritable", "source", name, "events", n)
 	}
-	q.Kick()
+	// No new offers once shutdown has been requested (a signal landing mid-tick):
+	// runRun is about to drain the ones already in flight, and a fresh offer here
+	// would start a handler the drain then has to wait for.
+	if ctx.Err() == nil {
+		q.Kick()
+	}
 	q.Expire()
 	now := time.Now()
 	svc.PublishTick(core.TickSnapshot{
@@ -1455,7 +1495,20 @@ func runRun(only, disable []string, metricsAddr string) int {
 		}()
 	}
 
-	svc, q, mp, storeClose, err := bootCore(ctx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeLongRunning)
+	return runLongRunningBody(ctx, pr, shutdownDrainTimeout)
+}
+
+// runLongRunningBody is runRun's boot-to-exit body over an already prepared
+// run, split out (like runUntilIdleBody) so a test can drive it with a
+// hand-built preparedRun and an injectable drainTimeout. ctx is the SIGNAL
+// context: it stops the tick loop and the core accept loop. Dispatches run
+// under a separate dispatchCtx that is cancelled only after the shutdown drain
+// (drainThenCancelDispatch), so a SIGTERM lets in-flight handlers finish
+// instead of SIGKILLing them (bead pg2-euh4f).
+func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.Duration) int {
+	dispatchCtx, cancelDispatch := context.WithCancel(context.Background())
+	defer cancelDispatch()
+	svc, q, mp, storeClose, err := bootCore(dispatchCtx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeLongRunning)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		return exitGeneric
@@ -1514,6 +1567,9 @@ func runRun(only, disable []string, metricsAddr string) int {
 		select {
 		case <-ctx.Done():
 			slog.Info("run: shutdown requested")
+			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
+			// session sweep) must not run while a dispatch is still in flight.
+			drainThenCancelDispatch(q, cancelDispatch, drainTimeout)
 			return exitOK
 		case <-ticker.C:
 		}

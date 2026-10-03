@@ -341,3 +341,46 @@ func TestRoleListener_Offer_ForwardsHandlerErrorToObserver(t *testing.T) {
 		t.Fatalf("observer errs = %v, want [%v]", obs.errs, dispatchErr)
 	}
 }
+
+// ctxCapturingHandler is a wireclient.HandlerClient whose Dispatch records the
+// context it was called with.
+type ctxCapturingHandler struct{ got context.Context }
+
+func (h *ctxCapturingHandler) Dispatch(ctx context.Context, _ roles.Role, _ eventqueue.Event) (wireclient.Reply, error) {
+	h.got = ctx
+	return wireclient.Reply{Outcome: "delivered"}, nil
+}
+
+func (h *ctxCapturingHandler) PostStartup(context.Context, roles.Role) (wireclient.Reply, error) {
+	return wireclient.Reply{}, nil
+}
+
+func (h *ctxCapturingHandler) PreShutdown(context.Context, roles.Role) (wireclient.Reply, error) {
+	return wireclient.Reply{}, nil
+}
+
+type listenerCtxKey struct{}
+
+// Offer must dispatch under the context injected into NewListener (bead
+// pg2-euh4f): runRun hands the listener a dispatch context decoupled from the
+// signal context, and cancelling THAT context is what unsticks a handler.
+func TestRoleListener_Offer_UsesInjectedContext(t *testing.T) {
+	o := newOrch(fastCfg(), testQuerySet(nil, nil))
+	h := &ctxCapturingHandler{}
+	o.Handler = h
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), listenerCtxKey{}, "injected"))
+	l := o.NewListener(ctx, roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}})
+	evt := discover.ToQueueEvent(event.NewItemEvent("work-ready", "t", item.Item{ID: "zr-ctx1"}))
+
+	l.Offer(eventqueue.Offering{ID: "dsp-000000000001", Event: evt})
+	if h.got == nil || h.got.Value(listenerCtxKey{}) != "injected" {
+		t.Fatalf("handler ctx = %v, want the context passed to NewListener", h.got)
+	}
+	if h.got.Err() != nil {
+		t.Fatalf("handler ctx already done before cancel: %v", h.got.Err())
+	}
+	cancel()
+	if h.got.Err() == nil {
+		t.Fatal("cancelling the injected context did not reach the handler's context")
+	}
+}

@@ -172,7 +172,13 @@ in
           # close/worktree-removal work), with headroom for the backlog to
           # keep growing before the dedup fix's own effect and pg2-5sirm
           # (tracked separately, out of scope here) catch up.
-          ExitTimeOut = 30;
+          #
+          # pg2-euh4f raised 30 -> 90: shutdown now first drains in-flight
+          # dispatches for up to shutdownDrainTimeout (30s,
+          # cmd/pg-router/run.go) BEFORE the sweep, so the budget is
+          # drain (30s) + the 30s sweep allowance above + the 5s
+          # inFlightDrainTimeout tail + margin. Keep in step with those.
+          ExitTimeOut = 90;
         };
       };
     })
