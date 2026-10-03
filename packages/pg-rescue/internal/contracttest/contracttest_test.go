@@ -37,7 +37,7 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(70)
 		}
-		os.Stdout.Write(b)
+		_, _ = os.Stdout.Write(b)
 	}
 	switch args[0] {
 	case "describe": // resolve, describing the report and environment it was given
@@ -62,7 +62,7 @@ func TestHelperProcess(t *testing.T) {
 	case "exit": // exit with a code and print the rest of the args as stdout
 		fmt.Print(strings.Join(args[2:], " "))
 		code := 0
-		fmt.Sscan(args[1], &code)
+		_, _ = fmt.Sscan(args[1], &code)
 		os.Exit(code)
 	case "env":
 		print(contract.Result{Outcome: contract.Declined, Summary: os.Getenv(args[1])})

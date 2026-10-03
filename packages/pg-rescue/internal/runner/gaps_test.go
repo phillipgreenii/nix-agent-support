@@ -92,8 +92,10 @@ func TestSignalWhileReadingStdin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pw.Close()
-	defer pr.Close()
+	defer func() { _ = pw.Close() }()
+
+	defer func() { _ = pr.Close() }()
+
 	e.rt.Stdin = pr // never closed: the read blocks until a signal arrives
 	e.exec.Signals = make(chan os.Signal, 1)
 	time.AfterFunc(300*time.Millisecond, func() { e.exec.Signals <- syscall.SIGINT })
@@ -151,7 +153,7 @@ func TestEscapedPipeHolderCannotWedgeTheWrapper(t *testing.T) {
 		t.Errorf("exit=%d after %v: the wait for the pipes must be bounded", code, took)
 	}
 	pid, _ := strconv.Atoi(waitForFile(t, pidFile))
-	syscall.Kill(pid, syscall.SIGKILL) // the escapee is the test's to clean up
+	_ = syscall.Kill(pid, syscall.SIGKILL) // the escapee is the test's to clean up
 }
 
 func TestDepthIgnoresNonsense(t *testing.T) {
@@ -184,7 +186,7 @@ func TestReportWriteFailureFailsOnlyThatAttempt(t *testing.T) {
 	}, chainOf("locks", "blocked"))
 	t.Cleanup(func() {
 		if e.exec.Last != nil && e.exec.Last.Report != nil {
-			os.Chmod(filepath.Dir(e.exec.Last.Report.OutputFile), 0o700)
+			_ = os.Chmod(filepath.Dir(e.exec.Last.Report.OutputFile), 0o700)
 		}
 	})
 	code, _, _ := e.wrap("locks,blocked", helperArgv("exit", "code=3"))

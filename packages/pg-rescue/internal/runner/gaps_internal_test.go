@@ -11,7 +11,7 @@ import (
 func TestForegroundOfTerminalIsFalseWithoutAControllingTerminal(t *testing.T) {
 	f, err := os.Open("/dev/tty")
 	if err == nil {
-		f.Close()
+		_ = f.Close()
 		t.Skip("this run has a controlling terminal")
 	}
 	if foregroundOfTerminal() {

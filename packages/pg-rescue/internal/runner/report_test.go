@@ -88,7 +88,7 @@ func TestTruncateBytes(t *testing.T) {
 func TestWriteFileAtomicReplacesASymlinkAndLeavesNoTemporaries(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "victim")
-	os.WriteFile(target, []byte("sentinel"), 0o600)
+	_ = os.WriteFile(target, []byte("sentinel"), 0o600)
 	p := filepath.Join(dir, "report.json")
 	if err := os.Symlink(target, p); err != nil {
 		t.Fatal(err)

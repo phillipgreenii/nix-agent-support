@@ -209,7 +209,7 @@ func (c *File) Close() error {
 		c.copyRing()
 	}
 	if c.ring != nil {
-		c.ring.Close()
+		_ = c.ring.Close()
 		_ = os.Remove(c.path + ".tail")
 	}
 	if err := c.f.Close(); err != nil && c.err == nil {

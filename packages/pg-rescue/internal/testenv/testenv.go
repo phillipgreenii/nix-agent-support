@@ -21,12 +21,12 @@ func Run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "testenv:", err)
 		return 1
 	}
-	defer os.RemoveAll(root)
+	defer func() { _ = os.RemoveAll(root) }()
 
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		if strings.HasPrefix(k, "PG_RESCUE_") || strings.HasPrefix(k, "GIT_") {
-			os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 	}
 	for k, sub := range map[string]string{
@@ -39,7 +39,7 @@ func Run(m *testing.M) int {
 			fmt.Fprintln(os.Stderr, "testenv:", err)
 			return 1
 		}
-		os.Setenv(k, dir)
+		_ = os.Setenv(k, dir)
 	}
 	return m.Run()
 }

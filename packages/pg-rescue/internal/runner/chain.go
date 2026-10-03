@@ -69,7 +69,7 @@ func (r *run) attempt(pos int, name string) (stop bool) {
 	if err != nil {
 		return fail("cannot create the stderr file: %v", err)
 	}
-	defer stderrCap.Close()
+	defer func() { _ = stderrCap.Close() }()
 
 	vars := r.vars(name, pos)
 	env, err := config.BuildEnv(r.baseEnv(), h, vars)
@@ -168,7 +168,7 @@ func (r *run) verify(a *report.Attempt, h *config.Handler, name string, pos int,
 		failf("could not start: cannot create the output file: %v", err)
 		return false
 	}
-	defer vcap.Close()
+	defer func() { _ = vcap.Close() }()
 
 	var argv []string
 	if r.p.Options.HasVerify {

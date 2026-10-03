@@ -78,8 +78,8 @@ func (r *run) runProc(s procSpec) procResult {
 	if !s.merge {
 		errR, errW, err := os.Pipe()
 		if err != nil {
-			outR.Close()
-			outW.Close()
+			_ = outR.Close()
+			_ = outW.Close()
 			return procResult{startErr: err}
 		}
 		readers = append(readers, reader{errR, s.stderr})
@@ -88,17 +88,17 @@ func (r *run) runProc(s procSpec) procResult {
 	}
 	err = cmd.Start()
 	for _, w := range writers {
-		w.Close()
+		_ = w.Close()
 	}
 	if err != nil {
 		for _, rd := range readers {
-			rd.from.Close()
+			_ = rd.from.Close()
 		}
 		return procResult{startErr: err}
 	}
 	defer func() {
 		for _, rd := range readers {
-			rd.from.Close()
+			_ = rd.from.Close()
 		}
 	}()
 
@@ -174,7 +174,7 @@ func (r *run) runProc(s procSpec) procResult {
 	// Whatever is still open is abandoned, and the copiers are joined, so
 	// nothing writes into the caller's sinks after runProc returns.
 	for _, rd := range readers {
-		rd.from.Close()
+		_ = rd.from.Close()
 	}
 	<-drained
 	return res

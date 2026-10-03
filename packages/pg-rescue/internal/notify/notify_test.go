@@ -26,7 +26,7 @@ func TestSanitize(t *testing.T) {
 		"surrounding space":       {"  \n x \t ", "x"},
 		"invalid utf8":            {"a\xffb", "a�b"},
 		"unicode kept":            {"héllo 日本語 \U0001F600", "héllo 日本語 \U0001F600"},
-		"emoji sequence kept":     {"\U0001F468‍\U0001F469", "\U0001F468‍\U0001F469"},
+		"emoji sequence kept":     {"\U0001F468\u200d\U0001F469", "\U0001F468\u200d\U0001F469"},
 		"exactly at the cap":      {strings.Repeat("x", 200), strings.Repeat("x", 200)},
 		"one over the cap":        {strings.Repeat("x", 201), strings.Repeat("x", 200)},
 		"cap counts characters":   {strings.Repeat("日", 250), strings.Repeat("日", 200)},

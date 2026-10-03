@@ -84,8 +84,8 @@ func TestStdinModeLeavesCmdAndExitEmpty(t *testing.T) {
 	dir := t.TempDir()
 	e := newE2E(t, "", recorders(dir, 1), chainOf("r1"))
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString("saved failure\n")
-	in.Seek(0, 0)
+	_, _ = in.WriteString("saved failure\n")
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	if code, _, stderr := e.wrap("r1", nil, "--stdin", "--verify", "true", "--context", "c"); code != 1 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -192,8 +192,8 @@ func TestHandlerCwdStdinAndProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	e := newE2E(t, "", recorders(dir, 1), chainOf("r1"))
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString("the wrapper's stdin, which a handler must not see")
-	in.Seek(0, 0)
+	_, _ = in.WriteString("the wrapper's stdin, which a handler must not see")
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	e.wrap("r1", helperArgv("exit", "code=1"))
 	r := readRecord(t, filepath.Join(dir, "rec-1"))
@@ -579,8 +579,8 @@ func TestFingerprintIsComputedOnceInBothModes(t *testing.T) {
 		t.Errorf("argv fingerprint = %s; want %s", got, want)
 	}
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString("x")
-	in.Seek(0, 0)
+	_, _ = in.WriteString("x")
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	e.wrap("d", nil, "--stdin", "--verify", "true", "-C", e.root, "--context", "ctx")
 	if got, want := e.onDisk().Fingerprint, report.Fingerprint(report.ModeStdin, nil, e.root, "ctx"); got != want {

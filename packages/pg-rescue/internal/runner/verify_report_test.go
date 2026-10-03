@@ -136,8 +136,8 @@ func TestVerifyEnvironmentOutputAndStdout(t *testing.T) {
 func TestVerifyInheritsStdinLikeTheCommand(t *testing.T) {
 	e := newE2E(t, "", []hd{result("fixer", "resolved")}, chainOf("fixer"))
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString("magic")
-	in.Seek(0, 0)
+	_, _ = in.WriteString("magic")
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	// The command does not read stdin; verify reads it and passes only if it is "magic".
 	code, _, stderr := e.wrap("fixer", helperArgv("exit", "code=1"), "--verify", `test "$(cat)" = magic`)
@@ -205,8 +205,8 @@ func TestStdinInputIsCappedToo(t *testing.T) {
 	e := newE2E(t, "", []hd{result("d", "declined")}, chainOf("d"))
 	e.exec.Limits.Head, e.exec.Limits.Tail = 10, 10
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString(strings.Repeat("a", 50) + strings.Repeat("b", 10))
-	in.Seek(0, 0)
+	_, _ = in.WriteString(strings.Repeat("a", 50) + strings.Repeat("b", 10))
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	e.wrap("d", nil, "--stdin", "--verify", "true")
 	b, _ := os.ReadFile(e.onDisk().OutputFile)
@@ -218,8 +218,8 @@ func TestStdinInputIsCappedToo(t *testing.T) {
 func TestInheritedStdinReachesTheCommand(t *testing.T) {
 	e := newE2E(t, "", []hd{result("d", "declined")}, chainOf("d"))
 	in, _ := os.CreateTemp(e.root, "in")
-	in.WriteString("typed by the user\n")
-	in.Seek(0, 0)
+	_, _ = in.WriteString("typed by the user\n")
+	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
 	code, stdout, _ := e.wrap("d", helperArgv("cat", "code=1"))
 	if code != 1 || stdout != "typed by the user\n" {

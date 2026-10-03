@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -280,7 +279,7 @@ func (r *run) execute() {
 	r.res.Report = r.rep
 	r.res.Kept = true
 	r.runChain(commandExit)
-	r.writeReport() // the final state, for "what happened in run X"
+	_ = r.writeReport() // the final state, for "what happened in run X"
 }
 
 func phaseOfInput(argvMode bool) Phase {
@@ -397,10 +396,8 @@ func foregroundOfTerminal() bool {
 	if err != nil {
 		return false
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 	var pgrp int32
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, tty.Fd(), uintptr(syscall.TIOCGPGRP), uintptr(unsafe.Pointer(&pgrp)))
 	return errno == 0 && int(pgrp) == syscall.Getpgrp()
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }

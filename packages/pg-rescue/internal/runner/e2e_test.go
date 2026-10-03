@@ -1,7 +1,6 @@
 package runner_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -183,13 +182,6 @@ func names(hs []hd) []string {
 		out[i] = h.name
 	}
 	return out
-}
-
-// bufs gives a test direct access to the wrapper's two output streams.
-func (e *e2e) runBuf(args []string) (code int, stdout, stderr *bytes.Buffer) {
-	stdout, stderr = &bytes.Buffer{}, &bytes.Buffer{}
-	code = app.Main(e.rt, args, stdout, stderr)
-	return
 }
 
 func jsonDecode(b []byte, v any) error { return json.Unmarshal(b, v) }

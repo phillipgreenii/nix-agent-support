@@ -192,7 +192,7 @@ func TestLockIsReleasedWhenTheHoldingProcessDies(t *testing.T) {
 	if !lockHeld(dir) {
 		t.Fatal("expected held")
 	}
-	f.Close() // closing the descriptor is what process death does
+	_ = f.Close() // closing the descriptor is what process death does
 	if lockHeld(dir) {
 		t.Error("closing the descriptor must release the lock")
 	}

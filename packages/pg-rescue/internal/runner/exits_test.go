@@ -75,8 +75,8 @@ func TestExitCodeTable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				in.WriteString(r.stdin)
-				in.Seek(0, 0)
+				_, _ = in.WriteString(r.stdin)
+				_, _ = in.Seek(0, 0)
 				e.rt.Stdin = in
 			}
 			opts := r.opts

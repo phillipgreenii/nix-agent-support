@@ -28,7 +28,7 @@ func Acquire(dir string) (*Lock, error) {
 		return nil, fmt.Errorf("cannot create the lock file in %s: %w", dir, err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("cannot lock %s: %w", dir, err)
 	}
 	return &Lock{f: f}, nil
@@ -51,7 +51,7 @@ func lockHeld(dir string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		return errors.Is(err, syscall.EWOULDBLOCK)

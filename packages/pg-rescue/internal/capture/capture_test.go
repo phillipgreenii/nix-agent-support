@@ -58,7 +58,7 @@ func TestCapMatchesTheModelAtEveryBoundary(t *testing.T) {
 		for chunk := 1; chunk <= 13; chunk++ {
 			c := newFile(t, Limits{Head: head, Tail: tail})
 			for i := 0; i < len(data); i += chunk {
-				c.Write([]byte(data[i:min(i+chunk, len(data))]))
+				_, _ = c.Write([]byte(data[i:min(i+chunk, len(data))]))
 			}
 			if got, want := finish(t, c), model(data, head, tail); got != want {
 				t.Fatalf("n=%d chunk=%d:\n got %q\nwant %q", n, chunk, got, want)
@@ -106,13 +106,13 @@ func TestWindow(t *testing.T) {
 	if len(b) != 0 || !start {
 		t.Errorf("empty capture: %q %v", b, start)
 	}
-	c.Write([]byte("abc\ndef"))
+	_, _ = c.Write([]byte("abc\ndef"))
 	if b, start := c.Window(10); string(b) != "abc\ndef" || !start {
 		t.Errorf("small: %q %v", b, start)
 	}
 	// Past the window: the oldest bytes fall off, and the answer says whether
 	// the first kept byte starts a line.
-	c.Write([]byte("\nghijkl"))
+	_, _ = c.Write([]byte("\nghijkl"))
 	b, start = c.Window(10)
 	if want := "abc\ndef\nghijkl"[4:]; string(b) != want {
 		t.Errorf("window = %q; want %q", b, want)
@@ -124,23 +124,23 @@ func TestWindow(t *testing.T) {
 	if string(b) != "hijkl" || start {
 		t.Errorf("window(5) = %q start=%v", b, start)
 	}
-	c.Close()
+	_ = c.Close()
 }
 
 func TestWindowClampsAndSurvivesHugeWrites(t *testing.T) {
 	c := newFile(t, Limits{Head: 4, Tail: 4, Window: 8})
-	c.Write([]byte(strings.Repeat("x", 1000)))
+	_, _ = c.Write([]byte(strings.Repeat("x", 1000)))
 	b, start := c.Window(100) // clamped to the configured window
 	if len(b) != 8 || start {
 		t.Errorf("window = %q start=%v", b, start)
 	}
-	c.Close()
+	_ = c.Close()
 }
 
 func TestWriteNeverFailsTheWriterEvenOnDiskErrors(t *testing.T) {
 	c := newFile(t, Limits{Head: 4, Tail: 4})
-	c.Write([]byte("abc"))
-	c.f.Close() // simulate the disk going away under the capture
+	_, _ = c.Write([]byte("abc"))
+	_ = c.f.Close() // simulate the disk going away under the capture
 	if n, err := c.Write([]byte("defgh")); n != 5 || err != nil {
 		t.Errorf("Write = %d, %v", n, err)
 	}
@@ -164,7 +164,7 @@ func TestConcurrentWritersKeepWritesWhole(t *testing.T) {
 			defer wg.Done()
 			line := []byte(strings.Repeat(string(rune('a'+w)), 99) + "\n")
 			for i := 0; i < 200; i++ {
-				c.Write(line)
+				_, _ = c.Write(line)
 			}
 		}()
 	}
@@ -183,7 +183,8 @@ func TestCreateIsExclusiveAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
+
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v", fi.Mode().Perm())
 	}
@@ -216,7 +217,7 @@ func TestTruncatedAtTheExactCap(t *testing.T) {
 		want bool
 	}{{9, false}, {10, false}, {11, true}} {
 		f := newFile(t, Limits{Head: 6, Tail: 4})
-		f.Write([]byte(strings.Repeat("z", c.n)))
+		_, _ = f.Write([]byte(strings.Repeat("z", c.n)))
 		if f.Truncated() != c.want {
 			t.Errorf("%d bytes over a 6+4 cap: Truncated = %v", c.n, f.Truncated())
 		}
@@ -229,9 +230,9 @@ func TestTruncatedAtTheExactCap(t *testing.T) {
 
 func TestWritesAfterCloseChangeNothing(t *testing.T) {
 	c := newFile(t, Limits{Head: 4, Tail: 4})
-	c.Write([]byte("abcdefghijkl"))
+	_, _ = c.Write([]byte("abcdefghijkl"))
 	before := finish(t, c)
-	c.Write([]byte("MORE"))
+	_, _ = c.Write([]byte("MORE"))
 	if c.Total() != 12 {
 		t.Errorf("total moved after Close: %d", c.Total())
 	}
@@ -255,7 +256,7 @@ func TestWindowAgreesWithAModelForRandomWrites(t *testing.T) {
 				chunk[j] = "ab\n"[rng.Intn(3)]
 			}
 			all = append(all, chunk...)
-			c.Write(chunk)
+			_, _ = c.Write(chunk)
 		}
 		for n := 0; n <= win+3; n++ {
 			got, lineStart := c.Window(n)
@@ -266,7 +267,7 @@ func TestWindowAgreesWithAModelForRandomWrites(t *testing.T) {
 				t.Fatalf("round %d win=%d n=%d all=%q: got %q/%v want %q/%v", round, win, n, all, got, lineStart, wantBytes, wantStart)
 			}
 		}
-		c.Close()
+		_ = c.Close()
 	}
 }
 
@@ -274,8 +275,8 @@ func TestFirstIOErrorWinsAndRingFailuresAreReported(t *testing.T) {
 	// A ring file that cannot be created is an error, and it does not replace
 	// an earlier one.
 	c := newFile(t, Limits{Head: 2, Tail: 2})
-	os.WriteFile(c.Path()+".tail", nil, 0o600) // makes the exclusive create fail
-	c.Write([]byte("abcdef"))
+	_ = os.WriteFile(c.Path()+".tail", nil, 0o600) // makes the exclusive create fail
+	_, _ = c.Write([]byte("abcdef"))
 	if c.Err() == nil {
 		t.Fatal("a ring that cannot be created must be reported")
 	}
@@ -284,30 +285,30 @@ func TestFirstIOErrorWinsAndRingFailuresAreReported(t *testing.T) {
 	}
 
 	c2 := newFile(t, Limits{Head: 2, Tail: 2})
-	c2.f.Close()
-	c2.Write([]byte("ab")) // fails: the file is closed
+	_ = c2.f.Close()
+	_, _ = c2.Write([]byte("ab")) // fails: the file is closed
 	first := c2.Err()
 	if first == nil {
 		t.Fatal("expected the head write to fail")
 	}
-	os.WriteFile(c2.Path()+".tail", nil, 0o600)
-	c2.Write([]byte("cdefgh"))
+	_ = os.WriteFile(c2.Path()+".tail", nil, 0o600)
+	_, _ = c2.Write([]byte("cdefgh"))
 	if c2.Err() != first {
 		t.Errorf("a later error replaced the first: %v -> %v", first, c2.Err())
 	}
-	c2.Close()
+	_ = c2.Close()
 
 	// A ring that breaks under us surfaces from Close.
 	c3 := newFile(t, Limits{Head: 2, Tail: 4})
-	c3.Write([]byte("abcdefgh"))
-	c3.ring.Close()
+	_, _ = c3.Write([]byte("abcdefgh"))
+	_ = c3.ring.Close()
 	if err := c3.Close(); err == nil {
 		t.Error("a broken ring must make Close fail")
 	}
 
 	// A file that cannot be closed cleanly is reported once.
 	c4 := newFile(t, Limits{})
-	c4.f.Close()
+	_ = c4.f.Close()
 	if err := c4.Close(); err == nil {
 		t.Error("closing an already closed file must be reported")
 	}
@@ -315,8 +316,8 @@ func TestFirstIOErrorWinsAndRingFailuresAreReported(t *testing.T) {
 
 func TestOversizedSingleWriteKeepsOnlyTheLastTail(t *testing.T) {
 	c := newFile(t, Limits{Head: 3, Tail: 5})
-	c.Write([]byte("abc"))
-	c.Write([]byte("0123456789")) // larger than the ring
+	_, _ = c.Write([]byte("abc"))
+	_, _ = c.Write([]byte("0123456789")) // larger than the ring
 	if got, want := finish(t, c), model("abc0123456789", 3, 5); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}

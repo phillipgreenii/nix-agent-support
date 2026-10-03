@@ -476,7 +476,8 @@ func TestRunDirectoryLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
+
 		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != syscall.EWOULDBLOCK {
 			t.Errorf("flock while the wrapper runs = %v; want EWOULDBLOCK", err)
 		}
