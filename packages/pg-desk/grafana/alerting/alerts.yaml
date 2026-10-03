@@ -87,6 +87,28 @@ groups:
       # growing, undrained backlog. noDataState: OK -- total absence of the
       # metric (the process itself being down) is already covered by the
       # dedicated liveness rule above.
+      #
+      # pg2-9awkw: SUPPRESSED while a pg-router SYSTEM_PAUSE gate is in force.
+      # A pause blocks the producer from dispatching the desk-heartbeat role,
+      # so meta.last_heartbeat stops advancing and the snapshot goes stale BY
+      # DESIGN (2026-10-02: a deliberate ~2h38m pause fired this rule as a
+      # false positive). The expression is
+      #   pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
+      # i.e. drop the stale series whenever ANY SYSTEM_PAUSE series reads 1.
+      #   - `on()` matches on no labels, so the differing label sets (job=
+      #     pg-desk/pg-pr vs job=pg-router, instance, ...) cannot make the
+      #     match silently fail and disable the alert; both the job=pg-desk
+      #     and the job=pg-pr duplicate series are suppressed together.
+      #   - pg-router exports pg_router_gates_active ONLY for gate types
+      #     currently in force (an ObservableGauge with one point per active
+      #     gate), so the series is normally ABSENT. An absent or 0 gate
+      #     series leaves the left side untouched: the rule behaves exactly as
+      #     before (fail-open toward alerting). This includes pg-router being
+      #     down/unscraped.
+      #   - While suppressed the query returns no data; noDataState: OK turns
+      #     that into Normal, so an Alerting/Pending instance resolves when the
+      #     pause begins. After the pause clears, the `for: 10m` window
+      #     restarts, giving the heartbeat time to resume before it can fire.
       - uid: pg-desk-sync-stale
         title: pg-desk-serve dashboard snapshot is stale
         condition: C
@@ -97,7 +119,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk-serve's dashboard snapshot has been stale for over 10 minutes"
-          description: "pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds."
+          description: 'pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds. This rule is suppressed while a pg-router SYSTEM_PAUSE gate is active (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1), because a pause deliberately stops the desk-heartbeat dispatch; if it fires, no SYSTEM_PAUSE gate was in force.'
         data:
           - refId: A
             relativeTimeRange:
@@ -108,7 +130,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_dashboard_stale
+              expr: pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
