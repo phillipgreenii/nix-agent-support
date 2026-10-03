@@ -25,6 +25,20 @@ prerequisite results (`docs/superpowers/specs/2026-09-29-pending-review-handling
 `docs/superpowers/specs/2026-09-30-pending-review-prerequisites-results.md`). It changes none of
 S1 to S28; like `review submit`, it follows `INV-EXIT-1`'s Targeted scheme (S27).
 
+**Amended 2026-10-03** (bead `pg2-kftf9.13`): section 9.1 makes `supersede_pending` conditional (the
+guarded supersede: a stale pending review is replaced only when the bot marker is on the body and
+every comment and a content digest carried in the marker verifies; otherwise it is left untouched
+and `blocked_human_pending` is reported), adds the output fields `status`, `reason`, `message`,
+`pending_review` and `superseded`, adds `url` and `digest_state` to 9.1a's record, and settles two
+points the bead left open: the archive is a backend-owned file under the state home
+(`PG_CONNECTOR_PR_GITHUB_ARCHIVE_DIR` or `$XDG_STATE_HOME/pg-connector-pr-github/archive`), and
+every status, `blocked_human_pending` included, exits 0 under `INV-EXIT-1`. Placement in
+pg-connector rather than pg-pr is the operator's ruling of 2026-10-03 ("no further changes are to
+be made to pg-pr, it is going away"), and the operator approved the digest-in-marker approach and
+folding the post-time hash sidecar bead (`pg2-kftf9.14`) into this one (2026-10-03, "continue"). No
+decision-log row is added; it changes none of S1 to S28 beyond the in-place clarification of S27's
+example.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
@@ -192,8 +206,10 @@ This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
   source's `emits` and every role's `binds` MUST list each `<type>.<kind>` explicitly.
 - **S27** — Each tool keeps its own exit-code scheme; the schemes are not bound together, and an
   adapter translates between what it calls and who calls it. `pg-connector pr review submit`
-  follows pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, including a
-  review that posted when the `supersede_pending` delete failed, which the JSON output reports;
+  follows pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed with a
+  well-formed result, including a `blocked_human_pending` outcome, which the JSON output's
+  `status` reports (rewritten in place 2026-10-03, bead `pg2-kftf9.13`; it used to name a review
+  that posted when the `supersede_pending` delete failed, a case the guarded supersede replaced);
   4 = `not_found`; 1 = any other error. The source adapter translates pg-desk's codes into
   pg-router's command-query contract instead of mirroring them: pg-desk 0 or 2 becomes exit 0,
   emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3

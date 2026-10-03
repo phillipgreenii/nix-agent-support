@@ -16,7 +16,7 @@ func pendingJSON(head, viewer, reviews string, total int) []byte {
 		`","reviews":{"totalCount":` + strconv.Itoa(total) + `,"nodes":[` + reviews + `]}}}}}`)
 }
 
-const oneReviewNode = `{"id":"PRR_1","databaseId":77,"state":"PENDING","author":{"login":"review-bot"},
+const oneReviewNode = `{"id":"PRR_1","databaseId":77,"url":"https://example.invalid/foo/bar/pull/42#pullrequestreview-77","state":"PENDING","author":{"login":"review-bot"},
 "commit":{"oid":"h1"},"body":"b","comments":{"totalCount":2,"nodes":[
 {"id":"C1","databaseId":1,"path":"a.go","line":4,"originalLine":4,"body":"c1"},
 {"id":"C2","databaseId":2,"path":"b.go","line":null,"originalLine":8,"body":"c2"}]}}`
@@ -32,6 +32,9 @@ func TestGetPendingReview_RecordAndQueryShape(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	r := got.Review
+	if r.URL != "https://example.invalid/foo/bar/pull/42#pullrequestreview-77" {
+		t.Errorf("URL = %q", r.URL)
+	}
 	if r.ID != "PRR_1" || r.DatabaseID != 77 || r.CommitOID != "h1" || r.Body != "b" || len(r.Comments) != 2 {
 		t.Fatalf("review = %+v", r)
 	}
@@ -42,7 +45,7 @@ func TestGetPendingReview_RecordAndQueryShape(t *testing.T) {
 		t.Fatalf("want exactly one round trip, got %d", len(gh.calls))
 	}
 	joined := strings.Join(gh.calls[0], " ")
-	for _, want := range []string{"api graphql", "headRefOid", "states: [PENDING]", "commit { oid }", "owner=foo", "name=bar", "number=42"} {
+	for _, want := range []string{"api graphql", "headRefOid", "url", "states: [PENDING]", "commit { oid }", "owner=foo", "name=bar", "number=42"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("call args missing %q: %s", want, joined)
 		}

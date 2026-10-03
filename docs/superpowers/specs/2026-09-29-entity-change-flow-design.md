@@ -347,8 +347,8 @@ SHOULD be done first.
 
 Its read counterpart, `pg-connector pr review pending <id>` (contract 9.1a, amendment 2026-10-03,
 bead `pg2-kftf9.12`), resolves the acting identity's pending review to a structured record. The
-guarded supersede (bead `pg2-kftf9.13`) uses it internally, and the pg-desk dashboard (bead
-`pg2-kftf9.18`) hydrates from it.
+guarded supersede (contract 9.1, amendment 2026-10-03, bead `pg2-kftf9.13`) uses it internally, and
+the pg-desk dashboard (bead `pg2-kftf9.18`) hydrates from it.
 
 ### 5.3 Consumer cursors (existing, reused)
 
@@ -850,6 +850,20 @@ meaning without a version bump of the containing contract (S11).
 
 ### 9.1 `pg-connector pr review submit <id>`
 
+> Amendment 2026-10-03 (bead `pg2-kftf9.13`). Placement: operator ruling (Phillip, 2026-10-03),
+> "no further changes are to be made to pg-pr, it is going away", so the guarded replace of a stale
+> pending review lands here, as an extension of `supersede_pending`, not in pg-pr's `postStaged`.
+> The post-time hash sidecar bead (`pg2-kftf9.14`) is folded in: the content digest lives in the
+> bot marker, not in a sidecar. Design basis:
+> `docs/superpowers/specs/2026-09-29-pending-review-handling-investigation.md` (policies 2 to 4 and
+> 7 of section 5) and `docs/superpowers/specs/2026-09-30-pending-review-prerequisites-results.md`
+> (P2, P3, P4, P8 proven; design corrections 6 and 7). It makes `supersede_pending` CONDITIONAL
+> (it used to delete unconditionally), adds output fields, and settles two points the bead left
+> open: the archive location and the exit code for `blocked_human_pending`. Both are recorded
+> below. Per S11 this is a contract change, but its only consumers are the review role's prompt and
+> bead lifecycle (beads `pg2-kftf9.17`, `pg2-kftf9.19`), which are not yet cut over to this verb, so
+> there is no dual-version window to coordinate.
+
 - **Input** (stdin JSON):
 
   ```json
@@ -864,7 +878,8 @@ meaning without a version bump of the containing contract (S11).
   ```
 
 - **Behavior**: posts a PENDING (unsubmitted) review only; anchored to `head_sha`; bot-marked by
-  the backend; when `supersede_pending`, deletes the actor's existing pending review first.
+  the backend. No automatic path ever submits a review. When `supersede_pending` is set, the op
+  runs the **guarded supersede** below instead of deleting unconditionally.
   `error.code` MUST come from pg-connector's fixed taxonomy
   (`packages/pg-connector/docs/behavior/invariants.md` `INV-ERR-1`: `not_found`, `unauthenticated`,
   `unavailable`, `unknown_op`, `version_mismatch`, `invalid_argument`, `query_not_recognized` —
@@ -882,16 +897,116 @@ meaning without a version bump of the containing contract (S11).
   after a `supersede_pending` attempt, the error message carries the supersede outcome (the error
   envelope stays `INV-WIRE-1`'s `{code, message}`; no extra field, no new code); a host-reported
   permission failure maps to `unauthenticated`; any other backend failure maps to `unavailable`.
-- **Output**: `{"review_id": "...", "state": "pending", "head_sha": "...", "as_of": "..."}`. When
-  `supersede_pending` was set, the output also reports the outcome of the delete: a failed
-  supersede delete is reported here, in the JSON output, never through the exit code (S27).
+- **Guarded supersede** (when `supersede_pending` is set; the head pre-check above runs first and
+  is unchanged). The op looks up the acting identity's pending review through the 9.1a record, then
+  emits EXACTLY ONE of four statuses:
+
+  | `status`                | When                                                                                                                                                                         | Posted?                | Review left |
+  | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ----------- |
+  | `posted`                | no pending review exists                                                                                                                                                     | yes                    | the new one |
+  | `skipped`               | the pending review's commit equals `head_sha` (case-insensitive); `reason: pending_review_exists_same_head`, `review_id` is the existing review; callers treat it as success | no                     | untouched   |
+  | `replaced`              | the pending review is stale AND every guard below holds: it is archived, deleted, and the new review is posted                                                               | yes                    | the new one |
+  | `blocked_human_pending` | the stale pending review could not be removed; `reason` says why; the review is NOT modified and its URL is reported                                                         | no (`review_id` empty) | untouched   |
+
+  ```mermaid
+  flowchart TD
+      A["review submit, supersede_pending, head H"] --> B["look up the pending review (9.1a)"]
+      B --> B1{"lookup succeeded?"}
+      B1 -- no --> X["blocked_human_pending: detection_failed"]
+      B1 -- yes --> C{"pending review exists?"}
+      C -- no --> P["post: posted"]
+      C -- yes --> D{"review commit == H?"}
+      D -- yes --> S["skipped: pending_review_exists_same_head"]
+      D -- no --> E{"marker on body AND every comment, AND digest verified?"}
+      E -- no --> Y["blocked_human_pending: human_edited"]
+      E -- yes --> F["archive the review content"]
+      F --> F1{"archive written?"}
+      F1 -- no --> Z["blocked_human_pending: archive_failed"]
+      F1 -- yes --> G["delete the review, once"]
+      G --> G1{"delete succeeded?"}
+      G1 -- no --> W["blocked_human_pending: delete_refused"]
+      G1 -- yes --> R["post the new review: replaced"]
+  ```
+
+  - **Stale** means the REVIEW-level commit differs from `head_sha`, or is empty (a force-push
+    removed it). A comment's own commit is never read (it is not stable, P4).
+  - **Verified-unedited** requires all three of: the bot marker on the body, the bot marker on
+    every comment, and a content digest in the body marker that matches the body and every comment
+    as read back. Anything else is `human_edited`, with the cause in `message`: a removed marker, an
+    added unmarked comment, a marker-preserving text edit, a removed comment, a damaged digest, or
+    NO digest at all (a review posted before digests existed, by pg-pr, or by a human). A review
+    with no readable digest is NOT verified-unedited and is never auto-replaced (fail-closed).
+    `lastEditedAt` MUST NOT be used as an edit signal (design correction 7, G2).
+  - **Content digest** (replaces the pg-pr `reviewstage` sidecar). At post time the backend stamps
+    the body with a digest marker as its final line,
+    `<!-- pg-connector-pr-github:review digest=sha256:<64 lowercase hex> -->`, and each comment with
+    the plain marker `<!-- pg-connector-pr-github:review -->`. The digest is SHA-256 over the body
+    text (the digest marker removed) and every posted comment text: each text is normalized (CRLF to
+    LF, trailing whitespace trimmed) and hashed, the comment hashes are SORTED, and the body hash
+    and sorted comment hashes are hashed together under a version prefix. Normalization is required
+    because a web-UI save rewrites LF to CRLF (design correction 6): a CRLF-only change is NOT an
+    edit. Sorting makes the read order of comments irrelevant. Paths, lines and sides are not
+    covered: they shift when the head advances (P8). A caller-supplied digest marker in `body` is
+    dropped. The record from 9.1a reports the verdict as `digest_state`.
+  - **Archive** (settled here). The full pending review (ids, URL, review and head commits, body,
+    every comment) is persisted BEFORE the delete, AND returned in the output as `superseded`. The
+    backend writes it as one JSON file,
+    `<archive root>/<owner>/<repo>/pr-<number>/review-<database id>.json`, atomically (temp file,
+    fsync, rename), mode 0600, then reads it back. The archive root is OWNED BY THE BACKEND and
+    resolved from its environment, exactly like its event log: `PG_CONNECTOR_PR_GITHUB_ARCHIVE_DIR`
+    if set, else `$XDG_STATE_HOME/pg-connector-pr-github/archive`, else
+    `$HOME/.local/state/pg-connector-pr-github/archive`. Rationale: the backend is a one-shot
+    process that is never handed pg-connector's config; the location is recovery data the backend
+    only writes and never reads back, so it does not make the backend stateful (D3); keying by
+    repo, PR and review id makes a deletion recoverable without the GitHub API; the state home is
+    already the backend's convention and sits outside the `*.jsonl` Loki glob. It cannot be
+    disabled: if no root resolves, the write fails, or the read-back does not match, the status is
+    `blocked_human_pending` with `reason: archive_failed` and NOTHING is deleted. The `superseded`
+    field is the second copy, so a lost archive file does not lose the content.
+  - **Delete** is attempted once. Any failure is `blocked_human_pending`,
+    `reason: delete_refused`. A REST HTTP 422 non-pending answer (or GraphQL `UNPROCESSABLE`), the
+    shape of a lost submit-versus-delete race (P2), re-lists once so `message` can say what the
+    review is now (no longer pending, still pending, replaced by another, or the re-list failed).
+    The delete is never retried blindly, and nothing is posted after a refused delete.
+  - **Detection failure** is fail-closed: the 9.1a lookup failed, so nothing is posted, deleted or
+    submitted: `blocked_human_pending`, `reason: detection_failed` (no URL is known).
+  - **Escalation** is NOT done by this op. On `blocked_human_pending` it only reports; the single
+    deduplicated escalation per PR (pending-review policy 5) is bead `pg2-kftf9.15`'s job, and the
+    worker's reaction is bead `pg2-kftf9.17`'s.
+
+- **Output**: `{"review_id": "...", "state": "pending", "head_sha": "...", "as_of": "...",
+"status": "posted"}`. `review_id` and `state` name the pending review that exists for the PR at
+  `head_sha` after the call (the new one for `posted` and `replaced`, the existing one for
+  `skipped`); for `blocked_human_pending` nothing was posted and both are empty. `status` is
+  present on every success (without `supersede_pending` it is always `posted`). The other fields
+  are present as follows (consumers MUST ignore unknown fields):
+
+  | Field            | Present for                                                 | Content                                                                                                                                  |
+  | ---------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+  | `reason`         | `skipped`, `blocked_human_pending`                          | `pending_review_exists_same_head`, or one of `detection_failed`, `human_edited`, `archive_failed`, `delete_refused`                      |
+  | `message`        | `skipped`, `blocked_human_pending`                          | what happened and why, including the review URL when one is known                                                                        |
+  | `pending_review` | `skipped`, `blocked_human_pending` (not `detection_failed`) | `{review_id, database_id, url?, commit_sha}` of the existing review (untouched)                                                          |
+  | `superseded`     | `replaced`                                                  | the removed review: `pending_review`'s fields plus `archive_path`, `body`, `comments[]` (each `{id, path, line, body, marked}`)          |
+  | `supersede`      | whenever `supersede_pending` was set                        | the original `{attempted, deleted, error?}` outcome of the delete, kept for compatibility; it mirrors `status`, so callers read `status` |
+
+  A caller MUST read `status`, never infer a posted review from the exit code.
+
 - **Exit codes**: pg-connector's own `INV-EXIT-1` Targeted scheme, 0/4/1 (9.12, S27); `error.code`
   ∈ `not_found` (exit 4), `unauthenticated`, `unavailable`, `invalid_argument` (exit 1).
+  **Every status exits 0, `blocked_human_pending` included** (settled here; the bead left 0/4/1
+  open). Why: it is a well-formed, deliberate result, which is exactly what `INV-EXIT-1`'s `0`
+  means, and the closed `INV-ERR-1` taxonomy has no code for it, so 4 (`not_found`) would be a lie
+  and 1 would fold it into real failures; S27 already rules that a supersede that did not go
+  through is reported in the JSON output, never through the exit code; and a non-zero exit would
+  invite the generic retry and hand-back paths of a worker or runner, which is the exact wedge this
+  design removes ("NOT retried on the same state"). The cost is that exit 0 alone does not prove a
+  review was posted; the status, always present, is the discriminator.
 - **Recovery (review role)**: on `invalid_argument` whose message says the head moved, run
   `pg-desk pr show <id> --refresh` and retry against the current head named in the message. On
   `invalid_argument` whose message says a pending review already exists, retry with
   `supersede_pending: true`. Any other `invalid_argument` is a rejected review (check the comment
-  anchors); a refresh will not fix it.
+  anchors); a refresh will not fix it. On `status: skipped` or `replaced`, the work is done. On
+  `blocked_human_pending`, do not retry on the same state: the review is a human's to resolve.
 
 ### 9.1a `pg-connector pr review pending <id>`
 
@@ -920,6 +1035,7 @@ meaning without a version bump of the containing contract (S11).
     "review": {
       "review_id": "PRR_...",
       "database_id": 5360090761,
+      "url": "https://github.com/.../pull/7#pullrequestreview-5360090761",
       "state": "pending",
       "commit_sha": "4b1d7aa...",
       "stale": true,
@@ -934,7 +1050,8 @@ meaning without a version bump of the containing contract (S11).
           "marked": false
         }
       ],
-      "all_marked": false
+      "all_marked": false,
+      "digest_state": "mismatch"
     }
   }
   ```
@@ -951,9 +1068,17 @@ meaning without a version bump of the containing contract (S11).
     marker: this backend's `<!-- pg-connector-pr-github:review -->`, or pg-pr's `<!-- pg-pr -->`
     (pg-pr is still the live review path until it is removed, and a review it left behind is
     agent-authored). `all_marked` is true only when the body and every comment are marked. A
-    marker is NOT proof the text is unedited: a text-only edit keeps it, and only the post-time
-    hash (bead `pg2-kftf9.14`) detects that. `lastEditedAt` MUST NOT be used as an edit signal
-    (null after a web-UI edit, G2).
+    marker is NOT proof the text is unedited: a text-only edit keeps it, and only the content
+    digest detects that. `lastEditedAt` MUST NOT be used as an edit signal (null after a web-UI
+    edit, G2).
+  - `digest_state` (amendment 2026-10-03, bead `pg2-kftf9.13`; additive) is the verdict of checking
+    the content digest that 9.1 stamps into the body marker against the body and every comment as
+    read: `verified` (readable and matching: provably unedited), `missing` (no digest marker: a
+    review posted before digests existed, by pg-pr, or by a human), `unreadable` (a damaged,
+    duplicated or non-sha256 digest) or `mismatch` (readable but the content differs: an edit, an
+    added or a removed comment). Only `verified` proves the content unedited. A CRLF-only change
+    still verifies. `url` (same amendment, additive) is the review's web URL when the host reports
+    one; the guarded supersede quotes it when it blocks.
 
 - **No pending review**: `{"pending": false, "head_sha": "...", "as_of": "..."}` with no `review`
   key. This is a well-formed answer: exit 0.
@@ -1442,7 +1567,7 @@ The two CLIs that sit on another tool's scheme:
 
 | CLI                                     | Exit codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pg-connector pr review submit` (9.1)   | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, the review posted, including when the `supersede_pending` delete failed, which the JSON output reports; 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, `invalid_argument`); nothing is posted on 4 or 1                                                                                                                                                                                       |
+| `pg-connector pr review submit` (9.1)   | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed with a well-formed result, whatever its `status` (`posted`, `skipped`, `replaced`, and `blocked_human_pending`, where nothing was posted and the JSON output says why); 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, `invalid_argument`); nothing is posted on 4 or 1. Exit 0 does NOT prove a review was posted: read `status`                                                              |
 | `pg-connector pr review pending` (9.1a) | pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed, a record or the explicit none result (`pending: false`); 4 = `not_found`; 1 = any other error (`unauthenticated`, `unavailable`, including a failed lookup, whose message begins `review_pending: detection_failed:`); nothing is posted, deleted or submitted on any exit code                                                                                                                                        |
 | source adapter (9.4)                    | translates pg-desk's codes into pg-router's command-query contract; it does not mirror them. pg-desk 0 or 2 → exit 0, emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3 → exit 1. Why: pg-router's command-query runner discards a source's whole output on any non-zero exit, and pg-desk's exit 2 means records were written and the cursor advanced, so mirroring 2 would lose them. Precedent: `pg-router-source-pg-connector`'s `classifyExit` |
 

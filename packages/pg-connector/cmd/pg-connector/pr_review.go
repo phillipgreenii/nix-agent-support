@@ -29,12 +29,13 @@ func newPrReviewCmd() *cobra.Command {
 // write (DispatchTargeted, never Dispatch, so INV-REG-2's try-each policy
 // and --backend pinning apply). The 9.1 request body is read from stdin;
 // the exit code follows INV-EXIT-1's Targeted scheme (0/4/1) via
-// writeTargetedResult, so a posted review whose supersede delete failed
-// still exits 0 (the failure is reported in the output's supersede field).
+// writeTargetedResult. Every status the op reports, blocked_human_pending
+// included, is a well-formed result and so exits 0: a caller MUST read the
+// output's status, never infer a posted review from the exit code.
 func newPrReviewSubmitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "submit <id>",
-		Short: "Post a PENDING review (JSON request on stdin: head_sha, body, comments, supersede_pending)",
+		Short: "Post a PENDING review (JSON request on stdin: head_sha, body, comments, supersede_pending); the output's status says what happened",
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
@@ -68,21 +69,33 @@ func readReviewSubmitArgs(in io.Reader, id string) (map[string]any, error) {
 	return fields, nil
 }
 
-// humanizeReviewSubmit formats a review_submit result for human display.
+// humanizeReviewSubmit formats a review_submit result for human display. The
+// status is authoritative: a blocked_human_pending result posted nothing, so
+// it is never shown as a review.
 func humanizeReviewSubmit(raw json.RawMessage) (string, error) {
 	var r pr.ReviewSubmitResult
 	if err := scriptout.Decode(raw, &r); err != nil {
 		return "", err
 	}
-	s := fmt.Sprintf("review %s [%s] at %s (as of %s)", r.ReviewID, r.State, r.HeadSHA, r.AsOf)
-	if r.Supersede != nil {
-		switch {
-		case r.Supersede.Deleted:
-			s += "\n  supersede: previous pending review deleted"
-		case r.Supersede.Error != "":
-			s += "\n  supersede: delete failed: " + r.Supersede.Error
-		default:
-			s += "\n  supersede: nothing to delete"
+	var s string
+	switch r.Status {
+	case pr.StatusBlockedHumanPending:
+		s = fmt.Sprintf("BLOCKED (%s): nothing was posted at %s (as of %s)\n  %s", r.Reason, r.HeadSHA, r.AsOf, r.Message)
+		if r.PendingReview != nil && r.PendingReview.URL != "" {
+			s += "\n  review: " + r.PendingReview.URL
+		}
+		return s, nil
+	case pr.StatusSkipped:
+		s = fmt.Sprintf("skipped (%s): pending review %s already at %s (as of %s)", r.Reason, r.ReviewID, r.HeadSHA, r.AsOf)
+	case pr.StatusReplaced:
+		s = fmt.Sprintf("replaced: review %s [%s] at %s (as of %s)", r.ReviewID, r.State, r.HeadSHA, r.AsOf)
+		if r.Superseded != nil {
+			s += fmt.Sprintf("\n  superseded: %s (archived at %s)", r.Superseded.ReviewID, r.Superseded.ArchivePath)
+		}
+	default:
+		s = fmt.Sprintf("review %s [%s] at %s (as of %s)", r.ReviewID, r.State, r.HeadSHA, r.AsOf)
+		if r.Status != "" {
+			s = r.Status + ": " + s
 		}
 	}
 	return s, nil
@@ -127,8 +140,8 @@ func humanizeReviewPending(raw json.RawMessage) (string, error) {
 	if rv.Stale {
 		staleness = "STALE"
 	}
-	s := fmt.Sprintf("pending review %s (database id %d) at %s, head %s [%s], as of %s\n  body marked: %t  all marked: %t  comments: %d",
-		rv.ReviewID, rv.DatabaseID, rv.CommitSHA, r.HeadSHA, staleness, r.AsOf, rv.BodyMarked, rv.AllMarked, len(rv.Comments))
+	s := fmt.Sprintf("pending review %s (database id %d) at %s, head %s [%s], as of %s\n  body marked: %t  all marked: %t  digest: %s  comments: %d",
+		rv.ReviewID, rv.DatabaseID, rv.CommitSHA, r.HeadSHA, staleness, r.AsOf, rv.BodyMarked, rv.AllMarked, rv.DigestState, len(rv.Comments))
 	for _, c := range rv.Comments {
 		s += fmt.Sprintf("\n    - %s:%d marked=%t", c.Path, c.Line, c.Marked)
 	}

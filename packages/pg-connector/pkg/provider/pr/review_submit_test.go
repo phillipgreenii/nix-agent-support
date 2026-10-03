@@ -96,3 +96,43 @@ func TestReviewSubmit_CapabilitiesGating(t *testing.T) {
 		})
 	}
 }
+
+// TestReviewSubmit_StatusFieldsWireShape pins the JSON names of the guarded
+// supersede's output fields (contract 9.1): status, reason, message,
+// pending_review, superseded, and the omission of the optional ones when unset.
+func TestReviewSubmit_StatusFieldsWireShape(t *testing.T) {
+	res := ReviewSubmitResult{
+		HeadSHA: "abc", AsOf: "t", Status: StatusBlockedHumanPending, Reason: ReasonHumanEdited, Message: "m",
+		PendingReview: &PendingReviewRef{ReviewID: "r1", DatabaseID: 5, URL: "u", CommitSHA: "old"},
+	}
+	raw, _ := json.Marshal(res)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	for k, want := range map[string]any{"status": "blocked_human_pending", "reason": "human_edited", "message": "m", "review_id": ""} {
+		if m[k] != want {
+			t.Errorf("%s = %v, want %v: %s", k, m[k], want, raw)
+		}
+	}
+	ref, _ := m["pending_review"].(map[string]any)
+	if ref["review_id"] != "r1" || ref["database_id"] != float64(5) || ref["url"] != "u" || ref["commit_sha"] != "old" {
+		t.Errorf("pending_review = %v", ref)
+	}
+	if _, ok := m["superseded"]; ok {
+		t.Errorf("superseded must be omitted unless replaced: %s", raw)
+	}
+
+	rep := ReviewSubmitResult{Status: StatusReplaced, Superseded: &SupersededReview{
+		PendingReviewRef: PendingReviewRef{ReviewID: "r1", DatabaseID: 5, CommitSHA: "old"},
+		ArchivePath:      "/a.json", Body: "b", Comments: []PendingReviewComment{{ID: "c", Body: "x", Marked: true}},
+	}}
+	raw, _ = json.Marshal(rep)
+	m = map[string]any{}
+	_ = json.Unmarshal(raw, &m)
+	sup, _ := m["superseded"].(map[string]any)
+	if sup["review_id"] != "r1" || sup["archive_path"] != "/a.json" || sup["body"] != "b" {
+		t.Errorf("superseded flattens the old review's ref plus content: %v", sup)
+	}
+	if cs, _ := sup["comments"].([]any); len(cs) != 1 {
+		t.Errorf("superseded.comments = %v", sup["comments"])
+	}
+}

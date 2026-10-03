@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	prprov "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -651,6 +652,78 @@ func TestReviewSubmitFailedSupersedeStillExits0(t *testing.T) {
 	}
 	if res.State != "pending" || !res.Supersede.Attempted || res.Supersede.Deleted || res.Supersede.Error != "boom" {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+// TestReviewSubmitSupersedeStatusesAllExit0: every status of the guarded
+// supersede, blocked_human_pending included, is a well-formed result, so the
+// CLI exits 0 (INV-EXIT-1's Targeted scheme) and the status in the JSON output
+// is what distinguishes them.
+func TestReviewSubmitSupersedeStatusesAllExit0(t *testing.T) {
+	results := map[string]string{
+		"posted":                `{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted"}`,
+		"skipped":               `{"review_id":"r0","state":"pending","head_sha":"abc","as_of":"t","status":"skipped","reason":"pending_review_exists_same_head","pending_review":{"review_id":"r0","database_id":5,"commit_sha":"abc"}}`,
+		"replaced":              `{"review_id":"r2","state":"pending","head_sha":"abc","as_of":"t","status":"replaced","superseded":{"review_id":"r1","database_id":5,"commit_sha":"old","archive_path":"/a/b.json","body":"x","comments":[]}}`,
+		"blocked_human_pending": `{"review_id":"","state":"","head_sha":"abc","as_of":"t","status":"blocked_human_pending","reason":"human_edited","message":"left untouched","pending_review":{"review_id":"r1","database_id":5,"url":"https://example.invalid/r","commit_sha":"old"}}`,
+	}
+	for status, result := range results {
+		t.Run(status, func(t *testing.T) {
+			name := "backend-rs-st-" + status
+			writeOpAwareFakeBackend(t, name, map[string]string{
+				"review_submit": `{"protocolVersion":1,"schemaVersion":4,"result":` + result + `}`,
+			}, `{}`)
+			writeConfigFor(t, name)
+			stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b","supersede_pending":true}`, []string{"pr", "review", "submit", "pr-1"})
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+			}
+			var resp scriptout.Response
+			if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+				t.Fatal(err)
+			}
+			var res prprov.ReviewSubmitResult
+			if err := json.Unmarshal(resp.Result, &res); err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != status {
+				t.Fatalf("status = %q, want %q", res.Status, status)
+			}
+			if status == "blocked_human_pending" && (res.ReviewID != "" || res.Reason != "human_edited" || res.PendingReview == nil || res.PendingReview.URL == "") {
+				t.Errorf("blocked result = %+v", res)
+			}
+		})
+	}
+}
+
+func TestHumanizeReviewSubmitByStatus(t *testing.T) {
+	cases := map[string]struct {
+		raw  string
+		want []string
+	}{
+		"posted":  {`{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted"}`, []string{"posted", "r1"}},
+		"skipped": {`{"review_id":"r0","state":"pending","head_sha":"abc","as_of":"t","status":"skipped","reason":"pending_review_exists_same_head"}`, []string{"skipped", "pending_review_exists_same_head", "r0"}},
+		"replaced": {
+			`{"review_id":"r2","state":"pending","head_sha":"abc","as_of":"t","status":"replaced","superseded":{"review_id":"r1","archive_path":"/a/b.json"}}`,
+			[]string{"replaced", "r2", "r1", "/a/b.json"},
+		},
+		"blocked": {
+			`{"head_sha":"abc","as_of":"t","status":"blocked_human_pending","reason":"delete_refused","message":"host said no","pending_review":{"url":"https://example.invalid/r"}}`,
+			[]string{"BLOCKED", "delete_refused", "host said no", "https://example.invalid/r", "nothing was posted"},
+		},
+		"legacy (no status)": {`{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t"}`, []string{"review r1 [pending]"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := humanizeReviewSubmit(json.RawMessage(c.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range c.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("%q missing %q", got, w)
+				}
+			}
+		})
 	}
 }
 

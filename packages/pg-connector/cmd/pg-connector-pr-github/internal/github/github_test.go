@@ -2451,8 +2451,9 @@ func TestPostPendingReview_PayloadAnchorsStampsAndCarriesSide(t *testing.T) {
 	if _, has := payload["event"]; has {
 		t.Errorf("payload must carry no event (stays PENDING): %v", payload)
 	}
-	if body, _ := payload["body"].(string); !strings.Contains(body, BotMarker) || !strings.HasPrefix(body, "top") {
-		t.Errorf("body not stamped: %q", body)
+	body, _ := payload["body"].(string)
+	if !strings.Contains(body, DigestMarkerPrefix) || !strings.HasPrefix(body, "top") {
+		t.Errorf("body not stamped with the digest marker: %q", body)
 	}
 	cs, _ := payload["comments"].([]any)
 	if len(cs) != 2 {
@@ -2462,35 +2463,17 @@ func TestPostPendingReview_PayloadAnchorsStampsAndCarriesSide(t *testing.T) {
 	if c0["side"] != "LEFT" || c1["side"] != "RIGHT" {
 		t.Errorf("sides = %v / %v, want LEFT / RIGHT", c0["side"], c1["side"])
 	}
+	var texts []string
 	for i, c := range []map[string]any{c0, c1} {
-		if b, _ := c["body"].(string); !strings.Contains(b, BotMarker) {
+		b, _ := c["body"].(string)
+		if !strings.Contains(b, BotMarker) {
 			t.Errorf("comment %d not stamped: %q", i, b)
 		}
+		texts = append(texts, b)
 	}
-}
-
-func TestFindPendingReview_PicksPendingAcrossPages(t *testing.T) {
-	gh := newFakeGH()
-	var page1 []string
-	for i := 1; i <= pendingReviewPageSize; i++ {
-		page1 = append(page1, `{"id":`+strings.Repeat("1", 1)+`,"state":"COMMENTED"}`)
-	}
-	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=1"] = []byte("[" + strings.Join(page1, ",") + "]")
-	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=2"] = []byte(`[{"id":99,"state":"APPROVED"},{"id":123,"state":"PENDING"}]`)
-	p := NewWithRunner(gh)
-
-	id, found, err := p.FindPendingReview(context.Background(), "foo/bar", 42)
-	if err != nil || !found || id != 123 {
-		t.Fatalf("FindPendingReview = (%d, %v, %v), want (123, true, nil)", id, found, err)
-	}
-}
-
-func TestFindPendingReview_NoneFound(t *testing.T) {
-	gh := newFakeGH()
-	gh.responses["api repos/foo/bar/pulls/42/reviews?per_page=100&page=1"] = []byte(`[{"id":1,"state":"APPROVED"}]`)
-	_, found, err := NewWithRunner(gh).FindPendingReview(context.Background(), "foo/bar", 42)
-	if err != nil || found {
-		t.Fatalf("FindPendingReview = (%v, %v), want (false, nil)", found, err)
+	// The digest stamped on the body verifies against exactly what was posted.
+	if got := VerifyDigest(body, texts); got != DigestVerified {
+		t.Errorf("digest of the posted payload = %q, want verified", got)
 	}
 }
 

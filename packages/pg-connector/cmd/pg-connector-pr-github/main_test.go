@@ -64,10 +64,6 @@ func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([
 	return nil, nil
 }
 
-func (fakeGH) FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error) {
-	return 0, false, nil
-}
-
 func (fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
 	return nil
 }

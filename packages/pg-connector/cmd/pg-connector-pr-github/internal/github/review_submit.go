@@ -11,14 +11,17 @@ import (
 )
 
 // This file holds the review_submit write path (entity-change-flow contract
-// 9.1): post a PENDING review anchored to a head SHA, stamp the bot marker,
-// and find/delete the actor's existing pending review. It lives apart from
+// 9.1): post a PENDING review anchored to a head SHA, stamp the bot marker and
+// content digest, and delete a pending review. Finding the actor's pending
+// review is review_pending's job (GetPendingReview). It lives apart from
 // github.go on purpose: github.go is hash-pinned against pg-pr's copy
 // (testdata/pg-pr-drift), and none of this exists in pg-pr.
 
-// BotMarker is the HTML comment this backend stamps on every review body and
-// every inline comment it posts, so a later reader can tell backend-authored
-// review text from human-authored text. It is deliberately pg-connector
+// BotMarker is the HTML comment this backend stamps on every inline comment it
+// posts (and on a body that already carries it), so a later reader can tell
+// backend-authored review text from human-authored text. The review body
+// carries the digest marker instead (DigestMarkerPrefix), which is also an
+// authorship marker. It is deliberately pg-connector
 // specific (pg-pr's marker package is Go-internal and not importable here).
 const BotMarker = "<!-- pg-connector-pr-github:review -->"
 
@@ -46,44 +49,6 @@ type ReviewSubmitComment struct {
 	Body string
 }
 
-// pendingReviewPageSize is the REST page size used when listing reviews.
-const pendingReviewPageSize = 100
-
-// FindPendingReview returns the numeric REST id of the authenticated user's
-// existing PENDING review on repo#number. GitHub only ever returns a PENDING
-// review to its own author, so a PENDING entry in the listing is the actor's.
-// found is false when there is none.
-func (p *Provider) FindPendingReview(ctx context.Context, repo string, number int) (id int64, found bool, err error) {
-	if err := validateRepo(repo); err != nil {
-		return 0, false, err
-	}
-	if number <= 0 {
-		return 0, false, fmt.Errorf("github: invalid PR number %d", number)
-	}
-	for page := 1; ; page++ {
-		raw, err := p.gh.Run(ctx, "api",
-			fmt.Sprintf("repos/%s/pulls/%d/reviews?per_page=%d&page=%d", repo, number, pendingReviewPageSize, page))
-		if err != nil {
-			return 0, false, fmt.Errorf("github: list reviews: %w", err)
-		}
-		var entries []struct {
-			ID    int64  `json:"id"`
-			State string `json:"state"`
-		}
-		if err := json.Unmarshal(bytes.TrimSpace(raw), &entries); err != nil {
-			return 0, false, fmt.Errorf("github: parse reviews listing: %w", err)
-		}
-		for _, e := range entries {
-			if strings.EqualFold(e.State, "PENDING") {
-				return e.ID, true, nil
-			}
-		}
-		if len(entries) < pendingReviewPageSize {
-			return 0, false, nil
-		}
-	}
-}
-
 // DeleteReview deletes the (pending) review with REST id reviewID.
 func (p *Provider) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
 	if err := validateRepo(repo); err != nil {
@@ -101,7 +66,9 @@ func (p *Provider) DeleteReview(ctx context.Context, repo string, number int, re
 }
 
 // PostPendingReview posts a PENDING review (no event, so it stays unsubmitted)
-// anchored to commitID, stamping BotMarker on the body and on each comment.
+// anchored to commitID, stamping BotMarker on each comment and, on the body, a
+// digest marker (StampBodyWithDigest) covering the body and every comment so a
+// later reader can prove the review is unedited.
 // Every comment must already be anchorable (path + positive line); the caller
 // validates. Unlike PostReview it carries each comment's side through. A host
 // failure is returned wrapped with gh's stderr, so callers can match "HTTP 422".
@@ -113,16 +80,19 @@ func (p *Provider) PostPendingReview(ctx context.Context, repo string, number in
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
 	rcs := make([]reviewComment, 0, len(comments))
+	texts := make([]string, 0, len(comments))
 	for _, c := range comments {
 		side := c.Side
 		if side == "" {
 			side = "RIGHT"
 		}
-		rcs = append(rcs, reviewComment{Path: c.Path, Body: StampBotMarker(c.Body), Line: c.Line, Side: side})
+		text := StampBotMarker(c.Body)
+		texts = append(texts, text)
+		rcs = append(rcs, reviewComment{Path: c.Path, Body: text, Line: c.Line, Side: side})
 	}
 	payload := map[string]any{
 		"commit_id": commitID,
-		"body":      StampBotMarker(body),
+		"body":      StampBodyWithDigest(body, texts),
 	}
 	if len(rcs) > 0 {
 		payload["comments"] = rcs

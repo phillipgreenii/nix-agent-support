@@ -37,6 +37,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         nodes {
           id
           databaseId
+          url
           state
           author { login }
           commit { oid }
@@ -75,6 +76,7 @@ type PendingReviewComment struct {
 type PendingReviewNode struct {
 	ID         string
 	DatabaseID int64
+	URL        string
 	CommitOID  string
 	Body       string
 	Comments   []PendingReviewComment
@@ -130,6 +132,7 @@ func (p *Provider) GetPendingReview(ctx context.Context, repo string, number int
 						Nodes      []struct {
 							ID         string `json:"id"`
 							DatabaseID int64  `json:"databaseId"`
+							URL        string `json:"url"`
 							State      string `json:"state"`
 							Author     struct {
 								Login string `json:"login"`
@@ -189,7 +192,7 @@ func (p *Provider) GetPendingReview(ctx context.Context, repo string, number int
 		return nil, fmt.Errorf("github: pending review comment list truncated (%d of %d returned); marker presence cannot be established",
 			len(n.Comments.Nodes), n.Comments.TotalCount)
 	}
-	rev := &PendingReviewNode{ID: n.ID, DatabaseID: n.DatabaseID, Body: n.Body}
+	rev := &PendingReviewNode{ID: n.ID, DatabaseID: n.DatabaseID, URL: n.URL, Body: n.Body}
 	if n.Commit != nil {
 		rev.CommitOID = n.Commit.OID
 	}

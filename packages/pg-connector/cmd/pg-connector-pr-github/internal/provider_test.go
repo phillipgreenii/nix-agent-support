@@ -58,18 +58,21 @@ type fakeGH struct {
 	viewerLoginErr      error
 	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
 
-	// review_submit seam (see review_submit_test.go).
-	pendingID    int64
-	pendingFound bool
-	findErr      error
-	deleteErr    error
-	postErr      error
-	deleted      []int64
-	posts        []postedReview
+	// review_submit seam (see review_submit_test.go). ops records the order
+	// of the lookup / delete / post calls (and the fake archiver's writes).
+	deleteErr error
+	postErr   error
+	deleted   []int64
+	posts     []postedReview
+	ops       []string
 
-	// review_pending seam (see review_pending_test.go).
-	pendingData *github.PendingReviewData
-	pendingErr  error
+	// review_pending seam (see review_pending_test.go). pendingSeq, when set,
+	// answers successive GetPendingReview calls in order (the last entry
+	// repeats), so a test can model the host changing between two lookups.
+	pendingData  *github.PendingReviewData
+	pendingErr   error
+	pendingSeq   []pendingReply
+	pendingCalls int
 }
 
 func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, error) {

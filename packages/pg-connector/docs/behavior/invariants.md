@@ -241,6 +241,11 @@ status`/`config validate`.
     was produced at all — no backend registered, an ambiguous multi-backend registration
     (`INV-REG-2`), a bad flag).
 
+  A targeted op that reports a well-formed outcome in its `result` body, including one that did
+  not do what was asked (for example `review submit`'s `blocked_human_pending`, where nothing was
+  posted), exits `0`: the outcome is distinguished by the body's `status`, never by the exit code,
+  and a caller MUST read it.
+
   `1` is otherwise reserved and MUST NOT be emitted by the fan-out scheme for an in-taxonomy
   outcome — it stays available as the CLI's own generic/unexpected-failure path.
 

@@ -21,11 +21,8 @@ type postedReview struct {
 	comments []github.ReviewSubmitComment
 }
 
-func (f *fakeGH) FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error) {
-	return f.pendingID, f.pendingFound, f.findErr
-}
-
 func (f *fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
+	f.ops = append(f.ops, "delete")
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
@@ -34,6 +31,7 @@ func (f *fakeGH) DeleteReview(ctx context.Context, repo string, number int, revi
 }
 
 func (f *fakeGH) PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error) {
+	f.ops = append(f.ops, "post")
 	if f.postErr != nil {
 		return nil, f.postErr
 	}
@@ -62,7 +60,7 @@ func TestReviewSubmitPendingOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitReview: %v", err)
 	}
-	if res.State != "pending" || res.ReviewID != "PRR_node" || res.HeadSHA != "deadbeef" || res.AsOf == "" {
+	if res.State != "pending" || res.ReviewID != "PRR_node" || res.HeadSHA != "deadbeef" || res.AsOf == "" || res.Status != pr.StatusPosted {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 	if res.Supersede != nil {
@@ -166,67 +164,11 @@ func TestReviewSubmitBotMarkerPresent(t *testing.T) {
 	}
 }
 
-func TestReviewSubmitSupersedeDeletesPriorPending(t *testing.T) {
-	gh := &fakeGH{pr: liveHeadPR(), pendingID: 777, pendingFound: true}
-	req := baseSubmitReq()
-	req.SupersedePending = true
-	res, err := New(gh).SubmitReview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("SubmitReview: %v", err)
-	}
-	if len(gh.deleted) != 1 || gh.deleted[0] != 777 {
-		t.Fatalf("deleted = %v, want [777]", gh.deleted)
-	}
-	if res.Supersede == nil || !res.Supersede.Attempted || !res.Supersede.Deleted || res.Supersede.Error != "" {
-		t.Fatalf("supersede outcome = %+v, want attempted+deleted", res.Supersede)
-	}
-	if len(gh.posts) != 1 {
-		t.Errorf("review must still post after supersede; posts = %d", len(gh.posts))
-	}
-}
-
-func TestReviewSubmitSupersedeNothingToDelete(t *testing.T) {
-	gh := &fakeGH{pr: liveHeadPR()}
-	req := baseSubmitReq()
-	req.SupersedePending = true
-	res, err := New(gh).SubmitReview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("SubmitReview: %v", err)
-	}
-	if res.Supersede == nil || res.Supersede.Attempted || res.Supersede.Deleted {
-		t.Fatalf("supersede outcome = %+v, want zero-valued (nothing attempted)", res.Supersede)
-	}
-}
-
-// TestReviewSubmitSupersedeFailureReportedInBody: a failed delete (or lookup)
-// never fails the op; the review posts and the outcome carries the error.
-func TestReviewSubmitSupersedeFailureReportedInBody(t *testing.T) {
-	for name, gh := range map[string]*fakeGH{
-		"delete fails": {pr: liveHeadPR(), pendingID: 5, pendingFound: true, deleteErr: errors.New("gh: Forbidden (HTTP 403)")},
-		"lookup fails": {pr: liveHeadPR(), findErr: errors.New("gh: Bad Gateway (HTTP 502)")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			req := baseSubmitReq()
-			req.SupersedePending = true
-			res, err := New(gh).SubmitReview(context.Background(), req)
-			if err != nil {
-				t.Fatalf("a failed supersede must not fail the op; got %v", err)
-			}
-			if res.Supersede == nil || !res.Supersede.Attempted || res.Supersede.Deleted || res.Supersede.Error == "" {
-				t.Fatalf("supersede outcome = %+v, want attempted, not deleted, error set", res.Supersede)
-			}
-			if len(gh.posts) != 1 || res.ReviewID == "" {
-				t.Errorf("review must still post; posts=%d result=%+v", len(gh.posts), res)
-			}
-		})
-	}
-}
-
 // TestReviewSubmitStaleHeadRejectedBeforePosting: a head_sha that is not the
 // PR's current head is invalid_argument naming the current head, and nothing
 // is posted or deleted (bead pg2-qr4sr).
 func TestReviewSubmitStaleHeadRejectedBeforePosting(t *testing.T) {
-	gh := &fakeGH{pr: &api.PR{HeadSHA: "cafef00d"}, pendingID: 9, pendingFound: true}
+	gh := &fakeGH{pr: &api.PR{HeadSHA: "cafef00d"}, pendingData: &github.PendingReviewData{HeadSHA: "cafef00d", Review: postedAsBackend("old", "s", "c")}}
 	req := baseSubmitReq() // head_sha deadbeef
 	req.SupersedePending = true
 	_, err := New(gh).SubmitReview(context.Background(), req)
@@ -238,8 +180,8 @@ func TestReviewSubmitStaleHeadRejectedBeforePosting(t *testing.T) {
 			t.Errorf("error %q must mention %q", err, want)
 		}
 	}
-	if len(gh.posts) != 0 || len(gh.deleted) != 0 {
-		t.Errorf("stale head must post and delete nothing; posts=%+v deleted=%v", gh.posts, gh.deleted)
+	if len(gh.posts) != 0 || len(gh.deleted) != 0 || len(gh.ops) != 0 {
+		t.Errorf("stale head must look up, post and delete nothing; posts=%+v deleted=%v ops=%v", gh.posts, gh.deleted, gh.ops)
 	}
 }
 
@@ -299,54 +241,5 @@ func TestReviewSubmitPendingExistsDistinguishableFromOtherRejections(t *testing.
 	}
 	if !strings.Contains(otherErr.Error(), "rejected the review") {
 		t.Errorf("other 422 should be described as a rejected review: %q", otherErr)
-	}
-}
-
-// TestReviewSubmitPostFailureReportsSupersedeOutcome: when the post fails after
-// a supersede attempt, the error carries what the supersede did.
-func TestReviewSubmitPostFailureReportsSupersedeOutcome(t *testing.T) {
-	cases := map[string]struct {
-		gh   *fakeGH
-		want []string
-	}{
-		"delete failed": {
-			&fakeGH{
-				pr: liveHeadPR(), pendingID: 5, pendingFound: true,
-				deleteErr: errors.New("gh: Forbidden (HTTP 403)"), postErr: errors.New(pendingExists422),
-			},
-			[]string{"pending review already exists", "attempted but failed", "403", "untouched"},
-		},
-		"deleted then post failed": {
-			&fakeGH{
-				pr: liveHeadPR(), pendingID: 5, pendingFound: true,
-				postErr: errors.New("gh: Validation Failed (HTTP 422)"),
-			},
-			[]string{"previous pending review was deleted"},
-		},
-		"nothing to delete": {
-			&fakeGH{pr: liveHeadPR(), postErr: errors.New("gh: Bad Gateway (HTTP 502)")},
-			[]string{"no pending review was found"},
-		},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			req := baseSubmitReq()
-			req.SupersedePending = true
-			_, err := New(c.gh).SubmitReview(context.Background(), req)
-			if err == nil {
-				t.Fatal("expected an error")
-			}
-			for _, w := range c.want {
-				if !strings.Contains(err.Error(), w) {
-					t.Errorf("error %q must mention %q", err, w)
-				}
-			}
-		})
-	}
-	// Without supersede_pending the message carries no supersede detail.
-	_, err := New(&fakeGH{pr: liveHeadPR(), postErr: errors.New(pendingExists422)}).
-		SubmitReview(context.Background(), baseSubmitReq())
-	if strings.Contains(err.Error(), "supersede:") {
-		t.Errorf("no supersede detail expected when supersede_pending was not set: %q", err)
 	}
 }

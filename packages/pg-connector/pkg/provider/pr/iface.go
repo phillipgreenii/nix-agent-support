@@ -98,23 +98,83 @@ type ReviewSubmitRequest struct {
 	SupersedePending bool            `json:"supersede_pending"`
 }
 
-// SupersedeOutcome reports the result of deleting the actor's existing
-// pending review before posting. A failed delete is reported here, never as
-// an op error (contract 9.1).
+// SupersedeOutcome reports the delete half of a supersede_pending request,
+// kept in its original shape alongside the status fields below (contract
+// 9.1). Attempted is true when a delete was issued; Deleted when it
+// succeeded; Error carries a failed delete's message. It is a mirror of what
+// status already says, so a caller reads status, not this.
 type SupersedeOutcome struct {
 	Attempted bool   `json:"attempted"`
 	Deleted   bool   `json:"deleted"`
 	Error     string `json:"error,omitempty"`
 }
 
+// review_submit statuses. With supersede_pending set, the op emits exactly one
+// of the four (contract 9.1); without it a successful post is StatusPosted.
+const (
+	// StatusPosted: no pending review existed; a new PENDING review was posted.
+	StatusPosted = "posted"
+	// StatusSkipped: a pending review already exists at the head being
+	// reviewed; nothing was posted. Callers treat it as success.
+	StatusSkipped = "skipped"
+	// StatusReplaced: a stale, provably unedited, fully marked pending review
+	// was archived and deleted, and a new one was posted.
+	StatusReplaced = "replaced"
+	// StatusBlockedHumanPending: a stale pending review could not be removed;
+	// the review is untouched, nothing was posted, and a human is needed.
+	StatusBlockedHumanPending = "blocked_human_pending"
+)
+
+// review_submit reasons, carried in ReviewSubmitResult.Reason.
+const (
+	// ReasonSameHead accompanies StatusSkipped.
+	ReasonSameHead = "pending_review_exists_same_head"
+	// The following accompany StatusBlockedHumanPending.
+	ReasonDetectionFailed = "detection_failed"
+	ReasonHumanEdited     = "human_edited"
+	ReasonArchiveFailed   = "archive_failed"
+	ReasonDeleteRefused   = "delete_refused"
+)
+
+// PendingReviewRef identifies a pending review: the one a skip points at, the
+// one a block left untouched, or the one a replace removed.
+type PendingReviewRef struct {
+	ReviewID   string `json:"review_id"`
+	DatabaseID int64  `json:"database_id"`
+	URL        string `json:"url,omitempty"`
+	CommitSHA  string `json:"commit_sha"`
+}
+
+// SupersededReview is the full content of a pending review that a replace
+// removed, returned so the caller holds it even if the archive file is lost.
+// ArchivePath is where the same content was persisted BEFORE the delete.
+type SupersededReview struct {
+	PendingReviewRef
+	ArchivePath string                 `json:"archive_path"`
+	Body        string                 `json:"body"`
+	Comments    []PendingReviewComment `json:"comments"`
+}
+
 // ReviewSubmitResult is the review_submit op's output (contract 9.1).
-// Supersede is nil (omitted) when supersede_pending was not set.
+//
+// Status is one of the Status* constants. ReviewID/State name the pending
+// review that exists for the PR at HeadSHA after the call: the new one for
+// posted and replaced, the existing one for skipped, empty for
+// blocked_human_pending (nothing was posted). Reason and Message are set for
+// skipped and blocked_human_pending. PendingReview names the existing review
+// a skip points at or a block left untouched; Superseded is set only for
+// replaced. Supersede is nil (omitted) when supersede_pending was not set.
 type ReviewSubmitResult struct {
-	ReviewID  string            `json:"review_id"`
-	State     string            `json:"state"`
-	HeadSHA   string            `json:"head_sha"`
-	AsOf      string            `json:"as_of"`
-	Supersede *SupersedeOutcome `json:"supersede,omitempty"`
+	ReviewID      string            `json:"review_id"`
+	State         string            `json:"state"`
+	HeadSHA       string            `json:"head_sha"`
+	AsOf          string            `json:"as_of"`
+	Status        string            `json:"status,omitempty"`
+	Reason        string            `json:"reason,omitempty"`
+	Message       string            `json:"message,omitempty"`
+	PendingReview *PendingReviewRef `json:"pending_review,omitempty"`
+	Superseded    *SupersededReview `json:"superseded,omitempty"`
+	Supersede     *SupersedeOutcome `json:"supersede,omitempty"`
 }
 
 // ReviewSubmitter is an OPTIONAL capability of a pr backend: it posts a
@@ -147,10 +207,12 @@ type PendingReviewComment struct {
 // review on a PR (contract 9.1a). CommitSHA is the REVIEW-level anchored
 // commit, never a comment's commit. Stale is true when CommitSHA is not the
 // PR head the result reports (an empty CommitSHA is stale). AllMarked is true
-// only when the body and every comment carry the marker.
+// only when the body and every comment carry the marker. URL is the review's
+// web URL when the host reports one.
 type PendingReview struct {
 	ReviewID   string                 `json:"review_id"`
 	DatabaseID int64                  `json:"database_id"`
+	URL        string                 `json:"url,omitempty"`
 	State      string                 `json:"state"`
 	CommitSHA  string                 `json:"commit_sha"`
 	Stale      bool                   `json:"stale"`
@@ -158,6 +220,11 @@ type PendingReview struct {
 	BodyMarked bool                   `json:"body_marked"`
 	Comments   []PendingReviewComment `json:"comments"`
 	AllMarked  bool                   `json:"all_marked"`
+	// DigestState is whether the review's content still matches the digest
+	// the backend stamped into the body marker when it posted: "verified",
+	// "missing", "unreadable" or "mismatch". Only "verified" proves the content
+	// unedited; every other value is NOT verified-unedited.
+	DigestState string `json:"digest_state"`
 }
 
 // PendingReviewResult is the review_pending op's output (contract 9.1a).

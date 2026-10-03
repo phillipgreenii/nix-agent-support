@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
@@ -67,9 +68,8 @@ type ghProvider interface {
 	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
 	ViewerLogin(ctx context.Context) (string, error)
 	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
-	// FindPendingReview/DeleteReview/PostPendingReview back review_submit
-	// (SubmitReview, review_submit.go).
-	FindPendingReview(ctx context.Context, repo string, number int) (int64, bool, error)
+	// DeleteReview/PostPendingReview back review_submit (SubmitReview,
+	// review_submit.go); finding the pending review is GetPendingReview's job.
 	DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error
 	PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error)
 	// GetPendingReview backs review_pending (PendingReview, review_pending.go).
@@ -79,6 +79,11 @@ type ghProvider interface {
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
 type Backend struct {
 	gh ghProvider
+	// archiver persists a pending review's content before the guarded
+	// supersede deletes it (review_submit.go). Nil means no archive location
+	// is configured, in which case every supersede that would delete is
+	// refused as archive_failed.
+	archiver archive.Archiver
 }
 
 // New returns a Backend wrapping gh. Production wiring passes a
@@ -86,6 +91,14 @@ type Backend struct {
 // ghProvider.
 func New(gh ghProvider) *Backend {
 	return &Backend{gh: gh}
+}
+
+// WithArchiver sets where a superseded pending review's content is persisted
+// before it is deleted, and returns b. Production wiring passes
+// archive.FromEnv; without it the guarded supersede never deletes.
+func (b *Backend) WithArchiver(a archive.Archiver) *Backend {
+	b.archiver = a
+	return b
 }
 
 // Compile-time checks that Backend satisfies the pr capability's Provider

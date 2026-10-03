@@ -24,9 +24,12 @@ var _ pr.PendingReviewReader = (*Backend)(nil)
 // is Go-internal and not importable from this module.
 const legacyPGPRMarker = "<!-- pg-pr -->"
 
-// hasBotMarker reports whether text carries either bot-authorship marker.
+// hasBotMarker reports whether text carries a bot-authorship marker: this
+// backend's plain marker, its digest-bearing body marker, or pg-pr's.
 func hasBotMarker(text string) bool {
-	return strings.Contains(text, github.BotMarker) || strings.Contains(text, legacyPGPRMarker)
+	return strings.Contains(text, github.BotMarker) ||
+		strings.Contains(text, github.DigestMarkerPrefix) ||
+		strings.Contains(text, legacyPGPRMarker)
 }
 
 // PendingReview implements pr.PendingReviewReader (contract 9.1a): it
@@ -44,7 +47,12 @@ func hasBotMarker(text string) bool {
 // it is not stable once the head advances (prerequisite P4). A review with no
 // commit is reported stale. Marker presence is reported for the body and for
 // each comment; it does not by itself prove the content is unedited (a
-// text-only edit keeps the marker; only a post-time hash detects that).
+// text-only edit keeps the marker). The record's DigestState does: it is the
+// result of checking the body's content digest, stamped at post time, against
+// the body and every comment as read (github.VerifyDigest), and only
+// "verified" proves the content unedited. A review with no digest (posted
+// before digests existed, by pg-pr, or by a human) is "missing", never
+// verified.
 func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest) (pr.PendingReviewResult, error) {
 	repo, number, err := parsePRID(req.ID)
 	if err != nil {
@@ -69,6 +77,7 @@ func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest
 	out := &pr.PendingReview{
 		ReviewID:   rev.ID,
 		DatabaseID: rev.DatabaseID,
+		URL:        rev.URL,
 		State:      "pending",
 		CommitSHA:  rev.CommitOID,
 		Stale:      rev.CommitOID == "" || !strings.EqualFold(rev.CommitOID, data.HeadSHA),
@@ -77,13 +86,16 @@ func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest
 		Comments:   make([]pr.PendingReviewComment, 0, len(rev.Comments)),
 	}
 	out.AllMarked = out.BodyMarked
+	commentTexts := make([]string, 0, len(rev.Comments))
 	for _, c := range rev.Comments {
 		marked := hasBotMarker(c.Body)
 		out.AllMarked = out.AllMarked && marked
+		commentTexts = append(commentTexts, c.Body)
 		out.Comments = append(out.Comments, pr.PendingReviewComment{
 			ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, Marked: marked,
 		})
 	}
+	out.DigestState = string(github.VerifyDigest(rev.Body, commentTexts))
 	res.Pending = true
 	res.Review = out
 	return res, nil

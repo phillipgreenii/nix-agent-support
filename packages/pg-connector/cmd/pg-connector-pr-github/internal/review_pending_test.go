@@ -11,7 +11,23 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
+// pendingReply is one scripted GetPendingReview answer.
+type pendingReply struct {
+	data *github.PendingReviewData
+	err  error
+}
+
 func (f *fakeGH) GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error) {
+	f.ops = append(f.ops, "lookup")
+	if len(f.pendingSeq) > 0 {
+		i := f.pendingCalls
+		if i >= len(f.pendingSeq) {
+			i = len(f.pendingSeq) - 1
+		}
+		f.pendingCalls++
+		return f.pendingSeq[i].data, f.pendingSeq[i].err
+	}
+	f.pendingCalls++
 	if f.pendingErr != nil {
 		return nil, f.pendingErr
 	}
@@ -201,5 +217,96 @@ func TestReviewPendingBadIDIsInvalidArgument(t *testing.T) {
 	_, err := New(&fakeGH{}).PendingReview(context.Background(), pr.PendingReviewRequest{ID: "nope"})
 	if !errors.Is(err, scriptout.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want invalid_argument", err)
+	}
+}
+
+// postedAsBackend returns a pending review whose body and comments are exactly
+// the text the backend would have posted (digest marker on the body, plain
+// marker on each comment), anchored at commit.
+func postedAsBackend(commit, body string, comments ...string) *github.PendingReviewNode {
+	rev := &github.PendingReviewNode{
+		ID: "PRR_node", DatabaseID: 5001, URL: "https://example.invalid/pr/42#review-5001", CommitOID: commit,
+	}
+	texts := make([]string, 0, len(comments))
+	for i, c := range comments {
+		t := github.StampBotMarker(c)
+		texts = append(texts, t)
+		rev.Comments = append(rev.Comments, github.PendingReviewComment{
+			ID: "C" + string(rune('1'+i)), DatabaseID: int64(i + 1), Path: "a.go", Line: i + 1, Body: t,
+		})
+	}
+	rev.Body = github.StampBodyWithDigest(body, texts)
+	return rev
+}
+
+func TestReviewPendingReportsURLAndDigestState(t *testing.T) {
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head2", Review: postedAsBackend("head1", "summary", "one", "two")}}
+	res, err := New(gh).PendingReview(context.Background(), pendingReq())
+	if err != nil {
+		t.Fatalf("PendingReview: %v", err)
+	}
+	r := res.Review
+	if r.URL != "https://example.invalid/pr/42#review-5001" {
+		t.Errorf("URL = %q", r.URL)
+	}
+	if r.DigestState != "verified" || !r.BodyMarked || !r.AllMarked {
+		t.Errorf("untouched backend content must be verified and fully marked: %+v", r)
+	}
+}
+
+// TestReviewPendingDigestStateTable: the digest, not the marker, is what makes
+// content verified-unedited; a review with no digest is never verified.
+func TestReviewPendingDigestStateTable(t *testing.T) {
+	mut := func(f func(*github.PendingReviewNode)) *github.PendingReviewNode {
+		r := postedAsBackend("head1", "summary", "one", "two")
+		f(r)
+		return r
+	}
+	cases := map[string]struct {
+		rev        *github.PendingReviewNode
+		wantDigest string
+		wantAll    bool
+	}{
+		"untouched": {postedAsBackend("head1", "summary", "one", "two"), "verified", true},
+		"CRLF-converted body and comments, text otherwise unchanged": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.ReplaceAll(r.Body, "\n", "\r\n")
+			for i := range r.Comments {
+				r.Comments[i].Body = strings.ReplaceAll(r.Comments[i].Body, "\n", "\r\n")
+			}
+		}), "verified", true},
+		"marker-preserving comment text edit": {mut(func(r *github.PendingReviewNode) {
+			r.Comments[0].Body = strings.Replace(r.Comments[0].Body, "one", "ONE (edited)", 1)
+		}), "mismatch", true},
+		"marker removed from a comment": {mut(func(r *github.PendingReviewNode) {
+			r.Comments[1].Body = strings.Replace(r.Comments[1].Body, github.BotMarker, "", 1)
+		}), "mismatch", false},
+		"unmarked comment added": {mut(func(r *github.PendingReviewNode) {
+			r.Comments = append(r.Comments, github.PendingReviewComment{ID: "CX", Body: "a human added this"})
+		}), "mismatch", false},
+		"body text edited": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.Replace(r.Body, "summary", "summary (edited)", 1)
+		}), "mismatch", true},
+		"posted before digests existed": {&github.PendingReviewNode{
+			ID: "R", DatabaseID: 1, CommitOID: "head1", Body: "x\n" + github.BotMarker,
+			Comments: []github.PendingReviewComment{{ID: "C", Body: "y " + github.BotMarker}},
+		}, "missing", true},
+		"left by pg-pr": {&github.PendingReviewNode{
+			ID: "R", DatabaseID: 1, CommitOID: "head1", Body: "x <!-- pg-pr -->",
+		}, "missing", true},
+		"damaged digest": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.Replace(r.Body, github.DigestMarkerPrefix, github.DigestMarkerPrefix+"zz", 1)
+		}), "unreadable", true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head2", Review: c.rev}}
+			res, err := New(gh).PendingReview(context.Background(), pendingReq())
+			if err != nil {
+				t.Fatalf("PendingReview: %v", err)
+			}
+			if res.Review.DigestState != c.wantDigest || res.Review.AllMarked != c.wantAll {
+				t.Errorf("digest_state=%q all_marked=%v, want %q / %v", res.Review.DigestState, res.Review.AllMarked, c.wantDigest, c.wantAll)
+			}
+		})
 	}
 }
