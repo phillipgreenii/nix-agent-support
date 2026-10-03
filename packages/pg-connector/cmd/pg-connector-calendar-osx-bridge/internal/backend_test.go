@@ -576,6 +576,78 @@ func TestBackend_ListAttention_QueryLooksBackAndFiltersEnded(t *testing.T) {
 	}
 }
 
+// Regression (bead pg2-vmhgr): occurrences of one recurring series share
+// an event ID, so the dedup key MUST distinguish occurrences — yesterday's
+// ended occurrence must not shadow tomorrow's upcoming one.
+func TestBackend_ListAttention_RecurringOccurrencesNotCollapsedByID(t *testing.T) {
+	yesterday := attnEvent("daily", rampNow.Add(-24*time.Hour), rampNow.Add(-23*time.Hour))
+	tomorrow := attnEvent("daily", rampNow.Add(20*time.Hour), rampNow.Add(21*time.Hour)) // inside the default 24h window
+	b, _, ctx := attentionBackend(t, backendConfig{}, yesterday, tomorrow)
+	items, err := b.ListAttention(ctx)
+	if err != nil {
+		t.Fatalf("ListAttention: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "daily" || items[0].Severity != schema.SeverityLow {
+		t.Fatalf("items = %+v, want exactly the upcoming occurrence of daily graded low", items)
+	}
+}
+
+func TestBackend_ListEvents_RecurringOccurrencesNotCollapsedByID(t *testing.T) {
+	yesterday := attnEvent("daily", rampNow.Add(-24*time.Hour), rampNow.Add(-23*time.Hour))
+	tomorrow := attnEvent("daily", rampNow.Add(24*time.Hour), rampNow.Add(25*time.Hour))
+	b, _, ctx := attentionBackend(t, backendConfig{}, yesterday, tomorrow)
+	res, err := b.ListEvents(ctx, rampNow.Add(-48*time.Hour), rampNow.Add(48*time.Hour), "")
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(res.Entities) != 2 {
+		t.Fatalf("len(Entities) = %d, want 2 distinct occurrences of daily: %+v", len(res.Entities), res.Entities)
+	}
+	starts := map[string]bool{}
+	for _, e := range res.Entities {
+		starts[e.Start] = true
+	}
+	if !starts[rfc3339(yesterday.Start)] || !starts[rfc3339(tomorrow.Start)] {
+		t.Errorf("starts = %v, want both yesterday's and tomorrow's occurrence", starts)
+	}
+}
+
+// The cross-calendar tie-break still applies per occurrence: the SAME
+// occurrence under two calendars collapses to the higher-priority
+// calendar's copy, while a different occurrence of the same id survives.
+func TestBackend_ListEvents_CrossCalendarTieBreakPerOccurrence(t *testing.T) {
+	d1 := attnEvent("daily", rampNow.Add(-24*time.Hour), rampNow.Add(-23*time.Hour))
+	d2 := attnEvent("daily", rampNow.Add(24*time.Hour), rampNow.Add(25*time.Hour))
+	ft := &fakeTransport{
+		calendars: []apiCalendar{{ID: "cal-w", Title: "Work"}, {ID: "cal-p", Title: "Personal"}},
+		events: map[string][]apiEvent{
+			"cal-p": {d1, d2},
+			"cal-w": {d2},
+		},
+	}
+	b := New(ft)
+	cfg := backendConfig{Calendars: []calendarConfig{
+		{Name: "Personal", Priority: "low"},
+		{Name: "Work", Priority: "high"},
+	}}
+	res, err := b.ListEvents(ctxWithConfig(t, cfg), rampNow.Add(-48*time.Hour), rampNow.Add(48*time.Hour), "")
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(res.Entities) != 2 {
+		t.Fatalf("len(Entities) = %d, want 2 (d2 deduped across calendars, d1 kept): %+v", len(res.Entities), res.Entities)
+	}
+	for _, e := range res.Entities {
+		want := "low"
+		if e.Start == rfc3339(d2.Start) {
+			want = "high"
+		}
+		if e.CalendarPriority != want {
+			t.Errorf("occurrence at %s CalendarPriority = %q, want %q", e.Start, e.CalendarPriority, want)
+		}
+	}
+}
+
 // ----------------------------------------------------------------------
 // Search
 // ----------------------------------------------------------------------

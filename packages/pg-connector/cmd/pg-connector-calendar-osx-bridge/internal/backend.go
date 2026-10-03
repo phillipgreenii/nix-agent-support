@@ -36,7 +36,9 @@
 //     [freedom boundary].
 //
 //   - Dedup tie-break: fetchOccurrences aggregates every resolved
-//     calendar's own "events" results and, when the SAME event ID appears
+//     calendar's own "events" results and, when the SAME occurrence (event ID
+//     AND occurrence start — a recurring series' occurrences share one ID
+//     and MUST NOT shadow one another, bead pg2-vmhgr) appears
 //     under two configured calendars, keeps the occurrence whose
 //     configured calendar_priority ranks HIGHEST (priorityWeight below);
 //     a tie (equal or both-unrecognized priority values) keeps whichever
@@ -350,6 +352,21 @@ type occurrence struct {
 	cal   resolvedCalendar
 }
 
+// occurrenceKey identifies one OCCURRENCE of an event for dedup: the event
+// ID plus the occurrence's own start instant. Occurrences of a plain
+// recurring series share one event ID, so the ID alone would collapse a
+// whole series in the queried range to its first occurrence (bead
+// pg2-vmhgr); the same occurrence seen under two configured calendars
+// shares both ID and start and so still collapses.
+type occurrenceKey struct {
+	id    string
+	start int64 // apiEvent.Start as UnixNano
+}
+
+func keyOf(e apiEvent) occurrenceKey {
+	return occurrenceKey{id: e.ID, start: e.Start.UnixNano()}
+}
+
 // fetchOccurrences resolves cfg's own configured calendars (optionally
 // narrowed to exactly one by name via calendarFilter — Provider.List's/
 // ListEvents'/Search's own "calendar" or "narrow to one" parameter),
@@ -357,8 +374,8 @@ type occurrence struct {
 // search, when non-empty, passed straight through as
 // apiEventsQuery.Search), drops a tentative occurrence whose own calendar
 // is configured include_tentative:false, and dedupes the survivors by
-// event ID using the tie-break rule this file's package doc comment
-// documents. Returns the deduped occurrences in first-seen (config) order.
+// occurrence (event ID plus occurrence start; see occurrenceKey) using the
+// tie-break rule this file's package doc comment documents. Returns the deduped occurrences in first-seen (config) order.
 func (b *Backend) fetchOccurrences(ctx context.Context, cfg backendConfig, start, end time.Time, calendarFilter, search string) ([]occurrence, error) {
 	resolved, err := b.resolveCalendars(ctx, cfg)
 	if err != nil {
@@ -374,8 +391,8 @@ func (b *Backend) fetchOccurrences(ctx context.Context, cfg backendConfig, start
 		resolved = filtered
 	}
 
-	winners := make(map[string]occurrence, len(resolved))
-	order := make([]string, 0, len(resolved))
+	winners := make(map[occurrenceKey]occurrence, len(resolved))
+	order := make([]occurrenceKey, 0, len(resolved))
 	for _, rc := range resolved {
 		events, err := b.transport.Events(ctx, apiEventsQuery{Start: start, End: end, CalendarIDs: []string{rc.ID}, Search: search})
 		if err != nil {
@@ -385,21 +402,22 @@ func (b *Backend) fetchOccurrences(ctx context.Context, cfg backendConfig, start
 			if !rc.IncludeTentative && isTentative(e.SelfStatus) {
 				continue
 			}
-			cur, seen := winners[e.ID]
+			key := keyOf(e)
+			cur, seen := winners[key]
 			if !seen {
-				winners[e.ID] = occurrence{event: e, cal: rc}
-				order = append(order, e.ID)
+				winners[key] = occurrence{event: e, cal: rc}
+				order = append(order, key)
 				continue
 			}
 			if priorityWeight(rc.Priority) > priorityWeight(cur.cal.Priority) {
-				winners[e.ID] = occurrence{event: e, cal: rc}
+				winners[key] = occurrence{event: e, cal: rc}
 			}
 		}
 	}
 
 	out := make([]occurrence, 0, len(order))
-	for _, id := range order {
-		out = append(out, winners[id])
+	for _, key := range order {
+		out = append(out, winners[key])
 	}
 	return out, nil
 }
