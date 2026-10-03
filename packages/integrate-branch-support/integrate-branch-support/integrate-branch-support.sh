@@ -22,12 +22,12 @@ Options:
                       (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT,
                       CC_CORE_WORKTREE -- non-empty iff the canonical clone's
                       .git/config sets core.worktree; read-only, never cleared).
-                      PRECOMMIT is bundle|stale|legacy|missing|broken, from
+                      PRECOMMIT is bundle|stale|missing|broken, from
                       `pg-hooks status --porcelain`
   --prek-branch-diff  FF-1b: run `pg-hooks run pre-land <FB>` in WT (the hooks
                       over the whole branch diff). Exit 10 (a hook failed)
                       and any other failure are passed through; exit 13 (no
-                      bundle, no usable legacy config) and a missing pg-hooks
+                      hook bundle) and a missing pg-hooks
                       (127) record their notice line and exit 0. Never
                       links, copies or regenerates a hook config
   --bundle-refresh <old-sha>
@@ -105,8 +105,7 @@ fi
 if [ "$mode" = prek-branch-diff ]; then
   # --prek-branch-diff: ff-merge-to-main's FF-1b step, made testable here
   # rather than as inline skill prose. It delegates to `pg-hooks run pre-land
-  # <FB>` (per-clone hook bundle, or a legacy .pre-commit-config.yaml that
-  # pg-hooks reads in place) and NEVER links, copies, or regenerates a hook
+  # <FB>` (per-clone hook bundle) and NEVER links, copies, or regenerates a hook
   # config (operator ruling 2026-10-01, bead pg2-pla9d.1). Exit-status mapping:
   # see pre_land_check.
   wt_val="$(current_worktree_root)"

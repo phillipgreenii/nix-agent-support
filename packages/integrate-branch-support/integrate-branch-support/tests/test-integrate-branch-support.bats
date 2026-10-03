@@ -491,8 +491,8 @@ facts_precommit() {
   facts_precommit relocated stale 16
 }
 
-@test "facts: PRECOMMIT is legacy when pg-hooks status reports legacy" {
-  facts_precommit legacy legacy
+@test "facts: PRECOMMIT is missing when pg-hooks status reports the retired legacy state" {
+  facts_precommit legacy missing
 }
 
 @test "facts: PRECOMMIT is missing when pg-hooks status reports missing" {
@@ -522,42 +522,20 @@ facts_precommit() {
   grep -qxF "cwd=$wt" "$STUB_BIN/pg-hooks-calls"
 }
 
-@test "facts: PRECOMMIT falls back to missing when pg-hooks is absent and no legacy config exists" {
+@test "facts: PRECOMMIT falls back to missing when pg-hooks is absent" {
   run_pg_hooks_absent --facts
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "^PRECOMMIT=missing$"
 }
 
-@test "facts: PRECOMMIT falls back to legacy for a plain legacy config when pg-hooks is absent" {
-  echo "repos: []" >.pre-commit-config.yaml
-  run_pg_hooks_absent --facts
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=legacy$"
-}
-
-@test "facts: PRECOMMIT falls back to legacy for a live-target symlink when pg-hooks is absent" {
-  echo "repos: []" >"$STUB_BIN/real-config.yaml"
-  ln -s "$STUB_BIN/real-config.yaml" .pre-commit-config.yaml
-  run_pg_hooks_absent --facts
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=legacy$"
-}
-
-@test "facts: PRECOMMIT falls back to missing for a dangling symlink when pg-hooks is absent" {
-  ln -s /nix/store/does-not-exist/.pre-commit-config.yaml .pre-commit-config.yaml
-  run_pg_hooks_absent --facts
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=missing$"
-}
-
-@test "facts: PRECOMMIT falls back to the legacy probe when pg-hooks prints no recognizable state" {
+@test "facts: PRECOMMIT is missing when pg-hooks prints no recognizable state, even with an on-disk config" {
   echo "repos: []" >.pre-commit-config.yaml
   STUB_PGH_STATE=""
   export STUB_PGH_STATE
   stub_pg_hooks
   run bash "$BIN" --facts
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "^PRECOMMIT=legacy$"
+  echo "$output" | grep -q "^PRECOMMIT=missing$"
 }
 
 @test "facts: PRIMARY resolution matches the JSON mode's (config -> origin/HEAD -> main)" {
@@ -598,7 +576,7 @@ facts_precommit() {
 PG_HOOKS_NOTICE='pg-hooks not installed on this machine; ask the operator to run pn workspace apply'
 
 # assert_no_hook_config_created <worktree>: FF-1b MUST NOT link, copy, or
-# regenerate a hook config -- nothing at all may exist at the legacy config
+# regenerate a hook config -- nothing at all may exist at the old config
 # path, and the worktree MUST be exactly as clean as before.
 assert_no_hook_config_created() {
   [ ! -e "$1/.pre-commit-config.yaml" ]
@@ -679,10 +657,9 @@ assert_no_hook_config_created() {
   [ "$status" -eq 2 ]
 }
 
-@test "prek-branch-diff: never calls prek directly, even with a legacy config present" {
+@test "prek-branch-diff: never calls prek directly" {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   add_worktree feat
-  echo "repos: []" >.pre-commit-config.yaml
   cat >"$STUB_BIN/prek" <<STUB
 #!/usr/bin/env bash
 echo called >>"$STUB_BIN/prek-calls"

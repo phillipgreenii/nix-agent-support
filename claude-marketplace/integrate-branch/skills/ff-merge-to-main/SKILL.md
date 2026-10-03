@@ -62,10 +62,10 @@ refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
   else `main`.
 - `DIRTY`, `AHEAD`, `BEHIND`, and `PRECOMMIT` are also available from this same
   call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
-  itself. `PRECOMMIT` (`bundle` / `stale` / `legacy` / `missing` / `broken`,
-  from `pg-hooks status --porcelain`; `legacy` also covers a usable
-  `.pre-commit-config.yaml` when `pg-hooks` is not installed) is informational
-  only: FF-1b decides for itself, through `pg-hooks`, whether hooks can run.
+  itself. `PRECOMMIT` (`bundle` / `stale` / `missing` / `broken`,
+  from `pg-hooks status --porcelain`; an absent `pg-hooks` or an unrecognized
+  state reports `missing`) is informational only: FF-1b decides for itself,
+  through `pg-hooks`, whether hooks can run.
 - `CC_CORE_WORKTREE` is empty on a healthy canonical clone. A non-empty value is
   the `core.worktree` key found in the canonical clone's own `.git/config`
   (read straight from that file, read-only); FF-0a below treats it as the
@@ -346,9 +346,8 @@ false-block on a pre-existing violation the branch never touched). `<FB>`
 already reflects FF-1's rebase, so this runs against the freshly-rebased tree,
 at the default `pre-commit` hook stage — the same stage every individual
 commit already ran, just scoped to the whole branch's diff instead of one
-commit's. `pg-hooks` picks the hook source itself: the clone's hook bundle, or,
-for a repo not yet cut over, the legacy `.pre-commit-config.yaml` read in place
-(dual mode) — this handler never chooses between them.
+commit's. `pg-hooks` resolves the clone's hook bundle itself — this handler never
+chooses a hook source.
 
 The exit status maps as follows (the exit-code contract of `pg-hooks`):
 
@@ -356,7 +355,7 @@ The exit status maps as follows (the exit-code contract of `pg-hooks`):
 | ------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 0                                                             | hooks passed, or nothing to run                                           | continue to FF-2                                                                                                       |
 | 10                                                            | a hook failed                                                             | halt: `stopped:precommit-branch-diff-failed`                                                                           |
-| 13                                                            | no bundle (and no usable legacy config) for this clone                    | record `pg-hooks`'s one notice line verbatim in the outcome report, continue to FF-2                                   |
+| 13                                                            | no hook bundle for this clone                                             | record `pg-hooks`'s one notice line verbatim in the outcome report, continue to FF-2                                   |
 | 127                                                           | `pg-hooks` is not installed (also reported when it is absent from `PATH`) | record `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
 | other non-zero (12 broken bundle, 2 usage, 11 skipped, 1 ...) | the check could not run or finish                                         | halt as `stopped:precommit-branch-diff-failed`, reporting the exit status and `pg-hooks`'s own message verbatim        |
 
@@ -542,18 +541,18 @@ ask the operator to run pn workspace apply`), and it MUST include FF-4a's
 `<reason>` values, and the
 disposition each one asks of the operator:
 
-| `<reason>`                     | Raised by | What the operator does next                                                             |
-| ------------------------------ | --------- | --------------------------------------------------------------------------------------- |
-| detached `HEAD`                | Step 0    | check out the feature branch                                                            |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                                   |
-| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler               |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                               |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                               |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                                    |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                                |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                                         |
-| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with a hook bundle or legacy config), then re-invoke |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                                  |
+| `<reason>`                     | Raised by | What the operator does next                                               |
+| ------------------------------ | --------- | ------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0    | check out the feature branch                                              |
+| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                     |
+| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler |
+| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                 |
+| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
+| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                      |
+| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                  |
+| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                           |
+| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with a hook bundle), then re-invoke    |
+| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                    |
 
 These reasons MUST NOT be collapsed into one another — above all,
 `rebase-conflict` MUST NOT absorb the four other rebase reasons

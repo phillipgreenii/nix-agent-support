@@ -235,56 +235,18 @@ ahead_behind_primary() {
   printf '%s\n' "$(git rev-list --count HEAD.."$ref" 2>/dev/null || echo 0)"
 }
 
-# legacy_config_state <worktree root>: print "symlink", "dangling", "real", or
-# "missing" for the on-disk state of <worktree root>/.pre-commit-config.yaml
-# (the LEGACY, pre-hook-bundle config). This repo's own CLAUDE.md ("prek /
-# pre-commit in Fresh Worktrees") documents why this matters: the canonical
-# clone's copy is a gitignored, nix-generated symlink into /nix/store, which a
-# fresh `git worktree add` worktree does not get for free. "symlink" is a link
-# whose target exists; "dangling" is a link whose target does NOT exist (e.g. a
-# garbage-collected nix store path) -- `-L` is checked before `-e` because `-e`
-# (and `-f`) follow the link and are false for a dangling one, which would
-# otherwise be misreported as "missing". Only "symlink" and "real" are a
-# USABLE prek config (see precommit_usable). Used only as the fallback when
-# `pg-hooks` is not on PATH (precommit_state below).
-legacy_config_state() {
-  local path="$1/.pre-commit-config.yaml"
-  if [ -L "$path" ]; then
-    if [ -e "$path" ]; then
-      printf 'symlink'
-    else
-      printf 'dangling'
-    fi
-  elif [ -e "$path" ]; then
-    printf 'real'
-  else
-    printf 'missing'
-  fi
-}
-
-# precommit_usable <worktree root>: succeed iff <worktree root> has a prek
-# config prek can actually read -- a regular file, or a symlink whose target
-# exists. A missing file and a dangling symlink both fail. Read-only: it never
-# links, copies, or regenerates a config (operator ruling 2026-10-01, bead
-# pg2-pla9d.1: with no config, the pre-land prek step does nothing).
-precommit_usable() {
-  case "$(legacy_config_state "$1")" in
-  real | symlink) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
 # precommit_state <worktree root>: print the PRECOMMIT fact -- one of
-# "bundle", "stale", "legacy", "missing", "broken" -- from `pg-hooks status
-# --porcelain` (spec 5.3: callers parse the porcelain, never prose):
-#   present -> bundle    stale -> stale    legacy -> legacy
-#   missing -> missing   broken -> broken
+# "bundle", "stale", "missing", "broken" -- from `pg-hooks status --porcelain`
+# (spec 5.3: callers parse the porcelain, never prose):
+#   present -> bundle    stale -> stale    missing -> missing   broken -> broken
 #   relocated -> stale   (the bundle exists but must be rebuilt)
 #   unreachable -> missing (git never runs the hooks from this clone)
 # `pg-hooks status` encodes the state in its exit code too, so a non-zero exit
-# is expected and ignored here. When pg-hooks is not on PATH (or prints no
-# recognizable state) fall back to the legacy on-disk config: "legacy" when it
-# is usable, else "missing". Read-only.
+# is expected and ignored here. Anything else -- pg-hooks not on PATH, no
+# `state=` line, or an unrecognized/retired state (e.g. an old pg-hooks's
+# `legacy`) -- is "missing": the tool tolerates both older and newer pg-hooks
+# output and never crashes on it. Read-only: it never inspects, links or
+# regenerates an on-disk hook config.
 precommit_state() {
   local wt="$1" out="" line state=""
   if command -v pg-hooks >/dev/null 2>&1; then
@@ -303,21 +265,13 @@ precommit_state() {
       printf 'stale'
       return
       ;;
-    legacy | missing | broken)
-      printf '%s' "$state"
-      return
-      ;;
-    unreachable)
-      printf 'missing'
+    broken)
+      printf 'broken'
       return
       ;;
     esac
   fi
-  if precommit_usable "$wt"; then
-    printf 'legacy'
-  else
-    printf 'missing'
-  fi
+  printf 'missing'
 }
 
 # PG_HOOKS_MISSING_NOTICE: the exact line spec 5.3 prescribes when pg-hooks is
@@ -329,7 +283,7 @@ PG_HOOKS_MISSING_NOTICE='pg-hooks not installed on this machine; ask the operato
 #   0   -> 0
 #   10  -> 10 (a hook failed; the caller reports
 #              stopped:precommit-branch-diff-failed)
-#   13  -> 0  (no bundle and no usable legacy config: pg-hooks has already
+#   13  -> 0  (no hook bundle: pg-hooks has already
 #              printed its one `pg-hooks: no hook bundle ...` notice on stderr,
 #              which the land outcome relays verbatim; the land continues)
 #   127 -> 0  (pg-hooks missing: print PG_HOOKS_MISSING_NOTICE on stdout; the
