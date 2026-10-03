@@ -25,17 +25,15 @@ func newDrainIsolateCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "isolate",
-		Short: "Create or reuse the bead's worktree (.worktrees/<bead> on drain/<bead>); link the pre-commit config only for legacy repos",
+		Short: "Create or reuse the bead's worktree (.worktrees/<bead> on drain/<bead>); report the hook-bundle state",
 		Long: `Idempotent isolation for one bead: reuses an existing worktree or parked
 branch, otherwise branches off the repo's primary branch.
 
-For a LEGACY repo (no hook bundle; "pg-hooks status --porcelain" says
-state=legacy, or pg-hooks is not installed) it then links the canonical
-clone's gitignored nix-generated .pre-commit-config.yaml into the worktree so
-commits there run the hooks; the precommit field is linked|present|none. For a
-repo with a hook bundle it writes NO file and reports the bundle state in the
-precommit field instead: bundle|stale|missing|broken (the PRECOMMIT vocabulary
-of integrate-branch-support --facts).
+It then reports the clone's hook-bundle state in the precommit field
+(bundle|stale|missing|broken, the PRECOMMIT vocabulary of
+integrate-branch-support --facts, from "pg-hooks status --porcelain") and
+writes NO file into the worktree: git runs the bundle's hooks from the shared
+common dir. An absent pg-hooks or an unrecognized state reports missing.
 
 Exit codes: 0 isolated (created or reused); 1 generic failure; 3 conflicting
 isolation state (the worktree path holds another branch, or drain/<bead> is

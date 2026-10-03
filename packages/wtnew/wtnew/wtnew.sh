@@ -1,9 +1,8 @@
 # shellcheck shell=bash
 # wtnew - create a fresh git worktree for MANUAL (non-drain) work: adds the
-# worktree on a new branch, links the pre-commit config that a fresh worktree
-# of a LEGACY repo is otherwise missing (CLAUDE.md "prek / pre-commit in
-# Fresh Worktrees"; phillipg-nix-repo-base ADR 0016; a repo with a hook bundle
-# needs no link and gets none), and prints the same integration-facts JSON
+# worktree on a new branch, reports the clone's hook-bundle state on stderr
+# (git runs a bundle's hooks from the shared common dir, so nothing is written
+# into the worktree), and prints the same integration-facts JSON
 # block `integrate-branch-support` prints, computed from inside the new
 # worktree.
 #
@@ -25,13 +24,12 @@ wtnew: Create a fresh git worktree for manual (non-drain) work
 
 Usage: wtnew <bead-or-name> [OPTIONS]
 
-Creates .worktrees/<bead-or-name> off a base ref on a new branch, links the
-pre-commit config a fresh worktree of a LEGACY repo is otherwise missing
-(`pg-hooks status --porcelain` says state=legacy, or pg-hooks is not
-installed; a repo with a hook bundle gets no file), and prints the same
-integration-facts JSON block `integrate-branch-support` prints (computed from
+Creates .worktrees/<bead-or-name> off a base ref on a new branch (writing no
+hook config into it: git runs the clone's hook bundle from the shared common
+dir), reports the hook-bundle state from `pg-hooks status --porcelain`, and
+prints the same integration-facts JSON block `integrate-branch-support` prints (computed from
 inside the new worktree). On stderr it also reports `PRECOMMIT=<value>`, the
-facts-block vocabulary: bundle|stale|legacy|missing|broken.
+facts-block vocabulary: bundle|stale|missing|broken.
 
 Arguments:
   <bead-or-name>    Directory name under .worktrees/, and (unless --branch
@@ -126,13 +124,6 @@ if ! git -C "$root" worktree add "$wt" -b "$branch" "$base" >&2; then
 fi
 
 hooks_state="$(wtnew_hooks_state "$wt")"
-link_status=""
-if wtnew_should_link_precommit "$hooks_state"; then
-  link_status="$(wtnew_link_precommit_config "$root/.pre-commit-config.yaml" "$wt/.pre-commit-config.yaml")"
-  echo "wtnew: pre-commit config: $link_status" >&2
-else
-  echo "wtnew: pre-commit config: not linked (pg-hooks status: $hooks_state)" >&2
-fi
-echo "wtnew: PRECOMMIT=$(wtnew_precommit_fact "$hooks_state" "$link_status")" >&2
+echo "wtnew: PRECOMMIT=$(wtnew_precommit_fact "$hooks_state")" >&2
 
 (cd "$wt" && integrate-branch-support)

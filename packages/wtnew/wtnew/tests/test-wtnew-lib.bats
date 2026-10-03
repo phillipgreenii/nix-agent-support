@@ -101,37 +101,6 @@ EOF
   [ "$output" = "trunk" ]
 }
 
-@test "wtnew_link_precommit_config: SRC is a symlink -> DST is relinked to SRC's resolved target (not SRC itself)" {
-  mkdir -p "$TEST_DIR/store-target"
-  touch "$TEST_DIR/store-target/config.yaml"
-  ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
-  mkdir -p "$TEST_DIR/wt"
-  run wtnew_link_precommit_config "$TEST_DIR/.pre-commit-config.yaml" "$TEST_DIR/wt/.pre-commit-config.yaml"
-  [ "$status" -eq 0 ]
-  [ "$output" = "linked" ]
-  [ -L "$TEST_DIR/wt/.pre-commit-config.yaml" ]
-  [ "$(readlink "$TEST_DIR/wt/.pre-commit-config.yaml")" = "$TEST_DIR/store-target/config.yaml" ]
-}
-
-@test "wtnew_link_precommit_config: SRC is a plain file -> DST gets a literal copy, not a symlink" {
-  echo "repos: []" >"$TEST_DIR/.pre-commit-config.yaml"
-  mkdir -p "$TEST_DIR/wt"
-  run wtnew_link_precommit_config "$TEST_DIR/.pre-commit-config.yaml" "$TEST_DIR/wt/.pre-commit-config.yaml"
-  [ "$status" -eq 0 ]
-  [ "$output" = "copied" ]
-  [ ! -L "$TEST_DIR/wt/.pre-commit-config.yaml" ]
-  [ -f "$TEST_DIR/wt/.pre-commit-config.yaml" ]
-  diff "$TEST_DIR/.pre-commit-config.yaml" "$TEST_DIR/wt/.pre-commit-config.yaml"
-}
-
-@test "wtnew_link_precommit_config: SRC is absent -> nothing created, reported as none" {
-  mkdir -p "$TEST_DIR/wt"
-  run wtnew_link_precommit_config "$TEST_DIR/.pre-commit-config.yaml" "$TEST_DIR/wt/.pre-commit-config.yaml"
-  [ "$status" -eq 0 ]
-  [ "$output" = "none" ]
-  [ ! -e "$TEST_DIR/wt/.pre-commit-config.yaml" ]
-}
-
 # --- Task 11 (pg2-pla9d.15) ---------------------------------------------------
 
 # stub_pg_hooks <state> <exit>: a `pg-hooks` on PATH printing that status.
@@ -176,21 +145,16 @@ EOF
   [ -z "$output" ]
 }
 
-@test "wtnew_should_link_precommit: only legacy, or no/unrecognized state, links" {
-  run wtnew_should_link_precommit legacy
+@test "wtnew_hooks_state: prints nothing for the retired legacy state" {
+  stub_pg_hooks legacy 0
+  run wtnew_hooks_state "$TEST_DIR"
   [ "$status" -eq 0 ]
-  run wtnew_should_link_precommit ""
-  [ "$status" -eq 0 ]
-  local st
-  for st in present stale missing broken unreachable relocated; do
-    run wtnew_should_link_precommit "$st"
-    [ "$status" -ne 0 ]
-  done
+  [ -z "$output" ]
 }
 
 @test "wtnew_precommit_fact: maps every pg-hooks state onto the shared PRECOMMIT vocabulary" {
   local pair st want
-  for pair in present:bundle stale:stale relocated:stale broken:broken legacy:legacy missing:missing unreachable:missing; do
+  for pair in present:bundle stale:stale relocated:stale broken:broken missing:missing unreachable:missing; do
     st="${pair%%:*}"
     want="${pair##*:}"
     run wtnew_precommit_fact "$st"
@@ -199,14 +163,12 @@ EOF
   done
 }
 
-@test "wtnew_precommit_fact: with no state, falls back to what the link step produced" {
-  run wtnew_precommit_fact "" linked
-  [ "$output" = "legacy" ]
-  run wtnew_precommit_fact "" copied
-  [ "$output" = "legacy" ]
-  run wtnew_precommit_fact "" none
-  [ "$output" = "missing" ]
+@test "wtnew_precommit_fact: no state, an unrecognized state, and the retired legacy state all report missing" {
   run wtnew_precommit_fact ""
+  [ "$output" = "missing" ]
+  run wtnew_precommit_fact weird
+  [ "$output" = "missing" ]
+  run wtnew_precommit_fact legacy
   [ "$output" = "missing" ]
 }
 
@@ -221,6 +183,9 @@ EOF
     printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$st'" "exit 0" >"$STUB_BIN/pg-hooks"
     chmod +x "$STUB_BIN/pg-hooks"
     stub_status="$(PATH="$STUB_BIN:$PATH" integrate-branch-support --facts | sed -n 's/^PRECOMMIT=//p')"
+    # A build that still maps the retired legacy state to "legacy" predates
+    # the legacy removal; the nix check builds the in-tree tool, which agrees.
+    if [ "$st" = legacy ] && [ "$stub_status" = legacy ]; then continue; fi
     [ "$stub_status" = "$(wtnew_precommit_fact "$st")" ]
   done
 }

@@ -1,11 +1,9 @@
 // Package drain implements /drain-beads isolation: one call that creates (or
-// reuses) a bead's worktree on its drain/<id> branch and, for a LEGACY repo
-// only, links the canonical clone's nix-generated pre-commit config into it
-// (the config is a gitignored symlink — absent from fresh worktrees, so
-// commits there would abort; phillipg-nix-repo-base ADR 0016). A repo with a
-// per-clone hook bundle needs no link: git runs the bundle's hooks from the
-// shared common dir, so isolate writes no file and reports the bundle state
-// (spec 7.1; `pg-hooks status --porcelain`).
+// reuses) a bead's worktree on its drain/<id> branch and reports the clone's
+// hook-bundle state. A repo with a per-clone hook bundle needs no link: git
+// runs the bundle's hooks from the shared common dir, so isolate writes NO
+// file into the worktree and only reports the state (`pg-hooks status
+// --porcelain`); an absent pg-hooks or an unrecognized state reports missing.
 package drain
 
 import (
@@ -33,10 +31,9 @@ type Result struct {
 	Worktree string `json:"worktree"`
 	Branch   string `json:"branch"`
 	Reused   string `json:"reused"` // none | worktree | branch
-	// Precommit is the hook-config outcome. Legacy repos (and machines without
-	// pg-hooks): linked | present | none, exactly as before. Repos with a hook
-	// bundle: bundle | stale | missing | broken (the PRECOMMIT vocabulary of
-	// integrate-branch-support --facts) and NO file is written.
+	// Precommit is the hook-bundle state: bundle | stale | missing | broken
+	// (the PRECOMMIT vocabulary of integrate-branch-support --facts). NO file is
+	// ever written into the worktree.
 	Precommit string `json:"precommit"`
 	// Warning is a non-fatal, read-only diagnosis of the canonical clone
 	// (core.worktree set in its .git/config, or git's toplevel disagreeing
@@ -125,25 +122,15 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 		}
 	}
 
-	// Link the legacy prek config ONLY when pg-hooks says "legacy" (or is not
-	// installed / gives no recognizable state: today's behavior, so a machine
-	// that has not applied yet is no worse off). Any other state means the repo
-	// has (or needs) a hook bundle; writing a config into the worktree would
-	// be wrong, so report the state instead.
-	if state := hooksState(ctx, r, wt); state != "" && state != "legacy" {
-		res.Precommit = precommitFact(state)
-		return res, nil
-	}
-	pc, err := linkPrecommitConfig(repo, wt)
-	if err != nil {
-		return Result{}, err
-	}
-	res.Precommit = pc
+	// Report the hook-bundle state; write nothing into the worktree. An absent
+	// pg-hooks, or any state this tool does not recognize (including the retired
+	// `legacy`), reports missing.
+	res.Precommit = precommitFact(hooksState(ctx, r, wt))
 	return res, nil
 }
 
 // hooksState runs `pg-hooks status --porcelain` in dir and returns its
-// state= value (present|stale|missing|broken|unreachable|relocated|legacy), or
+// state= value (present|stale|missing|broken|unreachable|relocated), or
 // "" when pg-hooks is absent (exec failure or exit 127) or prints no
 // recognizable state. The exit code is deliberately ignored: status encodes
 // the state in its exit code too (14 stale, 13 missing, ...), so a non-zero
@@ -156,7 +143,7 @@ func hooksState(ctx context.Context, r run.Runner, dir string) string {
 			continue
 		}
 		switch v {
-		case "present", "stale", "missing", "broken", "unreachable", "relocated", "legacy":
+		case "present", "stale", "missing", "broken", "unreachable", "relocated":
 			return v
 		}
 		return ""
@@ -165,7 +152,7 @@ func hooksState(ctx context.Context, r run.Runner, dir string) string {
 }
 
 // precommitFact maps a pg-hooks state to the PRECOMMIT vocabulary
-// integrate-branch-support --facts defines (bundle|stale|legacy|missing|broken):
+// integrate-branch-support --facts defines (bundle|stale|missing|broken):
 // relocated is a bundle that must be rebuilt (stale); unreachable means git
 // never runs this clone's hooks (missing).
 func precommitFact(state string) string {
@@ -176,8 +163,6 @@ func precommitFact(state string) string {
 		return "stale"
 	case "broken":
 		return "broken"
-	case "legacy":
-		return "legacy"
 	}
 	return "missing"
 }
@@ -278,32 +263,4 @@ func worktreeBranches(ctx context.Context, r run.Runner, repo string) (map[strin
 		}
 	}
 	return m, nil
-}
-
-// linkPrecommitConfig links the CANONICAL clone's .pre-commit-config.yaml PATH
-// (itself a gitignored symlink into the nix store) into the worktree — a
-// symlink-to-symlink, deliberately NOT the resolved store target, so a later
-// `nix run .#install-pre-commit-hooks` in the canonical clone propagates to
-// long-lived worktrees instead of pinning a stale hook generation. Returns
-// linked | present | none.
-func linkPrecommitConfig(repo, wt string) (string, error) {
-	dst := filepath.Join(wt, ".pre-commit-config.yaml")
-	if _, err := os.Lstat(dst); err == nil {
-		if _, err := os.Stat(dst); err == nil {
-			return "present", nil
-		}
-		// A DANGLING link would read as "present" while prek fails on it —
-		// exactly the failure this verb exists to prevent. Re-point it.
-		if err := os.Remove(dst); err != nil {
-			return "", fmt.Errorf("remove dangling pre-commit link: %w", err)
-		}
-	}
-	src := filepath.Join(repo, ".pre-commit-config.yaml")
-	if _, err := os.Lstat(src); err != nil {
-		return "none", nil // canonical has no config; nothing to link
-	}
-	if err := os.Symlink(src, dst); err != nil {
-		return "", fmt.Errorf("link pre-commit config into worktree: %w", err)
-	}
-	return "linked", nil
 }

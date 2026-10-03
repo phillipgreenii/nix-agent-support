@@ -1,6 +1,6 @@
 # wtnew
 
-> Create a fresh git worktree for manual (non-drain) work: adds the worktree on a new branch, links the pre-commit config a fresh worktree of a legacy repo is otherwise missing (repos with a hook bundle get no file), and prints the same integration-facts JSON block `integrate-branch-support` prints.
+> Create a fresh git worktree for manual (non-drain) work: adds the worktree on a new branch (writing no hook config into it), reports the hook-bundle state on stderr, and prints the same integration-facts JSON block `integrate-branch-support` prints.
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support>.
 
 - Create `.worktrees/{{pg2-abcde}}` off the repo's resolved primary branch, on a plain branch named `{{pg2-abcde}}`:

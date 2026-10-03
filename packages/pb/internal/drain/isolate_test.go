@@ -93,8 +93,9 @@ func stubPgHooks(t *testing.T, state string, exitCode int) string {
 	return log
 }
 
-// withCanonicalConfig gives repo the canonical clone's gitignored-symlink
-// .pre-commit-config.yaml and returns its path.
+// withCanonicalConfig gives repo an old-style gitignored-symlink
+// .pre-commit-config.yaml (the pre-bundle layout) and returns its path; tests
+// use it to prove isolate never links it into a worktree.
 func withCanonicalConfig(t *testing.T, repo string) string {
 	t.Helper()
 	target := filepath.Join(t.TempDir(), "generated-config.yaml")
@@ -153,7 +154,7 @@ func TestIsolate_freshWorktree(t *testing.T) {
 		t.Fatalf("Isolate: %v", err)
 	}
 	want := filepath.Join(repo, ".worktrees", "pg2-x1")
-	if out.Worktree != want || out.Branch != "drain/pg2-x1" || out.Reused != "none" || out.Precommit != "none" {
+	if out.Worktree != want || out.Branch != "drain/pg2-x1" || out.Reused != "none" || out.Precommit != "missing" {
 		t.Errorf("out = %+v", out)
 	}
 	if _, err := os.Stat(filepath.Join(want, "f.txt")); err != nil {
@@ -206,96 +207,6 @@ func TestIsolate_branchCheckedOutElsewhereErrors(t *testing.T) {
 	_, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-x5"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
-	}
-}
-
-func TestIsolate_linksPrecommitConfig(t *testing.T) {
-	repo := newRepo(t)
-	target := filepath.Join(t.TempDir(), "generated-config.yaml")
-	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// canonical clones carry a gitignored SYMLINK to the nix-generated config
-	src := filepath.Join(repo, ".pre-commit-config.yaml")
-	if err := os.Symlink(target, src); err != nil {
-		t.Fatal(err)
-	}
-	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-x6"})
-	if err != nil {
-		t.Fatalf("Isolate: %v", err)
-	}
-	if out.Precommit != "linked" {
-		t.Errorf("Precommit = %q, want linked", out.Precommit)
-	}
-	// The worktree links to the CANONICAL config path (symlink-to-symlink), so a
-	// later hook re-install in the canonical clone propagates to the worktree.
-	got, err := os.Readlink(filepath.Join(out.Worktree, ".pre-commit-config.yaml"))
-	if err != nil || got != src {
-		t.Errorf("worktree config link = %q, %v; want %q", got, err, src)
-	}
-}
-
-func TestIsolate_precommitPresentOnReuse(t *testing.T) {
-	repo := newRepo(t)
-	target := filepath.Join(t.TempDir(), "generated-config.yaml")
-	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// canonical clones carry a gitignored SYMLINK to the nix-generated config
-	src := filepath.Join(repo, ".pre-commit-config.yaml")
-	if err := os.Symlink(target, src); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xb"}); err != nil {
-		t.Fatal(err)
-	}
-	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xb"})
-	if err != nil {
-		t.Fatalf("second Isolate: %v", err)
-	}
-	if out.Reused != "worktree" {
-		t.Errorf("Reused = %q, want worktree", out.Reused)
-	}
-	if out.Precommit != "present" {
-		t.Errorf("Precommit = %q, want present (already-linked config on a reused worktree)", out.Precommit)
-	}
-}
-
-func TestIsolate_danglingPrecommitLinkIsRepointed(t *testing.T) {
-	repo := newRepo(t)
-	target := filepath.Join(t.TempDir(), "generated-config.yaml")
-	if err := os.WriteFile(target, []byte("repos: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// canonical clones carry a gitignored SYMLINK to the nix-generated config
-	src := filepath.Join(repo, ".pre-commit-config.yaml")
-	if err := os.Symlink(target, src); err != nil {
-		t.Fatal(err)
-	}
-	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xc"})
-	if err != nil {
-		t.Fatalf("Isolate: %v", err)
-	}
-	// Break the WORKTREE's link (not the canonical one) by repointing it at a
-	// nonexistent target — this is the shape a half-finished/corrupted worktree
-	// link takes, and it must be REPAIRED, not mistaken for "present".
-	wtCfg := filepath.Join(out.Worktree, ".pre-commit-config.yaml")
-	if err := os.Remove(wtCfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("/nonexistent/target", wtCfg); err != nil {
-		t.Fatal(err)
-	}
-	out2, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-xc"})
-	if err != nil {
-		t.Fatalf("second Isolate: %v", err)
-	}
-	if out2.Precommit != "linked" {
-		t.Errorf("Precommit = %q, want linked (a dangling link must be repointed, never read as present)", out2.Precommit)
-	}
-	got, err := os.Readlink(wtCfg)
-	if err != nil || got != src {
-		t.Errorf("worktree config link = %q, %v; want repointed to canonical %q", got, err, src)
 	}
 }
 
@@ -566,23 +477,17 @@ func TestDiagnoseCanonical_scripted(t *testing.T) {
 	}
 }
 
-// Task 11 (pg2-pla9d.15): link the prek config only when pg-hooks says legacy.
+// Hook-bundle state reporting: isolate writes no file into the worktree.
 
-func TestIsolate_legacyStateLinksPrecommitConfig(t *testing.T) {
+// TestIsolate_statusIsAskedFromTheWorktree: status is asked from inside the new
+// worktree (it resolves the clone from cwd).
+func TestIsolate_statusIsAskedFromTheWorktree(t *testing.T) {
 	repo := newRepo(t)
-	src := withCanonicalConfig(t, repo)
-	log := stubPgHooks(t, "legacy", 0)
+	log := stubPgHooks(t, "present", 0)
 	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11a"})
 	if err != nil {
 		t.Fatalf("Isolate: %v", err)
 	}
-	if out.Precommit != "linked" {
-		t.Errorf("Precommit = %q, want linked", out.Precommit)
-	}
-	if got, err := os.Readlink(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); err != nil || got != src {
-		t.Errorf("worktree config link = %q, %v; want %q", got, err, src)
-	}
-	// status is asked from inside the new worktree (it resolves the clone from cwd)
 	b, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatalf("pg-hooks was never called: %v", err)
@@ -604,6 +509,8 @@ func TestIsolate_bundleStatesWriteNoFileAndReportState(t *testing.T) {
 		{"broken", 12, "broken"},
 		{"missing", 13, "missing"},
 		{"unreachable", 15, "missing"},
+		// The retired legacy state (an old pg-hooks) falls through to missing.
+		{"legacy", 0, "missing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.state, func(t *testing.T) {
@@ -642,21 +549,24 @@ func TestIsolate_bundleStateOnReuseStillWritesNothing(t *testing.T) {
 	}
 }
 
-func TestIsolate_pgHooksAbsentKeepsTodaysBehavior(t *testing.T) {
+func TestIsolate_pgHooksAbsentReportsMissingAndWritesNothing(t *testing.T) {
 	// The default stub exits 127, standing in for "pg-hooks not installed".
 	t.Setenv("PG_HOOKS_STUB_STATE", "")
 	repo := newRepo(t)
-	withCanonicalConfig(t, repo)
+	withCanonicalConfig(t, repo) // an old symlink exists, yet must NOT be linked
 	out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11d"})
 	if err != nil {
 		t.Fatalf("Isolate: %v", err)
 	}
-	if out.Precommit != "linked" {
-		t.Errorf("Precommit = %q, want linked (pg-hooks absent => today's behavior)", out.Precommit)
+	if out.Precommit != "missing" {
+		t.Errorf("Precommit = %q, want missing (pg-hooks absent)", out.Precommit)
+	}
+	if _, err := os.Lstat(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a file/link was written into the worktree (Lstat err = %v)", err)
 	}
 }
 
-func TestIsolate_unrecognizedPgHooksStateKeepsTodaysBehavior(t *testing.T) {
+func TestIsolate_unrecognizedPgHooksStateReportsMissingAndWritesNothing(t *testing.T) {
 	repo := newRepo(t)
 	withCanonicalConfig(t, repo)
 	stubPgHooks(t, "frobnicated", 0)
@@ -664,8 +574,11 @@ func TestIsolate_unrecognizedPgHooksStateKeepsTodaysBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Isolate: %v", err)
 	}
-	if out.Precommit != "linked" {
-		t.Errorf("Precommit = %q, want linked (unrecognized state => today's behavior)", out.Precommit)
+	if out.Precommit != "missing" {
+		t.Errorf("Precommit = %q, want missing (unrecognized state)", out.Precommit)
+	}
+	if _, err := os.Lstat(filepath.Join(out.Worktree, ".pre-commit-config.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a file/link was written into the worktree (Lstat err = %v)", err)
 	}
 }
 
@@ -678,7 +591,7 @@ func TestHooksState_scripted(t *testing.T) {
 	}{
 		{"present", "state=present\nbundle=/x\n", nil, "present"},
 		{"stale with non-zero exit", "state=stale\n", fmt.Errorf("exit 14"), "stale"},
-		{"legacy", "state=legacy\nbundle=\n", nil, "legacy"},
+		{"retired legacy state", "state=legacy\nbundle=\n", nil, ""},
 		{"absent", "", fmt.Errorf("exec: not found"), ""},
 		{"no state line", "bundle=/x\n", nil, ""},
 		{"unknown state", "state=weird\n", nil, ""},

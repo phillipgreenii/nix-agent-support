@@ -2,7 +2,7 @@
 # bats file_tags=type:unit
 #
 # Script-level (subprocess) tests for wtnew's entry point: arg parsing,
-# worktree/branch creation, the pre-commit symlink guarantee, and the
+# worktree/branch creation, the no-hook-config-written guarantee, and the
 # facts-block output. Runs the REAL `integrate-branch-support` (must
 # resolve on PATH -- a testDeps entry under nix, and already installed in
 # this workspace's dev shell for a local `bats tests/` run) so the facts
@@ -142,7 +142,7 @@ add_worktree() {
   # NOTE: captured via command substitution (stdout only), not bats' `run`
   # -- `run` merges stdout+stderr into $output, and wtnew.sh deliberately
   # writes its own progress/diagnostic notes to stderr (git worktree add's
-  # chatter, the pre-commit-config link status) so stdout carries ONLY the
+  # chatter, the PRECOMMIT status) so stdout carries ONLY the
   # facts-block JSON, exactly like integrate-branch-support itself. Mixing
   # stderr back in here would break the JSON parse.
   stdout="$(bash "$BIN" pg2-abcde 2>/dev/null)"
@@ -177,28 +177,14 @@ add_worktree() {
   [ "$(git -C "$TEST_DIR/.worktrees/pg2-abcde" rev-parse HEAD)" = "$(git -C "$TEST_DIR" rev-parse other-base)" ]
 }
 
-@test "pre-commit config: canonical's symlink is relinked to its resolved target, not to the canonical path itself" {
+@test "pre-commit config: nothing is ever written into the worktree, even when the canonical clone has an old symlink" {
   mkdir -p "$TEST_DIR/store-target"
   touch "$TEST_DIR/store-target/config.yaml"
   ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
   run bash "$BIN" pg2-abcde
   [ "$status" -eq 0 ]
-  [ -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
-  [ "$(readlink "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml")" = "$TEST_DIR/store-target/config.yaml" ]
-}
-
-@test "pre-commit config: a plain committed file is copied, not symlinked" {
-  echo "repos: []" >"$TEST_DIR/.pre-commit-config.yaml"
-  run bash "$BIN" pg2-abcde
-  [ "$status" -eq 0 ]
-  [ ! -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
-  diff "$TEST_DIR/.pre-commit-config.yaml" "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml"
-}
-
-@test "pre-commit config: absent in canonical -> nothing created in the worktree, tool still succeeds" {
-  run bash "$BIN" pg2-abcde
-  [ "$status" -eq 0 ]
   [ ! -e "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [ ! -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
 }
 
 @test "run from inside an existing linked worktree: the new worktree lands under the CANONICAL clone's .worktrees/, not nested in the current one" {
@@ -209,19 +195,7 @@ add_worktree() {
   [ ! -d "$WT_DIR/wt/.worktrees" ]
 }
 
-# --- Task 11 (pg2-pla9d.15): link the prek config only for legacy repos ------
-
-@test "pg-hooks state legacy: the config is linked, as today, and PRECOMMIT=legacy is reported" {
-  mkdir -p "$TEST_DIR/store-target"
-  touch "$TEST_DIR/store-target/config.yaml"
-  ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
-  export PG_HOOKS_STUB_STATE=legacy
-  run bash "$BIN" pg2-abcde
-  [ "$status" -eq 0 ]
-  [ -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
-  [[ "$output" == *"pre-commit config: linked"* ]]
-  [[ "$output" == *"PRECOMMIT=legacy"* ]]
-}
+# --- hook-bundle state reporting: wtnew never writes a hook config ----------
 
 @test "pg-hooks state present (bundle): nothing is written into the worktree and PRECOMMIT=bundle is reported" {
   mkdir -p "$TEST_DIR/store-target"
@@ -232,14 +206,13 @@ add_worktree() {
   [ "$status" -eq 0 ]
   [ ! -e "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
   [ ! -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
-  [[ "$output" == *"not linked (pg-hooks status: present)"* ]]
   [[ "$output" == *"PRECOMMIT=bundle"* ]]
 }
 
 @test "pg-hooks bundle states report the shared PRECOMMIT vocabulary and write no file" {
   echo "repos: []" >"$TEST_DIR/.pre-commit-config.yaml"
   local i=0 pair st want
-  for pair in "stale:stale" "broken:broken" "missing:missing" "relocated:stale" "unreachable:missing"; do
+  for pair in "stale:stale" "broken:broken" "missing:missing" "relocated:stale" "unreachable:missing" "legacy:missing"; do
     st="${pair%%:*}"
     want="${pair##*:}"
     i=$((i + 1))
@@ -250,15 +223,16 @@ add_worktree() {
   done
 }
 
-@test "pg-hooks absent (127): today's behavior -- the config is linked" {
+@test "pg-hooks absent (127): PRECOMMIT=missing is reported and no config is written" {
   mkdir -p "$TEST_DIR/store-target"
   touch "$TEST_DIR/store-target/config.yaml"
   ln -s "$TEST_DIR/store-target/config.yaml" "$TEST_DIR/.pre-commit-config.yaml"
   unset PG_HOOKS_STUB_STATE
   run bash "$BIN" pg2-abcde
   [ "$status" -eq 0 ]
-  [ -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
-  [[ "$output" == *"pre-commit config: linked"* ]]
+  [ ! -e "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [ ! -L "$TEST_DIR/.worktrees/pg2-abcde/.pre-commit-config.yaml" ]
+  [[ "$output" == *"PRECOMMIT=missing"* ]]
 }
 
 @test "stdout stays exactly the facts block when a bundle is present (state goes to stderr only)" {
