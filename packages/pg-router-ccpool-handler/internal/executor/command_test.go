@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/query"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
@@ -75,5 +78,108 @@ func TestCommandDispatch_OtherExitCodeDoesNotMapToErrBusy(t *testing.T) {
 	}
 	if errors.Is(err, ErrBusy) {
 		t.Fatalf("errors.Is(err, ErrBusy) = true for a non-9 exit code; err = %v", err)
+	}
+}
+
+// shCommandRole returns a command role whose argv is a /bin/sh script, so
+// the test exercises the REAL default Commander (query.OSCommander) and the
+// real *exec.ExitError.Stderr population, not a fabricated error.
+func shCommandRole(script string) roles.Role {
+	return roles.Role{Name: "cmdrole", Type: "command", Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", script}}}
+}
+
+// TestCommandDispatch_FailureIncludesStderrTail is pg2-rzcfr's acceptance: a
+// command role that writes to stderr and exits non-zero surfaces that stderr
+// in the returned error (and so the dispatch WARN line), while the exit code
+// stays reachable through errors.As.
+func TestCommandDispatch_FailureIncludesStderrTail(t *testing.T) {
+	d := DispatchContext{Role: shCommandRole(`printf 'boom: stage=fetch\nsecond line\n' >&2; echo stdout-noise; exit 3`), Item: item.Item{ID: "b1"}}
+	deps := Deps{Cmd: query.OSCommander{}}
+
+	_, err := commandExecutor{}.Dispatch(context.Background(), d, deps)
+	if err == nil {
+		t.Fatal("exit 3 must produce an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "boom: stage=fetch | second line") {
+		t.Fatalf("error lacks the single-line stderr tail; err = %q", msg)
+	}
+	if !strings.Contains(msg, "command role \"cmdrole\" item b1: exit status 3") {
+		t.Fatalf("error lost the existing prefix / exit status; err = %q", msg)
+	}
+	if strings.ContainsAny(msg, "\n\r") {
+		t.Fatalf("error must stay single-line; err = %q", msg)
+	}
+	if strings.Contains(msg, "stdout-noise") {
+		t.Fatalf("stdout must not leak into the error; err = %q", msg)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
+		t.Fatalf("errors.As did not resolve the exit code 3; err = %v", err)
+	}
+}
+
+// TestCommandDispatch_StderrTailIsBounded feeds far more stderr than any bound
+// (well over exec.Output's own 32 KiB retention) and requires the error to carry
+// only the LAST commandStderrTailMax bytes.
+func TestCommandDispatch_StderrTailIsBounded(t *testing.T) {
+	script := `i=0; while [ $i -lt 4000 ]; do echo "noise-line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; echo FINAL-REASON >&2; exit 1`
+	d := DispatchContext{Role: shCommandRole(script), Item: item.Item{ID: "b1"}}
+
+	_, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: query.OSCommander{}})
+	if err == nil {
+		t.Fatal("exit 1 must produce an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "FINAL-REASON") {
+		t.Fatalf("tail must keep the LAST stderr line; err tail = %q", msg[max(0, len(msg)-200):])
+	}
+	if strings.Contains(msg, "noise-line-0-") || strings.Contains(msg, "noise-line-100-") {
+		t.Fatalf("early stderr must be cut off; len(err) = %d", len(msg))
+	}
+	// prefix + suffix label + the bound (the "..." marker is the only addition).
+	if limit := commandStderrTailMax + 200; len(msg) > limit {
+		t.Fatalf("error is %d bytes, want <= %d", len(msg), limit)
+	}
+	if !strings.Contains(msg, "stderr tail: ...") {
+		t.Fatalf("truncated tail must be marked with an ellipsis; err prefix = %q", msg[:min(len(msg), 120)])
+	}
+}
+
+// TestCommandDispatch_SuccessStderrNotLogged: a successful run's stderr is
+// never read into anything — Dispatch returns a nil error and an empty Result.
+func TestCommandDispatch_SuccessStderrNotLogged(t *testing.T) {
+	d := DispatchContext{Role: shCommandRole(`echo 'warning: noisy but fine' >&2; exit 0`), Item: item.Item{ID: "b1"}}
+
+	res, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: query.OSCommander{}})
+	if err != nil {
+		t.Fatalf("exit 0 must succeed, got %v", err)
+	}
+	if fmt.Sprintf("%+v", res) != fmt.Sprintf("%+v", report.Result{}) {
+		t.Fatalf("success must return an empty Result, got %+v", res)
+	}
+}
+
+// TestCommandDispatch_BusyExitStillErrBusyWithStderr: exit 9 stays a clean
+// decline; the tail is only for failures.
+func TestCommandDispatch_BusyExitStillErrBusyWithStderr(t *testing.T) {
+	d := DispatchContext{Role: shCommandRole(`echo 'at capacity' >&2; exit 9`), Item: item.Item{ID: "b1"}}
+
+	_, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: query.OSCommander{}})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("exit 9 must still map to ErrBusy; err = %v", err)
+	}
+}
+
+func TestStderrTail_SanitizesAndRedacts(t *testing.T) {
+	got := stderrTail([]byte("\x1b[31mred\x1b[0m\r\n\n  tab\there  \nBearer abcdefghijklmnopqrstuvwxyz0123456789ABCDEF\n"))
+	if strings.ContainsAny(got, "\x1b\r\n\t") {
+		t.Fatalf("control characters survived: %q", got)
+	}
+	if strings.Contains(got, "abcdefghijklmnopqrstuvwxyz0123456789ABCDEF") {
+		t.Fatalf("bearer token not redacted: %q", got)
+	}
+	if got == "" || stderrTail(nil) != "" || stderrTail([]byte(" \n\r\n")) != "" {
+		t.Fatalf("empty/whitespace-only stderr must yield no tail (got %q)", got)
 	}
 }

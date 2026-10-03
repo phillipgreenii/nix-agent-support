@@ -162,7 +162,11 @@ schema and the canonical defaults, then copy it and edit.
 Roles and queries are typed tagged unions discriminated by a `type` field:
 
 - **role `type`**: `ccpool` (dispatch a Claude session) or `command` (run an
-  executable; completion = exit code).
+  executable; completion = exit code). A non-zero exit fails the
+  dispatch; the error (and so the `dispatch result` WARN line) ends with
+  `: stderr tail: <text>` — the handler's last ~2 KiB of stderr, redacted,
+  collapsed to one line (lines joined by `|`), and prefixed `...` when cut.
+  A successful run's stderr is never logged.
 - **query `type`**: `command` (run an executable that emits items as
   JSON/JSONL — an opaque token pg-router just invokes and never interprets, so
   this is how you wire pg-router to `bd`, `gh`, Jira, or anything else) or
