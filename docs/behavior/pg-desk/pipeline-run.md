@@ -50,6 +50,26 @@ is a later observability item, alongside pg-router's own metrics sink. `run` MUS
 JSON to stderr, which pg-router captures as the triggering scheduler. `--verbose` additionally
 prints the three-stage timeline (gather, interpret, sync).
 
+### Failure diagnosis
+
+pg-router records a failed `run` only as "exit status 1", so a failure MUST be attributable from
+`run`'s stderr alone. The exit-code contract above is unchanged; the diagnosis is additive:
+
+- The per-entity structured line of a failed run (`"outcome":"error"`) MUST carry `stage` (which
+  step failed) and `error_class` (a coarse reason). A successful or degraded run's line MUST NOT
+  carry either field.
+- When `run` is about to exit non-zero it MUST also write one `{"event":"run_failed", ...}` line
+  with `entity_type`, `entity_id`, `change`, `stage`, `error_class` and `error`. It has no
+  `outcome` key, so a consumer counting outcomes does not count a failure twice. A failure from a
+  path with no stage tag (`run issue` for Jira, `run thread`) is labelled stage `run`.
+- Stages are `args`, `config`, `store_open`, `resolve_bead` (the `run` command itself) and
+  `gather`, `known_check`, `interpret`, `store`, `record_sync_error`, `sync`, `sync_retry_state`,
+  `load_facts`, `validate_change` (the pipeline).
+- Classes are `canceled`, `deadline`, `killed` (a `pg-connector` child ended by a signal),
+  `store_busy` (the store was locked), `connector` (a `pg-connector` failure code) and `error`
+  (anything else). They are diagnostic only: nothing branches on a class, and there is no retry
+  keyed on one.
+
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 `run issue` for Jira and `run thread` are Phase 13, as is the cross-reference step that would give

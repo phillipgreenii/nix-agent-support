@@ -212,6 +212,12 @@ type runLogLine struct {
 	Outcome    string `json:"outcome"`
 	Degraded   string `json:"degraded,omitempty"`
 	Error      string `json:"error,omitempty"`
+	// Stage and ErrorClass are set only on an "error" line whose error
+	// carries a *StageError (bead pg2-gp50o): the pipeline stage that failed
+	// and a coarse failure class (Class* constants), so a failure pg-router
+	// records only as "exit status 1" can still be attributed.
+	Stage      string `json:"stage,omitempty"`
+	ErrorClass string `json:"error_class,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
 }
 
@@ -226,6 +232,7 @@ func (p *Pipeline) Run(ctx context.Context, entityType, entityID string, change 
 		return runErr
 	}
 	if err := p.recordSyncRetry(entityID, runErr); err != nil {
+		err = TagStage(StageSyncRetryState, err)
 		if runErr == nil {
 			return fmt.Errorf("pipeline: %w", err)
 		}
@@ -276,6 +283,7 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	facts, err := p.gatherer.Gather(ctx, entityType, entityID, change)
 	timeline = append(timeline, stageEvent{Stage: "gather", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
+		err = TagStage(StageGather, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: gather %s %s: %w", entityType, entityID, err)
 	}
@@ -288,6 +296,7 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 		// the no-op, not what the re-read found.
 		_, known, getErr := p.store.GetEntity(p.repo(), entityType, entityID)
 		if getErr != nil {
+			getErr = TagStage(StageKnownCheck, getErr)
 			p.logRun(entityType, entityID, change, "error", "", getErr, runStart)
 			return fmt.Errorf("pipeline: check entity known %s %s: %w", entityType, entityID, getErr)
 		}
@@ -301,6 +310,7 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
 	timeline = append(timeline, stageEvent{Stage: "interpret", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
+		err = TagStage(StageInterpret, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
 	}
@@ -309,6 +319,7 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	interpRow, err := p.persist(entityType, entityID, facts, interp)
 	timeline = append(timeline, stageEvent{Stage: "store", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
+		err = TagStage(StageStore, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: store %s %s: %w", entityType, entityID, err)
 	}
@@ -332,9 +343,11 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 				// A failure to even RECORD the sync error is a genuine store
 				// error (this package's own exit-1 case), unlike the sync
 				// failure itself.
+				upsertErr = TagStage(StageRecordSyncError, upsertErr)
 				p.logRun(entityType, entityID, change, "error", "", upsertErr, runStart)
 				return fmt.Errorf("pipeline: record sync_error %s %s: %w", entityType, entityID, upsertErr)
 			}
+			syncErr = TagStage(StageSync, syncErr)
 			p.logRun(entityType, entityID, change, "error", interp.Degraded, syncErr, runStart)
 			return fmt.Errorf("pipeline: sync %s %s: %w", entityType, entityID, syncErr)
 		}
@@ -377,30 +390,33 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	switch change {
 	case gather.ChangeAdded, gather.ChangeChanged, gather.ChangeRemoved, gather.ChangeSweep:
 	default:
-		err := fmt.Errorf("pipeline: interpret-only %s %s: change kind %q is not one of added/changed/removed/sweep", entityType, entityID, change)
+		err := TagStage(StageInterpretOnlyArgs, fmt.Errorf("pipeline: interpret-only %s %s: change kind %q is not one of added/changed/removed/sweep", entityType, entityID, change))
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return err
 	}
 
 	entity, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
 	if err != nil {
+		err = TagStage(StageLoadFacts, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
 	}
 	if !found {
-		noEntityErr := fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID)
+		noEntityErr := TagStage(StageLoadFacts, fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID))
 		p.logRun(entityType, entityID, change, "error", "", noEntityErr, runStart)
 		return noEntityErr
 	}
 
 	var facts gather.Facts
 	if err := json.Unmarshal([]byte(entity.Facts), &facts); err != nil {
+		err = TagStage(StageLoadFacts, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
 	}
 
 	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
 	if err != nil {
+		err = TagStage(StageInterpret, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
 	}
@@ -412,18 +428,21 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	// effect as a fresh row.
 	prior, _, err := p.store.GetInterpretation(p.repo(), entityType, entityID)
 	if err != nil {
+		err = TagStage(StageStore, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only get prior interpretation %s %s: %w", entityType, entityID, err)
 	}
 
 	interpRow, err := p.persist(entityType, entityID, facts, interp)
 	if err != nil {
+		err = TagStage(StageStore, err)
 		p.logRun(entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
 	}
 	if prior.SyncError != "" {
 		interpRow.SyncError = prior.SyncError
 		if err := p.store.UpsertInterpretation(interpRow); err != nil {
+			err = TagStage(StageStore, err)
 			p.logRun(entityType, entityID, change, "error", "", err, runStart)
 			return fmt.Errorf("pipeline: interpret-only restore sync_error %s %s: %w", entityType, entityID, err)
 		}
@@ -844,6 +863,7 @@ func (p *Pipeline) logRun(entityType, entityID string, change gather.ChangeKind,
 	}
 	if runErr != nil {
 		line.Error = runErr.Error()
+		line.Stage, line.ErrorClass = StageOf(runErr)
 	}
 	b, err := json.Marshal(line)
 	if err != nil {

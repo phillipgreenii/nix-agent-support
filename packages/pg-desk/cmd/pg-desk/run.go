@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 
@@ -76,43 +77,109 @@ var runCmd = &cobra.Command{
 	Short: "Run the gather/interpret/store pipeline once for one entity",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		entityType, entityID := args[0], args[1]
-		switch entityType {
-		case "issue", "pr", "thread":
-			// implemented below
-		default:
-			return fmt.Errorf("run: unknown entity type %q (want pr, issue, or thread)", entityType)
-		}
-
-		cfg, err := runConfigLoad(cmd.Context())
+		err := runEntity(cmd, args)
 		if err != nil {
-			return fmt.Errorf("run: load config: %w", err)
+			// The returned error still maps to exit 1 in main.go (the exit-code
+			// contract is unchanged); this line makes the failure attributable
+			// when only stderr survives (bead pg2-gp50o).
+			logRunFailure(cmd.ErrOrStderr(), args[0], args[1], runF.change, err)
 		}
-		st, err := runStoreOpen()
-		if err != nil {
-			return fmt.Errorf("run: open store: %w", err)
-		}
-		defer func() { _ = st.Close() }()
-
-		p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()))
-		change := gather.ChangeKind(runF.change)
-
-		switch entityType {
-		case "issue":
-			if ticketkey.MatchesShape(entityID, cfg.TicketPatterns) {
-				return runJiraIssue(cmd.Context(), p, cfg, st, entityID, change)
-			}
-			_, prEntityID, err := runResolveBeadPR(cmd.Context(), cfg, entityID)
-			if err != nil {
-				return fmt.Errorf("run issue: resolve bead %s to PR: %w", entityID, err)
-			}
-			return p.RunInterpretOnly(cmd.Context(), entityTypePR, prEntityID, change)
-		case "thread":
-			return runThread(cmd.Context(), p, cfg, st, entityID, change)
-		}
-
-		return p.Run(cmd.Context(), entityType, entityID, change)
+		return err
 	},
+}
+
+// Stages `run` itself can fail in before (or around) the pipeline; the
+// pipeline's own stages are pipeline.Stage*. They are values of the `stage`
+// field on the structured stderr failure lines.
+const (
+	runStageArgs        = "args"
+	runStageConfig      = "config"
+	runStageStoreOpen   = "store_open"
+	runStageResolveBead = "resolve_bead"
+	// runStageUnknown labels a failure that carries no stage tag (the Jira
+	// and thread re-interpret paths, which are not stage-tagged).
+	runStageUnknown = "run"
+)
+
+// runFailureLine is the one structured JSON line `run` writes to stderr when
+// it is about to exit non-zero. Unlike the pipeline's per-entity run line
+// (which carries "outcome"), it has no "outcome" key, so a consumer counting
+// outcomes does not double-count a failure; it exists to give every failure,
+// whichever path produced it, one stage-tagged record.
+type runFailureLine struct {
+	Event      string `json:"event"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Change     string `json:"change"`
+	Stage      string `json:"stage"`
+	ErrorClass string `json:"error_class"`
+	Error      string `json:"error"`
+}
+
+// logRunFailure writes the runFailureLine for err to w. It never fails the
+// run: a write error is dropped, since the caller is already returning err.
+func logRunFailure(w io.Writer, entityType, entityID, change string, err error) {
+	stage, class := pipeline.StageOf(err)
+	if stage == "" {
+		stage = runStageUnknown
+		class = pipeline.ClassifyError(err)
+	}
+	b, mErr := json.Marshal(runFailureLine{
+		Event:      "run_failed",
+		EntityType: entityType,
+		EntityID:   entityID,
+		Change:     change,
+		Stage:      stage,
+		ErrorClass: class,
+		Error:      err.Error(),
+	})
+	if mErr != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(w, string(b))
+}
+
+// runEntity is runCmd's body: it validates args, loads config, opens the
+// store, and dispatches by entity type. Its errors carry a stage tag where
+// the failing step is known (pipeline.TagStage), without changing any
+// message text.
+func runEntity(cmd *cobra.Command, args []string) error {
+	entityType, entityID := args[0], args[1]
+	switch entityType {
+	case "issue", "pr", "thread":
+		// implemented below
+	default:
+		return pipeline.TagStage(runStageArgs, fmt.Errorf("run: unknown entity type %q (want pr, issue, or thread)", entityType))
+	}
+
+	cfg, err := runConfigLoad(cmd.Context())
+	if err != nil {
+		return pipeline.TagStage(runStageConfig, fmt.Errorf("run: load config: %w", err))
+	}
+	st, err := runStoreOpen()
+	if err != nil {
+		return pipeline.TagStage(runStageStoreOpen, fmt.Errorf("run: open store: %w", err))
+	}
+	defer func() { _ = st.Close() }()
+
+	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()))
+	change := gather.ChangeKind(runF.change)
+
+	switch entityType {
+	case "issue":
+		if ticketkey.MatchesShape(entityID, cfg.TicketPatterns) {
+			return runJiraIssue(cmd.Context(), p, cfg, st, entityID, change)
+		}
+		_, prEntityID, err := runResolveBeadPR(cmd.Context(), cfg, entityID)
+		if err != nil {
+			return pipeline.TagStage(runStageResolveBead, fmt.Errorf("run issue: resolve bead %s to PR: %w", entityID, err))
+		}
+		return p.RunInterpretOnly(cmd.Context(), entityTypePR, prEntityID, change)
+	case "thread":
+		return runThread(cmd.Context(), p, cfg, st, entityID, change)
+	}
+
+	return p.Run(cmd.Context(), entityType, entityID, change)
 }
 
 // runJiraIssue implements run issue's Jira half (docket pg2-2j5ac.40,
