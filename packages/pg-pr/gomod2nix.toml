@@ -216,12 +216,12 @@ cachePackages = [
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
 
   [mod.'github.com/ncruces/go-strftime']
-    version = 'v1.0.0'
-    hash = 'sha256-GYIwYDONuv/yTE0AEugCHQbtV3oiBaco93xUNYFcVBQ='
+    version = 'v1.1.0'
+    hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20260903063345-1f37a8dfe05a'
-    hash = 'sha256-crJAQzMth6pTLAzRqVwsW9RtDhwwGK8D6PDmJf8cMmA='
+    version = 'v0.0.0-20261001151509-f7717596dec9'
+    hash = 'sha256-LqFHu5sRoCN2V3NA5LDEB8A6FqkG4JyIBc3nZnNjltU='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'
@@ -256,56 +256,56 @@ cachePackages = [
     hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
 
   [mod.'go.opentelemetry.io/contrib/bridges/otelslog']
-    version = 'v0.20.1'
-    hash = 'sha256-x9ok/8QKu32U3os9lM7oUBQ4aPVMPjFCHvNR69rtkKA='
+    version = 'v0.21.0'
+    hash = 'sha256-LGE5EpisOEyhzerNogp8g1YJDFw9n4OpRWGIIg1wUUU='
 
   [mod.'go.opentelemetry.io/otel']
-    version = 'v1.46.0'
-    hash = 'sha256-2+xTacXn22hsJuMGGgXwazMbP/ZW5gkPRnf+rNUZgvQ='
+    version = 'v1.47.0'
+    hash = 'sha256-D4dSqVH4J9tKmnQWZFANTZ3+frHUjFIgcsvJWPSwuU4='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc']
-    version = 'v0.22.0'
-    hash = 'sha256-isk5CF2STZo1Vj4u+IE2bTb6zBE6K9V9T5YU0g0MKN4='
+    version = 'v0.23.0'
+    hash = 'sha256-IdWZ/L8rTlqFqwU7KVQKpU00JLzoPBC5gvUqdyXLksc='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp']
-    version = 'v0.22.0'
-    hash = 'sha256-ssBFTrn1bs8KdY3kYB/v74x8ImrKiECfEeNN7uo+sE8='
+    version = 'v0.23.0'
+    hash = 'sha256-vK5qblPAdJEhd2qPkXRmnTVF23eorfWICSjmvV9VxW8='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace']
-    version = 'v1.46.0'
-    hash = 'sha256-dhQCMAwny2CrgH3iJfTW0r0klpi7os0nht3zdLeWL6E='
+    version = 'v1.47.0'
+    hash = 'sha256-upPAkVlbXKHWBritk71OSRcSCbEI7ffueMkGewtcRq4='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc']
-    version = 'v1.46.0'
-    hash = 'sha256-qIv7G8ADgdnitDv9+jQUYBARM6zUtt9kBX5NCNKbB40='
+    version = 'v1.47.0'
+    hash = 'sha256-z/LRxCuScyH5m2mthWcCVMuaanayEPJNIfz4qQBHreg='
 
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp']
-    version = 'v1.46.0'
-    hash = 'sha256-EfYe0k/r58lSJwc4csdhoycyTpHL/neecqXkVrLLXdg='
+    version = 'v1.47.0'
+    hash = 'sha256-ufaKTLJEPrGJXhDL5SoZ6V/BDkV6LwiFq0Twmi5T048='
 
   [mod.'go.opentelemetry.io/otel/log']
-    version = 'v0.22.0'
-    hash = 'sha256-lvmqsKk4bwq61Z9oDaotfR12AkH5ErV7ioFj9vuI8nA='
+    version = 'v1.47.0'
+    hash = 'sha256-hYCHFuMmSSrMlyChIOEZMLuGYubF8IKkFLPC9yuVXdw='
 
   [mod.'go.opentelemetry.io/otel/metric']
-    version = 'v1.46.0'
-    hash = 'sha256-cY1DXXzRfcP0kKh7oBzowbu6kbFr3jANiEVyMlD5Bt8='
+    version = 'v1.47.0'
+    hash = 'sha256-ZKgYAoUSGUrI/u2qctou/GVlgJ0Kd9aMEVxudopPfFQ='
 
   [mod.'go.opentelemetry.io/otel/sdk']
-    version = 'v1.46.0'
-    hash = 'sha256-bDS4r1NfK2jZmTx5KUcrPJpPC2Men1lOuEKhy3vkMxc='
+    version = 'v1.47.0'
+    hash = 'sha256-f9JqSocWeQUExdeAcTvoGuJ9GeQ9KGyeDsLcsYRRu54='
 
   [mod.'go.opentelemetry.io/otel/sdk/log']
-    version = 'v0.22.0'
-    hash = 'sha256-2pl2jmMMRBpy1krBv4VpueKBk1JV4VOr+xNmajk53Pc='
+    version = 'v1.47.0'
+    hash = 'sha256-EakD3iIdS1Ym06EgUO/jlONxsE3a0tapHfjmfBMV5DA='
 
   [mod.'go.opentelemetry.io/otel/trace']
-    version = 'v1.46.0'
-    hash = 'sha256-zfj85gCR5Z3v1N+8nlOO+6+FVShaL/7Vb/3lXjdXnnw='
+    version = 'v1.47.0'
+    hash = 'sha256-W0eb1RPyxX7WUXrQIg9+da00P46fRUlL2S1kgFOvAM0='
 
   [mod.'go.opentelemetry.io/proto/otlp']
-    version = 'v1.11.0'
-    hash = 'sha256-jBcVUiab9mWgLmPsrCYK7sC2j15AJ47QJM4prnqGGkE='
+    version = 'v1.11.1'
+    hash = 'sha256-M8SCpLO073LypQdj2INMAixdbTRvw0b5Hzw0lIJMc0M='
 
   [mod.'golang.org/x/net']
     version = 'v0.59.0'
@@ -352,5 +352,5 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.60.0'
-    hash = 'sha256-ot2nO8b43WdhbM2V0bAs02yJP+WGG6FqcbOJkpm4BRE='
+    version = 'v1.60.1'
+    hash = 'sha256-NEuPcq63wseHfHZ0BorTAesJ0dPBwaPepsbFQOjM8Jo='
