@@ -48,6 +48,9 @@ mkGoApp {
       ./pkg/scriptout
       ./pkg/provider/iface.go
       ./pkg/provider/thread
+      # Shared event-log writer (bead pg2-kjdfi): this backend's internal/eventlog
+      # imports it, so it is part of the build+test dependency graph.
+      ./pkg/eventlog
       ./cmd/pg-connector-thread-slack
     ];
   };

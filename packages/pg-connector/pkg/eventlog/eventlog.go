@@ -1,0 +1,286 @@
+// Package eventlog is the shared writer behind every pg-connector backend's
+// OWN rotating JSONL event log (contract OBS-1..OBS-3 from bead pg2-m482k's
+// design; first user pg-connector-pr-github, bead pg2-ph0o4, then
+// pg-connector-thread-slack, bead pg2-kjdfi).
+//
+// What is shared and what is not. Ownership stays with each backend
+// (OBS-1/OBS-3): a backend resolves ITS OWN log path from ITS OWN
+// environment variable and state directory, defines ITS OWN event shape (the
+// fields only it can observe: GraphQL budget, claude failure stage, ...), and
+// registers the file as a Loki log source plus alert rules in ITS OWN nix
+// module -- never through pg-connector's config, and pg-connector stays
+// unbound to OTel. This package holds only the mechanics that would
+// otherwise be copied verbatim into every backend: the fields every event
+// carries (Base), the size-based rotation and the single-write append, the
+// path resolution rule, the error-code to level mapping, and the dispatch
+// table wrapper that times each call.
+//
+// Failure policy: writing the event log is strictly best effort. A failed
+// write never changes the op's result or exit code (the log is telemetry, not
+// part of the wire protocol); a backend's stderr is discarded by its callers,
+// so there is nowhere useful to report it either.
+package eventlog
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+)
+
+// FileName is the event log's name inside its directory; the rotated copy is
+// FileName+".1" and the rotation lock FileName+".lock". Neither matches a
+// registered *.jsonl glob.
+const FileName = "events.jsonl"
+
+// MaxBytes is the size past which a log is rotated (one rotated copy is kept,
+// so the worst case on disk is about twice this).
+const MaxBytes = 5 << 20
+
+// MaxErrorBytes caps the error message copied into an event; the log is for
+// triage, not forensics.
+const MaxErrorBytes = 300
+
+// Off is the value of a backend's events-file environment variable that
+// disables its event log.
+const Off = "off"
+
+// Log levels, per the phillipgreenii JSONL standard's lowercase enum
+// (phillipgreenii-nix-support-apps ADR 0038: required time / level / msg).
+const (
+	LevelInfo  = "info"
+	LevelWarn  = "warn"
+	LevelError = "error"
+)
+
+// Base is the field set every backend's event carries. A backend's Event type
+// embeds it (encoding/json flattens an embedded struct, so the line keeps one
+// flat object with these fields first) and appends the fields only it can
+// observe.
+//
+// time/level/msg are the JSONL standard's required fields. error_code is the
+// wire taxonomy code (scriptout's closed set) and is absent on success.
+type Base struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Msg     string `json:"msg"`
+	Service string `json:"service"`
+	Version string `json:"version,omitempty"`
+	PID     int    `json:"pid"`
+
+	Op         string `json:"op"`
+	DurationMS int64  `json:"duration_ms"`
+	// ErrorCode is the wire error.code the call answered with.
+	ErrorCode string `json:"error_code,omitempty"`
+	// Error is the (truncated) error message, for diagnosis.
+	Error string `json:"error,omitempty"`
+}
+
+// NewBase builds the Base for one finished call. The error code is the same
+// classification the wire error envelope uses (scriptout.ErrorResponse), so an
+// event's error_code always agrees with the response and the exit code.
+func NewBase(service, op, version string, start, end time.Time, err error) Base {
+	code := ""
+	if err != nil {
+		code = scriptout.ErrorResponse(err).Error.Code
+	}
+	b := Base{
+		Time:       end.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		Level:      LevelForCode(code),
+		Service:    service,
+		Version:    version,
+		PID:        os.Getpid(),
+		Op:         op,
+		DurationMS: end.Sub(start).Milliseconds(),
+		ErrorCode:  code,
+	}
+	if err != nil {
+		b.Error = Truncate(err.Error(), MaxErrorBytes)
+		b.Msg = fmt.Sprintf("%s failed: %s", op, code)
+	} else {
+		b.Msg = op + " ok"
+	}
+	return b
+}
+
+// LevelForCode maps a wire error code to a log level: unauthenticated and
+// unavailable mean the backend cannot do its job (error); the other codes
+// describe the caller's request (warn); no code is success (info).
+func LevelForCode(code string) string {
+	switch code {
+	case "":
+		return LevelInfo
+	case "unauthenticated", "unavailable":
+		return LevelError
+	default:
+		return LevelWarn
+	}
+}
+
+// Truncate cuts s to at most max bytes (plus an ellipsis) on a rune boundary,
+// so the log line stays valid UTF-8.
+func Truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !isRuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
+
+// ---------------------------------------------------------------------
+// Timing every call of a dispatch table.
+// ---------------------------------------------------------------------
+
+// Finish is called once per call, after the wrapped handler returned, with the
+// call's start and end times and its error (nil on success).
+type Finish func(start, end time.Time, err error)
+
+// Around is called once per call BEFORE the wrapped handler runs. It returns
+// the context to run the handler with (a backend attaches its per-call
+// recorder to it) and the Finish to call afterwards.
+type Around func(ctx context.Context, op string) (context.Context, Finish)
+
+// Wrap returns a copy of table whose every handler runs inside around. The
+// wrapped handler's result and error are passed through untouched. now is
+// injectable for tests.
+func Wrap(table scriptout.DispatchTable, now func() time.Time, around Around) scriptout.DispatchTable {
+	out := make(scriptout.DispatchTable, len(table))
+	for op, h := range table {
+		op, h := op, h
+		inner := h.Handle
+		h.Handle = func(ctx context.Context, args json.RawMessage) (any, error) {
+			ctx, finish := around(ctx, op)
+			start := now()
+			result, err := inner(ctx, args)
+			finish(start, now(), err)
+			return result, err
+		}
+		out[op] = h
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------
+// Appending with size-based rotation.
+// ---------------------------------------------------------------------
+
+// Line is v as one line of JSON ending in a newline.
+func Line(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// WriteBestEffort appends v as one line to path, rotating past max (MaxBytes
+// when max <= 0). Errors are swallowed (see the package doc's failure policy).
+func WriteBestEffort(path string, max int64, v any) {
+	line, err := Line(v)
+	if err != nil {
+		return
+	}
+	if max <= 0 {
+		max = MaxBytes
+	}
+	_ = Append(path, line, max)
+}
+
+// Append adds line to path with a single O_APPEND write, so concurrent backend
+// processes (pg-router, pg-desk and SwiftBar each spawn their own) never
+// interleave within a line. When the file already exceeds max it is first
+// renamed to path+".1", replacing the previous rotated copy.
+func Append(path string, line []byte, max int64) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := rotate(path, max); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	n, err := f.Write(line)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n != len(line) {
+		err = fmt.Errorf("short write to %s: %d of %d bytes", path, n, len(line))
+	}
+	return err
+}
+
+// rotate renames path to path+".1" when it is larger than max. Two processes
+// that notice the same oversized file at once would each rename it, and the
+// second would throw away the fresh log the first started; a flock on a
+// sibling file makes the check-and-rename atomic between them.
+func rotate(path string, max int64) error {
+	fi, err := os.Lstat(path)
+	if err != nil || fi.Size() <= max {
+		return nil // nothing to rotate; a missing file is created by the append
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	fi, err = os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && fi.Size() <= max) {
+		return nil // another process rotated it first
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(path, path+".1")
+}
+
+// ---------------------------------------------------------------------
+// Path resolution.
+// ---------------------------------------------------------------------
+
+// Path resolves a backend's event log path from the environment: envVar if
+// set, else $XDG_STATE_HOME/<service>/events.jsonl, else the XDG default
+// $HOME/.local/state/<service>/events.jsonl. It returns "" when no home can be
+// determined. The <service> directory name is also the backend's Loki
+// service_name and its logSources attribute name in its nix module, whose
+// default glob is ${XDG_STATE_HOME}/<service>/*.jsonl.
+func Path(getenv func(string) string, envVar, service string) string {
+	if p := getenv(envVar); p != "" {
+		return p
+	}
+	if state := getenv("XDG_STATE_HOME"); state != "" {
+		return filepath.Join(state, service, FileName)
+	}
+	if home := getenv("HOME"); home != "" {
+		return filepath.Join(home, ".local", "state", service, FileName)
+	}
+	return ""
+}
+
+// Resolve is the path a production sink writes to, or "" when the log is
+// disabled (envVar=off) or no path can be determined.
+func Resolve(getenv func(string) string, envVar, service string) string {
+	if getenv(envVar) == Off {
+		return ""
+	}
+	return Path(getenv, envVar, service)
+}

@@ -1,0 +1,153 @@
+# pg-connector-thread-slack unified-alerting rules (bead pg2-kjdfi): LogQL
+# rules over the backend's OWN event log (packages/pg-connector/cmd/
+# pg-connector-thread-slack/internal/eventlog), shipped to Loki by the
+# logSources entry in darwin/modules/pg-connector-thread-slack/default.nix.
+# Sibling of pr-github-alerts.yaml (bead pg2-ph0o4).
+#
+# Why these two, and why log-derived: the backend is a one-shot process, so
+# Prometheus cannot scrape it, and before this file nothing alerted when its
+# `claude -p` round trip to the Slack MCP broke -- the only trace of it was a
+# JSON error code on a stdout nobody kept. Contract: OBS-1/OBS-2/OBS-3 of the
+# pg-connector observability ruling (Phillip, 2026-10-02): each connector owns
+# its log and its alert rules, tracks availability / auth / quota where
+# exposed, and registers them in nix, not through pg-connector's config.
+#
+# What this backend can and cannot tell:
+#   - availability: every call that produced no usable reply is
+#     error_code=unavailable. Rule (b).
+#   - authentication: the backend holds no Slack credential and has no auth
+#     check; it only sees an auth problem in the text claude itself reports
+#     when a call fails, and tags such events failure_class=auth (the wire
+#     error_code stays unavailable). Rule (a). The marker list behind that tag
+#     is in eventlog.go (authMarkers) and is not verified against a live
+#     capture, so this rule can miss an auth failure phrased differently.
+#   - quota: NOT exposed, so there is deliberately NO quota rule. The backend
+#     reads no Slack rate-limit header and no Retry-After, and claude's
+#     envelope is decoded for result/is_error only. Add a rule here only if
+#     the backend starts reading such a signal.
+#
+# Event fields queried (all written by eventlog.Event):
+#   error_code     wire taxonomy code; absent on success
+#   failure_class  "auth" when claude's failure text looks like an auth problem
+# The generic Daemon Health error-rate rule is switched off for this source
+# (errorAlert.enable = false in the nix module): these bespoke rules cover the
+# same error-level lines with the right semantics, and leaving it on would
+# double-page every one of them.
+#
+# Shape notes, copied from phillipgreenii-nix-support-apps's
+# logsource-health/alerting-template.nix (the first Loki-datasource rule in
+# the stack, which documents these in full): datasourceUid is `loki`, the
+# query model uses the string `queryType: instant` (NOT Prometheus's boolean
+# `instant`), and every rule's noDataState is OK -- a quiet log just means
+# nothing called the backend, the healthy case.
+#
+# Series arithmetic: `| json` lifts every event field into a label, so the
+# range aggregations split into one series per distinct field combination;
+# the outer sum() collapses them to the single series the reduce stage
+# expects.
+#
+# Folder "pg-connector" converges by title (ADR 0039 in
+# phillipgreenii-nix-support-apps -- no folderUid, since alerting file
+# provisioning has no such field). Rule uids stay under Grafana's 40-char cap.
+#
+# Surfacing in SwiftBar needs no menubar change: pg-connector-alert-grafana
+# lists every firing Grafana alert and maps labels.severity (error -> high,
+# warning -> medium).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-thread-slack
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # (a) Auth: claude (or the Slack MCP behind it) reported an
+      # authentication problem -- not logged in, expired token, MCP needing
+      # authentication. Every Slack thread read fails until fixed, so ONE
+      # occurrence in the last 15m is enough. No `for` beyond the evaluation
+      # tick: the 15m window is the "within 15m".
+      - uid: pg-conn-thread-slack-auth-failing
+        title: pg-connector-thread-slack authentication failing
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-thread-slack: claude or the Slack MCP reported an authentication failure within the last 15 minutes"
+          description: 'pg-connector-thread-slack saw an authentication failure from claude -p at least once in the last 15 minutes, so every Slack thread panel it feeds is empty or stale. Run `claude` interactively and check `/login` and `/mcp` (the Slack server may need re-authentication). Inspect the events with {service_name="pg-connector-thread-slack"} | json | failure_class="auth" and read the error field.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-thread-slack"} | json | failure_class="auth" [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (b) Availability: calls keep failing as `unavailable` (claude not on
+      # PATH or hanging past its timeout, an is_error result, the model
+      # declining in prose, a malformed reply). Sustained = at least one such
+      # failure in every trailing 5m window for 10m running. Failures that read
+      # as authentication problems are `unavailable` too but are rule (a)'s
+      # business, so they are excluded via failure_class (an event with no
+      # failure_class passes the != filter).
+      - uid: pg-conn-thread-slack-unavailable
+        title: pg-connector-thread-slack unavailable
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-thread-slack has been failing as unavailable for over 10 minutes"
+          description: 'pg-connector-thread-slack has answered unavailable (not counting authentication failures) in every 5 minute window for over 10 minutes -- claude is missing or failing, the Slack MCP is not configured or not answering, or the model is not returning the requested JSON. Inspect the events with {service_name="pg-connector-thread-slack"} | json | error_code="unavailable" and read failure_stage and error.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-thread-slack"} | json | error_code="unavailable" | failure_class!="auth" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

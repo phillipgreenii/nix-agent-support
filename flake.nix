@@ -1687,6 +1687,10 @@
                     glob = src.path;
                     alerts = alertsFile;
                     eventlogSrc = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog/eventlog.go;
+                    # error_code lives on the shared evlog.Base (bead pg2-kjdfi
+                    # moved the common event fields into pkg/eventlog), the
+                    # graphql_* / below_reserve fields on this backend's Event.
+                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
                   }
                   ''
                     export HOME="$TMPDIR"
@@ -1732,7 +1736,152 @@
                       esac
                     done
                     for field in error_code below_reserve graphql_headroom; do
-                      grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" "$sharedEventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+                    touch $out
+                  '';
+
+              # darwin/modules/pg-connector-thread-slack (bead pg2-kjdfi): the Slack
+              # sibling of test-pg-connector-pr-github-darwin-module above --
+              # registers the backend's own event log as a Loki log source and its
+              # LogQL alert rules from its own nix module rather than through
+              # pg-connector's config. Same stub technique (a stub of the
+              # observability surface mirroring the REAL logSources submodule's
+              # defaults), so the assertions prove the module leaves
+              # `path`/`serviceName` at their defaults -- which the Go side
+              # (eventlog.Path) and the alert selectors depend on -- and switches
+              # the generic error-rate alert off. The runCommand then checks the
+              # alert file itself: exactly two rules (auth, availability; NO quota
+              # rule, because the backend reads no Slack rate-limit signal) with
+              # unique <=40-char uids and Loki datasources, every query selecting
+              # the registered service_name and parsing as LogQL (logcli --stdin
+              # parses offline; "metrics Query: not supported" is the parse-success
+              # sentinel), and every event field a rule reads still being a json
+              # tag on the backend's Event or the shared Base.
+              test-pg-connector-thread-slack-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-thread-slack/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-connector-thread-slack;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/thread-slack-alerts.yaml;
+                in
+                assert disabled.logSources == { };
+                assert disabled.alertRuleFiles == [ ];
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-thread-slack/*.jsonl";
+                assert src.serviceName == "pg-connector-thread-slack";
+                assert src.format == "jsonl";
+                assert src.errorAlert.enable == false;
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                pkgs.runCommand "test-pg-connector-thread-slack-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                    ];
+                    glob = src.path;
+                    alerts = alertsFile;
+                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog/eventlog.go;
+                    # error_code lives on the shared evlog.Base; failure_class on
+                    # this backend's Event.
+                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The default glob selects events.jsonl and not the rotated
+                    # copy or the rotation lock.
+                    state="$TMPDIR/state/pg-connector-thread-slack"
+                    mkdir -p "$state"
+                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
+
+                    # Alert file structure: auth + availability, no quota rule.
+                    [ "$(yq '.groups[0].rules | length' "$alerts")" = 2 ] || fail "want exactly 2 rules"
+                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
+                    uids="$(yq '.groups[0].rules[].uid' "$alerts")"
+                    [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 2 ] || fail "uids are not unique"
+                    printf '%s\n' "$uids" | while read -r u; do
+                      [ "''${#u}" -le 40 ] || fail "uid $u exceeds Grafana's 40-char cap"
+                    done
+                    for want in pg-conn-thread-slack-auth-failing pg-conn-thread-slack-unavailable; do
+                      printf '%s\n' "$uids" | grep -qx "$want" || fail "missing rule $want"
+                    done
+                    if printf '%s\n' "$uids" | grep -qi 'quota\|rate'; then
+                      fail "a quota/rate rule appeared: the backend exposes no Slack rate-limit signal"
+                    fi
+                    [ "$(yq '[.groups[0].rules[] | select(.condition == "C" and .noDataState == "OK" and .data[0].datasourceUid == "loki" and .data[0].model.queryType == "instant")] | length' "$alerts")" = 2 ] \
+                      || fail "a rule is not a loki instant query with condition C and noDataState OK"
+
+                    # Every query selects the registered service_name and parses
+                    # as LogQL; the fields it reads are still json tags on the
+                    # event types.
+                    for i in 0 1; do
+                      e="$(yq ".groups[0].rules[$i].data[0].model.expr" "$alerts")"
+                      case "$e" in
+                        *'{service_name="pg-connector-thread-slack"}'*) ;;
+                        *) fail "rule $i does not select the registered service_name: $e" ;;
+                      esac
+                      parsed="$(logcli query --stdin --quiet "$e" </dev/null 2>&1 | tail -n 1 || true)"
+                      case "$parsed" in
+                        *"metrics Query: not supported"*) ;;
+                        *) fail "rule $i does not parse as LogQL: $parsed" ;;
+                      esac
+                    done
+                    for field in error_code failure_class failure_stage claude_calls; do
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" "$sharedEventlogSrc" || fail "eventlog.Event has no json tag $field"
                     done
                     touch $out
                   '';

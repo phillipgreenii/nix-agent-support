@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/thread"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -253,15 +254,22 @@ Report every field of every item as a plain fact taken directly from the Slack M
 // usable reply," distinct from this backend's OWN reply-shape validation,
 // which each caller does itself against the envelope's Result field).
 func (b *Backend) runClaude(ctx context.Context, prompt string, jsonSchema string) (string, error) {
+	// The eventlog.Record* calls note, on this call's event in the backend's
+	// own event log, where the round trip broke; they never change the
+	// returned error (bead pg2-kjdfi).
+	eventlog.RecordClaudeCall(ctx)
 	out, err := b.runner.Run(ctx, prompt, jsonSchema)
 	if err != nil {
+		eventlog.RecordFailure(ctx, eventlog.StageExec, err.Error())
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: "+err.Error())
 	}
 	env, decodeErr := decodeClaudeEnvelope(out)
 	if decodeErr != nil {
+		eventlog.RecordFailure(ctx, eventlog.StageEnvelope, decodeErr.Error())
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: decode envelope: "+decodeErr.Error())
 	}
 	if env.IsError {
+		eventlog.RecordFailure(ctx, eventlog.StageClaudeError, env.Result)
 		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p reported is_error: "+env.Result)
 	}
 	return env.Result, nil
@@ -280,12 +288,14 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Thread, error) {
 	}
 	reply, decodeErr := decodeShowReply(result)
 	if decodeErr != nil {
+		eventlog.RecordFailure(ctx, eventlog.StageReplyDecode, decodeErr.Error())
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: decode thread reply: "+decodeErr.Error())
 	}
 	if !reply.Found {
 		return nil, scriptout.WrapError(scriptout.ErrNotFound, fmt.Sprintf("thread %q not found", id))
 	}
 	if reply.ID == "" || reply.Channel == "" || reply.Permalink == "" {
+		eventlog.RecordFailure(ctx, eventlog.StageReplyIncomplete, "")
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: thread reply missing one of id/channel/permalink")
 	}
 	return toSchemaThread(&reply.slackThreadFields, time.Now().UTC()), nil
@@ -318,6 +328,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		}
 		reply, decodeErr := decodeListReply(result)
 		if decodeErr != nil {
+			eventlog.RecordFailure(ctx, eventlog.StageReplyDecode, decodeErr.Error())
 			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: decode thread list reply: "+decodeErr.Error())
 		}
 		asOf := time.Now().UTC()

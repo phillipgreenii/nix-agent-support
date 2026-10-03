@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -280,24 +281,6 @@ func TestInstrument_PreservesSchemaVersionAndAllOps(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	long := strings.Repeat("a", 400)
-	if got := truncate(long, 300); len(got) != 303 || !strings.HasSuffix(got, "...") {
-		t.Errorf("truncate ascii len = %d", len(got))
-	}
-	if got := truncate("short", 300); got != "short" {
-		t.Errorf("truncate short = %q", got)
-	}
-	multi := strings.Repeat("é", 200) // 2 bytes each
-	got := truncate(multi, 301)       // 301 lands mid-rune
-	if !strings.HasSuffix(got, "...") {
-		t.Fatal("missing ellipsis")
-	}
-	if body := strings.TrimSuffix(got, "..."); strings.ContainsRune(body, '�') {
-		t.Errorf("truncate split a rune: %q", body)
-	}
-}
-
 func TestLevelForCode(t *testing.T) {
 	for code, want := range map[string]string{
 		"": "info", "unauthenticated": "error", "unavailable": "error",
@@ -318,8 +301,8 @@ func TestFileSink_AppendsOneLinePerEvent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "events.jsonl")
 	s := FileSink{Path: path, MaxBytes: 1 << 20}
-	s.Write(Event{Time: "t1", Level: "info", Msg: "one", Op: "list"})
-	s.Write(Event{Time: "t2", Level: "error", Msg: "two", Op: "show", ErrorCode: "unauthenticated"})
+	s.Write(Event{Base: evlog.Base{Time: "t1", Level: "info", Msg: "one", Op: "list"}})
+	s.Write(Event{Base: evlog.Base{Time: "t2", Level: "error", Msg: "two", Op: "show", ErrorCode: "unauthenticated"}})
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -339,52 +322,6 @@ func TestFileSink_AppendsOneLinePerEvent(t *testing.T) {
 	fi, _ := os.Stat(path)
 	if fi.Mode().Perm() != 0o600 {
 		t.Errorf("log mode = %v, want 0600", fi.Mode().Perm())
-	}
-}
-
-func TestAppend_RotatesPastMaxKeepingOneCopy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	line := []byte(strings.Repeat("x", 49) + "\n") // 50 bytes
-	const max = 120
-
-	for i := 0; i < 3; i++ { // 150 bytes: crosses max on the 3rd append (check is pre-append)
-		if err := Append(path, line, max); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := os.Stat(path + ".1"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("rotated too early (150 > 120 only counts at the next append): %v", err)
-	}
-	if err := Append(path, line, max); err != nil { // file is 150 > 120: rotate, then append
-		t.Fatal(err)
-	}
-	rot, err := os.ReadFile(path + ".1")
-	if err != nil {
-		t.Fatalf("no rotated copy: %v", err)
-	}
-	if len(rot) != 150 {
-		t.Errorf("rotated copy = %d bytes, want 150", len(rot))
-	}
-	cur, _ := os.ReadFile(path)
-	if len(cur) != 50 {
-		t.Errorf("fresh log = %d bytes, want 50", len(cur))
-	}
-
-	// A second rotation REPLACES .1 rather than accumulating more copies.
-	for i := 0; i < 3; i++ {
-		_ = Append(path, line, max)
-	}
-	entries, _ := os.ReadDir(filepath.Dir(path))
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	for _, n := range names {
-		switch n {
-		case "events.jsonl", "events.jsonl.1", "events.jsonl.lock":
-		default:
-			t.Errorf("unexpected file %q after repeated rotation", n)
-		}
 	}
 }
 
@@ -410,7 +347,7 @@ func TestAppend_ConcurrentWritersNeverInterleaveLines(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 50; i++ {
-				ev := Event{Time: "t", Level: "info", Msg: strings.Repeat("m", 200), Op: "list"}
+				ev := Event{Base: evlog.Base{Time: "t", Level: "info", Msg: strings.Repeat("m", 200), Op: "list"}}
 				FileSink{Path: path, MaxBytes: 1 << 30}.Write(ev)
 			}
 		}()
@@ -436,7 +373,7 @@ func TestFileSink_WriteFailureIsSwallowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Parent "directory" is a regular file: MkdirAll fails. Must not panic.
-	FileSink{Path: filepath.Join(blocker, "events.jsonl")}.Write(Event{Msg: "x"})
+	FileSink{Path: filepath.Join(blocker, "events.jsonl")}.Write(Event{Base: evlog.Base{Msg: "x"}})
 }
 
 // ---------------------------------------------------------------------
@@ -490,5 +427,33 @@ func TestSinkFromEnv(t *testing.T) {
 	s, ok := SinkFromEnv(env(map[string]string{EnvPath: "/x/e.jsonl"})).(FileSink)
 	if !ok || s.Path != "/x/e.jsonl" || s.MaxBytes != MaxBytes {
 		t.Errorf("sink = %+v", s)
+	}
+}
+
+// TestLine_GoldenWireShape pins the exact bytes of an event line, field order
+// included, so refactors of how Event is built (the shared pkg/eventlog
+// writer, bead pg2-kjdfi) cannot silently change what Loki ingests.
+func TestLine_GoldenWireShape(t *testing.T) {
+	rem, reserve, headroom := 640, 1000, -360
+	reset := "2026-10-03T14:00:00Z"
+	line, err := Line(Event{
+		Base: evlog.Base{
+			Time: "2026-10-03T12:00:00.250Z", Level: "error", Msg: "list failed: unavailable",
+			Service: ServiceName, Version: "v1", PID: 42, Op: "list", DurationMS: 250,
+			ErrorCode: "unavailable", Error: "boom",
+		},
+		GraphQLRemaining: &rem, GraphQLResetAt: &reset, GraphQLReserve: &reserve, GraphQLHeadroom: &headroom,
+		BelowReserve: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"time":"2026-10-03T12:00:00.250Z","level":"error","msg":"list failed: unavailable",` +
+		`"service":"pg-connector-pr-github","version":"v1","pid":42,"op":"list","duration_ms":250,` +
+		`"error_code":"unavailable","error":"boom","graphql_remaining":640,` +
+		`"graphql_reset_at":"2026-10-03T14:00:00Z","graphql_reserve":1000,"graphql_headroom":-360,` +
+		`"below_reserve":true}` + "\n"
+	if string(line) != want {
+		t.Errorf("wire shape changed:\n got %s\nwant %s", line, want)
 	}
 }

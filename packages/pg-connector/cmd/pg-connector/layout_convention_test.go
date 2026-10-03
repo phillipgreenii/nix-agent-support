@@ -14,13 +14,17 @@ import (
 // pkg/schema, pkg/provider (including its per-capability subpackages, e.g.
 // pkg/provider/pr — the small-per-capability-interface convention INV-CAP-1
 // names), and pkg/scriptout (including its own schemas/conformance
-// subpackages, bead pg2-7vgn5 — see below) may be shared across backend
+// subpackages, bead pg2-7vgn5 — see below) and pkg/eventlog (the shared
+// writer behind every backend's OWN event log, bead pg2-kjdfi: common event
+// fields, rotation, path rule and call timing only — each backend keeps its
+// own log path, event shape and alert rules) may be shared across backend
 // boundaries — every backend's own code must live in main or under its own
 // cmd/<binary>/internal/.
 var allowedSharedLayout = map[string]bool{
 	"pkg/schema":    true,
 	"pkg/provider":  true,
 	"pkg/scriptout": true,
+	"pkg/eventlog":  true,
 }
 
 // Both prefixes name a package whose OWN per-something subpackages are
@@ -147,7 +151,7 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			return nil
 		}
 		violations = append(violations, fmt.Sprintf(
-			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
+			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout, pkg/eventlog) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
 			rel, relDir,
 		))
 		return nil

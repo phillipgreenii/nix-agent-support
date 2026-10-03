@@ -62,6 +62,9 @@ mkGoApp {
       ./pkg/provider/pr
       ./pkg/provider/search
       ./pkg/provider/attention
+      # Shared event-log writer (bead pg2-kjdfi): this backend's internal/eventlog
+      # imports it, so it is part of the build+test dependency graph.
+      ./pkg/eventlog
       ./cmd/pg-connector-pr-github
     ];
   };

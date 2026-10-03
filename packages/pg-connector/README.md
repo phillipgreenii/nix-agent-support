@@ -135,6 +135,7 @@ packages/pg-connector/
     provider/     per-capability Go interfaces (pr.Provider, issue.Provider, ci.Provider, scm.Provider)
                   + the optional AuthChecker sub-interface
     scriptout/    the wire protocol itself (envelope, versioning, error taxonomy, serve loop)
+    eventlog/     shared writer mechanics behind each backend's OWN event log (see below)
   cmd/
     pg-connector/                        umbrella; imports pkg/schema + pkg/provider + pkg/scriptout only
     pg-connector-pr-github/internal/     backend-private
@@ -143,8 +144,8 @@ packages/pg-connector/
     pg-connector-scm-git/internal/
 ```
 
-Only `pkg/schema`, `pkg/provider` (and its per-capability subpackages), and `pkg/scriptout` are
-importable across backend boundaries — a backend's own code lives in `main` or under its own
+Only `pkg/schema`, `pkg/provider` (and its per-capability subpackages), `pkg/scriptout`, and
+`pkg/eventlog` are importable across backend boundaries — a backend's own code lives in `main` or under its own
 `internal/`. `cmd/pg-connector/layout_convention_test.go` backstops this mechanically.
 
 ## Backend observability (each backend owns its own)
@@ -159,7 +160,22 @@ event carries `time`, `level`, `msg`, `op`, `error_code`, `duration_ms` and, on 
 GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `graphql_headroom`.
 `packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
 `unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
-never changes an op's result. Other external-service connectors are expected to follow the same pattern.
+never changes an op's result.
+
+`pg-connector-thread-slack` follows the same pattern: it appends to
+`${XDG_STATE_HOME}/pg-connector-thread-slack/events.jsonl` (override with
+`PG_CONNECTOR_THREAD_SLACK_EVENTS_FILE`; `off` disables it), same rotation, with the common fields
+plus `claude_calls`, `failure_stage` (where the `claude -p` round trip broke: `exec`, `envelope`,
+`claude_error`, `reply_decode`, `reply_incomplete`) and `failure_class` (`auth` when claude's own
+failure text looks like an authentication problem; the wire `error_code` stays `unavailable`).
+`packages/pg-connector/grafana/alerting/thread-slack-alerts.yaml` alerts on auth failure and sustained
+`unavailable`. There is deliberately NO quota alert: the backend reads no Slack rate-limit header or
+`Retry-After` (claude's envelope is decoded for `result`/`is_error` only), so it has no quota reading
+to log.
+
+The writer mechanics both backends share (the common event fields, size-based rotation, the path
+rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
+its alert rules. Other external-service connectors are expected to follow the same pattern.
 
 ## Versioning
 
