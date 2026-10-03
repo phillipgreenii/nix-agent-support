@@ -971,8 +971,13 @@ meaning without a version bump of the containing contract (S11).
   - **Detection failure** is fail-closed: the 9.1a lookup failed, so nothing is posted, deleted or
     submitted: `blocked_human_pending`, `reason: detection_failed` (no URL is known).
   - **Escalation** is NOT done by this op. On `blocked_human_pending` it only reports; the single
-    deduplicated escalation per PR (pending-review policy 5) is bead `pg2-kftf9.15`'s job, and the
-    worker's reaction is bead `pg2-kftf9.17`'s.
+    deduplicated escalation per PR (pending-review policy 5) is done by the pg-router integration
+    `pg-router-review-escalator` (bead `pg2-kftf9.15`; host decision in ADR 0077's Deciders
+    consequences, behavior in `packages/pg-router-review-escalator/docs/behavior/README.md`). The
+    review role calls `pg-router-review-escalator submit <id>` in place of this verb: it runs this
+    verb with the same stdin, prints its output unchanged, and applies the status (bead and push
+    notification on `blocked_human_pending`; the PR's escalation closes on `posted`, `skipped` or
+    `replaced`). The worker's reaction is bead `pg2-kftf9.17`'s.
 
 - **Output**: `{"review_id": "...", "state": "pending", "head_sha": "...", "as_of": "...",
 "status": "posted"}`. `review_id` and `state` name the pending review that exists for the PR at

@@ -298,6 +298,12 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-review-escalator: Pattern A (ADR 0008), a stdlib-only module that
+          # execs pg-connector (pr review submit, issue ...) and the operator's push
+          # command as subprocesses (bead pg2-kftf9.15); no local `replace`/modRoot.
+          pg-router-review-escalator = final.callPackage ./packages/pg-router-review-escalator {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-rescue: Pattern A (ADR 0008), a Go module that wraps a command and,
           # on failure, walks a named chain of failure handlers (bead pg2-wgpem
           # is the first implementation bead: skeleton, CLI, config, check and
@@ -1059,6 +1065,7 @@
                 "pg-router-source-pg-connector"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
+                "pg-router-review-escalator"
                 "ccpool-probe"
                 "pg-rescue"
               ];
@@ -2736,6 +2743,17 @@
                 pname = "pg-router-disk-watchdog-go-tests";
                 src = lib.cleanSource ./packages/pg-router-disk-watchdog; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
+              };
+
+              # pg-router-review-escalator (bead pg2-kftf9.15) - table-driven suite over
+              # the escalation policy (dedupe, re-notify interval with a fake clock,
+              # auto-close, loud failure on each delivery path, systemic roll-up) with a
+              # fake tracker, notifier and Runner. No testDeps: nothing real is exec'd
+              # except `sh` in the ExecRunner test.
+              pg-router-review-escalator-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-review-escalator-go-tests";
+                src = lib.cleanSource ./packages/pg-router-review-escalator; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-review-escalator/gomod2nix.toml;
               };
 
               # ccpool-probe (docket pg2-93e5s, packet 2) — fixture-driven
@@ -7805,6 +7823,7 @@
               pg-router-source-pg-connector
               pg-router-probe
               pg-router-disk-watchdog
+              pg-router-review-escalator
               ccpool-probe
               pg-rescue
               integrate-branch-support

@@ -39,6 +39,15 @@ folding the post-time hash sidecar bead (`pg2-kftf9.14`) into this one (2026-10-
 decision-log row is added; it changes none of S1 to S28 beyond the in-place clarification of S27's
 example.
 
+**Amended 2026-10-03** (bead `pg2-kftf9.15`): the escalation that section 9.1 left to this bead
+(pending-review policy 5) is hosted by a pg-router integration, the leaf command binary
+`pg-router-review-escalator`, and not by a pg-decider rule. The reasoning is recorded in the
+Deciders cluster's Consequences. No decision-log row is added: the host choice is derived from the
+bead's own framing (a decider rule or a router integration), from G5 and from the current state of
+the code, and it changes none of S1 to S28. The operator's rulings it builds on are unchanged:
+unremovable stale pending reviews MUST escalate quickly (2026-09-29) and "no further changes are to
+be made to pg-pr" (2026-10-03).
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
@@ -397,6 +406,41 @@ This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24, S26.
 - Because no issue or thread decider ships on day one, pg-desk's issue and thread coverage is
   watched, hydrated and logged but never acted on until an operator configures a query/role pair
   for a decider of that type.
+- **The escalation of a blocked pending review is hosted outside the deciders, for now** (bead
+  `pg2-kftf9.15`, 2026-10-03). The bead left one point open: whether the escalation for a
+  `blocked_human_pending` outcome of `pg-connector pr review submit` is a pg-decider rule or a
+  pg-router integration. It is a pg-router integration, the stdlib-only command binary
+  `pg-router-review-escalator` (`packages/pg-router-review-escalator`), a leaf like
+  `pg-router-probe` and `pg-router-disk-watchdog`. Reasons, in order of weight:
+  1. **A decider rule has nothing to key on.** A decider is `decide(view)`, a pure function of the
+     composite view that does not branch on which change kind routed the item (the Deciders
+     contract, STORY-DEC-1). `blocked_human_pending` is the outcome of one write call, not a
+     field of any view, and the view only gains pending-review state with bead `pg2-kftf9.18`,
+     which depends on this bead. Auto-close has the same shape: it reacts to the `posted`,
+     `skipped` or `replaced` outcome of the next call.
+  2. **No pg-decider exists yet.** `packages/pg-decider` is a planned package. Building it here
+     would pull the decider program's registry, `plan`/`apply` and work-item contract into a bead
+     about one escalation.
+  3. **G5 is respected either way.** The escalator is none of pg-desk, pg-connector or pg-router's
+     core. It writes beads through `pg-connector issue ...` (the S10 path), never through `bd` and
+     never through pg-desk, and it changes no pg-router core or handler model (ADR 0065). It keeps
+     no state of its own: the open escalation bead carries the per-PR dedupe key, the reason, the
+     head and the last-notified time as metadata, so the tracker stays the source of truth, as the
+     Deciders contract requires of work items.
+  4. **The one tension is accepted.** The component table says pg-router roles MUST NOT decide which
+     work items exist. The escalator is not a role of its own: the review role calls it as the
+     wrapper of its submit call, and its only writes are the escalation beads for the outcome of
+     the call it wraps.
+
+  Obligations that follow. The review role MUST call `pg-router-review-escalator submit <pr>` in
+  place of `pg-connector pr review submit <pr>` (bead `pg2-kftf9.17`, in the deployment set's own
+  repo); a raw call raises no escalation, which is why the wrapper, not the prompt, is the
+  deliberate code path. The escalation policy lives in an I/O-free package
+  (`internal/escalate`) behind tracker and notifier ports, so when pg-decider exists and the
+  composite view carries pending-review state, the rule MAY be re-homed as a decider rule without
+  a rewrite. The defaults are a 12 hour re-notify interval and a roll-up threshold of 3; both,
+  the roll-up reasons, the lookup query, extra labels and the push command are configuration,
+  and the repo carries no push channel or organization identifier.
 
 ## Cutover
 
@@ -445,6 +489,8 @@ This cluster records S11.
   entity rule), and on ADR 0062's pg-connector Tier-1 umbrella and Tier-2 backend architecture.
 - Consistent with ADR 0064's pg-pr retirement: the flow does not depend on pg-pr, and the review
   role's `pg-pr review submit` call is one of the removals the flow makes.
+- The pending-review escalation host is recorded in the Deciders cluster's Consequences; its
+  behavior is documented in `packages/pg-router-review-escalator/docs/behavior/README.md`.
 - Tracked under program epic `pg2-2j5ac.52`, docket `pg2-2j5ac.52.2`. The design questions Q-A and
   Q-B were answered in bead `pg2-2j5ac.52.1` (S25, S26), the exit-code ruling was made on
   escalation bead `pg2-2j5ac.52.24` (S27) and the mergeability ruling on the `pg2-2j5ac.52.6`
