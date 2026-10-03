@@ -1,0 +1,186 @@
+# pg-connector-pr-github unified-alerting rules (bead pg2-ph0o4): LogQL rules
+# over the backend's OWN event log (packages/pg-connector/cmd/
+# pg-connector-pr-github/internal/eventlog), shipped to Loki by the
+# logSources entry in darwin/modules/pg-connector-pr-github/default.nix.
+#
+# Why these three, and why log-derived: the backend is a one-shot process, so
+# Prometheus cannot scrape it, and before this file nothing alerted when the
+# GitHub GraphQL budget dipped under rate_reserve_points (the condition that
+# starved pg-desk's My Work panel), when `gh` auth broke, or when GitHub was
+# unreachable -- the only trace of any of them was a JSON error code on a
+# stdout nobody kept. Contract: OBS-1/OBS-2/OBS-3 of the pg-connector
+# observability ruling (Phillip, 2026-10-02): each connector owns its log and
+# its alert rules, tracks availability / auth / quota, and registers them in
+# nix, not through pg-connector's config.
+#
+# Event fields queried (all written by eventlog.Event):
+#   error_code        wire taxonomy code; absent on success
+#   below_reserve     true only when the call was refused for the reserve
+#   graphql_headroom  graphql_remaining - rate reserve (negative = below)
+# The generic Daemon Health error-rate rule is switched off for this source
+# (errorAlert.enable = false in the nix module): these bespoke rules cover the
+# same error-level lines with the right semantics, and leaving it on would
+# double-page every one of them.
+#
+# Shape notes, copied from phillipgreenii-nix-support-apps's
+# logsource-health/alerting-template.nix (the first Loki-datasource rule in
+# the stack, which documents these in full): datasourceUid is `loki`, the
+# query model uses the string `queryType: instant` (NOT Prometheus's boolean
+# `instant`), and every rule's noDataState is OK -- a quiet log just means
+# nothing called the backend, the healthy case.
+#
+# Series arithmetic: `| json` lifts every event field into a label, so the
+# range aggregations split into one series per distinct field combination;
+# the outer sum()/max() collapses them to the single series the reduce stage
+# expects.
+#
+# Folder "pg-connector" converges by title (ADR 0039 in
+# phillipgreenii-nix-support-apps -- no folderUid, since alerting file
+# provisioning has no such field). Rule uids stay under Grafana's 40-char cap.
+#
+# Surfacing in SwiftBar needs no menubar change: pg-connector-alert-grafana
+# lists every firing Grafana alert and maps labels.severity (error -> high,
+# warning -> medium).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-connector-pr-github
+    folder: pg-connector
+    interval: 1m
+    rules:
+      # (a) Auth: `gh` has no usable credential or GitHub rejected it. Every
+      # op fails with unauthenticated until fixed, so ONE occurrence in the
+      # last 15m is enough. No `for`: the 15m window is the "within 15m".
+      - uid: pg-conn-pr-github-unauthenticated
+        title: pg-connector-pr-github authentication failing
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-pr-github: GitHub authentication failed within the last 15 minutes"
+          description: 'pg-connector-pr-github answered unauthenticated at least once in the last 15 minutes, so every pull-request panel it feeds (pg-desk My Work, review queues) is empty or stale. Run `gh auth status`; re-run `gh auth login` or refresh GH_TOKEN. Inspect the events with {service_name="pg-connector-pr-github"} | json | error_code="unauthenticated".'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-pr-github"} | json | error_code="unauthenticated" [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (b) Availability: calls keep failing as `unavailable` (GitHub or the
+      # network down, `gh` hanging past the 30s exec timeout, GraphQL errors).
+      # Sustained = at least one such failure in every trailing 5m window for
+      # 10m running. Calls refused only because the budget is under the
+      # reserve are `unavailable` too but are rule (c)'s business, so they
+      # are excluded via below_reserve.
+      - uid: pg-conn-pr-github-unavailable
+        title: pg-connector-pr-github unavailable
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-pr-github has been failing as unavailable for over 10 minutes"
+          description: 'pg-connector-pr-github has answered unavailable (not counting the rate-reserve refusal) in every 5 minute window for over 10 minutes -- GitHub or the network is unreachable, or gh is failing or timing out. Inspect the events with {service_name="pg-connector-pr-github"} | json | error_code="unavailable" and read the error field.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum(count_over_time({service_name="pg-connector-pr-github"} | json | error_code="unavailable" | below_reserve!="true" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # (c) Quota: the GraphQL budget is under rate_reserve_points. While it
+      # is, list/search/list_attention refuse to run (see checkRateReserve in
+      # provider.go), which is what emptied pg-desk's My Work panel. graphql_
+      # headroom is remaining minus the reserve in force, so this reads the
+      # live reserve (raising it, e.g. to force this alert, takes effect
+      # immediately). Every reading in the trailing 5m must be negative (max
+      # < 0) for 10m running, so one dip that recovers on the next call does
+      # not page, and an idle period (no readings) resolves it.
+      - uid: pg-conn-pr-github-quota-low
+        title: pg-connector-pr-github GraphQL quota below reserve
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-connector-pr-github: GitHub GraphQL budget has been below the rate reserve for over 10 minutes"
+          description: 'Every GraphQL rate-limit reading pg-connector-pr-github took in the last 5 minutes was below rate_reserve_points, for over 10 minutes, so list/search/list_attention are refusing to run and the pull-request panels are starved. See graphql_remaining, graphql_reset_at (when the budget replenishes) and graphql_reserve with {service_name="pg-connector-pr-github"} | json | graphql_headroom != "". Find the heavy caller or lower the polling rate.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'max(max_over_time({service_name="pg-connector-pr-github"} | json | graphql_headroom != "" | unwrap graphql_headroom | __error__="" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0]

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
@@ -54,9 +55,10 @@ type ghProvider interface {
 	// instead of the old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
 	// fan-out.
 	SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error)
-	// RateLimitRemaining reads the GraphQL API's current rate-limit
-	// remainder (design's "Rate protection" bullet).
-	RateLimitRemaining(ctx context.Context) (int, error)
+	// ReadRateLimit reads the GraphQL API's current rate-limit state —
+	// remainder and reset time (design's "Rate protection" bullet; reset
+	// added by bead pg2-ph0o4 for the backend's own event log).
+	ReadRateLimit(ctx context.Context) (github.RateLimit, error)
 	// GetFiles/GetCommits back the "files"/"commits" targeted ops (bead
 	// pg2-2j5ac.28.2's PR-facts design bullet).
 	GetFiles(ctx context.Context, repo string, number int) ([]api.File, error)
@@ -176,6 +178,28 @@ func rateReservePoints(config json.RawMessage) int {
 	return *cfg.RateReservePoints
 }
 
+// checkRateReserve is the shared "Rate protection" gate List, Search and
+// ListAttention each run before their first search: it reads the GraphQL
+// rate-limit state, records it on the call's event (eventlog.RecordRateLimit,
+// bead pg2-ph0o4 — the budget dipping under the reserve is what starved
+// pg-desk's My Work panel, and this is the one place every guarded call
+// reads it), and answers unavailable when the remainder is below the
+// configured reserve. A failed read is classified like any other gh failure.
+func (b *Backend) checkRateReserve(ctx context.Context) error {
+	rl, err := b.gh.ReadRateLimit(ctx)
+	if err != nil {
+		return classifyGHError(err)
+	}
+	reserve := rateReservePoints(scriptout.ConfigFromContext(ctx))
+	eventlog.RecordRateLimit(ctx, rl.Remaining, rl.ResetAt, reserve)
+	if rl.Remaining < reserve {
+		return scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", rl.Remaining, reserve,
+		))
+	}
+	return nil
+}
+
 // List implements pr.Provider.List against GitHub search (bead
 // pg2-2j5ac.28.1). query has ALREADY been resolved
 // from the request's own config.queries block by
@@ -235,14 +259,8 @@ func rateReservePoints(config json.RawMessage) int {
 // cleanup (bead pg2-c0vs3) once nothing outside them still referenced the
 // codec.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
-	remaining, err := b.gh.RateLimitRemaining(ctx)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
-			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
-		))
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
 	}
 
 	if idsOnly {
@@ -312,14 +330,8 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 	if query == "" {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "search: query required")
 	}
-	remaining, err := b.gh.RateLimitRemaining(ctx)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
-			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
-		))
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
 	}
 	prs, err := b.gh.SearchPRs(ctx, query)
 	if err != nil {
@@ -628,14 +640,8 @@ func parallelMap[T, R any](ctx context.Context, items []T, fn func(ctx context.C
 // an empty list.
 func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
 	query := attentionQueryFrom(scriptout.ConfigFromContext(ctx))
-	remaining, err := b.gh.RateLimitRemaining(ctx)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	if reserve := rateReservePoints(scriptout.ConfigFromContext(ctx)); remaining < reserve {
-		return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
-			"pg-connector-pr-github: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
-		))
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
 	}
 	self, err := b.gh.ViewerLogin(ctx)
 	if err != nil {

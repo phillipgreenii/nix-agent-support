@@ -19,8 +19,10 @@ package main
 
 import (
 	"os"
+	"time"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
@@ -42,7 +44,16 @@ func main() {
 // core's generic serve loop.
 func run() int {
 	backend := internal.New(github.New())
-	return scriptout.ServeLoop(newDispatchTable(backend))
+	return scriptout.ServeLoop(instrument(newDispatchTable(backend), os.Getenv))
+}
+
+// instrument wraps table so every call appends one event to this backend's
+// own rotating event log (bead pg2-ph0o4; package eventlog explains the
+// ownership contract). It lives apart from newDispatchTable so the wiring
+// tests that drive newDispatchTable never write to the real state home.
+// With the log disabled or unresolvable it returns table unchanged.
+func instrument(table scriptout.DispatchTable, getenv func(string) string) scriptout.DispatchTable {
+	return eventlog.Instrument(table, eventlog.SinkFromEnv(getenv), Version, time.Now)
 }
 
 // newDispatchTable builds the pr capability's table (show/list/files/

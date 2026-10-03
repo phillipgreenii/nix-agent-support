@@ -147,6 +147,20 @@ Only `pkg/schema`, `pkg/provider` (and its per-capability subpackages), and `pkg
 importable across backend boundaries — a backend's own code lives in `main` or under its own
 `internal/`. `cmd/pg-connector/layout_convention_test.go` backstops this mechanically.
 
+## Backend observability (each backend owns its own)
+
+A backend that fronts an external service owns its own rotating JSONL event log, and the Loki log
+source plus Grafana alert rules for it are registered in that backend's own nix module under
+`darwin/modules/`, never through pg-connector's config (the umbrella is not bound to OTel).
+`pg-connector-pr-github` is the first: it appends one event per call to
+`${XDG_STATE_HOME}/pg-connector-pr-github/events.jsonl` (override with
+`PG_CONNECTOR_PR_GITHUB_EVENTS_FILE`; `off` disables it), rotated at 5 MiB to `events.jsonl.1`. Each
+event carries `time`, `level`, `msg`, `op`, `error_code`, `duration_ms` and, on calls that read the
+GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `graphql_headroom`.
+`packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
+`unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
+never changes an op's result. Other external-service connectors are expected to follow the same pattern.
+
 ## Versioning
 
 Per-source content digest (this repo's own "Versioning of Custom Packages" convention):

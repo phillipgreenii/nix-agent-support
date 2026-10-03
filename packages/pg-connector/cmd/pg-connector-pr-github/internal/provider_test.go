@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -41,6 +42,7 @@ type fakeGH struct {
 	searchFn         func(ctx context.Context, query string) ([]api.PR, error)
 	searchEnrichedFn func(ctx context.Context, query string) ([]api.PR, error)
 	rateLimit        int
+	rateLimitResetAt string
 	rateLimitErr     error
 
 	// files/commits/filesErr/commitsErr back the Files/Commits (bead
@@ -114,14 +116,14 @@ func (f *fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR,
 // before List/rate-limit protection existed) keeps working unchanged.
 const rateLimitOrDefaultReserve = defaultRateReservePoints + 1000
 
-func (f *fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
+func (f *fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
 	if f.rateLimitErr != nil {
-		return 0, f.rateLimitErr
+		return github.RateLimit{}, f.rateLimitErr
 	}
 	if f.rateLimit == 0 {
-		return rateLimitOrDefaultReserve, nil
+		return github.RateLimit{Remaining: rateLimitOrDefaultReserve, ResetAt: f.rateLimitResetAt}, nil
 	}
-	return f.rateLimit, nil
+	return github.RateLimit{Remaining: f.rateLimit, ResetAt: f.rateLimitResetAt}, nil
 }
 
 func (f *fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
@@ -516,6 +518,101 @@ func TestBackend_List_RateLimitAboveReserve_Succeeds(t *testing.T) {
 	}
 	if len(got.Entities) != 1 {
 		t.Fatalf("Entities = %+v", got.Entities)
+	}
+}
+
+// TestBackend_RateGuard_RecordsReadingOnEvent (bead pg2-ph0o4): every guarded
+// op records the rate-limit reading it took -- remaining, reset, and the
+// reserve in force -- on the in-flight call's event, and the record carries
+// through BOTH the pass and the below-reserve paths, since the reading is
+// exactly what the "budget below reserve" alert needs.
+func TestBackend_RateGuard_RecordsReadingOnEvent(t *testing.T) {
+	cases := []struct {
+		name         string
+		remaining    int
+		wantErr      bool
+		wantHeadroom int
+		wantBelow    bool
+	}{
+		{"above reserve", 2500, false, 1500, false},
+		{"below reserve", 400, true, -600, true},
+	}
+	ops := map[string]func(b *Backend, ctx context.Context) error{
+		"list": func(b *Backend, ctx context.Context) error {
+			_, err := b.List(ctx, []string{"is:open"}, false, nil)
+			return err
+		},
+		"search": func(b *Backend, ctx context.Context) error {
+			_, err := b.Search(ctx, "is:open", nil)
+			return err
+		},
+		"list_attention": func(b *Backend, ctx context.Context) error {
+			_, err := b.ListAttention(ctx)
+			return err
+		},
+	}
+	for _, c := range cases {
+		for opName, run := range ops {
+			t.Run(c.name+"/"+opName, func(t *testing.T) {
+				sink := &captureSink{}
+				b := newTestBackend(t, &fakeGH{rateLimit: c.remaining, rateLimitResetAt: "2026-10-03T14:00:00Z"})
+				table := eventlog.Instrument(scriptout.DispatchTable{opName: {
+					SchemaVersion: 1,
+					Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+						return nil, run(b, scriptout.WithConfig(ctx, []byte(`{"rate_reserve_points":1000}`)))
+					},
+				}}, sink, "", time.Now)
+				_, err := table[opName].Handle(context.Background(), nil)
+				if (err != nil) != c.wantErr {
+					t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+				}
+				ev := sink.last(t)
+				if ev.GraphQLRemaining == nil || *ev.GraphQLRemaining != c.remaining {
+					t.Errorf("graphql_remaining = %v, want %d", ev.GraphQLRemaining, c.remaining)
+				}
+				if ev.GraphQLResetAt == nil || *ev.GraphQLResetAt != "2026-10-03T14:00:00Z" {
+					t.Errorf("graphql_reset_at = %v", ev.GraphQLResetAt)
+				}
+				if ev.GraphQLHeadroom == nil || *ev.GraphQLHeadroom != c.wantHeadroom {
+					t.Errorf("graphql_headroom = %v, want %d", ev.GraphQLHeadroom, c.wantHeadroom)
+				}
+				if ev.BelowReserve != c.wantBelow {
+					t.Errorf("below_reserve = %v, want %v", ev.BelowReserve, c.wantBelow)
+				}
+				wantCode := ""
+				if c.wantErr {
+					wantCode = "unavailable"
+				}
+				if ev.ErrorCode != wantCode {
+					t.Errorf("error_code = %q, want %q", ev.ErrorCode, wantCode)
+				}
+			})
+		}
+	}
+}
+
+// TestBackend_RateGuard_ReadFailureIsClassifiedAndLeavesNoReading: when the
+// rate-limit read itself fails with an auth error, the call answers
+// unauthenticated (what the auth alert keys on) and has no graphql fields.
+func TestBackend_RateGuard_ReadFailureIsClassifiedAndLeavesNoReading(t *testing.T) {
+	sink := &captureSink{}
+	b := newTestBackend(t, &fakeGH{rateLimitErr: github.ErrGHAuthInvalid})
+	table := eventlog.Instrument(scriptout.DispatchTable{"list": {
+		SchemaVersion: 1,
+		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+			return b.List(ctx, []string{"is:open"}, false, nil)
+		},
+	}}, sink, "", time.Now)
+	_, err := table["list"].Handle(context.Background(), nil)
+	if !errors.Is(err, scriptout.ErrUnauthenticated) {
+		t.Fatalf("err = %v, want unauthenticated", err)
+	}
+	ev := sink.last(t)
+	if ev.ErrorCode != "unauthenticated" || ev.Level != "error" {
+		t.Errorf("event = %+v", ev)
+	}
+	if ev.GraphQLRemaining != nil || ev.GraphQLHeadroom != nil {
+		t.Errorf("failed read left graphql fields: %+v", ev)
 	}
 }
 
@@ -947,4 +1044,17 @@ func TestPRShowCarriesBaseSHA(t *testing.T) {
 			}
 		})
 	}
+}
+
+// captureSink collects events for the rate-guard event tests.
+type captureSink struct{ events []eventlog.Event }
+
+func (c *captureSink) Write(ev eventlog.Event) { c.events = append(c.events, ev) }
+
+func (c *captureSink) last(t *testing.T) eventlog.Event {
+	t.Helper()
+	if len(c.events) == 0 {
+		t.Fatal("no event recorded")
+	}
+	return c.events[len(c.events)-1]
 }

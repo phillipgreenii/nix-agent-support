@@ -1004,30 +1004,50 @@ func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.P
 }
 
 // rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {
-// remaining } }'`'s own stdout — the standard GitHub GraphQL response
-// envelope, {"data": {"rateLimit": {"remaining": N}}}.
+// remaining resetAt } }'`'s own stdout — the standard GitHub GraphQL
+// response envelope, {"data": {"rateLimit": {"remaining": N, "resetAt":
+// "..."}}}.
 type rateLimitWire struct {
 	Data struct {
 		RateLimit struct {
-			Remaining int `json:"remaining"`
+			Remaining int    `json:"remaining"`
+			ResetAt   string `json:"resetAt"`
 		} `json:"rateLimit"`
 	} `json:"data"`
 }
 
-// RateLimitRemaining reads the GraphQL API's current rate-limit
-// remainder (bead pg2-2j5ac.28.1, design's "Rate protection"
-// bullet) via a dedicated, minimal GraphQL query — mirroring CheckAuth's
-// own `gh api graphql -f query=...` call shape exactly.
-func (p *Provider) RateLimitRemaining(ctx context.Context) (int, error) {
-	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining } }")
+// RateLimit is one reading of the GraphQL API's rate-limit budget: how many
+// points remain, and when GitHub replenishes them (RFC3339, as GitHub
+// reports it; empty if the response omitted it).
+type RateLimit struct {
+	Remaining int
+	ResetAt   string
+}
+
+// ReadRateLimit reads the GraphQL API's current rate-limit state (bead
+// pg2-2j5ac.28.1, design's "Rate protection" bullet; resetAt added by bead
+// pg2-ph0o4 so the backend's own event log can record when the budget
+// replenishes) via a dedicated, minimal GraphQL query — mirroring
+// CheckAuth's own `gh api graphql -f query=...` call shape exactly.
+func (p *Provider) ReadRateLimit(ctx context.Context) (RateLimit, error) {
+	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining resetAt } }")
 	if err != nil {
-		return 0, err
+		return RateLimit{}, err
 	}
 	var wire rateLimitWire
 	if err := json.Unmarshal(raw, &wire); err != nil {
-		return 0, fmt.Errorf("github: parse rate limit JSON: %w", err)
+		return RateLimit{}, fmt.Errorf("github: parse rate limit JSON: %w", err)
 	}
-	return wire.Data.RateLimit.Remaining, nil
+	return RateLimit{Remaining: wire.Data.RateLimit.Remaining, ResetAt: wire.Data.RateLimit.ResetAt}, nil
+}
+
+// RateLimitRemaining is ReadRateLimit's remainder alone.
+func (p *Provider) RateLimitRemaining(ctx context.Context) (int, error) {
+	rl, err := p.ReadRateLimit(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return rl.Remaining, nil
 }
 
 func validateRepo(repo string) error {

@@ -1262,6 +1262,36 @@ func TestRateLimitRemaining_ParsesRemainder(t *testing.T) {
 	}
 }
 
+func TestReadRateLimit_ParsesRemainderAndReset(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":1234,"resetAt":"2026-10-03T14:00:00Z"}}}`)
+	p := NewWithRunner(gh)
+
+	rl, err := p.ReadRateLimit(context.Background())
+	if err != nil {
+		t.Fatalf("ReadRateLimit: %v", err)
+	}
+	if rl.Remaining != 1234 || rl.ResetAt != "2026-10-03T14:00:00Z" {
+		t.Fatalf("rl = %+v, want {1234 2026-10-03T14:00:00Z}", rl)
+	}
+	// The query must actually ask GitHub for resetAt, or the field is always empty.
+	if len(gh.calls) != 1 || !strings.Contains(strings.Join(gh.calls[0], " "), "resetAt") {
+		t.Fatalf("query did not request resetAt: %v", gh.calls)
+	}
+}
+
+func TestReadRateLimit_MissingResetIsEmpty(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":7}}}`)
+	rl, err := NewWithRunner(gh).ReadRateLimit(context.Background())
+	if err != nil {
+		t.Fatalf("ReadRateLimit: %v", err)
+	}
+	if rl.Remaining != 7 || rl.ResetAt != "" {
+		t.Fatalf("rl = %+v", rl)
+	}
+}
+
 func TestRateLimitRemaining_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
 	gh.errs["api graphql"] = errors.New("boom")

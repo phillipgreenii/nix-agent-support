@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -40,8 +44,8 @@ func (fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, er
 	return nil, nil
 }
 
-func (fakeGH) RateLimitRemaining(ctx context.Context) (int, error) {
-	return 5000, nil
+func (fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
+	return github.RateLimit{Remaining: 5000, ResetAt: "2026-10-03T14:00:00Z"}, nil
 }
 
 func (fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
@@ -202,5 +206,81 @@ func TestNewDispatchTable_ListsReviewSubmit(t *testing.T) {
 	table := newDispatchTable(newTestBackend(t))
 	if _, ok := table["review_submit"]; !ok {
 		t.Fatalf("review_submit missing from dispatch table; ops = %v", table.Ops())
+	}
+}
+
+// TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog (bead pg2-ph0o4):
+// the production wiring (instrument over newDispatchTable) leaves exactly one
+// JSONL event per call in the log file the backend owns -- resolved from ITS
+// OWN environment, not from pg-connector's config -- and a call that read the
+// rate limit carries remaining/reset.
+func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
+	stateHome := t.TempDir()
+	getenv := func(k string) string {
+		if k == "XDG_STATE_HOME" {
+			return stateHome
+		}
+		return ""
+	}
+	table := instrument(newDispatchTable(newTestBackend(t)), getenv)
+
+	call := func(op, args string) {
+		t.Helper()
+		var out bytes.Buffer
+		scriptout.ServeOne(table, strings.NewReader(`{"op":"`+op+`","args":`+args+`}`), &out)
+	}
+	call("show", `{"id":"owner/repo#1"}`)
+	call("search", `{"query":"is:open"}`)
+	call("show", `{"id":"not-a-valid-id"}`)
+
+	path := filepath.Join(stateHome, "pg-connector-pr-github", "events.jsonl")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("event log not written at %s: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3:\n%s", len(lines), raw)
+	}
+	var evs []map[string]any
+	for _, l := range lines {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("bad line %q: %v", l, err)
+		}
+		evs = append(evs, m)
+	}
+	if evs[0]["op"] != "show" || evs[0]["level"] != "info" || evs[0]["service"] != "pg-connector-pr-github" {
+		t.Errorf("show event = %v", evs[0])
+	}
+	if _, has := evs[0]["graphql_remaining"]; has {
+		t.Errorf("show does not read the rate limit but event has graphql_remaining: %v", evs[0])
+	}
+	if evs[1]["op"] != "search" || evs[1]["graphql_remaining"] != float64(5000) || evs[1]["graphql_reset_at"] != "2026-10-03T14:00:00Z" {
+		t.Errorf("search event missing rate-limit reading: %v", evs[1])
+	}
+	if evs[2]["level"] == "info" || evs[2]["error_code"] == nil {
+		t.Errorf("failing call not logged as an error: %v", evs[2])
+	}
+}
+
+// TestInstrument_DisabledLeavesTableAlone: EnvPath=off must not write
+// anything and must not alter the table.
+func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
+	dir := t.TempDir()
+	getenv := func(k string) string {
+		switch k {
+		case eventlog.EnvPath:
+			return "off"
+		case "XDG_STATE_HOME":
+			return dir
+		}
+		return ""
+	}
+	table := instrument(newDispatchTable(newTestBackend(t)), getenv)
+	var out bytes.Buffer
+	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"owner/repo#1"}}`), &out)
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("disabled event log wrote files: %v", entries)
 	}
 }

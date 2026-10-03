@@ -6,6 +6,7 @@
     ./modules/claude-code
     ./modules/pa-monitor
     ./modules/pg-router
+    ./modules/pg-connector-pr-github
     ./modules/pg-rescue
     ./modules/pg-desk-serve
     ./modules/ccpool

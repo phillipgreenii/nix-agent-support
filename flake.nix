@@ -1592,6 +1592,144 @@
                   touch $out
                 '';
 
+              # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
+              # backend's own event log as a Loki log source and its LogQL alert
+              # rules, from its own nix module rather than through pg-connector's
+              # config. Same stub technique as test-pg-rescue-darwin-module above: a
+              # stub of the observability surface that mirrors the REAL logSources
+              # submodule's defaults (path from the attribute name, serviceName =
+              # name, format jsonl, errorAlert.enable) so the assertions prove the
+              # module leaves `path`/`serviceName` at their defaults -- which the Go
+              # side (eventlog.Path) and the alert selectors depend on -- and that it
+              # switches the generic error-rate alert off. The runCommand then
+              # checks the alert file itself: three rules with unique <=40-char uids
+              # and Loki datasources, every query selecting the registered
+              # service_name and parsing as LogQL (logcli --stdin parses offline;
+              # "metrics Query: not supported" is the parse-success sentinel, same as
+              # test-pg-rescue-runs-dashboard), and every event field a rule reads
+              # still being a json tag on eventlog.Event.
+              test-pg-connector-pr-github-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-pr-github/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-connector-pr-github;
+                  alertsFile = ./packages/pg-connector/grafana/alerting/pr-github-alerts.yaml;
+                in
+                assert disabled.logSources == { };
+                assert disabled.alertRuleFiles == [ ];
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-pr-github/*.jsonl";
+                assert src.serviceName == "pg-connector-pr-github";
+                assert src.format == "jsonl";
+                assert src.errorAlert.enable == false;
+                assert enabled.alertRuleFiles == [ alertsFile ];
+                pkgs.runCommand "test-pg-connector-pr-github-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                    ];
+                    glob = src.path;
+                    alerts = alertsFile;
+                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog/eventlog.go;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The default glob selects events.jsonl and not the rotated
+                    # copy or the rotation lock.
+                    state="$TMPDIR/state/pg-connector-pr-github"
+                    mkdir -p "$state"
+                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
+
+                    # Alert file structure.
+                    [ "$(yq '.groups[0].rules | length' "$alerts")" = 3 ] || fail "want exactly 3 rules"
+                    [ "$(yq '.groups[0].folder' "$alerts")" = pg-connector ] || fail "folder is not pg-connector"
+                    uids="$(yq '.groups[0].rules[].uid' "$alerts")"
+                    [ "$(printf '%s\n' "$uids" | sort -u | wc -l)" = 3 ] || fail "uids are not unique"
+                    printf '%s\n' "$uids" | while read -r u; do
+                      [ "''${#u}" -le 40 ] || fail "uid $u exceeds Grafana's 40-char cap"
+                    done
+                    for want in pg-conn-pr-github-unauthenticated pg-conn-pr-github-unavailable pg-conn-pr-github-quota-low; do
+                      printf '%s\n' "$uids" | grep -qx "$want" || fail "missing rule $want"
+                    done
+                    [ "$(yq '[.groups[0].rules[] | select(.condition == "C" and .noDataState == "OK" and .data[0].datasourceUid == "loki" and .data[0].model.queryType == "instant")] | length' "$alerts")" = 3 ] \
+                      || fail "a rule is not a loki instant query with condition C and noDataState OK"
+
+                    # Every query selects the registered service_name and parses
+                    # as LogQL; the fields it reads are still json tags on
+                    # eventlog.Event.
+                    for i in 0 1 2; do
+                      e="$(yq ".groups[0].rules[$i].data[0].model.expr" "$alerts")"
+                      case "$e" in
+                        *'{service_name="pg-connector-pr-github"}'*) ;;
+                        *) fail "rule $i does not select the registered service_name: $e" ;;
+                      esac
+                      parsed="$(logcli query --stdin --quiet "$e" </dev/null 2>&1 | tail -n 1 || true)"
+                      case "$parsed" in
+                        *"metrics Query: not supported"*) ;;
+                        *) fail "rule $i does not parse as LogQL: $parsed" ;;
+                      esac
+                    done
+                    for field in error_code below_reserve graphql_headroom; do
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+                    touch $out
+                  '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #
