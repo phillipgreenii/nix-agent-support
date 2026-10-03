@@ -1,0 +1,496 @@
+{
+  "uid": "pg-rescue-runs",
+  "title": "pg-rescue runs",
+  "tags": ["pg-rescue"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "description": "pg-rescue run-log rates per chain, from the run log (runs.jsonl) shipped to Loki as service_name=\"pg-rescue\" (darwin/modules/pg-rescue). Definitions match the README \"Measuring from the run log\" recipes. Every query matches the raw JSON line with RE2 line filters and a regexp stage, not `| json`, because LogQL cannot iterate the attempts array and the log source is shipped raw (body = the run-log line). A run started with --handlers has no chain and appears as a series with an empty chain label. Agent cost and failing handlers read attempt positions 1 to 8; an attempt at a later position is not counted. Run history starts at the first activation that shipped the source (the receiver reads new lines only).",
+  "templating": {
+    "list": [
+      {
+        "name": "chain",
+        "label": "chain (regex)",
+        "type": "textbox",
+        "query": ".*",
+        "current": {
+          "value": ".*",
+          "text": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "value": ".*",
+            "text": ".*"
+          }
+        ],
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Outcome rates by chain",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "title": "Runs",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Wrapped runs in the selected range, per chain, including the happy path. This is the denominator of the three rates beside it.",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no runs"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Common-case rate",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Share of runs that ended `success`, or `resolved` by an attempt tagged `deterministic`. The line filter keys on the attempt object field order tags, outcome, as the run-log writer encodes it.",
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"success\"|\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"deterministic\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "percentunit",
+          "noValue": "no runs",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Agent rate",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Share of runs `resolved` by an attempt tagged `agent`.",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"resolved\".*\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],\"outcome\":\"resolved\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "percentunit",
+          "noValue": "no runs",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Escape rate",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Share of runs that ended `deferred` or `unhandled`, i.e. escaped the chain.",
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "(sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} |~ `\"result\":\"(deferred|unhandled)\"` | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) or on(pr_chain) (sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range])) * 0)) / sum by (pr_chain) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" [$__range]))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "percentunit",
+          "noValue": "no runs",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Runs by chain and result",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Run count per interval by chain and result (success, resolved, deferred, unhandled, error, interrupted).",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (pr_chain, pr_result) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | regexp `\"result\":\"(?P<pr_result>[a-z]+)\"` | pr_chain =~ \"$chain\" [$__interval]))",
+          "legendFormat": "{{pr_chain}} / {{pr_result}}",
+          "refId": "A",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Agent cost",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "title": "Agent cost per interval",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Sum of `meta.total_cost_usd` over attempts tagged `agent`, per chain. An agent attempt whose meta carries no cost, or a nested object before it, adds nothing.",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (pr_chain) (sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":1,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`1` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":2,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`2` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":3,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`3` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":4,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`4` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":5,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`5` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":6,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`6` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":7,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`7` | unwrap pr_cost [$__interval])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":8,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`8` | unwrap pr_cost [$__interval])))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Agent cost in range",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Total agent cost over the selected range, per chain.",
+      "gridPos": {
+        "x": 16,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (pr_chain) (sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":1,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`1` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":2,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`2` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":3,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`3` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":4,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`4` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":5,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`5` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":6,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`6` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":7,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`7` | unwrap pr_cost [$__range])) or sum by (pr_chain, pr_slot) (sum_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"position\":8,\"tags\":\\[[^\\]]*\"agent\"[^\\]]*\\],[^{}]*\"meta\":\\{[^{}]*\"total_cost_usd\":(?P<pr_cost>[0-9.eE+-]+)` | pr_cost != \"\" | label_format pr_slot=`8` | unwrap pr_cost [$__range])))",
+          "legendFormat": "{{pr_chain}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "currencyUSD",
+          "noValue": "no runs"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Failing handlers",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "title": "Failing handlers by handler and reason",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Attempts with outcome `failed` over the selected range, grouped by chain, handler and the wrapper-recorded reason.",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (pr_chain, pr_handler, pr_reason) (sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":1,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`1` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":2,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`2` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":3,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`3` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":4,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`4` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":5,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`5` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":6,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`6` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":7,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`7` [$__range])) or sum by (pr_chain, pr_handler, pr_reason, pr_slot) (count_over_time({service_name=\"pg-rescue\"} | regexp `\"chain\":\"(?P<pr_chain>[^\"]*)\"` | pr_chain =~ \"$chain\" | regexp `\"handler\":\"(?P<pr_handler>[^\"\\\\]*)\",\"position\":8,\"tags\":\\[[^\\]]*\\],\"outcome\":\"failed\",\"reason\":\"(?P<pr_reason>(?:[^\"\\\\]|\\\\.)*)\"` | pr_handler != \"\" | label_format pr_slot=`8` [$__range])))",
+          "legendFormat": "{{pr_chain}} / {{pr_handler}}: {{pr_reason}}",
+          "refId": "A",
+          "instant": true,
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "unit": "short",
+          "noValue": "no runs"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}

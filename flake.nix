@@ -1430,6 +1430,159 @@
                     touch $out
                   '';
 
+              # pg-rescue-runs Grafana dashboard guard (bead pg2-lnfwd). The
+              # panels read the run log (runs.jsonl, shipped raw to Loki) with
+              # RE2 line filters and regexp stages over the verbatim JSON line,
+              # so a wrong field name or field order would silently render "No
+              # data". This check therefore (1) parses every query with logcli's
+              # LogQL parser (`--stdin` parses first and then reports metric
+              # queries as unsupported, which proves the parse succeeded), and
+              # (2) runs the line-filter and regexp stages pulled out of the
+              # dashboard JSON against the run-log writer's fixture
+              # (packages/pg-rescue/internal/runlog/testdata/runs.fixture.jsonl,
+              # whose per-chain numbers the writer's README test works out by
+              # hand), expecting the same counts. PCRE (grep -P) stands in for
+              # RE2; the dashboard regexes use only the syntax both share.
+              test-pg-rescue-runs-dashboard =
+                pkgs.runCommand "test-pg-rescue-runs-dashboard"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gawk
+                      pkgs.grafana-loki
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    f=${./packages/pg-rescue/grafana/pg-rescue-runs.json}
+                    fixture=${./packages/pg-rescue/internal/runlog/testdata/runs.fixture.jsonl}
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    jq -e '.uid == "pg-rescue-runs"' "$f" >/dev/null || fail "uid is not pg-rescue-runs"
+                    jq -e '[.panels[].targets[]?] | length > 0 and all(.datasource.type == "loki" and .datasource.uid == "loki" and (.expr | contains("{service_name=\"pg-rescue\"}")))' "$f" >/dev/null \
+                      || fail "a target is not a Loki query on {service_name=\"pg-rescue\"}"
+
+                    # (1) every query parses as LogQL
+                    n="$(jq '[.panels[].targets[]?] | length' "$f")"
+                    for i in $(seq 0 $((n - 1))); do
+                      e="$(jq -r --argjson i "$i" '[.panels[].targets[]?][$i].expr' "$f" | sed 's/\$__range/5m/g; s/\$__interval/1m/g; s/\$chain/.*/g')"
+                      parsed="$(logcli query --stdin --quiet "$e" </dev/null 2>&1 | tail -n 1 || true)"
+                      case "$parsed" in
+                        *"metrics Query: not supported"*) ;;
+                        *) fail "query $i does not parse as LogQL: $parsed" ;;
+                      esac
+                    done
+
+                    expr_of() { jq -r --arg t "$1" '.panels[] | select(.title == $t) | .targets[0].expr' "$f"; }
+
+                    # (2) the line filters count what the README recipes count
+                    count_filter() { expr_of "$1" | grep -oP '\|~ `\K[^`]+' | sed -n 1p | { read -r re; grep -cP -- "$re" "$fixture"; }; }
+                    [ "$(count_filter 'Common-case rate')" = 5 ] || fail "common-case filter: want 5 runs"
+                    [ "$(count_filter 'Agent rate')" = 2 ] || fail "agent filter: want 2 runs"
+                    [ "$(count_filter 'Escape rate')" = 4 ] || fail "escape filter: want 4 runs"
+
+                    # agent cost: the sum over the per-position regexps
+                    cost="$(expr_of 'Agent cost in range' | grep -oP 'regexp `\K"position":[^`]+' | while read -r re; do
+                      grep -oP -- "$re" "$fixture" | grep -oP 'total_cost_usd":\K[0-9.eE+-]+' || true
+                    done | awk '{ s += $1 } END { print s }')"
+                    [ "$cost" = 0.875 ] || fail "agent cost: want 0.875, got $cost"
+
+                    # failing handlers: handler + reason pairs, one regexp per position
+                    failing="$(expr_of 'Failing handlers by handler and reason' | grep -oP 'regexp `\K"handler":[^`]+' | while read -r re; do
+                      grep -oP -- "$re" "$fixture" | grep -oP '"handler":"\K[^"]*|"reason":"\K[^"]*' | paste -d, - - || true
+                    done | sort | uniq -c | sed 's/^ *//')"
+                    want="$(printf '%s\n' '2 ag,timed out after 8m' '1 ag,exit 1')"
+                    [ "$(printf '%s\n' "$failing" | sort)" = "$(printf '%s\n' "$want" | sort)" ] || fail "failing handlers: want $want, got $failing"
+
+                    echo "ok: uid pg-rescue-runs, $n queries parse, filters count 5/2/4, cost 0.875, failing handlers match"
+                    touch $out
+                  '';
+
+              # darwin/modules/pg-rescue (bead pg2-lnfwd): ships the run log to
+              # Loki. Evaluates the module against a stub of the observability
+              # surface that mirrors the REAL logSources submodule's defaults
+              # (phillipgreenii-nix-support-apps,
+              # darwin/modules/observability/registration.nix: path defaults to
+              # ${env:XDG_STATE_HOME}/<name>/*.jsonl, serviceName to the name,
+              # format to "jsonl"), so the assertions prove that the module
+              # leaves `path` at its default and that the default glob selects
+              # runs.jsonl and nothing else in the state directory.
+              test-pg-rescue-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                      };
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-rescue/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            dashboardProviders = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-rescue;
+                in
+                assert disabled.logSources == { };
+                assert disabled.dashboardProviders == { };
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-rescue/*.jsonl";
+                assert src.serviceName == "pg-rescue";
+                assert src.format == "raw";
+                assert enabled.dashboardProviders.pg-rescue.folder == "Claude Agents";
+                assert
+                  enabled.dashboardProviders.pg-rescue.dashboards
+                  == [ ./packages/pg-rescue/grafana/pg-rescue-runs.json ];
+                pkgs.runCommand "test-pg-rescue-darwin-module-ok" { glob = src.path; } ''
+                  # The default glob selects runs.jsonl and not the rotated
+                  # copy, the rotation lock or the run directories.
+                  state="$TMPDIR/state/pg-rescue"
+                  mkdir -p "$state/runs/20261002T140311Z-7f3a9c2e"
+                  touch "$state/runs.jsonl" "$state/runs.jsonl.1" "$state/runs.jsonl.lock" \
+                    "$state/runs/20261002T140311Z-7f3a9c2e/report.json"
+                  pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                  # shellcheck disable=SC2086 # the glob must expand
+                  matched="$(ls -d $pattern 2>/dev/null || true)"
+                  [ "$matched" = "$state/runs.jsonl" ] || { echo "FAIL: glob '$glob' matched: $matched" >&2; exit 1; }
+                  touch $out
+                '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #

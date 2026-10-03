@@ -309,6 +309,24 @@ Tracing: from a run to its bead, `pg-rescue-bead` records `meta.item_id`; from a
 bead body carries the run id; from a run to its claude session, `pg-rescue-claude` records
 `meta.session_id`.
 
+### Rates in Grafana
+
+On a machine with the observability stack, `darwin/modules/pg-rescue` registers the run log as a log
+source (`logSources.pg-rescue`, default glob `${XDG_STATE_HOME}/pg-rescue/*.jsonl`, which matches
+`runs.jsonl` and not the rotated `runs.jsonl.1`) and provisions the `pg-rescue runs` dashboard
+(`grafana/pg-rescue-runs.json`) in the "Claude Agents" folder. The source is shipped `raw`: the run
+log has a `ts` field and no `time` or `level`, which the `jsonl` log-source contract requires. Each
+Loki line is therefore the verbatim run-log line, stamped with its ingestion time, and history starts
+at the first activation that ships the source.
+
+The panels give, per chain, the same numbers as the recipes above: common-case rate, agent rate,
+escape rate, agent cost, and failing handlers by handler and reason. LogQL cannot iterate the
+`attempts` array, so the queries read the verbatim JSON line with RE2 line filters and `regexp`
+stages. They depend on the field order `internal/runlog` writes (`tags` then `outcome` in an
+attempt) and, for agent cost and failing handlers, look at attempt positions 1 to 8 only. The
+`test-pg-rescue-runs-dashboard` flake check parses every query and runs its filters against the
+fixture log. Query the raw lines yourself with `{service_name="pg-rescue"}`.
+
 ## Template data model
 
 The three reference handlers render their prompt, title or body with Go `text/template` over one
