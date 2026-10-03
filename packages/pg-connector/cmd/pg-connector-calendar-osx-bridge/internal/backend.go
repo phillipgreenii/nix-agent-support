@@ -66,16 +66,51 @@
 //     matching only — apiEvent (mirroring calendarapi.Event [landed:
 //     pg2-p9ap3]) carries no separate Organizer field.
 //
-//   - ListAttention's combining formula (a freedom boundary the design
-//     does not specify one exact rule for) is computeSeverity below: an
-//     additive score — priorityWeight(cal.Priority) [high=2, medium/
-//     normal=1, low/unrecognized/empty=0], +1 when any attendee matches
-//     important_people, -1 when the event's own SelfStatus is tentative —
-//     mapped to Severity by score (>=3 critical, 2 high, 1 medium, else
-//     low). Each of the three named inputs (calendar_priority,
-//     important_people match, SelfStatus/include_tentative) demonstrably
-//     changes the result in isolation — see backend_test.go's three
-//     dedicated fixture pairs.
+//   - ListAttention's severity is a TIME-BASED RAMP with bounded modifiers
+//     (bead pg2-pf1rb; INV-CAL-2..INV-CAL-6 in
+//     packages/pg-connector/docs/behavior/invariants.md): an event not yet
+//     started and starting later than attention_lead_time is "low"; one
+//     starting within the lead time is "high"; one in progress
+//     (start <= now < end) is "critical" and drops out once it ends.
+//     Declined events are never reported (INV-CAL-6).
+//
+//   - CAL-RAMP-5 design choice (all-day events): an all-day event is
+//     reported at "low" for as long as it overlaps the window, never
+//     ramped and never raised by a modifier. Reasoning: an all-day event
+//     has no meaningful start instant (it is typically a holiday, OOO
+//     marker, birthday, or deadline, not a meeting needing attendance), so
+//     "critical for the whole day" would pin the menubar's worst severity
+//     for 24h; omitting it would silently lose information the operator
+//     may want to see (consumers can already filter low severity out).
+//
+//   - CAL-RAMP-6 design choice (modifiers): the existing modifiers
+//     (calendar priority, important_people, tentative) are KEPT as a
+//     one-level shift of the time tier, capped at one level and clamped to
+//     the [low, critical] enum: delta = clamp(+1 if the calendar priority
+//     is "high", +1 if any attendee matches important_people, -1 if
+//     SelfStatus is tentative; -1..+1). Reasoning: dropping them would
+//     leave important_people (used by nothing else) and calendar_priority
+//     as dead config, while an uncapped additive score would let a
+//     modifier swallow the ramp (a far-off event outranking a running
+//     one). Because the shift is the same constant at every tier and the
+//     clamp is monotone, one event's severity is NON-DECREASING over time
+//     (far <= soon <= in progress) for every modifier combination: the
+//     ramp is never inverted. Priority "medium"/"normal" no longer
+//     differs from "low"/unset for attention (it still feeds the dedup
+//     tie-break priorityWeight).
+//
+//   - Look-back: ListAttention queries [now - attentionLookback,
+//     now + attention_window) and filters locally to events that have not
+//     ended (end > now) and start before the window closes. The daemon
+//     delegates to EventKit's predicateForEventsWithStartDate:endDate:
+//     calendars: + eventsMatchingPredicate: with NO local start/end
+//     filtering (pg-osx-bridge-api internal/eventkitprovider and
+//     go-eventkit v0.15.0 bridge_darwin.m ek_cal_fetch_events). EventKit
+//     is generally understood to return events OVERLAPPING the range, but
+//     nothing in the repos pins or tests that, so a query starting at "now"
+//     cannot be PROVEN to return an in-progress event. Rather than assume,
+//     the query start is widened by attentionLookback and the result is
+//     filtered, which is correct whether or not the predicate overlaps.
 //
 //   - Search has no time-range parameter of its own (search.Provider.Search
 //     takes only query/fields), but calendarapi.EventsQuery requires a
@@ -113,24 +148,37 @@ const (
 	searchWindowFuture = 365 * 24 * time.Hour
 )
 
-// calendarAttentionWindow bounds ListAttention's own event fetch: events
-// starting within the next 24h from now — mirrors
-// cmd/pg-connector-issue-jira/internal.defaultAttentionThreshold's
-// identical "one day's notice" default, with no config knob of its own
-// (this packet's own Contract enumerates only calendars/important_people
-// as this backend's recognized config keys) [freedom boundary].
-const calendarAttentionWindow = 24 * time.Hour
+// Defaults for ListAttention's per-backend config keys (INV-CAL-5):
+//
+//   - defaultAttentionWindow bounds the look-ahead: events starting within
+//     the next 24h are reported — mirrors
+//     cmd/pg-connector-issue-jira/internal.defaultAttentionThreshold's
+//     "one day's notice" default.
+//   - defaultAttentionLeadTime is the "starting soon" tier boundary.
+//
+// attentionLookback widens the events query start into the past so an
+// in-progress event is returned even if the daemon's range predicate does
+// not return overlapping events (see this file's package doc comment); it
+// is a safety margin, not a config knob, and MUST exceed the longest
+// non-all-day meeting expected.
+const (
+	defaultAttentionWindow   = 24 * time.Hour
+	defaultAttentionLeadTime = 15 * time.Minute
+	attentionLookback        = 24 * time.Hour
+)
 
 // Backend is pg-connector-calendar-osx-bridge's concrete calendar.Provider
 // implementation.
 type Backend struct {
 	transport Transport
+	// now is the clock; tests inject a fixed one. Production uses time.Now.
+	now func() time.Time
 }
 
 // New returns a Backend wrapping the given Transport. Production wiring
 // passes NewSocketClient(); tests inject a stub.
 func New(t Transport) *Backend {
-	return &Backend{transport: t}
+	return &Backend{transport: t, now: time.Now}
 }
 
 // Compile-time check that Backend satisfies the calendar capability's
@@ -171,6 +219,33 @@ type calendarConfig struct {
 type backendConfig struct {
 	Calendars       []calendarConfig `json:"calendars,omitempty"`
 	ImportantPeople []string         `json:"important_people,omitempty"`
+	// AttentionLeadTime / AttentionWindow are time.ParseDuration strings
+	// (INV-CAL-5); empty/absent means the default.
+	AttentionLeadTime string `json:"attention_lead_time,omitempty"`
+	AttentionWindow   string `json:"attention_window,omitempty"`
+}
+
+// attentionTiming resolves cfg's attention_lead_time / attention_window to
+// durations, applying defaults for absent keys. A malformed duration, a
+// negative lead time, or a non-positive window answers
+// scriptout.ErrInvalidArgument (INV-CAL-5).
+func (cfg backendConfig) attentionTiming() (lead, window time.Duration, err error) {
+	lead, window = defaultAttentionLeadTime, defaultAttentionWindow
+	if v := strings.TrimSpace(cfg.AttentionLeadTime); v != "" {
+		lead, err = time.ParseDuration(v)
+		if err != nil || lead < 0 {
+			return 0, 0, scriptout.WrapError(scriptout.ErrInvalidArgument,
+				fmt.Sprintf("calendar: attention_lead_time %q must be a non-negative time.ParseDuration string", v))
+		}
+	}
+	if v := strings.TrimSpace(cfg.AttentionWindow); v != "" {
+		window, err = time.ParseDuration(v)
+		if err != nil || window <= 0 {
+			return 0, 0, scriptout.WrapError(scriptout.ErrInvalidArgument,
+				fmt.Sprintf("calendar: attention_window %q must be a positive time.ParseDuration string", v))
+		}
+	}
+	return lead, window, nil
 }
 
 // decodeBackendConfig decodes raw (scriptout.ConfigFromContext's return
@@ -485,42 +560,100 @@ func attendeesMatchImportantPeople(attendees []apiAttendee, important []string) 
 	return false
 }
 
-// computeSeverity implements this file's own combining formula (package
-// doc comment) — the exact rule under which each of the three named
-// attention-severity inputs demonstrably changes the result.
-func computeSeverity(priority string, importantMatch bool, selfStatus string) schema.Severity {
-	score := priorityWeight(priority)
+// severityLevels is the ramp's ladder in ascending rank (the
+// schema.ValidSeverities order), indexed by level.
+var severityLevels = []schema.Severity{schema.SeverityLow, schema.SeverityMedium, schema.SeverityHigh, schema.SeverityCritical}
+
+// Time tiers' base levels in severityLevels (INV-CAL-2).
+const (
+	levelFar        = 0 // low:      not started, starts later than the lead time
+	levelSoon       = 2 // high:     not started, starts within the lead time
+	levelInProgress = 3 // critical: start <= now < end
+)
+
+// modifierDelta is the one-level, capped shift the existing modifiers
+// apply to the time tier (INV-CAL-4): +1 for a "high" calendar priority,
+// +1 when any attendee matches important_people, -1 when SelfStatus is
+// tentative, summed and clamped to [-1, +1].
+func modifierDelta(priority string, importantMatch bool, selfStatus string) int {
+	d := 0
+	if priorityWeight(priority) >= 2 {
+		d++
+	}
 	if importantMatch {
-		score++
+		d++
 	}
 	if isTentative(selfStatus) {
-		score--
+		d--
 	}
-	switch {
-	case score >= 3:
-		return schema.SeverityCritical
-	case score == 2:
-		return schema.SeverityHigh
-	case score == 1:
-		return schema.SeverityMedium
-	default:
-		return schema.SeverityLow
+	if d > 1 {
+		return 1
 	}
+	if d < -1 {
+		return -1
+	}
+	return d
 }
 
-// ListAttention implements the attention capability's attention.Provider:
-// every surviving occurrence (see fetchOccurrences) starting within the
-// next calendarAttentionWindow is reported as one AttentionItem, its
-// Severity computed by computeSeverity from all three named inputs.
+// computeSeverity maps one event's timing onto the attention ramp
+// (INV-CAL-2..INV-CAL-4). ok is false when the event MUST NOT be reported
+// (already ended, starts at/after the window's end, or declined). now is
+// the call's clock reading; lead/window come from attentionTiming.
+func computeSeverity(now time.Time, ev apiEvent, lead, window time.Duration, priority string, importantMatch bool) (sev schema.Severity, ok bool) {
+	if isDeclined(ev.SelfStatus) {
+		return "", false // INV-CAL-6
+	}
+	if !ev.End.After(now) {
+		return "", false // ended (end <= now)
+	}
+	inProgress := !ev.Start.After(now) // start <= now < end
+	if !inProgress && !ev.Start.Before(now.Add(window)) {
+		return "", false // starts at/after the look-ahead window's end
+	}
+	if ev.AllDay {
+		return schema.SeverityLow, true // INV-CAL-3: never ramped, never raised
+	}
+	level := levelFar
+	switch {
+	case inProgress:
+		level = levelInProgress
+	case ev.Start.Sub(now) <= lead:
+		level = levelSoon
+	}
+	level += modifierDelta(priority, importantMatch, ev.SelfStatus)
+	if level < 0 {
+		level = 0
+	}
+	if level >= len(severityLevels) {
+		level = len(severityLevels) - 1
+	}
+	return severityLevels[level], true
+}
+
+// isDeclined reports whether selfStatus is the declined RSVP state,
+// case-insensitively.
+func isDeclined(selfStatus string) bool {
+	return strings.EqualFold(strings.TrimSpace(selfStatus), "declined")
+}
+
+// ListAttention implements the attention capability's attention.Provider
+// as a time-based ramp (see this file's package doc comment and
+// INV-CAL-2..INV-CAL-6): the events query is widened to
+// [now - attentionLookback, now + attention_window) and each surviving
+// occurrence is filtered and graded by computeSeverity.
 func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
 	cfg, err := decodeBackendConfig(scriptout.ConfigFromContext(ctx))
 	if err != nil {
 		return nil, err
 	}
+	lead, window, err := cfg.attentionTiming()
+	if err != nil {
+		return nil, err
+	}
 	important := normalizeImportantPeople(cfg.ImportantPeople)
 
-	now := time.Now().UTC()
-	occs, err := b.fetchOccurrences(ctx, cfg, now, now.Add(calendarAttentionWindow), "", "")
+	now := b.now().UTC()
+	occs, err := b.fetchOccurrences(ctx, cfg, now.Add(-attentionLookback), now.Add(window), "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +661,10 @@ func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, er
 	items := make([]schema.AttentionItem, 0, len(occs))
 	for _, occ := range occs {
 		matched := attendeesMatchImportantPeople(occ.event.Attendees, important)
-		severity := computeSeverity(occ.cal.Priority, matched, occ.event.SelfStatus)
+		severity, ok := computeSeverity(now, occ.event, lead, window, occ.cal.Priority, matched)
+		if !ok {
+			continue
+		}
 		items = append(items, schema.AttentionItem{
 			// Type is a source-defined, generic string, not a closed enum
 			// (schema.AttentionItem's own doc comment) [freedom boundary].

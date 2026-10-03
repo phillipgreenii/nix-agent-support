@@ -73,6 +73,8 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 - **Severity** — the attention capability's closed four-value enum (`low` | `medium` | `high` |
   `critical`), each with a canonical rank used only by `attention list`'s own merge/sort
   (`INV-ATTN-1`) — never to default a source's own unopinionated (omitted) severity.
+  A `calendar` backend derives it from time, not a static label: `low` far out, `high` within the
+  lead time, `critical` while the event runs (`INV-CAL-2`..`INV-CAL-6`).
 - **Search** — the second cross-cutting, fan-out-only capability: "every result a query matches,"
   reported per-source and never merged across sources (unlike attention's own dedup). Same two
   implementer shapes as attention — a capability's own Tier-2 backend, or a dedicated standalone
