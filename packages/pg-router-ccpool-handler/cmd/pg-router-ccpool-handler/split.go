@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -35,10 +34,6 @@ All bead text arrives on stdin and goes to bd as discrete argv elements, never
 through a shell.
 `
 
-// beadIDPattern restricts a positional bead id to bd id characters, so an
-// id can never be read as a flag by bd.
-var beadIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
 func runSplit(args []string) int {
 	return runSplitWith(args, os.Stdin, os.Stdout, os.Stderr, &beads.CLIRunner{})
 }
@@ -53,7 +48,7 @@ func runSplitWith(args []string, stdin io.Reader, stdout, stderr io.Writer, br b
 		return conformance.ExitUsage
 	}
 	verb, id := args[0], args[1]
-	if !beadIDPattern.MatchString(id) {
+	if !beads.IsID(id) {
 		fmt.Fprintf(stderr, "split: invalid bead id %q\n", id)
 		return conformance.ExitUsage
 	}

@@ -221,3 +221,24 @@ func TestComment_argv(t *testing.T) {
 		t.Errorf("argv = %v, want %v", fr.args[0], want)
 	}
 }
+
+func TestIsID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"pg2-abc12", true},
+		{"zr-r", true},
+		{"pg2-abc12.3", true},
+		{"ZR-Private/ziprecruiter#120058", false},
+		{"2026-10-03T06:55:00Z", false},
+		{"", false},
+		{"-flag", false},
+		{"has space", false},
+	}
+	for _, tc := range tests {
+		if got := IsID(tc.id); got != tc.want {
+			t.Errorf("IsID(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

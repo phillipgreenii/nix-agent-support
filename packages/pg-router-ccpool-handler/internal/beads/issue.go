@@ -4,8 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 )
+
+// idPattern matches bd issue ids: alphanumerics plus `.`, `_`, `-` (hierarchical
+// ids like pg2-abc.1 included). Non-bead item ids never match: a PR item's id
+// is `owner/repo#N` (contains `/` and `#`) and a heartbeat/tick item's id is an
+// RFC3339 timestamp (contains `:`).
+var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// IsID reports whether id has the shape of a bd issue id. It is the cheap,
+// local kind check for "could this item be a bead at all": bd itself only
+// ever mints ids of this shape, so a false result proves the item is not a
+// bead (PR, heartbeat, ...), while a true result only means a bd lookup is
+// worth attempting. It also keeps an id from being read as a flag by bd.
+func IsID(id string) bool { return idPattern.MatchString(id) }
 
 // Issue is the subset of a bd issue pg-router reads. Metadata is left as a generic
 // map (bd serializes merge-request fields like author/repo/pr_number into it).

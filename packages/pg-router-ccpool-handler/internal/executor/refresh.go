@@ -20,11 +20,19 @@ import (
 // is the source of truth: its metadata keys overwrite the payload's, and
 // payload-only keys are kept.
 //
+// Only bead items are refreshed. An item whose id does not have the shape of a
+// bd id (a PR item `owner/repo#N`, a heartbeat/tick item keyed by an RFC3339
+// timestamp) is not a bead, so it is returned untouched with no bd call and no
+// WARN; the id shape is used rather than Item.Type because Type is source
+// specific (bead-list sources emit the bead's issue_type, changes/sweep sources
+// emit the connector entity type). Detecting by id shape cannot skip a genuine
+// bead, since bd only mints ids of that shape (pg2-rk7t9).
+//
 // Best effort: a bd read failure (or a bead with no metadata) leaves the
 // payload item untouched and is logged, never turned into a dispatch failure —
 // a stale-but-present prompt is no worse than before this refresh existed.
 func RefreshItem(ctx context.Context, bd beads.Runner, it item.Item) item.Item {
-	if bd == nil || it.ID == "" {
+	if bd == nil || !beads.IsID(it.ID) {
 		return it
 	}
 	iss, err := beads.ShowObj(ctx, bd, it.ID)

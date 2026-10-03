@@ -1,8 +1,10 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -85,5 +87,65 @@ func TestRefreshItem_BeadWithoutMetadataKeepsPayload(t *testing.T) {
 	in := item.Item{ID: "zr-r", Metadata: map[string]any{"head_sha": "old"}}
 	if got := RefreshItem(context.Background(), bd, in); got.Metadata["head_sha"] != "old" {
 		t.Fatalf("got %v", got.Metadata)
+	}
+}
+
+// recordingRunner records every bd call so a test can prove no `bd show` ran.
+type recordingRunner struct {
+	calls [][]string
+	out   string
+	err   error
+}
+
+func (r *recordingRunner) Run(_ context.Context, args ...string) (string, error) {
+	r.calls = append(r.calls, args)
+	return r.out, r.err
+}
+
+// TestRefreshItem_BeadVsNonBead covers pg2-rk7t9: non-bead items (PR,
+// heartbeat) are not refreshed — no `bd show` and no WARN — while a genuine
+// bead whose refresh fails still logs the WARN.
+func TestRefreshItem_BeadVsNonBead(t *testing.T) {
+	const warn = "could not refresh item metadata from bd"
+	tests := []struct {
+		name     string
+		item     item.Item
+		bdErr    error
+		wantShow bool
+		wantWarn bool
+	}{
+		{"PR item skips refresh", item.Item{ID: "ZR-Private/ziprecruiter#120058", Type: "pr"}, errors.New("bd down"), false, false},
+		{"heartbeat item skips refresh", item.Item{ID: "2026-10-03T06:55:00Z", Type: "pg-router-probe-tick"}, errors.New("bd down"), false, false},
+		{"empty id skips refresh", item.Item{}, errors.New("bd down"), false, false},
+		{"bead refresh failure still warns", item.Item{ID: "pg2-abc12", Type: "task"}, errors.New("bd down"), true, true},
+		{"hierarchical bead id refresh failure still warns", item.Item{ID: "pg2-abc12.3", Type: "review-pr"}, errors.New("bd down"), true, true},
+		{"bead refresh success does not warn", item.Item{ID: "pg2-abc12", Type: "task"}, nil, true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(old) })
+
+			bd := &recordingRunner{out: `{"data":[{"id":"x","status":"open"}]}`, err: tc.bdErr}
+			got := RefreshItem(context.Background(), bd, tc.item)
+
+			if got.ID != tc.item.ID {
+				t.Fatalf("item must be returned unchanged, got %+v", got)
+			}
+			showed := false
+			for _, c := range bd.calls {
+				if len(c) > 0 && c[0] == "show" {
+					showed = true
+				}
+			}
+			if showed != tc.wantShow {
+				t.Fatalf("bd show called = %v, want %v (calls %v)", showed, tc.wantShow, bd.calls)
+			}
+			if warned := strings.Contains(buf.String(), warn); warned != tc.wantWarn {
+				t.Fatalf("WARN logged = %v, want %v; log: %q", warned, tc.wantWarn, buf.String())
+			}
+		})
 	}
 }
