@@ -186,8 +186,22 @@ groups:
       # DO see failures recorded by the separate `pg-desk run` process --
       # unlike pg_desk_sync_errors_total above, which has no live call site.
 
+      # pg2-qki4v: the sync_error rows are split by automatic-retry state
+      # (pg2-xb6fs; internal/metrics/metrics.go's
+      # MetricSyncErrorRetryingRows / MetricSyncErrorExhaustedRows) so only a
+      # row needing a person pages critical:
+      #   - exhausted (retry bound reached, or a non-transient failure that
+      #     was never retried): stays non-zero until an operator reconcile
+      #     -> critical.
+      #   - retrying (transient, still inside the retry bound): a pg-router /
+      #     pg-desk restart killing an in-flight dispatch records one of
+      #     these and it self-heals within ~30m with no operator action
+      #     -> warning, and only once it outlives that typical window.
+      # pg_desk_sync_error_rows (the sum of the two) is deliberately no
+      # longer alerted on directly.
+
       - uid: pg-desk-sync-error-rows
-        title: pg-desk has rows with a recorded sync_error
+        title: pg-desk has rows with a recorded sync_error and no automatic retry left
         condition: C
         for: 5m
         noDataState: OK
@@ -195,8 +209,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "pg-desk has {{ $values.B }} row(s) with a non-empty sync_error"
-          description: "pg_desk_sync_error_rows has been above 0 for over 5 minutes -- one or more PR anchors failed bead sync and may have leaked open merge-request or child beads. Run `pg-desk doctor` (or `pg-desk status`) for the affected entities."
+          summary: "pg-desk has {{ $values.B }} sync_error row(s) with no automatic retry left"
+          description: "pg_desk_sync_error_exhausted_rows has been above 0 for over 5 minutes -- one or more PR anchors failed bead sync and will not be retried automatically (the retry bound was reached, or the failure is non-transient), so they may have leaked open merge-request or child beads. These need an operator: run `pg-desk doctor` (or `pg-desk status`) for the affected entities, then `pg-desk reconcile`."
         data:
           - refId: A
             relativeTimeRange:
@@ -207,7 +221,47 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_sync_error_rows
+              expr: pg_desk_sync_error_exhausted_rows
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-sync-error-retrying
+        title: pg-desk has sync_error rows still being retried automatically
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk has {{ $values.B }} sync_error row(s) still being retried for over 30 minutes"
+          description: "pg_desk_sync_error_retrying_rows has been above 0 for over 30 minutes -- one or more PR anchors have a transient sync_error and are within the automatic retry bound (1m backoff doubling to 30m, 10 retries), but have not healed within the usual window. No action is needed yet; if they exhaust, pg-desk-sync-error-rows pages critical."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: pg_desk_sync_error_retrying_rows
           - refId: B
             datasourceUid: __expr__
             model:

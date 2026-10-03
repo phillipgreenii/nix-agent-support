@@ -43,7 +43,10 @@ with a recorded `sync_error`), `pg_desk_oldest_sync_error_age_seconds`, and — 
 by their automatic-retry state (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s "Automatic retry")
 — `pg_desk_sync_error_retrying_rows` (still being retried, so they may heal on their own) and
 `pg_desk_sync_error_exhausted_rows` (no automatic retry left: the bound was reached, or the failure
-is non-transient; these need an operator). `serve`'s WARN/ERROR-level operational
+is non-transient; these need an operator). The Grafana alert rules follow that split (bead
+`pg2-qki4v`): `pg_desk_sync_error_exhausted_rows > 0` pages critical, while
+`pg_desk_sync_error_retrying_rows > 0` is only a warning, and only once it outlives 30 minutes — a
+row a restart left mid-dispatch heals on its own. `serve`'s WARN/ERROR-level operational
 log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 (`internal/telemetry`'s `Init`, wired at `serve` startup only — `run`/`run issue` are untouched);
 `serve` still logs to the path its launchd module configures, defaulting to
