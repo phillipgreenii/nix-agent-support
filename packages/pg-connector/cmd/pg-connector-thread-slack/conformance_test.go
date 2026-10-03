@@ -27,6 +27,7 @@ import (
 	"time"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
@@ -94,6 +95,12 @@ func TestConformance_RealBinary_FakeClaudeOnEnvOverride(t *testing.T) {
 	// the way cmd/pg-connector-issue-jira/internal.CLIRunner's own
 	// EnvBinary resolution is exercised against a real subprocess.
 	t.Setenv(internal.EnvBinary, fakeClaude)
+	// The child also inherits the event-log location. Left unset it resolves
+	// to the real $XDG_STATE_HOME/pg-connector-thread-slack/events.jsonl and
+	// every `go test` run appends version=dev lines to the live log (bead
+	// pg2-izlaw), so pin the log to a temp file.
+	eventsFile := filepath.Join(t.TempDir(), "events.jsonl")
+	t.Setenv(eventlog.EnvPath, eventsFile)
 
 	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
@@ -105,5 +112,10 @@ func TestConformance_RealBinary_FakeClaudeOnEnvOverride(t *testing.T) {
 		if r.Err != nil {
 			t.Errorf("%s: %v", r.Name, r.Err)
 		}
+	}
+	// Guard: the redirect must actually capture the child's events, so a
+	// future change to the path resolution cannot silently re-open the leak.
+	if info, err := os.Stat(eventsFile); err != nil || info.Size() == 0 {
+		t.Errorf("child wrote no events to %s (err=%v): event-log redirect is not effective", eventsFile, err)
 	}
 }
