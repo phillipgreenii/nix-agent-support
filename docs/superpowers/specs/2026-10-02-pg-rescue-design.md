@@ -1098,7 +1098,9 @@ Example deterministic handler, `pg-rescue-flake-lock-conflict` (implemented in
     package in the repo mixes a Go module with `mkBashScript`, and `mkGoApp` builds the module from
     `lib.cleanSource ./.`. The `pg-rescue-go-tests` check lists it in `testDeps`.
 - **Home-manager module:** `home/programs/pg-rescue/`, with
-  `programs.pg-rescue.{enable, redact, handlers.<name>, chains.<name>}`.
+  `phillipgreenii.programs.pg-rescue.{enable, redact, handlers.<name>, chains.<name>}` (the
+  `phillipgreenii.*` namespace this repo's `CLAUDE.md` requires for every machine-flake-facing
+  option; an earlier revision of this section said `programs.pg-rescue`).
   - It generates `config.toml`.
   - It ships default instances, any of which can be overridden: `flake-lock-conflict`, `notify`,
     `fix-small` (haiku, 2m, strict MCP), `fix-large` (sonnet, 8m) and `p1-later`.

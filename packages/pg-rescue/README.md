@@ -18,6 +18,9 @@ data model the three reference handlers share, how to write a handler, and `pg-r
 - [Template data model](#template-data-model)
 - [Writing a handler](#writing-a-handler)
 - [pg-rescue-claude](#pg-rescue-claude)
+- [Home-manager module](#home-manager-module)
+- [Integration tests](#integration-tests)
+- [Manual end-to-end run](#manual-end-to-end-run)
 
 ## The wrapper
 
@@ -534,3 +537,132 @@ canned envelope. Every canned report in `testdata/reports/` is run through `cont
 
 Tests that start processes (the time limit, SIGTERM and orphan tests) wait with generous windows and
 kill what they started by exact pid.
+
+## Home-manager module
+
+`home/programs/pg-rescue/` (option namespace `phillipgreenii.programs.pg-rescue`) installs
+`pg-rescue`, its three reference handlers and `pg-rescue-flake-lock-conflict`, and writes
+`${XDG_CONFIG_HOME}/pg-rescue/config.toml`.
+
+```nix
+{
+  phillipgreenii.programs.pg-rescue = {
+    enable = true;
+    redact = [ "ghp_[A-Za-z0-9]{36}" ];
+    # Override one field of a default instance; the rest of the instance is kept.
+    handlers.fix-small.timeout = "5m";
+    # Add an instance of your own.
+    handlers.my-fixer = {
+      command = [ "my-fixer" "--flag" ];
+      tags = [ "deterministic" ];
+    };
+    chains.quick.handlers = [ "flake-lock-conflict" "notify" ];
+  };
+}
+```
+
+**The generated config is world-readable.** It is a `/nix/store` path, so anything in `redact`,
+`handlers.<name>.env` or a command argument can be read by every user on the machine. Put secrets in
+a `0600` dotenv file outside nix and point `handlers.<name>.env_file` at it.
+
+Default instances. Each field is set with `mkDefault`, so any one can be overridden on its own:
+
+| Instance              | Command                                     | Timeout | Tags            |
+| --------------------- | ------------------------------------------- | ------- | --------------- |
+| `flake-lock-conflict` | `pg-rescue-flake-lock-conflict`             | `2m`    | `deterministic` |
+| `fix-small`           | `pg-rescue-claude --model haiku ...` (2m)   | `3m`    | `agent`         |
+| `fix-large`           | `pg-rescue-claude --model sonnet ...` (8m)  | `10m`   | `agent`         |
+| `p1-later`            | `pg-rescue-bead --priority 1 --dedup-query` | `1m`    | `deferral`      |
+| `notify`              | `pg-rescue-notify`                          | `10s`   | none            |
+
+The default chain `sync` runs `flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`, `notify`,
+in that order. The `deterministic` tag matters: the common-case rate in the run log's measurements
+is computed from it, so tag every deterministic script you add. `p1-later` names the
+`pg-rescue-open` pg-connector query, and `pg-rescue-bead` needs a tracker (a `.beads/` directory in
+the repo, or `--tracker-dir`) and, for a repo label, `--repo-label-map`; both are machine-specific
+and belong in the consuming machine flake.
+
+`checks.<system>.test-pg-rescue-module` evaluates the module, builds the config and runs
+`pg-rescue --config "$cfg" --handlers notify -q -- true` (it must exit `0`) and
+`pg-rescue check --chain sync` (every default handler binary must resolve). It also asserts the
+override behaviour above.
+
+## Integration tests
+
+`internal/integration` holds the `integration`-tagged scenarios. They drive the real `pg-rescue`,
+`pg-rescue-claude`, `pg-rescue-bead` and `pg-rescue-flake-lock-conflict` against real git (a bare
+origin and two clones), with only `nix`, `claude` and `pg-connector` faked:
+
+- A lock-only conflict is resolved by `flake-lock-conflict` and exits `0`. No agent runs and nothing
+  is filed.
+- A source-file conflict is declined by `flake-lock-conflict` and by `fix-small` (the fake `claude`
+  answers `declined`), then deferred by `p1-later`: the run exits `75`, the repository is left
+  mid-rebase, and the run log records `declined, declined, deferred`.
+
+They run in their own check, `nix build .#checks.<system>.pg-rescue-integration-tests`, so they stay
+off the deploy path. Locally: `go test -tags integration ./internal/integration/`. Without the
+binaries on `PATH` the tests build them with `go build`.
+
+## Manual end-to-end run
+
+The automated scenarios fake the three things that cost money or touch real state. This run uses the
+real ones. It is `contract`-tagged: run it locally only, never from a nix check, and never against a
+real repository or tracker. The ccpool harness (`packages/ccpool/contract/README.md`) is the
+precedent. It needs network access, a logged-in `claude`, and `nix`.
+
+1. Make a scratch workspace and a scratch tracker, so nothing real is touched:
+
+   ```bash
+   scratch="$(mktemp -d)" && cd "$scratch"
+   git init --bare -b main origin.git
+   git clone origin.git seed && git clone origin.git work && git clone origin.git other
+   (cd seed && nix flake init -t templates#trivial && git add -A && git commit -qm seed && git push -q origin HEAD:main)
+   (cd work && git pull -q) && (cd other && git pull -q)
+   # A scratch beads tracker in $scratch/tracker, isolated from the shared database
+   # (initialise it the way you initialise any throwaway tracker; do not point at a real one).
+   mkdir tracker
+   ```
+
+2. Write a config that uses the real handlers and the scratch tracker (omit `notify` unless you want
+   a real notification):
+
+   ```bash
+   cat > "$scratch/config.toml" <<EOF
+   [handler.flake-lock-conflict]
+   command = ["pg-rescue-flake-lock-conflict"]
+   tags = ["deterministic"]
+   [handler.fix-small]
+   command = ["pg-rescue-claude", "--model", "haiku", "--time-limit", "2m", "--strict-mcp-config"]
+   tags = ["agent"]
+   [handler.p1-later]
+   command = ["pg-rescue-bead", "--priority", "1", "--tracker-dir", "$scratch/tracker"]
+   tags = ["deferral"]
+   [chain.sync]
+   handlers = ["flake-lock-conflict", "fix-small", "p1-later"]
+   EOF
+   export PG_RESCUE_CONFIG="$scratch/config.toml" XDG_STATE_HOME="$scratch/state"
+   pg-rescue check --chain sync
+   ```
+
+3. Lock-only conflict. Make `other` and `work` both change `flake.lock` (for example
+   `nix flake update` in each, a day apart, or edit the same input's `rev`), push `other`, then:
+
+   ```bash
+   pg-rescue --chain sync -C "$scratch/work" -v -- git pull --rebase; echo "exit $?"
+   ```
+
+   Expect exit `0`, a clean tree, and a run-log line with `resolved_by` `flake-lock-conflict`.
+
+4. Source conflict. Edit the same line of `flake.nix` in `other` and `work`, push `other`, then run
+   the same command. Expect `fix-small` to run the real `claude`, the run to finish `resolved`
+   (the agent fixed it and verify passed) or `deferred` (exit `75`, a bead in the scratch tracker,
+   the repository left mid-rebase). Either is a pass; what you are checking is that the verdict, the
+   run log and the tracker agree:
+
+   ```bash
+   jq -c '{result, resolved_by, deferred_by, final_exit, attempts: [.attempts[] | {handler, outcome}]}' \
+     "$XDG_STATE_HOME/pg-rescue/runs.jsonl" | tail -n 1
+   bd -C "$scratch/tracker" list --label pg-rescue
+   ```
+
+5. Clean up: `rm -rf "$scratch"`. Nothing outside it was written, except `claude`'s own usage.

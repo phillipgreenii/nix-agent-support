@@ -982,10 +982,7 @@
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
               # doubles, verified via
-              # `grep -rln '^//go:build' packages/ccpool-probe`; `pg-rescue`
-              # added bead pg2-wgpem — verified via
-              # `grep -rln '^//go:build' packages/pg-rescue`, whose tests use
-              # the GO_WANT_HELPER_PROCESS re-exec pattern, not build tags) is a
+              # `grep -rln '^//go:build' packages/ccpool-probe`) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -1054,6 +1051,8 @@
                 "pg-pr"
                 "pb"
                 "claude-extended-tool-approver"
+                # pg2-04jgw: internal/integration is `integration`-tagged.
+                "pg-rescue"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -2470,6 +2469,35 @@
                   pkgs.git
                   pkgs.jq
                   pkgs.pg-rescue-flake-lock-conflict
+                ];
+              };
+
+              # pg-rescue-integration-tests (bead pg2-04jgw, design section
+              # 14.4): the `integration`-tagged end-to-end scenarios in
+              # internal/integration, in their own check so they stay off the
+              # deploy path (the precedent is
+              # claude-extended-tool-approver-integration-tests). They drive
+              # the BUILT binaries -- `pkgs.pg-rescue` supplies pg-rescue,
+              # pg-rescue-claude and pg-rescue-bead; the bash handler comes
+              # from its own package -- against real git, with only nix,
+              # claude and pg-connector faked. Like that precedent it is a
+              # superset of pg-rescue-go-tests (mkGoTest takes no
+              # subPackages, so `-tags integration` re-runs the untagged
+              # suites); the plain check stays the fast gate.
+              pg-rescue-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-rescue-integration-tests";
+                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                  pkgs.jq
+                  pkgs.pg-rescue
+                  pkgs.pg-rescue-flake-lock-conflict
+                ];
+                testFlags = [
+                  "-tags"
+                  "integration"
                 ];
               };
 
@@ -4481,6 +4509,129 @@
                       echo "FAIL: rendered paths.defaults=$got, expected $want" >&2
                       exit 1
                     fi
+                    touch $out
+                  '';
+
+              # test-pg-rescue-module (bead pg2-04jgw, design section 14.4's
+              # "Home-manager config" bullet): evaluates the pg-rescue
+              # home-manager module standalone, builds the config.toml it
+              # generates, and runs the real wrapper against it.
+              #   - disabled: installs nothing, renders nothing.
+              #   - defaults: the five default instances and the `sync` chain
+              #     render, `flake-lock-conflict` carries the `deterministic`
+              #     tag (the design's section 7.2 common-case rate keys on it),
+              #     `pg-rescue check --chain sync` exits 0 (every default
+              #     handler binary resolves on PATH from the two packages the
+              #     module installs), and
+              #     `pg-rescue --config "$cfg" --handlers notify -q -- true`
+              #     exits 0 (the design's required build-time smoke test).
+              #   - overrides: one field of a default instance can be
+              #     overridden without restating the rest, and consumers can
+              #     add instances and chains.
+              test-pg-rescue-module =
+                let
+                  evalHM =
+                    pgRescueCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pg-rescue/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            # Stubs for the surface the module writes but does
+                            # not declare; the real options live in
+                            # home-manager / programs.tldr.
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.pg-rescue = pgRescueCfg; }
+                      ];
+                    }).config;
+
+                  hmDisabled = evalHM { enable = false; };
+                  hmDefault = evalHM { enable = true; };
+                  hmOverride = evalHM {
+                    enable = true;
+                    redact = [ "ghp_[A-Za-z0-9]{36}" ];
+                    handlers = {
+                      fix-small.timeout = "5m";
+                      extra = {
+                        command = [ "true" ];
+                        tags = [ "deterministic" ];
+                      };
+                    };
+                    chains.mine.handlers = [ "extra" ];
+                  };
+
+                  defaultCfg = hmDefault.xdg.configFile."pg-rescue/config.toml".source;
+                  overrideCfg = hmOverride.xdg.configFile."pg-rescue/config.toml".source;
+                in
+                assert hmDisabled.home.packages == [ ];
+                assert hmDisabled.xdg.configFile == { };
+                assert lib.elem pkgs.pg-rescue hmDefault.home.packages;
+                assert lib.elem pkgs.pg-rescue-flake-lock-conflict hmDefault.home.packages;
+                # A partial override keeps the rest of the default instance.
+                assert hmOverride.phillipgreenii.programs.pg-rescue.handlers.fix-small.timeout == "5m";
+                assert
+                  lib.head hmOverride.phillipgreenii.programs.pg-rescue.handlers.fix-small.command
+                  == "pg-rescue-claude";
+                pkgs.runCommand "test-pg-rescue-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.pg-rescue
+                      pkgs.pg-rescue-flake-lock-conflict
+                      pkgs.yq-go
+                    ];
+                  }
+                  ''
+                    set -euo pipefail
+                    export HOME="$TMPDIR/home" XDG_STATE_HOME="$TMPDIR/state"
+                    mkdir -p "$HOME"
+
+                    # The design's build-time smoke test: the generated config
+                    # loads and a successful command passes straight through.
+                    pg-rescue --config ${defaultCfg} --handlers notify -q -- true
+
+                    # Every default handler binary resolves.
+                    pg-rescue check --config ${defaultCfg} --chain sync
+
+                    toml() { yq -p toml -o json "$@"; }
+                    [ "$(toml -r '.chain.sync.handlers | join(",")' ${defaultCfg})" = "flake-lock-conflict,fix-small,fix-large,p1-later,notify" ]
+                    [ "$(toml -r '.handler | keys | join(",")' ${defaultCfg})" = "fix-large,fix-small,flake-lock-conflict,notify,p1-later" ]
+                    [ "$(toml -r '.handler.flake-lock-conflict.tags | join(",")' ${defaultCfg})" = deterministic ]
+                    [ "$(toml -r '.handler.flake-lock-conflict.timeout' ${defaultCfg})" = 2m ]
+                    [ "$(toml -r '.handler.fix-small.tags | join(",")' ${defaultCfg})" = agent ]
+                    [ "$(toml -r '.handler.fix-large.tags | join(",")' ${defaultCfg})" = agent ]
+                    [ "$(toml -r '.handler.p1-later.tags | join(",")' ${defaultCfg})" = deferral ]
+                    [ "$(toml -r '.handler.notify | has("tags")' ${defaultCfg})" = false ]
+                    [ "$(toml -r '.handler.notify.timeout' ${defaultCfg})" = 10s ]
+                    [ "$(toml -r '.redact | length' ${defaultCfg})" = 0 ]
+
+                    # Overrides: one field changed, the rest of the default
+                    # instance intact; added instance, chain and redact render.
+                    pg-rescue check --config ${overrideCfg} --chain mine
+                    [ "$(toml -r '.handler.fix-small.timeout' ${overrideCfg})" = 5m ]
+                    [ "$(toml -r '.handler.fix-small.command[0]' ${overrideCfg})" = pg-rescue-claude ]
+                    [ "$(toml -r '.handler.fix-small.tags | join(",")' ${overrideCfg})" = agent ]
+                    [ "$(toml -r '.handler.extra.tags | join(",")' ${overrideCfg})" = deterministic ]
+                    [ "$(toml -r '.chain.mine.handlers | join(",")' ${overrideCfg})" = extra ]
+                    [ "$(toml -r '.chain | keys | join(",")' ${overrideCfg})" = "mine,sync" ]
+                    [ "$(toml -r '.redact[0]' ${overrideCfg})" = 'ghp_[A-Za-z0-9]{36}' ]
                     touch $out
                   '';
 

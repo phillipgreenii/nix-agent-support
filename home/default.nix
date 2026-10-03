@@ -34,6 +34,7 @@
     ./programs/handoff-create
     ./programs/pg-pr
     ./programs/pg-connector
+    ./programs/pg-rescue
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/pnwf
