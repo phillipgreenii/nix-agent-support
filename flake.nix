@@ -504,6 +504,15 @@
               pkgs = final;
               inherit bashBuilders;
             }).pg-rescue-flake-lock-conflict.script;
+          # sync-projects (bead pg2-zr3jf): pg-rescue's first consumer -- rebase
+          # every workspace repo under `pg-rescue --chain sync`, then `pn
+          # workspace push`. Single mkBashScript tool, so -- same rationale as
+          # wtdone above -- it takes `result.sync-projects.script` directly.
+          sync-projects =
+            (import ./packages/sync-projects {
+              pkgs = final;
+              inherit bashBuilders;
+            }).sync-projects.script;
           # handoff-create (bead pg2-2xfbi): creates a handoff bead correctly
           # (type/priority/title/first line/metadata/human label policy/task
           # fallback/read-back) for session-wrapup:wrap-up-session and the
@@ -4585,6 +4594,7 @@
                 assert hmDisabled.xdg.configFile == { };
                 assert lib.elem pkgs.pg-rescue hmDefault.home.packages;
                 assert lib.elem pkgs.pg-rescue-flake-lock-conflict hmDefault.home.packages;
+                assert lib.elem pkgs.sync-projects hmDefault.home.packages;
                 # A partial override keeps the rest of the default instance.
                 assert hmOverride.phillipgreenii.programs.pg-rescue.handlers.fix-small.timeout == "5m";
                 assert
@@ -7400,6 +7410,13 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-sync-projects (bead pg2-zr3jf). Same one-line idiom as
+            # wtdone above: the overlay attr takes only the script derivation,
+            # so without this the bats suite would run in no gate at all.
+            // (import ./packages/sync-projects {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-handoff-create (bead pg2-2xfbi). Same one-line idiom as wtdone
             # above: without this the suite (incl. the real-bd throwaway-DB
             # tests) would run in no gate at all.
@@ -7541,6 +7558,10 @@
             # `nix build .#pg-rescue-flake-lock-conflict` resolves via
             # flake.packages.<system>.
             inherit (pkgs) pg-rescue-flake-lock-conflict;
+            # sync-projects is likewise an overlay-only attr (single mkBashScript
+            # tool) -- re-exported so `nix build .#sync-projects` resolves via
+            # flake.packages.<system>.
+            inherit (pkgs) sync-projects;
             # handoff-create is likewise an overlay-only attr (single mkBashScript
             # tool holding just the script derivation) -- re-exported so
             # `nix build .#handoff-create` resolves via flake.packages.<system>.

@@ -167,7 +167,9 @@ in
       pg-rescue (script-first command runner: wraps a command and, when it
       fails, walks a named chain of failure handlers). Installs `pg-rescue`, its
       reference handlers (`pg-rescue-claude`, `pg-rescue-bead`,
-      `pg-rescue-notify`) and `pg-rescue-flake-lock-conflict`, and generates
+      `pg-rescue-notify`), `pg-rescue-flake-lock-conflict` and its first
+      consumer `sync-projects` (rebase every workspace repo under the `sync`
+      chain, then `pn workspace push`), and generates
       `$XDG_CONFIG_HOME/pg-rescue/config.toml`.
 
       WARNING: the generated config.toml is a `/nix/store` path and therefore
@@ -179,6 +181,8 @@ in
     package = lib.mkPackageOption pkgs "pg-rescue" { };
 
     flakeLockConflictPackage = lib.mkPackageOption pkgs "pg-rescue-flake-lock-conflict" { };
+
+    syncProjectsPackage = lib.mkPackageOption pkgs "sync-projects" { };
 
     redact = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -254,6 +258,7 @@ in
     home.packages = [
       cfg.package
       cfg.flakeLockConflictPackage
+      cfg.syncProjectsPackage
     ];
 
     xdg.configFile."pg-rescue/config.toml".source =
@@ -262,6 +267,11 @@ in
     programs.tldr.customPages.pg-rescue = lib.mkIf config.programs.tldr.enable {
       platform = "common";
       source = "${cfg.package}/share/tldr/pages.common/pg-rescue.md";
+    };
+
+    programs.tldr.customPages.sync-projects = lib.mkIf config.programs.tldr.enable {
+      platform = "common";
+      source = "${cfg.syncProjectsPackage}/share/tldr/pages.common/sync-projects.md";
     };
   };
 }
