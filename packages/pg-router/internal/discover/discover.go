@@ -120,7 +120,10 @@ func DeriveContextFromQueueEvent(role roles.Role, evt eventqueue.Event) Dispatch
 // OnSourceFailure). A nil Observer (Produce's default
 // when no option is given) is a safe no-op.
 type SourceFailureObserver interface {
-	OnSourceFailure(source string)
+	// err is the failed attempt's error, so the implementation can classify
+	// the failure (e.g. rate-limited vs unavailable vs interrupted) without
+	// this package knowing the taxonomy (bead pg2-hsla6).
+	OnSourceFailure(source string, err error)
 }
 
 // SourceActivityObserver is notified of a pull source's own per-pass
@@ -564,7 +567,7 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			// Together with the per-retry notification below, every failed
 			// attempt notifies the observer exactly once.
 			if obs != nil {
-				obs.OnSourceFailure(s.Name)
+				obs.OnSourceFailure(s.Name, err)
 			}
 			return nil
 		}
@@ -577,7 +580,7 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		// the log fires. The final give-up attempt above notifies it too (bead
 		// pg2-jgbnp), so each failed attempt is counted exactly once.
 		if obs != nil {
-			obs.OnSourceFailure(s.Name)
+			obs.OnSourceFailure(s.Name, err)
 		}
 		if serr := sleep(ctx, wait); serr != nil {
 			return fmt.Errorf("produce %s: %w", s.Name, serr)

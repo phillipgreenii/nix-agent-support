@@ -744,6 +744,9 @@ type flakySourceQuery struct {
 	query.Meta
 	failTimes int
 	calls     *int
+	// failErr, when non-nil, is the error a failing Run returns (default:
+	// a bare "source unavailable").
+	failErr error
 }
 
 func (f flakySourceQuery) Validate() error        { return nil }
@@ -751,6 +754,9 @@ func (f flakySourceQuery) BackingCommand() string { return "" }
 func (f flakySourceQuery) Run(context.Context, query.Env) ([]event.Event, error) {
 	*f.calls++
 	if *f.calls <= f.failTimes {
+		if f.failErr != nil {
+			return nil, f.failErr
+		}
 		return nil, errors.New("source unavailable")
 	}
 	return nil, nil
@@ -889,6 +895,84 @@ func TestBootCore_failFastSourceGiveUpIncrementsSourceFailures(t *testing.T) {
 	}
 	if got != 2 {
 		t.Fatalf("%s{source=failfast-src} = %d, want 2 (one per fail-fast give-up; the series must exist even with no retries)", metrics.MetricSourceFailures, got)
+	}
+}
+
+// TestBootCore_rateLimitReserveFailureIncrementsSourceFailures is bead
+// pg2-hsla6's end-to-end regression for the 2026-10-01/02 episode: a
+// fail-fast pull source (no [query.failure_backoff]) whose backend answers with
+// the GraphQL rate-limit-reserve breach -- scriptout "unavailable" -- must
+// increment MetricSourceFailures with reason="rate-limited" on every failed
+// tick, while an ordinary failure of another source still counts under its own
+// reason. The alert sums `by (source)`, so both feed pg-router-source-failure-rate.
+func TestBootCore_rateLimitReserveFailureIncrementsSourceFailures(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	rlCalls, plainCalls := 0, 0
+	rateLimited := errors.New("produce pr-mine: command query [pg-router-source-pg-connector changes pr mine --consumer pg-router]: exit status 1: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: GraphQL rate limit remaining (221) is below the configured reserve (1000)")
+	cfg := config.Config{
+		LogDir:        shortDir(t), // AF_UNIX path length cap; see shortDir's doc (ingest_event_test.go)
+		MeterProvider: mp,
+		Queries: query.SourceSet{
+			{Name: "pr-mine", Query: flakySourceQuery{
+				Meta:      query.Meta{EmitTypes: []string{"t1"}},
+				failTimes: 100,
+				calls:     &rlCalls,
+				failErr:   rateLimited,
+			}},
+			{Name: "plain-src", Query: flakySourceQuery{
+				Meta:      query.Meta{EmitTypes: []string{"t1"}},
+				failTimes: 100,
+				calls:     &plainCalls,
+			}},
+		},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg}
+	ctx := context.Background()
+	svc, q, _, storeClose, err := bootCore(ctx, cfg, o, cfg.Roles, runExclusions{}, core.RunModeDrainAndExit)
+	if err != nil {
+		t.Fatalf("bootCore: %v", err)
+	}
+	defer func() { _ = storeClose() }()
+	defer func() { _ = svc.Close() }()
+
+	for i := 0; i < 3; i++ {
+		if _, err := o.ProduceTick(ctx, q); err != nil {
+			t.Fatalf("ProduceTick: %v", err)
+		}
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	count := func(source, reason string) int64 {
+		got := int64(-1)
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name != metrics.MetricSourceFailures {
+					continue
+				}
+				s, ok := m.Data.(metricdata.Sum[int64])
+				if !ok {
+					continue
+				}
+				for _, dp := range s.DataPoints {
+					src, _ := dp.Attributes.Value(attribute.Key("source"))
+					rsn, _ := dp.Attributes.Value(attribute.Key("reason"))
+					if src.AsString() == source && rsn.AsString() == reason {
+						got = dp.Value
+					}
+				}
+			}
+		}
+		return got
+	}
+	if got := count("pr-mine", metrics.SourceFailureRateLimited); got != 3 {
+		t.Fatalf("%s{source=pr-mine,reason=rate-limited} = %d, want 3 (one per failed tick)", metrics.MetricSourceFailures, got)
+	}
+	if got := count("plain-src", metrics.SourceFailureError); got != 3 {
+		t.Fatalf("%s{source=plain-src,reason=error} = %d, want 3 (ordinary failures still count)", metrics.MetricSourceFailures, got)
 	}
 }
 

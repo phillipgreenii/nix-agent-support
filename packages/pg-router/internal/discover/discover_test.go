@@ -330,6 +330,29 @@ func TestProduce_failFastSourceGiveUpNotifiesObserver(t *testing.T) {
 	}
 }
 
+// TestProduce_failFastSourceErrorReachesObserver (bead pg2-hsla6): the
+// observer receives the failed attempt's error itself (not just the source
+// name), so the metrics side can classify an "unavailable"/rate-limit-reserve
+// failure instead of counting it as an opaque failure.
+func TestProduce_failFastSourceErrorReachesObserver(t *testing.T) {
+	calls := 0
+	sources := query.SourceSet{
+		{Name: "pr-mine", Query: flakyQuery{
+			Meta:      query.Meta{EmitTypes: []string{"x"}}, // zero-value FB: fail fast
+			failTimes: 100,
+			calls:     &calls,
+		}},
+	}
+	obs := &recordingSourceFailureObserver{}
+	var waits []time.Duration
+	if _, err := produce(context.Background(), query.Env{}, sources, newQueue(t), core.NewBindings("x"), Cadence{}, recordingSleep(&waits), time.Now, obs, nil); err != nil {
+		t.Fatalf("produce: %v", err)
+	}
+	if len(obs.errs) != 1 || obs.errs[0] == nil || !strings.Contains(obs.errs[0].Error(), "source unavailable") {
+		t.Fatalf("observer.errs = %v, want exactly the query's own error", obs.errs)
+	}
+}
+
 // TestProduceIsolatesSourceFailure is Task 1.1's Step 1(a) red test
 // (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1 resolved as
 // never-drop-work): with two sources, the FIRST exhausts its retries — but
@@ -448,10 +471,12 @@ func equalStrings(a, b []string) bool {
 // records every source name OnSourceFailure was called with, in call order.
 type recordingSourceFailureObserver struct {
 	sources []string
+	errs    []error
 }
 
-func (r *recordingSourceFailureObserver) OnSourceFailure(source string) {
+func (r *recordingSourceFailureObserver) OnSourceFailure(source string, err error) {
 	r.sources = append(r.sources, source)
+	r.errs = append(r.errs, err)
 }
 
 // TestProduce_WithSourceFailureObserverOption proves the exported Produce

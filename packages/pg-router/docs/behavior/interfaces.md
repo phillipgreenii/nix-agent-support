@@ -465,8 +465,15 @@ sequenceDiagram
     from **unconsumed-expired** above and never a relabelling of it: this one counts an event the core
     **refused** and named as rejected to the caller, that one counts an event the core **accepted** and
     later dropped, so neither member ever stands for both of `INV-DISP-3`'s cases;
-  - **source_failures** — counter, per source: a pull source's **query failure** (`INV-FAIL-3`), so
-    that failure is visible to an observer watching the catalog and not only to a reader of logs;
+  - **source_failures** — counter, per source and **reason**: a pull source's **query failure**
+    (`INV-FAIL-3`), so that failure is visible to an observer watching the catalog and not only to a
+    reader of logs. **Every failed attempt counts once**, including the final give-up attempt of a
+    source with no retries configured — so a source that fails fast on every tick (the default) is
+    counted on every tick. The `reason` label is one of a closed set: `rate-limited` (the backend
+    reported an exhausted or below-reserve upstream API budget), `unavailable` and `unauthenticated`
+    (the backend's own wire-level failure classes, rate limiting excluded), `interrupted` (the daemon
+    itself cancelled or killed the attempt), and `error` (anything else). A watcher that only needs "is
+    this source failing" aggregates `reason` away, so no reason is invisible to it;
   - **deduped** — counter, per `type`: a duplicate `id` the core **accepted** only because
     de-duplication already covers it (`INV-EVT-3`), never a fresh append. It is a **separate**
     member from `ingest-event`'s own `accepted` count below, which counts both together and

@@ -64,6 +64,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -145,7 +146,8 @@ const (
 	// RecordDispatchLatency's doc for why this task builds and exposes it
 	// without also wiring a live production call site.
 	MetricDispatchLatency = "pg_router_dispatch_latency"
-	// MetricSourceFailures counts a pull-source query failure, per source —
+	// MetricSourceFailures counts a pull-source query failure, per source and
+	// reason (see ClassifySourceFailure; the alert sums the reason away) —
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
 	// silently idle pass" (register gap R21, bead pg2-00jpn). Fed by
 	// OnSourceFailure, which discover.go's runAndEnqueue calls (via the
@@ -433,7 +435,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	sourceFailures, err := m.Int64Counter(
 		MetricSourceFailures,
 		metric.WithUnit("{failure}"),
-		metric.WithDescription("pull-source query failures reported to logs and metrics, per source (INV-FAIL-3)"),
+		metric.WithDescription("pull-source query failures reported to logs and metrics, per source and reason (INV-FAIL-3)"),
 	)
 	if err != nil {
 		return nil, err
@@ -897,6 +899,55 @@ func (e *Emitter) RecordFailure(class string) {
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("class", class)))
 }
 
+// Source-failure reasons: the closed set of values the "reason" label of
+// MetricSourceFailures takes (bead pg2-hsla6). The label exists so an operator
+// can tell a throttled GitHub budget from a dead backend from a daemon
+// shutdown without reading logs; the alert pg-router-source-failure-rate
+// aggregates it away (`sum by (source)`), so EVERY reason counts toward it.
+const (
+	// SourceFailureRateLimited: the backend refused because an upstream API
+	// budget is exhausted or below its configured reserve (e.g. pg-connector-pr-github's
+	// "GraphQL rate limit remaining (N) is below the configured reserve (M)").
+	SourceFailureRateLimited = "rate-limited"
+	// SourceFailureUnauthenticated: the backend reported scriptout "unauthenticated".
+	SourceFailureUnauthenticated = "unauthenticated"
+	// SourceFailureUnavailable: the backend reported scriptout "unavailable"
+	// for any reason other than a rate limit.
+	SourceFailureUnavailable = "unavailable"
+	// SourceFailureInterrupted: the attempt was cut short by the daemon itself
+	// (context cancelled or the child killed on shutdown), not by the backend.
+	SourceFailureInterrupted = "interrupted"
+	// SourceFailureError: any other failure (non-zero exit with no
+	// recognized backend class, malformed output, ...).
+	SourceFailureError = "error"
+)
+
+// ClassifySourceFailure maps a pull-source query error onto one of the closed
+// SourceFailure* reasons. The command query surfaces the backend's stderr
+// inside the error text (the process boundary hides any errors.Is sentinel),
+// so the backend classes are recognized by the pg-connector scriptout wire
+// vocabulary ("scriptout: unavailable", "scriptout: unauthenticated") and the
+// rate-limit phrasing, case-insensitively. Rate limiting is checked FIRST
+// because a rate-limit breach also carries the generic "scriptout: unavailable"
+// wrapper. A nil error classifies as SourceFailureError.
+func ClassifySourceFailure(err error) string {
+	if err == nil {
+		return SourceFailureError
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "below the configured reserve") || strings.Contains(msg, "rate limit"):
+		return SourceFailureRateLimited
+	case strings.Contains(msg, "scriptout: unauthenticated"):
+		return SourceFailureUnauthenticated
+	case strings.Contains(msg, "scriptout: unavailable"):
+		return SourceFailureUnavailable
+	case errors.Is(err, context.Canceled) || strings.Contains(msg, "context canceled") || strings.Contains(msg, "signal: killed"):
+		return SourceFailureInterrupted
+	}
+	return SourceFailureError
+}
+
 // OnSourceFailure implements discover.SourceFailureObserver (the interface is
 // defined in internal/discover to keep the dependency direction the queue's
 // own Observer already uses: the producer side declares the hook, metrics
@@ -904,9 +955,13 @@ func (e *Emitter) RecordFailure(class string) {
 // source whose query attempt failed — whether it will be retried after
 // backoff or is the final give-up attempt (INV-FAIL-3, register gap R21 /
 // beads pg2-00jpn, pg2-jgbnp) — the metrics half of the log lines
-// discover.go's runAndEnqueue writes at those points.
-func (e *Emitter) OnSourceFailure(source string) {
-	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("source", source)))
+// discover.go's runAndEnqueue writes at those points. The series carries the
+// ClassifySourceFailure reason of err (bead pg2-hsla6).
+func (e *Emitter) OnSourceFailure(source string, err error) {
+	e.sourceFailures.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("source", source),
+		attribute.String("reason", ClassifySourceFailure(err)),
+	))
 }
 
 // RecordThroughput increments the throughput counter, per type, for an event

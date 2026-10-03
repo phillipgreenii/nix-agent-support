@@ -183,7 +183,7 @@ func TestCatalogHasTenMembers(t *testing.T) {
 	emitter.OnUnconsumedExpired("t")
 	emitter.OnUnknownTypeRejected("t")
 	emitter.RecordThroughput("t")
-	emitter.OnSourceFailure("src")
+	emitter.OnSourceFailure("src", errors.New("boom"))
 	emitter.OnDeduped("t")
 	emitter.RecordDispatchLatency(12.5, "accepted")
 	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -295,15 +295,66 @@ func TestBacklogIsScalarSum(t *testing.T) {
 // increments the source-failures counter, per source.
 func TestOnSourceFailurePerSource(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.OnSourceFailure("github-pulls")
-	h.emitter.OnSourceFailure("github-pulls")
-	h.emitter.OnSourceFailure("jira-issues")
+	h.emitter.OnSourceFailure("github-pulls", errors.New("boom"))
+	h.emitter.OnSourceFailure("github-pulls", errors.New("boom"))
+	h.emitter.OnSourceFailure("jira-issues", errors.New("boom"))
 	m := findMetric(t, h.collect(t), MetricSourceFailures)
 	if got := sumFor(m, "source", "github-pulls"); got != 2 {
 		t.Fatalf("source_failures[github-pulls] = %d, want 2", got)
 	}
 	if got := sumFor(m, "source", "jira-issues"); got != 1 {
 		t.Fatalf("source_failures[jira-issues] = %d, want 1", got)
+	}
+}
+
+// rateLimitReserveErr is the verbatim error text the command query surfaced
+// for the 2026-10-01/02 episode (bead pg2-hsla6): the pg-connector-pr-github
+// reserve breach, wrapped by scriptout's "unavailable" envelope twice and by
+// the command query's exit-status prefix.
+const rateLimitReserveErr = "produce pr-mine: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes pr mine --consumer pg-router]: exit status 1: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: GraphQL rate limit remaining (221) is below the configured reserve (1000)"
+
+// TestClassifySourceFailure pins the closed reason taxonomy (bead pg2-hsla6).
+// The rate-limit case MUST win over the generic "scriptout: unavailable"
+// wrapper it arrives in.
+func TestClassifySourceFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"rate limit reserve breach (the 2026-10-01 episode)", errors.New(rateLimitReserveErr), SourceFailureRateLimited},
+		{"plain rate limit phrasing", errors.New("HTTP 403: API rate limit exceeded"), SourceFailureRateLimited},
+		{"scriptout unavailable", errors.New("command query [x]: exit status 1: scriptout: unavailable: backend down"), SourceFailureUnavailable},
+		{"scriptout unauthenticated", errors.New("exit status 1: scriptout: unauthenticated: token expired"), SourceFailureUnauthenticated},
+		{"context cancelled sentinel", fmt.Errorf("command query [x]: %w", context.Canceled), SourceFailureInterrupted},
+		{"context canceled text", errors.New("command query [x]: context canceled"), SourceFailureInterrupted},
+		{"child killed", errors.New("command query [x]: signal: killed"), SourceFailureInterrupted},
+		{"unrecognized exit", errors.New("command query [x]: exit status 1"), SourceFailureError},
+		{"nil error", nil, SourceFailureError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifySourceFailure(tc.err); got != tc.want {
+				t.Fatalf("ClassifySourceFailure = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A rate-limit-reserve breach increments the source-failures counter with
+// reason="rate-limited"; an ordinary failure for the same source lands on its
+// own reason series, and both are visible to the alert's `sum by (source)`.
+func TestOnSourceFailureCarriesReason(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnSourceFailure("pr-mine", errors.New(rateLimitReserveErr))
+	h.emitter.OnSourceFailure("pr-mine", errors.New(rateLimitReserveErr))
+	h.emitter.OnSourceFailure("pr-mine", errors.New("command query [x]: exit status 1"))
+	m := findMetric(t, h.collect(t), MetricSourceFailures)
+	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureRateLimited); got != 2 {
+		t.Fatalf("source_failures{pr-mine,rate-limited} = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "source", "pr-mine", "reason", SourceFailureError); got != 1 {
+		t.Fatalf("source_failures{pr-mine,error} = %d, want 1", got)
 	}
 }
 
@@ -323,7 +374,7 @@ func TestSourceFailureSeriesAbsentUntilFirstFailure(t *testing.T) {
 			}
 		}
 	}
-	h.emitter.OnSourceFailure("github-pulls")
+	h.emitter.OnSourceFailure("github-pulls", errors.New("boom"))
 	m := findMetric(t, h.collect(t), MetricSourceFailures)
 	if got := sumFor(m, "source", "github-pulls"); got != 1 {
 		t.Fatalf("source_failures[github-pulls] = %d after first failure, want 1", got)

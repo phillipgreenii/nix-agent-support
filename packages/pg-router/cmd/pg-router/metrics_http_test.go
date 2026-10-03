@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -92,7 +93,7 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 		t.Fatalf("metrics.New: %v", err)
 	}
 	emitter.RecordFailure(metrics.FailureClassDeclined)
-	emitter.OnSourceFailure("srcA")
+	emitter.OnSourceFailure("srcA", errors.New("boom"))
 	emitter.OnDeduped("review-requested")
 	emitter.RecordThroughput("review-requested")
 	emitter.RecordDispatchLatency(12.5, "accepted")
