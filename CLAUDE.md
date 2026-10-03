@@ -154,6 +154,13 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
 
 ## pg-pr / pg-router Development Rules
 
+- **pg-pr is frozen and going away** (operator ruling, Phillip, 2026-10-03, verbatim: "no further
+  changes are to be made to pg-pr, it is going away. we shoudl consider if the functionality
+  should be added to pg-connector or pg-desk. if neither, the we should probably drop the
+  bead."): an agent MUST NOT specify or implement new pg-pr behavior. New functionality MUST be
+  evaluated for pg-connector or pg-desk, and the bead MUST be dropped if it fits neither.
+  Provenance: this ambiguity held `pg2-kftf9.12`/`.13`/`.14`/`.16` as `human` beads until resolved
+  (now retargeted to pg-connector, `.14` folded into `.13`, `.16` dropped).
 - **Behavior docs are the source of truth** (working principle, user 2026-07-09): changes to the
   pg-pr ↔ pg-router system MUST flow through the living docs at `docs/behavior/` first, then derive
   throwaway spec → design → plan → code. The docs are product-level and timeless (stories,

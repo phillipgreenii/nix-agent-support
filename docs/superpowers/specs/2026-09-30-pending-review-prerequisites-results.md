@@ -9,7 +9,7 @@
 - Throwaway PRIVATE repository `pending-review-scratch` under the single authorized GitHub account, using the existing `gh` login (classic OAuth token, scopes `gist`, `read:org`, `repo`). No other account, org, repo, or host was touched. The PR author and the reviewer were the same identity (the same shape as the router worker, which posts under the operator's own account).
 - Setup: commit `base` on `main`; branch `feat` with commit H1 (`a.txt`, four lines) and draft PR `#1`; later commit H2 appended a fifth line.
 - Reviews were created with the REST create-review endpoint (marker `<!-- pg-pr -->` stamped by hand to match `marker.HTMLMarker`; `marker.Stamp` itself was not invoked) and GraphQL. Raw responses were captured to a local scratch directory (not committed: they contain account logins and node ids). Commands and the essential response fields are quoted below.
-- The scratch repo could NOT be deleted: `gh repo delete` was refused with HTTP 403 ("needs the `delete_repo` scope"). Per the bead's instruction the scope was not refreshed. **The repo is left in place for the operator to delete.**
+- The scratch repo could NOT be deleted at the time: `gh repo delete` was refused with HTTP 403 ("needs the `delete_repo` scope"). Per the bead's instruction the scope was not refreshed. **The repo is intentionally KEPT for future tests and verifications** (operator ruling, Phillip, 2026-10-02: "the scratch repo does not need to be removed. it can stay for future tests and vrerifications.").
 
 ## Results
 
