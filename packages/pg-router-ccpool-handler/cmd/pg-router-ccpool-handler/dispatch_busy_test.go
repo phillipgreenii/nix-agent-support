@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
@@ -106,5 +108,69 @@ func TestRunDispatch_busyDeclineReasonNilAndOtherErrors(t *testing.T) {
 	}
 	if _, busy := busyDeclineReason(errors.New("some other failure")); busy {
 		t.Fatal("an unrelated error must not be classified as a busy decline")
+	}
+}
+
+// TestRunDispatch_busyDeclineReasonCommandBusy is dispatch.go's own
+// busyDeclineReason mapping tested directly for the command role's exit-9
+// sentinel (bead pg2-358u3): executor.ErrBusy, wrapped exactly as
+// internal/executor/command.go wraps it, maps to busyReasonCommandBusy,
+// distinct from the capacity and low-disk reasons.
+func TestRunDispatch_busyDeclineReasonCommandBusy(t *testing.T) {
+	wrapped := fmt.Errorf("command role %q item %s: %w: %w", "r", "b1", executor.ErrBusy, errors.New("exit status 9"))
+	reason, busy := busyDeclineReason(wrapped)
+	if !busy {
+		t.Fatalf("a wrapped executor.ErrBusy must be recognized as a busy decline")
+	}
+	if reason != busyReasonCommandBusy {
+		t.Fatalf("reason = %q, want %q", reason, busyReasonCommandBusy)
+	}
+}
+
+// TestRunDispatch_commandRoleExit9ExitsBusyWithReason proves the whole
+// command-role path end to end (bead pg2-358u3): a command role whose real
+// argv exits 9 makes runDispatch exit conformance.ExitBusy with the OPTIONAL
+// reply body {"schemaVersion":"1","reason":"command-busy"} — a pre-accept
+// busy decline the core re-offers, NOT an accepted-dispatch failure
+// (ExitError + an {"error": ...} body). The body must also carry none of the
+// command's stderr (the failure-only tail must not leak onto the busy path).
+func TestRunDispatch_commandRoleExit9ExitsBusyWithReason(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+
+	dir := t.TempDir()
+	rolePath := filepath.Join(dir, "role.json")
+	roleJSON := `{"name":"cmd-busy","type":"command","command":{"argv":["/bin/sh","-c","echo secret-stderr-text >&2; exit 9"]}}`
+	if err := os.WriteFile(rolePath, []byte(roleJSON), 0o644); err != nil {
+		t.Fatalf("write role config: %v", err)
+	}
+
+	restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-w"}}}`)
+	defer restoreIn()
+
+	var code int
+	got := captureStdout(t, func() {
+		code = runDispatch([]string{"--role-config", rolePath})
+	})
+	if code != conformance.ExitBusy {
+		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, got)
+	}
+	var reply struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Reason        string `json:"reason"`
+		Error         string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(got), &reply); err != nil {
+		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
+	}
+	if reply.Reason != busyReasonCommandBusy {
+		t.Fatalf("reason = %q, want %q", reply.Reason, busyReasonCommandBusy)
+	}
+	if reply.Error != "" {
+		t.Fatalf("busy reply must carry no error text; got %q", reply.Error)
+	}
+	for _, leak := range []string{"stderr tail", "secret-stderr-text"} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("busy reply must not carry %q; stdout=%q", leak, got)
+		}
 	}
 }

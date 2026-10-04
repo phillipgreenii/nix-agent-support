@@ -374,17 +374,27 @@ const (
 	// above rather than an escalation (see ccpool.go's own doc comment at its
 	// isolation-Ensure error branch).
 	busyReasonLowDisk = "low-disk"
+	// busyReasonCommandBusy (bead pg2-358u3): a "command" role's argv exited 9
+	// (conformance.ExitBusy's own code — the command's "not right now" signal),
+	// which internal/executor/command.go turns into executor.ErrBusy. It gets
+	// its OWN tag, not at-capacity's, because the cause is opaque to this
+	// module (the command, not ccpool, decided it was busy) and the Grafana
+	// failure-rate rule excludes at-capacity as routine backpressure — a
+	// command that stays busy MUST remain visible, not hide inside that
+	// exclusion.
+	busyReasonCommandBusy = "command-busy"
 )
 
 // busyDeclineReason maps err to the wire's busy-decline reason tag when err
-// is one of executor's three "decline and retry later" sentinels (bead
-// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel): ok is
-// false for any other err (including nil), matching none of them. All three
-// still map to the SAME wire-level conformance.ExitBusy — the core's
+// is one of executor's four "decline and retry later" sentinels (bead
+// pg2-j4uwg's capacity pair, widened by pg2-8vn8t's low-disk sentinel and
+// pg2-358u3's command-busy sentinel): ok is false for any other err
+// (including nil), matching none of them. All four still map to the SAME wire-level conformance.ExitBusy — the core's
 // retry/backoff cadence never depends on which reason applied (INV-FAIL-1)
 // — reason exists purely so pg-router core's declined metric/status
 // breakdown can tell them apart (see this file's runDispatch call site and
-// ErrPoolCapacityUnknown/ErrPoolAtCapacity/ErrLowDisk's own doc comments).
+// ErrPoolCapacityUnknown/ErrPoolAtCapacity/ErrLowDisk/ErrBusy's own doc
+// comments).
 func busyDeclineReason(err error) (reason string, ok bool) {
 	switch {
 	case errors.Is(err, executor.ErrPoolCapacityUnknown):
@@ -393,6 +403,8 @@ func busyDeclineReason(err error) (reason string, ok bool) {
 		return busyReasonAtCapacity, true
 	case errors.Is(err, executor.ErrLowDisk):
 		return busyReasonLowDisk, true
+	case errors.Is(err, executor.ErrBusy):
+		return busyReasonCommandBusy, true
 	default:
 		return "", false
 	}

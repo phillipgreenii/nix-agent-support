@@ -18,8 +18,12 @@ import (
 // ExitCode()==9 and wraps it into the error returned through
 // Executor.Dispatch, so errors.Is on that error resolves to this sentinel
 // through the existing %w chain — no production interface change.
-// roleListener.Offer maps it to eventqueue.DeclineBusy: a graceful "not right
-// now" PRE-ACCEPT decline (INV-CONC-1), never a delivery failure.
+// cmd/pg-router-ccpool-handler's dispatch.go busyDeclineReason maps it to the
+// wire's pre-accept busy decline (conformance.ExitBusy, reason command-busy,
+// bead pg2-358u3) and the core's roleListener.Offer turns that into
+// eventqueue.DeclineBusy: a graceful "not right now" PRE-ACCEPT decline
+// (INV-CONC-1), never a delivery failure. The returned error carries no
+// stderr tail (that suffix is for failures only).
 var ErrBusy = errors.New("executor: command exited busy (exit code 9)")
 
 // busyExitCode is the command role's operator-facing "I am busy, retry me"

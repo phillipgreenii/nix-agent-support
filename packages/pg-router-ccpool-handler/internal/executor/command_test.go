@@ -169,6 +169,13 @@ func TestCommandDispatch_BusyExitStillErrBusyWithStderr(t *testing.T) {
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("exit 9 must still map to ErrBusy; err = %v", err)
 	}
+	// The busy path must stay free of the failure-only stderr tail: the
+	// command's stderr is not carried into the error at all.
+	for _, leak := range []string{"stderr tail", "at capacity"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("busy error must not carry %q; err = %v", leak, err)
+		}
+	}
 }
 
 func TestStderrTail_SanitizesAndRedacts(t *testing.T) {
