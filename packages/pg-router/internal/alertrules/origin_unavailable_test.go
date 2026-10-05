@@ -61,10 +61,41 @@ func TestOriginUnavailableAnnotationsAreStatic(t *testing.T) {
 		"mount-missing: check that the checkout volume is mounted",
 		"auth-unavailable: renew the step cert in an interactive shell",
 		"network:", "timeout:", "unknown:",
+		"browser has been opened to visit",
 		"origin status", "origin ignore",
 	} {
 		if !strings.Contains(ann, need) {
 			t.Errorf("annotations lost %q", need)
 		}
+	}
+}
+
+// pg2-x7ie2: only a person can clear an origin outage (auth-unavailable needs an
+// interactive step cert renewal), so this rule -- and ONLY this rule -- asks
+// pg-router-probe to file its bead straight to the operator.
+func TestEscalationHumanLabelOnlyOnOriginUnavailable(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := strings.Split(string(b), "- uid: ")[1:]
+	var withLabel []string
+	for _, blk := range blocks {
+		uid := strings.Fields(blk)[0]
+		// labels: block of the rule, ending at the annotations: key
+		i := strings.Index(blk, "labels:")
+		j := strings.Index(blk, "annotations:")
+		if i < 0 || j < i {
+			continue
+		}
+		if regexp.MustCompile(`(?m)^\s*escalation: human\s*$`).MatchString(blk[i:j]) {
+			withLabel = append(withLabel, uid)
+		}
+	}
+	if len(withLabel) != 1 || withLabel[0] != "pg-router-origin-unavailable" {
+		t.Fatalf("escalation: human must be on pg-router-origin-unavailable and no other rule, found on %v", withLabel)
+	}
+	if !strings.Contains(originRule(t), "escalation: human") {
+		t.Error("origin-unavailable rule lost escalation: human")
 	}
 }

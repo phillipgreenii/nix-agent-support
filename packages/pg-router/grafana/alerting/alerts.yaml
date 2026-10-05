@@ -46,6 +46,16 @@ groups:
     folder: pg-router
     interval: 1m
     rules:
+      # Conventions (pg2-x7ie2): the optional rule label `escalation` routes the
+      # bead pg-router-probe files for a firing instance of a rule it watches.
+      # Recognised value: `human` -- the bead gets the labels escalated AND human
+      # (it skips the triager and lands in the operator's queue, with this rule's
+      # summary/description rendered as a Remediation: section). Absent (the
+      # default) means escalated only, for the triager. `escalation` is routing
+      # metadata, not identity: the probe excludes it from the alert fingerprint,
+      # so adding it to a registered rule keeps matching that rule's open beads.
+      # Annotations stay STATIC (no {{ }}): they are copied verbatim into beads.
+      #
       # Liveness: pg_router_liveness reports 1 while the daemon's last tick
       # is within its liveness window, else 0 (daemon-mode only --
       # internal/metrics/metrics.go's WithLiveness/MetricLiveness).
@@ -531,9 +541,13 @@ groups:
         execErrState: Error
         labels:
           severity: warning
+          # Only a person can clear this (the auth-unavailable class needs an
+          # interactive step cert renewal), so pg-router-probe files its bead
+          # straight to the operator (pg2-x7ie2).
+          escalation: human
         annotations:
           summary: "pg-router is declining dispatches because a watched git origin is unavailable"
-          description: 'rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) has stayed above 0 for over 15 minutes. Find the origin and its class with `pg-router-ccpool-handler origin status` or the handler logs, then apply the matching remediation. mount-missing: check that the checkout volume is mounted. auth-unavailable: renew the step cert in an interactive shell. network: check network/VPN connectivity to the git host. timeout: check network and git host health, then retry. unknown: inspect the handler log for the origin. To stop gating an origin deliberately, use `pg-router-ccpool-handler origin ignore`. Runbook: docs/runbooks/dispatched-session-git-origin-auth.md.'
+          description: 'rate(pg_router_failures_total{reason="origin-unavailable"}[10m]) has stayed above 0 for over 15 minutes. Find the origin and its class with `pg-router-ccpool-handler origin status` or the handler logs, then apply the matching remediation. mount-missing: check that the checkout volume is mounted. auth-unavailable: renew the step cert in an interactive shell. network: check network/VPN connectivity to the git host. timeout: if the handler log shows the step-CA prompt "browser has been opened to visit ... auth", renew the step cert in an interactive shell (same as auth-unavailable); otherwise check network and git host health, then retry. unknown: inspect the handler log for the origin. To stop gating an origin deliberately, use `pg-router-ccpool-handler origin ignore`. Runbook: docs/runbooks/dispatched-session-git-origin-auth.md.'
         data:
           - refId: A
             relativeTimeRange:

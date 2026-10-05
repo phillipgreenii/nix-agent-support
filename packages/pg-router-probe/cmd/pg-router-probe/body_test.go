@@ -48,3 +48,23 @@ func TestRenderBodyReferencesClosedPredecessor(t *testing.T) {
 		t.Fatalf("no Predecessor line expected without a closed match")
 	}
 }
+
+func TestRenderBodyRemediationForEscalationHuman(t *testing.T) {
+	f := finding{
+		Fingerprint: "fp1", Summary: "s", Evidence: "e", Escalation: escalationHuman,
+		AlertSummary: "origin down", AlertDescription: "renew the cert",
+	}
+	body := renderBody(f, time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC), "", "")
+	want := "\nRemediation:\norigin down\nrenew the cert\n" +
+		"Close this bead once the alert clears after remediation (pg-router-probe never closes beads).\n"
+	if !strings.HasSuffix(body, want) {
+		t.Fatalf("body = %q, want suffix %q", body, want)
+	}
+}
+
+func TestRenderBodyNoRemediationByDefault(t *testing.T) {
+	f := finding{Fingerprint: "fp1", Summary: "s", Evidence: "e", AlertSummary: "x", AlertDescription: "y"}
+	if body := renderBody(f, time.Now(), "", ""); strings.Contains(body, "Remediation") {
+		t.Fatalf("default body must not render annotations: %q", body)
+	}
+}

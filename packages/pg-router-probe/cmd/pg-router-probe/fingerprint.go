@@ -9,13 +9,32 @@ import (
 	"strings"
 )
 
+// escalationLabelKey is the alert-rule label that routes a firing alert's
+// bead (pg2-x7ie2). The recognised value is escalationHuman; absent (or any
+// other value) means the default route, an "escalated"-only bead for the
+// triager. See escalationLabels in run.go.
+const (
+	escalationLabelKey = "escalation"
+	escalationHuman    = "human"
+)
+
 // grafanaAlertFingerprint renders "<rule-uid>|<sorted key=value labels>"
 // [design: same paragraph, first bullet] — verbatim reuse of lat-survey's
 // own fingerprint SCHEME (the scheme is reused; the code is not, per this
 // packet's own Contract "Grafana" bullet).
+//
+// The "escalation" label (escalationLabelKey) is EXCLUDED from the hash
+// (pg2-x7ie2): it is routing metadata set by the rule author, not part of
+// the alert's identity, so moving an already-registered rule to
+// `escalation: human` must keep matching the beads already open for it
+// instead of forking a duplicate (the pg2-dvkbh/pg2-imr6o class).
+// Annotations (summary/description) are never passed in here at all.
 func grafanaAlertFingerprint(ruleUID string, labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
+		if k == escalationLabelKey {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)

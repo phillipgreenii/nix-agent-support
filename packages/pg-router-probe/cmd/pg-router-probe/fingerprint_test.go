@@ -134,3 +134,33 @@ func TestFingerprintIgnoresStartsAtAndValues(t *testing.T) {
 		t.Fatalf("Values = %q", a1.Values)
 	}
 }
+
+// pg2-x7ie2: the `escalation` label is routing metadata, not identity.
+func TestGrafanaAlertFingerprintExcludesEscalationLabel(t *testing.T) {
+	base := map[string]string{"__alert_rule_uid__": "r", "severity": "warning"}
+	with := map[string]string{"__alert_rule_uid__": "r", "severity": "warning", "escalation": "human"}
+	a, b := grafanaAlertFingerprint("r", base), grafanaAlertFingerprint("r", with)
+	if a != b {
+		t.Fatalf("escalation label changed the fingerprint: %q vs %q", a, b)
+	}
+	if strings.Contains(b, "escalation") {
+		t.Fatalf("fingerprint %q must not mention escalation", b)
+	}
+}
+
+// Annotations (summary/description) decode into the alert but never reach
+// the fingerprint.
+func TestFingerprintIgnoresAnnotations(t *testing.T) {
+	fp := func(summary string) string {
+		srv := newAlertServer(t, `[{"labels":{"__alert_rule_uid__":"pg-router-failure-rate","escalation":"human"},"annotations":{"summary":"`+summary+`","description":"d"},"startsAt":"2026-10-05T09:00:00Z","status":{"state":"active"}}]`)
+		defer srv.Close()
+		alerts, err := newGrafanaClient(srv.URL, "", srv.Client()).firingAlerts(context.Background(), registeredRuleUIDs)
+		if err != nil || len(alerts) != 1 {
+			t.Fatalf("firingAlerts: %v %+v", err, alerts)
+		}
+		return checkGrafanaAlerts(alerts)[0].Fingerprint
+	}
+	if a, b := fp("one"), fp("two"); a != b {
+		t.Fatalf("annotations changed the fingerprint: %q vs %q", a, b)
+	}
+}

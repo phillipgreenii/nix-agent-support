@@ -193,3 +193,23 @@ func TestFiringAlertsDecodesStartsAtAndValues(t *testing.T) {
 		t.Fatalf("evidence = %q", ev)
 	}
 }
+
+// pg2-x7ie2: annotations.summary/description are decoded (trimmed) for the
+// body's Remediation: section; missing ones decode empty.
+func TestFiringAlertsDecodesSummaryAndDescription(t *testing.T) {
+	srv := newAlertServer(t, `[
+	  {"labels":{"__alert_rule_uid__":"pg-router-liveness-down"},"annotations":{"summary":"  s  ","description":"d"},"status":{"state":"active"}},
+	  {"labels":{"__alert_rule_uid__":"pg-router-failure-rate"},"status":{"state":"active"}}
+	]`)
+	defer srv.Close()
+	alerts, err := newGrafanaClient(srv.URL, "", srv.Client()).firingAlerts(context.Background(), registeredRuleUIDs)
+	if err != nil || len(alerts) != 2 {
+		t.Fatalf("firingAlerts: %v %+v", err, alerts)
+	}
+	if alerts[0].AnnotationSummary != "s" || alerts[0].AnnotationDescription != "d" {
+		t.Fatalf("got %+v", alerts[0])
+	}
+	if alerts[1].AnnotationSummary != "" || alerts[1].AnnotationDescription != "" {
+		t.Fatalf("got %+v", alerts[1])
+	}
+}

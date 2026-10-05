@@ -39,6 +39,28 @@
 // must not turn an otherwise-clean run into a reported partial failure.
 // This packet's own implementation choice; no design citation for the
 // configured/attempted distinction itself.
+//
+// # Bead labels and the `escalation` alert label (pg2-x7ie2)
+//
+// Every bead this verb creates carries the label "escalated" (the dedup
+// query and the triager both key on it). A Grafana alert rule MAY route its
+// beads straight to the operator, skipping the triager, by setting the
+// alert label escalation="human": the bead is then created with BOTH
+// "escalated" (so dedup still sees it) and "human" (so the triager's
+// `--exclude-label human` dispatch query does not). Recognised values:
+// "human"; absent or anything else is the default, "escalated" only. The
+// `escalation` label is routing metadata, not identity: it is excluded from
+// the alert fingerprint (fingerprint.go), so adding it to an
+// already-registered rule keeps matching that rule's open beads.
+//
+// For an escalation=human bead the body also carries a Remediation: section
+// rendered from the alert's annotations.summary and annotations.description
+// (body.go), ending with the instruction to close the bead once the alert
+// clears after remediation: the probe never closes beads. Annotations are
+// never part of the fingerprint.
+//
+// Which rule UIDs are probed at all is registeredRuleUIDs below; adding a
+// rule's escalation label does not register it.
 package main
 
 import (
@@ -166,7 +188,14 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the three health checks, filing/updating an escalated bd issue on a real finding",
-		Args:  cobra.NoArgs,
+		Long: `Run the three health checks, filing/updating an escalated bd issue on a real finding.
+
+Beads are created with the label "escalated". A firing Grafana alert whose rule
+sets the label escalation="human" is filed with labels "escalated" AND "human"
+instead: it skips the escalation triager and lands in the operator's queue, with
+the alert's summary/description rendered as a Remediation: section. The probe
+never closes beads; close one once its alert clears after remediation.`,
+		Args: cobra.NoArgs,
 	}
 	cmd.Flags().StringVar(&opts.grafanaURL, "grafana-url", "", "Grafana base URL; unset skips the Grafana alerts sub-check")
 	cmd.Flags().StringVar(&opts.grafanaToken, "grafana-token", os.Getenv("PG_ROUTER_PROBE_GRAFANA_TOKEN"), "Grafana bearer token (default from PG_ROUTER_PROBE_GRAFANA_TOKEN)")
@@ -402,7 +431,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				}
 				body := renderBody(f, now, skippedNote, predecessor)
 				createCtx, cancel := withPgTimeout()
-				_, err := deps.createIssue(createCtx, escalationTitle(f), []string{"escalated"}, trackedMetadata(f), body, warn)
+				_, err := deps.createIssue(createCtx, escalationTitle(f), escalationLabels(f), trackedMetadata(f), body, warn)
 				cancel()
 				if err != nil {
 					warn(fmt.Sprintf("failed to create bd issue for %s: %v", f.Fingerprint, err))
@@ -470,6 +499,23 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		return partialErrorf("run: partial (%s)", strings.Join(degraded, "; "))
 	}
 	return nil
+}
+
+// escalationLabels returns the labels a brand-new bead is created with.
+// Every bead carries "escalated": it is what the dedup query
+// (connector.go's defaultDedupQuery, `list --label escalated ...`) matches
+// on, so a bead without it would be invisible to dedup and re-created on
+// every tick (the pg2-dvkbh/pg2-imr6o duplicate class). A Grafana alert
+// whose rule sets the label escalation="human" additionally gets "human",
+// which keeps the bead out of the triager's `ready --label escalated
+// --exclude-label human` dispatch query and puts it straight in the
+// operator's queue (pg2-x7ie2). Any other escalation value (or none) is the
+// default, "escalated" only.
+func escalationLabels(f finding) []string {
+	if f.Kind == kindGrafanaAlert && f.Escalation == escalationHuman {
+		return []string{"escalated", "human"}
+	}
+	return []string{"escalated"}
 }
 
 // escalationTitle renders a short, deterministic title for a brand-new

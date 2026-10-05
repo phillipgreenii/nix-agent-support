@@ -45,6 +45,11 @@ type grafanaAlert struct {
 	State    string
 	StartsAt time.Time
 	Values   string
+	// AnnotationSummary/AnnotationDescription are the rule's static
+	// annotations.summary/description (pg2-x7ie2). They feed only the
+	// body's Remediation: section, never Labels or the fingerprint.
+	AnnotationSummary     string
+	AnnotationDescription string
 }
 
 // grafanaAlertEvidence renders one alert's raw evidence block for the bd
@@ -176,6 +181,9 @@ func (c *grafanaClient) firingAlerts(ctx context.Context, ruleUIDs []string) ([]
 			State:    inst.Status.State,
 			StartsAt: startsAt,
 			Values:   renderGrafanaValues(inst.Annotations["__values__"]),
+
+			AnnotationSummary:     strings.TrimSpace(inst.Annotations["summary"]),
+			AnnotationDescription: strings.TrimSpace(inst.Annotations["description"]),
 		})
 	}
 	return alerts, nil

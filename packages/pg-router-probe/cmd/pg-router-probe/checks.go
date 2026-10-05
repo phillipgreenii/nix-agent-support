@@ -61,6 +61,14 @@ type finding struct {
 	// the fingerprint (pg2-3tt2e).
 	StartsAt time.Time
 	Values   string
+	// Escalation is the alert's "escalation" label value (kindGrafanaAlert
+	// only; escalationHuman files the bead straight to the operator), and
+	// AlertSummary/AlertDescription its static annotations, rendered under
+	// the body's Remediation: section for escalationHuman beads
+	// (pg2-x7ie2). None of the three is part of the fingerprint.
+	Escalation       string
+	AlertSummary     string
+	AlertDescription string
 }
 
 // checkGrafanaAlerts builds one finding per currently-firing alert already
@@ -87,6 +95,10 @@ func checkGrafanaAlerts(alerts []grafanaAlert) []finding {
 			State:    a.State,
 			StartsAt: a.StartsAt,
 			Values:   a.Values,
+
+			Escalation:       a.Labels[escalationLabelKey],
+			AlertSummary:     a.AnnotationSummary,
+			AlertDescription: a.AnnotationDescription,
 		})
 	}
 	return findings

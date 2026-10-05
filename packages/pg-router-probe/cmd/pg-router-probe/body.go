@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -38,6 +39,9 @@ func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID strin
 		"Pg-Router-Escalation-Fingerprint: %s\n\nSource: %s\nFinding: %s\nSince: %s\nEvidence:\n%s\n",
 		f.Fingerprint, escalationSource, f.Summary, firstSeen.UTC().Format(time.RFC3339), f.Evidence,
 	)
+	if f.Escalation == escalationHuman {
+		body += remediationSection(f)
+	}
 	if predecessorID != "" {
 		body += "\nPredecessor: " + predecessorID + " (closed; this alert fired again)\n"
 	}
@@ -45,4 +49,21 @@ func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID strin
 		body += "\nNote: this run's other sub-check(s) were skipped/degraded: " + skippedNote + "\n"
 	}
 	return body
+}
+
+// remediationSection renders the alert's static annotations for a bead filed
+// straight to the operator (escalation=human, pg2-x7ie2): such a bead never
+// passes through a triager, so the bead itself must say what to do. The
+// probe never closes beads, hence the closing instruction.
+func remediationSection(f finding) string {
+	var b strings.Builder
+	b.WriteString("\nRemediation:\n")
+	if f.AlertSummary != "" {
+		b.WriteString(f.AlertSummary + "\n")
+	}
+	if f.AlertDescription != "" {
+		b.WriteString(f.AlertDescription + "\n")
+	}
+	b.WriteString("Close this bead once the alert clears after remediation (pg-router-probe never closes beads).\n")
+	return b.String()
 }
