@@ -2860,7 +2860,8 @@
                       pkgs.pg-ccaudit
                       pkgs.claude-extended-tool-approver
                       # Not on this PATH by design (specdrift.Exempt/IsExempt): launchctl (macOS
-                      # system tool), man (per-platform implementation), and every *.sh plugin
+                      # system tool), darwin-rebuild (a nix-darwin script in the system profile,
+                      # not a nixpkgs package), man (per-platform implementation), and every *.sh plugin
                       # helper script (a repo file resolved by relative path, no binary).
                     ]
                     # pn / pnwf (pg2-cjfpy.3) and pg-hooks / pg-go-mutate (pg2-cjfpy.2): built in
@@ -2889,6 +2890,9 @@
                       pkgs.gh
                       pkgs.pg-connector
                       pkgs.pg-desk
+                      # pg2-33slg: pa-monitor (status / info, the audit-worktrees liveness
+                      # check) is this repo's own overlay package (packages/pa-monitor).
+                      pkgs.pa-monitor
                       # No top-level bd/rtk overlay attr in THIS standalone flake --
                       # resolve them the same way pb-contract (above) already does.
                       (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)

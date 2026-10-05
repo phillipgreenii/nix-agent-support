@@ -10560,5 +10560,613 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: version plus a stray operand: abstains as before."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_status",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor status"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: pn-workspace-rules:audit-worktrees liveness check (read-only daemon query)."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_status___json",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor status --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: read-only daemon query."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_info_path__repo__worktrees_wt",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor info path:/repo/.worktrees/wt"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: pn-workspace-rules:audit-worktrees liveness check."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_info_session_abc123___json",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor info session:abc123 --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: read-only daemon query."
+  },
+  {
+    "case": "repo_base_regrade_pn___version",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: bare informational flag (FlagSpec.Informational)."
+  },
+  {
+    "case": "repo_base_regrade_pnwf___version",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: bare informational flag (FlagSpec.Informational)."
+  },
+  {
+    "case": "repo_base_regrade_pn_workspace___help",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: bare informational flag (FlagSpec.Informational)."
+  },
+  {
+    "case": "repo_base_regrade_pnwf___help",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: bare informational flag (FlagSpec.Informational)."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_config_remote_pushDefault",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo config remote.pushDefault"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-33slg: read of the push-remote convention key (already approved; pinned)."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: bare pa-monitor launches the TUI."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_nudge_session_abc123___text_hi",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor nudge session:abc123 --text=hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: nudge injects text into a session; not instructed."
+  },
+  {
+    "case": "repo_base_regrade_pa_monitor_daemon",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pa-monitor daemon"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: starts a daemon."
+  },
+  {
+    "case": "repo_base_regrade_pn",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: no subcommand and no informational flag."
+  },
+  {
+    "case": "repo_base_regrade_pn_workspace___verbose",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace --verbose"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: -v/--verbose is not informational."
+  },
+  {
+    "case": "repo_base_regrade_pn___version_init",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --version init"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: init is a guardrail verb."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_switch___flake___host",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild switch --flake .#host"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: activation is a user-only step."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_activate",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild activate"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: activation is a user-only step."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_build___flake___host_switch",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild build --flake .#host switch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: the script keeps the LAST action word, so this activates."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_build_switch___flake___host",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild build switch --flake .#host"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: the script keeps the LAST action word, so this activates."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_build___flake___host___override_input_alias_git_f",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild build --flake .#host --override-input alias git+file:///tmp/wt"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: input override redirects evaluation to code outside the project."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_build___flake__tmp_evil_host",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild build --flake /tmp/evil#host"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: a flake outside the project is outside the trust boundary."
+  },
+  {
+    "case": "repo_base_regrade_darwin_rebuild_build",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "darwin-rebuild build"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: no --flake: would evaluate /etc/nix-darwin or NIX_PATH."
+  },
+  {
+    "case": "repo_base_regrade_nix_eval___expr__builtins_readFile__etc_passwd_",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "nix eval --expr 'builtins.readFile /etc/passwd'"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: --expr evaluates arbitrary Nix text."
+  },
+  {
+    "case": "repo_base_regrade_nix_eval_nixpkgs_lib_version",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "nix eval nixpkgs#lib.version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: registry flakeref can fetch remote code."
+  },
+  {
+    "case": "repo_base_regrade_nix_fmt______tree_root__",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "nix fmt -- --tree-root=/"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: a flag forwarded to the formatter can retarget it."
+  },
+  {
+    "case": "repo_base_regrade_nix_fmt__etc_hosts",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "nix fmt /etc/hosts"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: absolute forwarded path."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_stash_push__u__m_unique_tag",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push -u -m unique-tag"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: pg2-33slg: no stash schema; awaiting operator decision."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_reset___hard_origin_main",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo reset --hard origin/main"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: operator ruling pg2-4yy4r item 4 (pg2-ur9zc): Abstain in every spelling."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_branch__D_pn_update_20261005",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo branch -D pn-update/20261005"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: operator ruling pg2-4yy4r item 5 (pg2-fkmg4): unsafe spelling abstains."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_branch__f_main_origin_main",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo branch -f main origin/main"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: operator ruling pg2-4yy4r item 5 (pg2-fkmg4): -f force-moves a ref."
+  },
+  {
+    "case": "repo_base_regrade_git__C__repo_config_remote_pushDefault_origin",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo config remote.pushDefault origin"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: two-positional form WRITES the key."
+  },
+  {
+    "case": "repo_base_regrade_tail__F___XDG_STATE_HOME___HOME__local_state__pn_events_jsonl",
+    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "tail -F ${XDG_STATE_HOME:-$HOME/.local/state}/pn/events.jsonl"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-33slg: runtime expansion path; the literal path needs an operator CETA_EXTRA_READONLY_ROOTS opt-in."
   }
 ]

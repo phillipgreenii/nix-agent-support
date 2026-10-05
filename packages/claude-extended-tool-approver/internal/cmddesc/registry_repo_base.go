@@ -202,7 +202,161 @@ var repoBasePnwfSchema = CommandSchema{
 	},
 }
 
+// ---- nix eval / nix fmt / darwin-rebuild build / pa-monitor (pg2-33slg) ----
+//
+// pg2-33slg re-graded the forms pn-workspace-rules and capability-model still
+// instruct after pg2-cjfpy.2/.3 and models the ones that are safe. Same
+// operator ruling as above (Phillip, 2026-10-04: "any command which is
+// supposed to work as part of a skill should be autoapproved"), same
+// restraint: every schema approves only the shape the skills use and every
+// other flag stays insufficient.
+
+// nixEvalSchema: `nix eval [--raw|--json] [.|.#attr]` -- evaluates an attribute
+// of THIS directory's flake and prints it (capability-model:
+// `nix eval ...darwinConfigurations.<host>...` to surface option/type errors
+// before a build). The operand set is CLOSED to the local-flake spellings
+// exactly like nixBuildSchema (a registry or URL flakeref can fetch remote
+// code); evaluating runs the checkout's own nix code, which the KindExec
+// implicit effect states so TrustedCheckoutExec judges the working directory.
+// Deliberately absent (insufficient): `--expr`/`--file`/`--apply` (evaluate
+// arbitrary text), `--impure`, `--write-to` (writes a directory tree),
+// `--option`, `--override-input`.
+var nixEvalSchema = CommandSchema{
+	Name:       "eval",
+	Provenance: "nix eval --help (Nix 2.34), this host 2026-10-05",
+	Flags: map[string]FlagSpec{
+		"--raw": inert, "--json": inert,
+		"-L": inert, "--print-build-logs": inert, "--help": inert,
+	},
+	Positionals:     PositionalSpec{Rest: AllowedLiteral("local-flake-installable")},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "nix eval"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutContent,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
+// nixFmtSchema: `nix fmt [-- paths...]` -- runs the formatter THIS directory's
+// flake declares (`nix fmt` is an alias for `nix formatter run`). The formatter
+// is checkout code (KindExec, judged by TrustedCheckoutExec) and it rewrites
+// files in place, so the working tree is declared PathModify. Every positional
+// is forwarded to the formatter, whose own flags this schema cannot see, so a
+// positional is accepted only from the closed "relative-project-path" set (a
+// plain relative file name: no leading `-`, no absolute/`~`/`$`/`..` spelling).
+// A PathModify role would be wrong here: after `--` it would read a forwarded
+// flag such as `--tree-root=/` as a file NAMED like the flag and approve it.
+// No flag is modeled: nix's own options (`--json`, `--impure`, `--option`, ...)
+// stay insufficient.
+var nixFmtSchema = CommandSchema{
+	Name:        "fmt",
+	Provenance:  "nix fmt --help (Nix 2.34), this host 2026-10-05",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: AllowedLiteral("relative-project-path")},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: Exec, Target: "nix fmt"},
+		{Role: PathModify, Target: "."},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// darwinRebuildSchema: ONLY `darwin-rebuild build --flake <local flake>#<host>`
+// -- the BUILD-only recipe pn-workspace-rules gives for a system-build-
+// equivalent check ("or `darwin-rebuild build`"). switch/activate/check/edit/
+// changelog are absent: switch and activate change the running system (a
+// user-only step) and `check` needs root. --flake is REQUIRED (a bare build
+// would evaluate whatever /etc/nix-darwin or NIX_PATH points at) and closed to
+// "." / ".#attr" like nix build, because a flake elsewhere is code from outside
+// the project. The first positional is Leading/Unmodeled and skipped only when
+// --flake appeared, so no --flake (or a stray positional) is insufficient.
+// `--override-input`, `--impure`, `--option`, `-I`, `--refresh` and `--offline`
+// change what is evaluated or fetched and are unmodeled; the pn-workspace
+// "replicate --override-input by hand" workaround therefore still abstains.
+// The build writes the ./result symlink and runs the checkout's nix code.
+var darwinRebuildSchema = CommandSchema{
+	Name:         "darwin-rebuild",
+	Provenance:   "darwin-rebuild --help (nix-darwin), this host 2026-10-05",
+	Flags:        map[string]FlagSpec{},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"build": {
+			Name:       "build",
+			Provenance: "darwin-rebuild --help (nix-darwin), this host 2026-10-05",
+			Flags: map[string]FlagSpec{
+				"--flake":   {Arity: ArityOne, Operand: AllowedLiteral("local-flake-installable")},
+				"--dry-run": inert, "--show-trace": inert,
+				"-L": inert, "--print-build-logs": inert,
+			},
+			// Rest: Unmodeled makes ANY extra word insufficient: the script keeps
+			// the LAST action word it sees, so `build ... switch` would activate.
+			Positionals: PositionalSpec{
+				Leading:               []OperandRole{Unmodeled},
+				LeadingSkippedByFlags: []string{"--flake"},
+				Rest:                  Unmodeled,
+			},
+			ImplicitEffects: []ImplicitEffect{
+				{Role: Exec, Target: "darwin-rebuild build"},
+				{Role: PathCreate, Target: "result"},
+			},
+			Stdin:        StdinNever,
+			Stdout:       StdoutMetadata,
+			UnknownFlag:  UnknownFlagInsufficient,
+			EndOfOptions: true,
+		},
+	},
+}
+
+// readsPaMonitor is the implicit effect of a pa-monitor query: a read over the
+// local Unix-socket RPC to the user's own pa-monitor daemon, the same shape as
+// readsBeads for bd.
+var readsPaMonitor = ImplicitEffect{Role: Remote("read"), Target: "pa-monitor"}
+
+// paMonitorSchema: ONLY the read-only queries `pa-monitor status [--json]` and
+// `pa-monitor info <selector> [--json]` (pn-workspace-rules:audit-worktrees'
+// informational liveness check). Source: packages/pa-monitor/cmd/pa-monitor/
+// cli.go runStatus (GetState + per-session GetSessionInfo, no mutation) and
+// control.go runInfo (GetPathInfo / GetSessionInfo). The selector
+// (`session:<id>`, `path:<p>`, `cmux:<ws>`) is a daemon lookup key, not a
+// filesystem operand: the daemon only matches it against known sessions. The
+// other subcommands are absent: daemon, caffeinate, nudge, auto-resume,
+// cmux-bridge and wait-until-agents-finished change daemon or session state,
+// and bare `pa-monitor` launches the TUI.
+var paMonitorSchema = CommandSchema{
+	Name:         "pa-monitor",
+	Provenance:   "pa-monitor --help, packages/pa-monitor/cmd/pa-monitor/main.go usageText, this repo 2026-10-05",
+	Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"status": {
+			Name:            "status",
+			Provenance:      "packages/pa-monitor/cmd/pa-monitor/cli.go runStatus, this repo 2026-10-05",
+			Flags:           map[string]FlagSpec{"--json": inert},
+			Positionals:     PositionalSpec{Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{readsPaMonitor},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
+		"info": {
+			Name:            "info",
+			Provenance:      "packages/pa-monitor/cmd/pa-monitor/control.go runInfo, this repo 2026-10-05",
+			Flags:           map[string]FlagSpec{"--json": inert},
+			Positionals:     PositionalSpec{Leading: []OperandRole{Literal}, Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{readsPaMonitor},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
+	},
+}
+
 // repoBaseToolSchemas lists the schemas this file contributes to DefaultRegistry.
 func repoBaseToolSchemas() []CommandSchema {
-	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema}
+	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema}
 }

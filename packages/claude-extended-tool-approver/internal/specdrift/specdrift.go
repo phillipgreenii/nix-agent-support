@@ -46,6 +46,12 @@ var Exempt = map[string]bool{
 	// pg2-slsc0: `command` is a bash builtin with no on-PATH binary (like cd/export),
 	// so it has no --help to hash; its spec cites bash `help command`.
 	"command": true,
+	// pg2-33slg: darwin-rebuild is a nix-darwin shell script installed in the
+	// system profile (/run/current-system/sw/bin), not a nixpkgs package, so no
+	// pinned binary can be put on the check sandbox's PATH (and it does not exist
+	// on linux at all); its evidence is `darwin-rebuild --help` / the script
+	// source, cited per fact in embeddedspecs/data/darwin-rebuild.json.
+	"darwin-rebuild": true,
 }
 
 // ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved

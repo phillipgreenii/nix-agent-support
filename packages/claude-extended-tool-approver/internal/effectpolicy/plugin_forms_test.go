@@ -465,6 +465,86 @@ var pluginForms = []pluginForm{
 	{"bash-scripting", `IFS=/; echo hi`, evalcontract.Abstain, "persistent IFS changes how every later expansion splits"},
 	{"bash-scripting", `CDPATH=/etc; cd foo`, evalcontract.Abstain, "persistent CDPATH retargets a later cd"},
 	{"bash-scripting", `GIT_DIR=/tmp/x; git status`, evalcontract.Reject, "persistent GIT_DIR redirects every later git command"},
+
+	// ---- forms the repo-base plugins instruct that pg2-cjfpy.2/.3 left (pg2-33slg)
+	// nix eval / nix fmt of the LOCAL flake (capability-model; pn-workspace-rules).
+	{"capability-model", "nix eval .#darwinConfigurations.host.config.system.stateVersion", evalcontract.Approve, ""},
+	{"capability-model", "nix eval --raw .#darwinConfigurations.host.config.system.build.toplevel.drvPath", evalcontract.Approve, ""},
+	{"capability-model", "nix eval --json .#packages.aarch64-darwin.foo.meta", evalcontract.Approve, ""},
+	{"capability-model", "nix eval --expr '1 + 1'", evalcontract.Abstain, "--expr evaluates arbitrary Nix text"},
+	{"capability-model", "nix eval --impure .#foo", evalcontract.Abstain, "--impure allows impure evaluation (env, absolute paths)"},
+	{"capability-model", "nix eval --write-to /tmp/out .#foo", evalcontract.Abstain, "--write-to writes a directory tree; unmodeled"},
+	{"capability-model", "nix eval nixpkgs#lib.version", evalcontract.Abstain, "a registry flakeref can fetch remote code; closed to the local flake"},
+	{"capability-model", "nix eval darwinConfigurations.host.config.system.stateVersion", evalcontract.Abstain, "not a local-flake spelling (. / .#attr); type .#darwinConfigurations..."},
+	{"pn-workspace-rules", "nix fmt", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "nix fmt flake.nix", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "nix fmt -- flake.nix home/foo.nix", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "nix fmt /etc/hosts", evalcontract.Abstain, "an absolute forwarded file is outside the closed relative-project-path set"},
+	{"pn-workspace-rules", "nix fmt -- ~/.zshrc", evalcontract.Abstain, "a home-relative forwarded file is outside the closed relative-project-path set"},
+	{"pn-workspace-rules", "nix fmt ../sibling/flake.nix", evalcontract.Abstain, "a .. segment leaves the project; outside the closed relative-project-path set"},
+	{"pn-workspace-rules", "nix fmt \"$FILE\"", evalcontract.Abstain, "a live expansion is not a closed-set literal"},
+	{"pn-workspace-rules", "nix fmt --impure", evalcontract.Abstain, "nix options are unmodeled for fmt"},
+	{"pn-workspace-rules", "nix fmt -- --tree-root=/", evalcontract.Abstain, "a flag forwarded to the formatter can retarget it; forwarded flags are not modeled"},
+	// darwin-rebuild: BUILD only, local flake, --flake required.
+	{"pn-workspace-rules", "darwin-rebuild build --flake .#host", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "darwin-rebuild build --flake . --show-trace", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "darwin-rebuild build --flake .#host --override-input alias git+file:///tmp/wt", evalcontract.Abstain, "--override-input redirects an input to code outside the project (the pn-workspace workaround form); unmodeled"},
+	{"pn-workspace-rules", "darwin-rebuild build --flake /Users/someone/other#host", evalcontract.Abstain, "a flake outside the project is code from outside the trust boundary; closed to . / .#attr"},
+	{"pn-workspace-rules", "darwin-rebuild build", evalcontract.Abstain, "no --flake: would evaluate whatever /etc/nix-darwin or NIX_PATH names"},
+	{"pn-workspace-rules", "darwin-rebuild build --flake .#host --impure", evalcontract.Abstain, "--impure is unmodeled"},
+	{"pn-workspace-rules", "darwin-rebuild build switch --flake .#host", evalcontract.Abstain, "the script keeps the LAST action word, so this activates; an extra word after build is unmodeled"},
+	{"pn-workspace-rules", "darwin-rebuild build --flake .#host switch", evalcontract.Abstain, "the script keeps the LAST action word, so this activates; an extra word after build is unmodeled"},
+	{"pn-workspace-rules", "darwin-rebuild --flake .#host build", evalcontract.Abstain, "options before the action word are not modeled"},
+	{"pn-workspace-rules", "darwin-rebuild switch --flake .#host", evalcontract.Abstain, "switch activates the running system: a user-only step, never approved"},
+	{"pn-workspace-rules", "darwin-rebuild activate", evalcontract.Abstain, "activation is a user-only step, never approved"},
+	{"pn-workspace-rules", "darwin-rebuild check --flake .#host", evalcontract.Abstain, "check needs root and is operator-only"},
+	// pa-monitor: the read-only queries audit-worktrees uses.
+	{"pn-workspace-rules", "pa-monitor status", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pa-monitor status --json", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pa-monitor info path:<ROOT>/.worktrees/wt", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pa-monitor info session:abc123 --json", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pa-monitor info", evalcontract.Abstain, "info needs a selector"},
+	{"pn-workspace-rules", "pa-monitor", evalcontract.Abstain, "bare pa-monitor launches the TUI"},
+	{"pn-workspace-rules", "pa-monitor nudge session:abc123 --text=hi", evalcontract.Abstain, "nudge injects text into a session; state-changing, not instructed"},
+	{"pn-workspace-rules", "pa-monitor daemon", evalcontract.Abstain, "starts a daemon"},
+	{"pn-workspace-rules", "pa-monitor caffeinate on", evalcontract.Abstain, "changes system sleep state"},
+	// git config remote.pushDefault: read forms only.
+	{"pn-workspace-rules", "git -C <ROOT> config remote.pushDefault", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "git -C <ROOT> config --get remote.pushDefault", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "git -C <ROOT> config --local remote.pushDefault", evalcontract.Abstain, "scope flags are unmodeled; a pinned golden (git_config_global_key) keeps `git config --global <key>` abstaining"},
+	{"pn-workspace-rules", "git -C <ROOT> config --global remote.pushDefault", evalcontract.Abstain, "scope flags are unmodeled; a pinned golden (git_config_global_key) keeps `git config --global <key>` abstaining"},
+	{"pn-workspace-rules", "git -C <ROOT> config remote.pushDefault origin", evalcontract.Abstain, "the two-positional form WRITES the key (changes where every later push goes)"},
+	{"pn-workspace-rules", "git -C <ROOT> config --global remote.pushDefault origin", evalcontract.Abstain, "the two-positional form WRITES the key, now in the user-global config"},
+	{"pn-workspace-rules", "git -C <ROOT> config --global --unset remote.pushDefault", evalcontract.Abstain, "--unset is a write; unmodeled"},
+	// Bare help / version forms (generic subcommand interpreter).
+	{"pn-workspace-rules", "pn workspace --help", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pn workspace -h", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pn --help", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pn --version", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pnwf --version", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pnwf --help", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pn workspace workforest --help", evalcontract.Approve, ""},
+	{"pn-workspace-rules", "pn", evalcontract.Abstain, "bare pn with no subcommand and no informational flag"},
+	{"pn-workspace-rules", "pn workspace", evalcontract.Abstain, "bare pn workspace with no subcommand and no informational flag"},
+	{"pn-workspace-rules", "pn workspace --verbose", evalcontract.Abstain, "-v/--verbose is not informational: nothing makes the tool exit"},
+	{"pn-workspace-rules", "pn workspace --otlp-endpoint http://x --help", evalcontract.Abstain, "--otlp-endpoint is a telemetry sink and is unmodeled; the informational flag does not excuse it"},
+	{"pn-workspace-rules", "pn --version init", evalcontract.Abstain, "init is a guardrail verb; a version flag before it does not change that"},
+	// The destructive git forms the workforest skills describe. Listed, NOT
+	// approved: operator rulings pg2-4yy4r item 4 (git reset --hard: Abstain in
+	// every spelling; landed as pg2-ur9zc) and item 5 (git branch: Abstain any
+	// unsafe spelling -D/-M/-C/-f; landed as pg2-fkmg4), reconfirmed by the
+	// operator 2026-08-12, plus ADR 0075 R5 (approve only when sure safe) and R6
+	// (a branch --delete abstains). `git stash push -u -m` has no explicit ruling
+	// and stays Abstain (unmodeled subcommand) pending an operator decision.
+	{"pn-workspace-rules", "git -C <ROOT> stash push -u -m unique-tag", evalcontract.Abstain, "no stash schema; stash push -u moves untracked work off the tree. Awaiting an operator decision (pg2-33slg)"},
+	{"pn-workspace-rules", "git -C <ROOT> reset --hard origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 4 / pg2-ur9zc: git reset --hard Abstains in every spelling"},
+	{"pn-workspace-rules", "git -C <ROOT> branch -D pn-update/20261005", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: git branch Abstains on any unsafe spelling; -D deletes an unmerged branch"},
+	{"pn-workspace-rules", "git -C <ROOT> branch -f main origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: -f force-moves a branch ref"},
+	// tail -F of the pn event stream: the literal path is a zone the path
+	// policy does not know (an operator opts it in with CETA_EXTRA_READONLY_ROOTS);
+	// the instructed ${XDG_STATE_HOME:-...} spelling is a runtime expansion.
+	{"pn-workspace-rules", "tail -F ${XDG_STATE_HOME:-$HOME/.local/state}/pn/events.jsonl", evalcontract.Abstain, "path is a runtime expansion; type the literal path"},
+	{"pn-workspace-rules", "tail -F /home/nobody/.local/state/pn/events.jsonl", evalcontract.Abstain, "a state dir outside every known zone; opt in with CETA_EXTRA_READONLY_ROOTS"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full

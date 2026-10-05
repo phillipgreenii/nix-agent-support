@@ -293,6 +293,8 @@ func TestRegistryNames(t *testing.T) {
 	// pg2-slsc0: the read-only probes the pb plugin instructs
 	// (registry_plugin_probes.go; pwd is pg2-dbrsg's builtin schema).
 	want = append(want, "command", "date", "diff", "readlink")
+	// pg2-33slg: darwin-rebuild (build only) and pa-monitor (status / info).
+	want = append(want, "darwin-rebuild", "pa-monitor")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

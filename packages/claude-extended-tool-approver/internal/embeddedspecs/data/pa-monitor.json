@@ -1,0 +1,195 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pa-monitor",
+  "command": {
+    "name": "pa-monitor",
+    "provenance": "pa-monitor --help, packages/pa-monitor/cmd/pa-monitor/main.go usageText, this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "pa-monitor --help: \"pa-monitor [<subcommand>] [flags]\""
+      },
+      "stdin": {
+        "source": "pa-monitor --help: \"pa-monitor [<subcommand>] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "pa-monitor --help: \"pa-monitor [<subcommand>] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "pa-monitor --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pa-monitor/cmd/pa-monitor/main.go:73 pickSubcommand: \"-h\"/\"--help\": the command is \"help\" (top-level usage)"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pa-monitor/cmd/pa-monitor/main.go:73 pickSubcommand: \"-h\"/\"--help\": the command is \"help\" (top-level usage)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "packages/pa-monitor/cmd/pa-monitor/main.go:43 usageText: \"pa-monitor [<subcommand>] [flags]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "info": {
+        "name": "info",
+        "provenance": "packages/pa-monitor/cmd/pa-monitor/control.go runInfo, this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/control.go:241 runInfo: \"func runInfo(args []string)\""
+          },
+          "stdin": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/control.go:241 runInfo: \"func runInfo(args []string)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/control.go:241 runInfo: \"func runInfo(args []string)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/control.go:241 runInfo: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/status_json.go:24 stripJSONFlag: removes a \"--json\" token from args"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/control.go:243-247: args[0] is the selector (session:<id> | path:<p> | cmux:<ws>), parsed by parseSelector and sent to the daemon as a lookup key"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pa-monitor",
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/control.go:241 runInfo: dials the local daemon and reads GetPathInfo/GetSessionInfo, writes nothing"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "status": {
+        "name": "status",
+        "provenance": "packages/pa-monitor/cmd/pa-monitor/cli.go runStatus, this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:15 runStatus: \"func runStatus(args []string)\""
+          },
+          "stdin": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:15 runStatus: \"func runStatus(args []string)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:15 runStatus: \"func runStatus(args []string)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:15 runStatus: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/status_json.go:24 stripJSONFlag: removes a \"--json\" token from args"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:17: \"status takes no positional args today\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pa-monitor",
+            "citation": {
+              "source": "packages/pa-monitor/cmd/pa-monitor/cli.go:15 runStatus: dials the local daemon and reads GetState/GetSessionInfo, writes nothing"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

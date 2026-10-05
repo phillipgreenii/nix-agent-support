@@ -203,6 +203,115 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "eval": {
+        "name": "eval",
+        "provenance": "nix eval --help (Nix 2.34), this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "nix eval --help: \"nix eval [option...] installable\""
+          },
+          "stdin": {
+            "source": "nix eval --help: \"nix eval [option...] installable\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "nix eval --help: \"nix eval [option...] installable\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "nix eval --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix eval --help: \"· --help\""
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix eval --help: \"· --json\""
+            }
+          },
+          "--print-build-logs": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix eval --help: \"· --print-build-logs / -L\""
+            }
+          },
+          "--raw": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix eval --help: \"· --raw\""
+            }
+          },
+          "-L": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix eval --help: \"· --print-build-logs / -L\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "allowed-literal",
+            "set": "local-flake-installable"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "nix eval --help: \"nix eval [option...] installable\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "nix eval",
+            "citation": {
+              "source": "nix eval --help: \"This command evaluates the given Nix expression, and prints the result on standard output.\" -- the installable is closed to the local flake (. / .#attr), whose evaluation runs the checkout's own Nix code, so the exec is judged as trusted-checkout code"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "flake": {
         "name": "flake",
         "provenance": "nix flake --help (Nix 2.34), this host 2026-10-05",
@@ -528,6 +637,62 @@
             "endOfOptions": true
           }
         }
+      },
+      "fmt": {
+        "name": "fmt",
+        "provenance": "nix fmt --help (Nix 2.34), this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "nix fmt --help: \"nix fmt [option...] args...\""
+          },
+          "stdin": {
+            "source": "nix fmt --help: \"nix fmt [option...] args...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "nix fmt --help: \"nix fmt [option...] args...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "nix fmt --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "allowed-literal",
+            "set": "relative-project-path"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "nix fmt --help: \"Any arguments will be forwarded to the formatter. Typically these are the files to format.\" -- forwarded to a program whose own flags are not modeled, so only plain relative file names are accepted"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "nix fmt",
+            "citation": {
+              "source": "nix fmt --help: \"nix fmt (an alias for nix formatter run) calls the formatter specified in the flake.\" -- the formatter is code from the checkout's flake"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "citation": {
+              "source": "nix fmt --help: \"Any arguments will be forwarded to the formatter. Typically these are the files to format.\" -- the formatter rewrites files in place, so the working tree is declared modified"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
       },
       "run": {
         "name": "run",

@@ -575,6 +575,27 @@ var allowedLiteralSets = map[string]func(string) bool{
 	"local-flake-installable": func(tok string) bool {
 		return tok == "." || strings.HasPrefix(tok, ".#")
 	},
+	// "relative-project-path": a plain relative file operand that stays inside
+	// the working directory by construction -- no leading `-` (an option the
+	// callee may forward to a program this schema cannot see: `nix fmt --
+	// --tree-root=/`), no `~` or `$` (a home or variable spelling), no absolute
+	// path and no `..` segment. It is for operands handed on to a program whose
+	// own flags are unmodeled (nix fmt's formatter), where a PathModify role
+	// would misread a forwarded flag as a file name (pg2-33slg).
+	"relative-project-path": func(tok string) bool {
+		if tok == "" || strings.HasPrefix(tok, "-") || strings.HasPrefix(tok, "/") || strings.HasPrefix(tok, "~") {
+			return false
+		}
+		if strings.ContainsAny(tok, "$`\\") {
+			return false
+		}
+		for _, seg := range strings.Split(tok, "/") {
+			if seg == ".." {
+				return false
+			}
+		}
+		return true
+	},
 }
 
 // inSet builds an exact-membership predicate.

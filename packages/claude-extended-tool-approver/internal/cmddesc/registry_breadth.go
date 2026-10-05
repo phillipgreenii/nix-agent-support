@@ -2145,6 +2145,10 @@ var nixSchema = CommandSchema{
 		// LOCAL flake — see registry_plugin_tools.go.
 		"build": nixBuildSchema,
 		"flake": nixFlakeSchema,
+		// pg2-33slg: `nix eval` / `nix fmt` of the LOCAL flake -- see
+		// registry_repo_base.go.
+		"eval": nixEvalSchema,
+		"fmt":  nixFmtSchema,
 	},
 }
 
