@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: GIT_DIR=/tmp/x"]
+    n1{{"env: GIT_DIR"}}
+    n2["command: git status"]
+    n0 -->|"assign: GIT_DIR=/tmp/x"| n1

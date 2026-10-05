@@ -1,0 +1,10 @@
+flowchart LR
+    n0["command: X=#quot;$(git rev-parse --show-toplevel)#quot;<br/>- env:set X<br/>mark=permitted"]
+    n1{{"env: X"}}
+    subgraph sg_s0["$(git rev-parse --show-toplevel)"]
+        n2["command: git rev-parse --show-toplevel<br/>- path:read .git [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+        n3[/"file: .git"/]
+    end
+    n2 -->|"substitution: $(git rev-parse --show-toplevel)"| n0
+    n0 -->|"assign: X=#quot;$(git rev-parse --show-toplevel)#quot;"| n1
+    n2 -->|"reads: read"| n3

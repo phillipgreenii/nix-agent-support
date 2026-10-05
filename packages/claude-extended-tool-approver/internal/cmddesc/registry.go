@@ -50,6 +50,8 @@ func coreSchemas() []CommandSchema {
 		xargsSchema, curlSchema,
 		gitSchema,
 		echoSchema, printfSchema, trueSchema, falseSchema, testSchema, renamed(testSchema, "["),
+		// pg2-dbrsg: the shell builtins skills' control-flow statements use.
+		pwdSchema, readSchema, shiftSchema, exitSchema,
 		lsSchema, wcSchema, sortSchema, tailSchema, grepSchema, mkdirSchema,
 		exportSchema,
 		// slice 3n (registry_breadth.go): beads, trivial inert commands,
@@ -1293,26 +1295,112 @@ var falseSchema = CommandSchema{
 	UnknownFlag: UnknownFlagInert,
 }
 
-// testSchema (also registered as "["): NO operator is modeled — per the
-// brief, "positionals Literal, no flags" — so this is the default
-// UnknownFlagInsufficient, unlike true/false: a bare string/numeric
-// comparison with no `-`-prefixed operator (`[ "$a" = "$b" ]`) is Sufficient
-// (every token is a Literal positional, `[`'s trailing `]` included), but
-// ANY of test's real operators (`-f`, `-n`, `-eq`, …) hits the generic
-// unknown-flag path and Abstains — a real over-approximation for common,
-// genuinely-safe idioms like `[ -n "$x" ]`, accepted deliberately rather
-// than modeling test's operator vocabulary (none of it produces a
-// filesystem/network/env effect this slice's Effect vocabulary would even
-// have anywhere to record, so modeling it would only ever relax Abstain to
-// Approve, never add a real check). Registered a second time as "[" via
-// renamed(), mirroring sh's registration alongside bash.
+// testSchema (also registered as "["): the operator vocabulary is modeled as
+// inert flags (pg2-dbrsg; before it, NO operator was modeled, so every
+// `[ -z "$x" ]`, `[ -d "$p" ]` and `[ "$n" -gt 3 ]` hit the generic
+// unknown-flag path and abstained — the commonest guard in the shell a skill
+// instructs). Each modeled operator is a pure query: the unary file tests
+// (-a -b -c -d -e -f -g -h -k -L -N -O -G -p -r -s -S -t -u -w -x) only
+// stat/access their operand and never read content; -z/-n test string
+// length; -eq -ne -lt -le -gt -ge compare integers (bash's `test`/`[` builtin
+// parses them as integers — `[ 'a[$(cmd)]' -eq 1 ]` is "integer expression
+// expected", it does NOT evaluate arithmetic the way `[[ ]]` does); -nt -ot
+// -ef compare file metadata; -o is either the OR connective or the
+// shell-option query. The operands stay Literal, so a path operand is never
+// read as a path effect.
+//
+// DELIBERATELY ABSENT, so they still abstain: `-v` and `-R`. Both take a
+// VARIABLE NAME that may carry an array subscript, and a subscript is an
+// arithmetic expression: `test -v 'a[$(cmd)]'` runs cmd. (`[[ ]]` is not this
+// schema at all — cmdparse reduces it to a DataTest leaf, which stays
+// unmodeled for the same reason.)
+//
+// UnknownFlagInsufficient stays the default: a token that looks like an
+// operator but is not in the list is not guessed at. Registered a second time
+// as "[" via renamed(), mirroring sh's registration alongside bash.
 var testSchema = CommandSchema{
-	Name:        "test",
-	Provenance:  "test (GNU coreutils) 9.11 / bash 5.3.9 builtin test — every operator is a pure comparison, no filesystem mutation or content read",
+	Name:       "test",
+	Provenance: "test (GNU coreutils) 9.11 / bash 5.3.9 builtin test — every operator is a pure comparison, no filesystem mutation or content read",
+	Flags: map[string]FlagSpec{
+		"-a": inert, "-b": inert, "-c": inert, "-d": inert, "-e": inert,
+		"-f": inert, "-g": inert, "-h": inert, "-k": inert, "-L": inert,
+		"-N": inert, "-O": inert, "-G": inert, "-p": inert, "-r": inert,
+		"-s": inert, "-S": inert, "-t": inert, "-u": inert, "-w": inert,
+		"-x": inert, "-z": inert, "-n": inert, "-o": inert,
+		"-eq": inert, "-ne": inert, "-lt": inert, "-le": inert,
+		"-gt": inert, "-ge": inert,
+		"-nt": inert, "-ot": inert, "-ef": inert,
+	},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutNone,
+}
+
+// pwdSchema (pg2-dbrsg): the bash builtin that prints the working directory.
+// Its output is path METADATA, not file content, so `D=$(pwd)` captures no
+// content (StdoutMetadata: the content-flow policy does not treat it as a
+// source). -L/-P are the only options. Registered under the name the builtin
+// shadows; the on-PATH /bin/pwd takes the same two flags.
+var pwdSchema = CommandSchema{
+	Name:         "pwd",
+	Provenance:   "bash 5.3.9 builtin pwd, help pwd",
+	Flags:        map[string]FlagSpec{"-L": inert, "-P": inert},
+	Positionals:  PositionalSpec{Rest: Literal},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// readSchema (pg2-dbrsg): the bash builtin that reads one line of STDIN into
+// shell variables. It touches no file itself (the input arrives on stdin, so
+// `read X < f` is judged as the redirection it is), and its only effect is
+// writing the variables it names — each bare NAME operand is an EffectEnv SET
+// (the EnvAssign role), so EnvAssignment refuses `read PATH`/`read HOME`/an
+// injector name exactly as it refuses `PATH=...`. `-a NAME` names an array
+// the same way. -p/-n/-N/-t/-d/-i take one inert value. `-u FD` (read from
+// an already-open descriptor, i.e. content from somewhere this model cannot
+// see) is deliberately NOT modeled and abstains.
+var readSchema = CommandSchema{
+	Name:       "read",
+	Provenance: "bash 5.3.9 builtin read, help read",
+	Flags: map[string]FlagSpec{
+		"-r": inert, "-s": inert, "-e": inert,
+		"-p": literal1, "-n": literal1, "-N": literal1, "-t": literal1,
+		"-d": literal1, "-i": literal1,
+		"-a": {Arity: ArityOne, Operand: EnvAssign},
+	},
+	Positionals:  PositionalSpec{Rest: EnvAssign},
+	Stdin:        StdinAlways,
+	Stdout:       StdoutNone,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// shiftSchema (pg2-dbrsg): `shift [n]` drops positional parameters — pure
+// shell state, no flags, the only operand a count.
+var shiftSchema = CommandSchema{
+	Name:        "shift",
+	Provenance:  "bash 5.3.9 builtin shift, help shift",
 	Flags:       map[string]FlagSpec{},
 	Positionals: PositionalSpec{Rest: Literal},
 	Stdin:       StdinNever,
 	Stdout:      StdoutNone,
+	UnknownFlag: UnknownFlagInsufficient,
+}
+
+// exitSchema (pg2-dbrsg): `exit [n]` ends the shell the command runs in with
+// status n — it does no I/O and changes nothing outside that shell. Like
+// true/false its argument cannot unlock any behavior (`exit -1` is a status,
+// not an option), so UnknownFlagInert is an accurate model, not a relaxation.
+var exitSchema = CommandSchema{
+	Name:        "exit",
+	Provenance:  "bash 5.3.9 builtin exit, help exit",
+	Flags:       map[string]FlagSpec{},
+	Positionals: PositionalSpec{Rest: Literal},
+	Stdin:       StdinNever,
+	Stdout:      StdoutNone,
+	UnknownFlag: UnknownFlagInert,
 }
 
 // lsSchema: PathRead is METADATA (a directory listing), not content —

@@ -288,6 +288,8 @@ func TestRegistryNames(t *testing.T) {
 		want,
 		"df-close-focus", "df-deferred", "df-pull", "df-wire", "lat-wire", "rc-claim", "rc-fp", "rc-park",
 	)
+	// pg2-dbrsg: the shell builtins skills' control-flow statements use.
+	want = append(want, "exit", "pwd", "read", "shift")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

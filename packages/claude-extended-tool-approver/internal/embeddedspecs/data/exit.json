@@ -1,0 +1,39 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "exit",
+  "command": {
+    "name": "exit",
+    "provenance": "bash 5.3.9 builtin exit, help exit",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin: help exit: \"exit: exit [n]\""
+      },
+      "stdin": {
+        "source": "bash builtin: help exit: \"exit: exit [n]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin: help exit: \"Exit the shell.\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "bash builtin: help exit: \"Exits the shell with a status of N.\" -- the reviewed text documents no options (a flag-shaped word such as -1 is a status operand), so an unrecognized one cannot change behavior, supporting \"inert\""
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin: help exit: \"exit: exit [n]\" and \"If N is omitted, the exit status is that of the last command executed.\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "inert"
+  }
+}

@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: echo #quot;$f#quot;"]
+    n1["command: $(ls)"]
+    subgraph sg_s0["$(ls)"]
+        n2["command: ls"]
+    end
+    n2 -->|"substitution: $(ls)"| n1

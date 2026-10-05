@@ -1,0 +1,8 @@
+flowchart LR
+    n0["command: X=$(rm -rf foo) echo hi"]
+    n1{{"env: X"}}
+    subgraph sg_s0["$(rm -rf foo)"]
+        n2["command: rm -rf foo"]
+    end
+    n2 -->|"substitution: $(rm -rf foo)"| n0
+    n0 -->|"assign: X=$(rm -rf foo)"| n1

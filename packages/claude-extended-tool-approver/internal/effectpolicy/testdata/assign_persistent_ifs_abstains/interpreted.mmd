@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: IFS=/<br/>- env:set IFS<br/>mark=insufficient: env:set IFS: env-assignment (persistent assignment of a shell-behaviour variable (IFS) changes how every later command in the expression is parsed or resolved (pg2-dbrsg))"]
+    n1{{"env: IFS"}}
+    n2["command: echo hi<br/>- stdio:stdout content<br/>mark=permitted"]
+    n0 -->|"assign: IFS=/"| n1

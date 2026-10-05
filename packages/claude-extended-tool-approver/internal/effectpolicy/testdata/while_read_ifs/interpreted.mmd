@@ -1,0 +1,12 @@
+flowchart LR
+    n0["command: IFS='=' read -r key value<br/>- env:set IFS<br/>- env:set key<br/>- env:set value<br/>- stdio:stdin content<br/>mark=permitted"]
+    n1{{"env: IFS"}}
+    n2["command: echo #quot;$key#quot;<br/>- stdio:stdout content<br/>mark=permitted"]
+    n3["command: #lt; README.md<br/>- path:read README.md [redirect #lt;]<br/>mark=permitted"]
+    n4[/"file: README.md"/]
+    n0 -->|"pipe"| n3
+    n4 -->|"redirect-in: #lt;"| n3
+    n0 -->|"assign: IFS='='"| n1
+    n3 -->|"reads: read"| n4
+    n3 -->|"flow: captured content-#gt;later commands"| n0
+    n3 -->|"flow: captured content-#gt;later commands"| n2

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: X=$((1+2))<br/>- env:set X<br/>- opaque (env X: assignment value holds an arithmetic expansion (arithmetic evaluation can run command substitutions found in variable text))<br/>mark=insufficient: env X: assignment value holds an arithmetic expansion (arithmetic evaluation can run command substitutions found in variable text)"]
+    n1{{"env: X"}}
+    n0 -->|"assign: X=$((1+2))"| n1

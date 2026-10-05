@@ -1,0 +1,10 @@
+flowchart LR
+    n0["command: X=$(rm -rf foo) echo hi<br/>- env:set X<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1{{"env: X"}}
+    subgraph sg_s0["$(rm -rf foo)"]
+        n2["command: rm -rf foo<br/>- path:delete foo [arg 1]<br/>mark=insufficient: path:delete foo [arg 1]: path-access (delete of a writable path needs consent (held by git workspace at <ROOT>))"]
+        n3[/"file: foo"/]
+    end
+    n2 -->|"substitution: $(rm -rf foo)"| n0
+    n0 -->|"assign: X=$(rm -rf foo)"| n1
+    n2 -->|"writes: delete"| n3

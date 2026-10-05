@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: echo #quot;$f#quot;<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1["command: $(ls)<br/>mark=permitted"]
+    subgraph sg_s0["$(ls)"]
+        n2["command: ls<br/>- path:read . [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+        n3[/"file: ."/]
+    end
+    n2 -->|"substitution: $(ls)"| n1
+    n2 -->|"reads: read"| n3

@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: GIT_DIR=/tmp/x<br/>- env:set GIT_DIR<br/>mark=forbidden: env:set GIT_DIR: env-assignment (GIT_DIR/GIT_INDEX_FILE assigned as a persistent shell variable redirects the repository of every later git command in the expression (pg2-dbrsg))"]
+    n1{{"env: GIT_DIR"}}
+    n2["command: git status<br/>- path:read . [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n3[/"file: ."/]
+    n0 -->|"assign: GIT_DIR=/tmp/x"| n1
+    n2 -->|"reads: read"| n3

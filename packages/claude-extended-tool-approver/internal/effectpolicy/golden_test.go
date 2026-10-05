@@ -840,11 +840,29 @@ var goldenCases = []goldenCase{
 	{"true_basic", "true --anything -x", evalcontract.Approve, nil},
 	{"false_basic", "false", evalcontract.Approve, nil},
 
-	// test / [: no operator modeled, so a flag-free comparison approves and
-	// any real test operator (`-f`, here) abstains — see testSchema's doc
-	// comment for the accepted over-approximation.
+	// test / [: the pure-query operators are modeled as inert flags
+	// (pg2-dbrsg; see testSchema's doc comment), so the guards skills
+	// instruct approve; `-v`/`-R` (array-subscript arithmetic) stay abstain.
 	{"test_string_eq", `[ "$a" = "$b" ]`, evalcontract.Approve, nil},
-	{"test_f_flag", "test -f README.md", evalcontract.Abstain, nil},
+	{"test_f_flag", "test -f README.md", evalcontract.Approve, nil},
+	{"bracket_z_var", `[ -z "$X" ]`, evalcontract.Approve, nil},
+	{"bracket_d_path", `[ -d /tmp ]`, evalcontract.Approve, nil},
+	{"bracket_gt_int", `[ "$N" -gt 3 ]`, evalcontract.Approve, nil},
+	{"bracket_v_abstains", `[ -v foo ]`, evalcontract.Abstain, nil},
+
+	// pg2-dbrsg: assignments, loops, case and the control-flow builtins.
+	{"assign_cmdsubst_approves", `X="$(git rev-parse --show-toplevel)"`, evalcontract.Approve, nil},
+	{"assign_cmdsubst_rm_abstains", `X=$(rm -rf foo)`, evalcontract.Abstain, nil},
+	{"prefix_assign_cmdsubst_rm_abstains", `X=$(rm -rf foo) echo hi`, evalcontract.Abstain, nil},
+	{"assign_arithmetic_abstains", `X=$((1+2))`, evalcontract.Abstain, nil},
+	{"assign_persistent_ifs_abstains", `IFS=/; echo hi`, evalcontract.Abstain, nil},
+	{"assign_persistent_git_dir_rejects", `GIT_DIR=/tmp/x; git status`, evalcontract.Reject, nil},
+	{"for_loop_cmdsubst_list", `for f in $(ls); do echo "$f"; done`, evalcontract.Approve, nil},
+	{"while_read_ifs", `while IFS='=' read -r key value; do echo "$key"; done < README.md`, evalcontract.Approve, nil},
+	{"case_assign_arm", `case "$p" in /*) ;; *) p="$W/$p" ;; esac`, evalcontract.Approve, nil},
+	{"read_path_abstains", `read PATH`, evalcontract.Abstain, nil},
+	{"builtins_pwd_shift_exit", `pwd; shift; exit 0`, evalcontract.Approve, nil},
+	{"dbl_bracket_abstains", `[[ -z "$X" ]]`, evalcontract.Abstain, nil},
 
 	// ls: metadata listing; implicit PathRead of "." with no positional.
 	{"ls_la_readme", "ls -la README.md", evalcontract.Approve, nil},

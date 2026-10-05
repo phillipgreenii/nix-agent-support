@@ -28,6 +28,15 @@ const HelpHashesFile = "help-hashes.json"
 var Exempt = map[string]bool{
 	"cd":     true,
 	"export": true,
+	// pg2-dbrsg: the control-flow builtins skills instruct. Like cd/export they
+	// are bash builtins; there is no pinned on-PATH binary whose --help is the
+	// builtin's behavior (coreutils ships a /bin/pwd, but the builtin shadows
+	// it in the shell a command runs in, and `read`/`shift`/`exit` have no
+	// binary at all). Their evidence is `help <name>` of the bash builtin.
+	"pwd":   true,
+	"read":  true,
+	"shift": true,
+	"exit":  true,
 	// pg2-cjfpy.2: launchctl is a macOS system tool absent from a linux (and a
 	// nix-sandboxed darwin) PATH, and `man` is man-db on linux but a different
 	// implementation on darwin, so neither has ONE pinned --help text to hash —

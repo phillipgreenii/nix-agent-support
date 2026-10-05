@@ -2088,6 +2088,34 @@ func appendEnvAssignments(base, extra []EnvAssignment) []EnvAssignment {
 	return append(base, extra...)
 }
 
+// DataKind classifies a command-less DATA leaf (ParsedCommand.Data, pg2-dbrsg).
+type DataKind int
+
+const (
+	// DataNone is the zero value: the leaf is not a data leaf.
+	DataNone DataKind = iota
+	// DataWordList is a `for`/`select` loop's `in` word list. The words are
+	// iterated, never executed; a substitution among them reaches the leaf's
+	// own Substitutions.
+	DataWordList
+	// DataCaseWord is a `case` clause's subject word.
+	DataCaseWord
+	// DataCasePattern is one `case` item pattern.
+	DataCasePattern
+	// DataTest is a `[[ ... ]]` test clause. Its integer operators
+	// (-eq/-lt/...) and `-v` evaluate their operands as ARITHMETIC, which runs
+	// command substitutions found in variable text, so it is not inert.
+	DataTest
+	// DataArithmetic is a `(( ... ))` arithmetic command or a `let` clause —
+	// arithmetic evaluation, not inert.
+	DataArithmetic
+	// DataOther is every other data leaf: an indexed/associative-array element
+	// assignment (`a[$i]=v`, whose subscript is an arithmetic expression), a
+	// quoted-empty command word, and any command type the lowering does not
+	// model.
+	DataOther
+)
+
 type ExpansionKind int
 
 const (
@@ -2313,6 +2341,15 @@ type ParsedCommand struct {
 	// primarycommit.go's shell-alias-body recursion, which re-parses the alias body on
 	// its own).
 	AndChainID int
+
+	// Data classifies a command-less DATA leaf (pg2-dbrsg): which construct the
+	// lowering reduced to "Raw text that may hold a substitution, but no command".
+	// DataNone (the zero value) means this is NOT a data leaf — it is a command
+	// leaf, an assignment-only leaf or a redirection-only leaf. A consumer that
+	// wants to treat a data leaf as inert MUST gate on a specific kind here and
+	// leave DataOther (and every kind it does not recognise) unmodeled: the
+	// lowering uses DataOther precisely for the shapes it could not classify.
+	Data DataKind
 }
 
 // ArgIsLiveExpansion is the SAFE accessor for ArgLiveExpansion: it reports

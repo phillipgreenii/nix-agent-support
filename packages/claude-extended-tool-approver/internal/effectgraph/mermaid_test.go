@@ -111,8 +111,14 @@ func TestInterpretedMarks(t *testing.T) {
 	if len(frob.Effects) != 1 || frob.Effects[0].Kind != cmddesc.EffectOpaque {
 		t.Errorf("frobnicate effects = %+v", frob.Effects)
 	}
-	if bare.Mark != MarkInsufficient {
-		t.Errorf("bare assignment mark = %s", bare.Mark)
+	// pg2-dbrsg: a bare assignment of a static value is MODELED (its EffectEnv
+	// is the whole effect), so the builder no longer marks it insufficient;
+	// the policy fold judges the NAME.
+	if bare.Mark != MarkUnjudged {
+		t.Errorf("bare assignment mark = %s (%s)", bare.Mark, bare.MarkReason)
+	}
+	if len(bare.Effects) != 1 || bare.Effects[0].Kind != cmddesc.EffectEnv || !bare.Effects[0].EnvPersistent {
+		t.Errorf("bare assignment effects = %+v, want one persistent EffectEnv", bare.Effects)
 	}
 }
 

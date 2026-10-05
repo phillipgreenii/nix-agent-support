@@ -25,8 +25,11 @@
 // # Shell-builtin exemption
 //
 // cd and export are pure bash builtins with no separate on-PATH binary to
-// invoke --help against (bash ships no standalone /bin/cd or /bin/export).
-// Exempt (this package's own package-level var) names them; both are
+// invoke --help against (bash ships no standalone /bin/cd or /bin/export);
+// pg2-dbrsg adds the control-flow builtins pwd, read, shift and exit on the
+// same ground (their evidence is the bash builtin's `help <name>`, not a
+// binary's --help).
+// Exempt (this package's own package-level var) names them; all are
 // recorded/expected as a JSON null in help-hashes.json rather than a hash
 // string, and both Record and Check skip the capture/compare step for them
 // entirely — this

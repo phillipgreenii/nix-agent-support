@@ -514,7 +514,9 @@ func (st *interpState) envAssign(op pendingOp, source string, live bool) {
 	if eq := strings.IndexByte(op.tok, '='); eq >= 0 {
 		name = op.tok[:eq]
 	}
-	st.effects = append(st.effects, Effect{Kind: EffectEnv, EnvName: name, EnvSet: true, Source: source})
+	// EnvPersistent: an operand-role assignment (`export NAME`, `read NAME`) writes
+	// the SHELL's variable, not one child's environment (see Effect.EnvPersistent).
+	st.effects = append(st.effects, Effect{Kind: EffectEnv, EnvName: name, EnvSet: true, EnvPersistent: true, Source: source})
 }
 
 // program emits the Program effect for an operand and folds in the dialect

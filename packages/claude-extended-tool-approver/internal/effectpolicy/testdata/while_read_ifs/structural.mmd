@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: IFS='=' read -r key value"]
+    n1{{"env: IFS"}}
+    n2["command: echo #quot;$key#quot;"]
+    n3["command: #lt; README.md"]
+    n4[/"file: README.md"/]
+    n0 -->|"pipe"| n3
+    n4 -->|"redirect-in: #lt;"| n3
+    n0 -->|"assign: IFS='='"| n1

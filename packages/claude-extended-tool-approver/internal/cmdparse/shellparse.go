@@ -872,10 +872,10 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 		// The subject word is DATA — `case $(curl|sh) in` executes the substitution
 		// but the word itself is never a command — so it gets the same command-less
 		// data leaf a `for` word list gets.
-		lw.emitData(cmd.Word)
+		lw.emitData(cmd.Word, DataCaseWord)
 		for _, item := range cmd.Items {
 			for _, pat := range item.Patterns {
-				lw.emitData(pat)
+				lw.emitData(pat, DataCasePattern)
 			}
 			lw.lowerStmtsFresh(item.Stmts)
 		}
@@ -912,14 +912,14 @@ func (lw *lowering) lowerStmt(st *syntax.Stmt, pid, idx, chain int) {
 		// engine's substitution recursion walks. Judging them as commands (which the
 		// outgoing front end did, yielding executables `[[` and `((`) is what this
 		// deliberately stops.
-		lw.emitDataNode(st.Cmd)
+		lw.emitDataNode(st.Cmd, dataKindOfClause(st.Cmd))
 		lw.emitCompoundRedirs(st, pid, idx, chain)
 
 	default:
 		// An unmodelled command type MUST NOT vanish (root cause 4: a pass may
 		// DELETE a segment, so the leaf set stops being a cover). Emitting its source
 		// span as a data leaf keeps I14's coverage while judging nothing.
-		lw.emitDataNode(st.Cmd)
+		lw.emitDataNode(st.Cmd, DataOther)
 		lw.emitCompoundRedirs(st, pid, idx, chain)
 	}
 }
@@ -983,7 +983,7 @@ func (lw *lowering) lowerLoop(loop syntax.Loop) (name string, values []string, o
 		}
 		values = append(values, v)
 	}
-	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End(), nodes)
+	lw.emitDataSpan(wi.Items[0].Pos(), wi.Items[len(wi.Items)-1].End(), nodes, DataWordList)
 	if !literal || wi.Name == nil {
 		return "", nil, false
 	}
@@ -1090,7 +1090,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, c
 		//
 		// It reaches a DATA leaf, the same shape a `for` word list gets: no executable,
 		// so it is never judged as a command, but its Raw is walked for substitutions.
-		lw.emitDataSpan(a.Pos(), a.End(), []syntax.Node{a})
+		lw.emitDataSpan(a.Pos(), a.End(), []syntax.Node{a}, DataOther)
 	}
 	for i, w := range cmd.Args {
 		for j, bt := range lw.wordTokens(w) {
@@ -1133,7 +1133,7 @@ func (lw *lowering) lowerCall(st *syntax.Stmt, cmd *syntax.CallExpr, pid, idx, c
 			for _, a := range cmd.Assigns {
 				nodes = append(nodes, a)
 			}
-			lw.emitDataSpan(st.Pos(), syntax.NewPos(uint(lw.stmtEndOffset(st)), 0, 0), nodes)
+			lw.emitDataSpan(st.Pos(), syntax.NewPos(uint(lw.stmtEndOffset(st)), 0, 0), nodes, DataOther)
 		}
 		return
 	}
@@ -1236,17 +1236,17 @@ func redirNodes(redirs []*syntax.Redirect) []syntax.Node {
 
 // emitData records a command-less DATA leaf for a word whose text may hold a live
 // substitution.
-func (lw *lowering) emitData(w *syntax.Word) {
+func (lw *lowering) emitData(w *syntax.Word, kind DataKind) {
 	if w == nil {
 		return
 	}
-	lw.emitDataNode(w)
+	lw.emitDataNode(w, kind)
 }
 
 // emitDataNode is emitDataSpan for a whole node, which also supplies itself as
 // the sole substitution-source node (see emitDataSpan's subNodes parameter).
-func (lw *lowering) emitDataNode(n syntax.Node) {
-	lw.emitDataSpan(n.Pos(), n.End(), []syntax.Node{n})
+func (lw *lowering) emitDataNode(n syntax.Node, kind DataKind) {
+	lw.emitDataSpan(n.Pos(), n.End(), []syntax.Node{n}, kind)
 }
 
 // emitDataSpan records a DATA leaf spanning [from, to) of the source.
@@ -1262,7 +1262,7 @@ func (lw *lowering) emitDataNode(n syntax.Node) {
 // re-parse of the sliced Raw. A data node can never itself carry a heredoc, so
 // substitutionsOf's skipHeredocBodies argument is passed true uniformly; it is
 // immaterial here.
-func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
+func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node, kind DataKind) {
 	span := lw.spanOf(from, to)
 	raw := lw.slice(from, to)
 	if strings.TrimSpace(raw) == "" {
@@ -1279,6 +1279,7 @@ func (lw *lowering) emitDataSpan(from, to syntax.Pos, subNodes []syntax.Node) {
 		Raw: raw, PipelineID: -1, PipelineIndex: -1,
 		SubshellScope: append([]int(nil), lw.scopePath...),
 		Substitutions: lw.substitutionsOf(subNodes, true),
+		Data:          kind,
 	})
 	lw.dataSpans = append(lw.dataSpans, span)
 }
@@ -3514,4 +3515,147 @@ func containsSubstitution(root syntax.Node) bool {
 		return true
 	})
 	return found
+}
+
+// dataKindOfClause classifies the compound clause the lowering reduces to a data
+// leaf: a `[[ ]]` test, or an arithmetic command / `let`.
+func dataKindOfClause(n syntax.Command) DataKind {
+	switch n.(type) {
+	case *syntax.TestClause:
+		return DataTest
+	case *syntax.ArithmCmd, *syntax.LetClause:
+		return DataArithmetic
+	}
+	return DataOther
+}
+
+// ASSIGNMENT-VALUE SUBSTITUTIONS (pg2-dbrsg)
+//
+// cmdparse deliberately lowers a leading assignment's value NO FURTHER than an
+// ExpansionKind: callSubstitutions returns nil for an assignment-only
+// statement (and omits leading assignments from a command's own list), because
+// the OLD engine judges those values through the env-var rule's recursion
+// (internal/rules/envvars) instead. The effect-graph engine has no such rule,
+// so a consumer of ParsedCommand.EnvVars that wants the value's command
+// substitutions graded by the SAME analysis as any other command needs them
+// lowered the way every other substitution is. AssignmentValueSubstitutions is
+// that seam: it reuses the one assignment-position probe parse
+// (assignmentValue) and the one substitution finder (substitutionsOf) the rest
+// of this file's machinery uses, so no second front end exists.
+
+// AssignmentValueSubstitutions returns the top-level COMMAND substitutions of an
+// env-assignment VALUE (EnvAssignment.Value), each with its body's own
+// pre-lowered Leaves, and a reason string that is non-empty when the value
+// holds an expansion this seam does not model and the caller therefore MUST
+// NOT treat the value as understood.
+//
+// A static value (no `$`, backtick, `<(` or `>(`) returns (nil, "").
+//
+// The value is UNMODELED (reason != "") when it:
+//   - is not parseable in assignment position;
+//   - holds a process substitution (`<(...)`/`>(...)`), an arithmetic
+//     expansion (`$((...))`: bash re-expands and evaluates variable text found
+//     inside, so `$(( X ))` with X='a[$(cmd)]' runs cmd) or an extended glob;
+//   - holds a parameter expansion that evaluates or transforms rather than
+//     substitutes: indirection (`${!X}`), a subscript or slice (their index is
+//     an arithmetic expression), a prompt/attribute transform (`${X@P}`), a
+//     zsh-only nested/flagged form.
+//
+// A plain `$X`, `${X}`, `${X:-default}`, `${X#prefix}`, `${#X}` and
+// `${X/a/b}` are inert (no evaluation of the value), and are modeled. A
+// default word that itself holds `$(cmd)` is found as a substitution like any
+// other.
+//
+// Only TOP-LEVEL substitutions are returned: a substitution nested inside
+// another surfaces in the outer one's pre-lowered Leaves, exactly as for a
+// command's own Substitutions.
+func AssignmentValueSubstitutions(value string) ([]Substitution, string) {
+	if !hasExpansionOpener(value) {
+		return nil, ""
+	}
+	src, root, ok := assignmentValue(value)
+	if !ok {
+		return nil, "assignment value is not parseable in assignment position"
+	}
+	if root == nil {
+		return nil, ""
+	}
+	var reason string
+	cmdSubsts := 0
+	syntax.Walk(root, func(n syntax.Node) bool {
+		if reason != "" {
+			return false
+		}
+		switch v := n.(type) {
+		case nil:
+			return false
+		case *syntax.CmdSubst:
+			cmdSubsts++
+			return false
+		case *syntax.ProcSubst:
+			reason = "assignment value holds a process substitution"
+			return false
+		case *syntax.ArithmExp:
+			reason = "assignment value holds an arithmetic expansion (arithmetic evaluation can run command substitutions found in variable text)"
+			return false
+		case *syntax.ExtGlob:
+			reason = "assignment value holds an extended glob"
+			return false
+		case *syntax.ParamExp:
+			if r := unmodeledParamExp(v); r != "" {
+				reason = r
+				return false
+			}
+		}
+		return true
+	})
+	if reason != "" {
+		return nil, reason
+	}
+	lw := &lowering{src: src, pipeSeq: -1}
+	subs := lw.substitutionsOf([]syntax.Node{root}, true)
+	if len(subs) != cmdSubsts {
+		// The census and the finder disagree about how many substitutions the
+		// value holds: something was not enumerated. Fail closed.
+		return nil, "assignment value holds a substitution the seam could not enumerate"
+	}
+	return subs, ""
+}
+
+// hasExpansionOpener reports whether value contains any byte sequence that can
+// OPEN an expansion. It is the same pre-parse shortcut classifyExpansion uses
+// (see its doc): not a structure claim, only "nothing here for a parser to
+// find".
+func hasExpansionOpener(value string) bool {
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '$', '`':
+			return true
+		case '<', '>':
+			if i+1 < len(value) && value[i+1] == '(' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// unmodeledParamExp returns a reason when v is a parameter expansion that
+// evaluates or transforms its operand instead of merely substituting it.
+func unmodeledParamExp(v *syntax.ParamExp) string {
+	switch {
+	case v.Param == nil, v.NestedParam != nil, v.Flags != nil:
+		return "assignment value holds a nested or flagged parameter expansion"
+	case v.Excl:
+		return "assignment value holds an indirect parameter expansion"
+	case v.Width, v.IsSet:
+		return "assignment value holds a width/is-set parameter expansion"
+	case v.Index != nil, v.Slice != nil:
+		return "assignment value holds a subscripted or sliced parameter expansion (the index is an arithmetic expression)"
+	case v.Names != 0, len(v.Modifiers) != 0:
+		return "assignment value holds a name-listing or modified parameter expansion"
+	case v.Exp != nil && v.Exp.Op == syntax.OtherParamOps:
+		return "assignment value holds a transforming parameter expansion (${X@op})"
+	}
+	return ""
 }

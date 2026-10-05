@@ -282,6 +282,20 @@ type Effect struct {
 	// tests. Always false for a read (EnvSet == false), matching EnvCleared.
 	EnvGitInvoking bool
 
+	// EnvPersistent (pg2-dbrsg) is true when the LEAF that produced this
+	// EffectEnv set is an ASSIGNMENT-ONLY statement (`X=v`, no command word).
+	// Unlike a prefix assignment (`X=v cmd`, scoped to that one command's
+	// environment), such a statement writes the SHELL's own variable, so it
+	// reaches EVERY later command in the expression and the shell's own
+	// behaviour (word splitting, `cd` lookup, globbing). It is a LEAF fact
+	// copied onto each EffectEnv for the same reason EnvCleared and
+	// EnvGitInvoking are: a policy sees one Effect at a time. The reader is
+	// effectpolicy.EnvAssignment, which refuses a persistent write of a
+	// shell-behaviour variable (IFS, CDPATH, ...) and treats a persistent
+	// GIT_DIR/GIT_INDEX_FILE as git-invoking (a later git leaf inherits it).
+	// Always false for a read and for a prefix assignment.
+	EnvPersistent bool
+
 	// EffectNet fields. Dynamic (shared with the path fields) is true when the
 	// URL is a runtime expansion, in which case Host holds the raw text. Method
 	// is the request method when the protocol has one ("" otherwise).

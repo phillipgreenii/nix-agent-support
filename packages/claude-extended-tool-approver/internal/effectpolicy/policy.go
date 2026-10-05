@@ -489,6 +489,25 @@ var envVarClasses = map[string]envVarClass{
 	"GIT_INDEX_FILE": envVarGitLocating,
 }
 
+// persistentShellBehaviorVars (pg2-dbrsg) are variables whose value changes how
+// the SHELL itself parses, resolves or expands the commands after the
+// assignment, rather than the environment one program sees. As a PREFIX
+// assignment (`IFS== read -r k v`) each is scoped to one command and is
+// judged as before; as a PERSISTENT assignment-only statement (EnvPersistent)
+// it would silently invalidate the static analysis of every later leaf in the
+// expression — CDPATH retargets a later relative `cd` (which the graph
+// builder resolves against the literal operand), GLOBIGNORE/IFS change what
+// an expansion yields, PWD/OLDPWD feed `cd -`/relative resolution, PS4/
+// PROMPT_COMMAND/SHELLOPTS/BASHOPTS/BASH_XTRACEFD wire code or tracing into
+// the shell. Such a write is never approved on the name alone.
+var persistentShellBehaviorVars = map[string]bool{
+	"IFS": true, "CDPATH": true, "GLOBIGNORE": true,
+	"PWD": true, "OLDPWD": true,
+	"PS4": true, "PROMPT_COMMAND": true,
+	"SHELLOPTS": true, "BASHOPTS": true, "BASH_XTRACEFD": true,
+	"TMPDIR": true,
+}
+
 // EnvAssignment judges every EffectEnv effect. A read (EnvSet == false) is
 // always Permitted: reading a variable's current value cannot itself change
 // what the command touches. A set is Unknown when the effect records the
@@ -702,6 +721,9 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	if e.Dynamic {
 		return Finding{Verdict: Unknown, Reason: "env NAME is a runtime expansion"}, true
 	}
+	if e.EnvPersistent && persistentShellBehaviorVars[e.EnvName] {
+		return Finding{Verdict: Unknown, Reason: "persistent assignment of a shell-behaviour variable (" + e.EnvName + ") changes how every later command in the expression is parsed or resolved (pg2-dbrsg)"}, true
+	}
 	class, known := envVarClasses[e.EnvName]
 	if !known {
 		// Map miss: NAME is outside every class above. This is exactly the
@@ -718,6 +740,9 @@ func (EnvAssignment) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 	case envVarGitLocating:
 		if e.EnvGitInvoking {
 			return Finding{Verdict: Forbidden, Reason: "GIT_DIR/GIT_INDEX_FILE redirects git's effective repository, and this leaf invokes git (tc-j0aa: narrowed from every command to git-invoking ones only)"}, true
+		}
+		if e.EnvPersistent {
+			return Finding{Verdict: Forbidden, Reason: "GIT_DIR/GIT_INDEX_FILE assigned as a persistent shell variable redirects the repository of every later git command in the expression (pg2-dbrsg)"}, true
 		}
 		return Finding{Verdict: Permitted, Reason: "GIT_DIR/GIT_INDEX_FILE only redirects git's own repo resolution; this leaf does not invoke git, so it is outside the known-bad vocabulary here (tc-j0aa)"}, true
 	case envVarAsk:

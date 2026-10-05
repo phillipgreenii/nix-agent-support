@@ -98,5 +98,9 @@
   "lat-wire": null,
   "rc-claim": null,
   "rc-fp": null,
-  "rc-park": null
+  "rc-park": null,
+  "pwd": null,
+  "read": null,
+  "shift": null,
+  "exit": null
 }

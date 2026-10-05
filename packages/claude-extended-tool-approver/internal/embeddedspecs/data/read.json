@@ -1,0 +1,162 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "read",
+  "command": {
+    "name": "read",
+    "provenance": "bash 5.3.9 builtin read, help read",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin: help read: \"read: read [-Eers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\""
+      },
+      "stdin": {
+        "source": "bash builtin: help read: \"Reads a single line from the standard input, or from file descriptor FD if the -u option is supplied.\""
+      },
+      "stdout": {
+        "source": "bash builtin: help read: \"Read a line from the standard input and split it into fields.\" (no explicit stdout wording in the reviewed text; the documented effect is assignment of the fields to the named variables or REPLY, so classified \"none\")"
+      },
+      "unknownFlag": {
+        "source": "bash builtin: help read: full option listing reviewed; \"-u fd read from file descriptor FD instead of the standard input\" reads content from a descriptor this model cannot see and is deliberately left unmodeled, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "-N": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-N nchars return only after reading exactly NCHARS characters, unless EOF is encountered or read times out, ignoring any delimiter\""
+        }
+      },
+      "-a": {
+        "arity": "one",
+        "operand": {
+          "kind": "env-assign"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-a array assign the words read to sequential indices of the array variable ARRAY, starting at zero\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-d delim continue until the first character of DELIM is read, rather than newline\""
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-e use Readline to obtain the line\""
+        }
+      },
+      "-i": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-i text use TEXT as the initial text for Readline\""
+        }
+      },
+      "-n": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-n nchars return after reading NCHARS characters rather than waiting for a newline\""
+        }
+      },
+      "-p": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-p prompt output the string PROMPT without a trailing newline before attempting to read\""
+        }
+      },
+      "-r": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-r do not allow backslashes to escape any characters\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-s do not echo input coming from a terminal\""
+        }
+      },
+      "-t": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help read: \"-t timeout time out and return failure if a complete line of input is not read within TIMEOUT seconds\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "env-assign"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin: help read: \"read [name ...]\" and \"If no NAMEs are supplied, the line read is stored in the REPLY variable.\""
+      }
+    },
+    "stdin": "always",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

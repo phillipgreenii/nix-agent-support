@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pwd",
+  "command": {
+    "name": "pwd",
+    "provenance": "bash 5.3.9 builtin pwd, help pwd",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin: help pwd: \"pwd: pwd [-LP]\""
+      },
+      "stdin": {
+        "source": "bash builtin: help pwd: \"pwd: pwd [-LP]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin: help pwd: \"Print the name of the current working directory.\" (a path name, not file content, so classified \"metadata\")"
+      },
+      "unknownFlag": {
+        "source": "bash builtin: help pwd: full option listing reviewed (-L and -P only); the reviewed text documents \"Returns 0 unless an invalid option is given\", so an unrecognized flag is an error and this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "-L": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help pwd: \"-L print the value of $PWD if it names the current working directory\""
+        }
+      },
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin: help pwd: \"-P print the physical directory, without any symbolic links\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin: help pwd: \"pwd: pwd [-LP]\" -- documents no operands"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

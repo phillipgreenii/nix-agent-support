@@ -77,6 +77,11 @@ type builder struct {
 	// interpret reads it to stamp Effect.Remote on every EffectPath a node
 	// in that scope produces.
 	scopeRemote map[string]string
+	// assignUnmodeled maps a Command node ID to the reason one of its leaf's
+	// env-assignment VALUES holds an expansion the seam does not model
+	// (cmdparse.AssignmentValueSubstitutions), recorded while the structural
+	// graph is built and read by interpret, which marks the node insufficient.
+	assignUnmodeled map[string]string
 }
 
 // cwdState is the working directory in force for one (scope, subshell)
@@ -89,7 +94,7 @@ type cwdState struct {
 }
 
 func newBuilder() *builder {
-	return &builder{files: map[string]string{}, envs: map[string]string{}, execDialect: map[string]string{}, scopeRemote: map[string]string{}}
+	return &builder{files: map[string]string{}, envs: map[string]string{}, execDialect: map[string]string{}, scopeRemote: map[string]string{}, assignUnmodeled: map[string]string{}}
 }
 
 func (b *builder) add(n Node) string {
@@ -179,7 +184,110 @@ func (b *builder) leaves(leaves []cmdparse.ParsedCommand, scope string) {
 		for _, s := range leaf.Substitutions {
 			b.substitution(s, id, scope)
 		}
+		b.assignmentSubstitutions(leaf, id, scope)
 	}
+}
+
+// assignmentSubstitutions lowers the command substitutions held in a leaf's
+// env-assignment VALUES into their own scopes, connected to the leaf exactly
+// like any other substitution, so the inner commands are graded by the SAME
+// effect analysis as a command typed at the top level (pg2-dbrsg). cmdparse
+// leaves those values un-lowered (see cmdparse.AssignmentValueSubstitutions),
+// which left `X=$(rm -rf d) echo hi` approved on the strength of `echo hi`
+// alone.
+//
+// A substitution the leaf already carries (`export X=$(pwd)`, `env X=$(pwd)
+// cmd`: the value is also one of the leaf's arguments) is NOT lowered a second
+// time — grading is a pure function of the body text, so the existing scope
+// already covers it. A value holding an expansion the seam does not model
+// records its reason in assignUnmodeled, which makes the leaf insufficient.
+func (b *builder) assignmentSubstitutions(leaf cmdparse.ParsedCommand, id, scope string) {
+	if len(leaf.EnvVars) == 0 {
+		return
+	}
+	have := map[string]int{}
+	for _, s := range leaf.Substitutions {
+		have[substitutionKey(s)]++
+	}
+	for _, e := range leaf.EnvVars {
+		subs, reason := cmdparse.AssignmentValueSubstitutions(e.Value)
+		// The one idiom the policy layer already certifies BY ITSELF and has
+		// always approved without grading its body: `NAME=$(mktemp -d)`, a
+		// fresh session-unique temp directory (effectpolicy.EnvAssignment's
+		// envFreshHomeTempDir, ported from the old engine's pg2-d71my ruling).
+		// `mktemp` has no schema (modeling it needs $TMPDIR), so grading it
+		// would turn a ruled idiom into an abstain. ONLY the bare spelling is
+		// exempted: the old predicate also accepts `mktemp -d -p /etc` and a
+		// template path, which name a directory — those are graded (and so
+		// abstain until mktemp has a schema) rather than inherited.
+		if reason == "" && isBareFreshTempDir(e, subs) {
+			continue
+		}
+		if reason != "" {
+			if b.assignUnmodeled[id] == "" {
+				b.assignUnmodeled[id] = "env " + e.Name + ": " + reason
+			}
+			continue
+		}
+		for _, s := range subs {
+			k := substitutionKey(s)
+			if have[k] > 0 {
+				have[k]--
+				continue
+			}
+			b.substitution(s, id, scope)
+		}
+	}
+}
+
+// commandlessModeled reports whether a leaf with NO executable is one of the
+// shapes the builder models as effect-free-by-itself (pg2-dbrsg). Its own
+// effects (EffectEnv for an assignment, path effects for a redirection) are
+// attached by interpret, and any command substitution it holds is a separate
+// scope graded like every other command.
+//
+// What stays UNMODELED, deliberately:
+//   - any heredoc (the I2 abstain floor) or process substitution;
+//   - a data leaf other than a `for` word list or a `case` subject/pattern:
+//     `[[ ]]` and `(( ))`/`let` evaluate operands as ARITHMETIC (the integer
+//     operators and `-v`), which runs a command substitution found in variable
+//     text; an array-element assignment's subscript is an arithmetic expression;
+//     DataOther is whatever the lowering could not classify.
+func commandlessModeled(leaf cmdparse.ParsedCommand) bool {
+	if len(leaf.Args) > 0 || leaf.HasHeredoc || len(leaf.Heredocs) > 0 || len(leaf.ProcessSubstitutions) > 0 {
+		return false
+	}
+	switch {
+	case leaf.Data != cmdparse.DataNone:
+		if len(leaf.EnvVars) > 0 || len(leaf.Redirections) > 0 {
+			return false
+		}
+		switch leaf.Data {
+		case cmdparse.DataWordList, cmdparse.DataCaseWord, cmdparse.DataCasePattern:
+			return true
+		}
+		return false
+	case len(leaf.EnvVars) > 0:
+		return true
+	default:
+		return len(leaf.Redirections) > 0
+	}
+}
+
+// isBareFreshTempDir reports whether e is exactly `NAME=$(mktemp -d)` (or
+// `--directory`): cmdparse's fresh-temp-dir idiom AND a sole `mktemp` leaf
+// whose only argument is that flag, no redirection.
+func isBareFreshTempDir(e cmdparse.EnvAssignment, subs []cmdparse.Substitution) bool {
+	if !cmdparse.IsFreshTempDirAssignment(e) || len(subs) != 1 || len(subs[0].Leaves) != 1 {
+		return false
+	}
+	l := subs[0].Leaves[0]
+	return path.Base(l.Executable) == "mktemp" && len(l.Redirections) == 0 &&
+		len(l.Args) == 1 && (l.Args[0] == "-d" || l.Args[0] == "--directory")
+}
+
+func substitutionKey(s cmdparse.Substitution) string {
+	return fmt.Sprint(int(s.Kind)) + "\x00" + s.Body
 }
 
 // substitution recurses into a substitution's pre-lowered leaves in a new
@@ -346,15 +454,29 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 			EnvExpansion:   e.Expansion,
 			EnvCleared:     leaf.EnvCleared,
 			EnvGitInvoking: gitInvoking,
+			EnvPersistent:  leaf.Executable == "",
 		})
+	}
+	if reason := b.assignUnmodeled[id]; reason != "" {
+		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: reason})
+		insufficient(reason)
 	}
 
 	switch leaf.Executable {
 	case "":
-		// A bare assignment or an empty leaf: nothing to look up, and the
-		// assignment's value may hide an expansion the parse does not lower here.
-		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: "no executable"})
-		insufficient("no executable")
+		// A command-less leaf. Three shapes are MODELED (pg2-dbrsg) and add no
+		// effect of their own: an assignment-only statement (its EffectEnv
+		// effects were appended above and its value's command substitutions
+		// are graded as scopes — see assignmentSubstitutions), a
+		// redirection-only statement (only its redirections, appended below,
+		// count), and the inert DATA leaves (a `for` word list, a `case`
+		// subject or pattern). Everything else — a heredoc, an arithmetic or
+		// `[[ ]]` clause, an array-element assignment, anything the lowering
+		// could not classify — stays opaque.
+		if !commandlessModeled(leaf) {
+			effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: "no executable"})
+			insufficient("no executable")
+		}
 	default:
 		// P4 executable identity (ADR 0075): an argv0 that STARTS WITH "/"
 		// is a PATH-search-bypassing absolute reference, so before trusting
@@ -661,6 +783,78 @@ func (b *builder) deriveFlows() {
 			b.edge(ee.child, ee.parent, EdgeFlow, "child stdout->stdout")
 		}
 	}
+
+	b.deriveVariableTaint()
+}
+
+// deriveVariableTaint (pg2-dbrsg) keeps content from escaping the content-flow
+// policy through a SHELL VARIABLE or a compound redirection.
+//
+// The flow edges deriveFlows adds follow argv, stdin and stdout. Two shapes
+// move content with none of those: an assignment-only statement or `read`
+// that captures content into a variable (`T=$(cat f)`, `cat f | read T`),
+// which a LATER command then reads as `$T`; and a redirection on a compound
+// (`while read l; do ...; done < f`), whose file feeds the commands inside
+// without being any one command's own redirect. Both are modeled
+// conservatively: such a node is a content SOURCE, and every other command
+// node in its scope (and the scopes nested in it) that is not already
+// upstream of it gets a Flow edge from it. The policy then treats those
+// commands as consuming local content, exactly as if the data had been piped
+// to each.
+//
+// A source is:
+//   - a node that writes a shell variable (EffectEnv set with EnvPersistent:
+//     an assignment-only leaf, `read NAME`, `export NAME`) AND has content
+//     flowing into it (a substitution that emits stdout content, a pipe,
+//     a redirect); or
+//   - a redirection-only leaf with an input redirection.
+//
+// Metadata output (`T=$(pwd)`) is not content and creates no source.
+func (b *builder) deriveVariableTaint() {
+	hasFlowIn := map[string]bool{}
+	hasRedirectIn := map[string]bool{}
+	for _, e := range b.g.Edges {
+		switch e.Kind {
+		case EdgeFlow:
+			hasFlowIn[e.To] = true
+		case EdgeRedirectIn:
+			hasRedirectIn[e.To] = true
+		}
+	}
+	var sources []string
+	for _, n := range b.g.Nodes {
+		if n.Kind != NodeCommand || n.Leaf == nil {
+			continue
+		}
+		writesVar := false
+		for _, e := range n.Effects {
+			if e.Kind == cmddesc.EffectEnv && e.EnvSet && e.EnvPersistent {
+				writesVar = true
+			}
+		}
+		redirOnly := n.Leaf.Executable == "" && n.Leaf.Data == cmdparse.DataNone && len(n.Leaf.EnvVars) == 0
+		if (writesVar && hasFlowIn[n.ID]) || (redirOnly && hasRedirectIn[n.ID]) {
+			sources = append(sources, n.ID)
+		}
+	}
+	for _, src := range sources {
+		srcNode := b.g.Node(src)
+		upstream := map[string]bool{}
+		for _, id := range b.g.UpstreamVia(src, EdgeFlow) {
+			upstream[id] = true
+		}
+		for _, t := range b.g.Nodes {
+			if t.Kind != NodeCommand || t.ID == src || upstream[t.ID] || !scopeWithin(t.Scope, srcNode.Scope) {
+				continue
+			}
+			b.edge(src, t.ID, EdgeFlow, "captured content->later commands")
+		}
+	}
+}
+
+// scopeWithin reports whether scope is outer or nested inside it.
+func scopeWithin(scope, outer string) bool {
+	return outer == "" || scope == outer || strings.HasPrefix(scope, outer+"/")
 }
 
 // redirectionEffect classifies a redirection into a path effect from the

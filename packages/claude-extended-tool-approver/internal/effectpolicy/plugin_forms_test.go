@@ -33,9 +33,34 @@ type pluginForm struct {
 // deliberate exception — a ruling collision (guardrail: listed, not
 // overridden), a safety exception (R5: approve only when sure), or a form that
 // is not a real command — so a future change that quietly flips one is caught
-// here. Forms that need shell machinery rather than a schema (loops, `[ ]`
-// tests, `X=$(cmd)` assignments, builtins) are not in this table: see the bead
-// close report.
+// here.
+//
+// SHELL STATEMENT FORMS (pg2-dbrsg, found by pg2-cjfpy.2): the forms that need
+// shell machinery rather than a command schema — `X="$(cmd)"` assignments, `[ ]`
+// tests, `for`/`while`/`case`, and the builtins read/shift/exit/pwd — are the
+// rows after the "shell statement forms" marker below. Each approves exactly
+// when every command it contains approves (an assignment's `$(...)` is graded by
+// the same effect analysis as a command typed on its own). What stays
+// non-approvable carries its reason in the row:
+//
+//   - A QUOTED VARIABLE USED AS A PATH (`git -C "$WT" ...`, `cd "$WT"`) is a
+//     runtime value, and this engine does not resolve in-command variables
+//     (the old engine did, through cmdparse.InCommandVars; threading that seam
+//     into the effect engine is a separate piece of work, not done here), so
+//     even `WT=/abs && git -C "$WT" status` abstains. Approval applies to the
+//     LITERAL-path form agents can type (`git -C /abs/path status`). Skill
+//     templates that say `"$WT"` should instruct a literal absolute path.
+//   - `[[ ]]`, `(( ))`, `let`, an array-element assignment and `$((...))`
+//     evaluate their operands as ARITHMETIC, which runs a command substitution
+//     found in variable text; `[ -v ]`/`[ -R ]` take a name that may carry an
+//     array subscript (same hazard). None is approved.
+//   - A persistent assignment of a shell-behaviour variable (IFS, CDPATH, ...)
+//     or of GIT_DIR/GIT_INDEX_FILE changes every later command's meaning.
+//   - `date`, `tr` have no schema, so a `$(date +%F)` substitution abstains
+//     until they get one (adding a schema also needs its --help hash recorded in
+//     the pinned nix sandbox, which cannot be done from a dev shell).
+//   - Builtins not listed (break, continue, return, set, trap, local, wait, ...)
+//     have no schema and abstain; the four the skills use are modeled.
 var pluginForms = []pluginForm{
 	{"wayfinder-beads", "bd show pg2-abc12", evalcontract.Approve, ""},
 	{"wayfinder-beads", "bd list --json", evalcontract.Approve, ""},
@@ -327,6 +352,74 @@ var pluginForms = []pluginForm{
 	{"claude-extended-tool-approver", "jq --help", evalcontract.Abstain, "generic '<tool> --help': executes an arbitrary program; not approved"},
 	{"claude-extended-tool-approver", "man jq", evalcontract.Approve, ""},
 	{"wayfinder-beads", "bd list --json | jq length", evalcontract.Approve, ""},
+
+	// ---- shell statement forms (pg2-dbrsg) --------------------------------
+	// Assignments from command substitution (X="$(cmd)"): approve iff the inner
+	// command approves.
+	{"integrate-branch", `REMOTE="$(git -C <ROOT> remote)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `SHA="$(git -C <ROOT> rev-parse HEAD)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `FB="$(git rev-parse --abbrev-ref HEAD)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `OLD_PRIMARY=$(git -C <ROOT> rev-parse main)`, evalcontract.Approve, ""},
+	{"integrate-branch", `path="$(git -C <ROOT> rev-parse --git-path rebase-merge)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `n="$(git -C <ROOT> remote | grep -c .)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `REMOTE="$(git -C <ROOT> rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null | cut -d/ -f1)"`, evalcontract.Approve, ""},
+	{"integrate-branch", `WT="$(pwd)"`, evalcontract.Approve, ""},
+	{"beads-lifecycle", `READY="$(bd ready --json -n 0)"`, evalcontract.Approve, ""},
+	{"beads-lifecycle", `BRANCH=$(bd show pg2-abc12 --json | jq -r '.metadata.branch')`, evalcontract.Approve, ""},
+	{"bash-scripting", `worktrees=$(jq -r '.worktrees[]' /tmp/cfg.json)`, evalcontract.Approve, ""},
+	{"bash-scripting", `TEST_DIR="$(mktemp -d)"`, evalcontract.Approve, ""},
+	{"bash-scripting", `MOCK_BIN=$(mktemp -d)`, evalcontract.Approve, ""},
+	{"integrate-branch", `X=literal`, evalcontract.Approve, ""},
+	// An assignment never launders an inner command that does not approve.
+	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt)`, evalcontract.Abstain, "inner command is graded like a top-level one: rm of a writable path needs consent"},
+	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt) echo hi`, evalcontract.Abstain, "a prefix assignment's substitution is graded too (it used to ride on echo's verdict)"},
+	{"integrate-branch", `D="$(date +%F)"`, evalcontract.Abstain, "date has no schema (needs a recorded --help hash from the nix sandbox)"},
+	{"integrate-branch", `T=$(echo x | tr a b)`, evalcontract.Abstain, "tr has no schema (needs a recorded --help hash from the nix sandbox)"},
+	{"integrate-branch", `REPO=$(pg-connector scm branch detect | jq -r '.result.repo')`, evalcontract.Abstain, "pg-connector scm is an unmodeled subcommand (ZR plugin schema, separate bead)"},
+	{"integrate-branch", `CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"`, evalcontract.Abstain, "cd to a runtime path: the directory is not statically known"},
+	{"integrate-branch", `N=$((1+2))`, evalcontract.Abstain, "arithmetic expansion evaluates variable text, which can run a command substitution"},
+
+	// `[ ]` / test operators.
+	{"integrate-branch", `[ -z "$REMOTE" ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ -n "$conflicted_inputs" ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ -d <ROOT>/.git ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ -f "$path" ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ "$n" -gt 1 ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ "$a" != "$b" ]`, evalcontract.Approve, ""},
+	{"integrate-branch", `test -z "$X"`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ -n "$(git -C <ROOT> status --porcelain -- flake.lock)" ] && echo dirty`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ -v NAME ]`, evalcontract.Abstain, "-v takes a variable name that may carry an array subscript (arithmetic evaluation)"},
+	{"integrate-branch", `[[ -z "$X" ]]`, evalcontract.Abstain, "[[ ]] evaluates integer operands as arithmetic"},
+	{"integrate-branch", `(( i++ ))`, evalcontract.Abstain, "arithmetic command"},
+
+	// Loops, case, and the builtins read / shift / exit / pwd.
+	{"integrate-branch", `for name in rebase-merge rebase-apply; do path="$(git -C <ROOT> rev-parse --git-path "$name")"; case "$path" in /*) ;; *) path="<ROOT>/$path" ;; esac; if [ -d "$path" ]; then echo "in progress: $path"; fi; done`, evalcontract.Approve, ""},
+	{"integrate-branch", `for a in x y; do bd show pg2-abc12; done`, evalcontract.Approve, ""},
+	{"bash-scripting", `while IFS='=' read -r key value; do case "$key" in a) echo A;; esac; done < /tmp/kv.env`, evalcontract.Approve, ""},
+	{"bash-scripting", `while read -r line; do echo "$line"; done`, evalcontract.Approve, ""},
+	{"bash-scripting", `read -r answer`, evalcontract.Approve, ""},
+	{"bash-scripting", `shift`, evalcontract.Approve, ""},
+	{"bash-scripting", `shift 2`, evalcontract.Approve, ""},
+	{"integrate-branch", `exit 1`, evalcontract.Approve, ""},
+	{"integrate-branch", `if [ -z "$REMOTE" ]; then echo none; exit 1; fi`, evalcontract.Approve, ""},
+	{"integrate-branch", `pwd`, evalcontract.Approve, ""},
+	{"integrate-branch", `pwd -P`, evalcontract.Approve, ""},
+	{"integrate-branch", `for f in $(rm -rf <ROOT>/.worktrees/wt); do echo "$f"; done`, evalcontract.Abstain, "a loop word-list substitution is graded like any command"},
+	{"bash-scripting", `read PATH`, evalcontract.Abstain, "read assigns the variable it names; PATH is a guarded name"},
+	{"bash-scripting", `read -u 3 line`, evalcontract.Abstain, "-u reads from a descriptor this model cannot see"},
+	{"bash-scripting", `while read -r l; do echo "$l"; done < ~/.ssh/id_rsa`, evalcontract.Reject, "the compound's input redirection reads a secret path"},
+
+	// Quoted-variable path forms stay non-approvable; the literal-path form
+	// approves (see the SHELL STATEMENT FORMS note above).
+	{"integrate-branch", `git -C "$WT" status`, evalcontract.Abstain, "quoted variable as a path: a runtime value, approvable only as a literal path"},
+	{"integrate-branch", `WT=<ROOT> && git -C "$WT" status`, evalcontract.Abstain, "even a literal in-command assignment is not resolved by this engine (the old engine's InCommandVars seam is not threaded in); type the literal path"},
+	{"integrate-branch", `WT="$(pwd)"; git -C "$WT" status`, evalcontract.Abstain, "the variable holds a runtime value, not a literal"},
+	{"integrate-branch", `git -C <ROOT> status`, evalcontract.Approve, ""},
+
+	// Persistent assignments of variables that change later commands' meaning.
+	{"bash-scripting", `IFS=/; echo hi`, evalcontract.Abstain, "persistent IFS changes how every later expansion splits"},
+	{"bash-scripting", `CDPATH=/etc; cd foo`, evalcontract.Abstain, "persistent CDPATH retargets a later cd"},
+	{"bash-scripting", `GIT_DIR=/tmp/x; git status`, evalcontract.Reject, "persistent GIT_DIR redirects every later git command"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full
