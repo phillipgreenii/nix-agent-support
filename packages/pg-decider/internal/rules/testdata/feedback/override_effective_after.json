@@ -1,0 +1,81 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42"
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [
+      {
+        "comment_id": "c-101",
+        "computed": "will-fix",
+        "override": "open"
+      },
+      {
+        "comment_id": "c-102",
+        "computed": "open",
+        "override": "no-action"
+      },
+      {
+        "comment_id": "c-103",
+        "computed": "open",
+        "override": null
+      },
+      {
+        "comment_id": "c-104",
+        "computed": "wont-fix",
+        "override": null
+      }
+    ],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client",
+      "labels": ["co-owned"],
+      "metadata": {
+        "dedup_key": "pr:acme/widgets#42:anchor"
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-2",
+      "state": "open",
+      "title": "process-feedback: acme/widgets#42",
+      "labels": ["mine", "fbsum:234aa3d824fd"],
+      "metadata": {
+        "covered_comments": "c-101,c-103",
+        "dedup_key": "pr:acme/widgets#42:process-feedback:234aa3d824fd"
+      }
+    }
+  ]
+}
