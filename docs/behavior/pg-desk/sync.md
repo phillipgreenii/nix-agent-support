@@ -114,6 +114,11 @@ review submit` (`pg2-kftf9.13`), the escalator (`pg2-kftf9.15`) and the ZR revie
     (`pg2-kftf9.17`). The replacement flow (`pg2-2j5ac.52`, rule `review.head-advanced`, decision
     S26) carries the same reopen-per-PR behavior forward unchanged ("as designed"), so no further
     behavior change is required of it for this lifecycle.
+- **Operator visibility** (`pg2-kftf9.18`) — `pg-desk pr show <id>` displays the PR's pending agent
+  review, the commit it is anchored to, whether it is stale relative to the head, and the id of any
+  open escalation bead for the PR ([`show.md`](show.md), "Pending review"). A failed lookup reads
+  `unknown`, never "no pending review". The display is an addition to the escalation, never a
+  substitute for it, and sync neither reads nor writes it.
 - **Recorded losses (D15)** — draft auto-promotion, `wip on`'s upstream draft conversion, and
   pending reply posting are not performed by sync.
 

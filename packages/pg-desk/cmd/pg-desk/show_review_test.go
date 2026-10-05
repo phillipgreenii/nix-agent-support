@@ -1,0 +1,335 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+)
+
+// Synthetic pending-review states of a PR, as the PR hydration stores them
+// (facts keys review_pending and review_escalations, from the pg-connector
+// `pr review pending` record and the escalation query) and as `pr show`
+// renders them. All names, ids and commits are placeholders.
+
+const (
+	reviewHead = "9f3c1e2aaaa"
+	reviewOld  = "4b1d7aabbbb"
+)
+
+// reviewFacts is PR facts for o/r#<n> carrying the given review state.
+func reviewFacts(n int, pending, escalations string) string {
+	pr := fmt.Sprintf(`"pr_show":{"id":"o/r#%d","repo":"o/r","number":%d,"title":"Change %d","state":"open","draft":false,"head_sha":%q}`, n, n, n, reviewHead)
+	out := "{" + pr + `,"head_sha":"` + reviewHead + `"`
+	if pending != "" {
+		out += `,"review_pending":` + pending
+	}
+	if escalations != "" {
+		out += `,"review_escalations":` + escalations
+	}
+	return out + "}"
+}
+
+func pendingRecord(commit string, stale bool) string {
+	return fmt.Sprintf(`{"result":{"pending":true,"head_sha":%q,"as_of":"2026-09-29T14:03:10Z","review":{"review_id":"PRR_1","url":"https://code.example/o/r/pull/5#pullrequestreview-1","commit_sha":%q,"stale":%t}}}`,
+		reviewHead, commit, stale)
+}
+
+const (
+	pendingNoneRecord  = `{"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-29T14:03:10Z"}}`
+	noEscalations      = `{"open":[]}`
+	oneEscalation      = `{"open":[{"id":"esc-77","kind":"pr","head":"` + reviewHead + `"}]}`
+	lookupFailedFacts  = `{"error":"pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review"}`
+	queryFailedFacts   = `{"open":[],"error":"issue list --query pending-review-escalations: exit 1: query_not_recognized"}`
+	reviewViewAsOfLine = "as_of=2026-09-29T14:03:10Z (fresh)"
+)
+
+// the five states, one PR each.
+var reviewStateCases = []struct {
+	name     string
+	n        int
+	pending  string
+	escal    string
+	wantLine string
+	state    string
+	pendingP string // JSON of review.pending
+	stale    string // JSON of review.stale
+	escState string
+	escIDs   string
+}{
+	{
+		"none", 11, pendingNoneRecord, noEscalations,
+		"review: pending=no  escalation=none", "none", "false", "null", "none", "[]",
+	},
+	{
+		"current", 12, pendingRecord(reviewHead, false), noEscalations,
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  stale=no  escalation=none", "current", "true", "false", "none", "[]",
+	},
+	{
+		"stale", 13, pendingRecord(reviewOld, true), noEscalations,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
+	},
+	{
+		"stale-with-open-escalation", 14, pendingRecord(reviewOld, true), oneEscalation,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=esc-77", "stale", "true", "true", "open", `["esc-77"]`,
+	},
+	{
+		"lookup-failed", 15, lookupFailedFacts, noEscalations,
+		"review: pending=unknown (pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review)  escalation=none",
+		"unknown", "null", "null", "none", "[]",
+	},
+}
+
+func seedReviewStates(t *testing.T) {
+	t.Helper()
+	f := newViewFixture(t)
+	for _, c := range reviewStateCases {
+		f.entity("pr", fmt.Sprintf("o/r#%d", c.n), reviewFacts(c.n, c.pending, c.escal), "2026-09-29T14:03:10Z", reviewHead)
+	}
+}
+
+func TestTypedShowPendingReviewFiveStatesHuman(t *testing.T) {
+	seedReviewStates(t)
+	for _, c := range reviewStateCases {
+		t.Run(c.name, func(t *testing.T) {
+			out, _, err := runTypedShowCmd(t, "pr", fmt.Sprintf("o/r#%d", c.n))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf("pr o/r#%[1]d  Change %[1]d\n", c.n) +
+				"-  open  ready  head=9f3c1e2  ci=none  " + reviewViewAsOfLine + "\n" +
+				"annotations: hidden=no  wip=no  suppress=[]\n" +
+				c.wantLine + "\n" +
+				"links: none\n"
+			if out != want {
+				t.Errorf("human output:\n got: %q\nwant: %q", out, want)
+			}
+		})
+	}
+}
+
+func TestTypedShowPendingReviewFiveStatesJSON(t *testing.T) {
+	seedReviewStates(t)
+	for _, c := range reviewStateCases {
+		t.Run(c.name, func(t *testing.T) {
+			out, _, err := runTypedShowCmd(t, "pr", fmt.Sprintf("o/r#%d", c.n), "--json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var v struct {
+				Review map[string]json.RawMessage `json:"review"`
+			}
+			if err := json.Unmarshal([]byte(out), &v); err != nil || v.Review == nil {
+				t.Fatalf("no review object: %v\n%s", err, out)
+			}
+			get := func(k string) string { return strings.TrimSpace(string(v.Review[k])) }
+			if get("state") != fmt.Sprintf("%q", c.state) || get("pending") != c.pendingP || get("stale") != c.stale {
+				t.Errorf("review = %s", out)
+			}
+			var esc struct {
+				State   string          `json:"state"`
+				BeadIDs json.RawMessage `json:"bead_ids"`
+			}
+			if err := json.Unmarshal(v.Review["escalation"], &esc); err != nil {
+				t.Fatal(err)
+			}
+			if esc.State != c.escState || strings.Join(strings.Fields(string(esc.BeadIDs)), "") != c.escIDs {
+				t.Errorf("escalation = %s %s, want %s %s", esc.State, esc.BeadIDs, c.escState, c.escIDs)
+			}
+			switch c.state {
+			case "current", "stale":
+				if get("anchored_commit") == "" || get("head_sha") != fmt.Sprintf("%q", reviewHead) || get("review_id") == "" {
+					t.Errorf("a pending review must carry its commit, the head and its id: %s", out)
+				}
+			case "unknown":
+				if get("error") == "" || !strings.Contains(get("error"), "detection_failed") {
+					t.Errorf("an unknown state must carry the reason: %s", out)
+				}
+			}
+		})
+	}
+}
+
+// A lookup that failed MUST NOT read as "no pending review": it is the one
+// state whose pending value is neither true nor false.
+func TestTypedShowFailedLookupIsNeverNone(t *testing.T) {
+	seedReviewStates(t)
+	out, _, err := runTypedShowCmd(t, "pr", "o/r#15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "pending=no") || strings.Contains(out, "escalation=none  ") || !strings.Contains(out, "pending=unknown") {
+		t.Errorf("failed lookup rendered as none:\n%s", out)
+	}
+}
+
+// Facts hydrated before the lookup existed, and a failed escalation query,
+// are unknown too, never none.
+func TestTypedShowUnhydratedAndQueryFailureAreUnknown(t *testing.T) {
+	f := newViewFixture(t)
+	f.entity("pr", "o/r#21", reviewFacts(21, pendingNoneRecord, queryFailedFacts), "2026-09-29T14:03:10Z", reviewHead)
+	out, _, err := runTypedShowCmd(t, "pr", "o/r#21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "review: pending=no  escalation=unknown (issue list --query pending-review-escalations: exit 1: query_not_recognized)") {
+		t.Errorf("failed escalation query:\n%s", out)
+	}
+	out, _, err = runTypedShowCmd(t, "pr", "5") // seeded without any review keys
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "review: pending=unknown (pending-review state was not looked up; run show --refresh)  escalation=unknown (escalations were not looked up; run show --refresh)") {
+		t.Errorf("unhydrated facts:\n%s", out)
+	}
+}
+
+func TestTypedShowReviewIsPROnly(t *testing.T) {
+	newViewFixture(t)
+	for _, tc := range [][2]string{{"issue", "bd-1"}, {"thread", "C1/1.5"}} {
+		out, _, err := runTypedShowCmd(t, tc[0], tc[1], "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out, `"review"`) {
+			t.Errorf("%s view carries a review object:\n%s", tc[0], out)
+		}
+	}
+}
+
+// Displaying the state is read-only: no pg-connector call at all without
+// --refresh, and the stored entity is byte-for-byte unchanged.
+func TestTypedShowReviewMakesNoStateChange(t *testing.T) {
+	f := newViewFixture(t)
+	f.entity("pr", "o/r#14", reviewFacts(14, pendingRecord(reviewOld, true), oneEscalation), "2026-09-29T14:03:10Z", reviewHead)
+	dir := t.TempDir()
+	installFakePGConnector(t, fmt.Sprintf(`echo "$@" >> %q/calls.log; exit 99`, dir))
+	before, found, err := f.seed.GetEntity("o/r", "pr", "o/r#14")
+	if err != nil || !found {
+		t.Fatal(err, found)
+	}
+	for _, args := range [][]string{{"o/r#14"}, {"o/r#14", "--json"}} {
+		if _, _, err := runTypedShowCmd(t, "pr", args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls, _ := os.ReadFile(filepath.Join(dir, "calls.log")); len(calls) != 0 {
+		t.Errorf("show without --refresh called pg-connector:\n%s", calls)
+	}
+	after, _, err := f.seed.GetEntity("o/r", "pr", "o/r#14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("show changed the stored entity:\n before %+v\n after  %+v", before, after)
+	}
+}
+
+// ---- through the hydration seam: show --refresh with a fake pg-connector ----
+
+// reviewConnector installs a fake pg-connector that answers one PR's
+// hydration from files in dir and records every call.
+type reviewConnector struct{ dir string }
+
+func newReviewConnector(t *testing.T) *reviewConnector {
+	t.Helper()
+	dir := t.TempDir()
+	installFakePGConnector(t, fmt.Sprintf(`D=%q
+echo "$@" >> "$D/calls.log"
+case "$1 $2" in
+"pr show") cat "$D/pr-show.json"; exit 0;;
+"pr files") echo '{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","files":[]}}'; exit 0;;
+"pr commits") echo '{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","commits":[]}}'; exit 0;;
+"ci list") echo '{"runs":[],"sources":[]}'; exit 0;;
+"pr review") cat "$D/pending.json"; exit "$(cat "$D/pending.exit")";;
+"issue list") cat "$D/issues.json"; exit 0;;
+esac
+exit 99`, dir))
+	c := &reviewConnector{dir: dir}
+	c.write("pr-show.json", fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","repo":"o/r","number":5,"title":"Add retry","state":"open","draft":false,"head_sha":%q,"as_of":"2026-09-30T00:00:00Z"}}`, reviewHead))
+	c.write("issues.json", `{"entities":[],"present_ids":[],"sources":[]}`)
+	return c
+}
+
+func (c *reviewConnector) write(name, body string) {
+	if err := os.WriteFile(filepath.Join(c.dir, name), []byte(body), 0o644); err != nil {
+		panic(err)
+	}
+}
+
+func (c *reviewConnector) pending(body string, exit int) {
+	c.write("pending.json", body)
+	c.write("pending.exit", fmt.Sprint(exit))
+}
+
+func (c *reviewConnector) calls() string {
+	b, _ := os.ReadFile(filepath.Join(c.dir, "calls.log"))
+	return string(b)
+}
+
+func refreshReviewView(t *testing.T) (human string, stderr string) {
+	t.Helper()
+	open, seed := seedLinkStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), open)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if _, err := seed.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#5", Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
+		0, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runTypedShowCmd(t, "pr", "o/r#5", "--refresh")
+	if err != nil {
+		t.Fatalf("show --refresh: %v (stderr %q)", err, errOut)
+	}
+	return out, errOut
+}
+
+func TestTypedShowRefreshHydratesPendingReviewThroughTheConnector(t *testing.T) {
+	cases := []struct {
+		name    string
+		pending string
+		exit    int
+		issues  string
+		want    string
+	}{
+		{
+			"none", `{"protocolVersion":1,"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-30T00:00:00Z"}}`, 0, "",
+			"review: pending=no  escalation=none",
+		},
+		{
+			"stale-with-open-escalation", `{"protocolVersion":1,` + strings.TrimPrefix(pendingRecord(reviewOld, true), "{"), 0,
+			`{"entities":[{"id":"esc-77","metadata":{"review_escalation_key":"pr:o/r#5","review_escalation_head":"` + reviewHead + `"}}],"present_ids":[],"sources":[]}`,
+			"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=esc-77",
+		},
+		{
+			"lookup-failed", `{"protocolVersion":1,"error":{"code":"unavailable","message":"review_pending: detection_failed: truncated"}}`, 1, "",
+			"review: pending=unknown (pg-connector [pr review pending o/r#5]: exit 1: unavailable: review_pending: detection_failed: truncated)  escalation=none",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newReviewConnector(t)
+			c.pending(tc.pending, tc.exit)
+			if tc.issues != "" {
+				c.write("issues.json", tc.issues)
+			}
+			out, _ := refreshReviewView(t)
+			if !strings.Contains(out, tc.want+"\n") {
+				t.Errorf("view after refresh:\n%s\nwant line %q", out, tc.want)
+			}
+			// The lookup is the connector's own verb, called once; nothing is written.
+			calls := c.calls()
+			if got := strings.Count(calls, "pr review pending o/r#5"); got != 1 {
+				t.Errorf("pr review pending called %d times:\n%s", got, calls)
+			}
+			for _, bad := range []string{"review submit", "issue create", "issue update", "issue comment", "issue close"} {
+				if strings.Contains(calls, bad) {
+					t.Errorf("display made a state change (%s):\n%s", bad, calls)
+				}
+			}
+		})
+	}
+}

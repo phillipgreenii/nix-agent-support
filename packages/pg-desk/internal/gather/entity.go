@@ -68,6 +68,9 @@ func (a *prGatherAdapter) GatherEntity(ctx context.Context, entityID string, cha
 	if err != nil {
 		return GatherResult{}, err
 	}
+	if f.RemovedState == "" && len(f.PRShow) > 0 {
+		a.g.gatherReviewState(ctx, entityID, &f)
+	}
 	payload, err := json.Marshal(f)
 	if err != nil {
 		return GatherResult{}, fmt.Errorf("gather: marshal pr facts: %w", err)

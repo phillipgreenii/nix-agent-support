@@ -80,6 +80,33 @@ making. A read failure degrades this run exactly like every other non-triggering
 naming `linked threads`; zero linked threads is a normal, expected outcome (most PRs have none),
 not a degradation.
 
+## Pending-review state (PR entity seam)
+
+The PR adapter of the generic entity seam (the `pr` gatherer that `refresh`, `changes` and `show
+--refresh` hydrate through) adds the PR's pending-agent-review state to its facts, after the inputs
+above. It is not gathered by the legacy `run`/`sync` path, whose facts are unchanged, and not on a
+`--change removed` re-read. Two reads, both through `pg-connector`:
+
+- **The pending review.** `pr review pending <id>`, the structured lookup of the acting identity's
+  pending review (entity-change-flow design 9.1a), stored verbatim as `review_pending.result`
+  (`{"pending": false, ...}` or the record with its review-level commit and `stale` flag). There is
+  no second lookup implementation here: the commit, the head and the stale verdict are the
+  connector's.
+- **The open escalations.** `issue list --query pending-review-escalations` (the named query that
+  `pg-router-review-escalator` and `pg-router-source-pg-connector list --exclude-escalated-query`
+  also read, carrying the beads workspace variable like every `issue` exec). The beads whose
+  `review_escalation_key` is `pr:<owner/repo>#<n>` for this PR, or a `rollup:<reason>` bead whose
+  `review_escalation_prs` names it, are stored as `review_escalations.open` (`id`, `kind`, `head`).
+
+Neither read degrades the hydration. A degraded hydration writes nothing, so the previous snapshot
+(possibly "current" or "none") would keep standing as if it were fresh. A failed read is recorded
+in the facts instead (`review_pending.error`, `review_escalations.error`) and read back as
+`unknown`; see [`show.md`](show.md), "Pending review". A `not_found` answer, any other failure, a
+result that is not a pending-review record and, for the escalations, a degraded or unreadable list
+(it could be missing the covering bead) are all failures.
+
+Both reads are read-only: gather posts, deletes and submits no review and writes no bead.
+
 ## Exit codes, telemetry, and logs
 
 Gather has no exit code of its own; it contributes to `run`'s exit code (`0` on success or a

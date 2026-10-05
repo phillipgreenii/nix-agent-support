@@ -70,7 +70,10 @@ type viewJSON struct {
 	Snapshot    json.RawMessage `json:"snapshot"`
 	Decorations viewDecorations `json:"decorations"`
 	Annotations viewAnnotations `json:"annotations"`
-	Links       []viewLink      `json:"links"`
+	// Review is a PR's pending-agent-review state (pr only; omitted for the
+	// other types).
+	Review *viewReview `json:"review,omitempty"`
+	Links  []viewLink  `json:"links"`
 	// LinksAsOf is the newest time any of the entity's links was last
 	// confirmed; null when it has no links.
 	LinksAsOf *string `json:"links_as_of"`
@@ -189,6 +192,10 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		if raw, ok := facts[snapshotField[entityType]]; ok {
 			v.Snapshot = raw
 		}
+	}
+
+	if entityType == entityTypePR {
+		v.Review = buildReview(ent.Facts)
 	}
 
 	anns, err := st.ListKVAnnotations(repo, entityType, id)
@@ -421,6 +428,11 @@ func renderTypedShow(w io.Writer, vd viewData) error {
 	anns := fmt.Sprintf("annotations: hidden=%s  wip=%s  suppress=[%s]",
 		hidden, yesNo(v.Annotations.WIP), strings.Join(v.Annotations.Suppress, ","))
 
+	reviewLine := ""
+	if v.Review != nil {
+		reviewLine = renderReviewLine(v.Review) + "\n"
+	}
+
 	linkTexts := make([]string, 0, len(v.Links))
 	for _, l := range v.Links {
 		detail := l.Relation
@@ -433,6 +445,6 @@ func renderTypedShow(w io.Writer, vd viewData) error {
 	if len(linkTexts) > 0 {
 		linksLine = "links: " + strings.Join(linkTexts, "  ")
 	}
-	_, err := fmt.Fprintf(w, "%s\n%s\n%s\n%s\n", line1, strings.Join(parts, "  "), anns, linksLine)
+	_, err := fmt.Fprintf(w, "%s\n%s\n%s\n%s%s\n", line1, strings.Join(parts, "  "), anns, reviewLine, linksLine)
 	return err
 }

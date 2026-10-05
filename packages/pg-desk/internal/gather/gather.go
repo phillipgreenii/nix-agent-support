@@ -204,6 +204,14 @@ type Facts struct {
 	// without changing this field's shape.
 	LinkedThreads []ThreadRef `json:"linked_threads,omitempty"`
 
+	// ReviewPending and ReviewEscalations are the pending-agent-review state of
+	// the PR (pg2-kftf9.18): the pg-connector `pr review pending` record and
+	// the open escalation beads covering the PR. They are read only by the
+	// generic entity seam (EntityGatherers' pr adapter), never by Gather, so
+	// the legacy path's facts are unchanged. nil means "never looked up".
+	ReviewPending     *ReviewPendingFact     `json:"review_pending,omitempty"`
+	ReviewEscalations *ReviewEscalationsFact `json:"review_escalations,omitempty"`
+
 	// AsOf is the timestamp pg-connector's `pr show` reported for this read.
 	AsOf string `json:"as_of,omitempty"`
 	// HeadSHA is the triggering PR's current head commit, from `pr show` —

@@ -263,6 +263,7 @@ func TestTypedShowHumanOutput(t *testing.T) {
 	want := "pr o/r#5  Add retry to client\n" +
 		"mine  open  ready  head=9f3c1e2  ci=failure  as_of=2026-09-29T14:03:10Z (fresh)\n" +
 		"annotations: hidden=no  wip=no  suppress=[fix-ci]\n" +
+		"review: pending=unknown (pending-review state was not looked up; run show --refresh)  escalation=unknown (escalations were not looked up; run show --refresh)\n" +
 		"links: bd-1 (work, open)  C1/1.5 (references)\n"
 	if out != want {
 		t.Errorf("human output:\n got: %q\nwant: %q", out, want)

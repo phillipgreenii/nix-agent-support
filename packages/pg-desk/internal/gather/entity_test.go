@@ -228,7 +228,29 @@ func TestPRPathParityFixtures(t *testing.T) {
 				return
 			}
 			want, _ := json.Marshal(direct)
-			if string(res.Payload) != string(want) {
+			// The pr adapter adds exactly the pending-review state
+			// (review_pending, review_escalations) to the direct result; drop
+			// it and the rest must be byte-identical.
+			got := res.Payload
+			if tc.change != ChangeRemoved {
+				var m map[string]json.RawMessage
+				if err := json.Unmarshal(got, &m); err != nil {
+					t.Fatal(err)
+				}
+				if m["review_pending"] == nil || m["review_escalations"] == nil {
+					t.Fatalf("adapter payload lacks the review state: %s", got)
+				}
+				delete(m, "review_pending")
+				delete(m, "review_escalations")
+				var derr2 error
+				if got, derr2 = json.Marshal(m); derr2 != nil {
+					t.Fatal(derr2)
+				}
+				var dm map[string]json.RawMessage
+				_ = json.Unmarshal(want, &dm)
+				want, _ = json.Marshal(dm) // same key order (sorted) as got
+			}
+			if string(got) != string(want) {
 				t.Fatalf("payload mismatch:\n%s\n%s", res.Payload, want)
 			}
 			if res.AsOf != direct.AsOf || res.Degraded != direct.Degraded || res.RemovedState != direct.RemovedState {

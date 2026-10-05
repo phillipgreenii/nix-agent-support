@@ -1219,6 +1219,16 @@ MUST be live-exercised (12).
     "force_review": false,
     "decider": { "pr-decider": { "fail.review.head-advanced": "1" } }
   },
+  "review": {
+    "state": "stale",
+    "pending": true,
+    "review_id": "PRR_...",
+    "url": "https://github.com/.../pull/123#pullrequestreview-5360090761",
+    "anchored_commit": "4b1d7aa...",
+    "head_sha": "9f3c1e2...",
+    "stale": true,
+    "escalation": { "state": "open", "bead_ids": ["pg2-abc12"] }
+  },
   "links": [
     {
       "type": "issue",
@@ -1265,6 +1275,18 @@ unclaimed) is what `fixci.failing-on-head`/`conflict.present` (7.3) read to deci
 close a now-satisfied item themselves or leave it for the worker (7.4). `annotations.hidden`'s
 `{value, reason}` shape matches the real `annotation` table's `hidden`/`hidden_reason` columns
 (9.6) — the only annotation whose value carries a paired reason.
+
+`review` (amendment 2026-10-05, bead `pg2-kftf9.18`; additive, `pr` only) is the PR's pending agent
+review: `state` is `none`, `current`, `stale` or `unknown`; `pending` is `true`, `false` or `null`;
+`review_id`, `url`, `anchored_commit` (the review-level commit) and `head_sha` are present with a
+pending review; `stale` is `null` without one. `escalation` is `{state: none|open|unknown,
+bead_ids[]}` for the open pending-review escalation beads covering the PR (its own per-PR bead or a
+roll-up naming it). Both come from the PR's hydration: the pending review from the 9.1a record (no
+second lookup) and the escalations from the `pending-review-escalations` named query. A failed or
+missing read is `unknown` with an `error` string, never `none`, and does not degrade the hydration
+(a degraded hydration writes nothing, so a previous "current" would keep standing). The view is an
+addition to the escalation of the pending-review handling design, never a substitute, and reading
+it changes nothing.
 
 ### 9.6 Annotations
 
