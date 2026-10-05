@@ -5,20 +5,64 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/apply"
+	"github.com/phillipgreenii/pg-decider/internal/config"
+	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/item"
+	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
-// applyFn is the replaceable seam for `apply` behavior. It runs only after
-// the view was freshly read (retrieve it with viewFromContext); it is nil
-// without --from-item. apply never decides from the item's kind. It returns
-// the process exit code. A sibling packet replaces the default.
+// decideFn computes the action list from the view; tests swap it.
+var decideFn = func(v *view.View, entityType string) action.PlanResult {
+	return decide.Decide(v, entityType)
+}
+
+// applyCommand is the factory every pg-connector and pg-desk write goes
+// through; tests swap it. The view read has its own seam (view.ExecCommand).
+var applyCommand apply.CmdFactory = exec.CommandContext
+
+// applyHooks returns the per-action hooks of an apply run. The audit and
+// failure packets register theirs here.
+var applyHooks = func() []apply.Hook { return nil }
+
+// applyFn is the implementation of `apply` behavior. It runs only after the
+// view was freshly read (retrieve it with viewFromContext); it is nil
+// without --from-item. apply never decides from the item's kind: it computes
+// the actions from the view with the decide core and executes them. It
+// returns the process exit code.
 var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed) int {
-	fmt.Fprintln(errOut, "pg-decider apply: not implemented")
-	return exitcode.Failure
+	v := viewFromContext(ctx)
+	if v == nil {
+		fmt.Fprintf(errOut, "pg-decider: no %s view of %s to apply\n", typ, id)
+		return exitcode.ViewUnreadable
+	}
+	if !decide.HasDecider(typ) {
+		fmt.Fprintf(errOut, "pg-decider: no decider is registered for entity type %q\n", typ)
+		return exitcode.Failure
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(errOut, "pg-decider: %v\n", err)
+		return exitcode.Failure
+	}
+	plan := decideFn(v, typ)
+	res := apply.Run(ctx, apply.Input{
+		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(),
+		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
+	})
+	for _, ev := range res.Events {
+		if ev.Err != nil {
+			fmt.Fprintf(errOut, "pg-decider: %s %s (rule %s): %s: %v\n", ev.Action.Op, ev.WorkItemID, ev.Action.Rule, ev.Outcome, ev.Err)
+		}
+	}
+	return res.ExitCode
 }
 
 func newApplyCmd() *cobra.Command {

@@ -1,0 +1,21 @@
+{
+  "entities": [
+    {
+      "id": "wb-11",
+      "title": "acme/widgets#42: anchor",
+      "metadata": { "dedup_key": "pr:PR_node_42:anchor" }
+    },
+    {
+      "id": "wb-12",
+      "title": "review-pr: acme/widgets#42",
+      "metadata": { "dedup_key": "pr:acme/widgets#42:review-pr" }
+    },
+    {
+      "id": "wb-13",
+      "title": "process-feedback: acme/widgets#7",
+      "metadata": { "dedup_key": "pr:acme/widgets#7:process-feedback:d1" }
+    }
+  ],
+  "present_ids": ["wb-11", "wb-12", "wb-13"],
+  "sources": [{ "source": "trk", "status": "succeeded", "count": 3 }]
+}

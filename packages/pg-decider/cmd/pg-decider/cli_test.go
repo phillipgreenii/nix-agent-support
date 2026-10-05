@@ -80,14 +80,6 @@ func TestSeamExitCodeIsPropagated(t *testing.T) {
 	}
 }
 
-func TestDefaultApplySeamReportsNotImplemented(t *testing.T) {
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
-	out, errOut, code := runCLI(t, "apply", "pr", "x")
-	if code != 1 || out != "" || !strings.Contains(errOut, "not implemented") {
-		t.Fatalf("apply: code=%d out=%q err=%q", code, out, errOut)
-	}
-}
-
 func TestUnreadableViewExits3WithNothingOnStdoutAndSeamNotCalled(t *testing.T) {
 	cases := map[string][]string{
 		"pg-desk failure": {"GO_HELPER_EXIT=1", "GO_HELPER_STDERR=no such entity"},
