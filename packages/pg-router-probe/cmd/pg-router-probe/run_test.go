@@ -223,38 +223,6 @@ func TestRunProbeDedupSkipsWhenNothingNew(t *testing.T) {
 	}
 }
 
-func TestRunProbeDedupUpdatesOnChange(t *testing.T) {
-	cmd, _ := testCmd()
-	opts := baseOpts(t)
-	opts.grafanaURL = "http://example.invalid"
-	spy := &spyDeps{
-		fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
-			return []grafanaAlert{{RuleUID: "pg-router-liveness-down", Labels: map[string]string{"instance": "a"}, State: "active", EpisodeCount: 5}}, nil
-		},
-		listEscalatedResult: []connectorIssue{{
-			ID: "zr-1",
-			Metadata: map[string]string{
-				metaFingerprint:  "pg-router-liveness-down|instance=a",
-				metaState:        "active",
-				metaEpisodeCount: "1",
-			},
-		}},
-	}
-	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if err != nil {
-		t.Fatalf("expected exit 0, got %v", err)
-	}
-	if len(spy.updated) != 1 || spy.updated[0].id != "zr-1" {
-		t.Fatalf("expected an update on zr-1, got %+v", spy.updated)
-	}
-	if len(spy.commented) != 1 || spy.commented[0].id != "zr-1" {
-		t.Fatalf("expected a comment on zr-1, got %+v", spy.commented)
-	}
-	if len(spy.created) != 0 {
-		t.Fatalf("expected no create when a match already exists")
-	}
-}
-
 func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
@@ -386,9 +354,9 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 // "escalated-work"); the next probe tick listed only ready beads, saw no
 // match, and filed a second bead. The fake below models the two named
 // queries faithfully: the ready-only triager query hides the parked bead,
-// the dedup query shows it. No new bead MUST be created; the episode is
-// APPENDED to the existing bead (here the alert's episode count moved, so
-// the probe updates its tracked metadata and comments).
+// the dedup query shows it. No new bead MUST be created; a NEW EPISODE of
+// the alert (startsAt moved, pg2-3tt2e) is recorded as a comment on the
+// existing bead.
 func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
 	const fp = "pg-router-failure-rate|__alert_rule_uid__=pg-router-failure-rate,class=handler-error"
 	parked := connectorIssue{
@@ -402,10 +370,10 @@ func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
 	}
 	fetch := func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
 		return []grafanaAlert{{
-			RuleUID:      "pg-router-failure-rate",
-			Labels:       map[string]string{"__alert_rule_uid__": "pg-router-failure-rate", "class": "handler-error"},
-			State:        "active",
-			EpisodeCount: 1,
+			RuleUID:  "pg-router-failure-rate",
+			Labels:   map[string]string{"__alert_rule_uid__": "pg-router-failure-rate", "class": "handler-error"},
+			State:    "active",
+			StartsAt: started.Add(time.Hour), // a new episode vs the seeded state
 		}}, nil
 	}
 	newSpy := func() *spyDeps {
@@ -425,7 +393,7 @@ func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
 	buggyOpts.grafanaURL = "http://example.invalid"
 	buggyOpts.dedupQuery = "escalated-work"
 	buggy := newSpy()
-	if err := runProbe(buggyCmd, buggyOpts, buggy.toRunDeps(time.Now())); err != nil {
+	if err := runProbe(buggyCmd, buggyOpts, buggy.toRunDeps(t0)); err != nil {
 		t.Fatalf("expected exit 0, got %v", err)
 	}
 	if len(buggy.created) != 1 {
@@ -436,18 +404,19 @@ func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	opts.grafanaURL = "http://example.invalid"
+	seedAlertState(t, opts.snapshotPath, fp, alertState{LastStartsAt: started, Episodes: []time.Time{started}, LastNoted: t0})
 	spy := newSpy()
-	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+	if err := runProbe(cmd, opts, spy.toRunDeps(t0)); err != nil {
 		t.Fatalf("expected exit 0, got %v", err)
 	}
 	if len(spy.created) != 0 {
 		t.Fatalf("a duplicate bead was created while a human-labeled bead held the fingerprint: %+v", spy.created)
 	}
-	if len(spy.updated) != 1 || spy.updated[0].id != "pg2-68005" {
-		t.Fatalf("expected the episode to update pg2-68005, got %+v", spy.updated)
-	}
 	if len(spy.commented) != 1 || spy.commented[0].id != "pg2-68005" {
-		t.Fatalf("expected the episode to be commented on pg2-68005, got %+v", spy.commented)
+		t.Fatalf("expected the new episode to be commented on pg2-68005, got %+v", spy.commented)
+	}
+	if len(spy.updated) != 1 || spy.updated[0].id != "pg2-68005" || spy.updated[0].metadata[metaEpisodeCount] != "2" {
+		t.Fatalf("expected episode_count bumped to 2 on pg2-68005, got %+v", spy.updated)
 	}
 	if len(spy.listedQueries) != 1 || spy.listedQueries[0] != defaultDedupQuery {
 		t.Fatalf("expected dedup to list through %q, got %v", defaultDedupQuery, spy.listedQueries)

@@ -109,6 +109,14 @@ type runOptions struct {
 	// dedupQuery is the named pg-connector query the dedup check lists
 	// existing beads through; see connector.go's defaultDedupQuery.
 	dedupQuery string
+
+	// closedDedupQuery names a pg-connector query listing recently CLOSED
+	// escalated beads (connector.go); "" disables the lookup. A bead
+	// created with only a closed match references the newest one.
+	closedDedupQuery string
+	// stillFiringInterval throttles still-firing comments on an open
+	// bead whose alert has not changed episode (dedup.go).
+	stillFiringInterval time.Duration
 }
 
 // runDeps is every external side effect runProbe performs, gathered into
@@ -152,6 +160,8 @@ func newRunCmd() *cobra.Command {
 		pgRouterPath:       "pg-router",
 		statusTimeout:      10 * time.Second,
 		dedupQuery:         defaultDedupQuery,
+
+		stillFiringInterval: 6 * time.Hour,
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -172,8 +182,13 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.binaryPath, "binary-path", "", "path to the daemon/handler binary to hash; unset skips the binary hash sanity sub-check")
 	cmd.Flags().StringVar(&opts.deployRecordPath, "deploy-record-file", "", "optional file of known-expected binary hashes, one per line")
 	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
+	cmd.Flags().StringVar(&opts.closedDedupQuery, "closed-dedup-query", opts.closedDedupQuery, "named pg-connector query listing recently CLOSED escalated beads; a new bead for a re-firing alert whose only match is closed references the newest one. Unset disables the lookup; a failing query degrades the run (exit 4) but the bead is still filed")
+	cmd.Flags().DurationVar(&opts.stillFiringInterval, "still-firing-interval", opts.stillFiringInterval, "minimum time between still-firing comments on an open bead for an alert that has not changed episode")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if opts.stillFiringInterval < 0 {
+			return usageErrorf("run: --still-firing-interval must not be negative")
+		}
 		opts.haveQueueDepth = cmd.Flags().Changed("queue-depth")
 		opts.haveBacklog = cmd.Flags().Changed("backlog")
 		return runProbe(cmd, opts, defaultRunDeps())
@@ -292,7 +307,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// value a DIFFERENT invocation is tracking [design: "Snapshot
 	// robustness" paragraph, generalized to every successful run, not
 	// only the broken-snapshot path].
-	next := snapshot{QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, BinaryPath: prevSnap.BinaryPath, CheckedAt: deps.now().UTC().Format(time.RFC3339)}
+	next := snapshot{QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, BinaryPath: prevSnap.BinaryPath, CheckedAt: deps.now().UTC().Format(time.RFC3339), Alerts: pruneAlertStates(prevSnap.Alerts, deps.now())}
 	if opts.haveQueueDepth {
 		next.QueueDepth = opts.queueDepth
 	}
@@ -303,7 +318,9 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		next.BinaryHash = currentHash
 		next.BinaryPath = currentPath
 	}
+	persistFailed := false
 	if err := saveSnapshot(opts.snapshotPath, next); err != nil {
+		persistFailed = true
 		// A snapshot that cannot be persisted silently disables the drift
 		// checks (every later run sees "no baseline"; pg2-3gqtw), so this
 		// is a degraded sub-check -- exit 4 after the run's findings are
@@ -338,18 +355,62 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			degraded = append(degraded, fmt.Sprintf("dedup query: %v", err))
 			return partialErrorf("run: partial (%s)", strings.Join(degraded, "; "))
 		}
+
+		// Closed predecessors are looked up lazily, at most once, and only
+		// when some finding is about to create a bead. A failure degrades
+		// the run (exit 4) but never blocks the create: the bead is filed
+		// without the reference.
+		var closed []connectorIssue
+		closedLoaded := false
+		loadClosed := func() []connectorIssue {
+			if closedLoaded || opts.closedDedupQuery == "" {
+				return closed
+			}
+			closedLoaded = true
+			closedCtx, cancel := withPgTimeout()
+			defer cancel()
+			list, err := deps.listEscalated(closedCtx, opts.closedDedupQuery, warn)
+			if err != nil {
+				warn(fmt.Sprintf("closed-dedup query %q failed: %v", opts.closedDedupQuery, err))
+				degraded = append(degraded, fmt.Sprintf("closed-dedup query: %v", err))
+				return nil
+			}
+			closed = list
+			return closed
+		}
+
+		now := deps.now()
+		alertStates := make(map[string]alertState, len(next.Alerts))
+		for fp, st := range next.Alerts {
+			alertStates[fp] = st
+		}
+		alertsChanged := false
+		// noted records a successful note about a grafana fingerprint.
+		noted := func(f finding) {
+			alertStates[f.Fingerprint] = recordEpisode(alertStates[f.Fingerprint], f.StartsAt, now)
+			alertsChanged = true
+		}
+
 		for _, f := range findings {
-			action, match := decideAction(f, existing)
-			body := renderBody(f, deps.now(), skippedNote)
+			st, haveState := alertStates[f.Fingerprint]
+			action, match := decideAction(f, existing, dedupContext{state: st, haveState: haveState, now: now, stillFiringInterval: opts.stillFiringInterval})
 			switch action {
 			case actionCreate:
+				predecessor := ""
+				if c := newestClosedMatch(f, loadClosed()); c != nil {
+					predecessor = c.ID
+				}
+				body := renderBody(f, now, skippedNote, predecessor)
 				createCtx, cancel := withPgTimeout()
 				_, err := deps.createIssue(createCtx, escalationTitle(f), []string{"escalated"}, trackedMetadata(f), body, warn)
 				cancel()
 				if err != nil {
 					warn(fmt.Sprintf("failed to create bd issue for %s: %v", f.Fingerprint, err))
+				} else if f.Kind == kindGrafanaAlert {
+					noted(f)
 				}
 			case actionUpdate:
+				body := renderBody(f, now, skippedNote, "")
 				updateCtx, cancel := withPgTimeout()
 				err := deps.updateMetadata(updateCtx, match.ID, trackedMetadata(f), warn)
 				cancel()
@@ -362,9 +423,45 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 				if err != nil {
 					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
 				}
+			case actionSeed:
+				// First tick with no state for an already-open bead
+				// (rollout, or a lost snapshot): remember the episode
+				// WITHOUT writing to the bead, so deploying this logic
+				// cannot burst a comment onto every open escalation.
+				alertStates[f.Fingerprint] = recordEpisode(st, f.StartsAt, now)
+				alertsChanged = true
+			case actionRecurrence, actionStillFiring:
+				after := recordEpisode(st, f.StartsAt, now)
+				commentCtx, cancel := withPgTimeout()
+				err := deps.comment(commentCtx, match.ID, stillFiringComment(f, after, now), warn)
+				cancel()
+				if err != nil {
+					// State stays put, so the next tick retries the note.
+					warn(fmt.Sprintf("failed to comment on bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					continue
+				}
+				noted(f)
+				if action == actionRecurrence {
+					updateCtx, cancel2 := withPgTimeout()
+					err := deps.updateMetadata(updateCtx, match.ID, recurrenceMetadata(f, match), warn)
+					cancel2()
+					if err != nil {
+						warn(fmt.Sprintf("failed to update bd issue %s for %s: %v", match.ID, f.Fingerprint, err))
+					}
+				}
 			case actionSkip:
 				// Nothing new -- no write [Binding decisions: "'Nothing
 				// new' rule"].
+			}
+		}
+
+		// Persist the alert state AFTER the writes it describes, so a
+		// failed comment is retried rather than recorded as noted.
+		if alertsChanged && !persistFailed {
+			next.Alerts = pruneAlertStates(alertStates, now)
+			if err := saveSnapshot(opts.snapshotPath, next); err != nil {
+				warn(fmt.Sprintf("failed to persist snapshot: %v", err))
+				degraded = append(degraded, fmt.Sprintf("snapshot-persist: %v", err))
 			}
 		}
 	}

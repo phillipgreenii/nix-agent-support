@@ -146,3 +146,50 @@ func TestFiringAlertsSendsBearerToken(t *testing.T) {
 		t.Fatalf("got Authorization header %q", gotAuth)
 	}
 }
+
+func TestRenderGrafanaValues(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                "",
+		`{"B":1.5,"A":0}`: "A=0, B=1.5",
+		`{"B":1e3}`:       "B=1e3",
+		"[no data]":       "[no data]",
+		`  {"C":2}  `:     "C=2",
+		`null`:            "null",
+	} {
+		if got := renderGrafanaValues(in); got != want {
+			t.Errorf("renderGrafanaValues(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// pg2-3tt2e: startsAt and __values__ are decoded; a missing or malformed
+// startsAt degrades to the zero time rather than failing the whole poll,
+// and a suppressed instance is still ignored.
+func TestFiringAlertsDecodesStartsAtAndValues(t *testing.T) {
+	srv := newAlertServer(t, `[
+	  {"labels":{"__alert_rule_uid__":"pg-router-liveness-down"},"startsAt":"2026-10-05T09:00:00.5Z","annotations":{"__values__":"{\"B\":2}"},"status":{"state":"active"}},
+	  {"labels":{"__alert_rule_uid__":"pg-router-failure-rate","x":"1"},"startsAt":"garbage","status":{"state":"active"}},
+	  {"labels":{"__alert_rule_uid__":"pg-router-budget-stops"},"startsAt":"2026-10-05T09:00:00Z","status":{"state":"suppressed"}}
+	]`)
+	defer srv.Close()
+	client := newGrafanaClient(srv.URL, "", srv.Client())
+	alerts, err := client.firingAlerts(context.Background(), registeredRuleUIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts) != 2 {
+		t.Fatalf("suppressed instance must be ignored, got %+v", alerts)
+	}
+	if want := time.Date(2026, 10, 5, 9, 0, 0, 500_000_000, time.UTC); !alerts[0].StartsAt.Equal(want) || alerts[0].Values != "B=2" {
+		t.Fatalf("got StartsAt=%v Values=%q", alerts[0].StartsAt, alerts[0].Values)
+	}
+	if !alerts[1].StartsAt.IsZero() || alerts[1].Values != "" {
+		t.Fatalf("malformed startsAt must decode to zero, got %+v", alerts[1])
+	}
+	if ev := grafanaAlertEvidence(alerts[0]); !strings.Contains(ev, "starts_at=2026-10-05T09:00:00Z") {
+		t.Fatalf("evidence = %q", ev)
+	}
+	if ev := grafanaAlertEvidence(alerts[1]); !strings.Contains(ev, "starts_at=unknown") {
+		t.Fatalf("evidence = %q", ev)
+	}
+}

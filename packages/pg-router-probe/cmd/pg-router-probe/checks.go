@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // findingKind identifies which of the three checks produced a finding —
@@ -43,17 +44,23 @@ const (
 // finding is one real, new-or-changed detection surfaced by a check.
 // State carries the value dedup.go's "nothing new" comparison keys off,
 // specific to Kind:
-//   - kindGrafanaAlert: the alert's own current state (e.g. "firing").
+//   - kindGrafanaAlert: the alert's own current state (e.g. "active"); the
+//     episode identity is StartsAt, not State (dedup.go).
 //   - kindQueueGrowth: the current severity band name.
 //   - kindBinaryHashMismatch: the current binary hash.
 type finding struct {
-	Kind         findingKind
-	Fingerprint  string
-	Aliases      []string // non-empty only for kindGrafanaAlert
-	Summary      string
-	Evidence     string
-	State        string
-	EpisodeCount int // kindGrafanaAlert only; 0 for the other two kinds
+	Kind        findingKind
+	Fingerprint string
+	Aliases     []string // non-empty only for kindGrafanaAlert
+	Summary     string
+	Evidence    string
+	State       string
+	// StartsAt/Values are kindGrafanaAlert only (zero/"" otherwise): the
+	// alert instance's startsAt (identifies the episode) and its rendered
+	// __values__ annotation (the "current value"). They are NOT part of
+	// the fingerprint (pg2-3tt2e).
+	StartsAt time.Time
+	Values   string
 }
 
 // checkGrafanaAlerts builds one finding per currently-firing alert already
@@ -74,11 +81,12 @@ func checkGrafanaAlerts(alerts []grafanaAlert) []finding {
 			// starts supplying a genuinely different alias here is honored
 			// without a dedup.go change [design: "Fingerprint metadata key"
 			// paragraph, first bullet].
-			Aliases:      []string{fp},
-			Summary:      fmt.Sprintf("Grafana alert %s is firing", a.RuleUID),
-			Evidence:     grafanaAlertEvidence(a),
-			State:        a.State,
-			EpisodeCount: a.EpisodeCount,
+			Aliases:  []string{fp},
+			Summary:  fmt.Sprintf("Grafana alert %s is firing", a.RuleUID),
+			Evidence: grafanaAlertEvidence(a),
+			State:    a.State,
+			StartsAt: a.StartsAt,
+			Values:   a.Values,
 		})
 	}
 	return findings

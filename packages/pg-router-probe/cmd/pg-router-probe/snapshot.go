@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // snapshotVersion is bumped whenever this file's own field shape changes,
@@ -47,6 +48,67 @@ type snapshot struct {
 	// it decodes to "" = unknown path (see checkBinaryHash).
 	BinaryPath string `json:"binary_path,omitempty"`
 	CheckedAt  string `json:"checked_at"`
+	// Alerts is the per-Grafana-fingerprint episode state (pg2-3tt2e).
+	// Additive and omitempty, like BinaryPath: snapshotVersion is NOT
+	// bumped, because a bump would discard the whole baseline; a snapshot
+	// without it decodes to a nil map = no alert has been observed yet.
+	Alerts map[string]alertState `json:"alerts,omitempty"`
+}
+
+// alertEpisodeWindow is how far back episode start times are kept and
+// counted ("episodes in last 7d").
+const alertEpisodeWindow = 7 * 24 * time.Hour
+
+// alertState is what this probe remembers about one Grafana alert
+// fingerprint between ticks. It lives here, in the probe's own snapshot,
+// rather than in bead metadata: pg-connector's metadata write bumps the
+// bead's updated_at (see dedup.go's re-surface note), and the data is the
+// probe's own bookkeeping, not tracker state.
+type alertState struct {
+	// LastStartsAt is the startsAt of the episode most recently recorded
+	// (noted on a bead or seeded). A different startsAt on the next tick
+	// is a new episode.
+	LastStartsAt time.Time `json:"last_starts_at,omitzero"`
+	// Episodes are the recorded episode start times within
+	// alertEpisodeWindow (the current episode, LastStartsAt, is always
+	// retained).
+	Episodes []time.Time `json:"episodes,omitempty"`
+	// LastNoted is when this probe last wrote about the fingerprint
+	// (bead create, comment, or first-sight seed).
+	LastNoted time.Time `json:"last_noted,omitzero"`
+}
+
+// pruneAlertStates returns a copy of states with episodes older than
+// alertEpisodeWindow dropped (except each state's LastStartsAt) and
+// entries with nothing left inside the window removed. It never mutates
+// its input.
+func pruneAlertStates(states map[string]alertState, now time.Time) map[string]alertState {
+	if len(states) == 0 {
+		return nil
+	}
+	cutoff := now.Add(-alertEpisodeWindow)
+	out := make(map[string]alertState, len(states))
+	for fp, st := range states {
+		kept := make([]time.Time, 0, len(st.Episodes))
+		inWindow := 0
+		for _, e := range st.Episodes {
+			if !e.Before(cutoff) {
+				inWindow++
+				kept = append(kept, e)
+			} else if e.Equal(st.LastStartsAt) {
+				kept = append(kept, e)
+			}
+		}
+		if inWindow == 0 && st.LastNoted.Before(cutoff) {
+			continue
+		}
+		st.Episodes = kept
+		out[fp] = st
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // loadSnapshot returns (zero value, false) for EVERY failure mode the

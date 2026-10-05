@@ -29,11 +29,18 @@ const escalationSource = "pg-router-probe"
 // string (create's --description vs. comment's --body); later updates
 // append via comment, never overwrite the original body [design: "Body
 // template" closing sentence].
-func renderBody(f finding, firstSeen time.Time, skippedNote string) string {
+//
+// predecessorID, when non-empty, names the newest CLOSED bead for the same
+// fingerprint (pg2-3tt2e); it renders as a "Predecessor:" line so a human
+// or triager can follow a re-firing alert back to its earlier escalation.
+func renderBody(f finding, firstSeen time.Time, skippedNote, predecessorID string) string {
 	body := fmt.Sprintf(
 		"Pg-Router-Escalation-Fingerprint: %s\n\nSource: %s\nFinding: %s\nSince: %s\nEvidence:\n%s\n",
 		f.Fingerprint, escalationSource, f.Summary, firstSeen.UTC().Format(time.RFC3339), f.Evidence,
 	)
+	if predecessorID != "" {
+		body += "\nPredecessor: " + predecessorID + " (closed; this alert fired again)\n"
+	}
 	if skippedNote != "" {
 		body += "\nNote: this run's other sub-check(s) were skipped/degraded: " + skippedNote + "\n"
 	}

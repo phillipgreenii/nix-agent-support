@@ -105,6 +105,10 @@ type connectorIssue struct {
 	ID       string            `json:"id"`
 	Labels   []string          `json:"labels"`
 	Metadata map[string]string `json:"metadata"`
+	// UpdatedAt (RFC3339, may be empty) orders closed predecessors: for a
+	// closed bead it is effectively its close time (dedup.go's
+	// newestClosedMatch).
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 // connectorIssueListEnvelope mirrors pg-connector's own "issue list" JSON
@@ -131,6 +135,16 @@ type connectorIssueListEnvelope struct {
 //
 //	escalated-all = "list --label escalated --status open,in_progress,blocked,deferred"
 const defaultDedupQuery = "escalated-all"
+
+// The closed-predecessor query (--closed-dedup-query, pg2-3tt2e) is the
+// COMPLEMENT of defaultDedupQuery: a named pg-connector query listing
+// RECENTLY CLOSED escalated beads, so a re-firing alert whose previous
+// bead was already closed gets a body reference to it. It has no default
+// (empty disables the lookup); the deployment defines the name, e.g.
+//
+//	escalated-closed = "list --label escalated --status closed ..."
+//
+// It is run through the same listEscalated plumbing.
 
 // listEscalated runs `pg-connector issue list --query <query>
 // --backend pg-connector-issue-beads --output json` -- the dedup check's

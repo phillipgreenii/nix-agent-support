@@ -19,35 +19,85 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
+	"time"
 )
 
 // grafanaAlert is the subset of one Grafana alert instance this probe
 // needs.
+//
+// StartsAt and Values are deliberately NOT part of Labels: Labels feeds
+// grafanaAlertFingerprint, and an alert whose identity changed with every
+// new episode (startsAt) or every new reading (__values__) could never be
+// matched to its previous bead (pg2-3tt2e). StartsAt is the zero time when
+// the response carried none (or an unparseable one); Values is the
+// rendered `__values__` annotation ("" when absent).
 type grafanaAlert struct {
-	RuleUID      string
-	Labels       map[string]string
-	State        string
-	EpisodeCount int
+	RuleUID  string
+	Labels   map[string]string
+	State    string
+	StartsAt time.Time
+	Values   string
 }
 
 // grafanaAlertEvidence renders one alert's raw evidence block for the bd
 // body template's "Evidence:" section [design: "Body template" code
 // block].
 func grafanaAlertEvidence(a grafanaAlert) string {
-	return fmt.Sprintf("rule_uid=%s\nstate=%s\nlabels=%v\nepisode_count=%d", a.RuleUID, a.State, a.Labels, a.EpisodeCount)
+	return fmt.Sprintf("rule_uid=%s\nstate=%s\nstarts_at=%s\nlabels=%v", a.RuleUID, a.State, formatStartsAt(a.StartsAt), a.Labels)
+}
+
+// formatStartsAt renders a start time as RFC3339 UTC, or "unknown" for the
+// zero time.
+func formatStartsAt(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// renderGrafanaValues renders the `__values__` annotation (Grafana encodes
+// it as a JSON object string, e.g. {"B":0.5,"C":1}) as sorted "k=v" pairs.
+// A value that is not a JSON object is returned trimmed and verbatim;
+// absence yields "".
+func renderGrafanaValues(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	dec.UseNumber()
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil || m == nil {
+		return raw
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, m[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // grafanaAlertInstance is the wire shape one element of the Alertmanager
 // v2 `/api/v2/alerts` response array decodes into — only the fields this
 // probe reads.
 type grafanaAlertInstance struct {
-	Labels map[string]string `json:"labels"`
-	Status struct {
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations"`
+	StartsAt    string            `json:"startsAt"`
+	Status      struct {
 		State string `json:"state"`
 	} `json:"status"`
 }
@@ -116,17 +166,16 @@ func (c *grafanaClient) firingAlerts(ctx context.Context, ruleUIDs []string) ([]
 		if !wanted[ruleUID] {
 			continue
 		}
+		var startsAt time.Time
+		if t, err := time.Parse(time.RFC3339, inst.StartsAt); err == nil {
+			startsAt = t.UTC()
+		}
 		alerts = append(alerts, grafanaAlert{
-			RuleUID: ruleUID,
-			Labels:  inst.Labels,
-			State:   inst.Status.State,
-			// EpisodeCount has no Alertmanager v2 wire equivalent this
-			// client decodes today (no design citation for a concrete
-			// source) -- left at zero; dedup.go's own grafana comparison
-			// still works (state/severity alone already drives it), and a
-			// future revision can populate this once a real episode-count
-			// source is identified.
-			EpisodeCount: 0,
+			RuleUID:  ruleUID,
+			Labels:   inst.Labels,
+			State:    inst.Status.State,
+			StartsAt: startsAt,
+			Values:   renderGrafanaValues(inst.Annotations["__values__"]),
 		})
 	}
 	return alerts, nil

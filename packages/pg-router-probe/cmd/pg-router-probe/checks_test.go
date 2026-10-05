@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckGrafanaAlertsEmpty(t *testing.T) {
@@ -16,7 +17,7 @@ func TestCheckGrafanaAlertsEmpty(t *testing.T) {
 
 func TestCheckGrafanaAlertsOnePerAlert(t *testing.T) {
 	alerts := []grafanaAlert{
-		{RuleUID: "pg-router-liveness-down", Labels: map[string]string{"instance": "a"}, State: "active", EpisodeCount: 3},
+		{RuleUID: "pg-router-liveness-down", Labels: map[string]string{"instance": "a"}, State: "active", StartsAt: time.Date(2026, 10, 5, 1, 2, 3, 0, time.UTC), Values: "B=3"},
 		{RuleUID: "pg-router-failure-rate", Labels: map[string]string{"instance": "b"}, State: "active"},
 	}
 	findings := checkGrafanaAlerts(alerts)
@@ -29,8 +30,11 @@ func TestCheckGrafanaAlertsOnePerAlert(t *testing.T) {
 	if findings[0].Fingerprint != "pg-router-liveness-down|instance=a" {
 		t.Fatalf("got fingerprint %q", findings[0].Fingerprint)
 	}
-	if findings[0].EpisodeCount != 3 {
-		t.Fatalf("got episode count %d", findings[0].EpisodeCount)
+	if !findings[0].StartsAt.Equal(time.Date(2026, 10, 5, 1, 2, 3, 0, time.UTC)) || findings[0].Values != "B=3" {
+		t.Fatalf("got StartsAt=%v Values=%q", findings[0].StartsAt, findings[0].Values)
+	}
+	if !strings.Contains(findings[0].Evidence, "starts_at=2026-10-05T01:02:03Z") {
+		t.Fatalf("evidence must print starts_at, got %q", findings[0].Evidence)
 	}
 	if len(findings[0].Aliases) != 1 || findings[0].Aliases[0] != findings[0].Fingerprint {
 		t.Fatalf("expected aliases to include own fingerprint, got %v", findings[0].Aliases)

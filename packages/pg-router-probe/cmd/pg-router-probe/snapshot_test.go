@@ -3,7 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadSnapshotMissing(t *testing.T) {
@@ -49,7 +52,7 @@ func TestSaveAndLoadSnapshotRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ok=true after a successful save")
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
@@ -77,7 +80,7 @@ func TestSaveSnapshotCreatesMissingParentDir(t *testing.T) {
 		t.Fatalf("saveSnapshot into a missing dir: %v", err)
 	}
 	got, ok := loadSnapshot(path)
-	if !ok || got != want {
+	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
 	}
 	info, err := os.Stat(filepath.Dir(path))
@@ -122,7 +125,46 @@ func TestSaveAndLoadSnapshotRoundTripsBinaryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := loadSnapshot(path)
-	if !ok || got != want {
+	if !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
+	}
+}
+
+// pg2-3tt2e: alerts is additive and omitempty. A pre-existing snapshot
+// without it still loads at the current version (no baseline reset), a
+// snapshot with no alert state serializes without the key, and the state
+// round-trips once set.
+func TestSnapshotAlertsFieldIsAdditive(t *testing.T) {
+	if snapshotVersion != 1 {
+		t.Fatalf("snapshotVersion = %d: adding alerts must not bump it", snapshotVersion)
+	}
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	raw := `{"version":1,"queue_depth":1,"backlog":2,"binary_hash":"abc","checked_at":"2026-09-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got.Backlog != 2 || got.Alerts != nil {
+		t.Fatalf("got %+v ok=%v", got, ok)
+	}
+
+	if err := saveSnapshot(path, snapshot{Backlog: 2}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "alerts") {
+		t.Fatalf("empty alert state must be omitted, got %s", data)
+	}
+
+	start := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	want := snapshot{Version: snapshotVersion, Alerts: map[string]alertState{
+		"fp": {LastStartsAt: start, Episodes: []time.Time{start}, LastNoted: start.Add(time.Hour)},
+	}}
+	if err := saveSnapshot(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = loadSnapshot(path)
+	if !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
 	}
 }

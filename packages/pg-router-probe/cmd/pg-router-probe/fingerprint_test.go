@@ -1,6 +1,21 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// newAlertServer serves body as the Alertmanager v2 alerts response.
+func newAlertServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+}
 
 func TestGrafanaAlertFingerprint(t *testing.T) {
 	got := grafanaAlertFingerprint("pg-router-liveness-down", map[string]string{
@@ -74,5 +89,48 @@ func TestQueueGrowthFingerprint(t *testing.T) {
 func TestBinaryHashMismatchFingerprintIsFixed(t *testing.T) {
 	if binaryHashMismatchFingerprint != "binary-hash-mismatch" {
 		t.Fatalf("got %q", binaryHashMismatchFingerprint)
+	}
+}
+
+// pg2-3tt2e: startsAt and __values__ identify an EPISODE and a reading, not
+// the alert. They must never reach Labels (and so the fingerprint), or a
+// re-firing alert could never be matched to its predecessor.
+func TestFingerprintIgnoresStartsAtAndValues(t *testing.T) {
+	const body = `[{
+	  "labels": {"__alert_rule_uid__": "pg-router-failure-rate", "class": "handler-error"},
+	  "annotations": {"__values__": "{\"B\":1.5,\"A\":0}", "__value_string__": "ignored", "summary": "s"},
+	  "startsAt": %q,
+	  "status": {"state": "active"}
+	}]`
+	fingerprintFor := func(startsAt string) (string, grafanaAlert) {
+		srv := newAlertServer(t, strings.Replace(body, "%q", `"`+startsAt+`"`, 1))
+		defer srv.Close()
+		client := newGrafanaClient(srv.URL, "", srv.Client())
+		alerts, err := client.firingAlerts(context.Background(), registeredRuleUIDs)
+		if err != nil || len(alerts) != 1 {
+			t.Fatalf("firingAlerts: %v %+v", err, alerts)
+		}
+		a := alerts[0]
+		return grafanaAlertFingerprint(a.RuleUID, a.Labels), a
+	}
+	fp1, a1 := fingerprintFor("2026-10-05T09:00:00Z")
+	fp2, a2 := fingerprintFor("2026-10-05T10:30:00.123Z")
+	if fp1 != fp2 {
+		t.Fatalf("startsAt changed the fingerprint: %q vs %q", fp1, fp2)
+	}
+	if a1.StartsAt.Equal(a2.StartsAt) {
+		t.Fatalf("startsAt must decode distinctly: %v vs %v", a1.StartsAt, a2.StartsAt)
+	}
+	for k := range a1.Labels {
+		if strings.HasPrefix(k, "__values") || k == "startsAt" || k == "summary" {
+			t.Fatalf("annotation/startsAt leaked into Labels: %v", a1.Labels)
+		}
+	}
+	want := "pg-router-failure-rate|__alert_rule_uid__=pg-router-failure-rate,class=handler-error"
+	if fp1 != want {
+		t.Fatalf("fingerprint = %q, want %q", fp1, want)
+	}
+	if a1.Values != "A=0, B=1.5" {
+		t.Fatalf("Values = %q", a1.Values)
 	}
 }
