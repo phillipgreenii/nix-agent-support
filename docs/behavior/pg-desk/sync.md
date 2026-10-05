@@ -79,6 +79,33 @@ prompts that read these shapes, in the same change:
   metadata refreshed in ONE `issue update <id> --status open --clear-assignee ...` call (the
   previous reviewer's claim MUST NOT survive the reopen, or no worker can claim the re-review;
   `pg2-1pt7r`). No gate.
+- **Review-request lifecycle** (`pg2-kftf9.8`) — the `review-pr` bead is per PR, not per review,
+  and its terminal state is reached by the worker, not by sync:
+  - Exactly one `review-pr` bead exists per `(repo, number)`. A head advance REOPENS that bead
+    (above); sync MUST NOT create a second bead beside it, so there is never an older open bead
+    to close as superseded. The older bead IS the newer one, reopened. (Whether a new head
+    should get its own bead instead is the open design question `pg2-b3tdu`; until it is ruled,
+    this reopen-per-PR rule stands.)
+  - The worker MUST close the bead once the review for its head is in place, that is when
+    `pg-connector pr review submit` (called through `pg-router-review-escalator submit`) reports
+    `posted`, `skipped` (reason `pending_review_exists_same_head`) or `replaced`. A same-head
+    review that is still an unsubmitted PENDING review counts as done: the bead MUST NOT stay
+    open waiting for a person to submit it, and a `skipped` result MUST NOT be handed back.
+  - A stale own PENDING review of an older head is cleared by the submit itself
+    (`supersede_pending`: archive, delete, repost; status `replaced`), so the worker needs no
+    "Human: unblock" bead. When the stale review cannot be removed (human-edited, delete refused,
+    detection failure) the status is `blocked_human_pending`: nothing is changed, the tool raises
+    the single deduplicated `human` + `human-focus-required` escalation for the PR, and the worker
+    records a comment and releases the bead ONCE (deferred, so it is not redispatched at once).
+  - When the PR is confirmed `merged` or `closed` (or gone), the closure cascade above closes the
+    open `review-pr` bead with its anchor, so no `review-pr` bead stays open for a finished PR.
+  - Delivery (operator ruling, Phillip, 2026-09-29, recorded on `pg2-kftf9.8`: no new
+    dismiss/finalize command on `pg-pr`): this lifecycle is delivered by the CURRENT pg-desk sync
+    (`ensureReviewRequest` reopen, plus the closure cascade) together with `pg-connector pr
+review submit` (`pg2-kftf9.13`), the escalator (`pg2-kftf9.15`) and the ZR review prompt
+    (`pg2-kftf9.17`). The replacement flow (`pg2-2j5ac.52`, rule `review.head-advanced`, decision
+    S26) carries the same reopen-per-PR behavior forward unchanged ("as designed"), so no further
+    behavior change is required of it for this lifecycle.
 - **Recorded losses (D15)** — draft auto-promotion, `wip on`'s upstream draft conversion, and
   pending reply posting are not performed by sync.
 

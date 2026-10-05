@@ -192,7 +192,7 @@ Policies (RFC 2119):
 7. `pg-pr` MUST NOT delete or submit anything when detection fails (retain current fail-closed behavior); detection failure is itself an escalation trigger per policy 4 and 5.
 8. The review prompt MUST stop instructing workers to hand back on skip. It SHOULD say: on `skipped` (same head) close the bead; on `replaced` close the bead; on `blocked_human_pending` do NOT create a bead of its own, record a bead comment, and release the bead ONCE (the escalation in policy 5 is raised by the tool).
 9. The improvised "Human: unblock stuck pending review on PR #N" bead MUST remain retired as an ad-hoc, worker-improvised pattern. It is replaced by the single, deliberate, deduplicated escalation of policy 5, which carries the `human-focus-required` label so the operator sees it quickly.
-10. Bead lifecycle: a `review-pr` bead MUST reach a terminal state whenever pg-pr reports `posted`, `skipped`(same head), or `replaced`. A newer head MUST supersede an older open `review-pr` bead for the same PR (close the older as superseded) rather than queueing beside it (coordinate with `pg2-kftf9.8`).
+10. Bead lifecycle: a `review-pr` bead MUST reach a terminal state whenever pg-pr reports `posted`, `skipped`(same head), or `replaced`. A newer head MUST NOT queue a second `review-pr` bead beside an older open one. AMENDED 2026-10-05 (operator, `pg2-kftf9.17`/`pg2-kftf9.8`): pg-desk keeps exactly one `review-pr` bead per PR and reopens it on head advance (ADR 0034, `ensureReviewRequest`, rule `review.head-advanced`, S26), so there is never an older bead to close as superseded; the reopen-vs-new-bead-per-head question is `pg2-b3tdu`. The lifecycle is written down in `docs/behavior/pg-desk/sync.md` ("Review-request lifecycle").
 11. pg-desk SHOULD display, per PR, whether a pending agent review exists, its commit, whether it is stale relative to head, and whether an escalation is open, using the same structured record as (1). The dashboard is an addition to, never a substitute for, the escalation.
 
 Archive location: the pending review's body and comments SHOULD be written to pg-pr's staging directory (`reviewstage`) as a sidecar keyed by repo, PR and review id, so deletion is recoverable without the GitHub API.
@@ -217,7 +217,7 @@ Settled by the operator on 2026-09-29:
 
 Still open (low stakes, default stated):
 
-4. Whether a same-head pending review counts as "review done" for bead-terminal purposes even though it is unsubmitted. Default in this design: yes (policy 2); the operator MAY overrule.
+4. Whether a same-head pending review counts as "review done" for bead-terminal purposes even though it is unsubmitted. Default in this design: yes (policy 2); the operator MAY overrule. Adopted as the lifecycle (not overruled) and recorded in `docs/behavior/pg-desk/sync.md` (`pg2-kftf9.8`).
 5. The push-notification channel and re-notify interval for escalations. Default: reuse the operator's existing push channel; interval to be set in the escalation bead.
 
 ## 8. Proposed implementation beads (NOT created)
