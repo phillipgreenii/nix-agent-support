@@ -1,0 +1,71 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42",
+    "mergeable": "MERGEABLE"
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "relation": "work",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client",
+      "labels": ["pbase:42"],
+      "metadata": {
+        "repo": "acme/widgets",
+        "pr_number": 42,
+        "dedup_key": "pr:acme/widgets#42:anchor"
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-4",
+      "relation": "work",
+      "state": "closed",
+      "title": "resolve-conflict: acme/widgets#42",
+      "labels": ["mine", "worker-ready"],
+      "metadata": {
+        "repo": "acme/widgets",
+        "pr_number": 42,
+        "branch": "feature/retry",
+        "head_sha": "9f3c1e2",
+        "base": "main",
+        "base_sha": "b45e000",
+        "dedup_key": "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
+        "close_reason": "done"
+      }
+    }
+  ]
+}

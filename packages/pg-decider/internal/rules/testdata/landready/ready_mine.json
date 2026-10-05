@@ -1,0 +1,76 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42",
+    "mergeable": "MERGEABLE",
+    "checks_rollup": "SUCCESS",
+    "review_decision": "APPROVED",
+    "draft": false
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "relation": "work",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client",
+      "labels": ["pbase:42"],
+      "metadata": {
+        "repo": "acme/widgets",
+        "pr_number": 42,
+        "dedup_key": "pr:acme/widgets#42:anchor"
+      }
+    }
+  ],
+  "ci": {
+    "runs": [
+      {
+        "id": "900",
+        "attempt": 1,
+        "name": "unit",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://ci.example/runs/900"
+      },
+      {
+        "id": "901",
+        "attempt": 1,
+        "name": "lint",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://ci.example/runs/901"
+      }
+    ]
+  }
+}
