@@ -1,0 +1,96 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42"
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": { "value": false, "reason": null },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-50",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client"
+    },
+    {
+      "type": "issue",
+      "id": "bd-51",
+      "state": "closed",
+      "title": "review-pr: acme/widgets#42",
+      "metadata": { "head_sha": "9f3c1e2" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-52",
+      "state": "open",
+      "title": "process-feedback: acme/renamed#42",
+      "labels": ["fbsum:zzz"],
+      "metadata": { "node_id": "PR_node_42" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-53",
+      "state": "open",
+      "title": "review-pr: other/repo#9"
+    },
+    {
+      "type": "issue",
+      "id": "bd-54",
+      "state": "open",
+      "title": "Unrelated task about widgets"
+    },
+    {
+      "type": "issue",
+      "id": "bd-55",
+      "state": "open",
+      "title": "other/repo#9: Something else"
+    },
+    {
+      "type": "issue",
+      "id": "bd-56",
+      "state": "open",
+      "title": "review-pr: acme/widgets#42",
+      "metadata": { "dedup_key": "pr:acme/widgets#42:review-pr" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-57",
+      "state": "open",
+      "title": "fix-ci: acme/widgets#42",
+      "metadata": { "node_id": "PR_other_node" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-58",
+      "state": "open",
+      "title": "review-pr: acme/widgets#42",
+      "metadata": { "dedup_key": "not a key" }
+    }
+  ]
+}

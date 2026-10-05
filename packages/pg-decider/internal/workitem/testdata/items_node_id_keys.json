@@ -1,0 +1,57 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42"
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": { "value": false, "reason": null },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client",
+      "metadata": { "dedup_key": "pr:PR_node_42:anchor" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-3",
+      "state": "closed",
+      "title": "fix-ci: acme/widgets#42",
+      "metadata": { "dedup_key": "pr:PR_node_42:fix-ci:9f3c1e2" }
+    },
+    {
+      "type": "issue",
+      "id": "bd-9",
+      "state": "open",
+      "title": "review-pr: old/name#42",
+      "metadata": { "dedup_key": "pr:acme/old-name#42:review-pr" }
+    }
+  ]
+}
