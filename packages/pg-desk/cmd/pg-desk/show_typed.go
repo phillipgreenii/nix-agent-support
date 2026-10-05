@@ -128,17 +128,22 @@ type viewAnnotations struct {
 	ForceReview bool       `json:"force_review"`
 	// ForceReviewSHA is the head SHA the force_review flag was requested at,
 	// or null when no flag is set.
-	ForceReviewSHA *string                      `json:"force_review_sha"`
-	Decider        map[string]map[string]string `json:"decider"`
+	ForceReviewSHA *string `json:"force_review_sha"`
+	// ReadyToLand is the reserved ready_to_land annotation: true or false
+	// once written, null when unset.
+	ReadyToLand *bool                        `json:"ready_to_land"`
+	Decider     map[string]map[string]string `json:"decider"`
 }
 
 // viewLink is one links[] entry. State, Labels, Metadata and Assignee are
 // present only when the linked entity has a stored row; Assignee is "" when
 // it is unclaimed. There is deliberately no closed_by [design 9.5, S26].
 type viewLink struct {
-	Type     string             `json:"type"`
-	ID       string             `json:"id"`
-	Relation string             `json:"relation"`
+	Type     string `json:"type"`
+	ID       string `json:"id"`
+	Relation string `json:"relation"`
+	// Title is the linked entity's stored title, "" when none is stored.
+	Title    string             `json:"title"`
 	URL      string             `json:"url,omitempty"`
 	State    string             `json:"state,omitempty"`
 	Labels   *[]string          `json:"labels,omitempty"`
@@ -263,6 +268,14 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		v.Annotations.ForceReview = true
 		v.Annotations.ForceReviewSHA = &sha
 	}
+	switch byKey[store.AnnotationReadyToLand] {
+	case "true":
+		b := true
+		v.Annotations.ReadyToLand = &b
+	case "false":
+		b := false
+		v.Annotations.ReadyToLand = &b
+	}
 
 	v.Decorations = viewDecorations{Dispositions: []viewDisposition{}}
 	interp, ifound, err := st.GetInterpretation(repo, entityType, id)
@@ -297,7 +310,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 	}
 	v.Links = []viewLink{}
 	for _, l := range det.Links {
-		vl := viewLink{Type: l.Type, ID: l.ID, Relation: l.Relation, URL: l.URL, State: l.State, Origins: []viewOrigin{}}
+		vl := viewLink{Type: l.Type, ID: l.ID, Relation: l.Relation, Title: l.Title, URL: l.URL, State: l.State, Origins: []viewOrigin{}}
 		if l.Stored {
 			labels := l.Labels
 			if labels == nil {

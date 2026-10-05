@@ -569,3 +569,71 @@ func TestTypedShowForceReviewSetClearSetShowsTheNewSHA(t *testing.T) {
 		t.Errorf("after re-set: force_review %v, force_review_sha %v; want true, bbbb2222", a["force_review"], a["force_review_sha"])
 	}
 }
+
+// linksByID runs `show --json` and returns the raw links[] objects by id.
+func linksByID(t *testing.T, typ, id string) map[string]map[string]any {
+	t.Helper()
+	out, _, err := runTypedShowCmd(t, typ, id, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Links []map[string]any `json:"links"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatal(err)
+	}
+	m := map[string]map[string]any{}
+	for _, l := range raw.Links {
+		m[l["id"].(string)] = l
+	}
+	return m
+}
+
+func TestTypedShowLinkTitleIsTheStoredTitleOrEmpty(t *testing.T) {
+	f := newViewFixture(t)
+	if err := f.seed.AddExternalXref(store.XrefLink{
+		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "gone-9", Relation: "references",
+		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z", Actor: "operator", ActedAt: "2026-09-29T13:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A stored issue whose snapshot carries no title.
+	f.entity("issue", "bd-2", `{"issue_show":{"id":"bd-2","state":"open"}}`, "2026-09-29T14:00:00Z", "")
+	if err := f.seed.AddExternalXref(store.XrefLink{
+		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "bd-2", Relation: "references",
+		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z", Actor: "operator", ActedAt: "2026-09-29T13:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	links := linksByID(t, "pr", "5")
+	for id, want := range map[string]string{"bd-1": "process feedback", "bd-2": "", "gone-9": "", "C1/1.5": ""} {
+		l, ok := links[id]
+		if !ok {
+			t.Fatalf("link %s missing: %v", id, links)
+		}
+		if got, has := l["title"]; !has || got != want {
+			t.Errorf("link %s title = %v (present %v), want %q", id, got, has, want)
+		}
+	}
+	// The PR end of the same link carries the PR's stored title.
+	if got := linksByID(t, "issue", "bd-1")["o/r#5"]["title"]; got != "Add retry to client" {
+		t.Errorf("pr link title = %v, want the stored PR title", got)
+	}
+}
+
+func TestTypedShowReadyToLandIsTrueFalseOrNull(t *testing.T) {
+	f := newViewFixture(t)
+	a := annotationsOf(t, "pr", "5")
+	if got, has := a["ready_to_land"]; !has || got != nil {
+		t.Errorf("unset: ready_to_land = %v (present %v), want an explicit null", got, has)
+	}
+	f.annotate("pr", "o/r#5", "ready_to_land", "true")
+	if got := annotationsOf(t, "pr", "5")["ready_to_land"]; got != true {
+		t.Errorf("after true: ready_to_land = %v, want JSON true", got)
+	}
+	f.annotate("pr", "o/r#5", "ready_to_land", "false")
+	if got := annotationsOf(t, "pr", "5")["ready_to_land"]; got != false {
+		t.Errorf("after false: ready_to_land = %v, want JSON false", got)
+	}
+}

@@ -25,7 +25,10 @@ type Detail struct {
 	// Stored reports that the linked entity has a stored row; State, Labels,
 	// Metadata and Assignee are meaningful only then. State is "" when the
 	// stored snapshot carries none (a thread has no state).
-	Stored   bool
+	Stored bool
+	// Title is the linked entity's title as stored; "" when the snapshot
+	// carries none (a thread has no title) or the entity has no stored row.
+	Title    string
 	State    string
 	Labels   []string
 	Metadata map[string]string
@@ -120,7 +123,7 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	return out, nil
 }
 
-// fillFromSnapshot reads the linked entity's own state, labels, metadata and
+// fillFromSnapshot reads the linked entity's own title, state, labels, metadata and
 // assignee out of its stored facts.
 func fillFromSnapshot(det *Detail, ent store.Entity) {
 	det.Stored = true
@@ -131,22 +134,24 @@ func fillFromSnapshot(det *Detail, ent store.Entity) {
 	switch det.Type {
 	case entityTypeIssue:
 		var s struct {
+			Title    string            `json:"title"`
 			State    string            `json:"state"`
 			Labels   []string          `json:"labels"`
 			Metadata map[string]string `json:"metadata"`
 			Assignee string            `json:"assignee"`
 		}
 		if json.Unmarshal(f["issue_show"], &s) == nil {
-			det.State, det.Labels, det.Metadata, det.Assignee = s.State, s.Labels, s.Metadata, s.Assignee
+			det.Title, det.State, det.Labels, det.Metadata, det.Assignee = s.Title, s.State, s.Labels, s.Metadata, s.Assignee
 		}
 	case entityTypePR:
 		var s struct {
+			Title  string   `json:"title"`
 			State  string   `json:"state"`
 			Merged bool     `json:"merged"`
 			Labels []string `json:"labels"`
 		}
 		if json.Unmarshal(f["pr_show"], &s) == nil {
-			det.State, det.Labels = s.State, s.Labels
+			det.Title, det.State, det.Labels = s.Title, s.State, s.Labels
 			if s.Merged {
 				det.State = "merged"
 			}

@@ -30,6 +30,7 @@
     "suppress": [],
     "force_review": false,
     "force_review_sha": null,
+    "ready_to_land": null,
     "decider": {}
   },
   "links": [
@@ -37,6 +38,7 @@
       "type": "pr",
       "id": "o/r#5",
       "relation": "work",
+      "title": "Add retry to client",
       "url": "https://code.example/o/r/pull/5",
       "state": "open",
       "labels": ["bug"],
