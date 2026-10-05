@@ -61,12 +61,17 @@ go run ./cmd/claude-extended-tool-approver spec-drift-check --embedded
 Hashes are only meaningful against the PINNED tool versions of the nix check's sandbox: run it
 there (`nix build .#checks.<system>.claude-extended-tool-approver-spec-help-drift`), and record
 new names with `spec-drift-check --embedded --record` in that same environment. A name with no
-on-PATH binary is exempt (`specdrift.Exempt`: `cd`, `export`, `pwd`, `read`, `shift`, `exit`, `launchctl`, `man`; every `*.sh`
-plugin helper script). A new on-PATH tool must be added to that check's `nativeBuildInputs`.
+on-PATH binary is exempt (`specdrift.IsExempt`: `specdrift.Exempt` — `cd`, `export`, `pwd`,
+`read`, `shift`, `exit`, `launchctl`, `man`; `specdrift.ExternalFlake` — commands whose binary
+ships from another flake; `specdrift.ExemptOn` — per-GOOS, `ps`/`pgrep` on darwin; and every
+`*.sh` plugin helper script). A new on-PATH tool must be added to that check's
+`nativeBuildInputs`. Regenerating the embedded JSON (`go run ./cmd/genspecs`) never rewrites
+`help-hashes*.json`, so recorded hashes survive it.
 
 ## 4. Goldens pass
 
-**Tool/runner**: **none is currently wired.** tc-o14i5.4.1's `SKILL.md` ("Generated goldens"
+**Tool/runner**: **no goldens-sidecar runner is wired** (the practical stand-in is below).
+tc-o14i5.4.1's `SKILL.md` ("Generated goldens"
 section) defines the per-command JSON FORMAT (one file per command, `approve`/`reject`/
 `not-approve`/`context-dependent` verdicts per flag role, re-derived from
 `internal/effectpolicy` at generation time) and the STORAGE location (a sibling root — e.g.
@@ -79,11 +84,30 @@ confirmed empirically by tc-o14i5.4.4 (`grep -rln goldens internal/ cmd/` finds 
 outside `internal/goldencorpus`/`internal/effectpolicy/testdata`, which are both distinct,
 pre-existing mechanisms the SKILL.md text itself says do NOT store this shape).
 
-**Today, satisfying this gate means**: manually re-deriving each flag/role's verdict per
-`SKILL.md`'s own "Generation procedure" and visually confirming it against the CURRENT
-`internal/effectpolicy/policy.go` `Judge` logic — there is nothing to `go run`. Wiring an
-actual runner/test for this format is unstarted work, out of both tc-o14i5.4.1's and
-tc-o14i5.4.4's own scope (neither packet's Files section calls for building one).
+**Today, satisfying this gate means** (all of the following MUST hold; re-verified against the
+current tree for pg2-cr59k):
+
+1. `go test ./...` from the module root passes (run it in the background or with an explicit
+   multi-minute timeout). It is the practical stand-in, with this precision about what it checks:
+   - `TestRoundTrip` (`internal/embeddedspecs`): the embedded JSON equals
+     `cmddesc.DefaultRegistry()` exactly (schema facts only; citations are not compared).
+   - `TestCorpusWellFormed` (`internal/goldencorpus`): `corpus.json` rows are STRUCTURALLY valid
+     (case name, tool input, cwd, mode, expected verdict, tags). It does NOT replay or grade any
+     verdict.
+   - `TestPluginInstructedForms` and `TestGolden` (`internal/effectpolicy`) and the
+     `internal/cmddesc/*_test.go` family tests ARE the verdict-bearing tests: they run commands
+     through the real engine against the registry.
+2. `go run ./cmd/claude-extended-tool-approver evaluate --corpus
+internal/goldencorpus/testdata/corpus.json` is the only thing that grades the corpus
+   verdicts against the engine. It exits 0 regardless of result, so the gate is the `Miss` count
+   and case list (`--format json`), compared with the pre-change baseline: a change MUST NOT add
+   a miss, and every row it adds MUST be `correct`. (At the time of pg2-cr59k the baseline
+   was 565 correct, 26 miss, 8 not-comparable of 599 rows; a non-zero baseline is expected.)
+3. If you author a per-flag goldens sidecar (the SKILL.md format), manually re-derive each verdict per
+   "Generation procedure" against the CURRENT `internal/effectpolicy/policy.go` `Judge` logic.
+   No file in the repo consumes a sidecar, and none exists under
+   `internal/embeddedspecs/data/goldens/`; wiring a runner for the format is unstarted work, out
+   of both tc-o14i5.4.1's and tc-o14i5.4.4's own scope.
 
 ## 5. P15 approve-reachability report attached
 

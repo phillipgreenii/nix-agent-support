@@ -267,14 +267,29 @@ command's _regenerated_ spec (re-sourcing its citations) is the one case that DO
 user-level / repo-level JSON layers are read today ONLY by `lint`, `spec-drift-check` and
 `genspecs`; the new engine decides from `cmddesc.DefaultRegistry()` alone (`evaluate --corpus`
 grades with exactly that registry, and the live cutover will too), so a JSON spec in a P17 layer
-changes NO verdict. For a CLI a first-party plugin instructs, the route is therefore:
+changes NO verdict. The only callers of `claudecodeadapter.Evaluate` today (`evaluate --corpus`
+and `internal/legacyextract`) pass `cmddesc.DefaultRegistry()`; no engine entry point loads
+`internal/embeddedspecs` or a P17 layer (its only importers are `lint`, `spec-drift-check` and
+`genspecs`). The Go registry is the SOURCE OF TRUTH for facts; the embedded JSON is generated from
+it and exists to carry citations and to feed `lint`/`spec-drift-check`. For a CLI a first-party
+plugin instructs, the route is therefore:
 
 1. add or extend its Go `CommandSchema` in `internal/cmddesc` (a new file next to
-   `registry_plugin_tools.go` is fine; register it in `pluginToolSchemas()`), approving only the
-   shapes the skills use — every unlisted flag stays insufficient;
-2. regenerate the embedded JSON with `go run ./cmd/genspecs` (it PRESERVES every real citation
-   already on disk and never touches `help-hashes*.json`; only the NEW facts come out thin), then
-   run the repo formatter over `internal/embeddedspecs/data/`;
+   `registry_plugin_tools.go` is fine; register it in `pluginToolSchemas()`, or in the matching
+   `pbToolSchemas()` / `repoBaseToolSchemas()` list when the CLI belongs to that plugin family),
+   approving only the shapes the skills use — every unlisted flag stays insufficient;
+2. regenerate the embedded JSON with `go run ./cmd/genspecs` from the module root. It PRESERVES
+   every real citation already on disk (`BuildSpecsPreserving`), deletes only a spec file whose
+   command left the registry, and NEVER touches `help-hashes*.json` (`WriteSpecs`); only the NEW
+   facts come out with a thin citation. A genspecs run MUST NOT be followed by "restore the rest"
+   (`git checkout` of the other data files): there is nothing to restore, and doing so would
+   discard the new facts. Its output is not prettier-formatted (arrays are re-expanded, `<`/`>`
+   are `<`-escaped), so run the repo formatter over `internal/embeddedspecs/data/` before
+   reading `git diff`; after formatting, a diff touching any file whose schema you did not change
+   MUST be investigated as a regression (the guards are `TestBuildSpecsPreservingKeepsRealCitations`
+   and `TestWriteSpecsNeverRemovesHelpHashes` in `internal/embeddedspecs/generate_test.go`). Facts
+   MUST NOT be hand-edited in the JSON: `TestRoundTrip` requires the JSON schema to equal the
+   registry, so change the Go schema and regenerate;
 3. replace each remaining thin citation with a real `--help`/man/source citation (see "Citation
    methodology"; a flag you cannot find in the tool's own help is a flag you must not model);
 4. record the tool's `--help` hash (`spec-drift-check --embedded --record` in the same pinned
@@ -282,12 +297,13 @@ changes NO verdict. For a CLI a first-party plugin instructs, the route is there
    on-PATH binary is added to `specdrift.Exempt` / the `.sh` helper-script rule instead) and add
    the package to that check's `nativeBuildInputs` in `flake.nix`;
 5. add `approve` rows (and guardrail `not-approve`/`reject` rows) to
-   `internal/goldencorpus/testdata/corpus.json` and grade them with `evaluate --corpus`.
+   `internal/goldencorpus/testdata/corpus.json` and grade them with `evaluate --corpus` (see
+   "Validation": it reports misses but exits 0), and add the shapes to the executable inventory
+   in `internal/effectpolicy/plugin_forms_test.go` (`TestPluginInstructedForms`).
 
-This supersedes the older "custom specs MUST NOT go in embeddedspecs/data" sentence for those
-tools only; a tool NO plugin ships still routes to the user/repo layer as below. (The former
-sentence that "the backfill of all 45 embedded specs is out of this packet's scope" was stale:
-the back-fill landed in `aa2eb014`, tc-o14i5.4.3.)
+A tool NO plugin ships (a machine- or repo-local custom tool) is the only case that routes to the
+user/repo layer as below; it never reaches the engine, and its spec is documentation plus `lint`
+coverage only.
 
 For a **custom** command's spec:
 
@@ -318,10 +334,22 @@ From the module root (`packages/claude-extended-tool-approver`):
 - **Built-in regeneration**: `go run ./cmd/claude-extended-tool-approver lint --embedded` lints
   the compiled-in `internal/embeddedspecs.FS`. After `go run ./cmd/genspecs` (which keeps every
   real citation already on disk) and filling the new facts' citations, re-run it (`go run`
-  recompiles the embed each time) and confirm zero HARD findings; `go test
-./internal/embeddedspecs/...` (`TestRoundTrip`) must also pass — the JSON must equal
-  `cmddesc.DefaultRegistry()` exactly. The older "temporarily overwrite then discard" recipe
-  applies only to re-sourcing the citations of a schema you are NOT changing.
+  recompiles the embed each time) and confirm zero HARD findings. To re-source the citations of
+  a schema you are NOT changing, edit the `citation` fields in
+  `internal/embeddedspecs/data/<name>.json` in place and keep the edit: the built-in back-fill has
+  landed (`aa2eb014`), `TestRoundTrip` ignores citations, and genspecs preserves them.
+- **Go tests (the practical stand-in for gate 4)**: `go test ./...` from the module root MUST
+  pass. It is long: run it in the background or with an explicit timeout of several minutes. The
+  parts that matter here: `TestRoundTrip` (`internal/embeddedspecs`: the JSON must equal
+  `cmddesc.DefaultRegistry()` exactly), `TestCorpusWellFormed` (`internal/goldencorpus`:
+  STRUCTURAL validity of `corpus.json` rows only — it grades no verdict), and the verdict-bearing
+  tests `TestPluginInstructedForms` / `TestGolden` (`internal/effectpolicy`) and the per-family
+  `internal/cmddesc/*_test.go` files. No test replays `corpus.json` verdicts, so also run
+  `go run ./cmd/claude-extended-tool-approver evaluate --corpus
+internal/goldencorpus/testdata/corpus.json` (add `--format json` to list the `miss` rows): it
+  exits 0 whatever the result, so compare the `Miss` count and the case names against the
+  baseline before your change, and no row you added may be a miss. There is still no runner for
+  the per-flag goldens sidecar format (see "Generated goldens").
 - **Custom / bare-file spec**: `go run ./cmd/claude-extended-tool-approver lint
 <path-to-your-spec.json>` lints one file directly (no `Repository`/layer machinery, so no
   overrides-conflict detection — that only fires when loaded through `--user-dir`/`--repo-dir`).
@@ -346,6 +374,8 @@ From the module root (`packages/claude-extended-tool-approver`):
 - [ ] Custom-command output routed to `specfmt.DefaultUserDir()`/`DefaultRepoDir()` (never
       `internal/userconfig`'s directory, never `internal/embeddedspecs/data/`)
 - [ ] `lint` run against the spec reports zero new HARD findings
+- [ ] For a workspace-instructed CLI: the schema is in the Go registry (not only in JSON), and
+      `go test ./...` passes and `evaluate --corpus` shows no new `miss` rows
 
 ## References
 
