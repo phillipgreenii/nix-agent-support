@@ -30,7 +30,7 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   "Cross-cutting capabilities"), which are capabilities but NOT entity types — neither is tied to
   one kind of external record.
 - **Entity type** — a capability tied to one kind of external record: one of `pr`, `issue`, `ci`,
-  `scm`, or `alert` in this set's extent (`thread`/`calendar`/`agentsession` are likewise entity
+  `scm`, or `alert` in this set's extent (`thread`/`calendar`/`mail`/`agentsession` are likewise entity
   types). Every entity type is also a capability; `attention`/`search` are the
   two capabilities that are not entity types.
 - **`pr`** — a pull/merge request: identity and review/feedback state. Carries no
@@ -45,6 +45,10 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   no remote entity.
 - **`alert`** — a currently-firing signal from a monitoring system: read-only, firing-only
   (`INV-ALERT-1`), with backends that implement `attention` directly (`INV-ALERT-7`).
+- **`mail`** — an email message in a mailbox: read-only listing and search, mark read/unread,
+  archive/unarchive, and attachment fetch, with NO delete operation of any kind (`INV-MAIL-1`).
+  Its sender is one `"Name <email>"` string (`INV-MAIL-2`), and its optional mailbox-priority tag is
+  never an attention input (`INV-MAIL-3`).
 - **Alert** — the `alert` entity's shared wire shape: a provider-namespaced stable `id`
   (`INV-ALERT-3`), `provider`, `title`, optional `description`/`severity`/`acknowledged`/`url`,
   `since`, flat `attributes`, per-provider `extensions` (opaque to Tier 1), `as_of`, and an

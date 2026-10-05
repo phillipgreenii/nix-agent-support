@@ -165,7 +165,7 @@ distinction come from the behavior-docs method
 ## Registry
 
 - **`INV-REG-1`** <!-- uuid: 0b8b254c-3fcf-46ce-bbe7-1c9b1c03be0d --> — The `connector.<type>`
-  registry MUST be flat and type-keyed at the top level. `issue`, `ci`, `pr`, and `calendar` MUST
+  registry MUST be flat and type-keyed at the top level. `issue`, `ci`, `pr`, `calendar`, and `mail` MUST
   be list-valued (zero or more simultaneously-registered backends); `scm` MUST be single-valued
   (exactly zero or one). Every registry value MUST be a bare backend binary name — there MUST be
   no `exec:`-prefix or other built-in/external distinction, because nothing is compiled into the
@@ -179,7 +179,8 @@ distinction come from the behavior-docs method
 
   A capability's registry entry naming more than one backend resolves differently depending on
   whether the op is **id-keyed** (`show`, `files`, `commits`, `review submit`, `review pending`, `comment`, `transition`, `update`,
-  `close`, `deps`, `get_logs`, `rerun_failed`, every `scm` targeted verb) or an **id-less write**
+  `close`, `deps`, `get_logs`, `rerun_failed`, `mail`'s `show`, `mark_read`, `mark_unread`, `archive`,
+  `unarchive` and `fetch_attachment`, every `scm` targeted verb) or an **id-less write**
   (`issue create` today, the only member) — a split fixed
   by bead pg2-2j5ac.17.2's own operator ruling, deliberately narrow (see this rule's final
   paragraph):
@@ -404,7 +405,8 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   credential/logic library across backends), so this invariant — not each backend's own private
   copy — is what keeps `pg-connector-calendar-osx-bridge` and a future `pg-connector-mail-osx-bridge`
   from silently drifting apart, even though the `important_people` config VALUES themselves are
-  shared between them via nix.
+  shared between them via nix. (How a `mail` backend splits a sender string into the name and
+  email these rules compare against is fixed by `INV-MAIL-2`.)
 
   A backend MUST treat "organizer matching" as attendee-list matching only:
   `schema.CalendarEvent` (ported from `calendarapi.Event` [landed: `pg2-p9ap3`]) carries no
@@ -465,6 +467,45 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   NOT report an event the user has declined (self RSVP `declined`, compared case-insensitively) in
   its `list_attention` result, in any tier. Declined events remain visible to the non-attention
   ops (`list`, `list_events`), which report the calendar, not what needs attention.
+
+## Mail capability
+
+> The `mail` capability's Tier-1 contract: `pkg/provider/mail`, `pkg/schema/mail.go`, and
+> `ADR 0062` Decision item 10. The rules below bind every `mail` backend.
+
+- **`INV-MAIL-1`** <!-- uuid: 789aae82-9baf-46cd-b3ba-c0ab2193fad9 --> — A `mail` backend MUST NOT expose any delete operation
+  (permanently remove, move to trash, expunge, purge, or any equivalent), and the `mail.Provider`
+  interface MUST NOT gain one: its op set is exactly `list`, `show`, `search_messages`, `mark_read`,
+  `mark_unread`, `archive`, `unarchive`, and `fetch_attachment` (`INTF-WIRE`'s op catalog). `archive`
+  is NOT deletion: the archived message MUST remain retrievable (`show`, `unarchive`). A removal
+  path under any other name is a violation. Reason: the operator's firm requirement, "no deleting
+  will occur", applies to the whole stack — the Tier-1 interface, every Tier-2 backend, and the
+  bridge behind it — so that no bug, misuse, or prompt-injected caller can destroy mail through
+  pg-connector. A test asserts both the interface's method set and the dispatch table's registered
+  ops.
+- **`INV-MAIL-2`** <!-- uuid: fdf56447-c6bd-4c30-902d-249fe696e677 --> — A message's sender is carried on the wire as ONE
+  `"Name <email>"` string (`schema.MailMessage.Sender`), not as separate name and email fields. A
+  `mail` backend matching a sender against a configured `important_people` list MUST first split
+  that string into a name and an email, then apply `INV-CAL-1`'s rules to the result unchanged
+  (case-insensitive; an entry containing `@` compares to the email only, with no domain
+  normalization; any other entry compares to the name only, by exact match). The split: after
+  trimming surrounding whitespace, if the string ends with `>` and contains a `<`, the email is
+  the text between the LAST `<` and the final `>` (trimmed) and the name is the text before that
+  `<` (trimmed, with one pair of enclosing double quotes removed when present); otherwise, if the
+  trimmed string contains `@`, the whole string is the email and the name is empty; otherwise the
+  whole string is the name and the email is empty. An empty name or email MUST match no entry. The
+  parse is fixed here so that every `mail` backend and the `calendar` backend agree on identity
+  matching (the same drift-prevention purpose as `INV-CAL-1`).
+- **`INV-MAIL-3`** <!-- uuid: 5940c8e2-9b77-42f5-bf5c-bdf26a8796c2 --> — A `mail` backend MUST NOT derive any attention `severity`
+  from a message's `mailbox_priority` or from an `important_people` match: mail attention, if a
+  backend answers `list_attention` for mail at all, is time-driven only, exactly as `INV-CAL-4`
+  rules for `calendar`, and a `mail` backend is NOT required to be registered under
+  `attention.sources` (operator rulings, Phillip, 2026-10-05, beads `pg2-qc5uc.1` and
+  `pg2-qc5uc.2`: attention for email is expected to be decided outside pg-connector, in `pg-desk`,
+  because it needs information pg-connector does not have; the operator will re-evaluate
+  `important_people` and mailbox tiers later). `mailbox_priority` is an OPTIONAL static tag on the
+  wire and MAY be unset; an unset value is the expected steady state until tiers are decided, not
+  a defect.
 
 ## Agent session attention
 

@@ -68,7 +68,7 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule,
   the optional `AuthChecker` sub-interface); the operator CLI surface for the landed
   entity-type capabilities (`pr`, `issue`, `ci`, `scm`, and `alert` with its `list`/`show`/`history`
-  verbs, firing-only contract, and direct attention implementation) plus `auth status`, `config validate`, and
+  verbs, firing-only contract, and direct attention implementation), plus `mail` (its Tier-1 interface, wire schema and op catalog, with no delete operation) plus `auth status`, `config validate`, and
   `config show`; the `pr`/`issue` `list` op and its named-query resolution; the `--backend`
   targeted/fan-out pinning flag; the id-keyed-vs-id-less split in multi-instance targeted-op
   resolution (an id-keyed op tries each registered backend in order, an id-less write hard-fails

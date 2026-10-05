@@ -28,7 +28,10 @@ import (
 // provider-interface packet (bead pg2-eezd1.6), which likewise builds
 // pkg/provider/agentsession from the moment it lands — same precedent as
 // thread/calendar's own additions above.
-var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread", "calendar", "agentsession", "alert"}
+// "mail" was appended by the mail docket's own Tier-1 capability packet
+// (bead pg2-qc5uc.4), which likewise builds pkg/provider/mail from the
+// moment it lands — same precedent again.
+var capabilityPackages = []string{"pr", "issue", "ci", "scm", "attention", "search", "thread", "calendar", "agentsession", "alert", "mail"}
 
 // systemNamingTokens is the "names no backend/system (github/jira/slack/…)"
 // half of INV-CAP-1's acceptance criteria. It is deliberately a curated

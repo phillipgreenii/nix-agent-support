@@ -124,6 +124,31 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    (`pg-connector-alert-grafana`, and a deferred `pg-connector-alert-pagerduty`) are separate
    work; this item records the Tier-1 entity, and the Grafana backend implements it.
 
+10. **A new entity-type capability (`mail`) was added under this same model, without changing
+    the model itself.** `mail` is a first-class Tier-1 entity (peer of `pr`/`issue`/`ci`/`scm`/
+    `thread`/`calendar`/`alert`): one capability-scoped `mail.Provider` Go interface
+    (`packages/pg-connector/pkg/provider/mail`), its own independently-versioned
+    `schema.MailSchemaVersion`, and a list-valued `connector.mail` registry entry (never
+    single-valued like `scm`). It follows every rule above identically, and, like `calendar`, it is a
+    NEW capability rather than a backend of an existing one. Its op set is read (`list`, `show`,
+    search), mark read/unread, archive/unarchive, and attachment fetch; it has **no delete operation,
+    now or later** (invariant `INV-MAIL-1`, in `packages/pg-connector/docs/behavior/invariants.md`).
+    This item does **not** restate item 8's distinction between a shared local daemon and a
+    credential-resolution library; it relies on it. The Tier-2 backend (`pg-connector-mail-osx-bridge`)
+    talks to the same local shared daemon item 8 describes (now named `pg-osx-bridge-api`, in
+    `phillipgreenii-nix-support-apps`), and `mail` records its **own** reason for routing through it:
+    not a TCC necessity (Apple Events automation is a different TCC permission category from
+    EventKit's, so mail does not need the daemon's process-identity treatment the way `calendar`
+    did), but **architectural consistency** (every Tier-2 backend stays uniformly simple and
+    stateless, a thin socket client) and **readiness** for future OS integrations that DO need the
+    daemon's TCC treatment. The bridge-side mechanism for driving Mail.app was ruled by the operator
+    (Phillip, 2026-10-05, recorded as the close reason of bead `pg2-qc5uc.1`), quoted here
+    without addition: "Option A -- in-process NSAppleScript/ScriptingBridge inside pg-osx-bridge-api;
+    no subprocess, guards unchanged; adds AppleEvents grant for Mail to the bridge; needs new ADR
+    superseding 0044 + updated allowlist.golden; backend talks only to the bridge mail service;
+    helper options B1/B2 rejected." (The "0044" there is `phillipgreenii-nix-support-apps` ADR 0044,
+    which that repo's own bridge work supersedes; this repo does not.)
+
 ## Consequences
 
 ### Positive
@@ -163,6 +188,12 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
   the extent. The Grafana Tier-2 backend (`pg-connector-alert-grafana`, bead `pg2-rejc3`) has
   since landed with `list`, `show` and `list_attention`, and its `list_history` (bead `pg2-rwuhs`)
   has since landed too (per-rule enumeration and state-history parsing live in the backend).
+- As of bead `pg2-qc5uc` (the "pg-connector-mail-osx-bridge: mail Tier-2 backend" docket,
+  decomposing bead `pg2-no8ic`'s design), the `mail` entity-type capability is likewise added to
+  this ADR's Decision (item 10, above) and to the accompanying behavior-docs set's extent. Only the
+  Tier-1 capability (interface, wire schema, dispatch table) is covered by that first packet; the
+  concrete Tier-2 backend, the CLI verb group and the registry entry are separate packets of the
+  same docket, and `mail create`/`mail reply` are not built at all.
 - Behavior-docs-first ordering, having been skipped for the first ten packets, cannot be
   retroactively un-skipped; this ADR and its behavior-docs set are a backfill, not evidence the
   process was followed from day one.
@@ -212,3 +243,5 @@ none of them well, and a future backend is free to pick whatever chain fits its 
   `pg2-hidkm`.
 - Extended by bead `pg2-si5jo`'s design (decomposed as docket `pg2-o2dmu`), which added the
   `calendar` entity-type capability (Decision item 8, above) under this same Tier-1/Tier-2 model.
+- Extended again by bead `pg2-no8ic`'s design (decomposed as docket `pg2-qc5uc`), which added the
+  `mail` entity-type capability (Decision item 10, above) under this same Tier-1/Tier-2 model.
