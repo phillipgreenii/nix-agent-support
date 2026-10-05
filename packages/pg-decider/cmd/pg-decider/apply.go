@@ -16,7 +16,9 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
+	"github.com/phillipgreenii/pg-decider/internal/failure"
 	"github.com/phillipgreenii/pg-decider/internal/item"
+	"github.com/phillipgreenii/pg-decider/internal/metrics"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
@@ -29,9 +31,15 @@ var decideFn = func(v *view.View, entityType string) action.PlanResult {
 // through; tests swap it. The view read has its own seam (view.ExecCommand).
 var applyCommand apply.CmdFactory = exec.CommandContext
 
-// applyHooks returns the per-action hooks of an apply run. The audit and
-// failure packets register theirs here; the audit hook is installed.
-var applyHooks = func() []apply.Hook { return []apply.Hook{audit.New()} }
+// applyHooks returns the per-action hooks of an apply run, in call order: the
+// audit comment, then the failure counter and escalation, then the run
+// counters (which count the escalations the failure hook created).
+var applyHooks = func(v *view.View, typ, id string) []apply.Hook {
+	fail := failure.New(v, typ, id)
+	run := metrics.New(v, typ, id)
+	fail.OnEscalate(run.Escalated)
+	return []apply.Hook{audit.New(), fail, run}
+}
 
 // applyFn is the implementation of `apply` behavior. It runs only after the
 // view was freshly read (retrieve it with viewFromContext); it is nil
@@ -55,7 +63,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 	}
 	plan := decideFn(v, typ)
 	res := apply.Run(ctx, apply.Input{
-		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(),
+		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id),
 		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
 	})
 	for _, ev := range res.Events {

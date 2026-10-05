@@ -1,0 +1,126 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "url": "https://example.test/acme/widgets/pull/42",
+    "draft": false,
+    "merged": false,
+    "labels": ["bug", "needs-review"],
+    "comments": [
+      {
+        "id": "c1",
+        "author": "review-bot",
+        "body": "please add a test",
+        "resolved": false
+      },
+      {
+        "id": "c2",
+        "author": "teammate",
+        "body": "done",
+        "resolved": true
+      }
+    ],
+    "head_sha": "9f3c1e2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "base_sha": "1111111111111111111111111111111111111111",
+    "mergeable": "MERGEABLE",
+    "checks_rollup": "success",
+    "review_decision": "REVIEW_REQUIRED",
+    "node_id": "PR_node_42"
+  },
+  "decorations": {
+    "relationship": "mine",
+    "dispositions": [
+      {
+        "comment_id": "c1",
+        "computed": "fix",
+        "override": null
+      },
+      {
+        "comment_id": "c2",
+        "computed": "resolved",
+        "override": "ignore"
+      }
+    ],
+    "urgency": "ready",
+    "category": "ready-to-land"
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": ["fix-ci"],
+    "force_review": false,
+    "decider": {
+      "pr": {
+        "last_seq": "5"
+      }
+    }
+  },
+  "review": {
+    "state": "none",
+    "pending": false,
+    "head_sha": "9f3c1e2",
+    "escalation": {
+      "state": "none",
+      "bead_ids": []
+    }
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "relation": "work",
+      "url": "https://example.test/issues/bd-1",
+      "state": "open",
+      "labels": ["pr-fix"],
+      "metadata": {
+        "kind": "fix-ci"
+      },
+      "assignee": "",
+      "origins": [
+        {
+          "origin": "derived:branch-name"
+        },
+        {
+          "origin": "external:agent",
+          "at": "2026-10-01T11:00:00Z",
+          "reason": "manual link"
+        }
+      ]
+    },
+    {
+      "type": "thread",
+      "id": "T1",
+      "relation": "references",
+      "origins": []
+    },
+    {
+      "type": "issue",
+      "id": "wb-anchor",
+      "relation": "work",
+      "state": "open",
+      "labels": [],
+      "metadata": {
+        "dedup_key": "pr:acme/widgets#42:anchor",
+        "kind": "anchor"
+      },
+      "title": "acme/widgets#42: Add retry to client",
+      "origins": []
+    }
+  ],
+  "links_as_of": "2026-10-01T12:00:00Z"
+}
