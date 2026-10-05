@@ -1,0 +1,67 @@
+{
+  "contract": "pg-decider.work-item-keys/v1",
+  "kinds": {
+    "anchor": [
+      "author",
+      "base",
+      "branch",
+      "dedup_key",
+      "draft",
+      "issue_type",
+      "labels",
+      "pr_number",
+      "repo",
+      "state",
+      "title",
+      "url"
+    ],
+    "fix-ci": [
+      "branch",
+      "dedup_key",
+      "failing_builds",
+      "failing_checks",
+      "head_sha",
+      "issue_type",
+      "labels",
+      "parent",
+      "pr_number",
+      "repo",
+      "title"
+    ],
+    "process-feedback": [
+      "branch",
+      "covered_comments",
+      "dedup_key",
+      "issue_type",
+      "labels",
+      "parent",
+      "pr_number",
+      "repo",
+      "title"
+    ],
+    "resolve-conflict": [
+      "base",
+      "base_sha",
+      "branch",
+      "dedup_key",
+      "head_sha",
+      "issue_type",
+      "labels",
+      "parent",
+      "pr_number",
+      "repo",
+      "title"
+    ],
+    "review-pr": [
+      "branch",
+      "dedup_key",
+      "head_sha",
+      "issue_type",
+      "ownership",
+      "parent",
+      "pr_number",
+      "repo",
+      "title"
+    ]
+  }
+}
