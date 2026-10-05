@@ -45,8 +45,18 @@ const FileName = "events.jsonl"
 const MaxBytes = 5 << 20
 
 // MaxErrorBytes caps the error message copied into an event; the log is for
-// triage, not forensics.
-const MaxErrorBytes = 300
+// triage, not forensics. An over-long message is cut in the MIDDLE
+// (TruncateHeadTail), keeping ErrorHeadBytes from the front and the rest of
+// the budget from the back: a wrapped exec failure reads "<command line>:
+// <exit status>: <stderr>", and the diagnostic (the stderr) is at the END, so
+// the former head-only 300-byte cut dropped exactly the part that tells a
+// connect failure from a 502/504 or a timeout (bead pg2-daktd).
+const MaxErrorBytes = 1024
+
+// ErrorHeadBytes is how much of the front of a truncated error is kept: enough
+// to identify the failing command, leaving the remainder of MaxErrorBytes for
+// the tail.
+const ErrorHeadBytes = 256
 
 // Off is the value of a backend's events-file environment variable that
 // disables its event log.
@@ -79,7 +89,8 @@ type Base struct {
 	DurationMS int64  `json:"duration_ms"`
 	// ErrorCode is the wire error.code the call answered with.
 	ErrorCode string `json:"error_code,omitempty"`
-	// Error is the (truncated) error message, for diagnosis.
+	// Error is the error message, for diagnosis; one longer than MaxErrorBytes
+	// keeps its head and tail (TruncateHeadTail).
 	Error string `json:"error,omitempty"`
 }
 
@@ -102,7 +113,7 @@ func NewBase(service, op, version string, start, end time.Time, err error) Base 
 		ErrorCode:  code,
 	}
 	if err != nil {
-		b.Error = Truncate(err.Error(), MaxErrorBytes)
+		b.Error = TruncateHeadTail(err.Error(), MaxErrorBytes, ErrorHeadBytes)
 		b.Msg = fmt.Sprintf("%s failed: %s", op, code)
 	} else {
 		b.Msg = op + " ok"
@@ -146,6 +157,36 @@ func Truncate(s string, max int) string {
 }
 
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
+
+// elisionMarker is what replaces the dropped middle of a TruncateHeadTail
+// result; n is the number of bytes dropped.
+func elisionMarker(n int) string { return fmt.Sprintf(" ...[%d bytes elided]... ", n) }
+
+// TruncateHeadTail cuts s to roughly max bytes by dropping its middle: the
+// first head bytes and the last max-head bytes survive, joined by an elision
+// marker that states how many bytes were dropped (so the result is at most
+// max plus the marker's length). Both cut points land on rune boundaries, so
+// the log line stays valid UTF-8. A string already within max is unchanged.
+func TruncateHeadTail(s string, max, head int) string {
+	if len(s) <= max {
+		return s
+	}
+	if head < 0 {
+		head = 0
+	}
+	if head > max {
+		head = max
+	}
+	headEnd := head
+	for headEnd > 0 && !isRuneStart(s[headEnd]) {
+		headEnd--
+	}
+	tailStart := len(s) - (max - head)
+	for tailStart < len(s) && !isRuneStart(s[tailStart]) {
+		tailStart++
+	}
+	return s[:headEnd] + elisionMarker(tailStart-headEnd) + s[tailStart:]
+}
 
 // ---------------------------------------------------------------------
 // Timing every call of a dispatch table.

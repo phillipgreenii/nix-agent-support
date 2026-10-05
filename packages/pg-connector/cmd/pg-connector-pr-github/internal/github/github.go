@@ -54,16 +54,22 @@ import (
 // Provider is the builtin GitHub VCS provider.
 type Provider struct {
 	gh ghRunner
+	// retry bounds the retry of transient failures on read-only gh calls (see
+	// retry.go); the zero value means a single attempt.
+	retry RetryPolicy
+	// retryGuard, when set, runs before every retry (see SetRetryGuard).
+	retryGuard func(ctx context.Context) error
 }
 
 // New constructs a GitHub VCS provider backed by the gh CLI on PATH, reached
 // only through the token-protected CLI gateway (see ghexec.go).
 func New() *Provider {
-	return &Provider{gh: NewCLI()}
+	return &Provider{gh: NewCLI(), retry: DefaultRetryPolicy()}
 }
 
 // NewWithRunner constructs a Provider with an injected ghRunner — used by
-// tests to feed canned JSON.
+// tests to feed canned JSON. It does NOT retry transient failures (a test opts
+// in with WithRetryPolicy), so an error-path test sees exactly one gh call.
 func NewWithRunner(r ghRunner) *Provider {
 	return &Provider{gh: r}
 }
@@ -133,7 +139,11 @@ func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string
 				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
 					strings.Join(args, " "), folded, ErrGHAuthInvalid)
 			}
-			return stdout.Bytes(), fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, folded)
+			return stdout.Bytes(), &ghExecError{
+				msg:    fmt.Sprintf("gh %s: %v: %s", strings.Join(args, " "), err, folded),
+				stderr: folded,
+				err:    err,
+			}
 		}
 		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}
@@ -396,7 +406,7 @@ func (p *Provider) GetPR(ctx context.Context, repo string, number int) (*api.PR,
 		"--repo", repo,
 		"--json", prListFields,
 	}
-	raw, err := p.gh.Run(ctx, args...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +438,7 @@ func (p *Provider) GetFiles(ctx context.Context, repo string, number int) ([]api
 	if number <= 0 {
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
-	raw, err := p.gh.Run(ctx, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "files")
+	raw, err := p.runRead(ctx, readOpts{}, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "files")
 	if err != nil {
 		return nil, err
 	}
@@ -473,7 +483,7 @@ func (p *Provider) GetCommits(ctx context.Context, repo string, number int) ([]a
 	if number <= 0 {
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
-	raw, err := p.gh.Run(ctx, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "commits")
+	raw, err := p.runRead(ctx, readOpts{}, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "commits")
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +551,7 @@ func (p *Provider) listForAuthor(ctx context.Context, repo, author string) ([]ap
 		"--json", prListFields,
 		"--limit", "100",
 	}
-	raw, err := p.gh.Run(ctx, args...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +715,7 @@ func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error
 		"--",
 	}
 	args = append(args, splitSearchQualifiers(query)...)
-	raw, err := p.gh.Run(ctx, args...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -971,7 +981,7 @@ func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.P
 		if after != "" {
 			args = append(args, "-f", "after="+after)
 		}
-		raw, err := p.gh.Run(ctx, args...)
+		raw, err := p.runRead(ctx, readOpts{}, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -1030,7 +1040,7 @@ type RateLimit struct {
 // replenishes) via a dedicated, minimal GraphQL query — mirroring
 // CheckAuth's own `gh api graphql -f query=...` call shape exactly.
 func (p *Provider) ReadRateLimit(ctx context.Context) (RateLimit, error) {
-	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining resetAt } }")
+	raw, err := p.runRead(ctx, readOpts{noGuard: true}, "api", "graphql", "-f", "query={ rateLimit { remaining resetAt } }")
 	if err != nil {
 		return RateLimit{}, err
 	}
@@ -1321,8 +1331,9 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 	out := make([]api.Comment, 0)
 
 	// 1. Top-level PR comments (the "issue" comment endpoint).
-	issueRaw, err := p.gh.Run(
+	issueRaw, err := p.runRead(
 		ctx,
+		readOpts{allowEmpty: true},
 		"api",
 		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
 		"--paginate",
@@ -1347,8 +1358,9 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 	}
 
 	// 2. Inline / review-thread comments (the "pulls comments" endpoint).
-	reviewRaw, err := p.gh.Run(
+	reviewRaw, err := p.runRead(
 		ctx,
+		readOpts{allowEmpty: true},
 		"api",
 		fmt.Sprintf("repos/%s/pulls/%d/comments", repo, number),
 		"--paginate",
@@ -1417,8 +1429,9 @@ func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([
 // [bug pg2-flaes]. The `repos/<repo>/pulls/<number>/reviews` REST endpoint is
 // the one GitHub response that carries both id shapes for a review at once.
 func (p *Provider) reviewNodeIDsByDatabaseID(ctx context.Context, repo string, number int) (map[int64]string, error) {
-	raw, err := p.gh.Run(
+	raw, err := p.runRead(
 		ctx,
+		readOpts{allowEmpty: true},
 		"api",
 		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
 		"--paginate",
@@ -1740,8 +1753,9 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 	if number <= 0 {
 		return nil, fmt.Errorf("github: invalid PR number %d", number)
 	}
-	raw, err := p.gh.Run(
+	raw, err := p.runRead(
 		ctx,
+		readOpts{},
 		"pr", "view", fmt.Sprintf("%d", number),
 		"--repo", repo,
 		"--json", "reviews",
@@ -1784,7 +1798,7 @@ func (p *Provider) CheckAuth(ctx context.Context) error {
 // stateless (D3, no local self_login configuration of its own the way
 // pg-pr's sync layer carries) so it resolves that fresh on every call.
 func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
-	raw, err := p.gh.Run(ctx, "api", "graphql", "-f", "query={ viewer { login } }")
+	raw, err := p.runRead(ctx, readOpts{}, "api", "graphql", "-f", "query={ viewer { login } }")
 	if err != nil {
 		return "", err
 	}
@@ -1855,7 +1869,7 @@ func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number in
 		"-f", "name=" + name,
 		"-F", fmt.Sprintf("number=%d", number),
 	}
-	raw, err := p.gh.Run(ctx, args...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1953,7 +1967,7 @@ func (p *Provider) ReviewThreadCount(ctx context.Context, repo string, number in
 		"-f", "name=" + name,
 		"-F", fmt.Sprintf("number=%d", number),
 	}
-	raw, err := p.gh.Run(ctx, args...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
 	if err != nil {
 		return 0, err
 	}

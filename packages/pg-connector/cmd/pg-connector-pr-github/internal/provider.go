@@ -89,8 +89,24 @@ type Backend struct {
 // New returns a Backend wrapping gh. Production wiring passes a
 // *github.Provider (internal/github.New()); tests pass a fake satisfying
 // ghProvider.
+//
+// A gh that retries transient read failures (a *github.Provider) is handed the
+// GraphQL rate-limit reserve check as its retry guard, so a retry is never
+// issued once the budget has dropped below config.rate_reserve_points: the
+// reserve is checked once before the first attempt (List/Search/ListAttention)
+// and again before every retry (bead pg2-daktd).
 func New(gh ghProvider) *Backend {
-	return &Backend{gh: gh}
+	b := &Backend{gh: gh}
+	if g, ok := gh.(retryGuardSetter); ok {
+		g.SetRetryGuard(b.checkRateReserve)
+	}
+	return b
+}
+
+// retryGuardSetter is implemented by a gh provider that retries transient
+// read failures and accepts a check to run before each retry.
+type retryGuardSetter interface {
+	SetRetryGuard(func(ctx context.Context) error)
 }
 
 // WithArchiver sets where a superseded pending review's content is persisted

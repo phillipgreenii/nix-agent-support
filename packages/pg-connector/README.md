@@ -162,6 +162,20 @@ GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `
 `unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
 never changes an op's result.
 
+An event's `error` field is capped at 1024 bytes. A longer message keeps its first 256 bytes (the
+failing command) and its last bytes (the `gh` stderr, which names the cause), with an
+`...[N bytes elided]...` marker between them, so a connect failure, an HTTP 502/503/504, a timeout
+and a truncated response stay distinguishable in the log.
+
+`pg-connector-pr-github` retries transient `gh` failures on its read-only calls (show, files,
+commits, list and search reads): a connection error, an HTTP 502/503/504, or a response that is
+empty or cut off mid-JSON. It makes at most 3 attempts, backing off 500ms and then 1s, and never
+starts a retry that would not leave at least 5s of the call's own deadline. Auth failures, 4xx
+answers, rate-limit errors and not-found answers are final on the first attempt, and writes are
+never retried. Before every retry the same GraphQL reserve check that guards `list` runs again, and
+a refusal ends the retrying. When every attempt fails the call still answers `unavailable`, with
+the last attempt's stderr and a note of the earlier attempts in `error`.
+
 `pg-connector-thread-slack` follows the same pattern: it appends to
 `${XDG_STATE_HOME}/pg-connector-thread-slack/events.jsonl` (override with
 `PG_CONNECTOR_THREAD_SLACK_EVENTS_FILE`; `off` disables it), same rotation, with the common fields

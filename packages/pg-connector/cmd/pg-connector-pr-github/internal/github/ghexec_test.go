@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -318,5 +319,34 @@ func TestGHCLITokenSource_CallableWithoutInjection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gh auth token") {
 		t.Errorf("error %v does not mention the `gh auth token` exec", err)
+	}
+}
+
+// A failed gh run keeps its usual message ("gh <args>: <exit error>: <stderr>")
+// but is now a *ghExecError carrying the stderr separately, so retry
+// classification reads what gh printed and not the command line (bead
+// pg2-daktd). The exit error stays reachable through errors.As.
+func TestCLIRun_ExecFailureIsTypedAndClassifiedByStderr(t *testing.T) {
+	ghStubExitingWithStderr(t, 1, "error connecting to api.github.com\ncheck your internet connection")
+
+	cli := NewCLIWithTokenSource(&fakeTokenSource{tok: "resolved-tok"})
+	_, err := cli.Run(context.Background(), "search", "prs", "--", "label:\"rate limit\"")
+	if err == nil {
+		t.Fatal("expected error from the failing gh stub")
+	}
+	var ge *ghExecError
+	if !errors.As(err, &ge) {
+		t.Fatalf("error %T is not a *ghExecError", err)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Errorf("exit error not reachable through the typed error: %v", err)
+	}
+	want := "gh search prs -- label:\"rate limit\": exit status 1: error connecting to api.github.com\ncheck your internet connection"
+	if err.Error() != want {
+		t.Errorf("message = %q, want %q", err.Error(), want)
+	}
+	if !isTransientGHError(context.Background(), err) {
+		t.Error("connect failure not classified transient (command line mentions 'rate limit')")
 	}
 }

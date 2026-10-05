@@ -1065,3 +1065,34 @@ func (c *captureSink) last(t *testing.T) eventlog.Event {
 	}
 	return c.events[len(c.events)-1]
 }
+
+// guardedFakeGH is a fakeGH that, like *github.Provider, accepts a retry guard.
+type guardedFakeGH struct {
+	*fakeGH
+	guard func(ctx context.Context) error
+}
+
+func (g *guardedFakeGH) SetRetryGuard(f func(ctx context.Context) error) { g.guard = f }
+
+// New hands a retry-capable gh the rate-limit reserve check as its retry
+// guard (bead pg2-daktd): above the reserve it passes, below it it answers the
+// same unavailable verdict List does, and it reads the budget from the
+// call's own config.
+func TestNew_InstallsRateReserveAsRetryGuard(t *testing.T) {
+	fake := &guardedFakeGH{fakeGH: &fakeGH{rateLimit: 500}}
+	New(fake)
+	if fake.guard == nil {
+		t.Fatal("New did not install a retry guard on a gh that accepts one")
+	}
+	// 500 remaining is under the default reserve (1000).
+	err := fake.guard(context.Background())
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("guard under reserve = %v, want an unavailable verdict", err)
+	}
+	fake.fakeGH.rateLimit = defaultRateReservePoints + 1
+	if err := fake.guard(context.Background()); err != nil {
+		t.Fatalf("guard above reserve = %v, want nil", err)
+	}
+	// A gh that cannot take a guard is simply left alone.
+	_ = New(&fakeGH{})
+}

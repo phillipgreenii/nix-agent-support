@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -74,9 +75,54 @@ func TestNewBase_SuccessAndFailure(t *testing.T) {
 		t.Errorf("plain error code = %q, want unavailable", got)
 	}
 
-	long := NewBase("svc", "x", "", start, end, errors.New(strings.Repeat("e", 1000)))
-	if len(long.Error) > MaxErrorBytes+3 {
+	long := NewBase("svc", "x", "", start, end, errors.New(strings.Repeat("e", 5000)))
+	if len(long.Error) > MaxErrorBytes+len(elisionMarker(5000)) {
 		t.Errorf("error not truncated: %d bytes", len(long.Error))
+	}
+}
+
+// A long error (a gh command line carrying a large GraphQL query, followed by
+// the subprocess's stderr) must keep its TAIL: the stderr is the diagnostic,
+// and head-only truncation at 300 bytes lost it entirely (bead pg2-daktd).
+func TestNewBase_LongErrorKeepsHeadAndStderrTail(t *testing.T) {
+	start := time.Unix(100, 0)
+	end := start.Add(time.Second)
+	msg := "gh api graphql -F query=" + strings.Repeat("{ field }", 400) +
+		": exit status 1: error connecting to api.github.com: check your internet connection"
+	b := NewBase("svc", "list", "", start, end, errors.New(msg))
+	if !strings.HasPrefix(b.Error, "gh api graphql -F query=") {
+		t.Errorf("head lost: %q", b.Error[:40])
+	}
+	if !strings.HasSuffix(b.Error, "error connecting to api.github.com: check your internet connection") {
+		t.Errorf("stderr tail lost: ...%q", b.Error[len(b.Error)-120:])
+	}
+	if !strings.Contains(b.Error, "bytes elided") {
+		t.Errorf("no elision marker: %q", b.Error)
+	}
+	if len(b.Error) > MaxErrorBytes+len(elisionMarker(len(msg))) {
+		t.Errorf("error exceeds bound: %d bytes", len(b.Error))
+	}
+}
+
+func TestTruncateHeadTail(t *testing.T) {
+	if got := TruncateHeadTail("short", 100, 20); got != "short" {
+		t.Errorf("short = %q", got)
+	}
+	long := strings.Repeat("h", 50) + strings.Repeat("m", 500) + strings.Repeat("t", 50)
+	got := TruncateHeadTail(long, 100, 30)
+	if !strings.HasPrefix(got, strings.Repeat("h", 30)) || !strings.HasSuffix(got, strings.Repeat("t", 50)) {
+		t.Errorf("head/tail not preserved: %q", got)
+	}
+	if strings.Contains(got, "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm") {
+		t.Errorf("middle not elided: %q", got)
+	}
+	// Both cut points must land on rune boundaries so the line stays valid UTF-8.
+	multi := strings.Repeat("é", 300)
+	for _, head := range []int{29, 30, 31} {
+		out := TruncateHeadTail(multi, 101, head)
+		if !utf8.ValidString(out) {
+			t.Errorf("head=%d produced invalid UTF-8: %q", head, out)
+		}
 	}
 }
 
