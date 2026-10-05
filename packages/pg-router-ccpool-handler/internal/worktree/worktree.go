@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,13 @@ func isDiskFull(err error) bool {
 // regardless of whether pg-router itself runs from the canonical clone or a
 // linked worktree, which refutes that bead's nested-worktree hypothesis as the
 // mechanism (a fresh path fails identically either way).
+//
+// pg2-mmgk2: when the probe says path is not a worktree but a directory is
+// there anyway, and that directory is provably only a flox-executive husk
+// (exactly .flox/log/<regular files>), it is removed before the create so the
+// husk cannot make `git worktree add` fail "already exists" -- see reapFloxHusk
+// for the strict shape check and why this lives here rather than only in
+// cleanup.
 func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID string) (string, error) {
 	path := filepath.Join(worktreeDir, beadID)
 	// Reuse: if the path is already a worktree root, keep it. A path that does
@@ -115,6 +123,16 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 		return path, nil
 	} else if !errors.Is(err, gitclient.ErrNotARepository) && !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("probe worktree %s: %w", path, err)
+	}
+	// pg2-mmgk2: a prior worktree removal can leave a flox-executive husk at
+	// path (see reapFloxHusk); clear it so `git worktree add` does not fail
+	// with "already exists". Strictly guarded; anything else is left alone and
+	// git reports its usual error.
+	if reaped, err := reapFloxHusk(path); err != nil {
+		slog.Warn("worktree: flox husk found but not fully removed (git worktree add will report the conflict)",
+			"path", path, "err", err)
+	} else if reaped {
+		slog.Info("worktree: removed flox-executive husk blocking worktree add", "path", path)
 	}
 	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir worktree dir: %w", err)
@@ -134,4 +152,97 @@ func Ensure(ctx context.Context, open Opener, worktreeDir, repoRoot, beadID stri
 		return "", fmt.Errorf("worktree add %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// reapFloxHusk removes a leftover "husk" directory at path and reports whether
+// it did (pg2-mmgk2). The husk is what a flox `executive` process leaves behind
+// when it outlives its worktree: cleanupWorktree removes the worktree while the
+// session's flox-activations executive is still running, and the executive
+// then recreates path/.flox/log/executive.<pid>.log.<date> under the removed
+// path. The resulting directory is not a git worktree, yet makes the next
+// `git worktree add` for the same bead fail with "already exists", which the
+// handler escalates to a human.
+//
+// Deletion is deliberately paranoid, because this runs on a path derived from a
+// bead id under the operator's worktree directory. The directory is removed
+// ONLY when its entire tree is exactly:
+//
+//	path/            (a real directory, not a symlink)
+//	  .flox/         (a real directory)
+//	    log/         (a real directory)
+//	      <regular files only>
+//
+// Any other entry at any level (a .git file, a source file, a symlink anywhere,
+// a nested directory under log, a non-regular file) makes it return (false,
+// nil) and deletes NOTHING. Nothing is followed through symlinks (Lstat
+// throughout). Removal is by non-recursive os.Remove, deepest first, so a file
+// that appears after the check makes the parent removal fail instead of being
+// deleted. A path that does not exist, or an empty directory (which git
+// worktree add accepts), is left untouched.
+//
+// Callers invoke this only after the probe established path is not a git
+// worktree, so a registered live worktree (which carries a .git entry and so
+// also fails the shape check) is never a candidate.
+func reapFloxHusk(path string) (bool, error) {
+	if !isFloxHusk(path) {
+		return false, nil
+	}
+	logDir := filepath.Join(path, ".flox", "log")
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(logDir, e.Name())); err != nil {
+			return false, err
+		}
+	}
+	for _, d := range []string{logDir, filepath.Join(path, ".flox"), path} {
+		if err := os.Remove(d); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// isFloxHusk reports whether path matches the exact husk shape documented on
+// reapFloxHusk. Read-only.
+func isFloxHusk(path string) bool {
+	if !isRealDir(path) {
+		return false
+	}
+	top, err := os.ReadDir(path)
+	if err != nil || len(top) != 1 || top[0].Name() != ".flox" {
+		return false
+	}
+	floxDir := filepath.Join(path, ".flox")
+	if !isRealDir(floxDir) {
+		return false
+	}
+	mid, err := os.ReadDir(floxDir)
+	if err != nil || len(mid) != 1 || mid[0].Name() != "log" {
+		return false
+	}
+	logDir := filepath.Join(floxDir, "log")
+	if !isRealDir(logDir) {
+		return false
+	}
+	files, err := os.ReadDir(logDir)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		info, err := os.Lstat(filepath.Join(logDir, f.Name()))
+		if err != nil || !info.Mode().IsRegular() {
+			return false
+		}
+	}
+	return true
+}
+
+// isRealDir reports whether p exists and is itself a directory (Lstat: a
+// symlink to a directory is NOT one).
+func isRealDir(p string) bool {
+	info, err := os.Lstat(p)
+	return err == nil && info.IsDir()
 }

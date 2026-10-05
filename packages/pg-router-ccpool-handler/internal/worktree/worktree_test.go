@@ -340,3 +340,282 @@ func TestEnsure_createsFreshPerBeadWorktree_realGitClient(t *testing.T) {
 		t.Errorf("redispatch path = %q, want %q", got2, want)
 	}
 }
+
+// --- pg2-mmgk2: flox-executive husk self-heal --------------------------------
+
+// makeHusk builds the leftover a live flox executive recreates after its
+// worktree was removed: path/.flox/log/executive.<pid>.log.<date> only.
+func makeHusk(t *testing.T, path string) string {
+	t.Helper()
+	logDir := filepath.Join(path, ".flox", "log")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(logDir, "executive.12345.log.2026-10-05")
+	if err := os.WriteFile(f, []byte("log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func mustExist(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Lstat(p); err != nil {
+		t.Errorf("%s must be untouched, got %v", p, err)
+	}
+}
+
+func TestReapFloxHusk_removesExactHusk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "zr-husk")
+	makeHusk(t, path)
+	// A second log file and a rotated one are still just regular files.
+	if err := os.WriteFile(filepath.Join(path, ".flox", "log", "executive.99.log.2026-10-04"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reaped, err := reapFloxHusk(path)
+	if err != nil || !reaped {
+		t.Fatalf("reapFloxHusk = (%v, %v), want (true, nil)", reaped, err)
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("husk dir must be gone, Lstat err = %v", err)
+	}
+	// The parent worktree dir itself is never touched.
+	mustExist(t, filepath.Dir(path))
+}
+
+func TestReapFloxHusk_refusesAnythingElse(t *testing.T) {
+	mk := func(t *testing.T) (path, keep string) {
+		path = filepath.Join(t.TempDir(), "zr-x")
+		makeHusk(t, path)
+		return path, ""
+	}
+	cases := []struct {
+		name string
+		mut  func(t *testing.T, path string) (sentinel string)
+	}{
+		{"extra file at top level", func(t *testing.T, p string) string {
+			f := filepath.Join(p, "README.md")
+			_ = os.WriteFile(f, []byte("x"), 0o644)
+			return f
+		}},
+		{"git file present (worktree-shaped)", func(t *testing.T, p string) string {
+			f := filepath.Join(p, ".git")
+			_ = os.WriteFile(f, []byte("gitdir: /nowhere\n"), 0o644)
+			return f
+		}},
+		{"extra entry under .flox", func(t *testing.T, p string) string {
+			f := filepath.Join(p, ".flox", "env.json")
+			_ = os.WriteFile(f, []byte("{}"), 0o644)
+			return f
+		}},
+		{"nested dir under log", func(t *testing.T, p string) string {
+			d := filepath.Join(p, ".flox", "log", "sub")
+			_ = os.MkdirAll(d, 0o755)
+			return d
+		}},
+		{"symlink inside log", func(t *testing.T, p string) string {
+			tgt := filepath.Join(filepath.Dir(p), "precious")
+			_ = os.WriteFile(tgt, []byte("keep"), 0o644)
+			l := filepath.Join(p, ".flox", "log", "link")
+			if err := os.Symlink(tgt, l); err != nil {
+				t.Fatal(err)
+			}
+			return tgt
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, _ := mk(t)
+			sentinel := c.mut(t, path)
+			reaped, err := reapFloxHusk(path)
+			if reaped || err != nil {
+				t.Fatalf("reapFloxHusk = (%v, %v), want (false, nil)", reaped, err)
+			}
+			mustExist(t, sentinel)
+			mustExist(t, filepath.Join(path, ".flox", "log", "executive.12345.log.2026-10-05"))
+		})
+	}
+}
+
+func TestReapFloxHusk_refusesSymlinks(t *testing.T) {
+	t.Run("path itself is a symlink to a husk-shaped dir", func(t *testing.T) {
+		base := t.TempDir()
+		real := filepath.Join(base, "real")
+		makeHusk(t, real)
+		link := filepath.Join(base, "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		if reaped, err := reapFloxHusk(link); reaped || err != nil {
+			t.Fatalf("= (%v, %v), want (false, nil)", reaped, err)
+		}
+		mustExist(t, link)
+		mustExist(t, filepath.Join(real, ".flox", "log", "executive.12345.log.2026-10-05"))
+	})
+	t.Run(".flox is a symlink", func(t *testing.T) {
+		base := t.TempDir()
+		elsewhere := filepath.Join(base, "elsewhere")
+		makeHusk(t, elsewhere) // elsewhere/.flox/log/...
+		path := filepath.Join(base, "zr-y")
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(elsewhere, ".flox"), filepath.Join(path, ".flox")); err != nil {
+			t.Fatal(err)
+		}
+		if reaped, err := reapFloxHusk(path); reaped || err != nil {
+			t.Fatalf("= (%v, %v), want (false, nil)", reaped, err)
+		}
+		mustExist(t, filepath.Join(elsewhere, ".flox", "log", "executive.12345.log.2026-10-05"))
+	})
+	t.Run("log is a symlink", func(t *testing.T) {
+		base := t.TempDir()
+		elsewhere := filepath.Join(base, "logs")
+		if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		keep := filepath.Join(elsewhere, "executive.1.log")
+		_ = os.WriteFile(keep, nil, 0o644)
+		path := filepath.Join(base, "zr-z")
+		if err := os.MkdirAll(filepath.Join(path, ".flox"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(elsewhere, filepath.Join(path, ".flox", "log")); err != nil {
+			t.Fatal(err)
+		}
+		if reaped, err := reapFloxHusk(path); reaped || err != nil {
+			t.Fatalf("= (%v, %v), want (false, nil)", reaped, err)
+		}
+		mustExist(t, keep)
+	})
+}
+
+func TestReapFloxHusk_missingAndEmptyUntouched(t *testing.T) {
+	base := t.TempDir()
+	if reaped, err := reapFloxHusk(filepath.Join(base, "absent")); reaped || err != nil {
+		t.Errorf("missing path = (%v, %v), want (false, nil)", reaped, err)
+	}
+	empty := filepath.Join(base, "empty")
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if reaped, err := reapFloxHusk(empty); reaped || err != nil {
+		t.Errorf("empty dir = (%v, %v), want (false, nil)", reaped, err)
+	}
+	mustExist(t, empty) // git worktree add accepts an empty dir; leave it
+}
+
+// Ensure with a fake opener: a husk at the (non-repo) path is cleared before
+// the create, and the create is then attempted.
+func TestEnsure_clearsFloxHuskBeforeCreate(t *testing.T) {
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-xvbqa.2")
+	makeHusk(t, path)
+	o := newRecOpener(map[string]bool{path: true})
+
+	if _, err := Ensure(context.Background(), o.Open, wtDir, "/repo", "zr-xvbqa.2"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("husk must be removed before create (fake create does not recreate it); err=%v", err)
+	}
+	if len(o.wtm.calls) != 1 {
+		t.Errorf("expected one CreateWorktree call, got %d", len(o.wtm.calls))
+	}
+}
+
+// Ensure with a fake opener: a dir with ANY other content is not touched.
+func TestEnsure_leavesNonHuskDirAlone(t *testing.T) {
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-keep")
+	makeHusk(t, path)
+	precious := filepath.Join(path, "work.txt")
+	if err := os.WriteFile(precious, []byte("uncommitted work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := newRecOpener(map[string]bool{path: true})
+
+	_, _ = Ensure(context.Background(), o.Open, wtDir, "/repo", "zr-keep")
+	mustExist(t, precious)
+	mustExist(t, filepath.Join(path, ".flox", "log", "executive.12345.log.2026-10-05"))
+}
+
+func realOpener(t *testing.T) Opener {
+	t.Helper()
+	homeDir := t.TempDir()
+	return func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
+		return gitclient.New(ctx, dir,
+			gitclient.WithHome(homeDir),
+			gitclient.WithoutInherited("SSH_AUTH_SOCK"),
+			gitclient.WithEnv("GIT_CONFIG_NOSYSTEM", "1"))
+	}
+}
+
+// Real git: reproduces the incident. Without the fix, `git worktree add` fails
+// "already exists" on the husk; with it, Ensure yields a real worktree.
+func TestEnsure_floxHusk_realGitClient(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repoRoot := initFixtureRepo(t, "main")
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-xvbqa.2")
+	makeHusk(t, path)
+
+	got, err := Ensure(context.Background(), realOpener(t), wtDir, repoRoot, "zr-xvbqa.2")
+	if err != nil {
+		t.Fatalf("Ensure over a flox husk: %v", err)
+	}
+	if got != path {
+		t.Errorf("path = %q, want %q", got, path)
+	}
+	if _, err := os.Stat(filepath.Join(got, ".git")); err != nil {
+		t.Fatalf("expected a real linked worktree at %s: %v", got, err)
+	}
+}
+
+// Real git: a dir holding anything besides the husk shape keeps failing exactly
+// as before and is left intact.
+func TestEnsure_nonHusk_realGitClient_stillFailsAndKeepsContent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repoRoot := initFixtureRepo(t, "main")
+	wtDir := t.TempDir()
+	path := filepath.Join(wtDir, "zr-other")
+	logFile := makeHusk(t, path)
+	precious := filepath.Join(path, "notes.txt")
+	if err := os.WriteFile(precious, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Ensure(context.Background(), realOpener(t), wtDir, repoRoot, "zr-other")
+	if err == nil {
+		t.Fatal("Ensure must still fail on a non-husk leftover dir")
+	}
+	mustExist(t, precious)
+	mustExist(t, logFile)
+}
+
+// Real git: a registered live worktree that happens to contain .flox/log files
+// is reused and never reaped (the probe sees a repo, and .git is present).
+func TestEnsure_registeredWorktreeWithFloxLogsIsReusedNotReaped(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repoRoot := initFixtureRepo(t, "main")
+	wtDir := t.TempDir()
+	open := realOpener(t)
+	path, err := Ensure(context.Background(), open, wtDir, repoRoot, "zr-live")
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	logFile := makeHusk(t, path)
+
+	got, err := Ensure(context.Background(), open, wtDir, repoRoot, "zr-live")
+	if err != nil || got != path {
+		t.Fatalf("Ensure (reuse) = (%q, %v)", got, err)
+	}
+	mustExist(t, logFile)
+	mustExist(t, filepath.Join(path, ".git"))
+}
