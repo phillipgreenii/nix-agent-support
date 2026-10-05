@@ -42,6 +42,13 @@ let
     # validateBackendList rejects an explicit `connector.alert: []` the
     # same way.
     alert = if cfg.connector.alert == [ ] then null else cfg.connector.alert;
+    # mail (docket pg2-qc5uc): mirrors thread/calendar's identical
+    # empty-list-omission pattern -- registry.go's validateBackendList
+    # rejects an explicit `connector.mail: []` the same way. Default stays
+    # [ ] in THIS repo's module (public flake, no machine-specific mailbox
+    # or person values hardcoded here) -- the real registration lives in
+    # the consuming machine flake (phillipg-nix-ziprecruiter).
+    mail = if cfg.connector.mail == [ ] then null else cfg.connector.mail;
   };
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
@@ -228,6 +235,20 @@ in
             type = lib.types.listOf lib.types.str;
             default = [ ];
             description = "Registered `alert` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+          };
+          # mail (docket pg2-qc5uc): a WHOLLY NEW capability, mirroring
+          # thread's exact shape (list-of-str, default [ ]). Without this
+          # field, a machine config setting
+          # `connector.mail = [ "pg-connector-mail-osx-bridge" ]` is a hard
+          # Nix eval error ("option does not exist"). Default MUST stay
+          # [ ] here (this repo is a public flake) -- the real
+          # registration plus real per-backend config live in the
+          # consuming machine flake (rendered via the free-form `backends`
+          # option, so no new option is needed for them).
+          mail = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `mail` capability backends (bare binary names, resolved on PATH), in fan-out order.";
           };
         };
       };
@@ -476,6 +497,9 @@ in
     # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
     # always-installed, independent of whether connector.alert is itself
     # populated -- it answers the attention capability too.
+    # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
+    # always-installed, independent of whether connector.mail is itself
+    # populated -- it answers the attention and search capabilities too.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -487,6 +511,7 @@ in
       pkgs.pg-connector-calendar-osx-bridge
       pkgs.pg-connector-agentsession-pa-monitor
       pkgs.pg-connector-alert-grafana
+      pkgs.pg-connector-mail-osx-bridge
     ];
 
     # No programs.tldr.customPages entry: unlike pg-pr's own module,

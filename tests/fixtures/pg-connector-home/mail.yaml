@@ -1,0 +1,9 @@
+attention:
+  sources:
+    - pg-connector-mail-osx-bridge
+connector:
+  mail:
+    - pg-connector-mail-osx-bridge
+search:
+  sources:
+    - pg-connector-mail-osx-bridge

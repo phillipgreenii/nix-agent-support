@@ -213,6 +213,19 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-mail-osx-bridge: the mail capability's first Tier-2
+          # backend (docket pg2-qc5uc) — another mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as every
+          # sibling backend entry above, building the standalone scriptout-only
+          # binary from packages/pg-connector/pg-connector-mail-osx-bridge.nix.
+          # Its Tier-2 implementation talks only to pg-osx-bridge-api's local
+          # Unix-domain socket mail service (the daemon lives in
+          # phillipgreenii-nix-support-apps), never Mail.app directly.
+          pg-connector-mail-osx-bridge =
+            final.callPackage ./packages/pg-connector/pg-connector-mail-osx-bridge.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           # pg-connector-alert-grafana: the alert capability's Grafana Tier-2
           # backend (bead pg2-rejc3) — another mkGoApp call over the SAME
           # packages/pg-connector module (shared src + gomod2nixToml) as every
@@ -7994,6 +8007,10 @@
                   same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyAlert}
                   same ${fixtures + "/alert-grafana.yaml"} ${rendered.alertGrafana}
                   same ${fixtures + "/legacy-plus-alert.yaml"} ${rendered.legacyPlusAlert}
+                  # mail (docket pg2-qc5uc): the option renders, and an explicit
+                  # connector.mail = [ ] is omitted exactly like alert/thread
+                  same ${fixtures + "/mail.yaml"} ${rendered.mail}
+                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyMail}
                   touch $out
                 '';
 
@@ -8515,6 +8532,7 @@
               pg-connector-scm-git
               pg-connector-thread-slack
               pg-connector-calendar-osx-bridge
+              pg-connector-mail-osx-bridge
               pg-connector-agentsession-pa-monitor
               pg-connector-alert-grafana
               pg-ccaudit

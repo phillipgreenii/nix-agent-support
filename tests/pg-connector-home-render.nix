@@ -87,6 +87,13 @@ let
       };
     };
   };
+
+  # mail (docket pg2-qc5uc): the registration alone, with example-only values.
+  mailExample = {
+    connector.mail = [ "pg-connector-mail-osx-bridge" ];
+    attention.sources = [ "pg-connector-mail-osx-bridge" ];
+    search.sources = [ "pg-connector-mail-osx-bridge" ];
+  };
 in
 {
   # Pre-alert configuration: MUST stay byte-for-byte unchanged.
@@ -97,6 +104,17 @@ in
     // {
       connector = legacy.connector // {
         alert = [ ];
+      };
+    }
+  );
+  # mail registration on its own.
+  mail = render mailExample;
+  # An explicit empty connector.mail is omitted exactly like thread/calendar.
+  legacyEmptyMail = render (
+    legacy
+    // {
+      connector = legacy.connector // {
+        mail = [ ];
       };
     }
   );
