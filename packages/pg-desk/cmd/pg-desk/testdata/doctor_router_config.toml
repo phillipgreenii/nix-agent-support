@@ -1,0 +1,70 @@
+# Synthetic pg-router config for `pg-desk doctor --router-config` tests. The
+# adapter name is a placeholder; only the shape of design 9.9 matters.
+
+[[query]]
+name = "desk-pr-changes"
+emits = [
+  "pr.opened", "pr.closed", # trailing comment after an array item
+  "pr.head_changed",
+  "pr.reconcile",
+]
+type = "command"
+trigger = { kind = "period", every = "60s" }
+
+[query.command]
+argv = ["example-adapter", "pg-desk", "pr", "--consumer", "pg-router"]
+format = "json"
+
+[[query]]
+name = "desk-issue-changes"
+emits = ["issue.opened", "issue.closed"]
+type = "command"
+trigger = { kind = "period", every = "5m" }
+
+[query.command]
+argv = ["example-adapter", "pg-desk", "issue", "--consumer", "pg-router"]
+format = "json"
+
+[[query]]
+name = "desk-thread-changes"
+emits = ["thread.opened"]
+type = "command"
+trigger = { kind = "period", every = "10m" }
+
+[query.command]
+argv = ["example-adapter", "pg-desk", "thread", "--consumer", "pg-router"]
+format = "json"
+
+# A second timer for the PR type; the smaller period wins for the sweep bound.
+[[query]]
+name = "desk-pr-changes-fast"
+emits = ["pr.opened"]
+type = "command"
+trigger = { kind = "period", every = "30s" }
+
+[query.command]
+argv = ["example-adapter", "pg-desk", "pr", "--consumer", "pg-router-fast"]
+format = "json"
+
+# Not a desk query: names no type or consumer, so it never matches.
+[[query]]
+name = "unrelated-timer"
+emits = ["note.tick"]
+type = "command"
+trigger = { kind = "period", every = "1s" }
+
+[query.command]
+argv = ["example-other-tool", "tick"]
+format = "json"
+
+[[role]]
+name = "pr-decider"
+enabled = true
+binds = [
+  "pr.opened", "pr.closed",
+  "pr.head_changed", "pr.reconcile",
+]
+
+[[role]]
+name = "note-reader"
+binds = ["note.tick"]

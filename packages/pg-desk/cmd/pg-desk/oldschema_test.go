@@ -71,9 +71,9 @@ func withRawStoreAt(t *testing.T, path string) {
 
 // TestStatusAndDoctorDoNotCrashOnOldSchemaStore proves status and doctor
 // open the store through the raw seam and report on an old-schema (1), a
-// cut-over (2) and an uninitialized store rather than crash or fail. What
-// doctor should REPORT about an unmigrated store is a later phase's; this
-// only pins that they survive it.
+// cut-over (2) and an uninitialized store rather than crash or fail. doctor
+// additionally REPORTS an unmigrated (old or uninitialized) store as such,
+// pointing at the cutover, and runs its change-flow checks only on a cut-over one.
 func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
 	for _, tc := range []struct {
 		kind        string
@@ -111,6 +111,9 @@ func TestStatusAndDoctorDoNotCrashOnOldSchemaStore(t *testing.T) {
 				if !strings.Contains(out, want) {
 					t.Errorf("doctor output missing %q:\n%s", want, out)
 				}
+			}
+			if unmigrated := strings.Contains(out, "pg-desk migrate --cutover"); unmigrated != (tc.kind != "new") {
+				t.Errorf("doctor on a %s store: reports unmigrated = %v\n%s", tc.kind, unmigrated, out)
 			}
 		})
 	}

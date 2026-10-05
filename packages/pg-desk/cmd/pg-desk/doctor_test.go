@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -300,5 +304,298 @@ func TestDoctorShowsSyncErrorRetryIndicator(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
+	}
+}
+
+// ---- change-flow checks [design: 11] ----
+
+// doctorNow is the fixed clock the change-flow doctor tests run at.
+var doctorNow = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+const doctorRouterFixture = "testdata/doctor_router_config.toml"
+
+// newSchemaDoctor wires a cut-over (change-flow schema) store and cfg into
+// the seams, stubs the doctor probes, and freezes the clock; it returns the
+// seed handle for fixtures.
+func newSchemaDoctor(t *testing.T, cfg *config.Config) *store.Store {
+	t.Helper()
+	seed, openFresh := openTestStore(t)
+	if err := seed.Cutover(); err != nil {
+		t.Fatalf("Cutover: %v", err)
+	}
+	withOpenSeams(t, cfg, openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	origNow := changesNow
+	t.Cleanup(func() { changesNow = origNow })
+	changesNow = func() time.Time { return doctorNow }
+	return seed
+}
+
+// runDoctorWithRouter runs doctor with --router-config set (and reset after,
+// since the command and its flags are process-global).
+func runDoctorWithRouter(t *testing.T, path string) (string, error) {
+	t.Helper()
+	c, _, ferr := rootCmd.Find([]string{"doctor"})
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	if err := c.Flags().Set("router-config", path); err != nil {
+		t.Fatalf("set --router-config: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Flags().Set("router-config", "") })
+	return runDoctorCmd(t)
+}
+
+func watchCfg(queries ...string) *config.Config {
+	cfg := openTestConfig("o/r")
+	cfg.Watch.PR.Queries = queries
+	return cfg
+}
+
+func TestDoctorReportsUnmigratedStoreWithoutRefusing(t *testing.T) {
+	withDoctorStore(t, "o/r") // openTestStore is an old-schema (not cut over) store
+	stubDoctorSeams(t, nil, nil, nil)
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor on an unmigrated store: %v, want it to report, not refuse\n%s", err, stdout)
+	}
+	for _, want := range []string{"unmigrated", "pg-desk migrate --cutover", "sync_error rows: 0", "stranded cycles: 0"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+	for _, skipped := range []string{"watched queries:", "consumers:", "sweep bound:"} {
+		if strings.Contains(stdout, skipped) {
+			t.Errorf("stdout ran the new-schema-only check %q on an unmigrated store:\n%s", skipped, stdout)
+		}
+	}
+}
+
+func TestDoctorReportsUnmigratedStoreWithNoSchemaAtAll(t *testing.T) {
+	withRawStoreAt(t, storeAtVersion(t, "empty"))
+	stubDoctorSeams(t, nil, nil, nil)
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor on an empty store: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "unmigrated") {
+		t.Errorf("stdout does not report the store as unmigrated:\n%s", stdout)
+	}
+}
+
+func TestDoctorWatchedQueryResolution(t *testing.T) {
+	newSchemaDoctor(t, watchCfg("mine", "nope"))
+	rec := filepath.Join(t.TempDir(), "calls.txt")
+	installFakePGConnector(t, fmt.Sprintf(`echo "$*" >> %q
+case "$*" in
+  *"--query nope"*) echo '{"error":{"code":"invalid_argument","message":"query_not_recognized: nope"}}'; exit 1 ;;
+esac
+echo '{"entities":[]}'`, rec))
+
+	stdout, err := runDoctorCmd(t)
+	if err == nil || !strings.Contains(err.Error(), "watched queries") {
+		t.Fatalf("doctor err = %v, want a failure naming watched queries\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, `pr "mine": ok`) || !strings.Contains(stdout, `pr "nope": FAIL`) {
+		t.Errorf("stdout does not separate the resolvable from the unknown query:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "query_not_recognized") {
+		t.Errorf("stdout does not carry pg-connector's reason:\n%s", stdout)
+	}
+	calls, _ := os.ReadFile(rec)
+	for _, line := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+		if !strings.HasPrefix(line, "pr list --query ") || strings.Contains(line, "changes") {
+			t.Errorf("probe exec %q is not the read-only list verb", line)
+		}
+	}
+}
+
+func TestDoctorWatchedQueriesAllResolveAndNoneConfigured(t *testing.T) {
+	newSchemaDoctor(t, watchCfg("mine"))
+	installFakePGConnector(t, `echo '{"entities":[]}'`)
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, `pr "mine": ok`) {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+
+	newSchemaDoctor(t, openTestConfig("o/r"))
+	stdout, err = runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "none configured") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func TestDoctorStalledConsumerWithRouterConfig(t *testing.T) {
+	seed := newSchemaDoctor(t, openTestConfig("o/r"))
+	// pr/pg-router has a 60s router period, so 3x = 3m. Seen 4m ago: stalled.
+	if err := seed.RegisterConsumer("pg-router", "pr", doctorNow.Add(-4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	// issue/pg-router has a 5m period, so 3x = 15m. Seen 4m ago: fine.
+	if err := seed.RegisterConsumer("pg-router", "issue", doctorNow.Add(-4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
+	if err == nil || !strings.Contains(err.Error(), "stalled consumers") {
+		t.Fatalf("doctor err = %v, want a failure naming stalled consumers\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "pr/pg-router:") || !strings.Contains(stdout, "STALLED") {
+		t.Errorf("stdout does not flag the pr consumer:\n%s", stdout)
+	}
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "issue/pg-router:") && !strings.HasSuffix(line, ": ok") {
+			t.Errorf("issue consumer within 3x its period must be ok: %q", line)
+		}
+	}
+	// reported, not pruned
+	cs, err := seed.ListConsumers()
+	if err != nil || len(cs) != 2 {
+		t.Errorf("consumers after doctor = %+v, %v; doctor must not prune", cs, err)
+	}
+}
+
+func TestDoctorStalledConsumerWithoutRouterConfigUsesConsumerStaleAfter(t *testing.T) {
+	seed := newSchemaDoctor(t, openTestConfig("o/r"))
+	if err := seed.RegisterConsumer("fresh", "pr", doctorNow.Add(-4*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("a consumer seen hours ago is within the 7d default: %v\n%s", err, stdout)
+	}
+	if err := seed.RegisterConsumer("old", "pr", doctorNow.Add(-8*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err = runDoctorCmd(t)
+	if err == nil || !strings.Contains(err.Error(), "stalled consumers") {
+		t.Fatalf("doctor err = %v, want stalled consumers\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "pr/old:") || !strings.Contains(stdout, "consumer_stale_after") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func seedActive(t *testing.T, st *store.Store, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		e := store.Entity{Repo: "o/r", EntityType: entityTypePR, EntityID: fmt.Sprintf("o/r#%d", i+1), Facts: `{}`, AsOf: "x"}
+		if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), true, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func sweepCfg(maxAge string, maxPerPoll int) *config.Config {
+	cfg := openTestConfig("o/r")
+	cfg.Sweep.MaxAge = maxAge
+	cfg.Sweep.MaxPerPoll = &maxPerPoll
+	return cfg
+}
+
+func TestDoctorSweepBoundViolation(t *testing.T) {
+	// 7 active / N=1 x the fixture's smallest pr period (30s) = 210s > D=3m.
+	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	seedActive(t, seed, 7)
+
+	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
+	if err == nil || !strings.Contains(err.Error(), "sweep bound") {
+		t.Fatalf("doctor err = %v, want a failure naming the sweep bound\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "active_count=7 max_per_poll=1 max_age=3m0s poll_interval=30s: VIOLATED") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func TestDoctorSweepBoundHoldsAtTheBoundary(t *testing.T) {
+	// 6 active / 1 x 30s = 180s == D=3m: holds (<=).
+	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	seedActive(t, seed, 6)
+
+	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "poll_interval=30s: holds") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+}
+
+func TestDoctorSweepBoundNeedsRouterConfigForAVerdict(t *testing.T) {
+	seed := newSchemaDoctor(t, sweepCfg("3m", 1))
+	seedActive(t, seed, 7) // would violate IF a poll interval were known
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("no router config means no verdict, so no failure: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "active_count=7 max_per_poll=1 max_age=3m0s poll_interval: unknown (no verdict)") {
+		t.Errorf("stdout does not report the inputs with poll_interval unknown:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "VIOLATED") || strings.Contains(stdout, "holds") {
+		t.Errorf("stdout gave a verdict without a poll interval:\n%s", stdout)
+	}
+}
+
+func TestDoctorRouterConfigListsRolesBoundPerType(t *testing.T) {
+	newSchemaDoctor(t, openTestConfig("o/r"))
+	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	section := stdout[strings.Index(stdout, "router roles:"):]
+	for _, want := range []string{"pr: pr-decider", "issue: none", "thread: none"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("router roles section lacks %q:\n%s", want, section)
+		}
+	}
+	if strings.Contains(section, "note-reader") {
+		t.Errorf("a role bound to no desk type must not be listed:\n%s", section)
+	}
+}
+
+func TestDoctorWithoutRouterConfigOmitsRoles(t *testing.T) {
+	newSchemaDoctor(t, openTestConfig("o/r"))
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if strings.Contains(stdout, "router roles:") {
+		t.Errorf("roles are reported only with --router-config:\n%s", stdout)
+	}
+}
+
+func TestDoctorFailsOnUnreadableRouterConfig(t *testing.T) {
+	newSchemaDoctor(t, openTestConfig("o/r"))
+	stdout, err := runDoctorWithRouter(t, filepath.Join(t.TempDir(), "missing.toml"))
+	if err == nil || !strings.Contains(err.Error(), "router config") {
+		t.Fatalf("doctor err = %v, want a failure naming router config\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "change_flow:") {
+		t.Errorf("the other change-flow checks must still run:\n%s", stdout)
+	}
+}
+
+func TestDoctorReportsRepeatedDegradedHydrations(t *testing.T) {
+	seed := newSchemaDoctor(t, openTestConfig("o/r"))
+	if err := seed.SetMeta("change_flow.degraded.pr", `{"o/r#7":{"count":3,"since":"2026-10-01T09:00:00Z"},"o/r#8":{"count":1,"since":"2026-10-01T10:00:00Z"}}`); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("a report, not a gate: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "pr o/r#7: count=3 since=2026-10-01T09:00:00Z") {
+		t.Errorf("stdout lacks the repeated entity:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "o/r#8") {
+		t.Errorf("a single degraded hydration is not 'repeated':\n%s", stdout)
 	}
 }

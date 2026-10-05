@@ -241,13 +241,14 @@ func describeSyncRetry(r store.SyncRetry, found bool) string {
 // never changes discovery behavior"].
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check config, pg-connector, and serve health",
+	Short: "Check config, pg-connector, serve, and change-flow health",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDoctor(cmd)
 	},
 }
 
 func init() {
+	doctorCmd.Flags().String("router-config", "", "path to the pg-router config (read as a file): evaluates the sweep sizing bound, ties each consumer to its router period, and lists the decider roles bound per type")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -297,8 +298,7 @@ func runDoctor(cmd *cobra.Command) error {
 	// doctor opens the store RAW (no migrations, no version gate) so it can
 	// inspect a store in any schema state — including one that has not been
 	// cut over yet, or has no schema at all — instead of failing to open it.
-	// What doctor should REPORT about an unmigrated store is deliberately
-	// not decided here.
+	// An unmigrated store is reported by the change_flow section below.
 	if st, err := deskStoreOpenRaw(); err != nil {
 		fmt.Fprintf(w, "stranded cycles: FAIL (open store: %v)\n", err)
 		failures = append(failures, "stranded cycles")
@@ -343,6 +343,21 @@ func runDoctor(cmd *cobra.Command) error {
 			}
 		}
 	}
+
+	// Change-flow checks [design: 11]. An unreadable --router-config is
+	// itself a failed check, but the checks that do not need it still run.
+	var rc *routerConfig
+	if path, _ := cmd.Flags().GetString("router-config"); path != "" {
+		loaded, err := loadRouterConfig(path)
+		if err != nil {
+			fmt.Fprintf(w, "router config: FAIL (%v)\n", err)
+			failures = append(failures, "router config")
+		} else {
+			rc = loaded
+			fmt.Fprintf(w, "router config: ok (%s)\n", path)
+		}
+	}
+	doctorChangeFlow(ctx, w, cfg, rc, &failures)
 
 	if len(failures) > 0 {
 		return fmt.Errorf("doctor: %d check(s) failed: %v", len(failures), failures)

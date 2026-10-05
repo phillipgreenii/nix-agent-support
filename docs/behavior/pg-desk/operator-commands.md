@@ -123,6 +123,44 @@ against its peers of the same type, bead `pg2-2j5ac.28.1`) is informational-only
 `pg2-rnnfz` — it does not affect that check's pass/fail verdict, so a query-coverage gap alone
 never fails `doctor`.
 
+`doctor` also runs the change-flow checks, printed under a `change_flow:` heading, on a store that
+has been cut over to the change-flow schema:
+
+- **Watched queries resolve.** Every configured watched query (`watch.<type>.queries`) is probed
+  against `pg-connector` with its read-only listing verb (`pg-connector <type> list --query <q>
+--ids-only --output json`), which touches no change ledger and no consumer cursor and fails when
+  `pg-connector` does not recognize the query name. A query that does not resolve fails `doctor`,
+  naming the type and the query. A partially degraded answer (some backend down) still counts as
+  resolved: it says nothing about the query name.
+- **Stalled consumers.** A registered consumer whose `seen_at` is older than three times its expected
+  period fails `doctor`; it is reported, never pruned. The expected period is the timer period of the
+  router `[[query]]` whose command names that type and that consumer (`--consumer <name>`), when
+  `--router-config` supplies one; a consumer no router query names is checked against
+  `consumer_stale_after` (default 7 days) instead, because no period is known. A consumer that was
+  never seen counts as stalled.
+- **The sweep sizing bound** (`active_count / N x poll_interval <= D`, see [`changes.md`](changes.md))
+  per entity type. `doctor` evaluates it ONLY when `--router-config` supplies the poll interval: the
+  period of the router `[[query]]` entries whose command names the type and carries a `--consumer`,
+  taking the smallest when several match. Otherwise it prints the bound's inputs (`active_count`,
+  `max_per_poll`, `max_age`) with `poll_interval: unknown` and no verdict, exactly as `status`
+  does. A violated bound fails `doctor`.
+- **Repeated degraded hydrations.** The entities whose hydration degraded or failed on at least two
+  consecutive attempts, per type, with their count and the time the run began. A report, not a gate.
+- **Router roles** (only with `--router-config`): per type, the decider roles bound to it. A role
+  binds to a type when any of its `binds` entries starts with `<type>.` — exact string comparison, no
+  wildcard. The list is expected empty for `issue` and `thread` until their deciders exist. A report,
+  not a gate.
+
+`--router-config <path>` points `doctor` at the pg-router config, read as a file (no dependency on
+pg-router). `doctor` reads only: each `[[query]]`'s `trigger = { kind = "period", every = "..." }`
+and command `argv`, and each `[[role]]`'s `name`, `enabled` and `binds`. A config that cannot be read
+or parsed fails `doctor` as a `router config` check; the checks that need no router config still run.
+
+On a store that has NOT been cut over (old schema, or none at all), `doctor` does not refuse and does
+not crash: it reports that the store is unmigrated, points at `pg-desk migrate --cutover`, skips the
+change-flow checks above, and still prints the `sync_error rows` and `stranded cycles` lines it
+always prints.
+
 "The config resolves" includes every configured `repos[].beads_dir`: config load MUST fail —
 so every command, `serve` startup, and `doctor` exit non-zero — when a `beads_dir` does not
 exist, is not a directory, or is not a beads workspace (no `config.yaml` or `metadata.json`).
@@ -133,7 +171,9 @@ swallowed per-event bead-write failure.
 primary-checkout relocation), update the deployment's pg-desk `repos[].beads_dir` in the same
 change, then run `pg-desk doctor` and confirm the config check passes.
 
-Exit codes: `0` when every check passes; `1` when any check fails (naming which one).
+Exit codes: `0` when every check passes; `1` when any check fails (naming which one) — including an
+unresolvable watched query, a stalled consumer, a violated sweep bound and an unreadable
+`--router-config`, so an alert can hang off the exit code.
 
 ## heartbeat / heartbeat-item
 
