@@ -1,0 +1,146 @@
+# pg-decider — work items
+
+The decider writes work items to the agent tracker so a worker can claim them. This doc owns the
+work-item contract: the kinds, their shapes, the dedup key that makes a write idempotent, and the
+same-context rule that stops a decider from recreating work it has already raised. Roles and
+workers MUST rely only on the fields in the table below.
+
+## Kinds
+
+There are five work-item kinds. A kind is named by its `kind` id, which is also the kind segment
+of its dedup key.
+
+| Kind id            | Table row        | Meaning                                              |
+| ------------------ | ---------------- | ---------------------------------------------------- |
+| `anchor`           | anchor           | The parent of every other kind: one per PR           |
+| `process-feedback` | feedback cycle   | Address the unaddressed review feedback on a PR      |
+| `review-pr`        | review request   | Review a PR at its current head                      |
+| `fix-ci`           | fix-ci           | Fix the failing CI builds on a PR's current head     |
+| `resolve-conflict` | resolve-conflict | Resolve the merge conflict between a PR and its base |
+
+## Bead shapes
+
+Reproduced from the design of record; any later change MUST land with the sources and prompts that
+read these shapes, in the same change:
+
+| Kind             | bd type         | Title                          | Labels                                               | Metadata                                                                                                                                                                                                | Parent |
+| ---------------- | --------------- | ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| anchor           | `merge-request` | `<repo>#<n>: <pr title>`       | `co-owned` when applicable, `pbase:<n>` while nudged | `repo`, `pr_number`, `state`, `branch`, `base`, `author`, `url`, `draft`, `dedup_key`                                                                                                                   | none   |
+| feedback cycle   | `task`          | `process-feedback: <repo>#<n>` | `mine`, `fbsum:<digest>`                             | `repo`, `pr_number`, `branch`, `covered_comments`, `dedup_key`; description is the rendered summary of unaddressed items                                                                                | anchor |
+| review request   | `task`          | `review-pr: <repo>#<n>`        | none                                                 | `repo`, `pr_number`, `branch`, `head_sha`, `ownership`, `dedup_key`                                                                                                                                     | anchor |
+| fix-ci           | `task`          | `fix-ci: <repo>#<n>`           | `mine`, `worker-ready`                               | `repo`, `pr_number`, `branch`, `head_sha`, `failing_checks`, `failing_builds`, `dedup_key`; description is the failing checks, each with a link to its run                                              | anchor |
+| resolve-conflict | `task`          | `resolve-conflict: <repo>#<n>` | `mine`, `worker-ready`                               | `repo`, `pr_number`, `branch`, `head_sha`, `base`, `base_sha`, `dedup_key`; description is the base plus the conflicting files if the backend reports them, else an instruction to rebase onto the base | anchor |
+
+Notes on the table:
+
+- `merge-request` and `task` are the tracker's issue types. `<repo>`, `<n>` and `<pr title>` are
+  the PR's repository, number and title.
+- `co-owned` is set only on a co-owned PR. `pbase:<n>` records the pre-nudge priority while a
+  conflict nudge is in effect. `mine` is set only for a PR whose relationship to the operator is
+  mine or co-owned; a team PR never gets a `process-feedback` or `fix-ci` item.
+- `fbsum:<digest>` carries the digest of the feedback set the cycle was last aligned to. When an
+  open cycle is updated for more feedback, the old `fbsum` label is replaced by the new one.
+- `worker-ready` marks an item a worker can pick up with no further triage. A worker reads these
+  fields the same way for every kind and needs no special case per kind.
+- `head_sha` on `review-pr` is the REVIEWED head: it advances only when the decider refreshes the
+  item for a new head. `ownership` is the PR's relationship to the operator at that time.
+- `base_sha` and `branch`, with `base`, name the conflict context of a `resolve-conflict` item.
+- The labels cell of a review request is `none`: the decider writes no label on it.
+
+### Metadata encodings
+
+Three metadata values hold lists. Each is a comma-separated string, sorted, with no spaces:
+
+| Key                | Holds                                                                  | Example         |
+| ------------------ | ---------------------------------------------------------------------- | --------------- |
+| `covered_comments` | The ids of the comments this cycle (or an earlier update of it) covers | `c-881,c-902`   |
+| `failing_builds`   | The failing builds on this head, each `<run id>:<attempt>`             | `9001:1,9002:2` |
+| `failing_checks`   | The names of the failing checks                                        | `lint,unit`     |
+
+`covered_comments` is what "not covered by an earlier cycle" is checked against: the union of the
+`covered_comments` of every `process-feedback` item for the PR, open or closed. A cycle created
+before the decider existed carries no `covered_comments` and covers nothing.
+
+## The dedup key
+
+Every work item the decider creates carries a `dedup_key` in its metadata. The key lives in the
+work item itself, never only in some other store, so a crash between a create and anything else
+that follows it cannot mint a duplicate on the next run.
+
+The key is `<type>:<id>:<kind>` plus a context suffix, where `<type>` is the entity type (`pr`),
+`<id>` is the entity id (for example `acme/widgets#42`) and `<kind>` is the kind id. The suffix
+names the kind's context where that context is narrower than the PR:
+
+| Kind id            | Context suffix                           | Example key                                                      |
+| ------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
+| `anchor`           | none                                     | `pr:acme/widgets#42:anchor`                                      |
+| `review-pr`        | none                                     | `pr:acme/widgets#42:review-pr`                                   |
+| `fix-ci`           | `:<head_sha>`                            | `pr:acme/widgets#42:fix-ci:9f3c1e2`                              |
+| `resolve-conflict` | `:<branch>:<head_sha>:<base>:<base_sha>` | `pr:acme/widgets#42:resolve-conflict:fix-x:9f3c1e2:main:77aa001` |
+| `process-feedback` | `:<digest>`                              | `pr:acme/widgets#42:process-feedback:ab12`                       |
+
+`<digest>` is the `fbsum` digest the cycle was created with.
+
+### The node_id form
+
+When the entity carries a stable backend id (`node_id`), the same key also exists in a second form
+with the `node_id` in place of the entity id: `<type>:<node_id>:<kind>` plus the same suffix, for
+example `pr:PR_kwDOabc123:fix-ci:9f3c1e2`. A repository rename or transfer changes the entity id
+but not the `node_id`, so matching on either form stops a rename from orphaning existing work
+items. The two forms name the SAME identity: a lookup for one form MUST find an item keyed in the
+other, and an entity with no `node_id` has only the first form.
+
+## Same-context rule
+
+A work item that exists for the CURRENT context, open or closed, is never recreated. The context
+differs per kind:
+
+| Kind id            | The context is                                                 | When the context changes                                                                                     |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `anchor`           | The PR                                                         | Never: one anchor per PR                                                                                     |
+| `review-pr`        | The PR                                                         | The head advances: the one item is reopened and refreshed                                                    |
+| `fix-ci`           | The head commit                                                | A new head gets a new item; a new failing build on the same head reopens and extends the existing one        |
+| `resolve-conflict` | The branch, head, base and base commit together                | Any of the four changes: a new item                                                                          |
+| `process-feedback` | The feedback itself: the comments no earlier cycle has covered | More feedback after a closed cycle: a new cycle; more feedback while a cycle is open: that cycle is extended |
+
+Further, for every kind:
+
+- A closed item is left closed unless its own rule says that a new context reopens it. A hit on a
+  closed item is therefore either a reopen (for the kinds above that say so) or nothing at all; it
+  is never a second item.
+- A changed `fbsum` digest alone is not more feedback. A cycle is raised only for comments that no
+  earlier cycle covers.
+- Items without a `dedup_key` that belong to the PR (matched by exact title, by the anchor title
+  prefix `<repo>#<n>: `, or by `node_id`) count as existing work, so no duplicate is created while
+  such an item is waiting to be adopted.
+- An open item labeled `human` is parked work. It counts as existing for dedup, and the decider
+  MUST NOT recreate it or relabel it.
+- Who closed an item, or how, is not recorded by the decider and never changes its behavior. The
+  decider reads an item's state only: open, or closed. There is no notion of a closure being
+  dismissed by a person.
+
+```mermaid
+flowchart TD
+    N["A rule wants a work item of kind K for the current context"] --> E{"Item of kind K exists for this context?"}
+    E -->|"no"| C["create, with dedup_key"]
+    E -->|"yes, open"| O["leave it, or refresh it if the rule says so"]
+    E -->|"yes, closed"| R{"Does the rule reopen on this change?"}
+    R -->|"yes"| RO["reopen and refresh"]
+    R -->|"no"| X["leave it closed: already handled"]
+    P{"Open item labeled human?"} -->|"yes"| X2["counts as existing: no create, no relabel"]
+```
+
+## Invariants
+
+- **INV-DECIDER-1.** Every work item the decider creates MUST carry a `dedup_key` of the form
+  `<type>:<id>:<kind>` plus the kind's context suffix, and the key MUST live in the work item.
+- **INV-DECIDER-2.** A work item that exists for the current context, open or closed, MUST NOT be
+  recreated; a decider MAY only reopen or refresh it where its rule says a new context warrants it.
+- **INV-DECIDER-3.** The `id` form and the `node_id` form of a dedup key MUST be treated as the
+  same identity, so that a rename or transfer does not orphan an existing work item.
+- **INV-DECIDER-4.** An open work item labeled `human` MUST count as existing work: the decider
+  MUST NOT recreate it or change its labels.
+- **INV-DECIDER-5.** No decider behavior MAY depend on who closed a work item or how it was closed;
+  the decider MUST read only whether the item is open or closed.
+- **INV-DECIDER-6.** A new feedback cycle MUST be raised only for comments no earlier cycle
+  covers; a changed digest alone MUST NOT raise or reopen a cycle.
