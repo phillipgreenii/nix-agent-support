@@ -52,12 +52,25 @@ func reapProcessGroup(cmd *exec.Cmd) {
 // group is already empty, reported as os.ErrProcessDone because that is what an
 // exec.Cmd.Cancel func must return to leave the command's own exit status intact
 // rather than replacing it with a cancellation error.
+//
+// EPERM is reported the same way, and this is the darwin half of a flake
+// (pg2-bri3b, seen as `exec: canceling Cmd: operation not permitted` under the
+// nix sandbox's CPU contention): macOS answers kill(-pgid) with EPERM, not
+// ESRCH, when every member of the group has already exited but is still an
+// unreaped zombie (verified: kill(-pid) on an exited, unreaped child returns
+// EPERM while kill(pid) returns nil; linux returns success for both). The
+// group is ours — we created it with Setpgid and the processor runs as our own
+// uid — so a real permission denial is impossible, and EPERM can only mean
+// "nothing left to kill". Reporting it as an error instead made a processor
+// that FINISHED SUCCESSFULLY a hair before the deadline watcher fired fail with
+// the cancel error, discarding its rewrite. If something else ever did make the
+// kill fail, cmd.WaitDelay still force-kills and bounds the wait.
 func killProcessGroup(pid int) error {
 	if pid <= 0 {
 		return os.ErrProcessDone
 	}
 	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
+		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
 			return os.ErrProcessDone
 		}
 		return err

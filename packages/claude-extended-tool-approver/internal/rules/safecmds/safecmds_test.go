@@ -3031,6 +3031,16 @@ func TestSafecmds_SessionModeAndWtdone_Approve(t *testing.T) {
 // positional argument, or a --body-file/--bd-dir outside a readable zone is
 // refused rather than approved.
 func TestSafecmds_HandoffCreate(t *testing.T) {
+	// Pin HOME so the `~/.ssh/id_rsa` credential-store case below is expanded
+	// against a fixed, non-/nix, non-temp home. HOME is read once at evaluator
+	// construction, so it must be set first. Under the shared mkGoTest builder
+	// HOME=$TMPDIR, which on darwin is /nix-rooted; the tilde path then lands
+	// inside Evaluate's READ-ONLY /nix zone and the credential store becomes
+	// readable (got approve, want abstain). The pin changes only where `~`
+	// points, not the assertion: a real credential path must still abstain
+	// (same fix as TestSafecmds_Strings; phillipg-nix-repo-base ADR 0021;
+	// pg2-bri3b).
+	t.Setenv("HOME", "/home/testuser")
 	pe := patheval.New("/home/user/project")
 	r := New(pe)
 	tests := []struct {
