@@ -1,0 +1,182 @@
+{
+  "actions": [
+    {
+      "op": "create",
+      "kind": "anchor",
+      "target": null,
+      "fields": {
+        "title": "acme/widgets#42: Add retry to client",
+        "issue_type": "merge-request",
+        "priority": "P1",
+        "labels": ["pbase:2"],
+        "metadata": {
+          "author": "teammate",
+          "base": "main",
+          "branch": "feature/retry",
+          "dedup_key": "pr:acme/widgets#42:anchor",
+          "draft": "false",
+          "pr_number": "42",
+          "repo": "acme/widgets",
+          "state": "open"
+        }
+      },
+      "rule": "anchor.lazy",
+      "facts": {
+        "needed_by": [
+          "conflict.present",
+          "feedback.digest-changed",
+          "fixci.failing-on-head",
+          "review.head-advanced"
+        ]
+      }
+    },
+    {
+      "op": "create",
+      "kind": "review-pr",
+      "target": null,
+      "fields": {
+        "title": "review-pr: acme/widgets#42",
+        "issue_type": "task",
+        "parent": "$anchor",
+        "metadata": {
+          "branch": "feature/retry",
+          "dedup_key": "pr:acme/widgets#42:review-pr",
+          "head_sha": "9f3c1e2",
+          "ownership": "mine",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "review.head-advanced",
+      "facts": {
+        "forced": false,
+        "head_sha": "9f3c1e2"
+      }
+    },
+    {
+      "op": "create",
+      "kind": "process-feedback",
+      "target": null,
+      "fields": {
+        "title": "process-feedback: acme/widgets#42",
+        "issue_type": "task",
+        "description": "Unaddressed reviewer feedback on acme/widgets#42.\n\n2 unaddressed item(s): c-101, c-102.",
+        "parent": "$anchor",
+        "labels": ["mine", "fbsum:5ff7c41ebe23"],
+        "metadata": {
+          "branch": "feature/retry",
+          "covered_comments": "c-101,c-102",
+          "dedup_key": "pr:acme/widgets#42:process-feedback:5ff7c41ebe23",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "feedback.digest-changed",
+      "facts": {
+        "digest": "5ff7c41ebe23",
+        "unaddressed": ["c-101", "c-102"],
+        "uncovered": ["c-101", "c-102"]
+      }
+    },
+    {
+      "op": "create",
+      "kind": "fix-ci",
+      "target": null,
+      "fields": {
+        "title": "fix-ci: acme/widgets#42",
+        "issue_type": "task",
+        "description": "CI is failing on head 9f3c1e2 of acme/widgets#42. Failing checks:\n- unit (run 900, attempt 1): failure - log: https://ci.example/runs/900\n",
+        "parent": "$anchor",
+        "labels": ["mine", "worker-ready"],
+        "metadata": {
+          "branch": "feature/retry",
+          "dedup_key": "pr:acme/widgets#42:fix-ci:9f3c1e2",
+          "failing_builds": "900:1",
+          "failing_checks": "unit",
+          "head_sha": "9f3c1e2",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "fixci.failing-on-head",
+      "facts": {
+        "failing_builds": ["900:1"],
+        "failing_checks": ["unit"],
+        "head_sha": "9f3c1e2"
+      }
+    },
+    {
+      "op": "create",
+      "kind": "resolve-conflict",
+      "target": null,
+      "fields": {
+        "title": "resolve-conflict: acme/widgets#42",
+        "issue_type": "task",
+        "description": "acme/widgets#42 conflicts with main (base commit b45e000). Rebase feature/retry onto main, resolve the conflicts and push.",
+        "parent": "$anchor",
+        "labels": ["mine", "worker-ready"],
+        "metadata": {
+          "base": "main",
+          "base_sha": "b45e000",
+          "branch": "feature/retry",
+          "dedup_key": "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
+          "head_sha": "9f3c1e2",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "conflict.present",
+      "facts": {
+        "base": "main",
+        "base_sha": "b45e000",
+        "head_sha": "9f3c1e2"
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "rule": "all.closed",
+      "reason": "not matched",
+      "facts": {
+        "pr_state": "open"
+      }
+    },
+    {
+      "rule": "all.reopened",
+      "reason": "not matched",
+      "facts": {
+        "anchor": false
+      }
+    },
+    {
+      "rule": "anchor.lazy",
+      "reason": "not matched"
+    },
+    {
+      "rule": "anchor.backfill",
+      "reason": "not matched",
+      "facts": {
+        "anchor": false
+      }
+    },
+    {
+      "rule": "anchor.priority",
+      "reason": "not matched",
+      "facts": {
+        "anchor": false
+      }
+    },
+    {
+      "rule": "adoption",
+      "reason": "not matched"
+    },
+    {
+      "rule": "adoption.node-id",
+      "reason": "not matched"
+    },
+    {
+      "rule": "land.ready",
+      "reason": "not matched"
+    }
+  ]
+}

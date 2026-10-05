@@ -1,0 +1,18 @@
+pr acme/widgets#42  mine  open  ready  head=9f3c1e2  ci=FAILURE  conflict=yes
+linked work: none
+
+actions:
+
+skipped:
+  all.closed               hidden  reason=parked by the operator
+  all.reopened             hidden  reason=parked by the operator
+  anchor.lazy              hidden  reason=parked by the operator
+  anchor.backfill          hidden  reason=parked by the operator
+  anchor.priority          hidden  reason=parked by the operator
+  adoption                 hidden  reason=parked by the operator
+  adoption.node-id         hidden  reason=parked by the operator
+  review.head-advanced     hidden  reason=parked by the operator
+  feedback.digest-changed  hidden  reason=parked by the operator
+  fixci.failing-on-head    hidden  reason=parked by the operator
+  conflict.present         hidden  reason=parked by the operator
+  land.ready               hidden  reason=parked by the operator

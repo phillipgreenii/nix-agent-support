@@ -1,0 +1,18 @@
+pr acme/widgets#42  mine  open  ready  head=9f3c1e2  ci=PENDING  conflict=no
+linked work: anchor (closed), review-pr (closed, reviewed_head=9f3c1e2)
+
+actions:
+  reopen  anchor  rule=all.reopened  pr_state=open
+
+skipped:
+  all.closed               not matched  pr_state=open
+  anchor.lazy              not matched
+  anchor.backfill          already handled  anchor=bd-1
+  anchor.priority          not matched      conflict=false
+  adoption                 not matched
+  adoption.node-id         not matched
+  review.head-advanced     already handled  head_sha=9f3c1e2 item=bd-2
+  feedback.digest-changed  not matched      unaddressed=0
+  fixci.failing-on-head    not matched
+  conflict.present         not matched
+  land.ready               not matched

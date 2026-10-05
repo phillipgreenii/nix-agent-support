@@ -1,0 +1,117 @@
+{
+  "actions": [
+    {
+      "op": "create",
+      "kind": "process-feedback",
+      "target": null,
+      "fields": {
+        "title": "process-feedback: acme/widgets#42",
+        "issue_type": "task",
+        "description": "Unaddressed reviewer feedback on acme/widgets#42.\n\n2 unaddressed item(s): c-101, c-102.",
+        "parent": "bd-1",
+        "labels": ["mine", "fbsum:5ff7c41ebe23"],
+        "metadata": {
+          "branch": "feature/retry",
+          "covered_comments": "c-101,c-102",
+          "dedup_key": "pr:acme/widgets#42:process-feedback:5ff7c41ebe23",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "feedback.digest-changed",
+      "facts": {
+        "digest": "5ff7c41ebe23",
+        "unaddressed": ["c-101", "c-102"],
+        "uncovered": ["c-101", "c-102"]
+      }
+    },
+    {
+      "op": "create",
+      "kind": "resolve-conflict",
+      "target": null,
+      "fields": {
+        "title": "resolve-conflict: acme/widgets#42",
+        "issue_type": "task",
+        "description": "acme/widgets#42 conflicts with main (base commit b45e000). Rebase feature/retry onto main, resolve the conflicts and push.",
+        "parent": "bd-1",
+        "labels": ["mine", "worker-ready"],
+        "metadata": {
+          "base": "main",
+          "base_sha": "b45e000",
+          "branch": "feature/retry",
+          "dedup_key": "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
+          "head_sha": "9f3c1e2",
+          "pr_number": "42",
+          "repo": "acme/widgets"
+        }
+      },
+      "rule": "conflict.present",
+      "facts": {
+        "base": "main",
+        "base_sha": "b45e000",
+        "head_sha": "9f3c1e2"
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "rule": "all.closed",
+      "reason": "not matched",
+      "facts": {
+        "pr_state": "open"
+      }
+    },
+    {
+      "rule": "all.reopened",
+      "reason": "already handled",
+      "facts": {
+        "anchor": "bd-1"
+      }
+    },
+    {
+      "rule": "anchor.lazy",
+      "reason": "not matched"
+    },
+    {
+      "rule": "anchor.backfill",
+      "reason": "already handled",
+      "facts": {
+        "anchor": "bd-1"
+      }
+    },
+    {
+      "rule": "anchor.priority",
+      "reason": "already handled",
+      "facts": {
+        "anchor": "bd-1",
+        "conflict": true
+      }
+    },
+    {
+      "rule": "adoption",
+      "reason": "not matched"
+    },
+    {
+      "rule": "adoption.node-id",
+      "reason": "not matched"
+    },
+    {
+      "rule": "review.head-advanced",
+      "reason": "suppressed",
+      "facts": {
+        "kind": "review-pr"
+      }
+    },
+    {
+      "rule": "fixci.failing-on-head",
+      "reason": "suppressed",
+      "facts": {
+        "kind": "fix-ci"
+      }
+    },
+    {
+      "rule": "land.ready",
+      "reason": "not matched"
+    }
+  ]
+}

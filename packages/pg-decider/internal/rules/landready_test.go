@@ -118,7 +118,7 @@ func TestLandReadyNotMatched(t *testing.T) {
 	}
 }
 
-func TestLandReadyNeverCreatesWorkItem(t *testing.T) {
+func TestLandReadyFixturesAreAnnotateOnly(t *testing.T) {
 	for _, name := range landreadyFixtures(t) {
 		t.Run(name, func(t *testing.T) {
 			for _, a := range landreadyEvaluate(t, name).Actions {

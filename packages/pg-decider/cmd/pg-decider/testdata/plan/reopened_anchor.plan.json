@@ -1,0 +1,76 @@
+{
+  "actions": [
+    {
+      "op": "reopen",
+      "kind": "anchor",
+      "target": "bd-1",
+      "fields": {},
+      "rule": "all.reopened",
+      "facts": {
+        "pr_state": "open"
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "rule": "all.closed",
+      "reason": "not matched",
+      "facts": {
+        "pr_state": "open"
+      }
+    },
+    {
+      "rule": "anchor.lazy",
+      "reason": "not matched"
+    },
+    {
+      "rule": "anchor.backfill",
+      "reason": "already handled",
+      "facts": {
+        "anchor": "bd-1"
+      }
+    },
+    {
+      "rule": "anchor.priority",
+      "reason": "not matched",
+      "facts": {
+        "conflict": false
+      }
+    },
+    {
+      "rule": "adoption",
+      "reason": "not matched"
+    },
+    {
+      "rule": "adoption.node-id",
+      "reason": "not matched"
+    },
+    {
+      "rule": "review.head-advanced",
+      "reason": "already handled",
+      "facts": {
+        "head_sha": "9f3c1e2",
+        "item": "bd-2"
+      }
+    },
+    {
+      "rule": "feedback.digest-changed",
+      "reason": "not matched",
+      "facts": {
+        "unaddressed": 0
+      }
+    },
+    {
+      "rule": "fixci.failing-on-head",
+      "reason": "not matched"
+    },
+    {
+      "rule": "conflict.present",
+      "reason": "not matched"
+    },
+    {
+      "rule": "land.ready",
+      "reason": "not matched"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "actions": [],
+  "skipped": [
+    {
+      "rule": "all.closed",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "all.reopened",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "anchor.lazy",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "anchor.backfill",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "anchor.priority",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "adoption",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "adoption.node-id",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "review.head-advanced",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "feedback.digest-changed",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "fixci.failing-on-head",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "conflict.present",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    },
+    {
+      "rule": "land.ready",
+      "reason": "hidden",
+      "facts": {
+        "reason": "parked by the operator"
+      }
+    }
+  ]
+}

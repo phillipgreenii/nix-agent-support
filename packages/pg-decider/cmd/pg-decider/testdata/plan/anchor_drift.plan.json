@@ -1,0 +1,145 @@
+{
+  "actions": [
+    {
+      "op": "update",
+      "kind": "anchor",
+      "target": "bd-1",
+      "fields": {
+        "metadata": {
+          "author": "teammate",
+          "base": "main",
+          "branch": "feature/retry",
+          "draft": "false",
+          "pr_number": "42",
+          "repo": "acme/widgets",
+          "state": "open"
+        }
+      },
+      "rule": "anchor.backfill",
+      "facts": {
+        "backfilled": ["pr_number", "repo"],
+        "drifted": ["author", "base", "branch", "draft", "state"]
+      }
+    },
+    {
+      "op": "update",
+      "kind": "anchor",
+      "target": "bd-1",
+      "fields": {
+        "priority": "P1",
+        "add_labels": ["pbase:2"]
+      },
+      "rule": "anchor.priority",
+      "facts": {
+        "conflict": true,
+        "from": "P2",
+        "to": "P1"
+      }
+    },
+    {
+      "op": "update",
+      "kind": "review-pr",
+      "target": "bd-2",
+      "fields": {
+        "metadata": {
+          "dedup_key": "pr:acme/widgets#42:review-pr"
+        }
+      },
+      "rule": "adoption",
+      "facts": {
+        "dedup_key": "pr:acme/widgets#42:review-pr",
+        "matched_by": "title"
+      }
+    },
+    {
+      "op": "update",
+      "kind": "anchor",
+      "target": "bd-1",
+      "fields": {
+        "metadata": {
+          "dedup_key": "pr:PR_node_42:anchor"
+        }
+      },
+      "rule": "adoption.node-id",
+      "facts": {
+        "dedup_key": "pr:PR_node_42:anchor",
+        "from": "pr:acme/widgets#42:anchor"
+      }
+    },
+    {
+      "op": "update",
+      "kind": "resolve-conflict",
+      "target": "bd-5",
+      "fields": {
+        "metadata": {
+          "dedup_key": "pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"
+        }
+      },
+      "rule": "adoption.node-id",
+      "facts": {
+        "dedup_key": "pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000",
+        "from": "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"
+      }
+    },
+    {
+      "op": "annotate",
+      "kind": "",
+      "target": "ready_to_land",
+      "fields": {
+        "value": "true"
+      },
+      "rule": "land.ready",
+      "facts": {
+        "ready_to_land": true
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "rule": "all.closed",
+      "reason": "not matched",
+      "facts": {
+        "pr_state": "open"
+      }
+    },
+    {
+      "rule": "all.reopened",
+      "reason": "already handled",
+      "facts": {
+        "anchor": "bd-1"
+      }
+    },
+    {
+      "rule": "anchor.lazy",
+      "reason": "not matched"
+    },
+    {
+      "rule": "review.head-advanced",
+      "reason": "review-pending",
+      "facts": {
+        "head_sha": "9f3c1e2",
+        "item": "bd-2"
+      }
+    },
+    {
+      "rule": "feedback.digest-changed",
+      "reason": "not matched",
+      "facts": {
+        "unaddressed": 0
+      }
+    },
+    {
+      "rule": "fixci.failing-on-head",
+      "reason": "not matched"
+    },
+    {
+      "rule": "conflict.present",
+      "reason": "already handled",
+      "facts": {
+        "base_sha": "b45e000",
+        "head_sha": "9f3c1e2",
+        "item": "bd-5"
+      }
+    }
+  ]
+}

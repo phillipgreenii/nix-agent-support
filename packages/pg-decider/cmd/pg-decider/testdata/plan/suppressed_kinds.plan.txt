@@ -1,0 +1,18 @@
+pr acme/widgets#42  mine  open  ready  head=9f3c1e2  ci=PENDING  conflict=yes
+linked work: anchor (open)
+
+actions:
+  create  process-feedback  rule=feedback.digest-changed  digest=5ff7c41ebe23 unaddressed=[c-101, c-102] uncovered=[c-101, c-102]
+  create  resolve-conflict  rule=conflict.present         base=main base_sha=b45e000 head_sha=9f3c1e2
+
+skipped:
+  all.closed             not matched      pr_state=open
+  all.reopened           already handled  anchor=bd-1
+  anchor.lazy            not matched
+  anchor.backfill        already handled  anchor=bd-1
+  anchor.priority        already handled  anchor=bd-1 conflict=true
+  adoption               not matched
+  adoption.node-id       not matched
+  review.head-advanced   suppressed  kind=review-pr
+  fixci.failing-on-head  suppressed  kind=fix-ci
+  land.ready             not matched

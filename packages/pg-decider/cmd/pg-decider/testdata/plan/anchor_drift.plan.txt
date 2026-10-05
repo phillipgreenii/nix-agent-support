@@ -1,0 +1,19 @@
+pr acme/widgets#42  mine  open  ready  head=9f3c1e2  ci=SUCCESS  conflict=yes
+linked work: anchor (open), review-pr (open, reviewed_head=9f3c1e2), resolve-conflict (open)
+
+actions:
+  update    anchor            rule=anchor.backfill   backfilled=[pr_number, repo] drifted=[author, base, branch, draft, state]
+  update    anchor            rule=anchor.priority   conflict=true from=P2 to=P1
+  update    review-pr         rule=adoption          dedup_key=pr:acme/widgets#42:review-pr matched_by=title
+  update    anchor            rule=adoption.node-id  dedup_key=pr:PR_node_42:anchor from=pr:acme/widgets#42:anchor
+  update    resolve-conflict  rule=adoption.node-id  dedup_key=pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000 from=pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000
+  annotate  ready_to_land     rule=land.ready        ready_to_land=true
+
+skipped:
+  all.closed               not matched      pr_state=open
+  all.reopened             already handled  anchor=bd-1
+  anchor.lazy              not matched
+  review.head-advanced     review-pending  head_sha=9f3c1e2 item=bd-2
+  feedback.digest-changed  not matched     unaddressed=0
+  fixci.failing-on-head    not matched
+  conflict.present         already handled  base_sha=b45e000 head_sha=9f3c1e2 item=bd-5
