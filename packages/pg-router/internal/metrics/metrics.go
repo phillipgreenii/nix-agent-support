@@ -496,7 +496,10 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		MetricDispatchLatency,
 		metric.WithUnit("ms"),
 		metric.WithDescription("time from an event's enqueue to a settling dispatch outcome, in milliseconds (STORY-OBS-1)"),
-		metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+		// Seconds-to-hours scale: latency is measured from evt.At through the
+		// synchronous handler run (bead pg2-nimab), and a re-offered event can be
+		// older than an hour (+Inf covers it).
+		metric.WithExplicitBucketBoundaries(100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000, 600000, 1200000, 1800000, 3600000),
 	)
 	if err != nil {
 		return nil, err
@@ -773,21 +776,21 @@ func (e *Emitter) seedPending(evt eventqueue.Event) {
 // the same lifecycle activityObserver's identical map already has. A miss
 // there (evicted under load) is silently skipped: the same tolerated
 // imperfection activityObserver's own doc accepts for its map.
-// listenerID is accepted for interface symmetry with eventqueue.Observer's
-// other per-listener hooks but is not part of either label set.
-func (e *Emitter) OnAccept(eventID, _ string) {
+// listenerID is the role name (orchestrator roleListener.ID()); it is recorded
+// as the config-bounded "role" label on both series (bead pg2-nimab).
+func (e *Emitter) OnAccept(eventID, listenerID string) {
 	e.mu.Lock()
 	p, ok := e.pending[eventID]
 	e.mu.Unlock()
 	if !ok {
 		return
 	}
-	e.RecordThroughput(p.typ)
+	e.RecordThroughput(p.typ, listenerID)
 	// Divide as a float rather than truncate through time.Duration.Milliseconds
 	// (int64): that would floor 0.6ms to 0 and 4.9ms to 4, biasing every
 	// sample low against the histogram's own sub-10ms buckets.
 	elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
-	e.RecordDispatchLatency(elapsedMS, "accepted")
+	e.RecordDispatchLatency(elapsedMS, "accepted", listenerID)
 }
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's
@@ -800,11 +803,12 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 // OnDeclined feeds the failure-rate counter from the queue's Dispatch path
 // (eventqueue.Observer): a graceful pre-accept decline, one of the two
 // delivery-side cases INV-FAIL-1 covers (the other, OnDispatchFailure below,
-// fires from the same Dispatch pass for the OTHER class). evtType/listenerID
-// (widened in Task 2.3) are accepted for interface symmetry with the queue's
-// other per-type hooks but are not themselves part of the failure-rate label
-// set — the counter's "class" dimension is FailureClassDeclined, the one
-// class knowable at this call site.
+// fires from the same Dispatch pass for the OTHER class). evtType (widened in
+// Task 2.3) is accepted for interface symmetry with the queue's other per-type
+// hooks but is not part of the failure-rate label set; listenerID is the role
+// name and IS recorded as the config-bounded "role" label (bead pg2-nimab,
+// DEC-OBS-5) — the counter's "class" dimension is FailureClassDeclined, the
+// one class knowable at this call site.
 //
 // reason (also widened in Task 2.3) WAS likewise discarded — that task's own
 // doc named this "metrics-catalog growth, out of this task's scope" rather
@@ -819,9 +823,10 @@ func (e *Emitter) OnUnconsumedExpired(evtType string) {
 // orchestrator.roleListener.Offer). This is what makes
 // pg_router_failures_total{class="declined"} distinguishable by reason
 // rather than a single undifferentiated bucket.
-func (e *Emitter) OnDeclined(_, _, reason string) {
+func (e *Emitter) OnDeclined(_, listenerID, reason string) {
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("class", FailureClassDeclined),
+		attribute.String("role", listenerID),
 		attribute.String("reason", reason),
 	))
 }
@@ -833,9 +838,13 @@ func (e *Emitter) OnDeclined(_, _, reason string) {
 // recovered from a Listener's Offer implementation (see
 // eventqueue.Queue's offerSafely). evtType is accepted for the same interface-
 // symmetry reason OnDeclined's doc gives and is likewise not part of the
-// label set; the class dimension is FailureClassDispatchFail.
-func (e *Emitter) OnDispatchFailure(_ string) {
-	e.RecordFailure(FailureClassDispatchFail)
+// label set; the class dimension is FailureClassDispatchFail and listenerID
+// (the role name) is the config-bounded "role" label (bead pg2-nimab).
+func (e *Emitter) OnDispatchFailure(_, listenerID string) {
+	e.failures.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("class", FailureClassDispatchFail),
+		attribute.String("role", listenerID),
+	))
 }
 
 // OnHandlerFailure implements orchestrator.HandlerFailureObserver
@@ -1067,20 +1076,24 @@ func (e *Emitter) OnSourceFailure(source string, err error) {
 	))
 }
 
-// RecordThroughput increments the throughput counter, per type, for an event
+// RecordThroughput increments the throughput counter, per type and role, for an event
 // dispatched and accepted (STORY-OBS-1). Exported for direct/test use; its
 // production call site is OnAccept, fed from the pending map OnEnqueue
 // populates — eventqueue.Observer.OnAccept's signature carries (eventID,
 // listenerID) only, not the event's type, so OnAccept recovers it the same
 // way cmd/pg-router/run.go's activityObserver already does for the identical
 // gap (see that type's own doc) rather than widening the Observer interface.
-func (e *Emitter) RecordThroughput(evtType string) {
-	e.throughput.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evtType)))
+func (e *Emitter) RecordThroughput(evtType, role string) {
+	e.throughput.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("type", evtType),
+		attribute.String("role", role),
+	))
 }
 
 // RecordDispatchLatency records the elapsed time, in milliseconds, from an
 // event's enqueue to a settling dispatch outcome (STORY-OBS-1) — the
-// catalog's one histogram, labeled by outcome. Exported for direct/test use;
+// catalog's one histogram, labeled by outcome and role (the accepting
+// listener's role name, bead pg2-nimab). Exported for direct/test use;
 // its production call site is OnAccept (see RecordThroughput's doc for the
 // shared pending-map mechanics), which always passes "accepted" today — the
 // one outcome OnAccept can observe. A future outcome (e.g. a final,
@@ -1090,8 +1103,11 @@ func (e *Emitter) RecordThroughput(evtType string) {
 // that settles the pair) — deliberately deferred (operator decision,
 // 2026-09-18); labeling from the start means adding it later is a new call
 // site, not another signature break.
-func (e *Emitter) RecordDispatchLatency(ms float64, outcome string) {
-	e.dispatchLatency.Record(context.Background(), ms, metric.WithAttributes(attribute.String("outcome", outcome)))
+func (e *Emitter) RecordDispatchLatency(ms float64, outcome, role string) {
+	e.dispatchLatency.Record(context.Background(), ms, metric.WithAttributes(
+		attribute.String("outcome", outcome),
+		attribute.String("role", role),
+	))
 }
 
 // Reader is a value-read-back handle over the catalog's current counter

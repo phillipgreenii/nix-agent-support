@@ -75,18 +75,26 @@ func findMetric(t *testing.T, rm metricdata.ResourceMetrics, name string) metric
 	return metricdata.Metrics{}
 }
 
-// sumFor returns the counter value for the given attribute key=value, or -1.
+// sumFor returns the counter value for the given attribute key=value, summed
+// across every datapoint carrying it (a counter with an additional label such
+// as "role" has one datapoint per label combination), or -1 if none match.
 func sumFor(m metricdata.Metrics, key, value string) int64 {
 	s, ok := m.Data.(metricdata.Sum[int64])
 	if !ok {
 		return -1
 	}
+	var total int64
+	found := false
 	for _, dp := range s.DataPoints {
 		if v, present := dp.Attributes.Value(attribute.Key(key)); present && v.AsString() == value {
-			return dp.Value
+			total += dp.Value
+			found = true
 		}
 	}
-	return -1
+	if !found {
+		return -1
+	}
+	return total
 }
 
 // sumForBoth is sumFor widened to match on TWO attribute key/value pairs at
@@ -182,10 +190,10 @@ func TestCatalogHasTenMembers(t *testing.T) {
 	emitter.RecordFailure(FailureClassDispatchFail)
 	emitter.OnUnconsumedExpired("t")
 	emitter.OnUnknownTypeRejected("t")
-	emitter.RecordThroughput("t")
+	emitter.RecordThroughput("t", "r")
 	emitter.OnSourceFailure("src", errors.New("boom"))
 	emitter.OnDeduped("t")
-	emitter.RecordDispatchLatency(12.5, "accepted")
+	emitter.RecordDispatchLatency(12.5, "accepted", "r")
 	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -401,11 +409,19 @@ func TestOnDedupedPerType(t *testing.T) {
 // direct/test use — see its doc for why no production call site feeds it yet.
 func TestRecordThroughputPerType(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.RecordThroughput("review-requested")
-	h.emitter.RecordThroughput("review-requested")
+	h.emitter.RecordThroughput("review-requested", "worker-a")
+	h.emitter.RecordThroughput("review-requested", "worker-a")
+	h.emitter.RecordThroughput("review-requested", "worker-b")
 	m := findMetric(t, h.collect(t), MetricThroughput)
-	if got := sumFor(m, "type", "review-requested"); got != 2 {
-		t.Fatalf("throughput[review-requested] = %d, want 2", got)
+	if got := sumFor(m, "type", "review-requested"); got != 3 {
+		t.Fatalf("throughput[review-requested] = %d, want 3", got)
+	}
+	// Per-role split (bead pg2-nimab): the role label separates the lanes.
+	if got := sumForBoth(m, "type", "review-requested", "role", "worker-a"); got != 2 {
+		t.Fatalf("throughput[review-requested,role=worker-a] = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "type", "review-requested", "role", "worker-b"); got != 1 {
+		t.Fatalf("throughput[review-requested,role=worker-b] = %d, want 1", got)
 	}
 }
 
@@ -414,7 +430,7 @@ func TestRecordThroughputPerType(t *testing.T) {
 // binding decision specifies.
 func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.RecordDispatchLatency(42, "accepted")
+	h.emitter.RecordDispatchLatency(42, "accepted", "worker-a")
 	m := findMetric(t, h.collect(t), MetricDispatchLatency)
 	if m.Unit != "ms" {
 		t.Fatalf("dispatch_latency unit = %q, want ms", m.Unit)
@@ -426,9 +442,15 @@ func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	if len(hist.DataPoints) != 1 || hist.DataPoints[0].Count != 1 {
 		t.Fatalf("dispatch_latency datapoints = %+v, want exactly one recorded value", hist.DataPoints)
 	}
-	wantBounds := []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
+	wantBounds := []float64{100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000, 600000, 1200000, 1800000, 3600000}
 	if !reflect.DeepEqual(hist.DataPoints[0].Bounds, wantBounds) {
 		t.Fatalf("dispatch_latency bucket bounds = %v, want %v", hist.DataPoints[0].Bounds, wantBounds)
+	}
+	if v, ok := hist.DataPoints[0].Attributes.Value(attribute.Key("role")); !ok || v.AsString() != "worker-a" {
+		t.Fatalf("dispatch_latency role label = %+v, want worker-a", hist.DataPoints[0].Attributes)
+	}
+	if v, ok := hist.DataPoints[0].Attributes.Value(attribute.Key("outcome")); !ok || v.AsString() != "accepted" {
+		t.Fatalf("dispatch_latency outcome label = %+v, want accepted", hist.DataPoints[0].Attributes)
 	}
 }
 
@@ -596,6 +618,9 @@ func TestThroughputThroughQueue_RecordsOnAccept(t *testing.T) {
 	if got := sumFor(m, "type", "review-requested"); got != 1 {
 		t.Fatalf("throughput[review-requested] = %d, want 1 after one Dispatch-path accept", got)
 	}
+	if got := sumForBoth(m, "type", "review-requested", "role", "accepting"); got != 1 {
+		t.Fatalf("throughput[review-requested,role=accepting] = %d, want 1 (OnAccept's listener id)", got)
+	}
 }
 
 // Fan-out (Register's own doc: "fan-out delivers a matching event to each
@@ -673,6 +698,9 @@ func TestDispatchLatencyThroughQueue_RecordsElapsedSinceEnqueue(t *testing.T) {
 	dp := hist.DataPoints[0]
 	if v, present := dp.Attributes.Value(attribute.Key("outcome")); !present || v.AsString() != "accepted" {
 		t.Fatalf("dispatch_latency outcome label = %+v, want \"accepted\"", dp.Attributes)
+	}
+	if v, present := dp.Attributes.Value(attribute.Key("role")); !present || v.AsString() != "accepting" {
+		t.Fatalf("dispatch_latency role label = %+v, want \"accepting\" (OnAccept's listener id)", dp.Attributes)
 	}
 	if dp.Sum != 250 {
 		t.Fatalf("dispatch_latency sum = %v ms, want 250 (elapsed since OnEnqueue)", dp.Sum)
@@ -827,6 +855,13 @@ func TestOnDeclinedFeedsFailuresCounter(t *testing.T) {
 	if got := sumForBoth(m, "class", FailureClassDeclined, "reason", "unavailable"); got != 1 {
 		t.Fatalf("failures[declined,reason=unavailable] = %d, want 1", got)
 	}
+	// Role (bead pg2-nimab): OnDeclined's listenerID is the role name.
+	if got := sumForBoth(m, "class", FailureClassDeclined, "role", "h1"); got != 2 {
+		t.Fatalf("failures[declined,role=h1] = %d, want 2", got)
+	}
+	if got := sumForBoth(m, "class", FailureClassDeclined, "role", "h2"); got != 1 {
+		t.Fatalf("failures[declined,role=h2] = %d, want 1", got)
+	}
 }
 
 // OnDeduped is Task 2.3's new eventqueue.Observer method. Task 3.3 (landed
@@ -862,6 +897,9 @@ func TestDeclineThroughQueueFeedsFailuresCounter(t *testing.T) {
 	if got := sumFor(m, "class", FailureClassDeclined); got != 1 {
 		t.Fatalf("failures[%s] = %d, want 1 after one Dispatch-path decline", FailureClassDeclined, got)
 	}
+	if got := sumForBoth(m, "class", FailureClassDeclined, "role", "declining"); got != 1 {
+		t.Fatalf("failures[%s,role=declining] = %d, want 1 (the listener id rides through the queue)", FailureClassDeclined, got)
+	}
 }
 
 // OnDispatchFailure — the queue's OTHER delivery-side failure signal
@@ -869,13 +907,20 @@ func TestDeclineThroughQueueFeedsFailuresCounter(t *testing.T) {
 // RecordFailure does, labeled with FailureClassDispatchFail.
 func TestOnDispatchFailureFeedsFailuresCounter(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.OnDispatchFailure("review-requested")
-	h.emitter.OnDispatchFailure("review-requested")
-	h.emitter.OnDispatchFailure("push-requested")
+	h.emitter.OnDispatchFailure("review-requested", "worker-a")
+	h.emitter.OnDispatchFailure("review-requested", "worker-a")
+	h.emitter.OnDispatchFailure("push-requested", "worker-b")
 
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassDispatchFail); got != 3 {
 		t.Fatalf("failures[%s] = %d, want 3 (evtType is not part of the label set)", FailureClassDispatchFail, got)
+	}
+	// Role (bead pg2-nimab): OnDispatchFailure's listenerID is the role name.
+	if got := sumForBoth(m, "class", FailureClassDispatchFail, "role", "worker-a"); got != 2 {
+		t.Fatalf("failures[%s,role=worker-a] = %d, want 2", FailureClassDispatchFail, got)
+	}
+	if got := sumForBoth(m, "class", FailureClassDispatchFail, "role", "worker-b"); got != 1 {
+		t.Fatalf("failures[%s,role=worker-b] = %d, want 1", FailureClassDispatchFail, got)
 	}
 }
 
@@ -896,6 +941,9 @@ func TestDispatchFailureThroughQueueFeedsFailuresCounter(t *testing.T) {
 	m := findMetric(t, h.collect(t), MetricFailures)
 	if got := sumFor(m, "class", FailureClassDispatchFail); got != 1 {
 		t.Fatalf("failures[%s] = %d, want 1 after one Dispatch-path panic", FailureClassDispatchFail, got)
+	}
+	if got := sumForBoth(m, "class", FailureClassDispatchFail, "role", "panicking"); got != 1 {
+		t.Fatalf("failures[%s,role=panicking] = %d, want 1 (the listener id rides through fanOut)", FailureClassDispatchFail, got)
 	}
 	if got := sumFor(m, "class", FailureClassDeclined); got != -1 {
 		t.Fatalf("failures[%s] = %d, want none recorded — a panic is not a graceful decline", FailureClassDeclined, got)

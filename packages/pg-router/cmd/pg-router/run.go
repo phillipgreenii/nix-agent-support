@@ -683,9 +683,9 @@ func (f fanOutObserver) OnDeclined(evtType, listenerID, reason string) {
 	f.b.OnDeclined(evtType, listenerID, reason)
 }
 
-func (f fanOutObserver) OnDispatchFailure(evtType string) {
-	f.a.OnDispatchFailure(evtType)
-	f.b.OnDispatchFailure(evtType)
+func (f fanOutObserver) OnDispatchFailure(evtType, listenerID string) {
+	f.a.OnDispatchFailure(evtType, listenerID)
+	f.b.OnDispatchFailure(evtType, listenerID)
 }
 
 // OnDeduped (Task 2.3, pg2-84o3m.22) deliberately fans out to the activity
@@ -860,7 +860,7 @@ func (a *activityObserver) OnDeclined(evtType, listenerID, _ string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "declined", Participant: listenerID})
 }
 
-func (a *activityObserver) OnDispatchFailure(evtType string) {
+func (a *activityObserver) OnDispatchFailure(evtType, _ string) {
 	a.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
 }
 
@@ -975,7 +975,7 @@ func (l *listenerCountObserver) OnDeclined(_, listenerID, reason string) {
 	}
 }
 
-func (l *listenerCountObserver) OnDispatchFailure(string) {}
+func (l *listenerCountObserver) OnDispatchFailure(string, string) {}
 
 func (l *listenerCountObserver) OnDeduped(string) {}
 

@@ -139,3 +139,32 @@ the daemon (or its metrics endpoint) is down, which `pg-router-liveness-down` co
 against per-tick outcomes extracted from the daemon's stderr log (`testdata/source_ticks.txt`; the
 log records only failed ticks, so successes are inferred, and the header there states the rule). Registration of
 this rule with `pg-router-probe` is a separate, deployment-side change.
+
+### `DEC-OBS-5` — `role` labels every delivery-side failure class, throughput and dispatch latency; latency buckets span seconds to hours <!-- uuid: c26b6639-0970-4ce9-b42c-a40579df041f -->
+
+**Decided** (operator request, Phillip, 2026-10-05; bead `pg2-nimab`). `role` (the listener id, which
+is the configured role name) is now recorded on `failures` for **all three** delivery-side classes
+(`declined` and `dispatch-failure` join `handler-error`, `DEC-OBS-3`), on `throughput` (per `type`
+and `role`), and on `dispatch-latency` (per `outcome` and `role`). `INTF-MON`'s catalog states the
+shapes. `INV-OBS-1`'s "exactly two delivery-side classes" is unchanged: this adds a label
+dimension, never a class (the precedent is the `reason` label added to `declined` under the
+metrics-catalog growth of bead `pg2-j4uwg`).
+
+**Why.** One starved or slow role was invisible: the per-lane problems the operator was chasing
+(a role bound to a type that stops draining, a slow handler) averaged away across roles. The call
+sites already knew the role (`OnDeclined` and `OnAccept` received the listener id and discarded it
+"for interface symmetry"); the dispatch-failure signal gained it by carrying the failing listener
+through the queue's signal fan-out.
+
+**Bounds.** Same reasoning as `DEC-OBS-3`: `role` is config-bounded, one value per configured role
+(14 roles x 17 latency series), so the cardinality cost is fixed by configuration, not by event
+traffic. No other identifier (event id, session, bead) becomes a label. Existing labels are
+unchanged, including the inconsistent names other metrics use for the same concept (`listener` on
+gate-drops, `participant` on gate-blocked, `pgrouter_role` on ccpool metrics); unifying them is a
+possible follow-up, not part of this decision.
+
+**Latency buckets.** Latency is measured from the event's enqueue instant through the handler's
+synchronous run, so the old 1 ms to 5 s boundaries left every real sample in the overflow bucket.
+The boundaries are now 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000, 600000,
+1200000, 1800000 and 3600000 ms; the overflow bucket covers a re-offered event older than an hour.
+While old and new `le` sets coexist in one rate window, quantiles are skewed for that window.

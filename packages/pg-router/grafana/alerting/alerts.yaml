@@ -354,12 +354,13 @@ groups:
                     type: gt
                     params: [0]
 
-      # Failure rate: pg_router_failures_total, aggregated by its only
-      # label (`class` -- declined | dispatch-failure | handler-error;
-      # there is no per-role breakdown in this metric today, so this cannot
-      # isolate a single failing role the way pg2-5sirm's incident
-      # described -- that would need a new label dimension, out of this
-      # bead's scope). Trustworthy as of pg2-97539 (closed): before that
+      # Failure rate: pg_router_failures_total, aggregated by `class`
+      # (declined | dispatch-failure | handler-error) and `role` (the
+      # config-bounded role name; as of pg2-nimab EVERY class carries it,
+      # so a single starved or failing role is isolated per series, the way
+      # pg2-5sirm's incident needed -- DEC-OBS-5). Residual declined reasons
+      # (busy, unavailable, capacity-unknown) therefore page per role, and
+      # this rule's alert fingerprint is per class+role. Trustworthy as of pg2-97539 (closed): before that
       # fix, a handler-internal dispatch error fell through both existing
       # failure classes uncounted, so a real 100% failure burst could have
       # read as a flat-zero rate here; FailureClassHandlerError closed that
@@ -381,8 +382,8 @@ groups:
       # (pg2-q4hzc) fired for that same accepted tradeoff within the same
       # ~24h window and were both closed no-fix-needed, which is the signal
       # this exclusion exists to act on. `reason` is ONLY ever set by
-      # OnDeclined (class=declined) -- OnDispatchFailure/OnHandlerFailure
-      # never attach it -- so a bare `reason!="at-capacity"` matcher cannot
+      # OnDeclined (class=declined) and OnHandlerFailure (budget-exceeded /
+      # triager-failure) -- OnDispatchFailure never attaches it -- so a bare `reason!="at-capacity"` matcher cannot
       # clip dispatch-failure/handler-error, nor any other declined reason
       # (e.g. capacity-unknown): those keep paging unchanged.
       - uid: pg-router-failure-rate
@@ -395,7 +396,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is empty for classes that carry none, e.g. declined) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the four causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable) and reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures). See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the four causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable) and reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures). See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:

@@ -89,7 +89,7 @@ func (o *ringObserver) OnDeclined(evtType, _, _ string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "declined"})
 }
 
-func (o *ringObserver) OnDispatchFailure(evtType string) {
+func (o *ringObserver) OnDispatchFailure(evtType, _ string) {
 	o.ring.Append(activity.Entry{Type: evtType, Outcome: "dispatch_failed"})
 }
 

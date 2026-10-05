@@ -467,7 +467,7 @@ func (o *reentrantHookObserver) OnDeduped(string) {
 	o.reenter()
 }
 
-func (o *reentrantHookObserver) OnDispatchFailure(string) {
+func (o *reentrantHookObserver) OnDispatchFailure(string, string) {
 	o.record("dispatch_failed")
 	o.reenter()
 }

@@ -144,7 +144,7 @@ type Observer interface {
 	// (bead pg2-icm3u). Like OnDeclined it fires on EVERY occurrence and
 	// follows the identical settlement/retry mechanics (INV-FAIL-1 / INV-EVT-4)
 	// — only the failure-rate metric class differs.
-	OnDispatchFailure(evtType string)
+	OnDispatchFailure(evtType, listenerID string)
 	// OnDeduped fires when Enqueue drops a re-emit of a still-RETAINED id
 	// (INV-EVT-3, the Deduped EnqueueResult) — a signal that, before Task
 	// 2.3, had no observer hook at all (the review digest's corr-5 gap:
@@ -177,7 +177,7 @@ func (noopObserver) OnAccept(string, string)           {}
 func (noopObserver) OnUnconsumedExpired(string)        {}
 func (noopObserver) OnDeclined(string, string, string) {}
 func (noopObserver) OnDeduped(string)                  {}
-func (noopObserver) OnDispatchFailure(string)          {}
+func (noopObserver) OnDispatchFailure(string, string)  {}
 
 // EnqueueResult reports whether an enqueue added a new event or was dropped as
 // a duplicate of a still-retained id (INV-EVT-3).
@@ -965,7 +965,7 @@ func (q *Queue) fanOut(sigs []dispatchSignal) {
 			}
 			q.obs.OnDeclined(s.evtType, s.listener, reason)
 		case signalDispatchFailure:
-			q.obs.OnDispatchFailure(s.evtType)
+			q.obs.OnDispatchFailure(s.evtType, s.listener)
 		}
 	}
 }
@@ -1205,7 +1205,7 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 		// very next pass. Only which Observer hook fires — and so which
 		// failure-rate metric class counts it — differs.
 		if p.dispatchFailed {
-			*signals = append(*signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type})
+			*signals = append(*signals, dispatchSignal{kind: signalDispatchFailure, evtType: p.evt.Type, listener: lid})
 		} else {
 			p.ls.declined.Add(1)
 			q.declined.Add(1)

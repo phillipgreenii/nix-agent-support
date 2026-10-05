@@ -145,7 +145,7 @@ func newSyncObserver(buf int) *syncObserver {
 func (o *syncObserver) OnEnqueue(Event)                   {}
 func (o *syncObserver) OnUnconsumedExpired(string)        {}
 func (o *syncObserver) OnDeclined(string, string, string) {}
-func (o *syncObserver) OnDispatchFailure(string)          {}
+func (o *syncObserver) OnDispatchFailure(string, string)  {}
 func (o *syncObserver) OnDeduped(string)                  {}
 
 func (o *syncObserver) OnAccept(id, lid string) {

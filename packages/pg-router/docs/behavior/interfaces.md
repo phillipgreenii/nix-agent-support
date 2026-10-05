@@ -451,9 +451,11 @@ sequenceDiagram
   - **failure rate** — counter, per **delivery-side** failure class, of which there are exactly two: a
     **pre-accept decline** (an `unavailable` self-report, or a **busy** decline from a handler at
     capacity, `INV-CONC-1`) and a **dispatch failure** where the core could not hand the event over at
-    all. A handler-reported error (`handler-error`) carries a bounded `role` label (the handler role
-    name, config-bounded), and a handler error carrying the **budget-stop sentinel** below is
-    additionally labelled `reason="budget-exceeded"` (`DEC-OBS-3`). The other post-accept classes are
+    all. **Every** delivery-side failure class carries a bounded `role` label (the handler role
+    name, config-bounded: one value per configured role), so a single starved or failing role is
+    visible rather than averaged away (`DEC-OBS-5`); a handler-reported error (`handler-error`)
+    carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`
+    (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;
   - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
@@ -494,7 +496,12 @@ sequenceDiagram
     intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
 
   and, alongside those eight, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
-  metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
+  metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`):
+  **throughput** is a counter per `type` **and** `role` (the accepting handler role); **dispatch
+  latency** is a histogram, in milliseconds from the event's enqueue to its accept, per `outcome`
+  **and** `role`, with the bucket boundaries 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
+  120000, 300000, 600000, 1200000, 1800000 and 3600000 (an event re-offered for longer than an hour
+  falls in the overflow bucket). `role` is config-bounded on both (`DEC-OBS-5`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
   **emission transport** and the concrete backend behind it (a scrape target, a log store) are

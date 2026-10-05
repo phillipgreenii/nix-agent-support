@@ -647,8 +647,8 @@ func (*recordingDispatchFailureObserver) OnAccept(string, string)           {}
 func (*recordingDispatchFailureObserver) OnUnconsumedExpired(string)        {}
 func (*recordingDispatchFailureObserver) OnDeclined(string, string, string) {}
 func (*recordingDispatchFailureObserver) OnDeduped(string)                  {}
-func (r *recordingDispatchFailureObserver) OnDispatchFailure(t string) {
-	r.dispatchFailed = append(r.dispatchFailed, t)
+func (r *recordingDispatchFailureObserver) OnDispatchFailure(t, lid string) {
+	r.dispatchFailed = append(r.dispatchFailed, t+"/"+lid)
 }
 
 // fanOutObserver.OnDispatchFailure must call BOTH fanned-out observers, in
@@ -660,13 +660,13 @@ func TestFanOutObserver_OnDispatchFailureCallsBoth(t *testing.T) {
 	b := &recordingDispatchFailureObserver{}
 	f := fanOutObserver{a, b}
 
-	f.OnDispatchFailure("review-requested")
+	f.OnDispatchFailure("review-requested", "worker-a")
 
-	if !reflect.DeepEqual(a.dispatchFailed, []string{"review-requested"}) {
-		t.Fatalf("a.dispatchFailed = %v, want [review-requested]", a.dispatchFailed)
+	if !reflect.DeepEqual(a.dispatchFailed, []string{"review-requested/worker-a"}) {
+		t.Fatalf("a.dispatchFailed = %v, want [review-requested/worker-a]", a.dispatchFailed)
 	}
-	if !reflect.DeepEqual(b.dispatchFailed, []string{"review-requested"}) {
-		t.Fatalf("b.dispatchFailed = %v, want [review-requested]", b.dispatchFailed)
+	if !reflect.DeepEqual(b.dispatchFailed, []string{"review-requested/worker-a"}) {
+		t.Fatalf("b.dispatchFailed = %v, want [review-requested/worker-a]", b.dispatchFailed)
 	}
 }
 
@@ -1210,7 +1210,7 @@ func TestActivityObserver_OnDispatchFailureAppendsEntry(t *testing.T) {
 	ring := activity.New(4)
 	a := newActivityObserver(ring)
 
-	a.OnDispatchFailure("review-requested")
+	a.OnDispatchFailure("review-requested", "worker-a")
 
 	buf := make([]activity.Entry, 4)
 	n, _ := ring.Read(0, buf)

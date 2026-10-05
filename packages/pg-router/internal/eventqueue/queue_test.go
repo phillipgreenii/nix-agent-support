@@ -102,7 +102,10 @@ type recordingObserver struct {
 	// checks evtType alone and is unaffected.
 	declinedReasons []string
 	dispatchFailed  []string
-	duped           []string
+	// dispatchFailedListeners is OnDispatchFailure's listenerID, one entry per
+	// o.dispatchFailed entry (bead pg2-nimab).
+	dispatchFailedListeners []string
+	duped                   []string
 }
 
 func (o *recordingObserver) OnEnqueue(e Event)       { o.enqueued = append(o.enqueued, e.ID) }
@@ -120,8 +123,9 @@ func (o *recordingObserver) OnDeclined(t, _, reason string) {
 	o.declinedReasons = append(o.declinedReasons, reason)
 }
 
-func (o *recordingObserver) OnDispatchFailure(t string) {
+func (o *recordingObserver) OnDispatchFailure(t, lid string) {
 	o.dispatchFailed = append(o.dispatchFailed, t)
+	o.dispatchFailedListeners = append(o.dispatchFailedListeners, lid)
 }
 
 // OnDeduped is Task 2.3's new Observer method.
@@ -351,6 +355,10 @@ func TestDispatchOfferPanicRecoveredAsDispatchFailure(t *testing.T) {
 	// OnDeclined — the two are now separable (see Observer's doc).
 	if !equal(obs.dispatchFailed, []string{"T"}) {
 		t.Fatalf("dispatchFailed = %v, want [T]", obs.dispatchFailed)
+	}
+	// The failing listener's id (the role name in production) rides along (bead pg2-nimab).
+	if !equal(obs.dispatchFailedListeners, []string{"h"}) {
+		t.Fatalf("dispatchFailedListeners = %v, want [h]", obs.dispatchFailedListeners)
 	}
 	if len(obs.declined) != 0 {
 		t.Fatalf("declined = %v, want none — a panic is a dispatch failure, not a decline", obs.declined)
