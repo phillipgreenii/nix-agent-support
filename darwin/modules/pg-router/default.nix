@@ -188,6 +188,27 @@ in
           # plist carried faithfully but launchd ignored above 60. Do NOT
           # raise this past 60; shrink shutdownDrainTimeout instead.
           ExitTimeOut = 60;
+          # AbandonProcessGroup (pg2-e5u06): launchd.plist(5) says that when
+          # a job dies launchd kills any remaining processes with the same
+          # process group ID as the job unless this key is true. Observed
+          # live (2026-10-04): the daemon is its own process-group leader
+          # (ppid 1, pgid == pid) and every handler child shares that pgid,
+          # so without this key launchd group-kills whatever is still
+          # running at daemon exit -- after the graceful drain
+          # (shutdownDrainTimeout) and inside ExitTimeOut -- which defeats
+          # the drain design (pg2-euh4f, pg2-s3fzr, pg2-vu2zc).
+          #
+          # Chosen over the alternative (per-handler Setpgid/Setsid in
+          # internal/wireclient.OSRunner) because it is plist-only: it does
+          # not change how `pg-router run-until-idle`/CLI invocations spawn
+          # handlers (a per-handler group would stop an interactive Ctrl-C
+          # reaching them and puts them in a background group for any TTY
+          # use), and it needs no Go change. Trade-off, accepted: survivors
+          # run on as orphans the new daemon does not track, and a hung
+          # group member is no longer reaped by launchd (it is reaped
+          # only by its own exit). ExitTimeOut is unchanged (60, the
+          # launchd hard cap, see above).
+          AbandonProcessGroup = true;
         };
       };
     })

@@ -4184,6 +4184,17 @@
                 # just above.
                 assert lib.hasInfix "export CCPOOL_POOL=/tmp/fake-ccpool-pool"
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
+                # pg2-e5u06: the plist MUST NOT let launchd group-kill a
+                # handler that outlives the daemon -- AbandonProcessGroup =
+                # true -- and ExitTimeOut MUST stay at launchd's 60s hard
+                # cap (pg2-s3fzr). serviceConfig passes through verbatim
+                # into the generated launchd plist.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.AbandonProcessGroup
+                  == true;
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.ExitTimeOut
+                  == 60;
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
                 # independent of daemonEnable -- both darwinWithDaemon and
