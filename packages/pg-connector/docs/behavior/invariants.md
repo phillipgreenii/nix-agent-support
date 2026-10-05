@@ -506,6 +506,22 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   `important_people` and mailbox tiers later). `mailbox_priority` is an OPTIONAL static tag on the
   wire and MAY be unset; an unset value is the expected steady state until tiers are decided, not
   a defect.
+- **`INV-MAIL-4`** <!-- uuid: e17e00a3-01fa-4366-85cb-a18b9ec09aae --> — The `mail` backend's
+  `list_attention` MUST answer an EMPTY list, however many messages are unread, flagged, or from an
+  `important_people` sender, and however its mailboxes are tiered. Reason: `INV-MAIL-3` makes mail
+  attention time-driven only, and an email carries no time-driven signal (unlike a calendar event's
+  start and end); the operator has ruled that attention for email is decided in `pg-desk`, which has
+  the context pg-connector lacks. The backend still answers the op (rather than `unknown_op`) so a
+  deployment that does register it under `attention.sources` gets an empty, successful result
+  instead of a failure. Mailbox selection, the optional `mailbox_priority` tag, and `important_people`
+  stay available to `list` and `search_messages` and MUST NOT leak into attention. A mail backend
+  that later derives attention items MUST do so under a new invariant that supersedes this one.
+  - **Mailbox scope and duplicates (mail backend, freedom boundary made explicit).** `list` and
+    `search_messages` with no `mailbox` query each CONFIGURED mailbox in order, because the bridge's
+    own "no mailbox" does not mean "the configured set". A configured mailbox the bridge reports
+    `not_found` for is skipped and MUST NOT fail the call; an explicitly named mailbox the bridge
+    reports `not_found` for is passed through as `not_found`. One Message-ID filed under several
+    configured mailboxes is merged to one entry, the earliest-configured mailbox winning.
 
 ## Agent session attention
 
