@@ -1,0 +1,27 @@
+{
+  "contract": "pg-desk.changes/v1",
+  "type": "issue",
+  "consumer": "router",
+  "cursor": {
+    "from": 1,
+    "to": 2
+  },
+  "sources": [
+    {
+      "query": "open",
+      "status": "ok"
+    }
+  ],
+  "records": [
+    {
+      "seq": 2,
+      "type": "issue",
+      "id": "bd-1",
+      "title": "title of bd-1",
+      "version": 2,
+      "kinds": ["comments_changed"],
+      "origin": "pg-connector",
+      "at": "2026-10-01T12:00:00Z"
+    }
+  ]
+}
